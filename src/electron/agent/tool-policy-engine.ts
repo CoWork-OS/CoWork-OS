@@ -107,7 +107,6 @@ const ORCHESTRATION_TOOLS = new Set([
 ]);
 
 const INTEGRATION_TOOLS = new Set([
-  "x_action",
   "notion_action",
   "box_action",
   "onedrive_action",
@@ -621,14 +620,6 @@ const ALWAYS_MUTATING = new Set([
   "browser_new_tab",
   "browser_close_tab",
   "browser_close",
-  "cloud_sandbox_create",
-  "cloud_sandbox_exec",
-  "cloud_sandbox_write_file",
-  "cloud_sandbox_delete",
-  "domain_register",
-  "domain_dns_add",
-  "domain_dns_delete",
-  "x402_fetch",
   "execute_code",
   "click",
   "double_click",
@@ -792,15 +783,6 @@ function applyDomainGate(
 
   if (isMutatingGitTool(toolName)) {
     return `Tool "${toolName}" is blocked for the "${domain}" domain because git mutation is not expected here.`;
-  }
-
-  if (
-    toolName.startsWith("cloud_sandbox_") ||
-    toolName.startsWith("domain_") ||
-    toolName.startsWith("wallet_") ||
-    toolName.startsWith("x402_")
-  ) {
-    return `Tool "${toolName}" is blocked for the "${domain}" domain because it is operations-specific.`;
   }
 
   return null;

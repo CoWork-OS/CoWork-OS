@@ -1618,8 +1618,6 @@ export type ToolType =
   | "browser_reload"
   | "browser_save_pdf"
   | "browser_close"
-  // X/Twitter
-  | "x_action"
   // PACT business agents
   | "pact_discover"
   | "pact_send_message"
@@ -1825,7 +1823,6 @@ export const TOOL_GROUPS = {
     "youtube_ask_or_ingest_video",
     "x_search",
     "voice_call",
-    "x_action",
     // PACT business agents that reach a business over the network (stored conversations
     // are read locally by pact_get_conversation).
     "pact_discover",
@@ -2087,7 +2084,6 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   browser_reload: "network",
   browser_save_pdf: "network",
   browser_close: "network",
-  x_action: "network",
   pact_discover: "network",
   pact_send_message: "network",
   pact_get_conversation: "read",
@@ -7973,109 +7969,6 @@ export interface SupervisorExchangeEvent {
   exchange: SupervisorExchange;
 }
 
-// ============ Infrastructure Types ============
-
-export interface WalletInfo {
-  address: string;
-  network: string;
-  balanceUsdc?: string;
-}
-
-export interface InfraSandboxInfo {
-  id: string;
-  name?: string;
-  status: "running" | "stopped" | "error";
-  createdAt: number;
-  region?: string;
-}
-
-export type InfraProviderStatus = "connected" | "disconnected" | "error" | "not_configured";
-
-export interface InfraStatus {
-  enabled: boolean;
-  wallet?: WalletInfo;
-  walletFileExists?: boolean;
-  providers: {
-    e2b: InfraProviderStatus;
-    domains: InfraProviderStatus;
-    wallet: InfraProviderStatus;
-  };
-  activeSandboxes: number;
-  error?: string;
-}
-
-export interface InfraSettings {
-  enabled: boolean;
-  showWalletInSidebar: boolean;
-  e2b: {
-    apiKey: string;
-    defaultRegion: string;
-  };
-  domains: {
-    provider: "namecheap";
-    apiKey: string;
-    username: string;
-    clientIp: string;
-  };
-  wallet: {
-    enabled: boolean;
-    provider: "local" | "coinbase_agentic";
-    coinbase: {
-      enabled: boolean;
-      signerEndpoint: string;
-      network: "base-mainnet" | "base-sepolia";
-      accountId: string;
-    };
-  };
-  payments: {
-    requireApproval: boolean;
-    maxAutoApproveUsd: number;
-    hardLimitUsd: number;
-    allowedHosts: string[];
-  };
-  enabledCategories: {
-    sandbox: boolean;
-    domains: boolean;
-    payments: boolean;
-  };
-}
-
-export const DEFAULT_INFRA_SETTINGS: InfraSettings = {
-  enabled: false,
-  showWalletInSidebar: true,
-  e2b: {
-    apiKey: "",
-    defaultRegion: "us-east-1",
-  },
-  domains: {
-    provider: "namecheap",
-    apiKey: "",
-    username: "",
-    clientIp: "",
-  },
-  wallet: {
-    enabled: true,
-    provider: "local",
-    coinbase: {
-      enabled: false,
-      signerEndpoint: "",
-      network: "base-mainnet",
-      accountId: "",
-    },
-  },
-  payments: {
-    requireApproval: true,
-    maxAutoApproveUsd: 1.0,
-    hardLimitUsd: 100.0,
-    allowedHosts: [],
-  },
-  enabledCategories: {
-    sandbox: true,
-    domains: true,
-    payments: true,
-  },
-};
-
 // ─── Proactive Suggestions ──────────────────────────────────────
 
 export type SuggestionType =
@@ -8714,12 +8607,6 @@ export const IPC_CHANNELS = {
   SEARCH_GET_CONFIG_STATUS: "search:getConfigStatus",
   SEARCH_TEST_PROVIDER: "search:testProvider",
 
-  // X/Twitter Settings
-  X_GET_SETTINGS: "x:getSettings",
-  X_SAVE_SETTINGS: "x:saveSettings",
-  X_TEST_CONNECTION: "x:testConnection",
-  X_GET_STATUS: "x:getStatus",
-
   // Notion Settings
   NOTION_GET_SETTINGS: "notion:getSettings",
   NOTION_SAVE_SETTINGS: "notion:saveSettings",
@@ -8893,17 +8780,6 @@ export const IPC_CHANNELS = {
 
   // MCP Events
   MCP_SERVER_STATUS_CHANGE: "mcp:serverStatusChange",
-
-  // Infrastructure
-  INFRA_GET_STATUS: "infra:getStatus",
-  INFRA_GET_SETTINGS: "infra:getSettings",
-  INFRA_SAVE_SETTINGS: "infra:saveSettings",
-  INFRA_SETUP: "infra:setup",
-  INFRA_GET_WALLET: "infra:getWallet",
-  INFRA_WALLET_RESTORE: "infra:walletRestore",
-  INFRA_WALLET_VERIFY: "infra:walletVerify",
-  INFRA_RESET: "infra:reset",
-  INFRA_STATUS_CHANGE: "infra:statusChange",
 
   // Scraping (Scrapling integration)
   SCRAPING_GET_SETTINGS: "scraping:getSettings",
@@ -9949,7 +9825,6 @@ export type ChannelType =
   | "googlechat"
   | "feishu"
   | "wecom"
-  | "x"
   | "whatsapp_cloud"
   | "twilio_sms";
 export type ChannelStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -10309,12 +10184,6 @@ export interface AddChannelRequest {
   twilioMessagingServiceSid?: string;
   twilioWebhookPublicUrl?: string;
   twilioStatusPath?: string;
-  // X-specific fields
-  xCommandPrefix?: string;
-  xAllowedAuthors?: string[];
-  xPollIntervalSec?: number;
-  xFetchCount?: number;
-  xOutboundEnabled?: boolean;
 }
 
 export interface UpdateChannelRequest {
@@ -10498,56 +10367,6 @@ export interface SearchSettingsData {
     baseUrl?: string;
     allowPrivate?: boolean;
   };
-}
-
-// X/Twitter integration settings
-export type XAuthMethod = "browser" | "manual";
-
-export type XMentionWorkspaceMode = "temporary";
-
-export interface XMentionTriggerSettings {
-  enabled: boolean;
-  commandPrefix: string;
-  allowedAuthors: string[];
-  pollIntervalSec: number;
-  fetchCount: number;
-  workspaceMode: XMentionWorkspaceMode;
-}
-
-export interface XMentionTriggerStatus {
-  mode: "bridge" | "native" | "disabled";
-  running: boolean;
-  lastPollAt?: number;
-  lastSuccessAt?: number;
-  lastError?: string;
-  acceptedCount: number;
-  ignoredCount: number;
-  lastTaskId?: string;
-}
-
-export interface XSettingsData {
-  enabled: boolean;
-  authMethod: XAuthMethod;
-  // Manual cookie auth
-  authToken?: string;
-  ct0?: string;
-  // Browser cookie extraction
-  cookieSource?: string[]; // e.g., ['chrome', 'arc', 'brave', 'firefox']
-  chromeProfile?: string;
-  chromeProfileDir?: string;
-  firefoxProfile?: string;
-  // Runtime options
-  timeoutMs?: number;
-  cookieTimeoutMs?: number;
-  quoteDepth?: number;
-  mentionTrigger: XMentionTriggerSettings;
-}
-
-export interface XConnectionTestResult {
-  success: boolean;
-  error?: string;
-  username?: string;
-  userId?: string;
 }
 
 // Notion integration settings

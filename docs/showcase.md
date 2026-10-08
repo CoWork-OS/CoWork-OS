@@ -1564,80 +1564,6 @@ disagree, and recommend which review I should trust for this PR.
 
 ---
 
-## Cloud Infrastructure as a Service
-
-### Sandboxed Code Execution
-
-Run untrusted code, experiments, or one-off scripts in isolated cloud sandboxes without touching your local machine.
-
-**What it handles:**
-
-- E2B cloud sandbox provisioning — spin up a fresh Linux environment in seconds
-- Multi-language execution (Python, Node.js, Rust, Go, etc.)
-- File system persistence within sandbox sessions
-- Package installation and environment customization
-- Output capture with stdout, stderr, and file artifacts
-
-**Example prompt:**
-
-```
-Spin up a sandbox and run this Python data pipeline that processes
-a 2GB CSV file. Install pandas and duckdb, run the script, and
-return the output summary. Don't run this on my local machine.
-```
-
-**Powered by:** E2B sandbox MCP, cloud execution tools, file transfer
-
----
-
-### Domain Registration & DNS
-
-Register domains, manage DNS records, and handle domain transfers — all from natural language commands.
-
-**What it handles:**
-
-- Domain availability search and registration via Namecheap
-- DNS record management (A, AAAA, CNAME, MX, TXT, NS)
-- SSL certificate status checking
-- Domain renewal and expiration monitoring
-- Bulk domain operations
-
-**Example prompt:**
-
-```
-Check if "myproject.dev" is available. If so, register it and set up
-DNS records: A record pointing to 203.0.113.50, MX records for Google
-Workspace, and a TXT record for domain verification.
-```
-
-**Powered by:** Namecheap MCP connector, DNS management tools
-
----
-
-### Machine-to-Machine Payments
-
-Enable autonomous agent-to-agent payments using crypto wallets and the x402 protocol — the agent can pay for API calls, services, and resources on your behalf.
-
-**What it handles:**
-
-- USDC wallet management (Coinbase-backed)
-- x402 protocol for HTTP-native machine payments
-- Automatic micro-payments for API services
-- Budget limits and spend tracking per task
-- Transaction history and receipt generation
-
-**Example prompt:**
-
-```
-Set a $5 budget for this research task. The agent can use x402 payments
-to access premium APIs if needed. Show me a receipt when done with
-a breakdown of what was spent and where.
-```
-
-**Powered by:** Crypto wallet tools, x402 payment protocol, budget management
-
----
-
 ## Everyday Automation
 
 ### Food Ordering & Delivery
@@ -1996,7 +1922,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **Enterprise**             | Salesforce, Jira, Discord, Google Workspace, Zendesk, HubSpot, Stripe, Tavily, Grafana, and more           | See the [Connector Inventory](connector-inventory.md)        |
 | **Data & Analytics**       | CSV analysis, SQL, financial modeling, market screening                                             | Data Analysis pack, 8+ financial skills                      |
 | **Content & Marketing**    | Blog, social, email campaigns, SEO, copywriting                                                     | Marketing pack, marketing strategist skill                   |
-| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 18 channels, scheduling, 10+ productivity skills             |
+| **Personal Productivity**  | Briefings, inbox, multi-channel messaging, task capture                                             | 17 channels, scheduling, 10+ productivity skills             |
 | **Team & Management**      | Sprints, 1-on-1 prep, status reports                                                                | EM pack, PM pack                                             |
 | **Security**               | Vulnerability scanning, compliance, dependency auditing, authorized data-broker privacy cleanup     | Security audit skill, dependency check skill, Unbroker skill |
 | **Remote Ops**             | Chat-driven deployment, headless mode, WebSocket API                                                | Gateway, headless daemon, remote access                      |
@@ -2005,7 +1931,6 @@ Rate the attractiveness of entering with a [specific angle].
 | **Financial Intelligence** | Risk analysis, tax planning, crypto, CFO modeling, ESG                                              | 8 financial skills, ccxt MCP, Wealth Management pack         |
 | **Knowledge & Notes**      | Apple Notes, knowledge graph, memory, deep research                                                 | Memory service, FTS5 index, scratchpad tools                 |
 | **AI Agent Ecosystem**     | Agent teams, build mode, playbooks, multi-LLM routing                                               | Orchestration engine, provider factory, playbook engine      |
-| **Cloud Infrastructure**   | Sandboxed execution, domain registration, crypto payments                                           | E2B MCP, Namecheap MCP, x402 protocol                        |
 | **Everyday Automation**    | Food ordering, scheduling, PDF editing, desktop control                                             | Foodora MCP, Calendly MCP, nano-pdf, Peekaboo                |
 | **Content Intelligence**   | Video analysis, blog monitoring, humanization, research                                             | YouTube tools, RSS parsing, web research, style matching     |
 

@@ -149,14 +149,11 @@ import type {
   EvalCase,
   EvalRun,
   EvalSuite,
-  InfraSettings,
-  InfraStatus,
   ImprovementCampaign,
   ImprovementCandidate,
   ImprovementEligibility,
   ImprovementHistoryResetResult,
   ImprovementLoopSettings,
-  WalletInfo,
   CreateAgentTeamItemRequest,
   CreateAgentTeamMemberRequest,
   CreateAgentTeamRequest,
@@ -961,7 +958,6 @@ interface CronDeliveryConfig {
     | "email"
     | "teams"
     | "googlechat"
-    | "x"
     | "whatsapp_cloud"
     | "twilio_sms";
   channelId?: string;
@@ -3636,12 +3632,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       profileName,
     }) as Promise<AppProfileSummary>,
 
-  // X/Twitter Settings APIs
-  getXSettings: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_SETTINGS),
-  saveXSettings: (settings: Any) => ipcRenderer.invoke(IPC_CHANNELS.X_SAVE_SETTINGS, settings),
-  testXConnection: () => ipcRenderer.invoke(IPC_CHANNELS.X_TEST_CONNECTION),
-  getXStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_STATUS),
-
   // Notion Settings APIs
   getNotionSettings: () => ipcRenderer.invoke(IPC_CHANNELS.NOTION_GET_SETTINGS),
   saveNotionSettings: (settings: Any) =>
@@ -4006,22 +3996,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.SECURE_MCP_TUNNELS_STATUS_CHANGE, subscription);
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.SECURE_MCP_TUNNELS_STATUS_CHANGE, subscription);
-  },
-
-  // Infrastructure APIs
-  infraGetStatus: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_GET_STATUS),
-  infraGetSettings: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_GET_SETTINGS),
-  infraSaveSettings: (settings: InfraSettings) =>
-    ipcRenderer.invoke(IPC_CHANNELS.INFRA_SAVE_SETTINGS, settings),
-  infraSetup: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_SETUP),
-  infraGetWallet: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_GET_WALLET),
-  infraWalletRestore: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_WALLET_RESTORE),
-  infraWalletVerify: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_WALLET_VERIFY),
-  infraReset: () => ipcRenderer.invoke(IPC_CHANNELS.INFRA_RESET),
-  onInfraStatusChange: (callback: (status: InfraStatus) => void) => {
-    const subscription = (_: unknown, status: InfraStatus) => callback(status);
-    ipcRenderer.on(IPC_CHANNELS.INFRA_STATUS_CHANGE, subscription);
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.INFRA_STATUS_CHANGE, subscription);
   },
 
   // Scraping (Scrapling) APIs
@@ -6898,52 +6872,6 @@ export interface ElectronAPI {
   switchProfile: (profileId: string) => Promise<{ success: true; relaunching: true }>;
   exportProfile: (profileId: string, destinationRoot: string) => Promise<ProfileExportResult>;
   importProfile: (sourcePath: string, profileName?: string) => Promise<AppProfileSummary>;
-  // X/Twitter Settings
-  getXSettings: () => Promise<{
-    enabled: boolean;
-    authMethod: "browser" | "manual";
-    authToken?: string;
-    ct0?: string;
-    cookieSource?: string[];
-    chromeProfile?: string;
-    chromeProfileDir?: string;
-    firefoxProfile?: string;
-    timeoutMs?: number;
-    cookieTimeoutMs?: number;
-    quoteDepth?: number;
-    mentionTrigger: {
-      enabled: boolean;
-      commandPrefix: string;
-      allowedAuthors: string[];
-      pollIntervalSec: number;
-      fetchCount: number;
-      workspaceMode: "temporary";
-    };
-  }>;
-  saveXSettings: (settings: Any) => Promise<{ success: boolean }>;
-  testXConnection: () => Promise<{
-    success: boolean;
-    error?: string;
-    username?: string;
-    userId?: string;
-  }>;
-  getXStatus: () => Promise<{
-    installed: boolean;
-    connected: boolean;
-    username?: string;
-    error?: string;
-    mentionTriggerStatus: {
-      mode: "bridge" | "native" | "disabled";
-      running: boolean;
-      lastPollAt?: number;
-      lastSuccessAt?: number;
-      lastError?: string;
-      acceptedCount: number;
-      ignoredCount: number;
-      lastTaskId?: string;
-    };
-  }>;
-  // Notion Settings
   getNotionSettings: () => Promise<{
     enabled: boolean;
     apiKey?: string;
@@ -7700,16 +7628,6 @@ export interface ElectronAPI {
   onSecureMcpTunnelStatusChange: (
     callback: (status: import("../shared/types").SecureMcpTunnelStatus[]) => void,
   ) => () => void;
-  // Infrastructure
-  infraGetStatus: () => Promise<InfraStatus>;
-  infraGetSettings: () => Promise<InfraSettings>;
-  infraSaveSettings: (settings: InfraSettings) => Promise<{ success: boolean }>;
-  infraSetup: () => Promise<InfraStatus>;
-  infraGetWallet: () => Promise<WalletInfo | null>;
-  infraWalletRestore: () => Promise<{ success: boolean; address?: string; status: string }>;
-  infraWalletVerify: () => Promise<{ status: string; address?: string }>;
-  infraReset: () => Promise<{ success: boolean }>;
-  onInfraStatusChange: (callback: (status: InfraStatus) => void) => () => void;
   // Scraping (Scrapling)
   scrapingGetSettings: () => Promise<Any>;
   scrapingSaveSettings: (settings: Any) => Promise<{ success: boolean }>;

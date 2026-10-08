@@ -526,19 +526,6 @@ Install enterprise connectors from **Settings** > **Integrations** > **Connector
 
 Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. Available connectors include Stripe, Tavily, Grafana, Metabase, Socket, Home Assistant, Rhino, Blender, ComfyUI, and more. See the generated [Connector Inventory](connector-inventory.md) for the full list and [Enterprise Connectors](enterprise-connectors.md) for setup.
 
-### Social Integrations (Optional)
-
-#### X (Twitter)
-
-1. Open **Settings** > **More Channels** > **X (Twitter)**
-2. Choose Browser Cookies or Manual Cookies
-3. (Optional) Enable **Mention Trigger** and configure:
-   - command prefix (default `do:`)
-   - allowlisted authors
-   - poll interval and fetch count
-4. Save and test the connection
-5. See [X Mention Triggers](x-mention-triggers.md) for bridge/native behavior and troubleshooting.
-
 ## Development Workflow
 
 ### Making Changes

@@ -1730,7 +1730,6 @@ export function registerControlPlaneMethods(
       "line",
       "bluebubbles",
       "email",
-      "x",
       "whatsapp_cloud",
       "twilio_sms",
     ];

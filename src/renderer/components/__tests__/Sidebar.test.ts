@@ -25,7 +25,6 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: "bot-task-1",
         activeTab: "bots",
         onSelectTask: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -51,7 +50,6 @@ describe("Sidebar top-level destinations", () => {
           activeDestinationId: activeDestinationId as Any,
           onNavigate: () => {},
           onSelectTask: () => {},
-          onOpenSettings: () => {},
           onTasksChanged: () => {},
         }),
       );
@@ -86,7 +84,6 @@ describe("Sidebar top-level destinations", () => {
           activeDestinationId: "agents",
           onNavigate: () => {},
           onSelectTask: () => {},
-          onOpenSettings: () => {},
           onTasksChanged: () => {},
         }),
       );
@@ -104,7 +101,6 @@ describe("Sidebar top-level destinations", () => {
           activeDestinationId: "home",
           onNavigate: () => {},
           onSelectTask: () => {},
-          onOpenSettings: () => {},
           onTasksChanged: () => {},
         }),
       );
@@ -120,7 +116,6 @@ describe("Sidebar top-level destinations", () => {
         selectedTaskId: null,
         onSelectTask: () => {},
         onNewSession: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -164,7 +159,6 @@ describe("Sidebar top-level destinations", () => {
         onSelectTask: () => {},
         onOpenAgents: () => {},
         onNewSession: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -192,7 +186,6 @@ describe("Sidebar top-level destinations", () => {
         onSelectTask: () => {},
         onOpenAgents: () => {},
         onNewSession: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -235,7 +228,6 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: "active-task-1",
         onSelectTask: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -267,7 +259,6 @@ describe("Sidebar top-level destinations", () => {
           ] as Any,
           selectedTaskId: null,
           onSelectTask: () => {},
-          onOpenSettings: () => {},
           onTasksChanged: () => {},
         }),
       );
@@ -286,7 +277,6 @@ describe("Sidebar top-level destinations", () => {
         tasks: [],
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -337,7 +327,6 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -376,7 +365,6 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -411,7 +399,6 @@ describe("Sidebar top-level destinations", () => {
         ] as Any,
         selectedTaskId: null,
         onSelectTask: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -473,7 +460,6 @@ describe("Sidebar top-level destinations", () => {
           ] as Any,
           selectedTaskId: null,
           onSelectTask: () => {},
-          onOpenSettings: () => {},
           onTasksChanged: () => {},
         }),
       );
@@ -650,7 +636,6 @@ describe("Sidebar top-level destinations", () => {
         onSelectTask: () => {},
         onOpenAgents: () => {},
         onNewSession: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );
@@ -695,7 +680,6 @@ describe("Sidebar top-level destinations", () => {
         onSelectTask: () => {},
         onOpenAgents: () => {},
         onNewSession: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );

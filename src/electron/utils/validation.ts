@@ -69,7 +69,6 @@ const OriginChannelSchema = z.preprocess(
     "googlechat",
     "feishu",
     "wecom",
-    "x",
     "whatsapp_cloud",
     "twilio_sms",
   ] as const),
@@ -1124,49 +1123,6 @@ export const SearchSettingsSchema = z.object({
     .optional(),
 });
 
-// ============ X/Twitter Settings Schema ============
-
-export const XSettingsSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    authMethod: z.enum(["browser", "manual"]).default("browser"),
-    authToken: z.string().max(2000).optional(),
-    ct0: z.string().max(2000).optional(),
-    cookieSource: z.array(z.string().max(50)).max(10).optional(),
-    chromeProfile: z.string().max(200).optional(),
-    chromeProfileDir: z.string().max(MAX_PATH_LENGTH).optional(),
-    firefoxProfile: z.string().max(200).optional(),
-    timeoutMs: z.number().int().min(1000).max(120000).optional(),
-    cookieTimeoutMs: z.number().int().min(1000).max(120000).optional(),
-    quoteDepth: z.number().int().min(0).max(5).optional(),
-    mentionTrigger: z
-      .object({
-        enabled: z.boolean().default(false),
-        commandPrefix: z.string().trim().min(1).max(50).default("do:"),
-        allowedAuthors: z.array(z.string().trim().min(1).max(50)).max(200).default([]),
-        pollIntervalSec: z.number().int().min(30).max(3600).default(120),
-        fetchCount: z.number().int().min(1).max(200).default(25),
-        workspaceMode: z.enum(["temporary"]).default("temporary"),
-      })
-      .default({
-        enabled: false,
-        commandPrefix: "do:",
-        allowedAuthors: [],
-        pollIntervalSec: 120,
-        fetchCount: 25,
-        workspaceMode: "temporary",
-      }),
-  })
-  .superRefine((data, ctx) => {
-    if (data.mentionTrigger.enabled && data.mentionTrigger.allowedAuthors.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["mentionTrigger", "allowedAuthors"],
-        message: "At least one allowed author is required when mention trigger is enabled",
-      });
-    }
-  });
-
 // ============ Notion Settings Schema ============
 
 export const NotionSettingsSchema = z.object({
@@ -1416,46 +1372,6 @@ export const GuardrailSettingsSchema = z.object({
   channelPersonaEnabled: z.boolean().default(GUARDRAIL_DEFAULTS.channelPersonaEnabled),
 });
 
-// ============ Infrastructure Settings Schema ============
-
-export const InfraSettingsSchema = z
-  .object({
-    enabled: z.boolean(),
-    showWalletInSidebar: z.boolean(),
-    e2b: z.object({
-      apiKey: z.string().max(500),
-      defaultRegion: z.string().max(100),
-    }),
-    domains: z.object({
-      provider: z.literal("namecheap"),
-      apiKey: z.string().max(500),
-      username: z.string().max(200),
-      clientIp: z.string().max(45),
-    }),
-    wallet: z.object({
-      enabled: z.boolean(),
-      provider: z.enum(["local", "coinbase_agentic"]),
-      coinbase: z.object({
-        enabled: z.boolean(),
-        signerEndpoint: z.string().max(500),
-        network: z.enum(["base-mainnet", "base-sepolia"]),
-        accountId: z.string().max(200),
-      }),
-    }),
-    payments: z.object({
-      requireApproval: z.boolean(),
-      maxAutoApproveUsd: z.number().min(0).max(1000),
-      hardLimitUsd: z.number().min(0).max(10000),
-      allowedHosts: z.array(z.string().max(255)).max(200),
-    }),
-    enabledCategories: z.object({
-      sandbox: z.boolean(),
-      domains: z.boolean(),
-      payments: z.boolean(),
-    }),
-  })
-  .strict();
-
 // ============ Gateway/Channel Schemas ============
 
 export const SecurityModeSchema = z.enum(["pairing", "allowlist", "open"]);
@@ -1665,17 +1581,6 @@ export const AddGoogleChatChannelSchema = z.object({
   webhookPath: z.string().min(1).max(200).optional(),
   webhookSecret: z.string().min(1).max(500),
   securityMode: SecurityModeSchema.optional(),
-});
-
-export const AddXChannelSchema = z.object({
-  type: z.literal("x"),
-  name: z.string().min(1).max(MAX_TITLE_LENGTH),
-  securityMode: SecurityModeSchema.optional(),
-  xCommandPrefix: z.string().trim().min(1).max(50).optional(),
-  xAllowedAuthors: z.array(z.string().trim().min(1).max(50)).max(200).optional(),
-  xPollIntervalSec: z.number().int().min(30).max(3600).optional(),
-  xFetchCount: z.number().int().min(1).max(200).optional(),
-  xOutboundEnabled: z.boolean().optional(),
 });
 
 export const AddFeishuChannelSchema = z.object({
@@ -2110,7 +2015,6 @@ export const AddChannelSchema = z.discriminatedUnion("type", [
   AddWeComChannelSchema,
   AddWhatsAppCloudChannelSchema,
   AddTwilioSmsChannelSchema,
-  AddXChannelSchema,
   AddEmailChannelSchema,
 ]);
 
@@ -2225,7 +2129,6 @@ const CHANNEL_TYPE_VALUES = [
   "googlechat",
   "feishu",
   "wecom",
-  "x",
   "whatsapp_cloud",
   "twilio_sms",
 ] as const;

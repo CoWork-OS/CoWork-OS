@@ -141,6 +141,7 @@ export class DatabaseManager {
       phaseStartedAt = Date.now();
       this.retirePersonalHealthSettings();
       logStartupPhase("retire-personal-health-settings", phaseStartedAt);
+      this.retireRemovedFeatureSettings();
       stampSchemaVersion(this.db);
     } catch (error) {
       releaseMigrationLock();
@@ -328,6 +329,27 @@ export class DatabaseManager {
         updated_at INTEGER NOT NULL
       )
     `);
+  }
+
+  /**
+   * Settings of retired features (the X integration and the Infrastructure tools) are removed on
+   * every startup, including after an older database is restored. The encrypted wallet keys of
+   * the Infrastructure tools (`infra-wallet`, `conway-wallet`) are kept so they can still be
+   * exported.
+   */
+  private retireRemovedFeatureSettings(): void {
+    const previousSecureDelete = this.db.pragma("secure_delete", { simple: true }) as number;
+    this.db.pragma("secure_delete = ON");
+    try {
+      const result = this.db
+        .prepare("DELETE FROM secure_settings WHERE category IN ('x', 'infra')")
+        .run();
+      if (result.changes > 0) {
+        schemaLogger.info(`Retired ${result.changes} settings row(s) of removed features`);
+      }
+    } finally {
+      this.db.pragma(`secure_delete = ${previousSecureDelete ? "ON" : "OFF"}`);
+    }
   }
 
   /** Retire Health data on every startup, including after an older database is restored. */

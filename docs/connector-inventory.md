@@ -8,8 +8,8 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 
 | Integration type | Count |
 | --- | ---: |
-| Native app integrations | 15 |
-| Gateway channels | 18 |
+| Native app integrations | 14 |
+| Gateway channels | 17 |
 | MCP connectors (Settings > Connectors) | 67 |
 | Bundled skills | 152 |
 
@@ -33,7 +33,6 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `sharepoint` | SharePoint | read, write | oauth-consent | first-party-api |
 | `teams-meetings` | Teams meeting transcripts | read, event-trigger | oauth-consent | first-party-api |
 | `voice-call` | Voice calls | outbound-message | api-key | first-party-api |
-| `x-native` | X (posting and search) | read, write | api-key | first-party-api |
 
 ## Gateway channels
 
@@ -56,7 +55,6 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `wecom` | WeCom | inbound-message, outbound-message | api-key, public-webhook | first-party-api |
 | `whatsapp` | WhatsApp (personal, WhatsApp Web) | inbound-message, outbound-message | personal-account-session | third-party-package |
 | `whatsapp_cloud` | WhatsApp Business Cloud API | inbound-message, outbound-message | api-key, public-webhook | first-party-api |
-| `x` | X (mentions) | inbound-message, outbound-message | api-key | first-party-api |
 
 ## MCP connectors (Settings > Connectors)
 

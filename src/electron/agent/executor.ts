@@ -22,7 +22,6 @@ import {
   SuccessCriteria as _SuccessCriteria,
   isTempWorkspaceId,
   ImageAttachment,
-  InfraStatus,
   TASK_ERROR_CODES,
   EvidenceRef,
   TaskBestKnownOutcome,
@@ -277,8 +276,6 @@ import { buildRolePersonaPrompt } from "../agents/role-persona";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { getAwarenessService } from "../awareness/AwarenessService";
 import { describeSchedule, parseIntervalToMs } from "../cron/types";
-import { InfraManager } from "../infra/infra-manager";
-import { InfraSettingsManager } from "../infra/infra-settings";
 import { buildBestKnownOutcome, mergeBestKnownOutcome } from "./outcome-policy";
 import { QueryOrchestrator } from "./orchestration/QueryOrchestrator";
 import { matchesExplicitSkillInvocationPhrase } from "./skill-invocation-utils";
@@ -596,7 +593,6 @@ const MEMORY_STEP_TOOLS: readonly string[] = ["memory_recall", "context_recall",
 const DEFAULT_PROMPT_SECTION_BUDGETS = {
   roleContext: 420,
   awarenessContext: 420,
-  infraContext: 420,
   personalityPrompt: 700,
   guidelinesPrompt: 520,
   toolDescriptions: 1400,
@@ -646,7 +642,6 @@ const EXPLICIT_CHAT_SUMMARY_TRIGGER_MESSAGE_COUNT = 24;
 const EXPLICIT_CHAT_SUMMARY_TRIGGER_TOKENS = 12_000;
 const EXPLICIT_CHAT_SUMMARY_MAX_OUTPUT_TOKENS = 1536;
 const BATCH_EXTERNAL_SIDE_EFFECT_TOOLS = new Set([
-  "x_action",
   "notion_action",
   "box_action",
   "onedrive_action",
@@ -771,10 +766,6 @@ function resolveExecutorBudgetProfile(
     return "balanced";
   }
   return "aggressive";
-}
-
-interface InfraContextProvider {
-  getStatus(): InfraStatus;
 }
 
 interface WebEvidenceEntry {
@@ -1232,7 +1223,6 @@ export class TaskExecutor {
   private lastPreCompactionFlushAt: number = 0;
   private lastPreCompactionFlushTokenCount: number = 0;
   private observedOutputTokensPerSecond: number | null = null;
-  private readonly infraContextProvider: InfraContextProvider;
   private readonly eventEmitter: ExecutorEventEmitter;
   private readonly timelineEmitter: ReturnType<typeof createTimelineEmitter>;
   private readonly citationTracker: CitationTracker;
@@ -8097,7 +8087,6 @@ ${transcript}
     private task: Task,
     private workspace: Workspace,
     private daemon: AgentDaemon,
-    infraContextProvider?: InfraContextProvider,
   ) {
     this.eventEmitter = new ExecutorEventEmitter((type, payload) => {
       this.daemon.logEvent(this.task.id, type, payload);
@@ -8105,7 +8094,6 @@ ${transcript}
     this.timelineEmitter = createTimelineEmitter(this.task.id, (type, payload) => {
       this.daemon.logEvent(this.task.id, type, payload);
     });
-    this.infraContextProvider = infraContextProvider ?? InfraManager.getInstance();
     const shortId = task.id.slice(0, 8);
     const roleName = task.assignedAgentRoleId
       ? daemon.getAgentRoleById(task.assignedAgentRoleId)?.displayName
@@ -8679,65 +8667,6 @@ ${transcript}
         : "",
     ].filter(Boolean);
     return sections.join("\n\n");
-  }
-
-  private getInfraContextPrompt(): string {
-    try {
-      const settings = InfraSettingsManager.loadSettings();
-      if (!settings.enabled) return "";
-
-      const status = this.infraContextProvider.getStatus();
-      if (!status.enabled) return "";
-
-      const lines: string[] = [
-        "INFRASTRUCTURE (Cloud Operations):",
-        "You have access to native infrastructure tools for autonomous cloud operations.",
-      ];
-
-      if (settings.enabledCategories.sandbox && settings.e2b?.apiKey?.trim()) {
-        lines.push(
-          "- CLOUD SANDBOXES: Create and manage Linux VMs (cloud_sandbox_create, cloud_sandbox_exec, cloud_sandbox_write_file, cloud_sandbox_read_file, cloud_sandbox_url, cloud_sandbox_delete). Use these to deploy servers, run code, and expose web services.",
-        );
-      }
-      if (settings.enabledCategories.domains) {
-        lines.push(
-          "- DOMAINS: Register and manage domains (domain_search, domain_register, domain_dns_list, domain_dns_add, domain_dns_delete). You can register real domains and configure DNS records.",
-        );
-      }
-      if (settings.enabledCategories.payments) {
-        lines.push(
-          "- PAYMENTS & WALLET: Check wallet (wallet_info, wallet_balance), x402 payments (x402_check, x402_fetch). USDC on Base network.",
-        );
-      }
-
-      // The wallet balance changes between turns; it is sent as turn-scoped context
-      // (getInfraWalletStatusPrompt) so it does not invalidate this cached section.
-
-      lines.push(
-        "Payment and domain registration tools require explicit user approval before execution.",
-      );
-      if (settings.enabledCategories.sandbox && settings.e2b?.apiKey?.trim()) {
-        lines.push(
-          "For deployments: cloud_sandbox_create → cloud_sandbox_exec (install deps) → cloud_sandbox_url for web access.",
-        );
-      }
-
-      return lines.join("\n");
-    } catch (error) {
-      logger.warn("[Executor] Failed to build infra context prompt:", error);
-      return "";
-    }
-  }
-
-  private getInfraWalletStatusPrompt(): string {
-    try {
-      if (!InfraSettingsManager.loadSettings().enabled) return "";
-      const status = this.infraContextProvider.getStatus();
-      if (!status.enabled || !status.wallet?.balanceUsdc) return "";
-      return `Current wallet balance: ${status.wallet.balanceUsdc} USDC`;
-    } catch {
-      return "";
-    }
   }
 
   private resolveConversationMode(prompt: string, isInitialPrompt?: boolean): "task" | "chat" {
@@ -11912,7 +11841,6 @@ ${transcript}
       canonical === "grep" ||
       canonical === "get_file_info" ||
       canonical === "system_info" ||
-      canonical === "infra_status" ||
       canonical === "task_events" ||
       canonical === "task_history" ||
       canonical === "scratchpad_write"
@@ -13151,7 +13079,6 @@ ${transcript}
         "run_command",
         "web_search",
         "web_fetch",
-        "infra_status",
         "system_info",
       ].map((toolName) => canonicalizeToolNameUtil(this.normalizeToolName(toolName).name)),
     );
@@ -18677,7 +18604,6 @@ ${transcript}
     projectGuidanceContext?: string;
     externalMemoryContext?: string;
     awarenessSnapshot?: string;
-    infraContext?: string;
     visualQAContext?: string;
     personalityPrompt?: string;
     guidelinesPrompt?: string;
@@ -18747,8 +18673,6 @@ ${transcript}
       projectGuidanceContext: params.projectGuidanceContext,
       externalMemoryContext: params.externalMemoryContext,
       awarenessSnapshot: params.awarenessSnapshot,
-      infraContext: params.infraContext,
-      infraStatusPrompt: params.infraContext ? this.getInfraWalletStatusPrompt() : undefined,
       visualQAContext: params.visualQAContext,
       personalityPrompt: params.personalityPrompt,
       guidelinesPrompt: params.guidelinesPrompt,
@@ -30347,7 +30271,6 @@ You are continuing a previous conversation. The context from the previous conver
       },
     );
 
-    const infraContext = this.getInfraContextPrompt();
     let channelAdaptedPersonality = personalityPrompt;
     const originChannel = this.task.agentConfig?.originChannel;
     if (originChannel) {
@@ -30465,7 +30388,6 @@ Return ONLY a JSON object:
         memoryContext: [planningMemory.l0, planningMemory.repo, planningMemory.l1]
           .filter(Boolean)
           .join("\n\n"),
-        infraContext,
         personalityPrompt: channelAdaptedPersonality,
         guidelinesPrompt,
         executionMode: effectivePlanningExecutionMode,
@@ -32533,7 +32455,6 @@ Return ONLY a JSON object:
       allowTrustedSharedMemory,
     );
     const roleContext = this.getRoleContextPrompt();
-    const infraContext = this.getInfraContextPrompt();
     const visualQAContext = this.getVisualQAContextPrompt();
     // Channel-specific persona adaptation (append to personality prompt)
     let channelAdaptedPersonality = personalityPrompt;
@@ -32597,7 +32518,6 @@ Return ONLY a JSON object:
       projectGuidanceContext,
       externalMemoryContext: externalProfileContext,
       awarenessSnapshot: awarenessSnapshotBlock,
-      infraContext,
       visualQAContext,
       personalityPrompt: channelAdaptedPersonality,
       guidelinesPrompt,
@@ -41430,7 +41350,6 @@ Return ONLY a JSON object:
       memoryDecision,
     );
     const roleContext = this.getRoleContextPrompt();
-    const infraContext = this.getInfraContextPrompt();
     let channelAdaptedPersonality = personalityPrompt;
     const originChannel = this.task.agentConfig?.originChannel;
     if (originChannel) {
@@ -41480,7 +41399,6 @@ Return ONLY a JSON object:
       memoryContext: followUpMemory.l1,
       externalMemoryContext: externalProfileContext,
       awarenessSnapshot: awarenessSnapshotBlock,
-      infraContext,
       personalityPrompt: channelAdaptedPersonality,
       guidelinesPrompt,
       executionMode: effectiveFollowUpExecutionMode,

@@ -18,7 +18,6 @@ const channelNames: Record<(typeof CHANNEL_TYPES)[number], string> = {
   googlechat: "Google Chat",
   feishu: "Feishu",
   wecom: "WeCom",
-  x: "X",
   whatsapp_cloud: "WhatsApp Cloud",
   twilio_sms: "Twilio SMS",
 };

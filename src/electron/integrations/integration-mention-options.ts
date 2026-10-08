@@ -258,7 +258,6 @@ const CHANNEL_LABELS: Record<string, { label: string; iconKey: string; aliases: 
   mattermost: { label: "Mattermost", iconKey: "mattermost", aliases: ["channel", "messages"] },
   matrix: { label: "Matrix", iconKey: "matrix", aliases: ["channel", "messages"] },
   email: { label: "Email", iconKey: "email", aliases: ["mail", "inbox"] },
-  x: { label: "X", iconKey: "x", aliases: ["twitter", "social"] },
 };
 
 const MCP_SERVICE_DEFS: Array<{

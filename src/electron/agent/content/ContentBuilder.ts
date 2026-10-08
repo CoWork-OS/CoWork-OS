@@ -46,9 +46,6 @@ export interface BuildExecutionPromptParams {
   /** Transcript span hits from the query orchestrator. */
   transcriptContext?: string;
   awarenessSnapshot?: string;
-  infraContext?: string;
-  /** Volatile infra status (wallet balance); turn-scoped so it cannot bust the cache. */
-  infraStatusPrompt?: string;
   visualQAContext?: string;
   personalityPrompt?: string;
   guidelinesPrompt?: string;
@@ -215,12 +212,6 @@ export class ContentBuilder {
             layerKind: "optional",
             cacheScope: "turn",
           }),
-          makeSection("infra_context", params.infraContext, 800, {
-            required: false,
-            dropPriority: 3,
-            layerKind: "optional",
-            cacheScope: "session",
-          }),
           makeSection("visual_qa", params.visualQAContext, 500, {
             required: false,
             dropPriority: 7,
@@ -317,18 +308,6 @@ export class ContentBuilder {
           makeSection("awareness_snapshot", params.awarenessSnapshot, 800, {
             required: false,
             dropPriority: 6,
-            layerKind: "optional",
-            cacheScope: "turn",
-          }),
-          makeSection("infra_context", params.infraContext, 800, {
-            required: false,
-            dropPriority: 3,
-            layerKind: "optional",
-            cacheScope: "session",
-          }),
-          makeSection("infra_status", params.infraStatusPrompt, 60, {
-            required: false,
-            dropPriority: 3,
             layerKind: "optional",
             cacheScope: "turn",
           }),

@@ -27,7 +27,6 @@ Use these dedicated guides when you want channel-specific details without scanni
 | LINE               | [LINE User Guide](channel-guides/line.md)                             |
 | BlueBubbles        | [BlueBubbles User Guide](channel-guides/bluebubbles.md)               |
 | Email              | [Email User Guide](channel-guides/email.md)                           |
-| X Mention Triggers | [X Mention Triggers User Guide](channel-guides/x-mention-triggers.md) |
 
 ## Shared Usage Model
 
@@ -505,36 +504,6 @@ Watch-outs:
 - Provider authentication varies; Gmail often requires app passwords, while Outlook.com personal accounts use OAuth.
 - Avoid broad open sender policies for task execution.
 
-## X Mention Triggers
-
-Best for:
-
-- Public or semi-public task intake through mentions.
-- Lightweight social trigger workflows.
-- Allowlisted users who trigger tasks with a prefix.
-
-Features:
-
-- Mention polling through Bird CLI.
-- Command prefix enforcement, defaulting to `do:`.
-- Allowlisted authors.
-- Idempotent task creation by tweet ID.
-- Temporary workspace routing by default.
-
-Best practices:
-
-- Keep allowlists tight.
-- Use a clear prefix so casual mentions do not become tasks.
-- Treat all public content as untrusted.
-- Keep outbound posting disabled unless the workflow explicitly requires it.
-- Use temporary workspaces for social-triggered tasks.
-
-Watch-outs:
-
-- Mentions are public unless the account/post context says otherwise.
-- Network/API limits and polling intervals affect latency.
-- Do not route public input into sensitive workspaces without review.
-
 ## Choosing a Channel
 
 | Need                            | Best channel choices                   |
@@ -544,7 +513,6 @@ Watch-outs:
 | Engineering/community workflows | Discord, Slack, Mattermost, Matrix     |
 | Enterprise tenant chat          | Teams, Google Chat, Feishu/Lark, WeCom |
 | Apple Messages workflows        | iMessage, BlueBubbles                  |
-| Public interaction              | X mention triggers                     |
 | Asynchronous requests           | Email                                  |
 | Privacy-sensitive mobile chat   | Signal                                 |
 | Link research rooms             | WhatsApp, Telegram                     |

@@ -33,7 +33,6 @@ const VERIFIER_DENY_LIST = [
   "group:image",
   // Connector actions can mutate external accounts even though they are
   // classified as network tools rather than workspace writes.
-  "x_action",
   "notion_action",
   "box_action",
   "onedrive_action",

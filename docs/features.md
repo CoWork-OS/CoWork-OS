@@ -24,7 +24,6 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **LINE**: Messaging API webhooks, 200M+ users in Asia
 - **BlueBubbles**: iMessage via Mac server, SMS support
 - **Email**: IMAP/SMTP, any email provider, threading
-- **X (Twitter)**: Mention-trigger task ingress (`do:` prefix by default) with allowlist controls and idempotent session keys ([guide](x-mention-triggers.md))
 - **Research Channels**: Telegram and WhatsApp groups can be marked as link-research channels that auto-generate a structured findings report from posted URLs
 - **Channel Specialization**: Gateway chats can resolve to admin-configured workspaces, agent roles, prompt guidance, tool restrictions, and shared-memory policy before new task creation
 
@@ -1492,81 +1491,6 @@ Configure by clicking any card in **Settings** > **Integrations**. Enterprise an
 
 ---
 
-## Infrastructure
-
-Built-in cloud infrastructure tools registered as native agent tools — no MCP subprocess, no external dependency at runtime. The agent can provision cloud resources, manage domains, and make payments directly.
-
-### How It Works
-
-Infrastructure tools are registered in the Tool Registry alongside file, shell, and browser tools. When the agent needs cloud resources, it calls these tools directly — no subprocess overhead, no external server. All credentials are stored encrypted in the OS keychain via SecureSettingsRepository.
-
-### Benefits
-
-- **Zero latency overhead**: Tools execute in-process, no MCP subprocess or network hop
-- **Unified approval flow**: Payment and registration operations use the same approval dialogs as shell commands and file deletions
-- **Encrypted credentials**: API keys and wallet private keys stored via OS keychain (macOS Keychain, Windows DPAPI, Linux libsecret)
-- **Provider-based architecture**: Swap E2B for another sandbox provider, or Namecheap for Cloudflare — each capability is a pluggable provider class
-
-### Cloud Sandboxes (E2B)
-
-Spin up isolated Linux VMs for running code, deploying services, or testing in a clean environment.
-
-| Tool                       | Description                                    |
-| -------------------------- | ---------------------------------------------- |
-| `cloud_sandbox_create`     | Create a new sandbox (name, timeout, env vars) |
-| `cloud_sandbox_exec`       | Run a shell command in a sandbox               |
-| `cloud_sandbox_write_file` | Write a file into a sandbox                    |
-| `cloud_sandbox_read_file`  | Read a file from a sandbox                     |
-| `cloud_sandbox_list`       | List all active sandboxes                      |
-| `cloud_sandbox_delete`     | Delete a sandbox and free resources            |
-| `cloud_sandbox_url`        | Get the public URL for an exposed port         |
-
-Sandboxes auto-expire per E2B tier (5 min default, configurable up to 60 min on free tier). E2B provides $100 free credits with no credit card required.
-
-### Domain Registration (Namecheap)
-
-Search, register, and manage domains and DNS records.
-
-| Tool                | Description                                                       |
-| ------------------- | ----------------------------------------------------------------- |
-| `domain_search`     | Search available domains across TLDs (.com, .io, .ai, .dev, etc.) |
-| `domain_register`   | Register a domain (requires user approval)                        |
-| `domain_list`       | List all registered domains                                       |
-| `domain_dns_list`   | List DNS records for a domain                                     |
-| `domain_dns_add`    | Add a DNS record (A, AAAA, CNAME, MX, TXT, NS)                    |
-| `domain_dns_delete` | Delete a DNS record                                               |
-
-Domain registration requires explicit user approval before any purchase is made.
-
-### Wallet & Payments
-
-Built-in USDC wallet on Base network for infrastructure payments.
-
-| Tool             | Description                                                 |
-| ---------------- | ----------------------------------------------------------- |
-| `wallet_info`    | Get wallet address, network, and USDC balance               |
-| `wallet_balance` | Get current USDC balance                                    |
-| `x402_check`     | Check if a URL requires x402 payment                        |
-| `x402_fetch`     | Fetch a URL with automatic x402 payment (requires approval) |
-
-The wallet is auto-generated on first setup, with the private key encrypted in the OS keychain. The wallet address and balance are displayed in the sidebar. x402 v2 is an HTTP-native payment protocol where the agent signs EIP-3009 EIP-712 typed data to authorize exact USDC payments on Base. Payment requirements use atomic-unit strings such as `1000` (0.001 USDC), which are preserved unchanged in the signed payload.
-
-### Status & Configuration
-
-| Tool           | Description                                                              |
-| -------------- | ------------------------------------------------------------------------ |
-| `infra_status` | Get overall status: provider connections, active sandboxes, wallet state |
-
-Configure in **Settings** > **Integrations** > **Infrastructure**. The settings UI shows:
-
-- Provider connection status (E2B, Namecheap, Wallet)
-- API key configuration for each provider
-- Wallet address with copy button and balance display
-- Tool category toggles (enable/disable sandbox, domain, or payment tools independently)
-- Coinbase Agentic Wallet remote signer configuration (`wallet.provider = coinbase_agentic`) — see [Coinbase Agentic Signer Contract](coinbase-agentic-signer.md)
-
----
-
 ## Personality System
 
 Customize agent behavior via Settings or conversation:
@@ -1606,7 +1530,7 @@ Schedule recurring tasks with cron expressions and optional channel delivery.
 - Task-sourced scheduled jobs preserve a source task title, task ID, and `cowork://tasks/<taskId>` deeplink in the compiled prompt/description
 - Target modes: create a new task for each run or continue an existing task thread with a scheduled follow-up
 - Run mode presets: `Chat` for no-command-tool unattended work, `Local` for work governed by the selected access profile; worktree automation is forced to new-task execution instead of continuing a thread
-- Channel delivery to any of the 18 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
+- Channel delivery to any of the 17 channels through the shared gateway delivery path, with idempotency, formatting, chunking, and outbox retry behavior aligned with normal chat replies
 - Conditional delivery (`deliverOnlyIfResult`)
 - Template variables: `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`
 - Chat context variables: `{{chat_messages}}`, `{{chat_since}}`, etc.

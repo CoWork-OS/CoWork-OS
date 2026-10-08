@@ -68,7 +68,6 @@ import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
 import { MentionTools } from "./mention-tools";
-import { XTools } from "./x-tools";
 import { XSearchTools } from "./x-search-tools";
 import { PACT_TOOL_NAMES, PactTools } from "./pact-tools";
 import { NotionTools } from "./notion-tools";
@@ -164,8 +163,6 @@ import { isHeadlessMode } from "../../utils/runtime-mode";
 import { sanitizeStoredPreferredName } from "../../utils/preferred-name";
 import { getBrowserWorkbenchService } from "../../browser/browser-workbench-service";
 import { HooksSettingsManager } from "../../hooks/settings";
-import { InfraTools } from "../../infra/infra-tools";
-import { InfraSettingsManager } from "../../infra/infra-settings";
 import { KnowledgeGraphTools } from "./knowledge-graph-tools";
 import { ScrapingTools } from "./scraping-tools";
 import { DocumentTools } from "./document-tools";
@@ -615,7 +612,6 @@ export class ToolRegistry {
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
-  private xTools: XTools;
   private xSearchTools: XSearchTools;
   private pactTools: PactTools;
   private notionTools: NotionTools;
@@ -633,7 +629,6 @@ export class ToolRegistry {
   private channelTools?: ChannelTools;
   private emailImapTools?: EmailImapTools;
   private gitTools: GitTools;
-  private infraTools: InfraTools;
   private knowledgeGraphTools: KnowledgeGraphTools;
   private scrapingTools: ScrapingTools;
   private memoryTools: MemoryTools;
@@ -705,7 +700,6 @@ export class ToolRegistry {
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
-    this.xTools = new XTools(workspace, daemon, taskId);
     this.xSearchTools = new XSearchTools(workspace, daemon, taskId);
     this.pactTools = new PactTools(workspace, daemon, taskId);
     this.notionTools = new NotionTools(workspace, daemon, taskId);
@@ -720,7 +714,6 @@ export class ToolRegistry {
     this.sharePointTools = new SharePointTools(workspace, daemon, taskId);
     this.voiceCallTools = new VoiceCallTools(workspace, daemon, taskId);
     this.gitTools = new GitTools(workspace, daemon, taskId);
-    this.infraTools = new InfraTools(workspace, daemon, taskId);
     this.knowledgeGraphTools = new KnowledgeGraphTools(workspace, daemon, taskId);
     this.scrapingTools = new ScrapingTools(workspace, daemon, taskId);
     this.memoryTools = new MemoryTools(workspace, daemon, taskId);
@@ -799,7 +792,6 @@ export class ToolRegistry {
     const builtinSettings = BuiltinToolsSettingsManager.loadSettings();
     const mcpSettings = MCPSettingsManager.loadSettings();
     const integrationState = {
-      x: XTools.isEnabled(),
       xSearch: XSearchTools.hasCredentials(),
       pact: PactTools.isAvailable() ? (PactTools.autoRouteEnabled() ? "auto" : "explicit") : false,
       notion: NotionTools.isEnabled(),
@@ -821,16 +813,6 @@ export class ToolRegistry {
       channelHistory: Boolean(this.channelTools),
       swarm: this.swarmToolsAvailable,
     };
-    let infraState: { enabled: boolean; enabledCategories?: Any } = { enabled: false };
-    try {
-      const infraSettings = InfraSettingsManager.loadSettings();
-      infraState = {
-        enabled: Boolean(infraSettings.enabled),
-        enabledCategories: infraSettings.enabledCategories || null,
-      };
-    } catch {
-      infraState = { enabled: false };
-    }
     let mcpManagerVersion = 0;
     let mcpToolNames: string[] = [];
     try {
@@ -862,7 +844,6 @@ export class ToolRegistry {
         builtinSettings,
         chronicleSettings: ChronicleSettingsManager.loadSettings(),
         integrationState,
-        infraState,
         toolPrompting: TOOL_PROMPT_METADATA_VERSION,
         mcp: {
           toolNamePrefix: mcpSettings.toolNamePrefix || "mcp_",
@@ -1210,7 +1191,6 @@ export class ToolRegistry {
     this.cronTools.setWorkspace(workspace);
     this.canvasTools.setWorkspace(workspace);
     this.visualTools.setWorkspace(workspace);
-    this.xTools.setWorkspace(workspace);
     this.xSearchTools.setWorkspace(workspace);
     this.pactTools.setWorkspace(workspace);
     this.notionTools.setWorkspace(workspace);
@@ -1385,17 +1365,6 @@ export class ToolRegistry {
       allTools.push(...this.getXSearchToolDefinitions());
     }
 
-    // Only add X/Twitter tool if integration is enabled
-    if (XTools.isEnabled()) {
-      allTools.push(...this.getXToolDefinitions());
-    }
-
-    // Only add Notion tool if integration is enabled
-    if (NotionTools.isEnabled()) {
-      allTools.push(...this.getNotionToolDefinitions());
-    }
-
-    // Only add Box tool if integration is enabled
     if (BoxTools.isEnabled()) {
       allTools.push(...this.getBoxToolDefinitions());
     }
@@ -1563,17 +1532,6 @@ export class ToolRegistry {
           required: ["action"],
         },
       });
-    }
-
-    // Infrastructure tools (cloud sandboxes, domains, wallet, x402 payments)
-    // Only add when infrastructure is enabled in settings
-    try {
-      const infraSettings = InfraSettingsManager.loadSettings();
-      if (infraSettings.enabled) {
-        allTools.push(...InfraTools.getToolDefinitions(infraSettings));
-      }
-    } catch {
-      // InfraSettingsManager may not be initialized yet
     }
 
     // Canvas/visual tools require a desktop UI; skip in headless mode (VPS/server).
@@ -3004,7 +2962,6 @@ export class ToolRegistry {
       async ({ request }) => this.webPreviewTools.execute(request.name, request.input),
       serialSchedulerSpec,
     );
-    register("x_action", async ({ request }) => this.xTools.executeAction(request.input));
     register("notion_action", async ({ request }) => this.notionTools.executeAction(request.input));
     register("box_action", async ({ request }) => this.boxTools.executeAction(request.input));
     register("onedrive_action", async ({ request }) =>
@@ -3322,16 +3279,6 @@ export class ToolRegistry {
     register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
-      serialSchedulerSpec,
-    );
-    registerPredicate(
-      (name) =>
-        name.startsWith("cloud_sandbox_") ||
-        name.startsWith("domain_") ||
-        name.startsWith("wallet_") ||
-        name.startsWith("x402_") ||
-        name === "infra_status",
-      async ({ request }) => this.infraTools.executeTool(request.name, request.input),
       serialSchedulerSpec,
     );
     register(
@@ -4965,9 +4912,6 @@ ${skillDescriptions}`;
       return result;
     }
 
-    // X/Twitter tools
-    if (name === "x_action") return await this.xTools.executeAction(input);
-
     // Notion tools
     if (name === "notion_action") return await this.notionTools.executeAction(input);
 
@@ -5109,17 +5053,6 @@ ${skillDescriptions}`;
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
-
-    // Infrastructure tools (cloud sandboxes, domains, wallet, x402 payments)
-    if (
-      name.startsWith("cloud_sandbox_") ||
-      name.startsWith("domain_") ||
-      name.startsWith("wallet_") ||
-      name.startsWith("x402_") ||
-      name === "infra_status"
-    ) {
-      return await this.infraTools.executeTool(name, input);
-    }
 
     // Canvas tools
     if (name === "canvas_create") return await this.canvasTools.createCanvas(input.title);
@@ -8378,77 +8311,6 @@ ${skillDescriptions}`;
   /**
    * Define X/Twitter tools (bird CLI)
    */
-  private getXToolDefinitions(): LLMTool[] {
-    return [
-      {
-        name: "x_action",
-        description:
-          "Use the connected X/Twitter account to read, search, and post. " +
-          "Posting actions (tweet/reply/follow/unfollow) require user approval. " +
-          "If X blocks a request (rate limit/challenge/auth/access issue), this tool attempts browser-mode fallback for read/write actions.",
-        input_schema: {
-          type: "object",
-          properties: {
-            action: {
-              type: "string",
-              enum: [
-                "whoami",
-                "read",
-                "thread",
-                "replies",
-                "search",
-                "user_tweets",
-                "mentions",
-                "home",
-                "tweet",
-                "reply",
-                "follow",
-                "unfollow",
-              ],
-              description: "Action to perform",
-            },
-            id_or_url: {
-              type: "string",
-              description: "Tweet URL or ID (for read/thread/replies/reply)",
-            },
-            query: {
-              type: "string",
-              description: "Search query (for search)",
-            },
-            user: {
-              type: "string",
-              description:
-                "User handle (with or without @) for user_tweets/mentions/follow/unfollow",
-            },
-            text: {
-              type: "string",
-              description: "Text for tweet/reply",
-            },
-            timeline: {
-              type: "string",
-              enum: ["for_you", "following"],
-              description: "Timeline for home (default: for_you)",
-            },
-            count: {
-              type: "number",
-              description: "Max results (1-50) for search/mentions/home/user_tweets",
-            },
-            media: {
-              type: "array",
-              description: "Media file paths (workspace-relative). Up to 4 images or 1 video.",
-              items: { type: "string" },
-            },
-            alt: {
-              type: "string",
-              description: "Alt text for media (single string)",
-            },
-          },
-          required: ["action"],
-        },
-      },
-    ];
-  }
-
   /**
    * Define Notion tools
    */

@@ -15,7 +15,6 @@ export const CHANNEL_TYPES = [
   "googlechat",
   "feishu",
   "wecom",
-  "x",
   "whatsapp_cloud",
   "twilio_sms",
 ] as const;

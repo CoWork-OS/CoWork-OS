@@ -21,7 +21,6 @@ export type AddToolsRoute = {
     | "morechannels";
   secondaryChannel?:
     | "teams"
-    | "x"
     | "discord"
     | "imessage"
     | "signal"
@@ -137,7 +136,6 @@ const CHANNEL_ENTRIES: Array<{
       ["mattermost", "Mattermost"],
       ["matrix", "Matrix"],
       ["bluebubbles", "BlueBubbles"],
-      ["x", "X (Twitter)"],
     ] as const
   ).map(([id, name]) => ({
     id,

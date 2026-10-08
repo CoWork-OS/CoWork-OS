@@ -145,13 +145,6 @@ export const NATIVE_INTEGRATIONS: NativeIntegrationSpec[] = [
     source: "src/electron/agent/tools/apple-reminders-tools.ts",
   },
   {
-    id: "x-native",
-    name: "X (posting and search)",
-    actions: ["read", "write"],
-    requirements: ["api-key"],
-    source: "src/electron/agent/tools/x-tools.ts",
-  },
-  {
     id: "teams-meetings",
     name: "Teams meeting transcripts",
     actions: ["read", "event-trigger"],
@@ -228,7 +221,6 @@ export const CHANNEL_INVENTORY: Record<ChannelType, ChannelInventorySpec> = {
     requirements: ["api-key", "public-webhook"],
     provenance: "first-party-api",
   },
-  x: { name: "X (mentions)", requirements: ["api-key"], provenance: "first-party-api" },
   whatsapp_cloud: {
     name: "WhatsApp Business Cloud API",
     requirements: ["api-key", "public-webhook"],

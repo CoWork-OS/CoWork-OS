@@ -164,7 +164,6 @@ function createStepExecutor(handler: (messages: Any[]) => LLMResponse): Any {
     softDeadlineTriggered: false,
     wrapUpRequested: false,
     logTag: "[Executor:test]",
-    infraContextProvider: { getStatus: () => ({ enabled: false }) },
   });
   executor.contextManager = {
     compactMessagesWithMeta: vi.fn((messages: Any) => ({

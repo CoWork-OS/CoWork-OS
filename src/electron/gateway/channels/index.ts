@@ -20,7 +20,6 @@ export * from "./matrix";
 export * from "./line";
 export * from "./bluebubbles";
 export * from "./email";
-export * from "./x";
 export * from "./whatsapp-cloud";
 export * from "./twilio-sms";
 export * from "./loom-client";

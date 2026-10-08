@@ -17,7 +17,6 @@ describe("Sidebar creation controls", () => {
         selectedTaskId: null,
         onSelectTask: () => {},
         onNewSession: () => {},
-        onOpenSettings: () => {},
         onTasksChanged: () => {},
       }),
     );

@@ -15001,3 +15001,14 @@ button.collab-timeline-thought-agent:hover {
   color: var(--color-text-muted);
   font-size: 13px;
 }
+
+/* Build's access picker sits in the status row under the composer, so its menu opens downward. */
+.calm-build-access {
+  position: relative;
+  margin-right: auto;
+}
+
+.calm-build-access .permission-access-dropdown {
+  top: calc(100% + 8px);
+  bottom: auto;
+}

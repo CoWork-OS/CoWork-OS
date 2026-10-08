@@ -10307,7 +10307,7 @@
   left: 0;
   width: min(560px, calc(100vw - 24px));
   min-width: min(460px, calc(100vw - 24px));
-  max-height: min(500px, calc(100dvh - 160px));
+  max-height: min(500px, calc(100dvh - 160px), var(--model-dropdown-room, 100dvh));
   z-index: 1000;
   animation: dropdownFadeIn 0.15s ease;
   overflow: visible;
@@ -10316,7 +10316,7 @@
 .model-dropdown-quick {
   width: min(360px, calc(100vw - 24px));
   min-width: min(300px, calc(100vw - 24px));
-  max-height: none;
+  max-height: var(--model-dropdown-room, none);
 }
 
 .model-dropdown-panel {
@@ -10671,7 +10671,7 @@
 
 @media (max-height: 760px) {
   .model-dropdown {
-    max-height: min(440px, calc(100dvh - 140px));
+    max-height: min(440px, calc(100dvh - 140px), var(--model-dropdown-room, 100dvh));
   }
 }
 

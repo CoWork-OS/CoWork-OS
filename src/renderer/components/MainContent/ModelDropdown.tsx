@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import type {
   LLMModelInfo,
   LLMProviderInfo,
@@ -217,6 +217,31 @@ export function ModelDropdown({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [closeDropdown]);
+
+  // The panel opens upward from the trigger, so cap its height to the room above the
+  // trigger; otherwise a short window pushes the top of the panel off-screen.
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!isOpen || !container) return;
+    const update = () => {
+      // Top of the visible area: the app header, or the nearest clipping ancestor if lower.
+      let limit =
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-height")) ||
+        0;
+      for (let el = container.parentElement; el; el = el.parentElement) {
+        const { overflowY } = getComputedStyle(el);
+        if (overflowY !== "visible") limit = Math.max(limit, el.getBoundingClientRect().top);
+      }
+      const room = Math.floor(container.getBoundingClientRect().top - limit - 8 - 12);
+      container.style.setProperty("--model-dropdown-room", `${Math.max(room, 160)}px`);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      container.style.removeProperty("--model-dropdown-room");
+    };
+  }, [isOpen]);
 
   // Escape closes the picker wherever focus is; the trigger's own key handler
   // only sees it while the trigger is focused.

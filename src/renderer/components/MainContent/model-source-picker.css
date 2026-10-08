@@ -4,7 +4,7 @@
 .model-dropdown.model-dropdown-advanced {
   width: min(420px, calc(100vw - 24px));
   min-width: 0;
-  max-height: min(560px, calc(100dvh - 140px));
+  max-height: min(560px, calc(100dvh - 140px), var(--model-dropdown-room, 100dvh));
 }
 
 .model-dropdown-panel.msp {

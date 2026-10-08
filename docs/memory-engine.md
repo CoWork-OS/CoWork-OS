@@ -895,9 +895,7 @@ are removed when their root task is deleted. See
 10. Done: shutdown waits (bounded) for consolidation, executor learning, compression batches and
     markdown syncs; quiet mode starts no memory cleanup and no kit writers; one kit-writer owner
     per profile between the desktop app and the node daemon (§7). One `DailyBriefingService`
-    (the on-demand IPC briefing passes its data sources per call) and one
-    `EverydayAgentService` per process, injected into IPC, the control plane and the browser
-    host. Open: a non-owner's live kit updates reach the files only when ownership changes or
+    per process (the on-demand IPC briefing passes its data sources per call). Open: a non-owner's live kit updates reach the files only when ownership changes or
     on the owner's next restart; the lease does not cover `USER.md`/`MEMORY.md`, which are
     rendered from `memory_items` on request and written only when their content changes.
 11. Done (DATA-5, DATA-7; §6a): summaries skip constant preambles, embeddings and observation

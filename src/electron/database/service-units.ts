@@ -11,9 +11,7 @@ import { IDENTITY_UNITS } from "../identity/identity-units";
 import { MANAGED_UNITS } from "../managed/managed-units";
 import { WORKSPACE_UNITS } from "../workspaces/workspace-units";
 import { EVAL_UNITS } from "../eval/eval-units";
-import { EVERYDAY_AGENT_UNITS } from "../everyday-agent/everyday-agent-units";
 import { ACTIVITY_UNITS } from "../activity/activity-units";
-import { COUNCIL_UNITS } from "../council/council-units";
 import { TRIGGER_UNITS } from "../triggers/trigger-units";
 import { AGENT_SIGNAL_UNITS } from "../agents/agent-signal-units";
 import { ACP_UNITS } from "../acp/acp-units";
@@ -61,10 +59,8 @@ export const SERVICE_UNITS = {
   ...IDENTITY_UNITS,
   ...WORKSPACE_UNITS,
   ...EVAL_UNITS,
-  ...EVERYDAY_AGENT_UNITS,
   ...MISSION_CONTROL_UNITS,
   ...ACTIVITY_UNITS,
-  ...COUNCIL_UNITS,
   ...TRIGGER_UNITS,
   ...AGENT_SIGNAL_UNITS,
   ...ACP_UNITS,

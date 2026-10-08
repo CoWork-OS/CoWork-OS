@@ -9,7 +9,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | Integration type | Count |
 | --- | ---: |
 | Native app integrations | 14 |
-| Gateway channels | 19 |
+| Gateway channels | 18 |
 | MCP connectors (Settings > Connectors) | 67 |
 | Bundled skills | 152 |
 
@@ -52,7 +52,6 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `slack` | Slack | inbound-message, outbound-message | api-key | third-party-package |
 | `telegram` | Telegram | inbound-message, outbound-message | api-key | third-party-package |
 | `twilio_sms` | Twilio SMS | inbound-message, outbound-message | api-key, public-webhook | first-party-api |
-| `twitch` | Twitch | inbound-message, outbound-message | oauth-consent | first-party-api |
 | `wecom` | WeCom | inbound-message, outbound-message | api-key, public-webhook | first-party-api |
 | `whatsapp` | WhatsApp (personal, WhatsApp Web) | inbound-message, outbound-message | personal-account-session | third-party-package |
 | `whatsapp_cloud` | WhatsApp Business Cloud API | inbound-message, outbound-message | api-key, public-webhook | first-party-api |

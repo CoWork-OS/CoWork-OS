@@ -17,7 +17,6 @@ export * from "./feishu";
 export * from "./wecom";
 export * from "./mattermost";
 export * from "./matrix";
-export * from "./twitch";
 export * from "./line";
 export * from "./bluebubbles";
 export * from "./email";

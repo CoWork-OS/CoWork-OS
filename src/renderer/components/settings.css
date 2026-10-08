@@ -2536,7 +2536,6 @@
     .insights-hero-card,
     .sc-status-card,
     .sc-card,
-    .council-source-card,
     .context-comparison,
     .hooks-token-section
   ) {
@@ -2611,12 +2610,6 @@
   padding: 24px 32px;
 }
 
-/* Everyday Agent's settings mode reuses the app's main-content shell. */
-.settings-page-layout .settings-content .everyday-agent-main.settings-mode {
-  background: transparent !important; /* beats .main-content's !important light fill */
-  padding-top: 0;
-}
-
 /* Appearance group labels sit below the section heading in the hierarchy. */
 .settings-page-layout .settings-content .appearance-section h4 {
   font-size: 13px;
@@ -2670,8 +2663,7 @@
     .settings-subsection,
     .form-group,
     .settings-card,
-    .computer-use-status-card,
-    .council-source-card
+    .computer-use-status-card
   )
   > :is(button, .settings-button, .button-primary, .button-secondary, .button-danger) {
   align-self: flex-start;
@@ -2685,7 +2677,7 @@
   width: auto;
 }
 
-/* Council / Skills form fields match the standard settings inputs. */
+/* Skills form fields match the standard settings inputs. */
 .settings-page-layout .settings-content .form-group :is(input, textarea, select) {
   background: var(--color-bg-input);
   font-size: 13px;
@@ -3608,7 +3600,6 @@ html .settings-nav-items .settings-nav-item:focus-visible {
     .insights-hero-card,
     .sc-status-card,
     .sc-card,
-    .council-source-card,
     .context-comparison,
     .hooks-token-section
   ) {

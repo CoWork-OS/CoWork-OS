@@ -407,24 +407,6 @@ export interface MatrixConfig extends ChannelConfig {
 }
 
 /**
- * Twitch-specific configuration
- */
-export interface TwitchConfig extends ChannelConfig {
-  /** Twitch username (login name) */
-  username: string;
-  /** OAuth token (with oauth: prefix or without) */
-  oauthToken: string;
-  /** Channels to join (without # prefix) */
-  channels: string[];
-  /** Response prefix for bot messages */
-  responsePrefix?: string;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-  /** Whether to respond to whispers (DMs) - default: false */
-  allowWhispers?: boolean;
-}
-
-/**
  * LINE-specific configuration
  * Uses LINE Messaging API for communication
  */

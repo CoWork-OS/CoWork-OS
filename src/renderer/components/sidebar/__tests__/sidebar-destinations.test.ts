@@ -52,7 +52,7 @@ describe("getSidebarRailLayout", () => {
   it("shows calm-only destinations only in the Calm theme", () => {
     const desktop = getSidebarRailLayout({ isCalm: false, isBrowserHost: false }, []);
     expect(ids(desktop.rail)).toEqual(["home", "inbox", "agents", "automations"]);
-    expect(ids(desktop.more)).toEqual(["devices", "everyday", "missionControl", "addTools"]);
+    expect(ids(desktop.more)).toEqual(["devices", "missionControl", "addTools"]);
 
     const calm = getSidebarRailLayout({ isCalm: true, isBrowserHost: false }, []);
     expect(ids(calm.rail)).toContain("library");
@@ -61,11 +61,11 @@ describe("getSidebarRailLayout", () => {
 
   it("orders pinned items by pin order and drops ones that are not visible", () => {
     const layout = getSidebarRailLayout({ isCalm: false, isBrowserHost: false }, [
-      "everyday",
+      "missionControl",
       "build",
       "devices",
     ]);
-    expect(ids(layout.pinned)).toEqual(["everyday", "devices"]);
+    expect(ids(layout.pinned)).toEqual(["missionControl", "devices"]);
   });
 
   it("hides Git Changes on the desktop app", () => {
@@ -87,7 +87,6 @@ describe("rail shortcuts and reordering", () => {
   it("numbers at most nine destinations, rail first then pinned", () => {
     const layout = getSidebarRailLayout({ isCalm: true, isBrowserHost: false }, [
       "devices",
-      "everyday",
       "missionControl",
       "build",
       "addTools",
@@ -118,7 +117,7 @@ describe("rail shortcuts and reordering", () => {
       "home",
       "automations",
     ]);
-    expect(moveSidebarDestination([...list], "home", "everyday", "after")).toEqual([...list]);
+    expect(moveSidebarDestination([...list], "home", "missionControl", "after")).toEqual([...list]);
   });
 
   it("treats an order matching the default as not custom", () => {
@@ -163,10 +162,10 @@ describe("rail pin persistence", () => {
   it("round-trips pins and ignores unknown, fixed, and duplicate ids", () => {
     const storage = memoryStorage({
       [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({
-        pinned: ["everyday", "home", "nope", "everyday", 7, "missionControl"],
+        pinned: ["devices", "home", "nope", "devices", 7, "missionControl"],
       }),
     });
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday", "missionControl"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["devices", "missionControl"]);
   });
 
   it("falls back to the defaults when storage holds invalid data", () => {
@@ -178,32 +177,32 @@ describe("rail pin persistence", () => {
 
   it("stores the rail order beside the pins without either resetting the other", () => {
     const storage = memoryStorage();
-    writeSidebarRailOrder(["agents", "home", "everyday"], storage);
-    writePinnedSidebarDestinations(["everyday"], storage);
+    writeSidebarRailOrder(["agents", "home", "missionControl"], storage);
+    writePinnedSidebarDestinations(["missionControl"], storage);
     // Only fixed rail items belong in the order.
     expect(readSidebarRailOrder(storage)).toEqual(["agents", "home"]);
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["missionControl"]);
 
     writeSidebarRailOrder([], storage);
     expect(readSidebarRailOrder(storage)).toEqual([]);
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["missionControl"]);
   });
 
   it("reads pins saved before the order existed", () => {
     const storage = memoryStorage({
-      [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({ pinned: ["everyday"] }),
+      [SIDEBAR_RAIL_STORAGE_KEY]: JSON.stringify({ pinned: ["missionControl"] }),
     });
-    expect(readPinnedSidebarDestinations(storage)).toEqual(["everyday"]);
+    expect(readPinnedSidebarDestinations(storage)).toEqual(["missionControl"]);
     expect(readSidebarRailOrder(storage)).toEqual([]);
   });
 
   it("toggles a pin on and off", () => {
-    expect(togglePinnedSidebarDestination(["devices"], "everyday")).toEqual([
+    expect(togglePinnedSidebarDestination(["devices"], "missionControl")).toEqual([
       "devices",
-      "everyday",
+      "missionControl",
     ]);
-    expect(togglePinnedSidebarDestination(["devices", "everyday"], "devices")).toEqual([
-      "everyday",
+    expect(togglePinnedSidebarDestination(["devices", "missionControl"], "devices")).toEqual([
+      "missionControl",
     ]);
   });
 });

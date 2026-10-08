@@ -7,7 +7,6 @@ import {
   Library,
   Monitor,
   Puzzle,
-  Sparkles,
   Users,
   UsersRound,
   Workflow,
@@ -22,7 +21,6 @@ export type SidebarDestinationId =
   | "library"
   | "gitChanges"
   | "devices"
-  | "everyday"
   | "missionControl"
   | "build"
   | "addTools";
@@ -105,14 +103,6 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
     views: ["devices"],
     panel: "devices",
     hostMethods: ["listManagedDevices", "getDeviceSummary"],
-  },
-  {
-    id: "everyday",
-    label: "Everyday",
-    icon: Sparkles,
-    placement: "more",
-    views: ["everydayAgent"],
-    hostMethods: ["everydayAgentGetProfile"],
   },
   {
     id: "missionControl",

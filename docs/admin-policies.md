@@ -1,6 +1,6 @@
 # Admin Policies
 
-Admin Policies provide organization-level control over plugin packs, connectors, agents, Everyday Agent, runtime security, and installation permissions. UI-independent enforcement occurs in backend IPC handlers and the central tool-policy pipeline.
+Admin Policies provide organization-level control over plugin packs, connectors, agents, runtime security, and installation permissions. UI-independent enforcement occurs in backend IPC handlers and the central tool-policy pipeline.
 
 Access from **Settings > System & Security > Admin Policies** (requires Power density mode).
 
@@ -25,7 +25,6 @@ The file is created when policies are first saved via the Admin Policies panel. 
 | **Pack policies**           | Which plugin packs are allowed, blocked, or required                             |
 | **Connector policies**      | Which MCP connectors are blocked                                                 |
 | **Agent policies**          | Heartbeat frequency limits, concurrent agent caps                                |
-| **Everyday Agent policies** | Product block, bundle blocks, review-only mode, cadence and background-work caps |
 | **Runtime policies**        | Permission/sandbox/network limits, telemetry, and Numbat agent-security policy   |
 | **Installation policies**   | Whether users can create, install from git, or install from URL                  |
 | **Organization settings**   | Org name, org plugin directory path                                              |
@@ -73,17 +72,6 @@ network, and shell egress below that selection.
   "agents": {
     "maxHeartbeatFrequencySec": 60,
     "maxConcurrentAgents": 10
-  },
-  "everydayAgent": {
-    "blocked": false,
-    "blockedBundles": ["screen_context"],
-    "forceReviewOnly": true,
-    "maxHeartbeatCadenceMinutes": 30,
-    "maxConcurrentBackgroundWork": 1,
-    "activeHours": {
-      "enabled": false,
-      "windows": []
-    }
   },
   "runtime": {
     "allowedPermissionModes": [],
@@ -153,17 +141,6 @@ network, and shell egress below that selection.
 | -------------------------- | -------- | ------- | ----- | ---------------------------------------------------------------------------- |
 | `maxHeartbeatFrequencySec` | `number` | `60`    | >= 60 | Minimum seconds between agent heartbeats. Prevents excessive resource usage. |
 | `maxConcurrentAgents`      | `number` | `10`    | >= 1  | Maximum number of agents that can run simultaneously per workspace.          |
-
-#### `everydayAgent`
-
-| Field                         | Type                         | Default  | Range            | Description                                                                                   |
-| ----------------------------- | ---------------------------- | -------- | ---------------- | --------------------------------------------------------------------------------------------- |
-| `blocked`                     | `boolean`                    | `false`  | —                | Disables the Everyday Agent product surface and background work.                              |
-| `blockedBundles`              | `EverydayCapabilityBundle[]` | `[]`     | valid bundle IDs | Blocks specific bundles such as `browser`, `messages`, `screen_context`, or `remote_devices`. |
-| `forceReviewOnly`             | `boolean`                    | `false`  | —                | Forces every Everyday Agent action preview to require explicit approval.                      |
-| `maxHeartbeatCadenceMinutes`  | `number`                     | `60`     | >= 5             | Clamps local Everyday Agent heartbeat cadence.                                                |
-| `maxConcurrentBackgroundWork` | `number`                     | `1`      | >= 1             | Caps concurrent Everyday Agent background jobs.                                               |
-| `activeHours`                 | `object`                     | disabled | —                | Optional organization active-hours ceiling.                                                   |
 
 #### `runtime` access-profile governance
 
@@ -275,14 +252,6 @@ The Admin Policies panel is accessible from **Settings > System & Security > Adm
 
 - Max Heartbeat Frequency — minimum seconds between heartbeats (>= 60)
 - Max Concurrent Agents — maximum agents per workspace (>= 1)
-
-**Everyday Agent**
-
-- Block Everyday Agent entirely
-- Force review-only mode
-- Blocked Capability Bundles — comma-separated bundle IDs
-- Max Heartbeat Cadence — maximum profile cadence in minutes
-- Max Background Work — concurrent background-work cap
 
 **Runtime Access Policy**
 
@@ -432,7 +401,6 @@ update and leaves the saved policy unchanged. Changes that need confirmation:
 - turning on `autoReview`, or exporting telemetry (turning it on or changing
   `otlpEndpoint`)
 - agent security: turning it off, `enforce` → `monitor`, or `failurePolicy` → `open`
-- Everyday Agent: removing `blocked` or `forceReviewOnly`
 - unblocking connectors or packs, clearing or extending `packs.allowed`, or changing
   `general.orgPluginDir`
 - turning on `allowCustomPacks`, `allowGitInstall` or `allowUrlInstall`

@@ -79,13 +79,6 @@ export function describePolicyRelaxations(current: AdminPolicies, next: AdminPol
     changes.push("Allow agent actions when the security check fails");
   }
 
-  if (current.everydayAgent.blocked && !next.everydayAgent.blocked) {
-    changes.push("Unblock the Everyday Agent");
-  }
-  if (current.everydayAgent.forceReviewOnly && !next.everydayAgent.forceReviewOnly) {
-    changes.push("Stop forcing review for Everyday Agent actions");
-  }
-
   const nextBlockedConnectors = Array.isArray(next.connectors?.blocked)
     ? next.connectors.blocked
     : [];

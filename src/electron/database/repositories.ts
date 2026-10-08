@@ -1844,16 +1844,6 @@ export class TaskStore {
       );
       clearSupervisorExchangeTaskId.run(taskId);
 
-      const clearCouncilRunTaskId = this.db.prepare(
-        "UPDATE council_runs SET task_id = NULL WHERE task_id = ?",
-      );
-      clearCouncilRunTaskId.run(taskId);
-
-      const clearCouncilMemoTaskId = this.db.prepare(
-        "UPDATE council_memos SET task_id = NULL WHERE task_id = ?",
-      );
-      clearCouncilMemoTaskId.run(taskId);
-
       const clearLlmCallEventTaskId = this.db.prepare(
         "UPDATE llm_call_events SET task_id = NULL WHERE task_id = ?",
       );

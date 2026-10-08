@@ -2,7 +2,6 @@ import { createBrowserProviderSignIn } from "./browser-provider-sign-in";
 import { createBrowserAwarenessDefinitions } from "./browser-awareness-methods";
 import { getAwarenessService } from "../../electron/awareness/AwarenessService";
 import type Database from "better-sqlite3";
-import type { EverydayAgentService } from "../../electron/everyday-agent/everyday-agent-repository-facades";
 import {
   ApprovalRepository,
   ArtifactRepository,
@@ -99,8 +98,6 @@ export interface BrowserHostApplicationOptions {
   getEventTriggerService?: () => EventTriggerService | null;
   getHeartbeatService?: () => HeartbeatService | null;
   notificationService?: NotificationService;
-  /** The process's one EverydayAgentService, shared with IPC and the control plane (LIFE-5). */
-  everydayAgentService: EverydayAgentService;
   taskCommands?: Pick<BrowserTaskCommands, "createTaskIdempotent" | "startAdmittedTask"> &
     BrowserApprovalCommands &
     Pick<AgentDaemon, "sendMessage" | "getDurableTaskFollowUpReceipt" | "cancelTask">;
@@ -203,7 +200,6 @@ export function createBrowserHostApplication(
         getRoutineService: options.getRoutineService,
         getEventTriggerService: options.getEventTriggerService,
         getHeartbeatService: options.getHeartbeatService,
-        everydayAgentService: options.everydayAgentService,
         resolveWorkspace: resolveBrowserWorkspace,
       })
     : null;

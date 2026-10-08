@@ -28,7 +28,6 @@ import { EvalService } from "../../eval/eval-repository-facades";
 import { ActivityRepository } from "../../activity/activity-repository-facades";
 import { MissionControlIntelligenceService } from "../../mission-control/mission-control-repository-facades";
 import { registerPendingTimelineWrites } from "../timeline-write-registry";
-import { EverydayAgentService } from "../../everyday-agent/everyday-agent-repository-facades";
 import { WorkSessionProtocolService } from "../../sessions/WorkSessionProtocolService";
 import {
   SessionMembershipService,
@@ -754,112 +753,6 @@ describe("agent repositories on the host and in the database worker", () => {
     expect(result.unreadAfter).toBe(1);
     expect(result.unreadListed).toEqual(["Committed activity"]);
     expect(result.pendingCommitted).toBe(true);
-  });
-
-  async function runEverydayAgentWorkload(backend: "host" | "worker") {
-    const dir = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), `cowork-services-everyday-${backend}-`)),
-    );
-    process.env.COWORK_USER_DATA_DIR = dir;
-    const manager = new DatabaseManager();
-    const db = manager.getDatabase();
-    const start = Date.now();
-    db.prepare(
-      `INSERT INTO workspaces (id, name, path, created_at, permissions)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run("ws-1", "Workspace", path.join(dir, "workspace"), 1, "{}");
-    let calls = 0;
-    let client: DatabaseClient | null = null;
-    if (backend === "worker") {
-      client = await DatabaseClient.start({
-        dbPath: manager.getDatabasePath(),
-        requiredTables: requiredTablesFor(DATABASE_COMMANDS),
-        workerPath,
-      });
-      const execute = client.execute.bind(client);
-      vi.spyOn(client, "execute").mockImplementation(((name: string, args: unknown) => {
-        if (name.startsWith("statements.")) calls += 1;
-        return execute(name as Parameters<typeof execute>[0], args as never);
-      }) as typeof client.execute);
-      setStatementClient("services", manager.getDatabasePath(), client);
-    }
-    cleanups.push(async () => {
-      await client?.close(2_000);
-      manager.close();
-      fs.rmSync(dir, { recursive: true, force: true });
-    });
-
-    // Admin policies are read on the host (defaults: no policy file) and passed to each unit.
-    const everyday = new EverydayAgentService(db);
-    const consent = await everyday.acceptConsent({ enabled: true, workspaceId: "ws-1" });
-    const draft = { title: "Stage reply", action: "Draft email reply", capability: "inbox" };
-    const approved = await everyday.approveAction({
-      previewId: (await everyday.previewAction({ ...draft, workspaceId: "ws-1" } as never)).id,
-    });
-    const stale = await everyday.previewAction({
-      ...draft,
-      title: "Stage another reply",
-      workspaceId: "ws-1",
-    } as never);
-    // Expire the preview on disk; the refusal's "expired" mark must survive the refusal.
-    const row = db
-      .prepare("SELECT preview_json FROM everyday_agent_action_previews WHERE id = ?")
-      .get(stale.id) as { preview_json: string };
-    db.prepare("UPDATE everyday_agent_action_previews SET preview_json = ? WHERE id = ?").run(
-      JSON.stringify({ ...JSON.parse(row.preview_json), expiresAt: start - 1 }),
-      stale.id,
-    );
-    const refusal = await everyday.approveAction({ previewId: stale.id }).then(
-      () => "approved",
-      (error: Error) => error.message,
-    );
-    const staleStatus = (
-      db
-        .prepare("SELECT status FROM everyday_agent_action_previews WHERE id = ?")
-        .get(stale.id) as {
-        status: string;
-      }
-    ).status;
-    const receipts = await everyday.listReceipts({ workspaceId: "ws-1" });
-    const cleared = await everyday.clearData({ previews: true });
-    const result = stable(
-      {
-        enabled: consent.profile.enabled,
-        managedAgentId: consent.profile.managedAgentId,
-        managedEnvironmentId: consent.profile.managedEnvironmentId,
-        allowed: consent.compiledPolicy.allowedCapabilities,
-        approved: { status: approved.status, capability: approved.capability },
-        refusal,
-        staleStatus,
-        receipts: receipts.map((receipt) => `${receipt.status}:${receipt.title}`).sort(),
-        previewsLeft: (
-          db.prepare("SELECT COUNT(*) AS count FROM everyday_agent_action_previews").get() as {
-            count: number;
-          }
-        ).count,
-        clearedEnabled: cleared.profile.enabled,
-      },
-      start,
-    );
-    return { calls, result };
-  }
-
-  it("runs Everyday Agent consent, approvals and clearing the same on either backend", async () => {
-    const host = await runEverydayAgentWorkload("host");
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-    setStatementClient(null, null, null);
-    vi.restoreAllMocks();
-    const worker = await runEverydayAgentWorkload("worker");
-
-    expect(host.calls).toBe(0);
-    expect(worker.calls).toBe(13);
-    expect(worker.result).toEqual(host.result);
-    const result = host.result as Record<string, Any>;
-    expect(result.enabled).toBe(true);
-    expect(result.approved.status).toBe("approved");
-    expect(result.refusal).toMatch(/preview expired/i);
-    expect(result.staleStatus).toBe("expired");
-    expect(result.previewsLeft).toBe(0);
   });
 
   async function runEvalWorkload(backend: "host" | "worker") {

@@ -1443,52 +1443,6 @@ html.visual-calm .studio-template:hover {
   border-color: var(--calm-border-strong);
 }
 
-/* ---------- Everyday ---------- */
-
-html.visual-calm .everyday-agent-main {
-  --calm-view-bg:
-    radial-gradient(50% 35% at 100% 0%, var(--calm-sky-2), transparent 70%), var(--calm-page);
-}
-
-html.visual-calm .ea-console-header h1 {
-  font-family: var(--calm-font-display);
-  font-size: 32px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-}
-
-html.visual-calm .ea-console-header p {
-  font-size: 15px;
-  color: var(--calm-text-secondary);
-}
-
-html.visual-calm .ea-kicker {
-  color: var(--calm-text-muted);
-  font-weight: 600;
-}
-
-html.visual-calm .ea-operator-main h2 {
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-html.visual-calm .ea-section h2,
-html.visual-calm .ea-section-header h2 {
-  font-family: var(--calm-font-display);
-  font-size: 22px;
-  font-weight: 400;
-  letter-spacing: -0.005em;
-  color: var(--calm-text);
-}
-
-html.visual-calm .ea-plan-step {
-  background: var(--calm-surface);
-  border-color: var(--calm-border);
-  border-radius: 14px;
-  box-shadow: var(--calm-shadow-soft);
-}
-
 /* ---------- Devices ---------- */
 
 html.visual-calm .dp-title {

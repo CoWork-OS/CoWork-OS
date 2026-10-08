@@ -77,8 +77,7 @@ Bounded command scenarios require an available OS sandbox and deliberately fail 
 - Additional surface run: 199 tests across mailbox, improvement automation, cron, Control Plane,
   browser/network policy, and sandbox suites.
 - Focused boundary run: 291 tests across policy, migration, path, broker, registered tools,
-  approval presentation, file mutation races, sandbox, ACP authority, and Council cron profile
-  propagation.
+  approval presentation, file mutation races, sandbox, and ACP authority.
 - Execution/network/browser run: 136 tests covering shell, browser, network policy, executor
   cancellation, and follow-up lifecycle.
 - Type check, Electron build, Node daemon build, CLI build, and renderer build passed. Renderer reports the

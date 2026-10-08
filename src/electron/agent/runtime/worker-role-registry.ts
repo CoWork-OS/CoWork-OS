@@ -53,6 +53,8 @@ const VERIFIER_DENY_LIST = [
   "dropbox_action",
   "sharepoint_action",
   "voice_call",
+  // A message to a business agent can change the user's account there.
+  "pact_send_message",
   "generate_video",
   "cancel_video_generation_job",
   // Browser/QA actions can submit forms, upload data, or alter the browser
@@ -121,6 +123,8 @@ const RESEARCHER_DENY_LIST = [
   // explicitly. Verifier already denies them via group:memory. (SEC-12)
   ...MEMORY_WRITE_TOOL_NAMES,
   "group:meta",
+  // Research never sends requests to a business on the user's behalf.
+  "pact_send_message",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",

@@ -81,6 +81,8 @@ export default defineConfig({
           { text: "Agent Messaging", link: "/agent-messaging" },
           { text: "Enterprise Connectors", link: "/enterprise-connectors" },
           { text: "Connector Inventory", link: "/connector-inventory" },
+          { text: "PACT Business Agents", link: "/pact" },
+          { text: "PACT Signer Contract", link: "/pact-signer" },
           { text: "Meeting Artifacts", link: "/meeting-artifacts" },
           { text: "Secure MCP Tunnels", link: "/secure-mcp-tunnels" },
           { text: "Integration + Skill Lifecycle", link: "/integration-skill-bootstrap-lifecycle" },

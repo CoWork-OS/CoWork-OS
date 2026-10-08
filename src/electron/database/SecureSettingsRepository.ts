@@ -157,6 +157,12 @@ export type SettingsCategory =
   | "plugin-packs"
   | "meeting-artifacts"
   | "checkpoint-signing"
+  // PACT business-agent protocol: settings, and secrets that never enter the pact_* tables.
+  | "pact"
+  | "pact:grants"
+  | "pact:authorization"
+  | "pact:signer"
+  | "pact:receipts"
   | `plugin:${string}`;
 
 interface SecureSettingsRow {

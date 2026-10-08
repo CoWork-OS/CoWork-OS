@@ -2,6 +2,7 @@ import { registerBotWorkControlMethods } from "./registerBotWorkControlMethods";
 import { registerBotResponsibilityMethods } from "./registerBotResponsibilityMethods";
 import { registerAutomationRuntimeMethods } from "./registerAutomationRuntimeMethods";
 import { registerBotWorkMethods } from "./registerBotWorkMethods";
+import { registerPactMethods } from "./registerPactMethods";
 /**
  * Control Plane IPC Handlers
  *
@@ -2959,6 +2960,7 @@ export function registerTaskAndWorkspaceMethods(
   const isAdminClient = (client: any) => !!client?.hasScope?.("admin");
 
   registerBotWorkMethods({ server, db, requireScope });
+  registerPactMethods({ server, agentDaemon, requireScope });
   registerBotWorkControlMethods({ server, db, agentDaemon, requireScope });
   registerBotResponsibilityMethods({
     server,

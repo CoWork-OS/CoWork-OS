@@ -62,13 +62,22 @@ import { shouldRunDirectRunEntrypoint } from "./direct-runtime";
 import { startDatabaseWorker, stopDatabaseWorker } from "../electron/database/async/runtime";
 import { FtsWorkerClient } from "../electron/database/FtsWorkerClient";
 import {
+  EXIT_NEEDS_USER_ACTION,
+  describePactSignInPause,
+  runPactDirectCommand,
+  type PactDirectAction,
+  type PactDirectArgs,
+} from "./pact-commands";
+import {
   startHostPerfMonitor,
   type HostPerfMonitorHandle,
 } from "../electron/utils/host-perf-monitor";
 
 type Any = Record<string, any>;
 
-interface DirectRunArgs {
+interface DirectRunArgs extends PactDirectArgs {
+  /** `cowork run`: stop with exit code 3 instead of waiting when a person must act. */
+  exitOnInput?: boolean;
   command:
     | "run"
     | "doctor"
@@ -134,7 +143,8 @@ interface DirectRunArgs {
     | "prompt-size"
     | "prompt-preview"
     | "dashboard-status"
-    | "pulse";
+    | "pulse"
+    | "pact";
   prompt: string;
   cwd: string;
   taskId?: string;
@@ -257,6 +267,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.once("SIGTERM", onSignal);
     await daemon.initialize();
 
+    if (args.command === "pact") {
+      const pactDaemon = daemon;
+      return await runPactDirectCommand(pactDaemon, args, (payload, text) =>
+        writeEvent(args, payload, text),
+      );
+    }
+
     try {
       mcpClientManager = MCPClientManager.getInstance();
       await mcpClientManager.initialize();
@@ -350,15 +367,21 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     await daemon.startTask(task);
 
     const status = await waitForTerminalTask(daemon, task.id, args);
+    const exitCode =
+      status === "needs_user_action"
+        ? EXIT_NEEDS_USER_ACTION
+        : status === "failed" || status === "cancelled"
+          ? 1
+          : 0;
     await updateActiveCliOwnership({
       endedAt: Date.now(),
-      exitCode: status === "completed" ? 0 : 1,
+      exitCode: status === "completed" ? 0 : exitCode,
     });
     stopCliHeartbeat();
     activeTaskId = null;
     activeCliRunId = null;
     done = true;
-    return status === "failed" || status === "cancelled" ? 1 : 0;
+    return exitCode;
   } catch (error) {
     writeError(args, formatError(error));
     return 1;
@@ -482,8 +505,9 @@ async function waitForTerminalTask(
   daemon: AgentDaemon,
   taskId: string,
   args: DirectRunArgs,
-): Promise<Task["status"]> {
+): Promise<Task["status"] | "needs_user_action"> {
   let lastStatus = "";
+  let announcedSignIn = "";
   while (true) {
     const task = await daemon.getTaskById(taskId);
     if (!task) throw new Error(`Task disappeared: ${taskId}`);
@@ -491,6 +515,18 @@ async function waitForTerminalTask(
       lastStatus = task.status;
       if (task.status !== "pending" && task.status !== "executing") {
         writeEvent(args, { type: "status", taskId, status: task.status }, `Status: ${task.status}`);
+      }
+    }
+    if (task.status === "paused" || task.status === "blocked") {
+      // A PACT sign-in: show the business's own login link to the owner at this terminal.
+      const signIn = await describePactSignInPause(daemon, taskId).catch(() => null);
+      if (signIn && signIn.authorizationId !== announcedSignIn) {
+        announcedSignIn = signIn.authorizationId;
+        writeEvent(args, signIn.payload, signIn.text);
+        // Unattended runs stop here (exit 3); a detached worker keeps waiting in the background.
+        if (args.exitOnInput || (!process.stdout.isTTY && !args.detachedWorker)) {
+          return "needs_user_action";
+        }
       }
     }
     if (isTerminalTaskStatus(task.status)) {
@@ -884,6 +920,55 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
       case "--yes":
       case "-y":
         args.yes = true;
+        break;
+      case "--pact":
+        args.command = "pact";
+        args.pactAction = next as PactDirectAction;
+        i++;
+        break;
+      case "--pact-domain":
+        args.pactDomain = next;
+        i++;
+        break;
+      case "--pact-card-url":
+        args.pactCardUrl = next;
+        i++;
+        break;
+      case "--pact-business":
+        args.pactBusinessId = next;
+        i++;
+        break;
+      case "--pact-message":
+        args.pactMessage = next;
+        i++;
+        break;
+      case "--pact-effect":
+        args.pactEffect = next;
+        i++;
+        break;
+      case "--pact-scope":
+        args.pactScopes = [
+          ...(args.pactScopes ?? []),
+          ...String(next ?? "")
+            .split(",")
+            .filter(Boolean),
+        ];
+        i++;
+        break;
+      case "--pact-id":
+        args.pactId = next;
+        i++;
+        break;
+      case "--pact-conversation":
+        args.pactConversationId = next;
+        i++;
+        break;
+      case "--pact-reconcile":
+        args.pactReconcile = next;
+        i++;
+        break;
+      case "--exit-on-input":
+        args.exitOnInput = true;
         break;
       case "--dry-run":
         args.dryRun = true;

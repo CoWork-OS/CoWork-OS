@@ -40,6 +40,7 @@ export const HOST_CAPABILITIES = [
   "devices.manage",
   "mailbox.manage",
   "browser.interactive",
+  "pact.manage",
 ] as const;
 
 export type HostCapabilityName = (typeof HOST_CAPABILITIES)[number];

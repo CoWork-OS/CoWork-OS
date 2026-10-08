@@ -1,0 +1,17 @@
+Open PACT Protocol
+Copyright the Open PACT Protocol contributors
+
+This directory contains code from https://github.com/openpactprotocol/openpactprotocol
+at commit 838c6bd1da9be39da04264e8b156dbb4e848a208, licensed under the Apache License,
+Version 2.0 (see LICENSE in this directory).
+
+Files and changes:
+- protocol.ts: packages/protocol/src/index.ts, unchanged apart from a provenance header.
+- delegation.ts: packages/protocol/src/delegation.ts, with a provenance header and the sibling
+  import changed from "./index.js" to "./protocol".
+- client-delegation.ts: logic adapted from packages/client/src/delegation.ts and
+  packages/client/src/index.ts. Network calls, the jose dependency and the module-level JWKS
+  cache were removed; card, OAuth, message:send and receipt-claim handling are kept as pure
+  functions.
+
+The rest of CoWork OS is licensed under the MIT License.

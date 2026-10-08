@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { Methods } from "../electron/control-plane/protocol";
 import fs from "node:fs/promises";
 import os from "node:os";
 import { spawn } from "node:child_process";
@@ -63,6 +64,15 @@ interface CommandContext {
 }
 
 const VALUE_FLAGS = new Set([
+  // cowork pact
+  "--domain",
+  "--card-url",
+  "--business",
+  "--message",
+  "--effect",
+  "--scope",
+  "--conversation",
+  "--reconcile",
   "--revision-hash",
   "--url",
   "--token",
@@ -251,6 +261,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await dashboard(ctx);
       case "open":
         return await openCommand(ctx);
+      case "pact":
+        return await pactCommand(ctx);
       default:
         process.stderr.write(`Unknown command: ${parsed.command}\n\n`);
         usage();
@@ -735,6 +747,8 @@ function buildDirectTaskArgs(ctx: CommandContext, prompt: string): string[] {
     ...(getFlag(ctx.parsed, "--permission-mode")
       ? ["--permission-mode", getFlag(ctx.parsed, "--permission-mode")!]
       : []),
+    // Stop with exit code 3 when a person must act (e.g. a PACT sign-in) instead of waiting.
+    ...(hasFlag(ctx.parsed, "--exit-on-input") ? ["--exit-on-input"] : []),
   ];
 }
 
@@ -847,6 +861,129 @@ async function approvals(ctx: CommandContext): Promise<number> {
       rows.length ? rows.map(formatApproval) : ["No pending approvals."],
     );
     return 0;
+  } finally {
+    client.close();
+  }
+}
+
+const PACT_USAGE =
+  "Usage: cowork pact status | discover <domain>|--card-url <url> | send --business <id> --message <text> [--effect inspect|change|unknown] [--scope <id>] [--yes] | grants | disconnect <grantId> | authorizations | authorization start --business <id> --scope <id> | authorization status|wait|cancel <id> | conversation <id> | receipt <id> [--remote]";
+
+/**
+ * `cowork pact`: the same operations as Settings and the Control Plane. Locally a send typed here
+ * is the owner's explicit request (`--yes` confirms a change); a pending sign-in prints the
+ * business's own login link and exits with code 3 until `authorization wait` resumes it.
+ */
+async function pactCommand(ctx: CommandContext): Promise<number> {
+  const [action = "status", second, third] = ctx.parsed.rest;
+  const scopes = getFlag(ctx.parsed, "--scope");
+  const subaction =
+    action === "authorization" || action === "auth"
+      ? `authorization-${second ?? "status"}`
+      : action;
+  const id = action === "authorization" || action === "auth" ? third : second;
+  if (hasFlag(ctx.parsed, "--remote")) return pactRemote(ctx, subaction, id);
+  const map: Record<string, string> = {
+    status: "status",
+    discover: "discover",
+    send: "send",
+    grants: "grants",
+    disconnect: "disconnect",
+    authorizations: "authorizations",
+    "authorization-start": "authorization-start",
+    "authorization-status": "authorization-status",
+    "authorization-wait": "authorization-wait",
+    "authorization-cancel": "authorization-cancel",
+    conversation: "conversation",
+    receipt: "receipt",
+  };
+  const direct = map[subaction];
+  if (!direct) return usageError(PACT_USAGE);
+  const domain = action === "discover" && second && !second.startsWith("http") ? second : undefined;
+  const cardUrl =
+    getFlag(ctx.parsed, "--card-url") ||
+    (action === "discover" && second?.startsWith("http") ? second : undefined);
+  return runDirectCommandProcess(ctx, [
+    "--pact",
+    direct,
+    ...(domain || getFlag(ctx.parsed, "--domain")
+      ? ["--pact-domain", (domain || getFlag(ctx.parsed, "--domain"))!]
+      : []),
+    ...(cardUrl ? ["--pact-card-url", cardUrl] : []),
+    ...(getFlag(ctx.parsed, "--business")
+      ? ["--pact-business", getFlag(ctx.parsed, "--business")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--message")
+      ? ["--pact-message", getFlag(ctx.parsed, "--message")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--effect") ? ["--pact-effect", getFlag(ctx.parsed, "--effect")!] : []),
+    ...(scopes ? ["--pact-scope", scopes] : []),
+    ...(getFlag(ctx.parsed, "--conversation")
+      ? ["--pact-conversation", getFlag(ctx.parsed, "--conversation")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--reconcile")
+      ? ["--pact-reconcile", getFlag(ctx.parsed, "--reconcile")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--workspace-id")
+      ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!]
+      : []),
+    ...(id && !["discover"].includes(action) ? ["--pact-id", id] : []),
+    ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : []),
+  ]);
+}
+
+async function pactRemote(
+  ctx: CommandContext,
+  subaction: string,
+  id: string | undefined,
+): Promise<number> {
+  const scopes = (getFlag(ctx.parsed, "--scope") || "").split(",").filter(Boolean);
+  const requests: Record<string, () => [string, unknown]> = {
+    status: () => [Methods.PACT_STATUS, undefined],
+    discover: () => [
+      Methods.PACT_BUSINESS_DISCOVER,
+      getFlag(ctx.parsed, "--card-url")
+        ? { cardUrl: getFlag(ctx.parsed, "--card-url") }
+        : { domain: ctx.parsed.rest[1] || getFlag(ctx.parsed, "--domain") },
+    ],
+    send: () => [
+      Methods.PACT_CONVERSATION_SEND,
+      {
+        businessId: getFlag(ctx.parsed, "--business"),
+        text: getFlag(ctx.parsed, "--message") || "",
+        effect: getFlag(ctx.parsed, "--effect") || "inspect",
+        requiredScopes: scopes,
+        confirmed: hasFlag(ctx.parsed, "--yes"),
+        ...(getFlag(ctx.parsed, "--conversation")
+          ? { conversationId: getFlag(ctx.parsed, "--conversation") }
+          : {}),
+        ...(getFlag(ctx.parsed, "--reconcile")
+          ? { reconcileOperationId: getFlag(ctx.parsed, "--reconcile") }
+          : {}),
+      },
+    ],
+    grants: () => [Methods.PACT_GRANT_LIST, undefined],
+    disconnect: () => [Methods.PACT_GRANT_DISCONNECT, { id }],
+    authorizations: () => [Methods.PACT_AUTHORIZATION_LIST, {}],
+    "authorization-start": () => [
+      Methods.PACT_AUTHORIZATION_START,
+      { businessId: getFlag(ctx.parsed, "--business"), scopes },
+    ],
+    "authorization-status": () => [Methods.PACT_AUTHORIZATION_GET, { id }],
+    "authorization-wait": () => [Methods.PACT_AUTHORIZATION_SIGN_IN, { id }],
+    "authorization-cancel": () => [Methods.PACT_AUTHORIZATION_CANCEL, { id }],
+    conversation: () => [Methods.PACT_CONVERSATION_GET, { id }],
+    receipt: () => [Methods.PACT_RECEIPT_GET, { id }],
+  };
+  const build = requests[subaction];
+  if (!build) return usageError(PACT_USAGE);
+  const [method, params] = build();
+  const client = await connectedClient(ctx);
+  try {
+    const payload = await client.request(method, params);
+    printLinesOrJson(ctx, payload, [JSON.stringify(payload, null, 2)]);
+    const status = (payload as { status?: unknown } | null)?.status;
+    return status === "needs_user_action" ? 3 : 0;
   } finally {
     client.close();
   }
@@ -1953,7 +2090,7 @@ function usage(): void {
       "  cowork daemon start [--background]",
       "  cowork workspace list",
       "  cowork workspace create [path]",
-      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force]',
+      '  cowork run "task prompt" [--cwd <path>] [--workspace-id <id>] [--access-profile <id>] [--permission-mode <mode>] [--detach] [--force] [--exit-on-input]',
       '  cowork run "task prompt" --remote [--url <ws-url>] [--token <token>] [--access-profile <id>]',
       "  cowork tail <taskId>",
       "  cowork tasks list [--active] [--cli]",
@@ -1985,6 +2122,9 @@ function usage(): void {
       "  cowork completions zsh|bash|fish",
       "  cowork dashboard [open|status]",
       "  cowork open dashboard | cowork open task <taskId>",
+      "  cowork pact status|discover|send|grants|disconnect|authorizations|authorization|conversation|receipt",
+      "",
+      "Exit codes: 0 ok, 1 failed, 3 needs user action (e.g. a business sign-in), 130 interrupted",
       "",
       "Global flags:",
       "  --profile <name>       Use a saved CLI profile",

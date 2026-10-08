@@ -658,6 +658,7 @@ const BATCH_EXTERNAL_SIDE_EFFECT_TOOLS = new Set([
   "dropbox_action",
   "sharepoint_action",
   "voice_call",
+  "pact_send_message",
 ]);
 
 // A task-level read-only constraint must win over mutation cues accidentally
@@ -11274,6 +11275,12 @@ ${transcript}
           runMs + TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS + TaskExecutor.CODE_EXEC_STARTUP_MS,
         )
       );
+    }
+
+    if (toolName === "pact_send_message") {
+      // A business sign-in waits for the user on the business's own page (up to 30 minutes),
+      // plus the local approval and the send itself; aborting earlier would cancel the wait.
+      return normalizedSettingsTimeout ?? 45 * 60 * 1000;
     }
 
     if (toolName === "request_user_input") {

@@ -319,6 +319,8 @@ import {
 } from "./message-ui";
 import { ModelDropdown } from "./ModelDropdown";
 import { StructuredInputPromptCard } from "./StructuredInputPromptCard";
+import { PactAuthorizationCard } from "./PactAuthorizationCard";
+import { isPactAuthorizationInputRequest } from "../../../shared/pact";
 import { LegalDemandIntakePromptCard, GenericLegalWorkflowPromptCard } from "./legal-prompt-cards";
 import {
   TASK_DOMAIN_ORDER,
@@ -12427,13 +12429,21 @@ function MainContentComponent({
           {hasActiveStructuredInputRequest &&
             inputRequest &&
             onSubmitInputRequest &&
-            onDismissInputRequest && (
+            onDismissInputRequest &&
+            (isPactAuthorizationInputRequest(inputRequest) ? (
+              // A business sign-in is answered on the business's own page; the card can only
+              // open that page or cancel.
+              <PactAuthorizationCard
+                request={inputRequest}
+                onCancel={() => onDismissInputRequest(inputRequest.id)}
+              />
+            ) : (
               <StructuredInputPromptCard
                 request={inputRequest}
                 onSubmit={(answers) => onSubmitInputRequest(inputRequest.id, answers)}
                 onDismiss={() => onDismissInputRequest(inputRequest.id)}
               />
-            )}
+            ))}
           {showVoiceNotConfigured && (
             <div className="voice-not-configured-banner">
               <svg

@@ -166,6 +166,9 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings["categories"]> 
   // Web fetch tools (high priority)
   web_fetch: "webfetch",
   notion_action: "webfetch",
+  pact_discover: "webfetch",
+  pact_send_message: "webfetch",
+  pact_get_conversation: "webfetch",
   box_action: "webfetch",
   onedrive_action: "webfetch",
   google_drive_action: "webfetch",

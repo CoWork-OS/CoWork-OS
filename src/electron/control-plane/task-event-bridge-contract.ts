@@ -16,6 +16,12 @@ export const TASK_EVENT_BRIDGE_ALLOWLIST = [
   "timeline_error",
   "task_impact_updated",
   "task_title_updated",
+  // PACT: redacted at the source (src/electron/pact/redaction.ts).
+  "pact_authorization_requested",
+  "pact_authorization_resolved",
+  "pact_outcome_unknown",
+  "pact_receipt_verified",
+  "pact_evidence_issue",
 ] as const;
 
 export type TaskEventBridgeAllowlistEvent = (typeof TASK_EVENT_BRIDGE_ALLOWLIST)[number];

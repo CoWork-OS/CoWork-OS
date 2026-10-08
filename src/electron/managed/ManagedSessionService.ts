@@ -584,6 +584,7 @@ function deriveManagedToolFamily(tool: LLMTool): ManagedAgentToolFamily | undefi
     toolName.startsWith("mcp_") ||
     toolName.endsWith("_action") ||
     toolName === "voice_call" ||
+    toolName.startsWith("pact_") ||
     toolName.startsWith("gmail_") ||
     toolName.startsWith("mailbox_") ||
     toolName.startsWith("channel_") ||

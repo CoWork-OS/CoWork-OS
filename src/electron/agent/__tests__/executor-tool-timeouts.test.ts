@@ -68,6 +68,19 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     timeoutSpy.mockRestore();
   });
 
+  it("lets pact_send_message outlast a business sign-in", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+    // The device-code wait alone may take 30 minutes.
+    expect(
+      executor.getToolTimeoutMs("pact_send_message", { business_id: "b", message: "hi" }),
+    ).toBe(45 * 60 * 1000);
+    timeoutSpy.mockRestore();
+  });
+
   it("uses a longer default timeout for run_command", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };

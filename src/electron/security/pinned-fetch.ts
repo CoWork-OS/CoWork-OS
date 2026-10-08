@@ -81,7 +81,10 @@ export async function pinnedFetch(
   url: string,
   init: RequestInit,
   requirePinnedDestination = false,
+  /** Callers that carry user credentials to third parties (PACT) can refuse loopback too. */
+  options: { allowLoopback?: boolean } = {},
 ): Promise<Response> {
+  const allowLoopback = options.allowLoopback !== false;
   const endpoint = new URL(url);
   if (!["http:", "https:"].includes(endpoint.protocol))
     throw new Error("Only HTTP and HTTPS URLs are supported");
@@ -89,7 +92,7 @@ export async function pinnedFetch(
   const explicitlyAllowedInternal = (
     loadPolicies().runtime.network.allowedInternalHosts ?? []
   ).some((pattern) => domainMatches(hostname, pattern));
-  if (!explicitlyAllowedInternal && isBlockedInternalHost(hostname, true))
+  if (!explicitlyAllowedInternal && isBlockedInternalHost(hostname, allowLoopback))
     throw new Error(`Refusing to connect to internal host ${hostname}`);
   if (usesEnvProxy(endpoint)) {
     if (requirePinnedDestination)
@@ -102,7 +105,9 @@ export async function pinnedFetch(
     init.signal?.throwIfAborted();
     return fetch(url, { ...init, redirect: "manual" });
   }
-  const addresses = await resolvePinnedAddresses(url, init.signal || undefined);
+  const addresses = await resolvePinnedAddresses(url, init.signal || undefined, {
+    allowLoopback,
+  });
   const agent = getPinnedAgent(endpoint, hostname, addresses);
   // The existing node-fetch alias's /node entry always uses the Node transport,
   // which supports a custom Agent. Native global fetch would ignore this option.
@@ -167,7 +172,9 @@ function toCancelSafeWebStream(body: Readable): ReadableStream<Uint8Array> {
 export async function resolvePinnedAddresses(
   url: string,
   signal?: AbortSignal,
+  options: { allowLoopback?: boolean } = {},
 ): Promise<PinnedAddress[]> {
+  const allowLoopback = options.allowLoopback !== false;
   const endpoint = new URL(url);
   const hostname = normalizeHostname(endpoint.hostname);
   const explicitlyAllowedInternal = (
@@ -175,7 +182,7 @@ export async function resolvePinnedAddresses(
   ).some((pattern) => domainMatches(hostname, pattern));
   if (usesEnvProxy(endpoint))
     throw new Error("Destination pinning is unavailable with environment proxies");
-  if (!explicitlyAllowedInternal && isBlockedInternalHost(hostname, true))
+  if (!explicitlyAllowedInternal && isBlockedInternalHost(hostname, allowLoopback))
     throw new Error("Internal destination refused");
   const addresses: PinnedAddress[] = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) }]
@@ -184,7 +191,7 @@ export async function resolvePinnedAddresses(
   if (
     !addresses.length ||
     (!explicitlyAllowedInternal &&
-      addresses.some(({ address }) => isBlockedInternalHost(address, true)))
+      addresses.some(({ address }) => isBlockedInternalHost(address, allowLoopback)))
   )
     throw new Error("Destination resolves to an internal or missing address");
   return addresses;

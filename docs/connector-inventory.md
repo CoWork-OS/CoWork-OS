@@ -8,7 +8,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 
 | Integration type | Count |
 | --- | ---: |
-| Native app integrations | 14 |
+| Native app integrations | 15 |
 | Gateway channels | 18 |
 | MCP connectors (Settings > Connectors) | 67 |
 | Bundled skills | 152 |
@@ -29,6 +29,7 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `mailbox` | Inbox Agent (Gmail API, Microsoft Graph, IMAP/SMTP, AgentMail) | read, write, event-trigger | oauth-consent | first-party-api |
 | `notion` | Notion | read, write | api-key | first-party-api |
 | `onedrive` | OneDrive | read, write | oauth-consent | first-party-api |
+| `pact` | PACT business agents | read, write, outbound-message | oauth-consent, public-webhook | first-party-api |
 | `sharepoint` | SharePoint | read, write | oauth-consent | first-party-api |
 | `teams-meetings` | Teams meeting transcripts | read, event-trigger | oauth-consent | first-party-api |
 | `voice-call` | Voice calls | outbound-message | api-key | first-party-api |

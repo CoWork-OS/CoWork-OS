@@ -11,6 +11,7 @@ import { AgentMailSettings } from "./AgentMailSettings";
 import { DropboxSettings } from "./DropboxSettings";
 import { TeamsMeetingSettings } from "./TeamsMeetingSettings";
 import { SharePointSettings } from "./SharePointSettings";
+import { PactSettings } from "./PactSettings";
 import { ConnectorBrandIcon } from "./ConnectorBrandIcon";
 import { NATIVE_INTEGRATIONS, type NativeIntegrationKey } from "./native-integration-catalog";
 import type { AddToolsSelection } from "./AddToolsPanel";
@@ -782,6 +783,7 @@ const INTEGRATION_COMPONENTS: Record<NativeIntegrationKey, ReactNode> = {
   box: <BoxSettings />,
   dropbox: <DropboxSettings />,
   "teams-meetings": <TeamsMeetingSettings />,
+  pact: <PactSettings />,
 };
 
 const INTEGRATIONS: IntegrationDefinition[] = NATIVE_INTEGRATIONS.map((integration) => ({

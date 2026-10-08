@@ -99,6 +99,10 @@ export function setupAdminPolicyHandlers(): void {
           ...current.connectors,
           ...updates.connectors,
         },
+        pact: {
+          ...current.pact,
+          ...updates.pact,
+        },
         agents: {
           ...current.agents,
           ...updates.agents,

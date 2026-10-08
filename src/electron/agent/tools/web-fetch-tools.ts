@@ -1,8 +1,11 @@
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
-import { evaluateNetworkPolicy } from "../../security/network-policy";
-import { pinnedFetch } from "../../security/pinned-fetch";
+import type { NetworkPolicyDecision } from "../../security/network-policy";
+import {
+  assertPolicyAllowsUrl,
+  fetchWithPolicyCheckedRedirects,
+} from "../../security/policy-checked-fetch";
 import { readBoundedResponse } from "../../security/bounded-response";
 import {
   DEFAULT_PDF_PARSE_LIMITS,
@@ -135,20 +138,22 @@ export class WebFetchTools {
     this.ensureNetworkAllowed(url, "web_fetch");
   }
 
-  private ensureNetworkAllowed(url: string, toolName: string): void {
-    const decision = evaluateNetworkPolicy({
-      url,
+  private networkPolicyOptions(toolName: string) {
+    return {
       toolName,
-      networkEnabled: this.workspace.permissions?.network,
-      accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
-      profileDomainRules: this.workspace.permissions?.accessDomainRules,
-    });
-    this.daemon.logEvent(this.taskId, "network_policy_decision", decision);
-    if (decision.action === "allow") return;
-    if (decision.reason === "legacy_guardrail_domain_denied") {
-      throw new Error(`Domain not allowed: "${url}"`);
-    }
-    throw new Error(`Network access denied for "${url}": ${decision.reason}`);
+      publicHeaders: PUBLIC_REQUEST_HEADERS,
+      networkContext: {
+        networkEnabled: this.workspace.permissions?.network,
+        accessNetworkMode: this.workspace.permissions?.accessNetworkMode,
+        profileDomainRules: this.workspace.permissions?.accessDomainRules,
+      },
+      onDecision: (decision: NetworkPolicyDecision) =>
+        this.daemon.logEvent(this.taskId, "network_policy_decision", decision),
+    };
+  }
+
+  private ensureNetworkAllowed(url: string, toolName: string): void {
+    assertPolicyAllowsUrl(url, this.networkPolicyOptions(toolName));
   }
 
   private async fetchWithPolicyCheckedRedirects(
@@ -157,67 +162,11 @@ export class WebFetchTools {
     toolName: string,
     followRedirects = true,
   ): Promise<Response> {
-    let currentUrl = url;
-    let currentInit: RequestInit = { ...init };
-
-    for (let redirectCount = 0; redirectCount <= 10; redirectCount += 1) {
-      const parsedUrl = new URL(currentUrl);
-      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-        throw new Error("Only HTTP and HTTPS URLs are supported");
-      }
-      this.ensureNetworkAllowed(parsedUrl.toString(), toolName);
-      const response = await pinnedFetch(currentUrl, {
-        ...currentInit,
-        redirect: "manual",
-      });
-
-      if (!followRedirects || !this.isRedirectResponse(response.status)) {
-        return response;
-      }
-
-      const location = response.headers.get("location");
-      if (!location) {
-        return response;
-      }
-
-      await response.body?.cancel();
-      const nextUrl = new URL(location, parsedUrl);
-      if (!["http:", "https:"].includes(nextUrl.protocol)) {
-        throw new Error("Only HTTP and HTTPS redirect URLs are supported");
-      }
-      this.ensureNetworkAllowed(nextUrl.toString(), toolName);
-      currentInit = this.buildRedirectInit(currentInit, response.status);
-
-      // Any caller header can carry a credential. Restore public defaults when
-      // the destination origin changes (including HTTPS downgrades).
-      if (nextUrl.origin !== parsedUrl.origin) {
-        // A preserved POST body may contain the same secret as its headers.
-        if (currentInit.body != null) {
-          throw new Error("Cross-origin redirects with a request body are not allowed");
-        }
-        currentInit = { ...currentInit, headers: { ...PUBLIC_REQUEST_HEADERS } };
-      }
-
-      currentUrl = nextUrl.toString();
-    }
-
-    throw new Error("Too many redirects");
-  }
-
-  private isRedirectResponse(status: number): boolean {
-    return [301, 302, 303, 307, 308].includes(status);
-  }
-
-  private buildRedirectInit(init: RequestInit, status: number): RequestInit {
-    const method = String(init.method || "GET").toUpperCase();
-    if (status === 303 || ((status === 301 || status === 302) && method === "POST")) {
-      const { body: _body, ...rest } = init;
-      return {
-        ...rest,
-        method: "GET",
-      };
-    }
-    return { ...init };
+    const { response } = await fetchWithPolicyCheckedRedirects(url, init, {
+      ...this.networkPolicyOptions(toolName),
+      followRedirects,
+    });
+    return response;
   }
 
   private resolveProtectedCredential(

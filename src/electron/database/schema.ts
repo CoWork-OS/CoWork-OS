@@ -23,6 +23,7 @@ import { ensureKnowledgeGraphQualitySchema } from "../knowledge-graph/knowledge-
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
+import { ensurePactSchema } from "../pact/schema";
 import { runSchemaBootstrap } from "./schema-bootstrap";
 import {
   acquireMigrationLock,
@@ -4330,6 +4331,9 @@ export class DatabaseManager {
     ensureSecureSettingsSchema(this.db);
     // Pulse's tables commit together with its settings row, possibly in the worker.
     ensurePulseSchema(this.db);
+    // PACT business-agent state (descriptors, grants, turns, receipts); secrets stay in
+    // secure settings. Units may run in the worker, so the tables exist before any unit.
+    ensurePactSchema(this.db);
 
     // ============ Mission Control Migrations ============
 

@@ -3341,6 +3341,54 @@ a,
   cursor: not-allowed;
 }
 
+/* PACT business sign-in card (PactAuthorizationCard.tsx) */
+.pact-authorization-purpose {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.pact-authorization-scopes {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pact-authorization-scopes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.pact-authorization-scope-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.pact-authorization-code {
+  color: var(--color-text-secondary);
+}
+
+.pact-authorization-error {
+  color: var(--color-error, #f87171);
+}
+
+.pact-evidence-note {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.pact-event-scopes {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .theme-light .input-request-card {
   border: 1px solid rgba(15, 23, 42, 0.16);
   background:

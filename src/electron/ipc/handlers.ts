@@ -576,6 +576,9 @@ import { configuredImageSearch } from "../answer-surfaces/web-image-search";
 import { AnswerImageService } from "../answer-surfaces/AnswerImageService";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
+import { setupPactHandlers } from "./pact-handlers";
+import { PactSurfaceService } from "../pact/pact-surface-service";
+import { PactSettingsManager } from "../pact/settings";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -11770,6 +11773,42 @@ export async function setupIpcHandlers(
       imageSearch: configuredImageSearch,
     }),
     store: AnswerSurfaceStateStore,
+  });
+
+  // PACT business agents: the renderer never receives a sign-in link; main opens it in the
+  // system browser.
+  const pactSurface = new PactSurfaceService({
+    runtime: () => agentDaemon.getPactRuntime(),
+    findWorkspace: (workspaceId) => agentDaemon.getWorkspaceForPact(workspaceId),
+  });
+  setupPactHandlers({
+    service: () => pactSurface,
+    owner: () => agentDaemon.getPactRuntime().ownerPrincipal("desktop"),
+    openExternal: (url) => shell.openExternal(url),
+    developmentAllowed: () =>
+      PactSettingsManager.loadSettings().identity.deployment === "development",
+    confirmSend: async (request) => {
+      const owner = BrowserWindow.getFocusedWindow() ?? getMainWindow();
+      const options: Electron.MessageBoxOptions = {
+        type: "question",
+        buttons: ["Cancel", "Send"],
+        defaultId: 0,
+        cancelId: 0,
+        title: "Send to business",
+        message: `Send this ${request.effect === "change" ? "change" : "request"} to ${request.businessName}?`,
+        detail: [
+          request.text,
+          request.scopes.length ? `Permissions: ${request.scopes.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+      const result =
+        owner && !owner.isDestroyed()
+          ? await dialog.showMessageBox(owner, options)
+          : await dialog.showMessageBox(options);
+      return result.response === 1;
+    },
   });
 
   // Memory folder: status, open, compact history and entry lines by ref. The

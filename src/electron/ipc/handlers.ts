@@ -287,7 +287,6 @@ import {
   AgentRole as _AgentRole,
   Task,
   BoardColumn as _BoardColumn,
-  XSettingsData,
   NotionSettingsData,
   BoxSettingsData,
   OneDriveSettingsData,
@@ -402,7 +401,6 @@ import {
   LLMSettingsSchema,
   JevTestProviderRequestSchema,
   SearchSettingsSchema,
-  XSettingsSchema,
   NotionSettingsSchema,
   BoxSettingsSchema,
   OneDriveSettingsSchema,
@@ -422,7 +420,6 @@ import {
   ChannelSpecializationUpdateSchema,
   ChannelSpecializationResolveSchema,
   GuardrailSettingsSchema,
-  InfraSettingsSchema,
   EmailChannelConfigSchema,
   UUIDSchema,
   WorkspaceIdSchema,
@@ -490,8 +487,6 @@ import {
 } from "../youtube";
 import { assertYouTubeIngestionAccess, createYouTubeIngestionOptions } from "../youtube/access";
 
-import { XSettingsManager } from "../settings/x-manager";
-import { testXConnection, checkBirdInstalled } from "../utils/x-cli";
 import { getCustomSkillLoader } from "../agent/custom-skill-loader";
 import { getAwarenessService } from "../awareness/AwarenessService";
 import { getAutonomyEngine } from "../awareness/AutonomyEngine";
@@ -594,9 +589,6 @@ import {
 } from "../context/kit-status";
 import { buildDefaultDesignSystemMarkdown } from "../context/design-system-template";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
-import { InfraManager } from "../infra/infra-manager";
-import { InfraSettingsManager } from "../infra/infra-settings";
-import { WalletManager } from "../infra/wallet/wallet-manager";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
 import type { MemorySettings } from "../database/repositories";
@@ -604,7 +596,6 @@ import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
 import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
 import { EvalService } from "../eval/eval-repository-facades";
-import { getXMentionBridgeService, getXMentionTriggerStatus } from "../x-mentions";
 import {
   createUniqueScopedTempWorkspaceDirectorySync,
   ensureTempWorkspaceDirectoryPathSync,
@@ -8414,53 +8405,6 @@ export async function setupIpcHandlers(
     return SearchProviderFactory.testProvider(providerType);
   });
 
-  // X/Twitter Settings handlers
-  ipcMain.handle(IPC_CHANNELS.X_GET_SETTINGS, async () => {
-    return XSettingsManager.loadSettings();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.X_SAVE_SETTINGS, async (_, settings) => {
-    checkRateLimit(IPC_CHANNELS.X_SAVE_SETTINGS);
-    const validated = validateInput(XSettingsSchema, settings, "x settings") as XSettingsData;
-    XSettingsManager.saveSettings(validated);
-    XSettingsManager.clearCache();
-    try {
-      getXMentionBridgeService()?.triggerNow();
-    } catch (error) {
-      logger.warn("[X] Failed to trigger immediate mention bridge poll:", error);
-    }
-    return { success: true };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.X_TEST_CONNECTION, async () => {
-    checkRateLimit(IPC_CHANNELS.X_TEST_CONNECTION);
-    const settings = XSettingsManager.loadSettings();
-    return testXConnection(settings);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.X_GET_STATUS, async () => {
-    checkRateLimit(IPC_CHANNELS.X_GET_STATUS);
-    const mentionTriggerStatus = getXMentionTriggerStatus();
-    const installStatus = await checkBirdInstalled();
-    if (!installStatus.installed) {
-      return { installed: false, connected: false, mentionTriggerStatus };
-    }
-
-    const settings = XSettingsManager.loadSettings();
-    if (!settings.enabled) {
-      return { installed: true, connected: false, mentionTriggerStatus };
-    }
-
-    const result = await testXConnection(settings);
-    return {
-      installed: true,
-      connected: result.success,
-      username: result.username,
-      error: result.success ? undefined : result.error,
-      mentionTriggerStatus,
-    };
-  });
-
   // Notion Settings handlers
   ipcMain.handle(IPC_CHANNELS.NOTION_GET_SETTINGS, async () => {
     return NotionSettingsManager.loadSettings();
@@ -9500,26 +9444,6 @@ export async function setupIpcHandlers(
 
       gateway.enableChannel(channel.id).catch((err) => {
         logger.error("Failed to enable Twilio SMS channel:", err);
-      });
-
-      return toPublicChannel(channel, "connecting");
-    }
-
-    if (validated.type === "x") {
-      const channel = await gateway.addXChannel(
-        validated.name,
-        {
-          commandPrefix: validated.xCommandPrefix,
-          allowedAuthors: validated.xAllowedAuthors,
-          pollIntervalSec: validated.xPollIntervalSec,
-          fetchCount: validated.xFetchCount,
-          outboundEnabled: validated.xOutboundEnabled ?? false,
-        },
-        validated.securityMode || "pairing",
-      );
-
-      gateway.enableChannel(channel.id).catch((err) => {
-        logger.error("Failed to enable X channel:", err);
       });
 
       return toPublicChannel(channel, "connecting");
@@ -11701,7 +11625,6 @@ export async function setupIpcHandlers(
   setupMCPHandlers();
 
   // Infrastructure handlers
-  setupInfraHandlers();
 
   // Scraping (Scrapling) handlers
   setupScrapingHandlers();
@@ -12429,87 +12352,6 @@ function setupMCPHandlers(): void {
   // Cron (Scheduled Tasks) Handlers
   // =====================
   setupCronHandlers();
-}
-
-/**
- * Set up Infrastructure IPC handlers
- */
-function setupInfraHandlers(): void {
-  rateLimiter.configure(IPC_CHANNELS.INFRA_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.INFRA_SETUP, RATE_LIMIT_CONFIGS.expensive);
-  rateLimiter.configure(IPC_CHANNELS.INFRA_RESET, RATE_LIMIT_CONFIGS.expensive);
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_GET_STATUS, async () => {
-    return InfraManager.getInstance().getStatus();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_GET_SETTINGS, async () => {
-    return InfraSettingsManager.loadSettings();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_SAVE_SETTINGS, async (_, settings) => {
-    checkRateLimit(IPC_CHANNELS.INFRA_SAVE_SETTINGS);
-    const validated = validateInput(InfraSettingsSchema, settings, "Infrastructure settings");
-    InfraSettingsManager.saveSettings(validated);
-    InfraSettingsManager.clearCache();
-    // Re-apply settings to providers
-    await InfraManager.getInstance().applySettings(validated);
-    return { success: true };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_SETUP, async () => {
-    checkRateLimit(IPC_CHANNELS.INFRA_SETUP);
-    return InfraManager.getInstance().setup();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_GET_WALLET, async () => {
-    return InfraManager.getInstance().getWalletInfo();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_WALLET_RESTORE, async () => {
-    const settings = InfraSettingsManager.loadSettings();
-    if (settings.wallet.provider === "coinbase_agentic") {
-      await InfraManager.getInstance().applySettings(settings);
-      const wallet = await InfraManager.getInstance().getWalletInfoWithBalance();
-      return {
-        success: !!wallet?.address,
-        address: wallet?.address || undefined,
-        status: wallet?.address ? "ok" : "no_wallet",
-      };
-    }
-
-    // Attempt to migrate/restore wallet
-    const check = WalletManager.startupCheck();
-    return {
-      success: !!check.address,
-      address: check.address || undefined,
-      status: check.status,
-    };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_WALLET_VERIFY, async () => {
-    const settings = InfraSettingsManager.loadSettings();
-    if (settings.wallet.provider === "coinbase_agentic") {
-      await InfraManager.getInstance().applySettings(settings);
-      const wallet = await InfraManager.getInstance().getWalletInfoWithBalance();
-      return {
-        status: wallet?.address ? "ok" : "no_wallet",
-        address: wallet?.address || undefined,
-      };
-    }
-
-    const hasWallet = WalletManager.hasWallet();
-    return {
-      status: hasWallet ? "ok" : "no_wallet",
-      address: WalletManager.getAddress() || undefined,
-    };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.INFRA_RESET, async () => {
-    checkRateLimit(IPC_CHANNELS.INFRA_RESET);
-    await InfraManager.getInstance().reset();
-    return { success: true };
-  });
 }
 
 /**

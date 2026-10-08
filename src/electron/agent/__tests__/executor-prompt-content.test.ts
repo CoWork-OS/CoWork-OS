@@ -49,7 +49,6 @@ import { CitationTracker } from "../citation/CitationTracker";
 import { closeDebugRuntimeSession } from "../debug/DebugRuntimeServer";
 import { TaskStrategyService } from "../strategy/TaskStrategyService";
 import { IntentRouter } from "../strategy/IntentRouter";
-import { InfraSettingsManager } from "../../infra/infra-settings";
 import { computeStablePrefixHash } from "../llm/prompt-cache";
 
 beforeEach(() => {
@@ -120,7 +119,6 @@ function makePromptExecutor(options: ExecutorOptions): Any {
   };
   executor.emitEvent = vi.fn();
   executor.logTag = "[Executor:prompt-content]";
-  executor.infraContextProvider = { getStatus: () => ({ enabled: false }) };
   return executor;
 }
 
@@ -795,47 +793,6 @@ describe("session-stable prompt prefix", () => {
     const after = await runStepAndHashStablePrefix();
 
     expect(after).toBe(before);
-  });
-
-  it("keeps the wallet balance out of session-scoped infra context", async () => {
-    vi.spyOn(InfraSettingsManager, "loadSettings").mockReturnValue({
-      enabled: true,
-      enabledCategories: { sandbox: false, domains: false, payments: true },
-      e2b: { apiKey: "" },
-    } as Any);
-    const executor = makePromptExecutor({
-      title: "Check wallet",
-      prompt: "Check whether the x402 endpoint is reachable.",
-      taskDomain: "operations",
-      taskIntent: "execution",
-      executionMode: "execute",
-    });
-    let balance = "12.50";
-    executor.infraContextProvider = {
-      getStatus: () => ({ enabled: true, wallet: { balanceUsdc: balance } }),
-    };
-
-    const first = await buildExecutionPrompt(executor, {
-      infraContext: executor.getInfraContextPrompt(),
-    });
-    balance = "7.25";
-    const second = await buildExecutionPrompt(executor, {
-      infraContext: executor.getInfraContextPrompt(),
-    });
-
-    const stableText = (built: Any) =>
-      built.systemBlocks
-        .filter((block: Any) => block.scope === "session")
-        .map((block: Any) => block.text)
-        .join("\n");
-    expect(stableText(first)).toContain("PAYMENTS & WALLET");
-    expect(stableText(first)).toBe(stableText(second));
-    expect(stableText(second)).not.toContain("7.25");
-    const turnText = second.systemBlocks
-      .filter((block: Any) => block.scope !== "session")
-      .map((block: Any) => block.text)
-      .join("\n");
-    expect(turnText).toContain("Current wallet balance: 7.25 USDC");
   });
 });
 

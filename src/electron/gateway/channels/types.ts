@@ -733,22 +733,6 @@ export interface TwilioSmsConfig extends ChannelConfig {
 }
 
 /**
- * X (Twitter) channel configuration
- */
-export interface XConfig extends ChannelConfig {
-  /** Mention command prefix (default: do:) */
-  commandPrefix?: string;
-  /** Allowlisted X handles */
-  allowedAuthors?: string[];
-  /** Poll interval in seconds */
-  pollIntervalSec?: number;
-  /** Mentions fetch count per poll */
-  fetchCount?: number;
-  /** Enables outbound posting from the gateway path */
-  outboundEnabled?: boolean;
-}
-
-/**
  * Channel adapter interface
  * All channel implementations must implement this interface
  */

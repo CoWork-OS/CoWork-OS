@@ -74,7 +74,6 @@ import { KnowledgeGraphService } from "../electron/knowledge-graph/KnowledgeGrap
 import { createKitWriterOwnership } from "../electron/agents/kit-writers";
 import type { KitWriterOwnership } from "../electron/agents/kit-writer-ownership";
 import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
-import { initializeXMentionBridgeService, XMentionBridgeService } from "../electron/x-mentions";
 import {
   StrategicPlannerService,
   setStrategicPlannerService,
@@ -508,16 +507,8 @@ async function main(): Promise<void> {
     autoConnect: true,
     agentDaemon,
   });
-  let xMentionBridgeService: XMentionBridgeService | null = null;
   try {
     await channelGateway.initialize();
-    xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {
-      isNativeXChannelEnabled: async () => {
-        const nativeX = await channelGateway.getChannelByType("x");
-        return nativeX?.enabled === true && nativeX.status === "connected";
-      },
-    });
-    xMentionBridgeService.start();
     console.log("[Daemon] Channel Gateway initialized");
   } catch (error) {
     console.error("[Daemon] Failed to initialize Channel Gateway:", error);
@@ -903,14 +894,6 @@ async function main(): Promise<void> {
           requiresQuiescence: true,
           run: async () => {
             if (startedControlPlane?.server?.isRunning) await startedControlPlane.server.stop();
-          },
-        },
-        {
-          name: "X mention bridge",
-          requiresQuiescence: true,
-          run: () => {
-            xMentionBridgeService?.stop();
-            xMentionBridgeService = null;
           },
         },
         {

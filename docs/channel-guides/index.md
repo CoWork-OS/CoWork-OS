@@ -25,7 +25,6 @@ Admins can also use [Channel Specialization](../channels.md#channel-specializati
 | LINE               | [LINE User Guide](line.md)                             |
 | BlueBubbles        | [BlueBubbles User Guide](bluebubbles.md)               |
 | Email              | [Email User Guide](email.md)                           |
-| X Mention Triggers | [X Mention Triggers User Guide](x-mention-triggers.md) |
 
 ## Shared Commands
 

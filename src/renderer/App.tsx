@@ -2214,7 +2214,6 @@ export function App() {
     | "slack"
     | "whatsapp"
     | "teams"
-    | "x"
     | "morechannels"
     | "integrations"
     | "automations"
@@ -7322,7 +7321,6 @@ export function App() {
       selectTaskAfterDraftFlush,
     ],
   );
-  const handleOpenSettings = useCallback(() => setCurrentView("settings"), []);
   const handleOpenBotMemory = useCallback((workspaceId: string, botName: string) => {
     requestBotMemoryContext(workspaceId, botName);
     setSettingsTab("memory");
@@ -8293,7 +8291,6 @@ export function App() {
                 }}
                 onNewSession={handleNewSession}
                 onOpenBotMemory={handleOpenBotMemory}
-                onOpenSettings={handleOpenSettings}
                 onTasksChanged={refreshTaskLists}
                 onLoadMoreTasks={loadMoreTasks}
                 hasMoreTasks={hasMoreTasks}

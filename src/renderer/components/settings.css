@@ -2517,11 +2517,6 @@
     .skillhub-group,
     .skillhub-group summary,
     .skillhub-group-content,
-    .infra-setup-section,
-    .infra-status-section,
-    .infra-wallet-card,
-    .infra-wallet-safety,
-    .infra-how-it-works,
     .managed-accounts-panel,
     .mcp-add-form,
     .registry-filters,
@@ -2741,21 +2736,6 @@
 /* Field label that follows another field in the same section. */
 .settings-label--spaced {
   margin-top: 10px;
-}
-
-/* Infrastructure headings use the standard section heading size. */
-.settings-page-layout
-  .settings-content
-  :is(
-    .infra-setup-info,
-    .infra-wallet-card,
-    .infra-config-section,
-    .infra-danger-section,
-    .infra-how-it-works
-  )
-  h3 {
-  font-size: 13px;
-  font-weight: 600;
 }
 
 /* Short fixed-format fields (e.g. phone prefixes). */
@@ -3586,11 +3566,6 @@ html .settings-nav-items .settings-nav-item:focus-visible {
       ):not(.memory-observation-result):not([role="status"]),
     .relationship-stats,
     .form-section,
-    .infra-setup-section,
-    .infra-status-section,
-    .infra-wallet-card,
-    .infra-wallet-safety,
-    .infra-how-it-works,
     .managed-accounts-panel,
     .mcp-add-form,
     .registry-filters,

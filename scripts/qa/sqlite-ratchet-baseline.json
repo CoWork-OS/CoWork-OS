@@ -202,7 +202,7 @@
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {
-      "prepare": 31,
+      "prepare": 32,
       "getDatabase": 1,
       "runtimeImport": 1
     },

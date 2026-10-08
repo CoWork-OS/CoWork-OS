@@ -145,9 +145,6 @@ function applyExecutorFieldDefaults(executor: Any): void {
   executor.softDeadlineTriggered = false;
   executor.wrapUpRequested = false;
   executor.logTag = "[Executor:test]";
-  executor.infraContextProvider = {
-    getStatus: () => ({ enabled: false }),
-  };
 }
 
 function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<string, Any>) {
@@ -205,7 +202,6 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     { name: "list_directory", description: "", input_schema: { type: "object", properties: {} } },
     { name: "get_file_info", description: "", input_schema: { type: "object", properties: {} } },
     { name: "system_info", description: "", input_schema: { type: "object", properties: {} } },
-    { name: "infra_status", description: "", input_schema: { type: "object", properties: {} } },
     { name: "web_search", description: "", input_schema: { type: "object", properties: {} } },
     { name: "web_fetch", description: "", input_schema: { type: "object", properties: {} } },
     { name: "write_file", description: "", input_schema: { type: "object", properties: {} } },

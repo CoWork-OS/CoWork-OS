@@ -406,7 +406,7 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/agent/(executor|tools/(box-tools|browser-tools|file-tools|integration-effect-guard|registry|shell-tools|x-tools))\\.ts$",
+      "pattern": "^src/electron/agent/(executor|tools/(box-tools|browser-tools|file-tools|integration-effect-guard|registry|shell-tools))\\.ts$",
       "domain": "runtime wiring",
       "access": "Agent and tool boundaries pass the database handle only to async responsibility-policy/review units and repository facades. SQL stays in the worker-backed services/storage modules.",
       "plan": "stays: handles only; SQL runs through the worker-backed facades",

@@ -227,15 +227,6 @@ const ICON_META: Record<string, IntegrationIconMeta> = {
       { tag: "path", attrs: { d: "M12 3a14 14 0 0 0 0 18" } },
     ],
   },
-  x: {
-    glyph: "X",
-    bg: "#f4f4f5",
-    fg: "#111827",
-    nodes: [
-      { tag: "line", attrs: { x1: 6, y1: 6, x2: 18, y2: 18 } },
-      { tag: "line", attrs: { x1: 18, y1: 6, x2: 6, y2: 18 } },
-    ],
-  },
   mcp: {
     glyph: "M",
     bg: "#ede9fe",

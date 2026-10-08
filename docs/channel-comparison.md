@@ -23,7 +23,7 @@ How CoWork OS channel integrations compare to alternative plugin-based implement
 
 ## Related Documentation
 
-- [Channel Integrations](channels.md) — Setup and features for all 18 channels
+- [Channel Integrations](channels.md) — Setup and features for all 17 channels
 - [Channel User Guides](channel-user-guides.md) — End-user features and best practices for each messaging channel
 - [Dedicated Channel Guides](channel-guides/) — Separate guide pages for each messaging channel
 - [Gateway User Guide](gateway-user-guide.md) — End-user workflows and best practices for remote chat usage

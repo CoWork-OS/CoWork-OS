@@ -160,7 +160,6 @@ import { MemoryFeaturesManager } from "./settings/memory-features-manager";
 import { PersonalityManager } from "./settings/personality-manager";
 import { MCPClientManager } from "./mcp/client/MCPClientManager";
 import { MCPEventService } from "./mcp/events/MCPEventService";
-import { InfraManager } from "./infra/infra-manager";
 import { trayManager } from "./tray";
 import {
   CRON_ACTIVE_TASK_STATUSES,
@@ -279,7 +278,6 @@ import {
   ManagedAccountManager,
   type ManagedAccountStatus,
 } from "./accounts/managed-account-manager";
-import { initializeXMentionBridgeService, XMentionBridgeService } from "./x-mentions";
 import {
   getDesktopLocationService,
   registerLocationProbeScheme,
@@ -392,7 +390,6 @@ let autonomyEngine: AutonomyEngine | null = null;
 let subconsciousLoopService: SubconsciousLoopService | null = null;
 // CrossSignal, Feedback and Lore: run only while this process owns the kit-writer lease.
 let kitWriterOwnership: KitWriterOwnership | null = null;
-let xMentionBridgeService: XMentionBridgeService | null = null;
 let strategicPlannerService: StrategicPlannerService | null = null;
 let automationOutcomeService: AutomationOutcomeService | null = null;
 let recurringApprovalService: RecurringApprovalService | null = null;
@@ -2403,19 +2400,6 @@ if (isMacSafeStorageMigrationWorker) {
         deferStartupTask("mcp-auto-connect", initializeMcpClientManager);
       }
 
-      // Initialize Infrastructure Manager - restores wallet, configures providers
-      if (startupQuietMode) {
-        logger.info("InfraManager initialization skipped in quiet mode");
-      } else {
-        try {
-          await InfraManager.getInstance().initialize();
-          logger.info("InfraManager initialized");
-        } catch (error) {
-          logger.error("Failed to initialize InfraManager:", error);
-          // Don't fail app startup if infra init fails
-        }
-      }
-
       // Initialize Cron Service for scheduled task execution
       try {
         const db = dbManager.getDatabase();
@@ -2953,18 +2937,6 @@ if (isMacSafeStorageMigrationWorker) {
         setupImprovementHandlers(subconsciousLoopService);
       }
       void notifyKeychainIdentityMismatch();
-      const startXMentionBridge = () => {
-        if (!xMentionBridgeService) {
-          xMentionBridgeService = initializeXMentionBridgeService(agentDaemon, {
-            isNativeXChannelEnabled: async () => {
-              const nativeX = await channelGateway.getChannelByType("x");
-              return nativeX?.enabled === true && nativeX.status === "connected";
-            },
-          });
-        }
-        xMentionBridgeService.start();
-      };
-
       // Initialize heartbeat and Mission Control services
       try {
         const db = dbManager.getDatabase();
@@ -3476,7 +3448,6 @@ if (isMacSafeStorageMigrationWorker) {
             `Channels summary: loaded=${channelStats.loaded}, enabled=${channelStats.enabled}, connected=${channelStats.connected}`,
           );
           logPhase("channel-gateway-headless", channelInitStartedAt);
-          startXMentionBridge();
         } catch (error) {
           logger.error("Failed to initialize Channel Gateway (headless):", error);
           // Don't fail app startup if gateway init fails
@@ -3588,7 +3559,6 @@ if (isMacSafeStorageMigrationWorker) {
             logger.info(
               `Channels auto-connect complete: loaded=${connectedStats.loaded}, enabled=${connectedStats.enabled}, connected=${connectedStats.connected}`,
             );
-            startXMentionBridge();
           });
         }
         // Initialize update manager with main window reference
@@ -4569,13 +4539,6 @@ if (isMacSafeStorageMigrationWorker) {
             await automationRuntime.stop("strategic_planner");
             strategicPlannerService = null;
             setStrategicPlannerService(null);
-          },
-        },
-        {
-          name: "X mention bridge",
-          run: () => {
-            xMentionBridgeService?.stop();
-            xMentionBridgeService = null;
           },
         },
         {

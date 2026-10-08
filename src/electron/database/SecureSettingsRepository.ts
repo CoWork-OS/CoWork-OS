@@ -125,7 +125,6 @@ export type SettingsCategory =
   | "claude-auth"
   | "queue"
   | "tray"
-  | "x"
   | "notion"
   | "box"
   | "onedrive"
@@ -135,8 +134,8 @@ export type SettingsCategory =
   | "user-profile"
   | "relationship-memory"
   | "conway"
+  // Encrypted wallet keys of the retired Infrastructure tools; kept so an export remains possible.
   | "conway-wallet"
-  | "infra"
   | "infra-wallet"
   | "proactive-suggestions-state"
   | "improvement-loop"

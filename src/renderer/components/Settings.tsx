@@ -38,7 +38,6 @@ import {
   Send,
   Hash,
   UsersRound,
-  AtSign,
   MoreHorizontal,
   Shield,
   Brain,
@@ -149,7 +148,6 @@ const TwilioSmsSettings = lazySettingsPanel(
   () => import("./TwilioSmsSettings"),
   "TwilioSmsSettings",
 );
-const XSettings = lazySettingsPanel(() => import("./XSettings"), "XSettings");
 const SearchSettings = lazySettingsPanel(() => import("./SearchSettings"), "SearchSettings");
 const UpdateSettings = lazySettingsPanel(() => import("./UpdateSettings"), "UpdateSettings");
 const GuardrailSettings = lazySettingsPanel(
@@ -237,7 +235,6 @@ const WebAccessSettingsPanel = lazySettingsPanel(
   () => import("./WebAccessSettingsPanel"),
   "WebAccessSettingsPanel",
 );
-const InfraSettings = lazySettingsPanel(() => import("./InfraSettings"), "InfraSettings");
 const SubconsciousSettingsPanel = lazySettingsPanel(
   () => import("./SubconsciousSettingsPanel"),
   "SubconsciousSettingsPanel",
@@ -271,7 +268,6 @@ type SettingsTab =
   | "slack"
   | "whatsapp"
   | "teams"
-  | "x"
   | "morechannels"
   | "integrations"
   | "updates"
@@ -282,7 +278,6 @@ type SettingsTab =
   | "skillhub"
   | "connectors"
   | "identity"
-  | "infrastructure"
   | "mcp"
   | "tools"
   | "scheduled"
@@ -341,7 +336,6 @@ const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
 // Secondary channels shown inside "More Channels" tab
 type SecondaryChannel =
   | "teams"
-  | "x"
   | "discord"
   | "imessage"
   | "signal"
@@ -747,7 +741,7 @@ type SidebarSearchTarget = {
   aiModelsSubTab?: "llm" | "image" | "video" | "search";
   automationsSubTab?: "routines" | "queue" | "subconscious" | "scheduled" | "hooks" | "triggers";
   skillsSubTab?: "custom" | "store";
-  integrationsSubTab?: "git" | "connectors" | "identity" | "infrastructure";
+  integrationsSubTab?: "git" | "connectors" | "identity";
   accessSubTab?: "controlplane" | "webaccess";
 };
 
@@ -918,7 +912,6 @@ const secondaryChannelItems: Array<{
   icon: ReactNode;
 }> = [
   { key: "teams", label: "Teams", icon: <UsersRound {...S} /> },
-  { key: "x", label: "X (Twitter)", icon: <AtSign {...S} /> },
   { key: "discord", label: "Discord", icon: <MessageSquare {...S} /> },
   { key: "imessage", label: "iMessage", icon: <MessageCircle {...S} /> },
   { key: "signal", label: "Signal", icon: <ShieldCheckIcon {...S} /> },
@@ -936,7 +929,6 @@ const secondaryChannelItems: Array<{
 
 const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> = {
   teams: ["microsoft teams", "teams"],
-  x: ["twitter", "x twitter", "tweets", "social"],
   discord: ["discord"],
   imessage: ["imessage", "ios messages", "apple messages"],
   signal: ["signal", "secure messaging"],
@@ -1102,12 +1094,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       terms: ["identity", "contacts", "crm", "contact identity"],
       target: { tab: "integrations", integrationsSubTab: "identity" },
     },
-    {
-      terms: ["infrastructure", "infra", "servers", "deployment"],
-      target: { tab: "integrations", integrationsSubTab: "infrastructure" },
-    },
-  ],
-  customize: [
     {
       terms: [
         "feature packs",
@@ -1280,7 +1266,7 @@ const SettingsSidebar = memo(function SettingsSidebar({
               acc.elements.push(
                 <button
                   key={item.tab}
-                  className={`settings-nav-item ${activeTab === item.tab || (item.tab === "morechannels" && (activeTab === "teams" || activeTab === "x")) ? "active" : ""}`}
+                  className={`settings-nav-item ${activeTab === item.tab || (item.tab === "morechannels" && activeTab === "teams") ? "active" : ""}`}
                   data-tab={item.tab}
                   onClick={() => onSelect(item, matchedTarget)}
                 >
@@ -1381,7 +1367,7 @@ export function Settings({
                 "triggers",
               ].includes(initialTab as string)
             ? "automations"
-            : ["git", "connectors", "infrastructure"].includes(initialTab as string)
+            : ["git", "connectors"].includes(initialTab as string)
               ? "integrations"
               : initialTab === "controlplane" || initialTab === "webaccess"
                 ? "access"
@@ -1420,10 +1406,10 @@ export function Settings({
       ),
   );
   const [activeIntegrationsSubTab, setActiveIntegrationsSubTab] = useState<
-    "git" | "connectors" | "identity" | "infrastructure"
+    "git" | "connectors" | "identity"
   >(
-    ["git", "connectors", "identity", "infrastructure"].includes(initialTab as string)
-      ? (initialTab as "git" | "connectors" | "identity" | "infrastructure")
+    ["git", "connectors", "identity"].includes(initialTab as string)
+      ? (initialTab as "git" | "connectors" | "identity")
       : "connectors",
   );
   const [activeAccessSubTab, setActiveAccessSubTab] = useState<"controlplane" | "webaccess">(
@@ -9257,10 +9243,10 @@ export function Settings({
                 <SlackSettings />
               ) : activeTab === "whatsapp" ? (
                 <WhatsAppSettings />
-              ) : activeTab === "morechannels" || activeTab === "teams" || activeTab === "x" ? (
+              ) : activeTab === "morechannels" || activeTab === "teams" ? (
                 (() => {
                   const effectiveSecondary =
-                    activeTab === "teams" || activeTab === "x" ? activeTab : activeSecondaryChannel;
+                    activeTab === "teams" ? activeTab : activeSecondaryChannel;
                   return (
                     <div className="more-channels-panel">
                       <div className="more-channels-header">
@@ -9286,7 +9272,6 @@ export function Settings({
                       </div>
                       <div className="more-channels-content">
                         {effectiveSecondary === "teams" && <TeamsSettings />}
-                        {effectiveSecondary === "x" && <XSettings />}
                         {effectiveSecondary === "discord" && <DiscordSettings />}
                         {effectiveSecondary === "imessage" && <ImessageSettings />}
                         {effectiveSecondary === "signal" && <SignalSettings />}
@@ -9508,7 +9493,7 @@ export function Settings({
                 <div className="more-channels-panel">
                   <div className="more-channels-header">
                     <h2>Integrations</h2>
-                    <p className="settings-description">Git, connectors, and infrastructure</p>
+                    <p className="settings-description">Git, connectors, and identity</p>
                   </div>
                   <div className="more-channels-tabs">
                     <button
@@ -9532,13 +9517,6 @@ export function Settings({
                       <UsersRound {...S} />
                       <span>Identity</span>
                     </button>
-                    <button
-                      className={`more-channels-tab ${activeIntegrationsSubTab === "infrastructure" ? "active" : ""}`}
-                      onClick={() => setActiveIntegrationsSubTab("infrastructure")}
-                    >
-                      <Zap {...S} />
-                      <span>Infrastructure</span>
-                    </button>
                   </div>
                   <div className="more-channels-content">
                     {activeIntegrationsSubTab === "git" && <WorktreeSettings />}
@@ -9552,25 +9530,6 @@ export function Settings({
                     {activeIntegrationsSubTab === "identity" && (
                       <ContactIdentitySettings workspaceId={workspaceId} />
                     )}
-                    {activeIntegrationsSubTab === "infrastructure" &&
-                      (window.coworkBrowserHost === true &&
-                      !hasHostMethods(
-                        "infraGetStatus",
-                        "infraGetSettings",
-                        "infraSetup",
-                        "infraReset",
-                        "infraSaveSettings",
-                      ) ? (
-                        <section className="settings-section" role="status">
-                          <h2>Infrastructure settings are unavailable on this browser host</h2>
-                          <p className="settings-description">
-                            This host does not expose the infrastructure service yet. Configure it
-                            in the desktop app; its saved host settings remain in effect.
-                          </p>
-                        </section>
-                      ) : (
-                        <InfraSettings />
-                      ))}
                   </div>
                 </div>
               ) : activeTab === "mcp" ? (

@@ -15,7 +15,6 @@ export type SettingsTab =
   | "slack"
   | "whatsapp"
   | "teams"
-  | "x"
   | "morechannels"
   | "integrations"
   | "updates"

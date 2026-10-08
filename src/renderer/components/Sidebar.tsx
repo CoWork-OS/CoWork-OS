@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
 import { stripAllEmojis } from "../utils/emoji-replacer";
-import { Task, Workspace, UiDensity, InfraStatus, isTempWorkspaceId } from "../../shared/types";
+import { Task, Workspace, UiDensity, isTempWorkspaceId } from "../../shared/types";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { VirtualList } from "./VirtualList";
 import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
@@ -116,7 +116,6 @@ interface SidebarProps {
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
   onNewSession?: () => void;
-  onOpenSettings: () => void;
   onOpenBotMemory?: (workspaceId: string, botName: string) => void;
   isDevicesActive?: boolean;
 
@@ -857,8 +856,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.onBotUpdated === next.onBotUpdated &&
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
-    prev.onOpenBotMemory === next.onOpenBotMemory &&
-    prev.onOpenSettings === next.onOpenSettings
+    prev.onOpenBotMemory === next.onOpenBotMemory
   );
 }
 
@@ -888,7 +886,6 @@ function SidebarComponent({
   onOpenBot,
   onReopenBot,
   onNewSession,
-  onOpenSettings,
   onOpenBotMemory,
   isDevicesActive = false,
   isLoadingMoreTasks = false,
@@ -3462,79 +3459,7 @@ function SidebarComponent({
           )}
         </>
       )}
-
-      {/* Footer: the wallet balance. Settings and the update prompt are on the rail. */}
-      <div className="sidebar-footer cli-sidebar-footer" hidden={isCalm}>
-        <InfraWalletBadge
-          onOpenSettings={browserAction(
-            ["getLLMSettings", "getLLMConfigStatus"],
-            onOpenSettings,
-            "Settings",
-          )}
-        />
-      </div>
     </div>
-  );
-}
-
-function InfraWalletBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const [balance, setBalance] = useState<string | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const ipcAPI = window.electronAPI;
-    if (!ipcAPI?.infraGetStatus || !ipcAPI?.infraGetSettings) return;
-
-    const load = async () => {
-      try {
-        const [status, settings] = await Promise.all([
-          ipcAPI.infraGetStatus(),
-          ipcAPI.infraGetSettings(),
-        ]);
-        if (settings?.showWalletInSidebar && status?.enabled && status?.wallet?.balanceUsdc) {
-          setBalance(status.wallet.balanceUsdc);
-          setVisible(true);
-        } else {
-          setVisible(false);
-        }
-      } catch {
-        setVisible(false);
-      }
-    };
-
-    load();
-
-    const unsubscribe = ipcAPI.onInfraStatusChange?.((status: InfraStatus) => {
-      if (status?.enabled && status?.wallet?.balanceUsdc) {
-        setBalance(status.wallet.balanceUsdc);
-        setVisible(true);
-      }
-    });
-    return () => unsubscribe?.();
-  }, []);
-
-  if (!visible || !balance) return null;
-
-  return (
-    <button
-      type="button"
-      className="infra-wallet-badge"
-      onClick={onOpenSettings}
-      title="Infrastructure — click to open settings"
-      aria-label="Open Infrastructure settings"
-    >
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-      </svg>
-      <span className="infra-wallet-balance">{balance} USDC</span>
-    </button>
   );
 }
 

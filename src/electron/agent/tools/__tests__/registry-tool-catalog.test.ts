@@ -132,16 +132,6 @@ vi.mock("../../../hooks/settings", () => ({
   },
 }));
 
-vi.mock("../../../infra/infra-settings", () => ({
-  InfraSettingsManager: {
-    initialize: vi.fn(),
-    loadSettings: vi.fn(() => ({
-      enabled: false,
-      enabledCategories: {},
-    })),
-  },
-}));
-
 vi.mock("../../../memory/SupermemoryService", () => ({
   SupermemoryService: {
     isConfigured: vi.fn(() => supermemoryIsConfiguredMock()),

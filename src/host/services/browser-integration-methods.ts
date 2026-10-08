@@ -40,7 +40,6 @@ type Gateway = Pick<
   | "addWeComChannel"
   | "addWhatsAppCloudChannel"
   | "addTwilioSmsChannel"
-  | "addXChannel"
   | "addEmailChannel"
   | "updateChannel"
   | "removeChannel"
@@ -173,13 +172,6 @@ const CHANNEL_PUBLIC_CONFIG_KEYS: Record<string, Set<string>> = {
     "webhookPath",
     "statusPath",
   ]),
-  x: new Set([
-    "commandPrefix",
-    "allowedAuthors",
-    "pollIntervalSec",
-    "fetchCount",
-    "outboundEnabled",
-  ]),
   email: new Set([
     "protocol",
     "email",
@@ -256,10 +248,6 @@ const CHANNEL_UPDATE_CONFIG_KEYS = new Set([
   "allowedContacts",
   "allowedSenders",
   "subjectFilter",
-  "allowedAuthors",
-  "outboundEnabled",
-  "pollIntervalSec",
-  "fetchCount",
   "cliPath",
   "dbPath",
   "captureSelfMessages",
@@ -949,18 +937,6 @@ async function addChannel(gateway: Gateway, request: AddChannelRequest) {
           webhookPort: request.webhookPort,
           webhookPath: request.webhookPath,
           statusPath: request.twilioStatusPath,
-        },
-        securityMode,
-      );
-    case "x":
-      return gateway.addXChannel(
-        request.name,
-        {
-          commandPrefix: request.xCommandPrefix,
-          allowedAuthors: request.xAllowedAuthors,
-          pollIntervalSec: request.xPollIntervalSec,
-          fetchCount: request.xFetchCount,
-          outboundEnabled: request.xOutboundEnabled ?? false,
         },
         securityMode,
       );

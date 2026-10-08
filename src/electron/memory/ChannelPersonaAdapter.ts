@@ -180,15 +180,6 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     structuredFormatting: false,
     formalFraming: false,
   },
-  x: {
-    directive:
-      "You are responding via X (Twitter) DMs. Keep messages concise and clear. " +
-      "Match the brief, direct style typical of the platform.",
-    lengthHint: "shorter",
-    emojiEncouraged: false,
-    structuredFormatting: false,
-    formalFraming: false,
-  },
   bluebubbles: {
     directive:
       "You are responding via BlueBubbles (iMessage bridge). " +

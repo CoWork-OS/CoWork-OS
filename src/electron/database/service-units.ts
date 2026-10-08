@@ -17,6 +17,7 @@ import { COUNCIL_UNITS } from "../council/council-units";
 import { TRIGGER_UNITS } from "../triggers/trigger-units";
 import { AGENT_SIGNAL_UNITS } from "../agents/agent-signal-units";
 import { ACP_UNITS } from "../acp/acp-units";
+import { PACT_UNITS } from "../pact/pact-units";
 import { FILE_HUB_UNITS } from "../file-hub/file-hub-units";
 import { FIRST_TASK_UNITS } from "../first-task/first-task-units";
 import { BRIEFING_UNITS } from "../briefing/briefing-units";
@@ -68,6 +69,7 @@ export const SERVICE_UNITS = {
   ...TRIGGER_UNITS,
   ...AGENT_SIGNAL_UNITS,
   ...ACP_UNITS,
+  ...PACT_UNITS,
   ...FILE_HUB_UNITS,
   ...FIRST_TASK_UNITS,
   ...BRIEFING_UNITS,

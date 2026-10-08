@@ -56,6 +56,16 @@ export interface AdminPolicies {
     blocked: string[];
   };
 
+  /** PACT business-agent protocol (docs/pact.md) */
+  pact: {
+    /** Whether the outbound PACT adapter may be used at all. */
+    enabled: boolean;
+    /** Whether eligible business interactions may be routed to PACT automatically. */
+    autoRoute: boolean;
+    /** Provider origins (or host patterns) CoWork must never contact over PACT. */
+    blockedProviders: string[];
+  };
+
   /** Agent policies */
   agents: {
     /** Maximum heartbeat frequency in seconds (minimum 60) */
@@ -162,6 +172,11 @@ const DEFAULT_POLICIES: AdminPolicies = {
   connectors: {
     blocked: [],
   },
+  pact: {
+    enabled: true,
+    autoRoute: true,
+    blockedProviders: [],
+  },
   agents: {
     maxHeartbeatFrequencySec: 60,
     maxConcurrentAgents: 10,
@@ -246,6 +261,11 @@ function normalizePolicies(parsed: any): AdminPolicies {
     },
     connectors: {
       blocked: Array.isArray(parsed.connectors?.blocked) ? parsed.connectors.blocked : [],
+    },
+    pact: {
+      enabled: parsed.pact?.enabled !== false,
+      autoRoute: parsed.pact?.autoRoute !== false,
+      blockedProviders: normalizeStringList(parsed.pact?.blockedProviders),
     },
     agents: {
       maxHeartbeatFrequencySec: Math.max(60, parsed.agents?.maxHeartbeatFrequencySec || 60),
@@ -497,6 +517,33 @@ export function isConnectorBlocked(connectorId: string, policies?: AdminPolicies
   return p.connectors.blocked.some((blocked) => normalize(blocked) === target);
 }
 
+export function getPactPolicy(policies?: AdminPolicies): AdminPolicies["pact"] {
+  return (policies || loadPolicies()).pact ?? DEFAULT_POLICIES.pact;
+}
+
+/**
+ * Whether a PACT provider is blocked. Entries are origins (`https://provider.example`) or host
+ * patterns (`provider.example`, `*.provider.example`), matched case-insensitively.
+ */
+export function isPactProviderBlocked(providerOrigin: string, policies?: AdminPolicies): boolean {
+  let host: string;
+  let origin: string;
+  try {
+    const url = new URL(providerOrigin);
+    host = url.hostname.toLowerCase();
+    origin = url.origin.toLowerCase();
+  } catch {
+    return true;
+  }
+  return getPactPolicy(policies).blockedProviders.some((entry) => {
+    const pattern = entry.trim().toLowerCase().replace(/\/+$/, "");
+    if (!pattern) return false;
+    if (pattern.includes("://")) return pattern === origin;
+    if (pattern.startsWith("*.")) return host.endsWith(pattern.slice(1));
+    return host === pattern;
+  });
+}
+
 export function getEverydayAgentPolicy(policies?: AdminPolicies): AdminPolicies["everydayAgent"] {
   return (policies || loadPolicies()).everydayAgent;
 }
@@ -675,6 +722,23 @@ export function validatePolicies(policies: unknown): string | null {
       (!Array.isArray(blocked) || blocked.some((id) => typeof id !== "string"))
     ) {
       return "connectors.blocked must be an array of strings";
+    }
+  }
+
+  if (p.pact !== undefined) {
+    if (!p.pact || typeof p.pact !== "object") return "pact must be an object";
+    const pact = p.pact as Record<string, unknown>;
+    for (const key of ["enabled", "autoRoute"] as const) {
+      if (pact[key] !== undefined && typeof pact[key] !== "boolean") {
+        return `pact.${key} must be a boolean`;
+      }
+    }
+    if (
+      pact.blockedProviders !== undefined &&
+      (!Array.isArray(pact.blockedProviders) ||
+        pact.blockedProviders.some((entry) => typeof entry !== "string"))
+    ) {
+      return "pact.blockedProviders must be an array of strings";
     }
   }
 

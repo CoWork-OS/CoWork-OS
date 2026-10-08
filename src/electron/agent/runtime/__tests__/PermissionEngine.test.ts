@@ -1109,6 +1109,76 @@ describe("PermissionEngine", () => {
       },
     );
 
+    it("does not mistake a Swift formatting call inside an OCR command for disk format", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "never",
+          accessNetworkMode: "enabled",
+        }),
+        toolName: "run_command",
+        approvalType: "run_command",
+        command:
+          "command -v swift && cat > .cowork/tmp/ocr.swift <<'EOF'\nprint(String(format: \"%.2f\", 1.0))\nEOF\nswift .cowork/tmp/ocr.swift",
+      });
+      expect(result.decision).toBe("allow");
+    });
+
+    it.each([
+      "echo ready && format E:",
+      "echo ready\nformat E:",
+      "cmd /c format E:",
+      'cmd /c "format E: /Q"',
+      "echo $(format E:)",
+      "Format-Volume -DriveLetter E",
+    ])("still requires consent for an actual disk format command: %s", (command) => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "never",
+          accessNetworkMode: "enabled",
+        }),
+        toolName: "run_command",
+        approvalType: "run_command",
+        command,
+      });
+      expect(result.decision).toBe("deny");
+    });
+
+    it.each(["analyze_image", "read_pdf_visual"])(
+      "asks for explicit visual-analysis consent even in Full access: %s",
+      (toolName) => {
+        const result = evaluate({
+          workspace: namedWorkspace({
+            accessProfileId: "full_access",
+            accessSandboxMode: "danger-full-access",
+            accessApprovalPolicy: "never",
+            accessNetworkMode: "enabled",
+          }),
+          toolName,
+          approvalType: "data_export",
+          toolInput: { path: ".cowork/uploads/image.png" },
+        });
+        expect(result.decision).toBe("ask");
+        expect(result.reason.summary).toContain("explicit consent");
+      },
+    );
+
+    it("still denies unrelated exports when Full access cannot request consent", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessProfileId: "full_access",
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "never",
+          accessNetworkMode: "enabled",
+        }),
+        toolName: "http_request",
+        approvalType: "data_export",
+        toolInput: { method: "POST", url: "https://example.com/upload" },
+      });
+      expect(result.decision).toBe("deny");
+    });
+
     it.each([
       ["workspace write", { toolName: "write_file", toolInput: { path: "notes.txt" } }],
       [

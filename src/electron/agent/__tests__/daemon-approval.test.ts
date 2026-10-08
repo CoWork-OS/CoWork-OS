@@ -1414,6 +1414,41 @@ describe("boundary authorization broker", () => {
     expect(daemon.logEvent.mock.calls.every((call: Any[]) => call[1] === "log")).toBe(true);
   });
 
+  it("keeps an interactive visual consent approval valid under Full access", async () => {
+    const daemon = {
+      taskRepo: {
+        findById: vi.fn(() => ({
+          id: "task-visual",
+          status: "blocked",
+          agentConfig: { accessProfileId: "full_access" },
+        })),
+      },
+      evaluatePermissionRequest: vi.fn(() => ({
+        evaluation: { decision: "ask" },
+        authorizationKey: "visual-policy",
+        workspace: { permissions: { accessApprovalPolicy: "never" } },
+      })),
+      getTaskWithTransientAgentConfig: (task: Any) => task,
+    } as Any;
+    const approval = {
+      taskId: "task-visual",
+      type: "data_export",
+      details: {
+        tool: "analyze_image",
+        authorization: { version: 1, key: "visual-policy" },
+      },
+    };
+    expect(await AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, approval)).toBe(
+      true,
+    );
+    expect(
+      await AgentDaemon.prototype["isApprovalAuthorityCurrent"].call(daemon, {
+        ...approval,
+        details: { ...approval.details, tool: "http_request" },
+      }),
+    ).toBe(false);
+  });
+
   it("rejects pending approval when its arguments or policy identity changed", async () => {
     const daemon = {
       taskRepo: { findById: vi.fn(() => ({ id: "task-a", status: "blocked" })) },
@@ -1607,6 +1642,39 @@ describe("inline approval card routing (legacy approval queue off)", () => {
     );
 
     expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a visual-analysis consent card in an interactive Full access task", async () => {
+    useInlineCardRuntime();
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "full_access" } });
+
+    await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "data_export",
+      "Analyze the attached image",
+      { tool: "analyze_image", params: { path: ".cowork/uploads/image.png" } },
+    );
+
+    expect(daemon.requestAssistantApproval).toHaveBeenCalledTimes(1);
+    expect(daemon.approvalRepo.create).toHaveBeenCalledOnce();
+  });
+
+  it("does not raise a Full access visual consent card in a headless task", async () => {
+    useInlineCardRuntime();
+    process.env.COWORK_HEADLESS = "1";
+    const daemon = buildDaemon({ agentConfig: { accessProfileId: "full_access" } });
+
+    const approved = await AgentDaemon.prototype.requestApproval.call(
+      daemon,
+      "task-inline",
+      "data_export",
+      "Analyze the attached image",
+      { tool: "analyze_image", params: { path: ".cowork/uploads/image.png" } },
+    );
+
+    expect(approved).toBe(false);
+    expect(daemon.requestAssistantApproval).not.toHaveBeenCalled();
   });
 
   it.each([

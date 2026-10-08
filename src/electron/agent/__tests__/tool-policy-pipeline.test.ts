@@ -170,6 +170,42 @@ describe("ToolPolicyPipeline", () => {
     expect(permissionEvaluation).toHaveBeenCalledWith({ approvalType: "data_export" });
   });
 
+  it("routes Full access visual analysis to a human approval card only when one is available", async () => {
+    const fullAccessWorkspace = {
+      ...workspace,
+      permissions: {
+        ...workspace.permissions,
+        accessProfileId: "full_access",
+        accessSandboxMode: "danger-full-access",
+        accessApprovalPolicy: "never",
+        accessNetworkMode: "enabled",
+      },
+    } as Any;
+    const evaluateVisual = (inlineApprovalAvailable: boolean, toolName = "analyze_image") =>
+      evaluateToolPolicyPipeline({
+        workspace: fullAccessWorkspace,
+        toolName,
+        toolInput: { path: "image.png" },
+        approvalRequired: true,
+        runtimeApprovalType: "data_export",
+        permissionApprovalType: "data_export",
+        inlineApprovalAvailable,
+        permissionEvaluation: async () =>
+          PermissionEngine.evaluate({
+            workspace: fullAccessWorkspace,
+            toolName,
+            toolInput: { path: "image.png" },
+            mode: "bypass_permissions",
+            rules: [],
+            approvalType: "data_export",
+          }),
+      });
+
+    expect((await evaluateVisual(true)).decision).toBe("require_approval");
+    expect((await evaluateVisual(false)).decision).toBe("deny");
+    expect((await evaluateVisual(true, "read_pdf_visual")).decision).toBe("require_approval");
+  });
+
   it("preserves destructive runtime approval semantics for custom tools", async () => {
     const permissionEvaluation = vi.fn(async (opts?: { approvalType?: ApprovalType | null }) =>
       PermissionEngine.evaluate({

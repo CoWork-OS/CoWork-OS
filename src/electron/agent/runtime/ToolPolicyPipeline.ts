@@ -18,6 +18,7 @@ import {
 } from "../tool-policy-engine";
 import { ToolPolicyTraceBuilder } from "./ToolPolicyTrace";
 import { approvalPromptsDisabled } from "../approval-policy";
+import { isVisualAnalysisConsentRequest } from "../visual-consent-policy";
 
 export interface ToolPolicyPipelineOptions {
   workspace: Workspace;
@@ -168,9 +169,12 @@ export async function evaluateToolPolicyPipeline(
   // daemon's inline "Deny / Allow once" card when a person can answer it.
   // Without one (headless, CLI, automation, sub-agents) the ask is denied.
   // Operators can restore the legacy queue with COWORK_APPROVAL_PROMPTS=on.
+  const interactiveVisualConsent =
+    opts.inlineApprovalAvailable === true &&
+    isVisualAnalysisConsentRequest(opts.toolName, resolvedPermissionApprovalType);
   const canRequestApproval =
     (!approvalPromptsDisabled() || opts.inlineApprovalAvailable === true) &&
-    opts.workspace.permissions.accessApprovalPolicy !== "never";
+    (opts.workspace.permissions.accessApprovalPolicy !== "never" || interactiveVisualConsent);
 
   if (opts.deniedTools?.has(opts.toolName)) {
     trace.add("task_restrictions", "deny", "tool denied by task restrictions");

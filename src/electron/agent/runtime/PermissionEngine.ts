@@ -38,6 +38,7 @@ import {
   extractDomainFromUrl,
   extractUrlFromToolInput,
 } from "../security/export-permission-context";
+import { isVisualAnalysisConsentRequest } from "../visual-consent-policy";
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
 import { domainMatches } from "../../security/network-policy";
 import type { MCPToolPolicy } from "../../mcp/tool-policy";
@@ -152,9 +153,13 @@ const DANGEROUS_COMMAND_PATTERNS = [
   /\bpoweroff\b/i,
   /\bhalt\b/i,
   /\bdiskutil\s+erase/i,
-  /\bformat\b/i,
+  /\bformat-volume\b/i,
   /\bdel\b.*(?:^|\s)\/f\b/i,
 ];
+// Keep disk-format detection independent of shell quoting and nesting. The
+// command requires a following argument, while Swift's String(format: ...)
+// label has a colon and is not a disk-format invocation.
+const DISK_FORMAT_COMMAND_PATTERN = /\bformat(?:\.com|\.exe)?(?=\s|$)/i;
 const SAFE_DANGEROUS_ONLY_COMMAND_PREFIXES = [
   "pwd",
   "ls",
@@ -660,20 +665,27 @@ export class PermissionEngine {
   ): PermissionEvaluationResult {
     const profile = this.getRuntimeAccessProfile(request);
     const never = profile?.approval === "never";
-    const decision = never && result.decision === "ask" ? "deny" : result.decision;
-    const reason =
-      never && result.decision === "ask"
-        ? {
-            type: "other" as const,
-            summary:
-              "The active access profile is configured with never; required authority is unavailable.",
-            metadata: {
-              accessApprovalPolicy: "never",
-              originalDecision: result.decision,
-              originalReason: result.reason.summary,
-            },
-          }
-        : result.reason;
+    // Visual analysis sends file pixels to the selected model provider. Keep
+    // explicit consent, including in Full access: a desktop task can ask the
+    // user, while a headless task without an approval channel remains blocked.
+    const visualAnalysisConsent = isVisualAnalysisConsentRequest(
+      facts.toolName,
+      request.approvalType,
+    );
+    const deniedByNever = never && result.decision === "ask" && !visualAnalysisConsent;
+    const decision = deniedByNever ? "deny" : result.decision;
+    const reason = deniedByNever
+      ? {
+          type: "other" as const,
+          summary:
+            "This operation requires explicit consent, but the active access profile is set to never ask. Switch to an on-request profile and retry.",
+          metadata: {
+            accessApprovalPolicy: "never",
+            originalDecision: result.decision,
+            originalReason: result.reason.summary,
+          },
+        }
+      : result.reason;
     return {
       decision,
       reason,
@@ -1243,6 +1255,7 @@ export class PermissionEngine {
     const isExplicitConsentRequired =
       (isShell &&
         (DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(normalizedCommand)) ||
+          DISK_FORMAT_COMMAND_PATTERN.test(rawCommand) ||
           /(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(normalizedCommand))) ||
       approvalType === "risk_gate" ||
       approvalType === "delete_file" ||

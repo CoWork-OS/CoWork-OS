@@ -7,6 +7,8 @@ import {
   descriptionHasStrongWriteIntent,
   descriptionHasWriteIntent,
   extractArtifactPathCandidates,
+  extractArtifactPathAlternativeGroups,
+  extractArtifactExtensionsFromText,
   isReadOnlyConstraintOnlyStep,
   isArtifactPathLikeToken,
   isLikelyCommandSnippet,
@@ -29,6 +31,24 @@ describe("step-contract path extraction", () => {
     );
     expect(candidates).not.toEqual(expect.arrayContaining(["win95-ui/scripts/validate.py"]));
   });
+
+  it("expands alternate config extensions into concrete candidate paths", () => {
+    const paths = extractArtifactPathCandidates(
+      "Read package.json and electron-builder.yml/.json, or build scripts if present.",
+    );
+    expect(paths).toContain("package.json");
+    expect(paths).toContain("electron-builder.yml");
+    expect(paths).toContain("electron-builder.json");
+    expect(paths).not.toContain("electron-builder.yml/.json");
+    expect(extractArtifactPathAlternativeGroups("electron-builder.yml/.json")).toEqual([
+      ["electron-builder.yml", "electron-builder.json"],
+    ]);
+    expect(extractArtifactExtensionsFromText("electron-builder.yml/.json")).toEqual([]);
+  });
+
+  it("does not treat alternate-extension paths inside shell snippets as artifacts", () => {
+    expect(extractArtifactPathCandidates("Run `cat electron-builder.yml/.json`.")).toEqual([]);
+  });
 });
 
 describe("step-contract token classification", () => {
@@ -45,6 +65,13 @@ describe("step-contract token classification", () => {
 });
 
 describe("step-contract write intent", () => {
+  it("keeps a packaging audit read-only when it merely mentions build scripts", () => {
+    const description =
+      "Audit the current packaging: check git status, read package.json and build scripts if present, and dump the existing code signature.";
+    expect(descriptionHasStrongWriteIntent(description)).toBe(false);
+    expect(descriptionHasWriteIntent(description)).toBe(false);
+  });
+
   it("does not treat generic make phrasing as write intent without artifact cues", () => {
     expect(
       descriptionHasWriteIntent(

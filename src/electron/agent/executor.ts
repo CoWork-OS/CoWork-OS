@@ -508,6 +508,7 @@ import {
   descriptionNamesCodeSourceFile,
   extractArtifactExtensionsFromText,
   extractArtifactPathCandidates,
+  extractArtifactPathAlternativeGroups,
   hasArtifactExtensionMention,
   isReadOnlyConstraintOnlyStep,
   type StepContractEnforcementLevel,
@@ -4416,7 +4417,24 @@ export class TaskExecutor {
     if (policy !== "pin_and_rewrite") return null;
     if (!this.reliabilityPathDriftRewriteV6Enabled) return null;
     if (!this.taskPinnedRoot || this.taskPinnedRoot === ".") return null;
-    return detectTaskRootPathRewrite(candidate, this.workspace.path, this.taskPinnedRoot, opts);
+    const match = detectTaskRootPathRewrite(
+      candidate,
+      this.workspace.path,
+      this.taskPinnedRoot,
+      opts,
+    );
+    // A root inferred from a mutation is only a hint. Rewrite only when the
+    // target already exists there and the source does not. Creating a new
+    // unqualified file is ambiguous and must keep the path the agent chose.
+    if (match && !this.isUnambiguousMutationRootPath(match)) return null;
+    return match;
+  }
+
+  private isUnambiguousMutationRootPath(match: TaskRootPathRewriteMatch): boolean {
+    return (
+      this.taskPinnedRootSource !== "mutation" ||
+      (!match.sourceExists && fs.existsSync(match.normalizedAbsolutePath))
+    );
   }
 
   private rewriteTaskPinnedRootPathsInDescription(step: PlanStep, description: string): string {
@@ -4590,7 +4608,7 @@ export class TaskExecutor {
           requireSourceMissing: false,
         },
       );
-      if (rewriteMatch) {
+      if (rewriteMatch && this.isUnambiguousMutationRootPath(rewriteMatch)) {
         return { key, from: value, expected: rewriteMatch.normalizedPath };
       }
     }
@@ -4606,13 +4624,14 @@ export class TaskExecutor {
             requireSourceMissing: false,
           },
         );
-        if (rewriteMatch) {
+        if (rewriteMatch && this.isUnambiguousMutationRootPath(rewriteMatch)) {
           return { key: "paths", from: entry, expected: rewriteMatch.normalizedPath };
         }
       }
     }
 
     if (
+      this.taskPinnedRootSource !== "mutation" &&
       this.isTaskRootPathRecoverableTool(toolName) &&
       typeof input.path === "string" &&
       input.path.trim()
@@ -4762,7 +4781,19 @@ export class TaskExecutor {
 
     const firstSegment = normalized.split("/")[0];
     if (!firstSegment || firstSegment === "." || firstSegment === "..") return;
+    // Runtime scratch, uploads and dependency/build directories are not
+    // project roots. OCR and other inspection tools commonly write here.
     const commonRootSubdirs = new Set([
+      ".cowork",
+      ".git",
+      "node_modules",
+      "tmp",
+      "temp",
+      "logs",
+      "dist",
+      "build",
+      "release",
+      "coverage",
       "app",
       "src",
       "data",
@@ -25390,7 +25421,18 @@ You are continuing a previous conversation. The context from the previous conver
   private extractStepPathCandidates(step: PlanStep): string[] {
     const text = String(step.description || "");
     if (!text.trim()) return [];
-    const candidates = extractArtifactPathCandidates(text);
+    let candidates = extractArtifactPathCandidates(text);
+    for (const group of extractArtifactPathAlternativeGroups(text)) {
+      const existing = group.filter((candidate) => {
+        const absolute = path.resolve(this.workspace.path, candidate);
+        return this.canReadWorkspacePath(absolute) && fs.existsSync(absolute);
+      });
+      if (existing.length > 0) {
+        candidates = candidates.filter(
+          (candidate) => !group.includes(candidate) || existing.includes(candidate),
+        );
+      }
+    }
     if (candidates.length === 0) return [];
 
     const normalized = new Set<string>();
@@ -25691,6 +25733,38 @@ You are continuing a previous conversation. The context from the previous conver
     return this.isFileMutationTool(canonicalToolName) || canonicalToolName === "run_command";
   }
 
+  private isAnalysisScratchMutation(
+    evidence: MutationEvidence,
+    stepContract: StepExecutionContract,
+  ): boolean {
+    if (stepContract.mode !== "analysis_only" || !evidence.reported_path) return false;
+    const workspaceRelative = path.relative(this.workspace.path, evidence.reported_path);
+    if (
+      workspaceRelative === ".." ||
+      workspaceRelative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(workspaceRelative)
+    )
+      return false;
+    const parts = workspaceRelative.split(path.sep);
+    if (parts[0] !== ".cowork" || parts[1] !== "tmp" || parts.length < 3) return false;
+    try {
+      const realWorkspace = fs.realpathSync(this.workspace.path);
+      const realScratch = fs.realpathSync(path.join(this.workspace.path, ".cowork", "tmp"));
+      const realReported = fs.realpathSync(evidence.reported_path);
+      // A symlinked scratch directory must not turn a workspace file into an
+      // exempt OCR artifact. Only the physical .cowork/tmp directory qualifies.
+      if (realScratch !== path.join(realWorkspace, ".cowork", "tmp")) return false;
+      const fileWithinScratch = path.relative(realScratch, realReported);
+      return (
+        fileWithinScratch !== ".." &&
+        !fileWithinScratch.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(fileWithinScratch)
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private resolveWorkspaceMutationPathCandidate(pathValue: string): string | null {
     const trimmed = String(pathValue || "").trim();
     if (!trimmed) return null;
@@ -25855,6 +25929,7 @@ You are continuing a previous conversation. The context from the previous conver
         : opts.stepStartedAt;
     const thresholdMs = Math.max(0, mutationStartTs - 1000);
     const candidatePaths = this.collectShellMutationTargetPaths(opts.input, opts.stepContract);
+    let scratchEvidence: MutationEvidence | null = null;
 
     for (const candidatePath of candidatePaths) {
       const evidence = this.buildObservedMutationEvidence({
@@ -25862,7 +25937,12 @@ You are continuing a previous conversation. The context from the previous conver
         reportedPath: candidatePath,
         thresholdMs,
       });
-      if (evidence) return evidence;
+      if (!evidence) continue;
+      if (opts.stepContract && this.isAnalysisScratchMutation(evidence, opts.stepContract)) {
+        scratchEvidence ||= evidence;
+      } else {
+        return evidence;
+      }
     }
 
     const scopedCandidates = new Set(candidatePaths.map((candidate) => path.resolve(candidate)));
@@ -25880,14 +25960,29 @@ You are continuing a previous conversation. The context from the previous conver
       if (!evidence?.reported_path) continue;
       if (scopedCandidates.size > 0) {
         if (scopedCandidates.has(path.resolve(evidence.reported_path))) {
+          if (opts.stepContract && this.isAnalysisScratchMutation(evidence, opts.stepContract)) {
+            scratchEvidence ||= evidence;
+          } else {
+            return evidence;
+          }
+        } else if (
+          opts.stepContract?.mode === "analysis_only" &&
+          !this.isAnalysisScratchMutation(evidence, opts.stepContract)
+        ) {
+          // An analysis command may edit a second file not named in the shell
+          // text. Task-scoped file events still have to fail the mutation guard.
           return evidence;
         }
         continue;
       }
-      fallbackEvidence = fallbackEvidence || evidence;
+      if (opts.stepContract && this.isAnalysisScratchMutation(evidence, opts.stepContract)) {
+        scratchEvidence ||= evidence;
+      } else {
+        fallbackEvidence ||= evidence;
+      }
     }
 
-    return scopedCandidates.size > 0 ? null : fallbackEvidence;
+    return fallbackEvidence || scratchEvidence;
   }
 
   private getEquivalentRequiredMutationToolsFromEvidence(
@@ -35312,9 +35407,11 @@ Return ONLY a JSON object:
                                 size_bytes: evidence.size_bytes,
                                 observed_event_type: evidence.observed_event_type,
                               });
-                              const mutationSatisfiedByEvidence = this.mutationEvidenceV2Enabled
-                                ? this.mutationEvidenceSatisfiesWriteContract(evidence)
-                                : evidence.tool_success;
+                              const mutationSatisfiedByEvidence =
+                                !this.isAnalysisScratchMutation(evidence, stepContract) &&
+                                (this.mutationEvidenceV2Enabled
+                                  ? this.mutationEvidenceSatisfiesWriteContract(evidence)
+                                  : evidence.tool_success);
                               if (
                                 mutationSatisfiedByEvidence &&
                                 evidence.tool_success &&
@@ -36719,9 +36816,11 @@ Return ONLY a JSON object:
                       size_bytes: evidence.size_bytes,
                       observed_event_type: evidence.observed_event_type,
                     });
-                    const mutationSatisfiedByEvidence = this.mutationEvidenceV2Enabled
-                      ? this.mutationEvidenceSatisfiesWriteContract(evidence)
-                      : evidence.tool_success;
+                    const mutationSatisfiedByEvidence =
+                      !this.isAnalysisScratchMutation(evidence, stepContract) &&
+                      (this.mutationEvidenceV2Enabled
+                        ? this.mutationEvidenceSatisfiesWriteContract(evidence)
+                        : evidence.tool_success);
                     if (
                       mutationSatisfiedByEvidence &&
                       evidence.tool_success &&

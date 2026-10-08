@@ -68,9 +68,11 @@ export const CANONICAL_ARTIFACT_PATH_REGEX = new RegExp(
 );
 
 const COMMAND_PREFIX_REGEX =
-  /(^|\s)(python3?|node|npm|npx|pnpm|yarn|bash|sh|zsh|git|curl|wget|make|cmake|xcodebuild|uv|pip3?|go|cargo|java|ruby|php|ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap)\b/i;
+  /(^|\s)(python3?|node|npm|npx|pnpm|yarn|bash|sh|zsh|git|curl|wget|cat|make|cmake|xcodebuild|uv|pip3?|go|cargo|java|ruby|php|ssh|scp|sftp|ping|traceroute|mtr|nc|netcat|telnet|dig|nslookup|nmap)\b/i;
 const SHELL_OPERATOR_REGEX = /(?:\|\||&&|[|;<>])/;
 const URL_LIKE_REGEX = /^[a-z][a-z0-9+.-]*:\/\//i;
+const ALTERNATE_EXTENSION_PATH_REGEX =
+  /((?:\/|\.{1,2}\/)?[A-Za-z0-9_./-]+)\.([A-Za-z0-9]+)\/\.([A-Za-z0-9]+)\b/g;
 // "change", "correct", "convert" and "resolve" are also nouns/adjectives or
 // read-only verbs ("the change log", "is correct", "resolve the hostname"),
 // so they count only with an object that makes them a remediation.
@@ -96,7 +98,11 @@ export function hasArtifactExtensionMention(text: string): boolean {
 }
 
 export function extractArtifactExtensionsFromText(text: string): string[] {
-  const normalized = String(text || "").toLowerCase();
+  // An extension shorthand names alternative files, not two required output
+  // formats. Concrete paths selected by the caller contribute their extension.
+  const normalized = String(text || "")
+    .replace(ALTERNATE_EXTENSION_PATH_REGEX, " ")
+    .toLowerCase();
   if (!normalized.trim()) return [];
 
   const extensions = new Set<string>();
@@ -151,6 +157,7 @@ export function extractArtifactPathCandidates(text: string): string[] {
   if (!source.trim()) return [];
 
   const candidates = new Set<string>();
+  const alternateRanges: Array<{ start: number; end: number }> = [];
   const commandSnippetRanges: Array<{ start: number; end: number }> = [];
   const backtickPattern = /`([^`]+)`/g;
   let backtickMatch = backtickPattern.exec(source);
@@ -165,10 +172,26 @@ export function extractArtifactPathCandidates(text: string): string[] {
     if (isLikelyCommandSnippet(value)) {
       commandSnippetRanges.push({ start, end: start + token.length });
     }
-    if (isArtifactPathLikeToken(value)) {
+    if (isArtifactPathLikeToken(value) && !/\.[a-z0-9]+\/\.[a-z0-9]+$/i.test(value)) {
       candidates.add(value);
     }
     backtickMatch = backtickPattern.exec(source);
+  }
+
+  for (const match of source.matchAll(ALTERNATE_EXTENSION_PATH_REGEX)) {
+    const [, stem, firstExtension, secondExtension] = match;
+    const inCommandSnippet = commandSnippetRanges.some(
+      (range) => match.index >= range.start && match.index < range.end,
+    );
+    if (
+      inCommandSnippet ||
+      !CANONICAL_ARTIFACT_EXTENSION_SET.has(firstExtension.toLowerCase()) ||
+      !CANONICAL_ARTIFACT_EXTENSION_SET.has(secondExtension.toLowerCase())
+    )
+      continue;
+    candidates.add(`${stem}.${firstExtension}`);
+    candidates.add(`${stem}.${secondExtension}`);
+    alternateRanges.push({ start: match.index, end: match.index + match[0].length });
   }
 
   const barePattern = new RegExp(CANONICAL_ARTIFACT_PATH_REGEX.source, "gi");
@@ -179,13 +202,30 @@ export function extractArtifactPathCandidates(text: string): string[] {
     const inCommandSnippet = commandSnippetRanges.some(
       (range) => start >= range.start && start < range.end,
     );
-    if (!inCommandSnippet && token) {
+    const inAlternatePath = alternateRanges.some(
+      (range) => start >= range.start && start < range.end,
+    );
+    if (!inCommandSnippet && !inAlternatePath && token) {
       candidates.add(token);
     }
     bareMatch = barePattern.exec(source);
   }
 
   return Array.from(candidates.values());
+}
+
+export function extractArtifactPathAlternativeGroups(text: string): string[][] {
+  const groups: string[][] = [];
+  for (const match of String(text || "").matchAll(ALTERNATE_EXTENSION_PATH_REGEX)) {
+    const [, stem, firstExtension, secondExtension] = match;
+    if (
+      CANONICAL_ARTIFACT_EXTENSION_SET.has(firstExtension.toLowerCase()) &&
+      CANONICAL_ARTIFACT_EXTENSION_SET.has(secondExtension.toLowerCase())
+    ) {
+      groups.push([`${stem}.${firstExtension}`, `${stem}.${secondExtension}`]);
+    }
+  }
+  return groups;
 }
 
 export function descriptionHasWriteIntent(text: string): boolean {
@@ -216,7 +256,11 @@ export function descriptionHasWriteIntent(text: string): boolean {
 }
 
 export function descriptionHasStrongWriteIntent(text: string): boolean {
-  const desc = String(text || "").toLowerCase();
+  const desc = String(text || "")
+    .toLowerCase()
+    // In inspection steps, "the build scripts" and "or build scripts" name
+    // existing files; "build" is not an instruction to produce anything.
+    .replace(/\b(?:the|existing|current|and|or)\s+build\s+scripts?\b/g, " ");
   return STRONG_WRITE_VERB_REGEX.test(desc) || PASSIVE_ARTIFACT_WRITE_CUE_REGEX.test(desc);
 }
 

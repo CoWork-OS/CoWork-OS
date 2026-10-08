@@ -18,7 +18,7 @@ When several agents work on one goal, they share `swarms/<slug>/` in the memory 
 Agent Memory Repo spec's swarm example.
 
 - **Swarm.** The root of a task's `parentTaskId` chain, when it has child tasks or a team run
-  (sub-agents from `spawn_agent` / `orchestrate_agents`, collaborative and council runs, workflow
+  (sub-agents from `spawn_agent` / `orchestrate_agents`, collaborative runs, workflow
   pipelines). Slug: `<title slug>-<first 8 of the root id>`. Bot teams are not covered (their
   tasks share no goal id).
 - **Files.** `README.md` (goal: the root prompt, one line; members; rules: write what you measured

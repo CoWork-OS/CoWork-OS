@@ -696,10 +696,6 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     });
     await openMoreItem("Devices");
     await page.getByRole("heading", { name: "Devices", exact: true }).waitFor({ state: "visible" });
-    await openMoreItem("Everyday");
-    await page
-      .getByRole("heading", { name: "Everyday Agent", exact: true })
-      .waitFor({ state: "visible" });
     await openMoreItem("Mission Control");
     await page.locator(".mc-v2-topbar h1").waitFor({ state: "visible" });
     await inboxButton.click();
@@ -936,7 +932,6 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       "personality",
       "system",
       "voice",
-      "everydayAgent",
       "aimodels",
       "jev",
       "whatsapp",

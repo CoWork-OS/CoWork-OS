@@ -59,7 +59,6 @@ import {
   MessagesSquare,
   Mail,
   Square,
-  Tv,
   CircleDot,
   Cloud,
   Star,
@@ -129,7 +128,6 @@ const MattermostSettings = lazySettingsPanel(
   "MattermostSettings",
 );
 const MatrixSettings = lazySettingsPanel(() => import("./MatrixSettings"), "MatrixSettings");
-const TwitchSettings = lazySettingsPanel(() => import("./TwitchSettings"), "TwitchSettings");
 const LineSettings = lazySettingsPanel(() => import("./LineSettings"), "LineSettings");
 const BlueBubblesSettings = lazySettingsPanel(
   () => import("./BlueBubblesSettings"),
@@ -244,7 +242,6 @@ const SubconsciousSettingsPanel = lazySettingsPanel(
   () => import("./SubconsciousSettingsPanel"),
   "SubconsciousSettingsPanel",
 );
-const CouncilSettings = lazySettingsPanel(() => import("./CouncilSettings"), "CouncilSettings");
 const RoutineSettingsPanel = lazySettingsPanel(
   () => import("./RoutineSettingsPanel"),
   "RoutineSettingsPanel",
@@ -257,11 +254,6 @@ const TaskTraceDebuggerPanel = lazySettingsPanel(
   () => import("./TaskTraceDebuggerPanel"),
   "TaskTraceDebuggerPanel",
 );
-const EverydayAgentSettingsPanel = lazySettingsPanel(
-  () => import("./EverydayAgentPanel"),
-  "EverydayAgentSettingsPanel",
-);
-
 type SettingsTab =
   | "appearance"
   | "personality"
@@ -285,7 +277,6 @@ type SettingsTab =
   | "updates"
   | "automations"
   | "routines"
-  | "council"
   | "queue"
   | "skills"
   | "skillhub"
@@ -306,7 +297,6 @@ type SettingsTab =
   | "traces"
   | "customize"
   | "addtools"
-  | "everydayAgent"
   | "triggers"
   | "briefing"
   | "subconscious"
@@ -317,7 +307,6 @@ type SettingsTab =
 const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
   appearance: [],
   personality: ["getPersonalityConfigV2", "getRelationshipStats", "savePersonalityConfigV2"],
-  everydayAgent: ["everydayAgentGetProfile"],
   aimodels: ["getLLMSettings", "saveLLMSettings"],
   jev: ["testJevProvider"],
   automations: AUTOMATION_SUBTAB_METHOD_REQUIREMENTS.routines,
@@ -358,7 +347,6 @@ type SecondaryChannel =
   | "signal"
   | "mattermost"
   | "matrix"
-  | "twitch"
   | "line"
   | "bluebubbles"
   | "email"
@@ -757,14 +745,7 @@ type SidebarSearchTarget = {
   tab?: SettingsTab;
   secondaryChannel?: SecondaryChannel;
   aiModelsSubTab?: "llm" | "image" | "video" | "search";
-  automationsSubTab?:
-    | "routines"
-    | "queue"
-    | "subconscious"
-    | "scheduled"
-    | "hooks"
-    | "triggers"
-    | "council";
+  automationsSubTab?: "routines" | "queue" | "subconscious" | "scheduled" | "hooks" | "triggers";
   skillsSubTab?: "custom" | "store";
   integrationsSubTab?: "git" | "connectors" | "identity" | "infrastructure";
   accessSubTab?: "controlplane" | "webaccess";
@@ -801,12 +782,6 @@ const sidebarItems: SidebarItem[] = [
     icon: <Shield {...I} />,
   },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
-  {
-    tab: "everydayAgent",
-    label: "Everyday Agent",
-    group: "General",
-    icon: <Sparkles {...I} />,
-  },
   {
     tab: "aimodels",
     label: "AI & Models",
@@ -956,7 +931,6 @@ const secondaryChannelItems: Array<{
   { key: "twilio_sms", label: "SMS (Twilio)", icon: <MessageSquare {...S} /> },
   { key: "mattermost", label: "Mattermost", icon: <Square {...S} /> },
   { key: "matrix", label: "Matrix", icon: <LayoutGrid {...S} /> },
-  { key: "twitch", label: "Twitch", icon: <Tv {...S} /> },
   { key: "bluebubbles", label: "BlueBubbles", icon: <Smile {...S} /> },
 ];
 
@@ -975,7 +949,6 @@ const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> =
   twilio_sms: ["twilio", "sms", "text message", "mms"],
   mattermost: ["mattermost"],
   matrix: ["matrix"],
-  twitch: ["twitch", "stream chat"],
   bluebubbles: ["bluebubbles", "blue bubbles"],
 };
 
@@ -1091,10 +1064,6 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
     {
       terms: ["queue", "task queue", "queued tasks"],
       target: { tab: "automations", automationsSubTab: "queue" },
-    },
-    {
-      terms: ["council", "r&d council", "research council"],
-      target: { tab: "automations", automationsSubTab: "council" },
     },
     {
       terms: [
@@ -1410,7 +1379,6 @@ export function Settings({
                 "scheduled",
                 "hooks",
                 "triggers",
-                "council",
               ].includes(initialTab as string)
             ? "automations"
             : ["git", "connectors", "infrastructure"].includes(initialTab as string)
@@ -1440,7 +1408,6 @@ export function Settings({
     "scheduled",
     "hooks",
     "triggers",
-    "council",
   ].includes(initialTab as string)
     ? (initialTab as AutomationSettingsSubTab)
     : "routines";
@@ -9218,8 +9185,6 @@ export function Settings({
                   onSettingsChanged={onSettingsChanged}
                   onOpenMemoryHub={() => setActiveTab("memory")}
                 />
-              ) : activeTab === "everydayAgent" ? (
-                <EverydayAgentSettingsPanel workspaceId={workspaceId} onCreateTask={onCreateTask} />
               ) : activeTab === "system" ? (
                 <div className="settings-combined-panel system-security-panel">
                   <div className="system-security-panel-header">
@@ -9327,7 +9292,6 @@ export function Settings({
                         {effectiveSecondary === "signal" && <SignalSettings />}
                         {effectiveSecondary === "mattermost" && <MattermostSettings />}
                         {effectiveSecondary === "matrix" && <MatrixSettings />}
-                        {effectiveSecondary === "twitch" && <TwitchSettings />}
                         {effectiveSecondary === "line" && <LineSettings />}
                         {effectiveSecondary === "bluebubbles" && <BlueBubblesSettings />}
                         {effectiveSecondary === "email" && <EmailSettings />}
@@ -9450,15 +9414,6 @@ export function Settings({
                       />
                     )}
                     {activeAutomationsSubTab === "queue" && <QueueSettings />}
-                    {activeAutomationsSubTab === "council" && (
-                      <CouncilSettings
-                        workspaceId={workspaceId}
-                        onOpenTask={onOpenTask}
-                        focusCouncilId={
-                          focusAutomation?.owner === "council" ? focusAutomation.id : undefined
-                        }
-                      />
-                    )}
                     {activeAutomationsSubTab === "subconscious" && (
                       <SubconsciousSettingsPanel
                         initialWorkspaceId={workspaceId}

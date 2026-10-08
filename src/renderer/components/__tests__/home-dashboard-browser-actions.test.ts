@@ -22,7 +22,6 @@ describe("browser-safe Home and Build actions", () => {
         onViewAllFiles: vi.fn(),
         onOpenScheduledTasks: vi.fn(),
         onOpenMissionControl: vi.fn(),
-        onOpenEverydayAgent: vi.fn(),
         onOpenEventTriggers: vi.fn(),
         onOpenSelfImprove: vi.fn(),
         onOpenModelSettings: vi.fn(),

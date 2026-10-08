@@ -21,8 +21,6 @@ interface MissionControlPanelProps {
   initialCompanyId?: string | null;
   /** When opening from Inbox Agent (or elsewhere), focus this issue in Ops. */
   initialIssueId?: string | null;
-  /** When opening from Everyday Agent, land on the supervision feed. */
-  initialEverydayAgentFocus?: boolean;
 }
 
 export function MissionControlPanel({
@@ -30,9 +28,8 @@ export function MissionControlPanel({
   onOpenAgents,
   initialCompanyId = null,
   initialIssueId = null,
-  initialEverydayAgentFocus = false,
 }: MissionControlPanelProps) {
-  const data = useMissionControlData(initialCompanyId, initialIssueId, initialEverydayAgentFocus);
+  const data = useMissionControlData(initialCompanyId, initialIssueId);
 
   const {
     loading,

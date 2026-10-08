@@ -171,16 +171,6 @@ const CHANNEL_PROFILES: Partial<Record<ChannelType, ChannelProfile>> = {
     structuredFormatting: false,
     formalFraming: false,
   },
-  twitch: {
-    directive:
-      "You are responding in Twitch chat. Keep messages very short — " +
-      "Twitch messages should be punchy and easy to read in a fast-moving chat. " +
-      "One or two sentences max per message.",
-    lengthHint: "shorter",
-    emojiEncouraged: true,
-    structuredFormatting: false,
-    formalFraming: false,
-  },
   line: {
     directive:
       "You are responding via LINE. Keep messages short and friendly. " +

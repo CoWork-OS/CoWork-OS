@@ -103,14 +103,6 @@ export function setupAdminPolicyHandlers(): void {
           ...current.agents,
           ...updates.agents,
         },
-        everydayAgent: {
-          ...current.everydayAgent,
-          ...updates.everydayAgent,
-          activeHours: {
-            ...current.everydayAgent.activeHours,
-            ...updates.everydayAgent?.activeHours,
-          },
-        },
         runtime: {
           ...current.runtime,
           ...updates.runtime,

@@ -37,7 +37,6 @@ import {
   WeComConfig as _WeComConfig,
   MattermostConfig as _MattermostConfig,
   MatrixConfig as _MatrixConfig,
-  TwitchConfig as _TwitchConfig,
   LineConfig as _LineConfig,
   BlueBubblesConfig as _BlueBubblesConfig,
   GoogleChatConfig as _GoogleChatConfig,
@@ -56,7 +55,6 @@ import { createWhatsAppCloudAdapter } from "./channels/whatsapp-cloud";
 import { createTwilioSmsAdapter } from "./channels/twilio-sms";
 import { MattermostAdapter, createMattermostAdapter } from "./channels/mattermost";
 import { MatrixAdapter, createMatrixAdapter } from "./channels/matrix";
-import { TwitchAdapter, createTwitchAdapter } from "./channels/twitch";
 import { LineAdapter, createLineAdapter } from "./channels/line";
 import { BlueBubblesAdapter, createBlueBubblesAdapter } from "./channels/bluebubbles";
 import { createGoogleChatAdapter } from "./channels/google-chat";
@@ -1188,50 +1186,6 @@ export class ChannelGateway {
     });
     if (!channel) {
       throw new Error("Matrix channel already configured. Update or remove it first.");
-    }
-
-    return channel;
-  }
-
-  /**
-   * Add a new Twitch channel
-   */
-  async addTwitchChannel(
-    name: string,
-    username: string,
-    oauthToken: string,
-    channels: string[],
-    allowWhispers: boolean = false,
-    securityMode: "open" | "allowlist" | "pairing" = "pairing",
-  ): Promise<Channel> {
-    // Check if Twitch channel already exists
-    const existing = await this.channelRepo.findByType("twitch");
-    if (existing) {
-      throw new Error("Twitch channel already configured. Update or remove it first.");
-    }
-
-    // Create channel record
-    const channel = await this.channelRepo.createIfTypeAbsent({
-      type: "twitch",
-      name,
-      enabled: false, // Don't enable until connected
-      config: {
-        username,
-        oauthToken,
-        channels,
-        allowWhispers,
-      },
-      securityConfig: {
-        mode: securityMode,
-        allowedUsers: [],
-        pairingCodeTTL: 300, // 5 minutes
-        maxPairingAttempts: 5,
-        rateLimitPerMinute: 30,
-      },
-      status: "disconnected",
-    });
-    if (!channel) {
-      throw new Error("Twitch channel already configured. Update or remove it first.");
     }
 
     return channel;
@@ -2593,16 +2547,6 @@ export class ChannelGateway {
           responsePrefix: channel.config.responsePrefix as string | undefined,
         });
 
-      case "twitch":
-        return createTwitchAdapter({
-          enabled: channel.enabled,
-          username: channel.config.username as string,
-          oauthToken: channel.config.oauthToken as string,
-          channels: channel.config.channels as string[],
-          allowWhispers: channel.config.allowWhispers as boolean | undefined,
-          responsePrefix: channel.config.responsePrefix as string | undefined,
-        });
-
       case "line":
         return createLineAdapter({
           enabled: channel.enabled,
@@ -2828,8 +2772,6 @@ export { MattermostAdapter, createMattermostAdapter } from "./channels/mattermos
 export { MattermostClient } from "./channels/mattermost-client";
 export { MatrixAdapter, createMatrixAdapter } from "./channels/matrix";
 export { MatrixClient } from "./channels/matrix-client";
-export { TwitchAdapter, createTwitchAdapter } from "./channels/twitch";
-export { TwitchClient } from "./channels/twitch-client";
 export { LineAdapter, createLineAdapter } from "./channels/line";
 export { LineClient } from "./channels/line-client";
 export { BlueBubblesAdapter, createBlueBubblesAdapter } from "./channels/bluebubbles";

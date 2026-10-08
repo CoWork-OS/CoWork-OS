@@ -146,30 +146,6 @@ describe("validatePolicies", () => {
       }),
     ).toBe("runtime.agentSecurity.timeoutMs must be between 250 and 5000");
   });
-
-  it("accepts Everyday Agent admin policy controls", () => {
-    expect(
-      validatePolicies({
-        everydayAgent: {
-          blocked: false,
-          blockedBundles: ["browser", "screen_context"],
-          forceReviewOnly: true,
-          maxHeartbeatCadenceMinutes: 15,
-          maxConcurrentBackgroundWork: 1,
-        },
-      }),
-    ).toBeNull();
-  });
-
-  it("rejects invalid Everyday Agent bundles", () => {
-    expect(
-      validatePolicies({
-        everydayAgent: {
-          blockedBundles: ["browser", "all_the_things"],
-        },
-      }),
-    ).toBe("everydayAgent.blockedBundles contains an invalid bundle");
-  });
 });
 
 describe("loadPoliciesStrict", () => {
@@ -190,16 +166,6 @@ describe("loadPoliciesStrict", () => {
 
     expect(freshLoadPoliciesStrict()?.packs.blocked).toEqual(["smb-complete"]);
     expect(freshLoadPoliciesStrict()?.packs.blocked).toEqual(["smb-complete"]);
-  });
-
-  it("rejects invalid Everyday Agent bundles before normalization can drop them", async () => {
-    mockFs.existsSync.mockReturnValue(true);
-    mockFs.readFileSync.mockReturnValue(
-      JSON.stringify({ everydayAgent: { blockedBundles: ["browser", "all_the_things"] } }),
-    );
-    const { loadPoliciesStrict: freshLoadPoliciesStrict } = await import("../policies");
-
-    expect(freshLoadPoliciesStrict()).toBeNull();
   });
 
   it("loadPolicies remains permissive only when no valid policy is available", async () => {

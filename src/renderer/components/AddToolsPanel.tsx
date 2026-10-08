@@ -34,7 +34,6 @@ export type AddToolsRoute = {
     | "twilio_sms"
     | "mattermost"
     | "matrix"
-    | "twitch"
     | "bluebubbles";
 };
 export type AddToolsSelection = Pick<
@@ -137,7 +136,6 @@ const CHANNEL_ENTRIES: Array<{
       ["twilio_sms", "SMS (Twilio)"],
       ["mattermost", "Mattermost"],
       ["matrix", "Matrix"],
-      ["twitch", "Twitch"],
       ["bluebubbles", "BlueBubbles"],
       ["x", "X (Twitter)"],
     ] as const

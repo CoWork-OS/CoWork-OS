@@ -259,7 +259,6 @@ The agent connects to 15+ channels but delivers the same personality regardless 
 | `mattermost` | Normal  | Structured            | No    | No                        |
 | `matrix`     | Normal  | Structured            | No    | No                        |
 | `googlechat` | Shorter | Plain                 | No    | No                        |
-| `twitch`     | Shorter | Plain                 | Yes   | No                        |
 
 **Group/public context overlay:** When `gatewayContext` is `"group"` or `"public"`, an additional privacy-aware directive is layered on (do not share sensitive information, be aware others are reading).
 

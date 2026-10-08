@@ -166,9 +166,6 @@
       "prepare": 7,
       "runtimeImport": 1
     },
-    "src/electron/council/council-sql.ts": {
-      "prepare": 16
-    },
     "src/electron/database/async/statement-commands.ts": {
       "prepare": 1
     },
@@ -201,7 +198,7 @@
       "prepare": 3
     },
     "src/electron/database/repositories.ts": {
-      "prepare": 273,
+      "prepare": 271,
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {
@@ -245,9 +242,6 @@
     },
     "src/electron/eval/EvalService.ts": {
       "prepare": 25
-    },
-    "src/electron/everyday-agent/EverydayAgentService.ts": {
-      "prepare": 22
     },
     "src/electron/file-hub/file-hub-sql.ts": {
       "prepare": 2

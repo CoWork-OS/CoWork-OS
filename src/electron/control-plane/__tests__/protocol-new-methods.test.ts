@@ -47,18 +47,6 @@ describe("New Methods constants", () => {
     expect(Methods.MANAGED_SESSION_EVENTS_LIST).toBe("managedSession.events.list");
   });
 
-  it("has Everyday Agent methods", () => {
-    expect(Methods.EVERYDAY_AGENT_GET_PROFILE).toBe("everydayAgent.getProfile");
-    expect(Methods.EVERYDAY_AGENT_UPDATE_PROFILE).toBe("everydayAgent.updateProfile");
-    expect(Methods.EVERYDAY_AGENT_ACCEPT_CONSENT).toBe("everydayAgent.acceptConsent");
-    expect(Methods.EVERYDAY_AGENT_PAUSE).toBe("everydayAgent.pause");
-    expect(Methods.EVERYDAY_AGENT_REVOKE_CAPABILITY).toBe("everydayAgent.revokeCapability");
-    expect(Methods.EVERYDAY_AGENT_LIST_RECEIPTS).toBe("everydayAgent.listReceipts");
-    expect(Methods.EVERYDAY_AGENT_CLEAR_DATA).toBe("everydayAgent.clearData");
-    expect(Methods.EVERYDAY_AGENT_PREVIEW_ACTION).toBe("everydayAgent.previewAction");
-    expect(Methods.EVERYDAY_AGENT_APPROVE_ACTION).toBe("everydayAgent.approveAction");
-  });
-
   it("has workspace methods", () => {
     expect(Methods.WORKSPACE_LIST).toBe("workspace.list");
     expect(Methods.WORKSPACE_GET).toBe("workspace.get");

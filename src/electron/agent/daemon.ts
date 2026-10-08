@@ -5741,7 +5741,7 @@ export class AgentDaemon extends EventEmitter {
     });
   }
 
-  /** The team run rooted at a task (collaborative / council runs), if any. */
+  /** The team run rooted at a task (collaborative runs), if any. */
   findTeamRunByRootTaskId(rootTaskId: string): AgentTeamRun | null {
     const db = this.dbManager.getDatabase();
     return new AgentTeamRunStore(db).findByRootTaskId(rootTaskId) || null;

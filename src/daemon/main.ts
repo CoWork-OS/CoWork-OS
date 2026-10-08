@@ -72,7 +72,6 @@ import { startMemoryEngine } from "../electron/memory/memory-engine-bootstrap";
 import { startMemoryRepo, stopMemoryRepo } from "../electron/memory/repo/memory-repo-bootstrap";
 import { KnowledgeGraphService } from "../electron/knowledge-graph/KnowledgeGraphService";
 import { createKitWriterOwnership } from "../electron/agents/kit-writers";
-import { EverydayAgentService } from "../electron/everyday-agent/everyday-agent-repository-facades";
 import type { KitWriterOwnership } from "../electron/agents/kit-writer-ownership";
 import { attachAgentDaemonTaskBridge, registerControlPlaneMethods } from "./control-plane-methods";
 import { initializeXMentionBridgeService, XMentionBridgeService } from "../electron/x-mentions";
@@ -860,8 +859,6 @@ async function main(): Promise<void> {
           agentDaemon,
           channelGateway,
           notificationService,
-          // The daemon's only Everyday Agent service (it has no IPC handlers).
-          everydayAgentService: new EverydayAgentService(browserDb),
         });
         await startedControlPlane.server.setWebApplication(browserApp);
         startedControlPlane.server.registerMethod("web.pair", async (client) => {

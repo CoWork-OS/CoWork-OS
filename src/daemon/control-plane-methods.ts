@@ -1725,7 +1725,6 @@ export function registerControlPlaneMethods(
       "signal",
       "matrix",
       "mattermost",
-      "twitch",
       "line",
       "bluebubbles",
       "email",

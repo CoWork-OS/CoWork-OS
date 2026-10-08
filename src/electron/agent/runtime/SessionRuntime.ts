@@ -2152,7 +2152,7 @@ export class SessionRuntime {
     const tags = PINNED_CONTEXT_TAGS;
     // The profile block is MemoryContextBuilder's L0 (identity, rules, preferences,
     // commitments). allowMemoryInjection comes from MemoryInjectionPolicy: false for
-    // retainMemory:false tasks (sub-agents, verifiers, council), `<no-memory>`, memory-off
+    // retainMemory:false tasks (sub-agents, verifiers), `<no-memory>`, memory-off
     // workspaces and group or public gateway contexts without trusted shared memory.
     const userProfileBlock = opts.allowMemoryInjection
       ? await this.deps.buildUserProfileBlock()

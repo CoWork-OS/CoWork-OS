@@ -188,7 +188,6 @@ export const CHANNEL_INVENTORY: Record<ChannelType, ChannelInventorySpec> = {
   },
   mattermost: { name: "Mattermost", requirements: ["api-key"], provenance: "first-party-api" },
   matrix: { name: "Matrix", requirements: ["api-key"], provenance: "third-party-package" },
-  twitch: { name: "Twitch", requirements: ["oauth-consent"], provenance: "first-party-api" },
   line: {
     name: "LINE",
     requirements: ["api-key", "public-webhook"],

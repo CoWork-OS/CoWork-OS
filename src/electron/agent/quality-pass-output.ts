@@ -23,6 +23,13 @@ const FILE_NAME_REGEX =
   /\b[\w-]+\.(?:md|txt|tsx?|jsx?|mjs|cjs|json|py|csv|xlsx|docx|pdf|pptx|html|css|ya?ml|toml|sh|go|rs|java|rb|sql|log|png|jpe?g|svg|gif|mp4)\b/gi;
 const LIST_MARKER_REGEX = /^\s*\d+[.)]\s+/gm;
 const NUMBER_REGEX = /\d[\d,]*(?:\.\d+)?/g;
+const LEADING_VERDICT_REGEX = /^\W*VERDICT:\s*(PASS|FAIL|PARTIAL)\b/i;
+const MISSING_EVIDENCE_CLAIM_REGEX =
+  /\b(?:no|without)\s+(?:file\s+contents?|(?:read|search|tool|command|file)[\w/ -]{0,30}?(?:output|results?|contents?)|evidence)\b[^.!?\n]{0,80}?\b(?:supplied|provided|shown|included)\b|\b(?:file\s+contents?|tool\s+output|evidence)\s+(?:was|were)\s+not\s+(?:supplied|provided|shown|included)\b/i;
+
+function extractLeadingVerdict(text: string): string | null {
+  return LEADING_VERDICT_REGEX.exec(text)?.[1]?.toUpperCase() ?? null;
+}
 
 function stripTrailingPunctuation(value: string): string {
   return value.replace(/[.,;:!?]+$/, "");
@@ -59,6 +66,11 @@ export function isQualityRewriteFaithful(text: string, draft: string): boolean {
   const rewrite = text.trim();
   const original = draft.trim();
   if (rewrite.length < original.length * MIN_REWRITE_LENGTH_RATIO) return false;
+  // An editor cannot change a verdict or decide that evidence was missing.
+  if (extractLeadingVerdict(rewrite) !== extractLeadingVerdict(original)) return false;
+  if (MISSING_EVIDENCE_CLAIM_REGEX.test(rewrite) && !MISSING_EVIDENCE_CLAIM_REGEX.test(original)) {
+    return false;
+  }
 
   const originalReferences = [
     ...(original.match(URL_REGEX) || []).map(stripTrailingPunctuation),

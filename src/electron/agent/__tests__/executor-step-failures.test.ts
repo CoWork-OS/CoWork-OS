@@ -1413,6 +1413,24 @@ describe("TaskExecutor executeStep failure handling", () => {
     }
   });
 
+  it("keeps a verifier worker's evidence-backed draft out of the text-only refiner", async () => {
+    const verifier = Object.create(TaskExecutor.prototype) as Any;
+    verifier.task = { id: "verify-1", title: "Verify: checklist", workerRole: "verifier" };
+    verifier.getQualityPassCount = vi.fn(() => 2);
+    verifier.applyQualityPassesToDraft = vi.fn();
+    const response = { content: [{ type: "text", text: "VERDICT: PASS\n- Read the checklist." }] };
+
+    const result = await verifier.maybeApplyQualityPasses({
+      response,
+      enabled: true,
+      contextLabel: "step:1",
+      userIntent: "Verify the checklist against the completion summary.",
+    });
+
+    expect(result).toBe(response);
+    expect(verifier.applyQualityPassesToDraft).not.toHaveBeenCalled();
+  });
+
   it("rejects unrelated artifact inspection for generic verification steps", async () => {
     executor = createExecutorWithStubs(
       [toolUseResponse("read_file", { path: "other.docx" }), textResponse("OK")],

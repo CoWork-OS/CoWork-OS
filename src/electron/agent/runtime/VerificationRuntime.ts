@@ -314,15 +314,16 @@ export class VerificationRuntime {
       requirementEvidenceBlock,
       "A file_exists proof establishes only that the exact file existed when the server inspected and hashed it; it does not establish file contents or semantic correctness.",
       "Do not treat generic PASS prose or unlinked evidence as proof that an outcome requirement is satisfied.",
-      "1. Use read/search/browser/test/build/run tools only.",
+      "1. Use read/search tools only; you cannot run commands, so rely on supplied command, test, or build output where the Task prompt required those actions.",
       "2. Be adversarial: try to falsify the claim that the task is complete.",
-      "3. Inspect files and outputs using command/file evidence, not just prose.",
+      "3. Confirm claims against the actual files and supplied outputs, not the parent summary's prose.",
       "4. Check completeness, correctness, and whether anything was missed.",
       "5. Check scope control: every changed file should trace to the user request; flag unrelated cleanup, broad rewrites, renames, or speculative abstractions.",
       "6. Start the final answer with exactly VERDICT: PASS, VERDICT: FAIL, or VERDICT: PARTIAL.",
       "7. Then provide concise bullet findings focused on gaps and evidence.",
       "8. Do not modify project files.",
       "9. Include at least one adversarial probe.",
+      '10. A requested document, checklist, or plan passes when its actual contents cover every requested item and respect stated limits (for example "do not publish or upload"). Do not mark it PARTIAL because the actions it describes were not carried out.',
     ].join("\n");
   }
 }

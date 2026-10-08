@@ -42,4 +42,21 @@ describe("text-only quality passes", () => {
       false,
     );
   });
+
+  it("rejects a rewrite that changes the verdict or invents missing evidence", () => {
+    const draft =
+      "VERDICT: PASS\n- Read macos-release-checklist.md; it covers build validation, signing and notarization, packaging, release notes, distribution, and monitoring.";
+    const flipped =
+      "VERDICT: PARTIAL\n- No file contents or read/search output were supplied, so macos-release-checklist.md cannot be confirmed to cover build validation, signing and notarization, packaging, release notes, distribution, and monitoring.";
+    expect(isQualityRewriteFaithful(flipped, draft)).toBe(false);
+    expect(
+      isQualityRewriteFaithful(flipped.replace("VERDICT: PARTIAL", "VERDICT: PASS"), draft),
+    ).toBe(false);
+    expect(
+      isQualityRewriteFaithful(
+        draft.replace("it covers", "the checklist fully covers") + " Scope stays preparation-only.",
+        draft,
+      ),
+    ).toBe(true);
+  });
 });

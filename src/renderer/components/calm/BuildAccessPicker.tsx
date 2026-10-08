@@ -194,7 +194,11 @@ export function BuildAccessPicker({
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       {open && (
-        <div className="permission-access-dropdown" role="menu" aria-label="Permission access profiles">
+        <div
+          className="permission-access-dropdown"
+          role="menu"
+          aria-label="Permission access profiles"
+        >
           {BUILTIN_ACCESS_PROFILES.map((profile) => renderOption(profile, false))}
           {customProfiles.length > 0 && (
             <div className="permission-access-custom-label">Custom profiles</div>

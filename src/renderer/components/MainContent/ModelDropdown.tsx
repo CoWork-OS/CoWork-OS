@@ -226,8 +226,9 @@ export function ModelDropdown({
     const update = () => {
       // Top of the visible area: the app header, or the nearest clipping ancestor if lower.
       let limit =
-        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-height")) ||
-        0;
+        parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--header-height"),
+        ) || 0;
       for (let el = container.parentElement; el; el = el.parentElement) {
         const { overflowY } = getComputedStyle(el);
         if (overflowY !== "visible") limit = Math.max(limit, el.getBoundingClientRect().top);

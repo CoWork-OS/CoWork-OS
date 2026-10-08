@@ -19620,6 +19620,10 @@ ${transcript}
       // capability grant. Connected tools stay discoverable in every language;
       // task allowlists and execution permission checks still govern calls.
       if (tool.runtime?.capabilityTags?.includes("mcp") || name.startsWith("mcp_")) return true;
+      // Business-agent (PACT) tools reach this point only when the task-level business lane
+      // admitted them; the PACT runtime admits and approves every call itself. Step prose
+      // rarely names a file write, so step scoping would otherwise hide them from every step.
+      if (tool.runtime?.capabilityTags?.[0] === "business") return true;
       return allowlist.has(name);
     });
 

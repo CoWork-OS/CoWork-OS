@@ -127,7 +127,8 @@ export interface PactConversationView {
   turns: PactTurnView[];
 }
 
-export type PactGrantState = "active" | "expired" | "invalid" | "disconnected";
+/** `superseded`: replaced by a wider grant for the same business account (a step-up). */
+export type PactGrantState = "active" | "expired" | "invalid" | "disconnected" | "superseded";
 
 export interface PactGrantView {
   id: string;

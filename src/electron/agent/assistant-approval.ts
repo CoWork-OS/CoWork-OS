@@ -146,13 +146,16 @@ export function buildAssistantApprovalRequest(
       : "Allow for this task"
     : "Allow once";
   const scopeText = scopePreview ? ` Scope: ${scopePreview}.` : "";
+  // Exact content the decision is about (a PACT message is up to 4000 characters), written by
+  // the main process; it gets its own bound so the description limit never truncates it.
+  const reviewText = normalizeText(detailsRecord?.approvalReviewText, 4600);
 
   return {
     questions: [
       {
         header: "Permission",
         id: questionId,
-        question: `${safeDescription}${scopeText}${
+        question: `${safeDescription}${reviewText ? ` ${reviewText}` : ""}${scopeText}${
           taskConsent
             ? allowLabel === "Allow for this chat"
               ? ` Consent covers ${taskConsent}.`

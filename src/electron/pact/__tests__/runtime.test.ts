@@ -30,6 +30,7 @@ interface Harness {
   network: FakeNetwork;
   host: PactHost & {
     approvals: string[];
+    approvalDetails: Record<string, unknown>[];
     waits: { taskId: string; requestId: string }[];
     settled: { requestId: string; state: PactAuthorizationState }[];
     events: { type: string; payload: Record<string, unknown> }[];
@@ -92,14 +93,16 @@ function makeHarness(
   const secrets = options.shared?.secrets ?? new MemoryPactSecretStore(db);
   const host: Harness["host"] = {
     approvals: [],
+    approvalDetails: [],
     waits: [],
     settled: [],
     events: [],
     unavailable: [],
     approve: true,
     onWait: () => provider.decide(),
-    async requestLocalApproval(_taskId, summary) {
+    async requestLocalApproval(_taskId, summary, details) {
       host.approvals.push(summary);
+      host.approvalDetails.push(details);
       return host.approve;
     },
     async openAuthorizationWait(taskId) {
@@ -211,6 +214,10 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
       evidence: "verified",
     });
     expect(harness.host.approvals).toHaveLength(1);
+    // The approval shows the exact message and the permissions it uses.
+    expect(harness.host.approvalDetails[0]?.approvalReviewText).toBe(
+      "Message: “Please cancel order A-88213.” Permissions: Cancel an order that has not shipped (orders:cancel); Look up your orders and their status (orders:read).",
+    );
     expect(harness.host.waits).toHaveLength(1);
     expect(harness.host.settled).toEqual([{ requestId: "input-1", state: "granted" }]);
     // The effectful message went only into a context opened by a non-mutating introduction.
@@ -267,7 +274,7 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(outcome).toMatchObject({ status: "denied", reason: "insufficient_permission" });
   });
 
-  it("steps up with the union of effective and missing scopes, creating a second grant", async () => {
+  it("steps up with the union of effective and missing scopes, replacing the narrower grant", async () => {
     const business = await discover();
     const first = await harness.runtime.send(
       owner,
@@ -293,6 +300,38 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(second).toMatchObject({ status: "replied", evidence: "verified" });
     const requested = harness.provider.devices.map((device) => device.scopes.sort());
     expect(requested).toEqual([["orders:read"], ["orders:cancel", "orders:read"]]);
+    const grants = await harness.runtime.listGrants(owner);
+    const active = grants.filter((grant) => grant.state === "active");
+    expect(active.map((grant) => grant.scopes.map((scope) => scope.id).sort())).toEqual([
+      ["orders:cancel", "orders:read"],
+    ]);
+    expect(grants.filter((grant) => grant.state === "superseded")).toHaveLength(1);
+  });
+
+  it("keeps a grant for another account at the same business after a step-up", async () => {
+    const business = await discover();
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "What is the status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    // The user signs in with a different account at the business for the next request.
+    harness.provider.brandUserId = "brand-user-9002";
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Now cancel it please.",
+        effect: "change",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
     const grants = await harness.runtime.listGrants(owner);
     expect(grants.filter((grant) => grant.state === "active")).toHaveLength(2);
   });

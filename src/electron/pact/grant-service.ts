@@ -212,7 +212,7 @@ export class PactGrantService {
     // Secret first: a crash after this leaves an unreferenced secret, never a grant row whose
     // token is missing.
     this.deps.secrets.putGrant(secretRef, secret);
-    return this.deps.repo.insertGrant({
+    const grant = await this.deps.repo.insertGrant({
       ...key,
       accountBinding: facts.brandUserId
         ? accountBindingDigest(facts.brandUserId, this.bindingKey())
@@ -224,6 +224,31 @@ export class PactGrantService {
       accessExpiresAt: token.expiresAt,
       grantExpiresAt: this.now() + DEFAULT_GRANT_LIFETIME_MS,
     });
+    await this.retireNarrowerGrants(key, grant);
+    return grant;
+  }
+
+  /**
+   * A step-up returns one grant covering the earlier scopes and the new ones. An older grant for
+   * the same business account whose scopes it covers is redundant: retire it and delete its
+   * tokens, so one permission per account stays usable and listed. Grants for another account,
+   * or with a scope the new grant lacks (unchecked at the business), stay active.
+   */
+  private async retireNarrowerGrants(key: GrantKey, grant: PactGrantRecord): Promise<void> {
+    if (!grant.accountBinding) return;
+    for (const other of await this.activeGrants(key)) {
+      if (other.id === grant.id || other.accountBinding !== grant.accountBinding) continue;
+      if (!covers(grant, other.scopes)) continue;
+      await this.deps.repo.updateGrant(other.id, {
+        state: "superseded",
+        stateReason: "superseded_by_wider_grant",
+      });
+      try {
+        this.deps.secrets.deleteGrant(other.secretRef);
+      } catch {
+        // The row is already unusable; a leftover secret is unreachable.
+      }
+    }
   }
 
   /** The raw business user id and grant id, for receipt binding checks. */

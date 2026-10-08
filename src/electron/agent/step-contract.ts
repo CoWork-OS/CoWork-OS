@@ -165,7 +165,7 @@ export function extractArtifactPathCandidates(text: string): string[] {
     if (isLikelyCommandSnippet(value)) {
       commandSnippetRanges.push({ start, end: start + token.length });
     }
-    if (isArtifactPathLikeToken(value)) {
+    if (isArtifactPathLikeToken(value) && !/\.[a-z0-9]+\/\.[a-z0-9]+$/i.test(value)) {
       candidates.add(value);
     }
     backtickMatch = backtickPattern.exec(source);
@@ -179,7 +179,7 @@ export function extractArtifactPathCandidates(text: string): string[] {
     const inCommandSnippet = commandSnippetRanges.some(
       (range) => start >= range.start && start < range.end,
     );
-    if (!inCommandSnippet && token) {
+    if (!inCommandSnippet && token && !/\.[a-z0-9]+\/\.[a-z0-9]+$/i.test(token)) {
       candidates.add(token);
     }
     bareMatch = barePattern.exec(source);
@@ -216,7 +216,11 @@ export function descriptionHasWriteIntent(text: string): boolean {
 }
 
 export function descriptionHasStrongWriteIntent(text: string): boolean {
-  const desc = String(text || "").toLowerCase();
+  const desc = String(text || "")
+    .toLowerCase()
+    // In inspection steps, "the build scripts" and "or build scripts" name
+    // existing files; "build" is not an instruction to produce anything.
+    .replace(/\b(?:the|existing|current|and|or)\s+build\s+scripts?\b/g, " ");
   return STRONG_WRITE_VERB_REGEX.test(desc) || PASSIVE_ARTIFACT_WRITE_CUE_REGEX.test(desc);
 }
 

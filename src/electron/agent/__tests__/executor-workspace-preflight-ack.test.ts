@@ -1242,6 +1242,55 @@ End with a final section titled "Verification Evidence".`,
     ).toBe(false);
   });
 
+  it("does not pin runtime scratch as the project root or shadow an existing root file", () => {
+    const workspaceDir = fs.mkdtempSync(path.join(process.cwd(), "tmp-task-scratch-root-"));
+    const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
+    fakeThis.workspace = { path: workspaceDir };
+    fakeThis.task = { id: "task-scratch" };
+    fakeThis.emitEvent = vi.fn();
+    fakeThis.canReadWorkspacePath = vi.fn(() => true);
+    fakeThis.reliabilityTaskRootPinningV6Enabled = true;
+    fakeThis.reliabilityPathDriftRewriteV6Enabled = true;
+    fakeThis.taskPathRootPolicy = "pin_and_rewrite";
+    fakeThis.taskPinnedRoot = ".";
+    fakeThis.taskPinnedRootSource = "fallback";
+    fs.mkdirSync(path.join(workspaceDir, ".cowork", "tmp"), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, "new-project"), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, "package.json"), "{}\n");
+
+    try {
+      (TaskExecutor as Any).prototype.maybePinTaskRootFromMutationPath.call(
+        fakeThis,
+        ".cowork/tmp/ocr.txt",
+        { tool: "run_command", stepId: "1" },
+      );
+      expect(fakeThis.taskPinnedRoot).toBe(".");
+
+      (TaskExecutor as Any).prototype.maybePinTaskRootFromMutationPath.call(
+        fakeThis,
+        "new-project/src/main.ts",
+        { tool: "write_file", stepId: "2" },
+      );
+      expect(fakeThis.taskPinnedRoot).toBe("new-project");
+      expect(
+        (TaskExecutor as Any).prototype.normalizeTaskRootPathCandidate.call(
+          fakeThis,
+          "package.json",
+          { requireSourceMissing: true },
+        ),
+      ).toBeNull();
+      expect(
+        (TaskExecutor as Any).prototype.normalizeTaskRootPathCandidate.call(
+          fakeThis,
+          "src/main.ts",
+          { requireSourceMissing: true },
+        )?.normalizedPath,
+      ).toBe("new-project/src/main.ts");
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("auto-recovers relative path drift to pinned root with retry budget", async () => {
     const fakeThis: Any = Object.create((TaskExecutor as Any).prototype);
     fakeThis.workspace = { path: process.cwd() };

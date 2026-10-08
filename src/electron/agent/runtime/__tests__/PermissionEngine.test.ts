@@ -1109,6 +1109,54 @@ describe("PermissionEngine", () => {
       },
     );
 
+    it("does not mistake a Swift formatting call inside an OCR command for disk format", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "never",
+          accessNetworkMode: "enabled",
+        }),
+        toolName: "run_command",
+        approvalType: "run_command",
+        command:
+          "command -v swift && cat > .cowork/tmp/ocr.swift <<'EOF'\nprint(String(format: \"%.2f\", 1.0))\nEOF\nswift .cowork/tmp/ocr.swift",
+      });
+      expect(result.decision).toBe("allow");
+    });
+
+    it.each(["echo ready && format E:", "echo ready\nformat E:", "cmd /c format E:"])(
+      "still requires consent for an actual disk format command: %s",
+      (command) => {
+        const result = evaluate({
+          workspace: namedWorkspace({
+            accessSandboxMode: "danger-full-access",
+            accessApprovalPolicy: "never",
+            accessNetworkMode: "enabled",
+          }),
+          toolName: "run_command",
+          approvalType: "run_command",
+          command,
+        });
+        expect(result.decision).toBe("deny");
+      },
+    );
+
+    it("explains how to retry image analysis when Full access cannot request consent", () => {
+      const result = evaluate({
+        workspace: namedWorkspace({
+          accessProfileId: "full_access",
+          accessSandboxMode: "danger-full-access",
+          accessApprovalPolicy: "never",
+          accessNetworkMode: "enabled",
+        }),
+        toolName: "analyze_image",
+        approvalType: "data_export",
+        toolInput: { path: ".cowork/uploads/image.png" },
+      });
+      expect(result.decision).toBe("deny");
+      expect(result.reason.summary).toContain("Switch to an on-request profile and retry");
+    });
+
     it.each([
       ["workspace write", { toolName: "write_file", toolInput: { path: "notes.txt" } }],
       [

@@ -29,6 +29,14 @@ describe("step-contract path extraction", () => {
     );
     expect(candidates).not.toEqual(expect.arrayContaining(["win95-ui/scripts/validate.py"]));
   });
+
+  it("does not invent a path from alternate config extensions", () => {
+    const paths = extractArtifactPathCandidates(
+      "Read package.json and electron-builder.yml/.json, or build scripts if present.",
+    );
+    expect(paths).toContain("package.json");
+    expect(paths).not.toContain("electron-builder.yml/.json");
+  });
 });
 
 describe("step-contract token classification", () => {
@@ -45,6 +53,13 @@ describe("step-contract token classification", () => {
 });
 
 describe("step-contract write intent", () => {
+  it("keeps a packaging audit read-only when it merely mentions build scripts", () => {
+    const description =
+      "Audit the current packaging: check git status, read package.json and build scripts if present, and dump the existing code signature.";
+    expect(descriptionHasStrongWriteIntent(description)).toBe(false);
+    expect(descriptionHasWriteIntent(description)).toBe(false);
+  });
+
   it("does not treat generic make phrasing as write intent without artifact cues", () => {
     expect(
       descriptionHasWriteIntent(

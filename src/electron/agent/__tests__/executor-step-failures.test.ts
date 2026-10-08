@@ -3219,6 +3219,51 @@ relationship_memory:
     }
   });
 
+  it("allows OCR scratch output during an image inspection without treating it as a project edit", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", {
+          command: "printf recognized > .cowork/tmp/ocr.txt",
+        }),
+        textResponse("The dialog says the app was not opened."),
+      ],
+      {},
+    );
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ocr-inspection-"));
+    (executor as Any).workspace.path = tempDir;
+    fs.mkdirSync(path.join(tempDir, ".cowork", "tmp"), { recursive: true });
+    executor.toolRegistry.executeTool = vi.fn(async () => {
+      fs.writeFileSync(path.join(tempDir, ".cowork", "tmp", "ocr.txt"), "recognized\n");
+      return { success: true, stdout: "", exitCode: 0 };
+    });
+    const step: Any = {
+      id: "inspect-image",
+      description: "Inspect the attached screenshot before changing any project files.",
+      status: "pending",
+    };
+
+    try {
+      expect((executor as Any).resolveStepExecutionContract(step).mode).toBe("analysis_only");
+      await (executor as Any).executeStep(step);
+      expect(step.status, String(step.error || "")).toBe("completed");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not require a file write for an existing packaging audit", () => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = {
+      id: "audit-packaging",
+      description:
+        "Audit the current packaging and signing setup: check git status, read package.json and build scripts if present, and dump the code signature of any existing .app.",
+      status: "pending",
+    };
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect(contract.mode).toBe("analysis_only");
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
   async function runInspectThenEditStep(opts: {
     description: string;
     relPath: string;

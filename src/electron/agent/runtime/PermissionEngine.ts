@@ -152,9 +152,12 @@ const DANGEROUS_COMMAND_PATTERNS = [
   /\bpoweroff\b/i,
   /\bhalt\b/i,
   /\bdiskutil\s+erase/i,
-  /\bformat\b/i,
   /\bdel\b.*(?:^|\s)\/f\b/i,
 ];
+// Inspect the raw command so a format invocation after a newline is retained.
+// A word-only match also catches Swift's String(format: ...) inside OCR code.
+const DISK_FORMAT_COMMAND_PATTERN =
+  /(?:^|(?:&&|\|\||[;|\n])\s*|cmd(?:\.exe)?\s+\/c\s+)format(?:\.com|\.exe)?(?=\s|$)/i;
 const SAFE_DANGEROUS_ONLY_COMMAND_PREFIXES = [
   "pwd",
   "ls",
@@ -666,7 +669,7 @@ export class PermissionEngine {
         ? {
             type: "other" as const,
             summary:
-              "The active access profile is configured with never; required authority is unavailable.",
+              "This operation requires explicit consent, but the active access profile is set to never ask. Switch to an on-request profile and retry.",
             metadata: {
               accessApprovalPolicy: "never",
               originalDecision: result.decision,
@@ -1243,6 +1246,7 @@ export class PermissionEngine {
     const isExplicitConsentRequired =
       (isShell &&
         (DANGEROUS_COMMAND_PATTERNS.some((pattern) => pattern.test(normalizedCommand)) ||
+          DISK_FORMAT_COMMAND_PATTERN.test(rawCommand) ||
           /(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(normalizedCommand))) ||
       approvalType === "risk_gate" ||
       approvalType === "delete_file" ||

@@ -4416,7 +4416,17 @@ export class TaskExecutor {
     if (policy !== "pin_and_rewrite") return null;
     if (!this.reliabilityPathDriftRewriteV6Enabled) return null;
     if (!this.taskPinnedRoot || this.taskPinnedRoot === ".") return null;
-    return detectTaskRootPathRewrite(candidate, this.workspace.path, this.taskPinnedRoot, opts);
+    const match = detectTaskRootPathRewrite(
+      candidate,
+      this.workspace.path,
+      this.taskPinnedRoot,
+      opts,
+    );
+    // A root inferred from a mutation is only a hint. It must not shadow a
+    // real file at the workspace root (for example package.json in a repo).
+    // An explicit scaffold root from the plan remains authoritative.
+    if (match?.sourceExists && this.taskPinnedRootSource === "mutation") return null;
+    return match;
   }
 
   private rewriteTaskPinnedRootPathsInDescription(step: PlanStep, description: string): string {
@@ -4762,7 +4772,19 @@ export class TaskExecutor {
 
     const firstSegment = normalized.split("/")[0];
     if (!firstSegment || firstSegment === "." || firstSegment === "..") return;
+    // Runtime scratch, uploads and dependency/build directories are not
+    // project roots. OCR and other inspection tools commonly write here.
     const commonRootSubdirs = new Set([
+      ".cowork",
+      ".git",
+      "node_modules",
+      "tmp",
+      "temp",
+      "logs",
+      "dist",
+      "build",
+      "release",
+      "coverage",
       "app",
       "src",
       "data",
@@ -25691,6 +25713,17 @@ You are continuing a previous conversation. The context from the previous conver
     return this.isFileMutationTool(canonicalToolName) || canonicalToolName === "run_command";
   }
 
+  private isAnalysisScratchMutation(
+    evidence: MutationEvidence,
+    stepContract: StepExecutionContract,
+  ): boolean {
+    if (stepContract.mode !== "analysis_only" || !evidence.reported_path) return false;
+    const workspaceRelative = path.relative(this.workspace.path, evidence.reported_path);
+    if (workspaceRelative.startsWith("..") || path.isAbsolute(workspaceRelative)) return false;
+    const parts = workspaceRelative.split(path.sep);
+    return parts[0] === ".cowork" && parts[1] === "tmp" && parts.length > 2;
+  }
+
   private resolveWorkspaceMutationPathCandidate(pathValue: string): string | null {
     const trimmed = String(pathValue || "").trim();
     if (!trimmed) return null;
@@ -35312,9 +35345,11 @@ Return ONLY a JSON object:
                                 size_bytes: evidence.size_bytes,
                                 observed_event_type: evidence.observed_event_type,
                               });
-                              const mutationSatisfiedByEvidence = this.mutationEvidenceV2Enabled
-                                ? this.mutationEvidenceSatisfiesWriteContract(evidence)
-                                : evidence.tool_success;
+                              const mutationSatisfiedByEvidence =
+                                !this.isAnalysisScratchMutation(evidence, stepContract) &&
+                                (this.mutationEvidenceV2Enabled
+                                  ? this.mutationEvidenceSatisfiesWriteContract(evidence)
+                                  : evidence.tool_success);
                               if (
                                 mutationSatisfiedByEvidence &&
                                 evidence.tool_success &&
@@ -36719,9 +36754,11 @@ Return ONLY a JSON object:
                       size_bytes: evidence.size_bytes,
                       observed_event_type: evidence.observed_event_type,
                     });
-                    const mutationSatisfiedByEvidence = this.mutationEvidenceV2Enabled
-                      ? this.mutationEvidenceSatisfiesWriteContract(evidence)
-                      : evidence.tool_success;
+                    const mutationSatisfiedByEvidence =
+                      !this.isAnalysisScratchMutation(evidence, stepContract) &&
+                      (this.mutationEvidenceV2Enabled
+                        ? this.mutationEvidenceSatisfiesWriteContract(evidence)
+                        : evidence.tool_success);
                     if (
                       mutationSatisfiedByEvidence &&
                       evidence.tool_success &&

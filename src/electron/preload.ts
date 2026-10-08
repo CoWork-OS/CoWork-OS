@@ -5769,9 +5769,16 @@ export type {
 
 export interface ElectronAPI {
   selectFolder: (defaultPath?: string) => Promise<string | null>;
-  selectFiles: (
-    defaultPath?: string,
-  ) => Promise<Array<{ path: string; name: string; size: number; mimeType?: string }>>;
+  selectFiles: (defaultPath?: string) => Promise<
+    Array<{
+      path: string;
+      name: string;
+      size: number;
+      mimeType?: string;
+      /** OS-rendered preview image (data URL), when the platform can produce one. */
+      thumbnailDataUrl?: string;
+    }>
+  >;
   openFile: (filePath: string, workspacePath?: string) => Promise<string>;
   openFileWithApp: (
     filePath: string,

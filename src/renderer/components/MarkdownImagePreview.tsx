@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { ImageLightbox } from "./ImageLightbox";
 
 type MarkdownImagePreviewProps = {
   src?: string;
@@ -91,16 +91,6 @@ export function MarkdownImagePreview({
     };
   }, [localPath, trimmedSrc, workspacePath]);
 
-  useEffect(() => {
-    if (!isExpanded) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsExpanded(false);
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isExpanded]);
-
   const label = title || alt || fileName || localPath || "Image";
 
   if (!trimmedSrc) return null;
@@ -132,35 +122,14 @@ export function MarkdownImagePreview({
         )}
       </span>
 
-      {isExpanded &&
-        displaySrc &&
-        createPortal(
-          <div
-            className="markdown-image-lightbox"
-            role="dialog"
-            aria-modal="true"
-            aria-label={label}
-            onClick={() => setIsExpanded(false)}
-          >
-            <div
-              className="markdown-image-lightbox-content"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                className="markdown-image-lightbox-close"
-                onClick={() => setIsExpanded(false)}
-                aria-label="Close image preview"
-                title="Close"
-              >
-                x
-              </button>
-              <img src={displaySrc} alt={alt || label} className="markdown-image-lightbox-img" />
-              {label && <div className="markdown-image-lightbox-caption">{label}</div>}
-            </div>
-          </div>,
-          document.body,
-        )}
+      {isExpanded && displaySrc && (
+        <ImageLightbox
+          src={displaySrc}
+          fileName={label}
+          alt={alt || label}
+          onClose={() => setIsExpanded(false)}
+        />
+      )}
     </>
   );
 }

@@ -6474,66 +6474,6 @@
   background: var(--color-bg-primary);
 }
 
-.markdown-image-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 10020;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 28px;
-  background: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(8px);
-}
-
-.markdown-image-lightbox-content {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  max-width: min(92vw, 1200px);
-  max-height: 90vh;
-}
-
-.markdown-image-lightbox-img {
-  display: block;
-  max-width: min(92vw, 1200px);
-  max-height: calc(90vh - 48px);
-  object-fit: contain;
-  border-radius: 8px;
-  background: var(--color-bg-primary);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-}
-
-.markdown-image-lightbox-close {
-  position: absolute;
-  top: -14px;
-  right: -14px;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-bg-primary);
-  color: var(--color-text);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-}
-
-.markdown-image-lightbox-close:hover {
-  background: var(--color-bg-hover);
-}
-
-.markdown-image-lightbox-caption {
-  max-width: min(92vw, 900px);
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: center;
-  overflow-wrap: anywhere;
-}
-
 .inline-video-preview {
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -10014,58 +9954,10 @@
 .attachment-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-
-.attachment-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  max-width: 260px;
-}
-
-.attachment-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.attachment-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
-}
-
-.attachment-size {
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-
-.attachment-remove {
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-.attachment-remove:hover {
-  color: var(--color-text);
-}
-
-.attachment-remove:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  align-items: flex-end;
+  gap: 10px;
+  /* Room for the remove badge that overhangs file tiles. */
+  padding-top: 6px;
 }
 
 .model-selector {

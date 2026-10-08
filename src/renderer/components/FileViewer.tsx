@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js/lib/core";
-import { Download } from "lucide-react";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -34,6 +33,7 @@ import { useAgentContext } from "../hooks/useAgentContext";
 import { createVideoObjectUrl } from "../utils/videoPlayback";
 import { PDFDocumentSurface } from "./PDFDocumentSurface";
 import { PresentationViewer } from "./PresentationViewer";
+import { ImageLightbox } from "./ImageLightbox";
 import { ThemeIcon } from "./ThemeIcon";
 import {
   AlertTriangleIcon,
@@ -181,12 +181,7 @@ const formatDuration = (seconds: number): string => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
-const ALPHA_FORMATS = new Set(["png", "svg", "webp", "gif", "ico"]);
-
-const hasAlphaChannel = (fileName: string): boolean => {
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  return ALPHA_FORMATS.has(ext);
-};
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|heic|tiff?)$/i;
 
 interface JsonNodeProps {
   value: unknown;
@@ -276,7 +271,6 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(
     null,
   );
-  const [imageActualSize, setImageActualSize] = useState(false);
   const [audioDurationSec, setAudioDurationSec] = useState<number | null>(null);
   const [jsonRaw, setJsonRaw] = useState(false);
   const [copyFlash, setCopyFlash] = useState(false);
@@ -306,8 +300,13 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
     loadFile();
   }, [filePath, workspacePath]);
 
+  // Images render in ImageLightbox, which handles its own keyboard shortcuts.
+  const showImageLightbox =
+    fileData?.fileType === "image" || (loading && !fileData && IMAGE_PATH_RE.test(filePath));
+
   // Handle Escape key
   useEffect(() => {
+    if (showImageLightbox) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
@@ -315,7 +314,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, showImageLightbox]);
 
   // Prepare video / audio playback URL
   useEffect(() => {
@@ -367,7 +366,6 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
 
   // Reset per-format state when fileData changes
   useEffect(() => {
-    setImageActualSize(false);
     setAudioDurationSec(null);
     setJsonRaw(false);
   }, [fileData?.fileType, fileData?.path]);
@@ -740,32 +738,6 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
           </div>
         );
 
-      case "image":
-        return (
-          <div
-            className="file-viewer-image-container"
-            data-alpha={hasAlphaChannel(fileData.fileName) ? "true" : undefined}
-            data-mode={imageActualSize ? "actual" : "fit"}
-          >
-            <img
-              src={fileData.content || ""}
-              alt={fileData.fileName}
-              className="file-viewer-image"
-            />
-            {fileData.content && (
-              <a
-                className="file-viewer-image-download-button"
-                href={fileData.content}
-                download={fileData.fileName || "image.png"}
-                title="Download image"
-                aria-label={`Download ${fileData.fileName || "image"}`}
-              >
-                <Download size={18} strokeWidth={2.2} aria-hidden="true" />
-              </a>
-            )}
-          </div>
-        );
-
       case "video":
         return (
           <div className="file-viewer-video-container">
@@ -892,8 +864,20 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   };
 
   const fileType = fileData?.fileType;
-  const showImageFitToggle = fileType === "image";
   const showJsonRawToggle = fileType === "json";
+
+  if (showImageLightbox && !error) {
+    return (
+      <ImageLightbox
+        src={fileData?.content || undefined}
+        fileName={fileData?.fileName || filePath.split("/").pop()}
+        meta={subtitle || undefined}
+        onClose={onClose}
+        onShowInFinder={handleShowInFinder}
+        onOpenExternal={handleOpenExternal}
+      />
+    );
+  }
 
   return createPortal(
     <div className="file-viewer-overlay" onClick={onClose}>
@@ -913,32 +897,6 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
             </div>
           </div>
           <div className="file-viewer-actions">
-            {showImageFitToggle && (
-              <button
-                className="file-viewer-action-btn"
-                onClick={() => setImageActualSize((v) => !v)}
-                title={imageActualSize ? "Fit to window" : "Actual size"}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  {imageActualSize ? (
-                    <>
-                      <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" strokeLinecap="round" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" strokeLinecap="round" />
-                    </>
-                  )}
-                </svg>
-              </button>
-            )}
             {showJsonRawToggle && (
               <button
                 className={`file-viewer-action-btn ${jsonRaw ? "is-active" : ""}`}

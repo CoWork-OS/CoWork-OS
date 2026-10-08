@@ -60,6 +60,7 @@ import {
   shell,
   nativeTheme,
   Menu,
+  nativeImage,
   screen,
   safeStorage,
   type BrowserWindowConstructorOptions,
@@ -5162,6 +5163,27 @@ if (isMacSafeStorageMigrationWorker) {
       },
     );
 
+    // OS-rendered preview (Quick Look on macOS, the shell thumbnail cache on Windows) so the
+    // composer can show real thumbnails for images, PDFs, Office docs, etc. Unsupported on
+    // Linux and for some file types; callers fall back to a file-type tile.
+    const ATTACHMENT_THUMBNAIL_SIZE = { width: 192, height: 192 };
+    const ATTACHMENT_THUMBNAIL_TIMEOUT_MS = 2000;
+    const createAttachmentThumbnail = async (filePath: string): Promise<string | undefined> => {
+      if (process.platform !== "darwin" && process.platform !== "win32") return undefined;
+      try {
+        const image = await Promise.race([
+          nativeImage.createThumbnailFromPath(filePath, ATTACHMENT_THUMBNAIL_SIZE),
+          new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), ATTACHMENT_THUMBNAIL_TIMEOUT_MS),
+          ),
+        ]);
+        if (!image || image.isEmpty()) return undefined;
+        return image.toDataURL();
+      } catch {
+        return undefined;
+      }
+    };
+
     // Handle file selection (attachments)
     ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_FILES, async (event, defaultPath?: string | null) => {
       const resolvedDefaultPath = await resolveDialogDefaultPath(defaultPath);
@@ -5187,11 +5209,13 @@ if (isMacSafeStorageMigrationWorker) {
             if (!stats.isFile()) {
               return null;
             }
+            const thumbnailDataUrl = await createAttachmentThumbnail(filePath);
             return {
               path: filePath,
               name: path.basename(filePath),
               size: stats.size,
               mimeType: (mime.lookup(filePath) || undefined) as string | undefined,
+              ...(thumbnailDataUrl ? { thumbnailDataUrl } : {}),
             };
           } catch {
             return null;
@@ -5207,6 +5231,7 @@ if (isMacSafeStorageMigrationWorker) {
           name: string;
           size: number;
           mimeType: string | undefined;
+          thumbnailDataUrl?: string;
         } => Boolean(entry),
       );
       rememberApprovedImportFiles(validEntries.map((entry) => entry.path));

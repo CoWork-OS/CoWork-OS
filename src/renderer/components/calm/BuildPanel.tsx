@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge, Plus, X } from "lucide-react";
+import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge, Plus } from "lucide-react";
 import { isTempWorkspaceId, type TaskStatus, type Workspace } from "../../../shared/types";
 import { getWorkspaceStatusFolderLabel } from "../MainContent/welcome-suggestions";
 import { ModelDropdown, type ModelDropdownProps } from "../MainContent/ModelDropdown";
-import { formatFileSize, type PendingAttachment } from "../MainContent/attachments";
+import { type PendingAttachment } from "../MainContent/attachments";
 import { hasHostMethod } from "../../host/browser-capabilities";
 import { CalmFolderMenu } from "./CalmTopBar";
 import { BUILD_FOCUS_COMPOSER_EVENT } from "./build-events";
 import { BUILD_INSTRUCTIONS } from "./build-task";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
+import { AttachmentTile } from "../AttachmentTile";
 
 interface BuildPanelProps {
   onStart: (
@@ -254,26 +255,14 @@ export function BuildPanel({
           {attachments.length > 0 && (
             <div className="attachment-list calm-build-attachments">
               {attachments.map((attachment) => (
-                <div className="attachment-chip" key={attachment.id}>
-                  <span className="attachment-name" title={attachment.name}>
-                    {attachment.name}
-                  </span>
-                  <span className="attachment-size">{formatFileSize(attachment.size)}</span>
-                  <button
-                    type="button"
-                    className="attachment-remove"
-                    onClick={() =>
-                      setAttachments((current) =>
-                        current.filter((file) => file.id !== attachment.id),
-                      )
-                    }
-                    disabled={submitting}
-                    title="Remove attachment"
-                    aria-label={`Remove ${attachment.name}`}
-                  >
-                    <X size={12} aria-hidden="true" />
-                  </button>
-                </div>
+                <AttachmentTile
+                  key={attachment.id}
+                  attachment={attachment}
+                  onRemove={() =>
+                    setAttachments((current) => current.filter((file) => file.id !== attachment.id))
+                  }
+                  disabled={submitting}
+                />
               ))}
             </div>
           )}

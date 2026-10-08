@@ -27,6 +27,7 @@ import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
 import { PresentationArtifactCard } from "./PresentationArtifactCard";
 import { PresentationViewer, type PresentationPreview } from "./PresentationViewer";
 import "./artifact-viewers.css";
+import { AttachmentTile } from "./AttachmentTile";
 
 type PresentationArtifactViewerMode = "sidebar" | "fullscreen";
 type PresentationSettingsTab = Any;
@@ -36,6 +37,7 @@ type PendingPresentationAttachment = {
   name: string;
   size: number;
   mimeType?: string;
+  thumbnailDataUrl?: string;
 };
 
 type PresentationArtifactViewerProps = {
@@ -81,14 +83,6 @@ function presentationPreviewNeedsRender(preview: PresentationPreview | null | un
 
 function getFileName(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
-}
-
-function formatAttachmentSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  const kb = size / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
 }
 
 function formatFileSize(bytes: number): string {
@@ -505,23 +499,12 @@ export function PresentationArtifactViewer({
                 {fullscreenAttachments.length > 0 && (
                   <div className="attachment-list">
                     {fullscreenAttachments.map((attachment) => (
-                      <div className="attachment-chip" key={attachment.id}>
-                        <span className="attachment-name" title={attachment.name}>
-                          {attachment.name}
-                        </span>
-                        <span className="attachment-size">
-                          {formatAttachmentSize(attachment.size)}
-                        </span>
-                        <button
-                          type="button"
-                          className="attachment-remove"
-                          onClick={() => removeAttachment(attachment.id)}
-                          title="Remove attachment"
-                          disabled={fullscreenSending}
-                        >
-                          <X size={12} aria-hidden="true" />
-                        </button>
-                      </div>
+                      <AttachmentTile
+                        key={attachment.id}
+                        attachment={attachment}
+                        onRemove={() => removeAttachment(attachment.id)}
+                        disabled={fullscreenSending}
+                      />
                     ))}
                   </div>
                 )}

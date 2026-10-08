@@ -198,7 +198,7 @@
       "prepare": 3
     },
     "src/electron/database/repositories.ts": {
-      "prepare": 271,
+      "prepare": 270,
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {
@@ -245,15 +245,6 @@
     },
     "src/electron/file-hub/file-hub-sql.ts": {
       "prepare": 2
-    },
-    "src/electron/first-task/attempt-schema.ts": {
-      "prepare": 1
-    },
-    "src/electron/first-task/first-task-sql.ts": {
-      "prepare": 13
-    },
-    "src/electron/first-task/real-work-state.ts": {
-      "prepare": 4
     },
     "src/electron/gateway/context-policy.ts": {
       "prepare": 7
@@ -461,9 +452,6 @@
     "src/electron/subconscious/SubconsciousRepositories.ts": {
       "prepare": 33,
       "runtimeImport": 1
-    },
-    "src/electron/supervisor/SupervisorExchangeRepository.ts": {
-      "prepare": 9
     },
     "src/electron/telemetry/pulse-report-sql.ts": {
       "prepare": 9

@@ -11,8 +11,6 @@ import { setStatementClient } from "../statements/statement-route";
 import { TaskRepository } from "../repository-facades";
 import { EventTriggerService } from "../../triggers/EventTriggerService";
 import { HookSessionRepository } from "../../hooks/hook-session-repository-facades";
-import { ensureFirstTaskTables } from "../../first-task/attempt-schema";
-import { FirstTaskRepository } from "../../first-task/first-task-repository-facades";
 import { ContextPolicyManager } from "../../gateway/context-policy-repository-facades";
 import { RecurringApprovalService } from "../../security/recurring-approval-repository-facades";
 import { AgentSecurityRepository } from "../../security/numbat/agent-security-repository-facades";
@@ -105,7 +103,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
       ).run(taskId);
     }
     // Schema the services create on the host at construction.
-    ensureFirstTaskTables(db);
     db.exec(MCP_EVENT_SCHEMA);
     YouTubeTranscriptStore.setDatabaseForTests(db);
     const triggers = new EventTriggerService(
@@ -190,27 +187,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
     const locks = [await hooks.acquireLock("hook:1"), await hooks.acquireLock("hook:1")];
     await hooks.releaseLock("hook:1");
     const relocked = await hooks.acquireLock("hook:1");
-
-    // First task: setup choice, and a sample task created with its attempt in one unit.
-    const firstTask = new FirstTaskRepository(db);
-    await firstTask.setSetupChoice("ready", start);
-    const setup = await firstTask.getSetup();
-    const sample = await firstTask.createSampleAttempt({
-      attemptId: "attempt-1",
-      missionId: "release-brief-v1",
-      workspaceId: "ws-1",
-      now: start,
-      task: {
-        title: "Sample",
-        prompt: "Sample prompt",
-        status: "pending",
-        workspaceId: "ws-1",
-        source: "sample",
-      } as never,
-    });
-    const attempt = await firstTask.findAttempt("attempt-1");
-    const attemptTaskIds = await firstTask.attemptTaskIds();
-    const sampleTask = await new TaskRepository(db).findById(sample.id);
 
     // Context policies: the group default restricts memory tools; DMs do not.
     const policies = new ContextPolicyManager(db);
@@ -345,12 +321,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
           deleted: mcpEventAfterDelete === undefined,
         },
         hooks: { hookCreated, taskId: hookSession?.taskId, locks, relocked },
-        firstTask: {
-          choice: setup?.choice,
-          attemptTask: attempt?.task_id === sample.id,
-          attemptTaskIds: attemptTaskIds.length,
-          sampleSource: sampleTask?.source,
-        },
         policies: { toolChecks, channelPolicies: channelPolicies.sort() },
         approvals: { activeBefore, activeAfter },
         security: { ingestedDiagnostics: ingestedDiagnostics.length, findings, diagnostics },
@@ -385,11 +355,6 @@ describe("DB6 close-out services on the host and in the database worker", () => 
       taskId: "task-a",
       locks: [true, false],
       relocked: true,
-    });
-    expect(result.firstTask).toMatchObject({
-      choice: "ready",
-      attemptTask: true,
-      sampleSource: "sample",
     });
     expect(result.policies.toolChecks).toEqual([false, true]);
     expect(result.approvals).toEqual({ activeBefore: true, activeAfter: null });

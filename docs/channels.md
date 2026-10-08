@@ -228,12 +228,6 @@ The agent can fetch messages and download attachments directly from Discord, not
 
 **Typical flow:** Use `channel_list_chats` with `channel: "discord"` to discover chat IDs, then `channel_fetch_discord_messages` for live history, and `channel_download_discord_attachment` for any message with attachments.
 
-### Supervisor Mode
-
-Discord can run a strict worker/supervisor protocol with a dedicated coordination channel, watched output channels, and human escalation mirrored into Mission Control.
-
-See [Supervisor Mode on Discord](supervisor-mode-discord.md).
-
 ---
 
 ## Slack

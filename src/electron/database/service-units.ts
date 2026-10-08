@@ -17,7 +17,6 @@ import { AGENT_SIGNAL_UNITS } from "../agents/agent-signal-units";
 import { ACP_UNITS } from "../acp/acp-units";
 import { PACT_UNITS } from "../pact/pact-units";
 import { FILE_HUB_UNITS } from "../file-hub/file-hub-units";
-import { FIRST_TASK_UNITS } from "../first-task/first-task-units";
 import { BRIEFING_UNITS } from "../briefing/briefing-units";
 import { YOUTUBE_UNITS } from "../youtube/youtube-units";
 import { ANSWER_SURFACE_UNITS } from "../answer-surfaces/answer-surface-units";
@@ -29,7 +28,6 @@ import { ROUTINE_UNITS } from "../routines/routine-units";
 import { SUBCONSCIOUS_UNITS } from "../subconscious/subconscious-units";
 import { MISSION_CONTROL_UNITS } from "../mission-control/mission-control-units";
 import { AUTOMATION_OUTCOME_UNITS } from "../automation/automation-outcome-units";
-import { SUPERVISOR_UNITS } from "../supervisor/supervisor-units";
 import { HOOK_SESSION_UNITS } from "../hooks/hook-session-units";
 import { CONTEXT_POLICY_UNITS } from "../gateway/context-policy-units";
 import { ORCHESTRATION_GRAPH_UNITS } from "../agent/orchestration/orchestration-graph-units";
@@ -67,7 +65,6 @@ export const SERVICE_UNITS = {
   ...ACP_UNITS,
   ...PACT_UNITS,
   ...FILE_HUB_UNITS,
-  ...FIRST_TASK_UNITS,
   ...BRIEFING_UNITS,
   ...YOUTUBE_UNITS,
   ...ANSWER_SURFACE_UNITS,
@@ -76,7 +73,6 @@ export const SERVICE_UNITS = {
   ...PULSE_REPORT_UNITS,
   ...TEMP_WORKSPACE_UNITS,
   ...AUTOMATION_OUTCOME_UNITS,
-  ...SUPERVISOR_UNITS,
   ...HOOK_SESSION_UNITS,
   ...CONTEXT_POLICY_UNITS,
   ...ORCHESTRATION_GRAPH_UNITS,

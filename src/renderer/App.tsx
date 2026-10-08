@@ -51,7 +51,6 @@ import type { AutomationOwner } from "./components/automation-library";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
-import { QuickFirstRun } from "./components/QuickFirstRun";
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from "./components/Toast";
 import {
@@ -848,7 +847,6 @@ type SelectedTaskWorkspaceViewProps = {
     images?: ImageAttachment[],
     workspace?: Workspace,
   ) => Promise<void | boolean>;
-  onFirstTaskReady: (task: Task, workspace: Workspace) => void;
   onAskInbox: (query: string) => void;
   onChangeWorkspace: () => void;
   onSelectWorkspace: (workspace: Workspace) => void;
@@ -978,7 +976,6 @@ const SelectedTaskWorkspaceView = memo(
     onStartOnboarding,
     onStartFreshSession,
     onCreateTask,
-    onFirstTaskReady,
     onAskInbox,
     onChangeWorkspace,
     onSelectWorkspace,
@@ -1557,7 +1554,6 @@ const SelectedTaskWorkspaceView = memo(
         return (
           <WebArtifactViewer
             filePath={spreadsheetArtifact.path}
-            readOnlyPreview={task?.source === "sample"}
             workspacePath={workspace.path}
             mode="fullscreen"
             onClose={closeSpreadsheetArtifact}
@@ -1646,7 +1642,6 @@ const SelectedTaskWorkspaceView = memo(
               onStartOnboarding={onStartOnboarding}
               onStartFreshSession={onStartFreshSession}
               onCreateTask={onCreateTask}
-              onFirstTaskReady={onFirstTaskReady}
               onAskInbox={onAskInbox}
               onChangeWorkspace={onChangeWorkspace}
               onSelectWorkspace={onSelectWorkspace}
@@ -1822,7 +1817,6 @@ const SelectedTaskWorkspaceView = memo(
                   ) : spreadsheetArtifact?.kind === "webpage" ? (
                     <WebArtifactViewer
                       filePath={spreadsheetArtifact.path}
-                      readOnlyPreview={task?.source === "sample"}
                       workspacePath={workspace.path}
                       mode="sidebar"
                       onClose={closeSpreadsheetArtifact}
@@ -3337,32 +3331,6 @@ export function App() {
 
     // Refresh LLM config after onboarding (user may have configured a provider)
     loadLLMConfig();
-  };
-
-  const handleQuickFirstRunComplete = async (
-    choice: "ready" | "skipped" | "browsing_without_ai" | "connecting",
-    openSettings = false,
-  ) => {
-    try {
-      const previousTasks = await window.electronAPI.listTasks({ limit: 1 });
-      if (Array.isArray(previousTasks) && previousTasks.length === 0) {
-        const currentMemoryFeatures = await window.electronAPI.getMemoryFeaturesSettings();
-        await window.electronAPI.saveMemoryFeaturesSettings({
-          ...currentMemoryFeatures,
-          contextPackInjectionEnabled: false,
-          heartbeatMaintenanceEnabled: false,
-        });
-      }
-      await window.electronAPI.setFirstTaskSetup(choice);
-    } catch (error) {
-      // Setup preferences are best-effort; never trap the user in first-run.
-      console.error("Failed to save first-run setup:", error);
-    }
-    await handleOnboardingComplete(true);
-    if (openSettings) {
-      setSettingsTab("llm");
-      setCurrentView("settings");
-    }
   };
 
   const handleOpenBrowserView = (url?: string) => {
@@ -7905,17 +7873,10 @@ export function App() {
   if (!onboardingCompleted) {
     return (
       <div className="app">
-        {import.meta.env.VITE_FIRST_TASK_BETA === "1" ? (
-          <QuickFirstRun
-            onComplete={(choice) => handleQuickFirstRunComplete(choice, false)}
-            onOpenSettings={() => handleQuickFirstRunComplete("connecting", true)}
-          />
-        ) : (
-          <Onboarding
-            onComplete={handleOnboardingComplete}
-            workspaceId={currentWorkspace?.id ?? null}
-          />
-        )}
+        <Onboarding
+          onComplete={handleOnboardingComplete}
+          workspaceId={currentWorkspace?.id ?? null}
+        />
       </div>
     );
   }
@@ -8606,18 +8567,6 @@ export function App() {
                   onStartOnboarding={handleShowOnboarding}
                   onStartFreshSession={handleClearTaskView}
                   onCreateTask={handleCreateTask}
-                  onFirstTaskReady={(task, workspace) => {
-                    setTasks((previous) =>
-                      upsertTaskPreservingIdentity(previous, task, { prependIfMissing: true }),
-                    );
-                    tasksRef.current = upsertTaskPreservingIdentity(tasksRef.current, task, {
-                      prependIfMissing: true,
-                    });
-                    setCurrentWorkspace(workspace);
-                    clearRemoteTaskView();
-                    setCurrentView("main");
-                    void selectTaskAfterDraftFlush(task.id);
-                  }}
                   onAskInbox={handleAskInboxFromComposer}
                   onChangeWorkspace={handleChangeWorkspace}
                   onSelectWorkspace={handleSelectWorkspace}

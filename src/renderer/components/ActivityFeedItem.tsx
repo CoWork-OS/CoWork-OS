@@ -1,4 +1,3 @@
-import { useState, type MouseEvent } from "react";
 import { ActivityData, ActivityType, ActivityActorType } from "../../electron/preload";
 import { ThemeIcon } from "./ThemeIcon";
 import {
@@ -40,7 +39,6 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ReactNode> = {
   command_executed: <ThemeIcon emoji="💻" icon={<CodeIcon size={16} />} />,
   tool_used: <ThemeIcon emoji="🔧" icon={<SlidersIcon size={16} />} />,
   mention: <ThemeIcon emoji="@" icon={<AtIcon size={16} />} />,
-  supervisor_exchange: <ThemeIcon emoji="🛰️" icon={<BotIcon size={16} />} />,
   agent_assigned: <ThemeIcon emoji="🤖" icon={<BotIcon size={16} />} />,
   error: <ThemeIcon emoji="⚠️" icon={<AlertTriangleIcon size={16} />} />,
   info: <ThemeIcon emoji="ℹ️" icon={<InfoIcon size={16} />} />,
@@ -60,7 +58,6 @@ const ACTIVITY_COLORS: Record<ActivityType, string> = {
   command_executed: "#06b6d4",
   tool_used: "#6366f1",
   mention: "#ec4899",
-  supervisor_exchange: "#14b8a6",
   agent_assigned: "#6366f1",
   error: "#ef4444",
   info: "#3b82f6",
@@ -92,55 +89,9 @@ export function ActivityFeedItem({
 }: ActivityFeedItemProps) {
   const icon = ACTIVITY_ICONS[activity.activityType];
   const color = ACTIVITY_COLORS[activity.activityType];
-  const exchangeId =
-    activity.metadata && typeof activity.metadata.exchangeId === "string"
-      ? activity.metadata.exchangeId
-      : null;
-  const exchangeStatus =
-    activity.metadata && typeof activity.metadata.exchangeStatus === "string"
-      ? activity.metadata.exchangeStatus
-      : null;
-  const canResolveSupervisorExchange =
-    activity.activityType === "supervisor_exchange" &&
-    !!exchangeId &&
-    exchangeStatus === "escalated";
-  const [isResolvingSupervisorExchange, setIsResolvingSupervisorExchange] = useState(false);
-  const [resolvedSupervisorExchange, setResolvedSupervisorExchange] = useState(false);
-
   const handleClick = () => {
     if (!activity.isRead) {
       onMarkRead(activity.id);
-    }
-  };
-
-  const handleResolveSupervisorExchange = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (!exchangeId) return;
-
-    const resolution = window.prompt("Resolve supervisor escalation", "");
-    if (!resolution || !resolution.trim()) {
-      return;
-    }
-
-    try {
-      setIsResolvingSupervisorExchange(true);
-      const mirrorToDiscord = window.confirm("Mirror this resolution back to Discord?");
-      await window.electronAPI.resolveSupervisorExchange({
-        id: exchangeId,
-        resolution: resolution.trim(),
-        mirrorToDiscord,
-      });
-      setResolvedSupervisorExchange(true);
-      if (!activity.isRead) {
-        onMarkRead(activity.id);
-      }
-    } catch (error) {
-      console.error("Failed to resolve supervisor exchange:", error);
-      window.alert(
-        error instanceof Error ? error.message : "Failed to resolve supervisor exchange",
-      );
-    } finally {
-      setIsResolvingSupervisorExchange(false);
     }
   };
 
@@ -170,16 +121,6 @@ export function ActivityFeedItem({
       </div>
 
       <div className="activity-actions">
-        {canResolveSupervisorExchange && !resolvedSupervisorExchange && (
-          <button
-            className="activity-action-btn resolve"
-            onClick={handleResolveSupervisorExchange}
-            title="Resolve escalation"
-            disabled={isResolvingSupervisorExchange}
-          >
-            {isResolvingSupervisorExchange ? "Resolving..." : "Resolve"}
-          </button>
-        )}
         <button
           className={`activity-action-btn ${activity.isPinned ? "active" : ""}`}
           onClick={(e) => {

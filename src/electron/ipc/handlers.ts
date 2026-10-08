@@ -56,23 +56,11 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
-import {
-  RELEASE_BRIEF_PROMPT,
-  checkReleaseBriefRuntime,
-  seedReleaseBriefWorkspace,
-} from "../first-task/service";
-import { probeFirstTaskModel } from "../first-task/model-preflight";
-import { applyRevisionContract } from "../first-task/revision-contract";
-import { ensureFirstTaskTables } from "../first-task/attempt-schema";
-import { FirstTaskRepository } from "../first-task/first-task-repository-facades";
-import { reconcilePendingSampleAttempts } from "../first-task/reconcile-attempts";
-import { verifyReleaseBrief } from "../first-task/verify-release-brief";
 import { randomUUID } from "node:crypto";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 import { withEffectiveAccessProfile } from "../security/effective-workspace";
 import { withSettingsResponseStyleMirror } from "../memory/memory-read-side";
-import { RELEASE_BRIEF_ACCESS_PROFILE_ID } from "../security/access-profile-resolver";
 import * as path from "path";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
@@ -1179,7 +1167,6 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
-rateLimiter.configure(IPC_CHANNELS.FIRST_TASK_PREFLIGHT, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_ANTHROPIC_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_OLLAMA_MODELS, RATE_LIMIT_CONFIGS.standard);
@@ -1238,7 +1225,6 @@ rateLimiter.configure(IPC_CHANNELS.MEMORY_RELATIONSHIP_UPDATE, RATE_LIMIT_CONFIG
 rateLimiter.configure(IPC_CHANNELS.MEMORY_RELATIONSHIP_DELETE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOX_BRAIN_GET_STATUS, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.BOX_BRAIN_SYNC_NOW, RATE_LIMIT_CONFIGS.expensive);
-rateLimiter.configure(IPC_CHANNELS.SUPERVISOR_EXCHANGE_RESOLVE, RATE_LIMIT_CONFIGS.limited);
 
 // Helper function to get the main window (avoids overlay/utility windows)
 let mainWindowGetter: (() => BrowserWindow | null) | null = null;
@@ -4757,318 +4743,6 @@ export async function setupIpcHandlers(
   );
 
   // Task handlers
-  ensureFirstTaskTables(db);
-  const firstTaskRepo = new FirstTaskRepository(db);
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_GET, async () => {
-    const row = await firstTaskRepo.getSetup();
-    return row
-      ? {
-          schemaVersion: row.schema_version,
-          choice: row.choice,
-          updatedAt: row.updated_at,
-          modelReadyAt: row.model_ready_at,
-        }
-      : null;
-  });
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_SETUP_SET, async (_event, choice: string) => {
-    if (!["ready", "skipped", "browsing_without_ai", "connecting"].includes(choice))
-      throw new Error("Invalid first-task setup choice");
-    await firstTaskRepo.setSetupChoice(choice as "ready", Date.now());
-  });
-  void firstTaskRepo
-    .attemptTaskIds()
-    .then(async (taskIds) => {
-      const tasks = new Map<string, Awaited<ReturnType<typeof taskRepo.findById>>>();
-      for (const taskId of taskIds) tasks.set(taskId, await taskRepo.findById(taskId));
-      const failures: Array<Promise<void>> = [];
-      reconcilePendingSampleAttempts(
-        taskIds,
-        (taskId) => tasks.get(taskId),
-        (taskId, error, completedAt) => {
-          failures.push(taskRepo.update(taskId, { status: "failed", error, completedAt }));
-        },
-      );
-      await Promise.all(failures);
-    })
-    .catch((error: unknown) => logger.warn("Failed to reconcile sample attempts:", error));
-  const requireRealWorkTask = async (taskId: string) => {
-    if (!/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
-    const task = await taskRepo.findById(taskId);
-    if (!task || task.source === "sample" || task.parentTaskId || task.evalCaseId)
-      throw new Error("Real-work task not found");
-    return task;
-  };
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_GET, async (_event, taskId: string) => {
-    await requireRealWorkTask(taskId);
-    return firstTaskRepo.readRealWork(taskId);
-  });
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_INSPECT, async (_event, taskId: string) => {
-    const task = await requireRealWorkTask(taskId);
-    if (task.status !== "completed")
-      throw new Error("Finish the task before inspecting its result");
-    return firstTaskRepo.recordRealWorkInspection(taskId, Date.now());
-  });
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REAL_WORK_USEFUL, async (_event, taskId: string) => {
-    const task = await requireRealWorkTask(taskId);
-    if (task.status !== "completed" || task.terminalStatus === "failed") {
-      throw new Error("Only a completed real-work task can be marked useful");
-    }
-    return firstTaskRepo.recordRealWorkUseful(taskId, Date.now());
-  });
-  const firstTaskStarts = new Map<string, Promise<unknown>>();
-  const firstTaskPreflights = new Map<string, { routeKey: string; createdAt: number }>();
-  const selectedFirstTaskRoute = () => {
-    const selection = LLMProviderFactory.resolveTaskModelSelection();
-    return { selection, routeKey: `${selection.providerType}:${selection.modelId}` };
-  };
-  const readFirstTaskAttempt = async (attemptId?: string, taskId?: string) => {
-    const record = await firstTaskRepo.findAttempt(attemptId, taskId);
-    if (!record) return null;
-    const task = await taskRepo.findById(record.task_id);
-    const workspace = await workspaceRepo.findById(record.workspace_id);
-    if (!task || !workspace) return null;
-    return {
-      attemptId: record.attempt_id,
-      missionId: record.mission_id,
-      task,
-      workspace,
-      check: record.check_json ? JSON.parse(record.check_json) : null,
-      checkedAt: record.checked_at ?? null,
-      inspectedAt: record.inspected_at ?? null,
-      revisionRequestedAt: record.revision_requested_at ?? null,
-      revisionBaseHashes: record.revision_base_hashes_json
-        ? (JSON.parse(record.revision_base_hashes_json) as Record<string, string>)
-        : null,
-      revisionInspectedAt: record.revision_inspected_at ?? null,
-    };
-  };
-
-  ipcMain.handle(
-    IPC_CHANNELS.FIRST_TASK_GET,
-    async (_event, attemptId?: string, taskId?: string) => {
-      if (attemptId && !/^[0-9a-f-]{36}$/i.test(attemptId)) throw new Error("Invalid attempt ID");
-      if (taskId && !/^[0-9a-f-]{36}$/i.test(taskId)) throw new Error("Invalid task ID");
-      const attempt = await readFirstTaskAttempt(attemptId, taskId);
-      if (!attempt?.check?.passed) return attempt;
-      const current =
-        attempt.task.status === "completed"
-          ? await verifyReleaseBrief(attempt.workspace.path).catch(() => null)
-          : null;
-      if (
-        current?.passed &&
-        JSON.stringify(current.artifactHashes) === JSON.stringify(attempt.check.artifactHashes)
-      )
-        return attempt;
-      await firstTaskRepo.clearCheck(attempt.attemptId);
-      return readFirstTaskAttempt(attempt.attemptId);
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_PREFLIGHT, async () => {
-    checkRateLimit(IPC_CHANNELS.FIRST_TASK_PREFLIGHT);
-    for (const [issuedToken, issued] of firstTaskPreflights) {
-      if (Date.now() - issued.createdAt > 10 * 60_000) firstTaskPreflights.delete(issuedToken);
-    }
-    const { selection, routeKey } = selectedFirstTaskRoute();
-    const workspace = await checkReleaseBriefRuntime(tempWorkspaceRoot)
-      .then(() => ({ status: "pass" as const }))
-      .catch((error: unknown) => ({
-        status: "fail" as const,
-        detail: error instanceof Error ? error.message : "The sample workspace is unavailable",
-      }));
-    if (workspace.status === "fail") {
-      return {
-        endpoint: "unknown" as const,
-        model: "unknown" as const,
-        toolCalls: "unknown" as const,
-        workspace: workspace.status,
-        workspaceDetail: workspace.detail,
-        token: null,
-        providerType: selection.providerType,
-        modelId: selection.modelId,
-      };
-    }
-    const result = await (async () => {
-      try {
-        const provider = LLMProviderFactory.createProvider({
-          type: selection.providerType,
-          model: selection.modelId,
-        });
-        return await probeFirstTaskModel(provider, selection.modelId);
-      } catch {
-        return {
-          endpoint: "fail" as const,
-          model: "unknown" as const,
-          toolCalls: "unknown" as const,
-          reason: "endpoint" as const,
-        };
-      }
-    })();
-    const token = result.toolCalls === "pass" ? randomUUID() : null;
-    if (token) {
-      firstTaskPreflights.set(token, { routeKey, createdAt: Date.now() });
-      await firstTaskRepo.markModelReady(Date.now());
-    }
-    return {
-      ...result,
-      workspace: workspace.status,
-      token,
-      providerType: selection.providerType,
-      modelId: selection.modelId,
-    };
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.FIRST_TASK_START,
-    async (_event, attemptId: string, preflightToken?: string) => {
-      if (
-        typeof attemptId !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId)
-      ) {
-        throw new Error("Invalid attempt ID");
-      }
-      const existing = await readFirstTaskAttempt(attemptId);
-      if (existing) return existing;
-      const inFlight = firstTaskStarts.get(attemptId);
-      if (inFlight) return inFlight;
-      const preflight = preflightToken ? firstTaskPreflights.get(preflightToken) : undefined;
-      const { selection, routeKey } = selectedFirstTaskRoute();
-      if (
-        !preflight ||
-        preflight.routeKey !== routeKey ||
-        Date.now() - preflight.createdAt > 10 * 60_000
-      ) {
-        throw new Error("Check the selected model route before starting the sample task.");
-      }
-      firstTaskPreflights.delete(preflightToken!);
-      const launch = (async () => {
-        await checkReleaseBriefRuntime(tempWorkspaceRoot);
-        const workspace = await getOrCreateTempWorkspace({ createNew: true });
-        await seedReleaseBriefWorkspace(workspace.path);
-        // The sample task and its attempt row are created in one unit.
-        const task = await firstTaskRepo.createSampleAttempt({
-          attemptId,
-          missionId: "release-brief-v1",
-          workspaceId: workspace.id,
-          now: Date.now(),
-          task: {
-            title: "Turn a messy release folder into a launch brief",
-            prompt: RELEASE_BRIEF_PROMPT,
-            status: "pending",
-            workspaceId: workspace.id,
-            source: "sample",
-            agentConfig: {
-              accessProfileId: RELEASE_BRIEF_ACCESS_PROFILE_ID,
-              providerType: selection.providerType,
-              modelKey: selection.modelKey,
-              allowedTools: ["list_directory", "read_file", "write_file", "edit_file"],
-              executionMode: "execute",
-            },
-          } as never,
-        });
-        try {
-          await agentDaemon.startTask(task);
-        } catch (error) {
-          agentDaemon.failTask(task.id, error instanceof Error ? error.message : String(error));
-        }
-        return readFirstTaskAttempt(attemptId);
-      })();
-      firstTaskStarts.set(attemptId, launch);
-      try {
-        return await launch;
-      } finally {
-        firstTaskStarts.delete(attemptId);
-      }
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_VERIFY, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
-      throw new Error("Invalid attempt ID");
-    const attempt = await readFirstTaskAttempt(attemptId);
-    if (!attempt) throw new Error("Sample attempt not found");
-    if (attempt.task.status === "cancelled")
-      throw new Error("Cancelled attempts cannot pass checks");
-    if (attempt.task.status !== "completed")
-      throw new Error("Wait for the task to finish before checking outputs");
-    const verified = await verifyReleaseBrief(attempt.workspace.path);
-    const check = attempt.revisionRequestedAt
-      ? applyRevisionContract(verified, attempt.revisionBaseHashes)
-      : verified;
-    await firstTaskRepo.recordCheck(attemptId, JSON.stringify(check), Date.now());
-    return check;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_INSPECT, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
-      throw new Error("Invalid attempt ID");
-    const attempt = await readFirstTaskAttempt(attemptId);
-    if (!attempt || !attempt.check?.passed) throw new Error("No checked sample output to inspect");
-    if (attempt.task.status !== "completed") throw new Error("Sample task is not complete");
-    const current = await verifyReleaseBrief(attempt.workspace.path);
-    if (
-      !current.passed ||
-      JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)
-    ) {
-      await firstTaskRepo.clearCheck(attemptId);
-      throw new Error("Sample output changed since the last check. Run checks again.");
-    }
-    if (attempt.revisionRequestedAt) {
-      if (
-        current.artifactHashes["release-brief.html"] ===
-        attempt.revisionBaseHashes?.["release-brief.html"]
-      ) {
-        throw new Error("The release brief has not changed since the revision request.");
-      }
-      await firstTaskRepo.markInspected(attemptId, true, Date.now());
-    } else {
-      await firstTaskRepo.markInspected(attemptId, false, Date.now());
-    }
-    return true;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_REQUEST_REVISION, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
-      throw new Error("Invalid attempt ID");
-    const attempt = await readFirstTaskAttempt(attemptId);
-    if (
-      !attempt ||
-      attempt.task.status !== "completed" ||
-      !attempt.check?.passed ||
-      !attempt.inspectedAt
-    ) {
-      throw new Error("Open a checked sample result before requesting a revision.");
-    }
-    const current = await verifyReleaseBrief(attempt.workspace.path);
-    if (
-      !current.passed ||
-      JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.check.artifactHashes)
-    ) {
-      throw new Error("Sample output changed. Run checks again before revising.");
-    }
-    await firstTaskRepo.requestRevision(
-      attemptId,
-      JSON.stringify(current.artifactHashes),
-      Date.now(),
-    );
-    return true;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.FIRST_TASK_CANCEL_REVISION, async (_event, attemptId: string) => {
-    if (typeof attemptId !== "string" || !/^[0-9a-f-]{36}$/i.test(attemptId))
-      throw new Error("Invalid attempt ID");
-    const attempt = await readFirstTaskAttempt(attemptId);
-    if (!attempt?.revisionRequestedAt || attempt.task.status !== "completed") return false;
-    const current = await verifyReleaseBrief(attempt.workspace.path);
-    if (
-      !current.passed ||
-      JSON.stringify(current.artifactHashes) !== JSON.stringify(attempt.revisionBaseHashes)
-    )
-      return false;
-    await firstTaskRepo.cancelRevision(attemptId, JSON.stringify(current), Date.now());
-    return true;
-  });
-
   ipcMain.handle(IPC_CHANNELS.TASK_CREATE, async (_, data) => {
     checkRateLimit(IPC_CHANNELS.TASK_CREATE);
     const validated = validateInput(TaskCreateSchema, data, "task");
@@ -9165,19 +8839,6 @@ export async function setupIpcHandlers(
         validated.botToken!,
         validated.applicationId!,
         validated.guildIds,
-        validated.discordSupervisor
-          ? {
-              enabled: validated.discordSupervisor.enabled === true,
-              coordinationChannelId: validated.discordSupervisor.coordinationChannelId,
-              watchedChannelIds: validated.discordSupervisor.watchedChannelIds,
-              workerAgentRoleId: validated.discordSupervisor.workerAgentRoleId,
-              supervisorAgentRoleId: validated.discordSupervisor.supervisorAgentRoleId,
-              humanEscalationChannelId: validated.discordSupervisor.humanEscalationChannelId,
-              humanEscalationUserId: validated.discordSupervisor.humanEscalationUserId,
-              peerBotUserIds: validated.discordSupervisor.peerBotUserIds,
-              strictMode: validated.discordSupervisor.strictMode !== false,
-            }
-          : undefined,
         validated.securityMode || "pairing",
       );
       return toPublicChannel(channel);
@@ -9514,17 +9175,6 @@ export async function setupIpcHandlers(
         Object.entries(validated.config).filter(([, value]) => value !== undefined),
       );
       const mergedConfig = { ...channel.config, ...compactConfig };
-      if ("supervisor" in compactConfig) {
-        const nextSupervisor = compactConfig.supervisor;
-        mergedConfig.supervisor =
-          nextSupervisor && typeof nextSupervisor === "object"
-            ? {
-                ...((channel.config?.supervisor as Record<string, unknown> | undefined) || {}),
-                ...nextSupervisor,
-              }
-            : nextSupervisor;
-      }
-
       if (channel.type === "email") {
         updates.config = validateInput(
           EmailChannelConfigSchema,
@@ -10156,36 +9806,6 @@ export async function setupIpcHandlers(
       });
     }
     return mention;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERVISOR_EXCHANGE_LIST, async (_, query: Any) => {
-    if (!gateway?.getDiscordSupervisorService()) {
-      return [];
-    }
-    const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, "workspace ID");
-    return gateway.getDiscordSupervisorService()!.listExchanges({
-      workspaceId: validatedWorkspaceId,
-      status: query.status,
-      limit: typeof query.limit === "number" ? query.limit : undefined,
-    });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERVISOR_EXCHANGE_RESOLVE, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.SUPERVISOR_EXCHANGE_RESOLVE, RATE_LIMIT_CONFIGS.limited);
-    const service = gateway?.getDiscordSupervisorService();
-    if (!service) {
-      throw new Error("Discord supervisor service is not available");
-    }
-    const id = validateInput(UUIDSchema, request?.id, "supervisor exchange ID");
-    const resolution = String(request?.resolution || "").trim();
-    if (!resolution) {
-      throw new Error("Resolution is required");
-    }
-    return service.resolveExchange({
-      id,
-      resolution,
-      mirrorToDiscord: request?.mirrorToDiscord === true,
-    });
   });
 
   // Agent Teams (Mission Control)

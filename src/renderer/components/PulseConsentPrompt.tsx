@@ -17,7 +17,6 @@ export function PulseConsentPrompt({ tasks }: { tasks: Task[] }) {
         (task) =>
           task.status === "completed" &&
           !task.parentTaskId &&
-          task.source !== "sample" &&
           (task.terminalStatus === undefined ||
             task.terminalStatus === null ||
             task.terminalStatus === "ok" ||

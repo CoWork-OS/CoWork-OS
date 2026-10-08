@@ -248,17 +248,6 @@ CoWork OS is a **security-first, GUI-first local AI super app and everything app
 - [x] Power mode shows all settings and features
 - [x] Configurable in Settings > Appearance
 
-#### Infrastructure (Native Cloud Tools)
-
-- [x] Cloud sandboxes via E2B (create, exec, file read/write, list, delete, expose ports)
-- [x] Domain registration via Namecheap (search, register, DNS management)
-- [x] Built-in USDC wallet on Base (auto-generated, OS keychain encrypted, balance polling)
-- [x] x402 payment protocol (EIP-712 signed USDC payments for HTTP APIs)
-- [x] Infrastructure status tool for provider health checks
-- [x] Approval gating for all payment and registration operations
-- [x] Settings UI with provider status, API key config, wallet display, and tool toggles
-- [x] Located: `src/electron/infra/`
-
 #### Starter Missions & Skills
 
 - [x] 10 one-click starter mission templates with categories
@@ -391,7 +380,6 @@ cowork-os/
 │   │   │   └── guardrails/    # Safety limits
 │   │   ├── gateway/           # WhatsApp, Telegram, Discord & Slack
 │   │   ├── canvas/            # Canvas manager, Build Mode orchestrator
-│   │   ├── infra/             # Infrastructure (E2B, domains, wallet, x402)
 │   │   ├── reports/           # Usage insights, daily briefing
 │   │   ├── memory/            # Memory, playbook, user profile
 │   │   ├── agents/            # Agent teams, orchestrator
@@ -514,10 +502,6 @@ Operations Requiring Approval:
 23. Receive proactive daily briefings with task stats and priorities
 24. Create persistent agent teams that survive across sessions
 25. Adjust UI complexity (focused, standard, power) to match your experience level
-26. Spin up cloud sandboxes and run code in isolated Linux VMs
-27. Search and register domains with DNS management
-28. Use a built-in crypto wallet for infrastructure payments
-29. Make x402 HTTP payments for API access and premium content
 
 ### You Cannot (Yet):
 

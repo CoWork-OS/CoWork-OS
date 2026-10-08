@@ -110,9 +110,6 @@ const plannedMethods = new Set([
   "listBotConversations",
   "getVoiceSettings",
   "onVoiceEvent",
-  "infraGetStatus",
-  "infraGetSettings",
-  "onInfraStatusChange",
 ]);
 
 const nativeOnlyMethods = new Set([

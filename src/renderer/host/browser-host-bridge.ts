@@ -1676,9 +1676,6 @@ export function installBrowserHostBridge(
     "getVoiceSettings",
     "onVoiceEvent",
     "onTrayOpenAbout",
-    "infraGetStatus",
-    "infraGetSettings",
-    "onInfraStatusChange",
     "checkForUpdates",
     "listBotConversations",
     // Local server management is optional in ElectronAPI and currently has no

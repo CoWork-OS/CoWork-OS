@@ -8314,9 +8314,6 @@ ${skillDescriptions}`;
   }
 
   /**
-   * Define X/Twitter tools (bird CLI)
-   */
-  /**
    * Define Notion tools
    */
   private getNotionToolDefinitions(): LLMTool[] {

@@ -1,4 +1,5 @@
 import { mcpConfigurationCurrent } from "../../mcp/configuration-authority";
+import { MCPEventService } from "../../mcp/events/MCPEventService";
 import { snapshotToolInput } from "./tool-input-snapshot";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { isFullAccessProfile } from "../../../shared/access-profiles";
@@ -1504,6 +1505,53 @@ export class ToolRegistry {
 
     // Always add cron/scheduling tools (enables task scheduling)
     allTools.push(...CronTools.getToolDefinitions());
+    if (MCPEventService.getActive()) {
+      allTools.push({
+        name: "manage_connector_events",
+        description:
+          "Discover MCP Events and ask CoWork to watch one. A matching event can continue this task with saved instructions or start a new task. Use unsubscribe to stop monitoring.",
+        input_schema: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["list_events", "list_subscriptions", "subscribe", "unsubscribe"],
+            },
+            serverId: {
+              type: "string",
+              description: "Connected MCP server ID, required for list_events and subscribe",
+            },
+            eventName: { type: "string", description: "Event name advertised by the MCP server" },
+            arguments: {
+              type: "object",
+              description: "Event subscription filters from its input schema",
+            },
+            instructions: {
+              type: "string",
+              description: "What to do when a matching event arrives",
+            },
+            title: { type: "string", description: "Short name for this monitor" },
+            delivery: {
+              type: "string",
+              enum: ["webhook", "poll"],
+              description: "Optional; defaults to webhook when available",
+            },
+            callbackUrl: {
+              type: "string",
+              description:
+                "Public HTTPS callback base URL for webhook mode; can be omitted when COWORK_MCP_EVENTS_PUBLIC_URL is configured",
+            },
+            target: {
+              type: "string",
+              enum: ["current_task", "new_task"],
+              description: "Where to run on event arrival; defaults to current_task",
+            },
+            triggerId: { type: "string", description: "Monitor ID to unsubscribe" },
+          },
+          required: ["action"],
+        },
+      });
+    }
 
     // Infrastructure tools (cloud sandboxes, domains, wallet, x402 payments)
     // Only add when infrastructure is enabled in settings
@@ -1925,8 +1973,43 @@ export class ToolRegistry {
     return access.path;
   }
 
+  private async manageConnectorEvents(input: Any): Promise<Any> {
+    const service = MCPEventService.getActive();
+    if (!service) throw new Error("MCP Events runtime is unavailable");
+    const workspaceId = this.workspace.id;
+    switch (input?.action) {
+      case "list_events":
+        if (typeof input.serverId !== "string") throw new Error("serverId is required");
+        return { events: await service.listAvailable(input.serverId) };
+      case "list_subscriptions":
+        return { subscriptions: service.listOwned(workspaceId) };
+      case "subscribe":
+        return service.createFromTask({
+          serverId: input.serverId,
+          eventName: input.eventName,
+          arguments: input.arguments || {},
+          instructions: input.instructions,
+          title: input.title,
+          delivery: input.delivery,
+          callbackUrl: input.callbackUrl,
+          target: input.target,
+          workspaceId,
+          taskId: this.taskId,
+        });
+      case "unsubscribe":
+        if (typeof input.triggerId !== "string") throw new Error("triggerId is required");
+        return { removed: await service.removeOwned(input.triggerId, workspaceId) };
+      default:
+        throw new Error("Unsupported MCP Events action");
+    }
+  }
+
   private getApprovalTypeForTool(toolName: string, input?: Any): ApprovalType | null {
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
+    if (canonicalToolName === "manage_connector_events") {
+      if (input?.action === "list_subscriptions") return null;
+      return input?.action === "list_events" ? "network_access" : "external_service";
+    }
     if (getConfiguredMcpToolPolicy(canonicalToolName)) return "external_service";
     if (canonicalToolName === "Skill") return null;
     if (canonicalToolName === "request_protected_credential") return "protected_credential";
@@ -3182,6 +3265,11 @@ export class ToolRegistry {
       this.batchImageTools.batchProcess(request.input),
     );
     register("schedule_task", async ({ request }) => this.cronTools.executeAction(request.input));
+    register(
+      "manage_connector_events",
+      async ({ request }) => this.manageConnectorEvents(request.input),
+      serialSchedulerSpec,
+    );
     registerPredicate(
       (name) =>
         name.startsWith("cloud_sandbox_") ||
@@ -4369,7 +4457,12 @@ Scheduling:
   - Create reminders: "remind me to X at Y"
   - Recurring tasks: "every day at 9am, do X"
   - One-time tasks: "at 3pm tomorrow, do X"
-  - Cron schedules: standard cron expressions supported
+- Cron schedules: standard cron expressions supported
+${
+  hasAnyVisibleTools("manage_connector_events")
+    ? "- manage_connector_events: Discover connected MCP event types, subscribe with saved instructions, continue this task on delivery, and stop monitoring when asked"
+    : ""
+}
 
 ${
   hasAnyVisibleTools(
@@ -4961,6 +5054,7 @@ ${skillDescriptions}`;
 
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
+    if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Infrastructure tools (cloud sandboxes, domains, wallet, x402 payments)
     if (

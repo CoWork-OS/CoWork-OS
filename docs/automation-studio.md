@@ -13,6 +13,7 @@ Advanced and compatibility controls remain under **Settings → Automations**. T
 | Find prompt routines, flows, schedules, events, webhooks, and Councils                                       | Main sidebar **Automations → Library**                                   |
 | Create or inspect a prompt-based routine                                                                     | Task menu **… → Add automation…** or the advanced Routines editor        |
 | Manage the cron, inbound hook, or event-trigger engine directly                                              | **Settings → Automations → Scheduled Tasks / Webhooks / Event Triggers** |
+| Watch a connected MCP server event and run saved instructions                                                 | **Settings → Automations → Event Triggers → MCP Event** ([setup guide](./mcp-events.md)) |
 | Configure the always-on cognitive loop                                                                       | Mission Control and **Settings → Automations → Workflow Intelligence**   |
 
 Structured flows are stored as Routines for compatibility, but each activation points to an immutable structured workflow version and executes through the deterministic workflow engine.

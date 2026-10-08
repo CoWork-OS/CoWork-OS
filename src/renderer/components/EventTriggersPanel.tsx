@@ -44,6 +44,12 @@ interface MCPServerOption {
   name: string;
   status: string;
 }
+interface MCPEventOption {
+  name: string;
+  description?: string;
+  delivery: Array<"webhook" | "poll" | "push">;
+  inputSchema: Record<string, Any>;
+}
 
 const SOURCES = [
   { value: "mailbox_event", label: "Mailbox Event" },
@@ -51,6 +57,7 @@ const SOURCES = [
   { value: "email", label: "Legacy Email" },
   { value: "webhook", label: "Webhook" },
   { value: "connector_event", label: "Connector Event" },
+  { value: "mcp_event", label: "MCP Event" },
 ];
 
 const OPERATORS = [
@@ -119,6 +126,7 @@ const FIELDS_BY_SOURCE: Record<string, string[]> = {
   ],
   webhook: ["path", "method", "body"],
   connector_event: ["changeType", "serverId", "connectorId", "resourceUri", "data"],
+  mcp_event: ["data", "eventId", "eventName"],
 };
 
 /** Example triggers shown when empty; clicking one populates the form */
@@ -226,6 +234,20 @@ export const EventTriggersPanel: React.FC<{
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const [history, setHistory] = useState<TriggerHistoryEntry[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServerOption[]>([]);
+  const [mcpEvents, setMcpEvents] = useState<MCPEventOption[]>([]);
+  const [mcpServerId, setMcpServerId] = useState("");
+  const [mcpEventName, setMcpEventName] = useState("");
+  const [mcpArgsJson, setMcpArgsJson] = useState("{}");
+  const [mcpMode, setMcpMode] = useState<"webhook" | "poll">("webhook");
+  const [mcpCallbackUrl, setMcpCallbackUrl] = useState("");
+  const [formError, setFormError] = useState("");
+  const [subscriptionStatuses, setSubscriptionStatuses] = useState<
+    Array<{
+      triggerId: string;
+      status: string;
+      error?: string;
+    }>
+  >([]);
   const appliedFocusTriggerId = useRef<string | null>(null);
 
   // Form state
@@ -238,6 +260,8 @@ export const EventTriggersPanel: React.FC<{
   const [actionPrompt, setActionPrompt] = useState("");
   const [actionTitle, setActionTitle] = useState("");
   const [actionAgentRoleId, setActionAgentRoleId] = useState("");
+  const [runMode, setRunMode] = useState<"new_task" | "thread_follow_up">("new_task");
+  const [targetTaskId, setTargetTaskId] = useState("");
 
   const loadTriggers = useCallback(async () => {
     try {
@@ -253,6 +277,39 @@ export const EventTriggersPanel: React.FC<{
   useEffect(() => {
     loadTriggers();
   }, [loadTriggers]);
+
+  useEffect(() => {
+    if (!mcpServerId) {
+      setMcpEvents([]);
+      return;
+    }
+    let current = true;
+    void (window as Any).electronAPI
+      .listMcpEvents(mcpServerId)
+      .then((events: MCPEventOption[]) => {
+        if (current) setMcpEvents(Array.isArray(events) ? events : []);
+      })
+      .catch((error: Error) => {
+        if (!current) return;
+        setMcpEvents([]);
+        setFormError(error.message);
+      });
+    return () => {
+      current = false;
+    };
+  }, [mcpServerId]);
+
+  useEffect(() => {
+    const loadStatuses = () => {
+      void (window as Any).electronAPI
+        .getMcpEventsStatus?.()
+        .then((statuses: typeof subscriptionStatuses) => setSubscriptionStatuses(statuses || []))
+        .catch(() => undefined);
+    };
+    loadStatuses();
+    const interval = setInterval(loadStatuses, 15_000);
+    return () => clearInterval(interval);
+  }, [triggers]);
 
   useEffect(() => {
     const loadMcpServers = async () => {
@@ -310,12 +367,37 @@ export const EventTriggersPanel: React.FC<{
 
   const handleAdd = async () => {
     if (!name.trim()) return;
+    setFormError("");
     try {
+      let mcpEvent: Record<string, Any> | undefined;
+      if (source === "mcp_event") {
+        const selected = mcpEvents.find((event) => event.name === mcpEventName);
+        if (!mcpServerId || !selected || !selected.delivery.includes(mcpMode)) {
+          throw new Error("Select a connected MCP server, event, and supported delivery mode.");
+        }
+        const args = JSON.parse(mcpArgsJson);
+        if (!args || typeof args !== "object" || Array.isArray(args)) {
+          throw new Error("Subscription arguments must be a JSON object.");
+        }
+        if (mcpMode === "webhook" && !mcpCallbackUrl.trim()) {
+          throw new Error("Enter a public HTTPS callback base URL.");
+        }
+        mcpEvent = {
+          serverId: mcpServerId,
+          name: mcpEventName,
+          arguments: args,
+          delivery: mcpMode,
+          ...(mcpMode === "webhook" ? { callbackUrl: mcpCallbackUrl.trim() } : {}),
+        };
+        if (runMode === "thread_follow_up" && !targetTaskId.trim()) {
+          throw new Error("Enter the task ID to continue when this event arrives.");
+        }
+      }
       await (window as Any).electronAPI.addTrigger({
         name: name.trim(),
         enabled: true,
         source,
-        conditions,
+        conditions: source === "mcp_event" ? [] : conditions,
         conditionLogic: "all",
         action: {
           type: actionType,
@@ -324,14 +406,18 @@ export const EventTriggersPanel: React.FC<{
               ? {
                   prompt: actionPrompt,
                   agentRoleId: actionAgentRoleId.trim(),
+                  ...(mcpEvent ? { mcpEvent } : {}),
                 }
               : {
                   prompt: actionPrompt,
                   title: actionTitle || `Trigger: ${name.trim()}`,
                   workspaceId,
+                  ...(mcpEvent ? { mcpEvent } : {}),
+                  ...(source === "mcp_event" ? { runMode, targetTaskId: targetTaskId.trim() } : {}),
                 },
         },
         workspaceId: workspaceId || "",
+        ...(source === "mcp_event" ? { cooldownMs: 0 } : {}),
       });
       setShowForm(false);
       setName("");
@@ -340,9 +426,11 @@ export const EventTriggersPanel: React.FC<{
       setActionPrompt("");
       setActionTitle("");
       setActionAgentRoleId("");
+      setRunMode("new_task");
+      setTargetTaskId("");
       loadTriggers();
     } catch (err) {
-      console.error("Failed to add trigger:", err);
+      setFormError(err instanceof Error ? err.message : "Could not create trigger.");
     }
   };
 
@@ -471,6 +559,11 @@ export const EventTriggersPanel: React.FC<{
               value={source}
               onChange={(e) => {
                 setSource(e.target.value);
+                if (e.target.value === "mcp_event" && !actionPrompt) {
+                  setActionPrompt(
+                    "When this event arrives, review its data and carry out the requested follow-up.",
+                  );
+                }
                 setConditions([
                   {
                     field: FIELDS_BY_SOURCE[e.target.value]?.[0] || "text",
@@ -545,84 +638,180 @@ export const EventTriggersPanel: React.FC<{
             </div>
           )}
 
-          <div style={{ marginBottom: 12 }}>
-            <label
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-secondary)",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Conditions (all must match)
-            </label>
-            {conditions.map((c, i) => (
-              <div
-                key={i}
-                style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}
-              >
+          {source === "mcp_event" && (
+            <div style={{ display: "grid", gap: 10, marginBottom: 12 }}>
+              <label style={{ fontSize: 12 }}>
+                MCP server
                 <select
-                  value={c.field}
-                  onChange={(e) => updateCondition(i, { field: e.target.value })}
                   className="settings-select event-triggers-select"
-                  style={{ flex: 1 }}
+                  value={mcpServerId}
+                  onChange={(e) => {
+                    setMcpServerId(e.target.value);
+                    setMcpEventName("");
+                  }}
                 >
-                  {fields.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
+                  <option value="">Select a connected server</option>
+                  {mcpServers
+                    .filter((server) => server.status === "connected")
+                    .map((server) => (
+                      <option key={server.id} value={server.id}>
+                        {server.name}
+                      </option>
+                    ))}
                 </select>
+              </label>
+              <label style={{ fontSize: 12 }}>
+                Event
                 <select
-                  value={c.operator}
-                  onChange={(e) => updateCondition(i, { operator: e.target.value })}
                   className="settings-select event-triggers-select"
-                  style={{ flex: 1 }}
+                  value={mcpEventName}
+                  onChange={(e) => {
+                    const event = mcpEvents.find((item) => item.name === e.target.value);
+                    setMcpEventName(e.target.value);
+                    setMcpMode(event?.delivery.includes("poll") ? "poll" : "webhook");
+                  }}
                 >
-                  {OPERATORS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
+                  <option value="">Select an event</option>
+                  {mcpEvents
+                    .filter(
+                      (event) =>
+                        event.delivery.includes("webhook") || event.delivery.includes("poll"),
+                    )
+                    .map((event) => (
+                      <option key={event.name} value={event.name}>
+                        {event.name}
+                      </option>
+                    ))}
                 </select>
-                <input
-                  type="text"
+              </label>
+              {mcpEventName && (
+                <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
+                  {mcpEvents.find((event) => event.name === mcpEventName)?.description}
+                </p>
+              )}
+              <label style={{ fontSize: 12 }}>
+                Subscription filters (JSON object)
+                <textarea
                   className="settings-input"
-                  value={c.value}
-                  onChange={(e) => updateCondition(i, { value: e.target.value })}
-                  placeholder="value"
-                  style={{ flex: 2, marginBottom: 0 }}
+                  value={mcpArgsJson}
+                  rows={3}
+                  onChange={(e) => setMcpArgsJson(e.target.value)}
                 />
-                {conditions.length > 1 && (
-                  <button
-                    onClick={() => removeCondition(i)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "var(--color-text-muted)",
-                      padding: 2,
-                    }}
+              </label>
+              <label style={{ fontSize: 12 }}>
+                Delivery
+                <select
+                  className="settings-select event-triggers-select"
+                  value={mcpMode}
+                  onChange={(e) => setMcpMode(e.target.value as "webhook" | "poll")}
+                >
+                  {mcpEvents
+                    .find((event) => event.name === mcpEventName)
+                    ?.delivery.filter((mode) => mode === "webhook" || mode === "poll")
+                    .map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {mcpMode === "webhook" && (
+                <label style={{ fontSize: 12 }}>
+                  Public HTTPS callback base URL
+                  <input
+                    className="settings-input"
+                    value={mcpCallbackUrl}
+                    onChange={(e) => setMcpCallbackUrl(e.target.value)}
+                    placeholder="https://your-domain.example"
+                  />
+                  <span style={{ color: "var(--color-text-muted)" }}>
+                    Forward /mcp-events/* to 127.0.0.1:8766. CoWork verifies signed deliveries.
+                  </span>
+                </label>
+              )}
+            </div>
+          )}
+
+          {source !== "mcp_event" && (
+            <div style={{ marginBottom: 12 }}>
+              <label
+                style={{
+                  fontSize: 12,
+                  color: "var(--color-text-secondary)",
+                  display: "block",
+                  marginBottom: 4,
+                }}
+              >
+                Conditions (all must match)
+              </label>
+              {conditions.map((c, i) => (
+                <div
+                  key={i}
+                  style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}
+                >
+                  <select
+                    value={c.field}
+                    onChange={(e) => updateCondition(i, { field: e.target.value })}
+                    className="settings-select event-triggers-select"
+                    style={{ flex: 1 }}
                   >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              onClick={addCondition}
-              style={{
-                fontSize: 11,
-                color: "var(--color-accent)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "2px 0",
-              }}
-            >
-              + Add condition
-            </button>
-          </div>
+                    {fields.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={c.operator}
+                    onChange={(e) => updateCondition(i, { operator: e.target.value })}
+                    className="settings-select event-triggers-select"
+                    style={{ flex: 1 }}
+                  >
+                    {OPERATORS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={c.value}
+                    onChange={(e) => updateCondition(i, { value: e.target.value })}
+                    placeholder="value"
+                    style={{ flex: 2, marginBottom: 0 }}
+                  />
+                  {conditions.length > 1 && (
+                    <button
+                      onClick={() => removeCondition(i)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "var(--color-text-muted)",
+                        padding: 2,
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                onClick={addCondition}
+                style={{
+                  fontSize: 11,
+                  color: "var(--color-accent)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px 0",
+                }}
+              >
+                + Add condition
+              </button>
+            </div>
+          )}
 
           <div style={{ marginBottom: 12 }}>
             <label
@@ -646,6 +835,26 @@ export const EventTriggersPanel: React.FC<{
               <option value="create_task">Create task</option>
               <option value="wake_agent">Wake agent</option>
             </select>
+            {source === "mcp_event" && actionType === "create_task" && (
+              <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
+                <select
+                  className="settings-select event-triggers-select"
+                  value={runMode}
+                  onChange={(e) => setRunMode(e.target.value as "new_task" | "thread_follow_up")}
+                >
+                  <option value="new_task">Start a new task</option>
+                  <option value="thread_follow_up">Continue an existing task</option>
+                </select>
+                {runMode === "thread_follow_up" && (
+                  <input
+                    className="settings-input"
+                    value={targetTaskId}
+                    onChange={(e) => setTargetTaskId(e.target.value)}
+                    placeholder="Task ID to continue"
+                  />
+                )}
+              </div>
+            )}
             <input
               type="text"
               className="settings-input"
@@ -679,6 +888,11 @@ export const EventTriggersPanel: React.FC<{
           </div>
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            {formError && (
+              <span role="alert" style={{ color: "var(--color-danger)", fontSize: 12 }}>
+                {formError}
+              </span>
+            )}
             <button className="settings-button" onClick={() => setShowForm(false)}>
               Cancel
             </button>
@@ -796,9 +1010,28 @@ export const EventTriggersPanel: React.FC<{
                 {t.name}
               </div>
               <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 2 }}>
-                {t.source.replace("_", " ")} · {t.conditions.length} condition
-                {t.conditions.length !== 1 ? "s" : ""} · fired {t.fireCount}x
+                {t.source === "mcp_event"
+                  ? `MCP event: ${t.action.config.mcpEvent?.name || "unknown"}`
+                  : `${t.source.replace("_", " ")} · ${t.conditions.length} conditions`}
+                {` · fired ${t.fireCount}x`}
               </div>
+              {t.source === "mcp_event" &&
+                (() => {
+                  const status = subscriptionStatuses.find((item) => item.triggerId === t.id);
+                  return (
+                    status && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: status.error ? "var(--color-danger)" : "var(--color-text-muted)",
+                        }}
+                      >
+                        Subscription: {status.status}
+                        {status.error ? ` — ${status.error}` : ""}
+                      </div>
+                    )
+                  );
+                })()}
             </div>
             <button
               onClick={() => loadHistory(t.id)}

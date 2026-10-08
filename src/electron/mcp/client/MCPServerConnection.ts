@@ -33,7 +33,13 @@ import { isLikelyIntegrationAuthError } from "../../notifications/integration-au
 // MCP Protocol version we support
 /** Latest MCP revision the client implements; servers may answer with an older one. */
 const PROTOCOL_VERSION = "2025-06-18";
-export const SUPPORTED_MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = [
+  MODERN_PROTOCOL_VERSION,
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+];
 
 // Client info to send during initialize
 const CLIENT_INFO = {
@@ -66,6 +72,7 @@ export class MCPServerConnection extends EventEmitter {
   private transport: MCPTransport | null = null;
   private status: MCPConnectionStatus = "disconnected";
   private serverInfo: MCPServerInfo | null = null;
+  private modernProtocol = false;
   private tools: MCPTool[] = [];
   private resources: MCPResource[] = [];
   private prompts: MCPPrompt[] = [];
@@ -125,6 +132,15 @@ export class MCPServerConnection extends EventEmitter {
     return this.prompts;
   }
 
+  /** Protocol-level event methods are never exposed as model tools. */
+  async requestEventMethod(method: string, params?: Record<string, Any>): Promise<Any> {
+    if (!this.modernProtocol || this.status !== "connected" || !this.transport) {
+      throw new Error(`MCP Events require a connected 2026-07-28 server: ${this.config.name}`);
+    }
+    if (!method.startsWith("events/")) throw new Error("Unsupported MCP Events method");
+    return this.transport.sendRequest(method, params);
+  }
+
   /**
    * Connect to the MCP server
    */
@@ -178,7 +194,7 @@ export class MCPServerConnection extends EventEmitter {
     if (this.transport) {
       try {
         // Send shutdown notification if connected
-        if (this.status === "connected") {
+        if (this.status === "connected" && !this.modernProtocol) {
           await this.transport.send({
             jsonrpc: "2.0",
             method: MCP_METHODS.SHUTDOWN,
@@ -386,6 +402,32 @@ export class MCPServerConnection extends EventEmitter {
     }
 
     logger.debug(`Initializing connection to ${this.config.name}`);
+
+    if (this.config.transport === "stdio" || this.config.transport === "streamable-http") {
+      this.transport.setProtocolVersion?.(MODERN_PROTOCOL_VERSION);
+      try {
+        const discovered = await this.transport.sendRequest("server/discover", undefined, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (
+          Array.isArray(discovered?.supportedVersions) &&
+          discovered.supportedVersions.includes(MODERN_PROTOCOL_VERSION)
+        ) {
+          const info = discovered?._meta?.["io.modelcontextprotocol/serverInfo"];
+          this.serverInfo = {
+            name: info?.name || this.config.name,
+            version: info?.version || "unknown",
+            protocolVersion: MODERN_PROTOCOL_VERSION,
+            capabilities: discovered.capabilities || {},
+          };
+          this.modernProtocol = true;
+          return;
+        }
+      } catch (error) {
+        logger.debug(`Modern MCP discovery unavailable for ${this.config.name}:`, error);
+      }
+      this.transport.setProtocolVersion?.(PROTOCOL_VERSION);
+    }
 
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
       protocolVersion: PROTOCOL_VERSION,
@@ -736,6 +778,7 @@ export class MCPServerConnection extends EventEmitter {
     this.prompts = [];
     this.subscribedResourceUris.clear();
     this.serverInfo = null;
+    this.modernProtocol = false;
     this.connectedAt = null;
   }
 

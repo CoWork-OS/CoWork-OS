@@ -27,6 +27,7 @@ import {
 } from "../security/access-profile-resolver";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import type { MCPClientManager } from "../mcp/client/MCPClientManager";
+import { MCPEventService } from "../mcp/events/MCPEventService";
 import type { ChannelType } from "../gateway/channels/types";
 
 /** Reuse the same repositories and engines in Node; desktop-only executors are absent. */
@@ -152,6 +153,9 @@ export function createHeadlessBotAutomation(input: {
     },
     db,
   );
+  const mcpEvents = input.mcpClientManager
+    ? new MCPEventService(db, input.mcpClientManager, triggers)
+    : null;
   const syncSubscriptions = async () => {
     await input.mcpClientManager?.syncTriggerResourceSubscriptions(
       triggers
@@ -160,6 +164,7 @@ export function createHeadlessBotAutomation(input: {
         .map(connectorTriggerSubscription)
         .filter((subscription) => subscription !== null),
     );
+    await mcpEvents?.sync();
   };
   const routines: RoutineService = new RoutineService({
     db,
@@ -258,12 +263,14 @@ export function createHeadlessBotAutomation(input: {
       // Recover routines before ingress starts draining the persistent trigger queue.
       await runtime.start("routines");
       await runtime.start("event_triggers");
+      await mcpEvents?.start();
       await syncSubscriptions().catch(input.log);
       await runtime.start("heartbeat");
     },
     async stop() {
       listening = false;
       input.mcpClientManager?.off("connector_event", onConnectorEvent);
+      await mcpEvents?.stop();
       const results = await Promise.allSettled([
         runtime.stop("event_triggers"),
         runtime.stop("heartbeat"),

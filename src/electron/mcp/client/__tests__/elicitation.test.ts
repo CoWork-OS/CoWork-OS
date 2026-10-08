@@ -87,13 +87,19 @@ describe("MCP approval form elicitation", () => {
     transport.sendRequest.mockResolvedValue({ serverInfo: {}, capabilities: {} });
     (transport as Any).send = vi.fn();
     await (connection as Any).initialize();
-    expect(transport.sendRequest.mock.calls[0][1].capabilities).toEqual({
+    expect(
+      transport.sendRequest.mock.calls.find(([method]) => method === "initialize")?.[1]
+        .capabilities,
+    ).toEqual({
       elicitation: { form: {} },
     });
     delete (transport as Any).sendResponse;
     transport.sendRequest.mockClear();
     await (connection as Any).initialize();
-    expect(transport.sendRequest.mock.calls[0][1].capabilities).toEqual({});
+    expect(
+      transport.sendRequest.mock.calls.find(([method]) => method === "initialize")?.[1]
+        .capabilities,
+    ).toEqual({});
   });
 
   it.each([

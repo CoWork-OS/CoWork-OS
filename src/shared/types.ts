@@ -1744,6 +1744,7 @@ export const TOOL_GROUPS = {
   ],
   // Write operations - medium risk
   "group:write": [
+    "manage_connector_events",
     "write_file",
     "edit_file",
     "copy_file",
@@ -1794,6 +1795,7 @@ export const TOOL_GROUPS = {
   ],
   // Network operations - requires network permission
   "group:network": [
+    "manage_connector_events",
     "http_request",
     "generate_image",
     "generate_video",
@@ -9949,6 +9951,8 @@ export const IPC_CHANNELS = {
   TRIGGER_UPDATE: "trigger:update",
   TRIGGER_REMOVE: "trigger:remove",
   TRIGGER_HISTORY: "trigger:history",
+  MCP_EVENTS_LIST: "mcpEvents:list",
+  MCP_EVENTS_STATUS: "mcpEvents:status",
 
   // Routines
   ROUTINE_LIST: "routine:list",

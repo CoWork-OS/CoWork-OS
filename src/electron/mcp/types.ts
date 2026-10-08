@@ -133,8 +133,19 @@ export interface MCPPrompt {
   }>;
 }
 
+/** Event catalog entry from the experimental MCP Events extension. */
+export interface MCPEventDefinition {
+  name: string;
+  description?: string;
+  delivery: Array<"webhook" | "poll" | "push">;
+  inputSchema: Record<string, Any>;
+  payloadSchema: Record<string, Any>;
+}
+
 // MCP Server Capabilities
 export interface MCPServerCapabilities {
+  /** Experimental MCP Events extension, advertised by compatible servers. */
+  events?: { listChanged?: boolean };
   tools?: {
     listChanged?: boolean;
   };
@@ -358,6 +369,8 @@ export const MCP_ERROR_CODES = {
 export interface MCPTransport {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  /** Select per-request metadata for MCP 2026-07-28 after discovery. */
+  setProtocolVersion?(version: string): void;
   send(message: JSONRPCRequest | JSONRPCNotification): Promise<void>;
   /** Present on transports that implement server-to-client approval requests. */
   sendResponse?(message: JSONRPCResponse): Promise<void>;

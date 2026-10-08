@@ -26,6 +26,7 @@ import { getCustomSkillLoader } from "../../electron/agent/custom-skill-loader";
 import { getSkillRegistry } from "../../electron/agent/skill-registry";
 import { getPackRegistry } from "../../electron/extensions/pack-registry";
 import { MCPClientManager } from "../../electron/mcp/client/MCPClientManager";
+import { MCPEventService } from "../../electron/mcp/events/MCPEventService";
 import { MCPRegistryManager } from "../../electron/mcp/registry/MCPRegistryManager";
 import {
   AgentBuilderService,
@@ -1540,6 +1541,7 @@ function validateEventTriggerInput(value: unknown, partial = false): RecordLike 
       "mailbox_event",
       "webhook",
       "connector_event",
+      "mcp_event",
       "github_event",
       "file_change",
       "cron_event",
@@ -1590,6 +1592,7 @@ function validateEventTriggerInput(value: unknown, partial = false): RecordLike 
       "workspaceId",
       "runMode",
       "targetTaskId",
+      "mcpEvent",
     ]);
     for (const key of ["prompt", "message"])
       if (config[key] !== undefined) textArg(config[key], 100_000);
@@ -1614,6 +1617,20 @@ function validateEventTriggerInput(value: unknown, partial = false): RecordLike 
       config.workspaceId !== input.workspaceId
     )
       return invalidRequest();
+    if (config.mcpEvent !== undefined) {
+      const event = requireRecord(config.mcpEvent, [
+        "serverId",
+        "name",
+        "arguments",
+        "delivery",
+        "callbackUrl",
+      ]);
+      textArg(event.serverId, 200);
+      textArg(event.name, 200);
+      requireRecord(event.arguments);
+      if (event.delivery !== "webhook" && event.delivery !== "poll") return invalidRequest();
+      if (event.callbackUrl !== undefined) textArg(event.callbackUrl, 2048);
+    }
     if (action.type === "create_task" && config.prompt === undefined) return invalidRequest();
     if (
       action.type === "send_message" &&
@@ -4513,6 +4530,28 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
 
   const triggersAvailable = Boolean(eventTriggerService());
   if (triggersAvailable) {
+    definitions.listMcpEvents = definition(
+      automation,
+      async ([serverId]) => MCPClientManager.getInstance().listServerEvents(String(serverId)),
+      { minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
+    );
+    definitions.getMcpEventsStatus = definition(
+      automation,
+      async () => {
+        const visibleIds = new Set(
+          (await listReadableWorkspaces()).map((workspace) => workspace.id),
+        );
+        const triggerIds = new Set(
+          eventTriggerService()!.listTriggers!()
+            .filter((trigger) => visibleIds.has(trigger.workspaceId))
+            .map((trigger) => trigger.id),
+        );
+        return (MCPEventService.getActive()?.status() || []).filter((row) =>
+          triggerIds.has(row.triggerId),
+        );
+      },
+      { minArgs: 0, maxArgs: 0 },
+    );
     definitions.listTriggers = definition(
       automation,
       async ([rawWorkspaceId]) => {
@@ -4568,7 +4607,9 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
               403,
             );
         }
-        return eventTriggerService()!.addTrigger(input);
+        const created = await eventTriggerService()!.addTrigger(input);
+        await MCPEventService.getActive()?.sync();
+        return created;
       },
       {
         mutation: true,
@@ -4607,7 +4648,9 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
               403,
             );
         }
-        return eventTriggerService()!.updateTrigger(String(id), updates);
+        const updated = await eventTriggerService()!.updateTrigger(String(id), updates);
+        await MCPEventService.getActive()?.sync();
+        return updated;
       },
       {
         mutation: true,
@@ -4622,7 +4665,9 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
         const trigger = eventTriggerService()!.getTrigger(String(id));
         if (!trigger) return false;
         await permission(trigger.workspaceId, "canManageRoutines");
-        return eventTriggerService()!.removeTrigger(String(id));
+        const removed = await eventTriggerService()!.removeTrigger(String(id));
+        await MCPEventService.getActive()?.sync();
+        return removed;
       },
       { mutation: true, minArgs: 1, maxArgs: 1, validate: simpleIdValidator },
     );

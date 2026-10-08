@@ -14,6 +14,7 @@ import {
   MCPCallResult,
   MCPClientEvent,
   MCPToolCallOptions,
+  MCPEventDefinition,
   MCPSettings as _MCPSettings,
 } from "../types";
 import { MCPSettingsManager } from "../settings";
@@ -348,6 +349,60 @@ export class MCPClientManager extends EventEmitter {
       return [];
     }
     return connection.getTools();
+  }
+
+  async listServerEvents(serverId: string): Promise<MCPEventDefinition[]> {
+    this.assertServerNotBlocked(serverId);
+    const connection = this.connections.get(serverId);
+    if (!connection) throw new Error(`MCP server ${serverId} is not connected`);
+    if (!connection.getStatus().serverInfo?.capabilities?.events) return [];
+    const events: MCPEventDefinition[] = [];
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    const names = new Set<string>();
+    do {
+      const result = await connection.requestEventMethod(
+        "events/list",
+        cursor ? { cursor } : undefined,
+      );
+      if (!Array.isArray(result?.events)) throw new Error("Invalid MCP event catalog");
+      for (const event of result.events) {
+        if (
+          !event ||
+          typeof event.name !== "string" ||
+          !event.name ||
+          names.has(event.name) ||
+          !Array.isArray(event.delivery) ||
+          !event.delivery.every((mode: unknown) =>
+            ["webhook", "poll", "push"].includes(String(mode)),
+          ) ||
+          !event.inputSchema ||
+          typeof event.inputSchema !== "object" ||
+          !event.payloadSchema ||
+          typeof event.payloadSchema !== "object"
+        ) {
+          throw new Error("Invalid MCP event definition");
+        }
+        names.add(event.name);
+        events.push(event);
+      }
+      cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+      if (cursor && seen.has(cursor)) throw new Error("MCP event catalog repeated its cursor");
+      if (cursor) seen.add(cursor);
+      if (events.length > 1000) throw new Error("MCP event catalog exceeds 1000 entries");
+    } while (cursor);
+    return events;
+  }
+
+  async requestServerEventMethod(
+    serverId: string,
+    method: "events/subscribe" | "events/unsubscribe" | "events/poll",
+    params: Record<string, Any>,
+  ): Promise<Any> {
+    this.assertServerNotBlocked(serverId);
+    const connection = this.connections.get(serverId);
+    if (!connection) throw new Error(`MCP server ${serverId} is not connected`);
+    return connection.requestEventMethod(method, params);
   }
 
   getServerIdForTool(toolName: string): string | null {

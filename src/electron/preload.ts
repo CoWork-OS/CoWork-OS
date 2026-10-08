@@ -5462,6 +5462,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Event Triggers
   listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
+  listMcpEvents: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_LIST, serverId),
+  getMcpEventsStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_STATUS),
   addTrigger: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_ADD, data),
   updateTrigger: (id: string, updates: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_UPDATE, { id, updates }),

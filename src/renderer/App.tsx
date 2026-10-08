@@ -6828,6 +6828,7 @@ export function App() {
   const handleCreateTaskFromPrompt = async (
     prompt: string,
     attachments: PendingAttachment[] = [],
+    taskOptions?: { accessProfileId?: AccessProfileId },
   ): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
@@ -6866,6 +6867,7 @@ export function App() {
       message,
       {
         generateTitle: true,
+        ...(taskOptions?.accessProfileId ? { accessProfileId: taskOptions.accessProfileId } : {}),
         ...(isBuildPrompt(prompt) ? { agentConfig: { taskOrigin: "build" as const } } : {}),
       },
       images,
@@ -8545,6 +8547,10 @@ export function App() {
                   onSelectWorkspace={(workspace) => void selectBuildWorkspace(workspace)}
                   recentBuilds={recentBuilds}
                   onOpenBuild={(taskId) => void openTaskById(taskId)}
+                  onOpenSettings={(tab) => {
+                    if (tab) setSettingsTab(tab);
+                    setCurrentView("settings");
+                  }}
                   onPickFolder={handlePickBuildFolder}
                   folderPickerUnavailableReason={
                     isBrowserHost

@@ -333,7 +333,7 @@ If you recently changed the Google OAuth client id, client secret, or scopes, re
 
 When a background integration request fails because authorization is stale, revoked, missing scopes, or blocked by a sign-in challenge, CoWork now creates a warning notification instead of silently retrying forever. The notification points you back to Settings so you can reconnect or update the provider credentials.
 
-This applies to the shared Google Workspace path used by Gmail, Calendar, and Drive; X (Twitter) login/challenge failures; and MCP connector tool calls or connection status errors that look like auth failures. To avoid notification spam, repeated auth failures for the same integration are de-duped for a short window.
+This applies to the shared Google Workspace path used by Gmail, Calendar, and Drive, and MCP connector tool calls or connection status errors that look like auth failures. To avoid notification spam, repeated auth failures for the same integration are de-duped for a short window.
 
 Fix:
 

@@ -176,7 +176,6 @@ Integration auth failures are surfaced through `src/electron/notifications/integ
 Current producers are:
 
 - Google Workspace API helpers for Gmail, Calendar, Drive, and shared native/MCP token refresh or scope failures
-- X (Twitter) tool failures that indicate login, challenge, verification, or authorization blocking
 - MCP connector tool/status errors that look like auth failures
 
 MCP transport disconnects that classify as auth failures stop at `error` rather than scheduling reconnect backoff. Non-auth transient disconnects still use the normal reconnect path.

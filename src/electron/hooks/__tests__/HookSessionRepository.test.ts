@@ -89,21 +89,21 @@ describe("HookSessionRepository", () => {
   });
 
   it("creates and finds a session mapping", async () => {
-    const created = await repo.create("xmention:123", "task-1");
+    const created = await repo.create("hook:123", "task-1");
     expect(created).toBe(true);
 
-    const found = await repo.findBySessionKey("xmention:123");
+    const found = await repo.findBySessionKey("hook:123");
     expect(found).not.toBeNull();
     expect(found?.taskId).toBe("task-1");
   });
 
   it("is idempotent for duplicate session keys", async () => {
-    const first = await repo.create("xmention:dup", "task-1");
-    const second = await repo.create("xmention:dup", "task-2");
+    const first = await repo.create("hook:dup", "task-1");
+    const second = await repo.create("hook:dup", "task-2");
     expect(first).toBe(true);
     expect(second).toBe(false);
 
-    const found = await repo.findBySessionKey("xmention:dup");
+    const found = await repo.findBySessionKey("hook:dup");
     expect(found?.taskId).toBe("task-1");
   });
 
@@ -114,11 +114,11 @@ describe("HookSessionRepository", () => {
     let second = false;
     let third = false;
     try {
-      first = await repo.acquireLock("xmention:lock");
-      second = await repo.acquireLock("xmention:lock");
-      await repo.releaseLock("xmention:lock");
+      first = await repo.acquireLock("hook:lock");
+      second = await repo.acquireLock("hook:lock");
+      await repo.releaseLock("hook:lock");
       Date.now = () => nowMs + 10_000;
-      third = await repo.acquireLock("xmention:lock");
+      third = await repo.acquireLock("hook:lock");
     } finally {
       Date.now = realDateNow;
     }

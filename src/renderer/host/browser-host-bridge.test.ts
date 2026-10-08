@@ -234,8 +234,6 @@ describe("browser host bridge", () => {
     expect(api.stopLocalAIServer).toBeUndefined();
     expect(api.detectHardware).toBeUndefined();
     expect(api.getVoiceSettings).toBeUndefined();
-    expect(api.infraGetStatus).toBeUndefined();
-    expect(api.infraGetSettings).toBeUndefined();
     expect(api.onTrayOpenAbout).toBeUndefined();
     expect(typeof api.createTask).toBe("function");
     dispose();

@@ -13,6 +13,7 @@ afterEach(async () => {
   await Promise.all(running.splice(0).map((service) => service.stop()));
   vi.restoreAllMocks();
   delete process.env.COWORK_MCP_EVENTS_KEY;
+  delete process.env.COWORK_MCP_EVENTS_PUBLIC_URL;
 });
 
 function trigger(delivery: "webhook" | "poll"): EventTrigger {
@@ -138,6 +139,34 @@ describe("MCPEventService", () => {
         }),
       }),
     );
+    db.close();
+  });
+
+  it("reuses an explicit poll monitor when a webhook base URL is configured", async () => {
+    process.env.COWORK_MCP_EVENTS_PUBLIC_URL = "https://events.example";
+    const { db, triggers, client, service } = fixture("poll");
+    (client as Any).listServerEvents = vi.fn(async () => [
+      {
+        name: "comment.created",
+        delivery: ["webhook", "poll"],
+        inputSchema: { type: "object" },
+        payloadSchema: { type: "object" },
+      },
+    ]);
+    await service.start();
+    const input = {
+      serverId: "server-1",
+      eventName: "comment.created",
+      arguments: { document_id: "doc-2" },
+      instructions: "Review the new comment",
+      delivery: "poll" as const,
+      workspaceId: "workspace-1",
+      taskId: "task-1",
+    };
+    const first = await service.createFromTask(input);
+    const second = await service.createFromTask(input);
+    expect(second.triggerId).toBe(first.triggerId);
+    expect(triggers.addTrigger).toHaveBeenCalledOnce();
     db.close();
   });
 

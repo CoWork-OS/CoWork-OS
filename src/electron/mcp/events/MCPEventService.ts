@@ -180,10 +180,15 @@ export class MCPEventService {
     const callbackUrl = input.callbackUrl || process.env.COWORK_MCP_EVENTS_PUBLIC_URL;
     const delivery =
       input.delivery ||
-      (callbackUrl && definition.delivery.includes("webhook") ? "webhook" : "poll");
+      (callbackUrl && definition.delivery.includes("webhook")
+        ? "webhook"
+        : definition.delivery.includes("poll")
+          ? "poll"
+          : "webhook");
     if (!definition.delivery.includes(delivery))
       throw new Error("Event does not support that delivery mode");
     if (delivery === "webhook") this.callbackUrl(callbackUrl, "validation");
+    const selectedCallbackUrl = delivery === "webhook" ? callbackUrl : undefined;
     const existing = this.triggers.listTriggers(input.workspaceId).find((trigger) => {
       const spec = trigger.action.config.mcpEvent;
       return (
@@ -193,7 +198,7 @@ export class MCPEventService {
         spec.name === input.eventName &&
         canonicalJson(spec.arguments) === canonicalJson(input.arguments) &&
         spec.delivery === delivery &&
-        spec.callbackUrl === callbackUrl &&
+        spec.callbackUrl === selectedCallbackUrl &&
         trigger.action.config.prompt === input.instructions.trim() &&
         trigger.action.config.targetTaskId === input.taskId &&
         trigger.action.config.runMode ===

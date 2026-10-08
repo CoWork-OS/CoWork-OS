@@ -98,7 +98,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Browser V2 session manager with visible workbench default and responsive viewport testing
 - [x] Electron Workbench CDP control through renderer-owned webview
 - [x] Playwright local fallback for forced headless/background runs
-- [x] External CDP attach path gated by explicit real-browser consent
+- [x] System Chrome profile launch gated by explicit real-browser consent; attaching to an already-running external browser over CDP is refused
 - [x] Right-sidebar/fullscreen workbench routing with persistent workspace browser profile
 - [x] Accessibility snapshots with short-lived refs and stale-ref validation
 - [x] Visible cursor movement for agent browser actions
@@ -200,7 +200,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] browser_back
 - [x] browser_forward
 - [x] browser_reload
-- [x] browser_attach
+- [x] browser_attach (kept for compatibility; external attach is refused)
 - [x] browser_act_batch
 - [x] browser_close
 

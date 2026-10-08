@@ -425,7 +425,7 @@ Workspace kit context is still injected separately and placed before the memory 
 - `L1 Essential Story`: **on**
 - archive memory: **off by default** (the per-turn recall block still injects query matches)
 - Supermemory profile injection: **optional**
-- `L2 Topic Packs`: **tool-driven**
+- `L2 Topic Packs`: retired
 - `L3 Deep Recall` (`memory_recall`, `context_recall`): **tool-driven**
 
 ---

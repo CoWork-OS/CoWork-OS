@@ -44,7 +44,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Governed Access Profiles**: The main composer offers Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles. A profile carries sandbox, approval, reviewer, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, and child-task surfaces. Command tools are derived from the selected profile; there is no separate new-task shell toggle. See [Access Profiles](access-profiles.md).
 - **Everything Workbench**: Generated documents, spreadsheets, presentations, web pages, PDFs, and previews share one artifact model: compact output card, sidebar open, fullscreen artifact workspace, follow-up composer, and refresh after the agent completes requested edits. This makes CoWork the default place to create, inspect, and revise everyday Word/Excel/PowerPoint-style work while keeping external app actions available for advanced native workflows. See [Everything Workbench](everything-workbench.md).
 - **Terminal Tabs**: CoWork now includes real xterm.js + node-pty terminal tabs inside the workspace, with native macOS login-shell behavior, Windows `cmd.exe` through ConPTY/winpty, keyboard shortcuts, Tab completion, Ctrl+C, interactive prompts, resizing, closeable tabs, and cwd-only prompts. This is a major super-app step because direct CLI work, repository work, agents, artifacts, browser testing, approvals, channels, and automations can stay in one governed workspace. See [Terminal Tabs](terminal-tabs.md).
-- **Browser Workbench / Browser V2**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see through Browser V2, with responsive viewport testing through `browser_emulate`, accessibility snapshot refs, CDP-backed actions, tabs, diagnostics, screenshots, annotation, and visible cursor movement during agent actions. Explicit fallback modes include local Playwright, external Chrome/Edge CDP attach with consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
+- **Browser Workbench / Browser V2**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see through Browser V2, with responsive viewport testing through `browser_emulate`, accessibility snapshot refs, CDP-backed actions, tabs, diagnostics, screenshots, annotation, and visible cursor movement during agent actions. Explicit fallback modes include local Playwright, a separately launched Chrome with your system profile after consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Task Overflow Actions**: task view title menus expose supported task actions in place: pin/unpin, rename, archive, copy working directory, copy task ID, copy `cowork://tasks/<taskId>` deeplink, copy Markdown, fork session, view outputs, and create a same-thread or new-task automation from the current task. See [Task Automations](task-automations.md).
 - **Managed Agents**: Agents Hub provides a dedicated surface for creating, inspecting, publishing, suspending, and improving reusable agents. Agent detail screens are configuration-first and single-pane: test, preview, and starter-prompt actions create normal runtime managed sessions and open their backing tasks in the main task window, where questions, responses, approvals, artifacts, and outputs are handled like any other task. See [Managed Agents](managed-agents.md).
@@ -1175,7 +1175,7 @@ The browser workbench supports:
 - diagnostics drawer and tools for console, network, downloads, storage, and trace state
 - workspace screenshot capture plus in-app screenshot annotation that can be saved or sent back to the agent as an image attachment
 - fullscreen mode with the same follow-up composer and latest-turn/working context frame used by artifact workbenches
-- optional fallback to forced headless Playwright or explicit Chrome DevTools attach for background runs and signed-in system Chrome/Edge sessions
+- optional fallback to forced headless Playwright for background runs, or a separately launched Chrome with the signed-in system profile after consent (attaching to an already-running external browser is refused)
 
 Use `web_fetch` for reading a known static URL. Use the browser workbench for interactive websites, JavaScript-heavy pages, forms, app testing, and visual checks. See [Browser Workbench](browser-workbench.md) for user behavior and [Browser V2 Architecture](browser-v2-architecture.md) for the implementation contract.
 
@@ -1211,7 +1211,7 @@ Browser tools first target the active visible browser workbench for the selected
 
 | Tool                    | Description                                                                                                                                                        |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `browser_attach`        | Attach to existing Chrome/Edge via Chrome DevTools Protocol after explicit real-browser consent. See [Chrome DevTools attach](#chrome-devtools-attach-mode) below. |
+| `browser_attach`        | Kept for compatibility; attaching to an existing Chrome/Edge is refused under the enforced network policy. See [External browser attach](#external-browser-attach-refused) below. |
 | `browser_act_batch`     | Execute batched actions (click, fill, type, press, wait, scroll) in sequence with optional delays                                                                  |
 | `browser_navigate`      | Navigate to URL with configurable wait states; opens the visible in-app browser workbench by default                                                               |
 | `browser_snapshot`      | Return compact accessibility nodes with short-lived refs, focus state, console summary, and network summary                                                        |
@@ -1255,23 +1255,13 @@ Lightweight HTTP without browser overhead — preferred for reading known URLs.
 | `web_fetch`    | Fetch URL → HTML-to-Markdown conversion with optional CSS selector filtering              |
 | `http_request` | Raw HTTP requests (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) with custom headers/body |
 
-### Chrome DevTools Attach Mode
+<a id="chrome-devtools-attach-mode"></a>
 
-Attach to an existing Chrome/Edge instance to control a signed-in browser session (e.g. Gmail, social media). Uses the Chrome DevTools Protocol and requires explicit real-browser consent before control.
+### External Browser Attach (Refused)
 
-**Setup:**
+Attaching to an already-running Chrome or Edge over the Chrome DevTools Protocol (`browser_attach`, or any tool call with `debugger_url`) is refused. An external browser can hold sockets and service workers that were opened before CoWork connected, and those cannot be brought under the task's network policy, so the attempt fails and the managed browser session is kept.
 
-1. Launch Chrome with remote debugging: `chrome --remote-debugging-port=9222` (or add `--remote-debugging-port=9222` to your Chrome shortcut).
-2. Visit [chrome://inspect/#devices](chrome://inspect/#devices) to verify the endpoint.
-3. The agent asks for explicit consent showing the target browser/profile/tab/domain.
-4. The agent uses `browser_attach` with `debugger_url: "http://localhost:9222"` (or the WebSocket URL from the version endpoint) and `confirm_real_browser_control: true`.
-5. After attach, `browser_navigate` and other browser tools operate on the attached session.
-
-See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-debugging/) for full setup guides.
-
-**Profile presets vs attach mode:** Use `browser_attach` with `debugger_url` when you want to control an **already running** signed-in Chrome/Edge session after consent. Use `profile="user"` when you want to **launch a new** Chrome instance with your system profile — but Chrome must not already be running with that profile (profile lock). For existing sessions, attach mode is the correct choice.
-
-**Note:** If you close the Chrome window while attached, subsequent browser actions will fail with "Target closed". Re-attach with `browser_attach` after relaunching Chrome.
+For a signed-in session, sign in inside the Browser Workbench (cookies persist in the workspace browser profile), or use `profile="user"` to **launch a new** Chrome instance with your system profile after you approve real-browser control. Chrome must not already be running with that profile (profile lock).
 
 ### Browser Features
 
@@ -1286,7 +1276,7 @@ See [Chrome Remote Debugging](https://developer.chrome.com/docs/devtools/remote-
 | **Visible Cursor**               | Agent browser actions render cursor movement and click/action pulses over the in-app webview                                                                                                                                         |
 | **Screenshot Annotation**        | Capture, mark up, save, and send browser screenshots back to the agent as image attachments                                                                                                                                          |
 | **Real-Browser Consent**         | System Chrome/Edge profile control requires explicit approval; default workbench never silently reuses system cookies                                                                                                                |
-| **Profile Presets**              | `user` (launch new Chrome with system profile after consent — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). For existing signed-in sessions, use `browser_attach` instead. |
+| **Profile Presets**              | `user` (launch new Chrome with system profile after consent — fails if Chrome is already running), `chrome-relay` (extension relay), `workspace` (workspace default). Attaching to an already-running browser is refused. |
 | **Persistent Profiles**          | Cookies and storage persist across tasks in `.cowork/browser-profiles/`                                                                                                                                                              |
 | **Consent Auto-Dismiss**         | 40+ pattern detectors for cookie/GDPR consent popups                                                                                                                                                                                 |
 | **Retry Logic**                  | 2-attempt retry with per-attempt timeout calculation                                                                                                                                                                                 |

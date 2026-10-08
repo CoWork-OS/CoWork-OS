@@ -93,7 +93,7 @@ CoWork now has three distinct memory surfaces:
    `memory_items` facts (L0/L1), the `USER.md` / `MEMORY.md` blocks rendered from them, and the wake-up layers.
 
 2. **Local deep recall**
-   `memory_recall` over saved facts, the archive, earlier conversations, `.cowork` notes, topic packs and the knowledge graph; `context_recall` for the active task after compaction.
+   `memory_recall` over saved facts, the archive, earlier conversations, `.cowork` notes, the memory folder and the knowledge graph; `context_recall` for the active task after compaction.
 
 3. **External Supermemory**
    Scoped profile/search/remember/forget operations plus optional mirrored memory history.

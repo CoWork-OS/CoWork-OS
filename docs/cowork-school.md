@@ -87,7 +87,7 @@ The best results come from treating it like a capable operator you supervise, no
 
 With a normal chatbot, you leave your work, open a model, ask a question, then copy the result back into whatever you were doing.
 
-CoWork OS reduces that context switching. You can create a task in the desktop app, start from an Ideas prompt, operate through a channel, or run it from a VPS control plane. The task, the outputs, the approvals, and the memory all stay in one operating surface.
+CoWork OS reduces that context switching. You can create a task in the desktop app, start from a use-case gallery prompt, operate through a channel, or run it from a VPS control plane. The task, the outputs, the approvals, and the memory all stay in one operating surface.
 
 ### It is better at workflows than one-shot prompts
 

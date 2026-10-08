@@ -309,7 +309,7 @@ Title: Screenshot a webpage
 Description: Navigate to https://example.com and take a screenshot. Save it as example-screenshot.png.
 ```
 
-Interactive browser tasks use the visible Browser Workbench by default. For form testing or JavaScript-heavy apps, the agent should navigate, call `browser_snapshot`, and then use refs for click/fill/type/read actions. For responsive checks, use `browser_emulate` before screenshots or snapshots so the shared workbench and saved captures reflect the tested desktop/tablet/mobile viewport. Real signed-in Chrome/Edge control is explicit opt-in through `browser_attach`; the default workspace browser profile does not reuse system Chrome cookies.
+Interactive browser tasks use the visible Browser Workbench by default. For form testing or JavaScript-heavy apps, the agent should navigate, call `browser_snapshot`, and then use refs for click/fill/type/read actions. For responsive checks, use `browser_emulate` before screenshots or snapshots so the shared workbench and saved captures reflect the tested desktop/tablet/mobile viewport. Launching Chrome with your signed-in system profile is explicit opt-in, and attaching to an already-running Chrome or Edge is refused; the default workspace browser profile does not reuse system Chrome cookies.
 
 Browser Use Cloud stealth browsers are available only as an explicit opt-in backend. Configure `BROWSER_USE_API_KEY`, then request `browser_provider: "browser-use-cloud"` for a public HTTP(S) site. Cloud mode is blocked for localhost, private networks, `file:` URLs, generated local HTML artifacts, and intranet-style hostnames; use the default visible Browser Workbench for those targets. Browser Use Cloud sessions are stopped by `browser_close`, and retryable pending-stop results include the Browser Use session id if the stop API fails.
 
@@ -395,8 +395,6 @@ Configure these in **Settings** > **AI & Models** > **Model Access** by entering
 | ----------------------------- | ----------------------------------- |
 | OpenCode Zen                  | API key + base URL in Settings      |
 | Google Vertex                 | Access token + base URL in Settings |
-| Google Antigravity            | Access token + base URL in Settings |
-| Google Gemini CLI             | Access token + base URL in Settings |
 | Z.AI                          | API key + base URL in Settings      |
 | GLM                           | API key + base URL in Settings      |
 | Vercel AI Gateway             | API key in Settings                 |

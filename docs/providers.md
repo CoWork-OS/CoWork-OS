@@ -77,8 +77,6 @@ integration.
 | OpenCode Zen                  | API key + base URL in Settings                 | Provider billing                                                        |
 | OpenCode Go                   | API key or supported account token in Settings | Provider-controlled plan eligibility and usage limits apply             |
 | Google Vertex                 | Access token + base URL in Settings            | Provider billing                                                        |
-| Google Antigravity            | Access token + base URL in Settings            | Provider billing                                                        |
-| Google Gemini CLI             | Access token + base URL in Settings            | Provider billing                                                        |
 | Z.AI                          | API key + base URL in Settings                 | Provider billing                                                        |
 | GLM                           | API key + base URL in Settings                 | Provider billing                                                        |
 | Vercel AI Gateway             | API key in Settings                            | Provider billing                                                        |

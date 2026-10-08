@@ -465,8 +465,8 @@ If a task like "go to example.com and test the application as a normal user" doe
 
 1. Confirm the task used a `browser_*` tool such as `browser_navigate`, not only `web_fetch`. `web_fetch` is still correct for static page reading.
 2. Confirm the task is selected in the main task view. The visible workbench is tied to the selected task and opens on demand through the renderer.
-3. If the task explicitly requested `force_headless`, `profile`, `browser_channel`, or `debugger_url`, the tool will use the Playwright/external-CDP fallback path instead of the embedded workbench. The legacy `headless` flag alone should not bypass the visible workbench for normal site testing.
-4. If the site requires an existing signed-in Chrome or Edge session, use `browser_attach` explicitly and confirm real-browser control. The embedded browser uses a persistent workspace profile and does not silently reuse system Chrome cookies.
+3. If the task explicitly requested `force_headless`, `profile`, or `browser_channel`, the tool will use the Playwright fallback path instead of the embedded workbench. The legacy `headless` flag alone should not bypass the visible workbench for normal site testing.
+4. If the site requires a signed-in session, sign in inside the Browser Workbench, or launch Chrome with `profile: "user"` after confirming real-browser control. Attaching to an already-running Chrome or Edge (`browser_attach`, `debugger_url`) is refused under the enforced network policy. The embedded browser uses a persistent workspace profile and does not silently reuse system Chrome cookies.
 5. Capture a fresh dev log and check for `browserWorkbench:openRequest`, `browserWorkbench:register`, `BrowserSessionManager`, or browser tool errors if the sidebar never appears.
 
 If the sidebar opens but browser actions are hard to follow:

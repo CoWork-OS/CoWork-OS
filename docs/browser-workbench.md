@@ -33,13 +33,13 @@ Use `web_fetch` for static page reading or summarizing a known URL. Use the Brow
 
 ## Browser V2 Concept
 
-Browser V2 gives CoWork one browser contract across visible workbench sessions, Playwright fallback runs, and explicit external Chrome/Edge attach.
+Browser V2 gives CoWork one browser contract across visible workbench sessions and Playwright fallback runs. Attaching to an already-running external Chrome or Edge over the DevTools Protocol is refused, because pre-existing sockets and workers in that browser cannot be brought under the task's network policy.
 
 Core rules:
 
 - Visible in-app Browser Workbench is the default agent browser.
 - Main-process automation is CDP-backed through `BrowserSessionManager`, not DOM-script-first renderer automation.
-- Real signed-in Chrome/Edge control is explicit opt-in only.
+- Launching Chrome with your system profile is explicit opt-in only; attaching to an already-running browser is refused.
 - Accessibility snapshot refs are the preferred control path.
 - Selector-based tools continue to work for compatibility.
 - Diagnostics, downloads, uploads, dialogs, storage, screenshots, and traces belong to the browser session.
@@ -51,8 +51,8 @@ See [Browser V2 Architecture](browser-v2-architecture.md) for backend adapters, 
 Every browser tool is resolved through the task's effective [access
 profile](access-profiles.md) before the selected backend runs. The profile and
 administrator policy can constrain network destinations, domain rules, file
-uploads, downloads/exports, external browser attach, and available browser
-tools. Switching from the visible workbench to Playwright, external CDP, or
+uploads, downloads/exports, real-browser profile control, and available browser
+tools. Switching from the visible workbench to Playwright or
 Browser Use Cloud is a transport choice, not a permission escalation; the
 backend cannot widen the task profile. OS Screen Recording, browser login
 state, and external-browser consent remain separate prerequisites.
@@ -162,10 +162,10 @@ Default behavior:
 
 For sites that require an existing signed-in Chrome profile, use an explicit fallback:
 
-- `browser_attach` with a DevTools URL for an already-running signed-in Chrome/Edge session
-- explicit `profile`, `browser_channel`, or `debugger_url` options when a task needs the Playwright-local or external-CDP path
+- `profile: "user"` launches a separate Chrome with your system profile after you approve real-browser control; it fails if Chrome is already running with that profile
+- explicit `profile` or `browser_channel` options when a task needs the Playwright-local path
 
-Real signed-in Chrome/Edge control requires explicit user consent. The default embedded Browser Workbench never reuses system Chrome cookies automatically.
+`browser_attach` and `debugger_url` (attaching to an already-running Chrome or Edge over the DevTools Protocol) are refused under the enforced network policy. Sign in inside the Browser Workbench or use a dedicated browser profile instead. Real signed-in Chrome control requires explicit user consent, and the default embedded Browser Workbench never reuses system Chrome cookies automatically.
 
 ## Downloads, Uploads, Dialogs, And Permissions
 
@@ -175,7 +175,7 @@ Browser V2 treats browser side effects as governed workspace actions:
 - Executable downloads are not run automatically.
 - Uploads require workspace-readable file paths and path validation.
 - JavaScript dialogs are handled with `browser_handle_dialog` and should be visible in diagnostics.
-- Camera, microphone, location, clipboard, notifications, downloads, uploads, and external real-browser attach should surface permission prompts instead of being silently granted.
+- Camera, microphone, location, clipboard, notifications, downloads, uploads, and real-browser profile control should surface permission prompts instead of being silently granted.
 - Console, network, storage, and download metadata are redacted before entering agent context.
 - The active access profile is checked before these browser actions; a profile or domain deny cannot be widened by a backend switch or a one-shot approval.
 
@@ -192,13 +192,12 @@ Generated web pages and live websites use different surfaces:
 
 The visible Browser Workbench is the default for interactive website testing, but CoWork keeps fallback paths for situations where an embedded renderer is not available or the user explicitly asks for a different mode.
 
-Browser tools fall back to Playwright-local or external-CDP adapters when:
+Browser tools fall back to the Playwright-local adapter when:
 
 - no renderer/webview is available
 - the task is running in a remote/headless environment
 - the user explicitly requests `force_headless`
-- the task specifies `profile`, `browser_channel`, or `debugger_url`
-- the task uses explicit Chrome DevTools attach for an existing signed-in Chrome/Edge session after real-browser consent
+- the task specifies `profile` or `browser_channel`
 - the task explicitly requests Browser Use Cloud with `browser_provider: "browser-use-cloud"`
 
 Visible workbench navigation now applies the same domain guardrails as the Playwright fallback before loading the page.

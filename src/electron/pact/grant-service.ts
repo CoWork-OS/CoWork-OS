@@ -53,8 +53,7 @@ export function tokenFacts(accessToken: string): {
     return {
       remoteGrantId: typeof claims.grant_id === "string" ? claims.grant_id : null,
       brandUserId: typeof claims.sub === "string" ? claims.sub : null,
-      scope:
-        typeof claims.scope === "string" ? claims.scope.split(" ").filter(Boolean) : null,
+      scope: typeof claims.scope === "string" ? claims.scope.split(" ").filter(Boolean) : null,
     };
   } catch {
     return { remoteGrantId: null, brandUserId: null, scope: null };
@@ -104,7 +103,10 @@ export class PactGrantService {
     for (const grant of grants) {
       if (!this.matchesKey(grant, key)) continue;
       if (grant.grantExpiresAt !== null && grant.grantExpiresAt <= at) {
-        await this.deps.repo.updateGrant(grant.id, { state: "expired", stateReason: "grant_expired" });
+        await this.deps.repo.updateGrant(grant.id, {
+          state: "expired",
+          stateReason: "grant_expired",
+        });
         continue;
       }
       active.push(grant);
@@ -159,7 +161,10 @@ export class PactGrantService {
   }
 
   /** The raw business user id and grant id, for receipt binding checks. */
-  grantClaims(grant: PactGrantRecord): { brandUserId: string | null; remoteGrantId: string | null } {
+  grantClaims(grant: PactGrantRecord): {
+    brandUserId: string | null;
+    remoteGrantId: string | null;
+  } {
     const secret = this.deps.secrets.getGrant(grant.secretRef);
     if (!secret) return { brandUserId: null, remoteGrantId: grant.remoteGrantId };
     const facts = tokenFacts(secret.accessToken);
@@ -187,7 +192,10 @@ export class PactGrantService {
     const secret = this.deps.secrets.getGrant(current.secretRef);
     if (!secret) {
       await this.invalidate(current.id, "secret_missing");
-      throw new PactGrantUnavailableError("secret_missing", "The stored business permission is missing");
+      throw new PactGrantUnavailableError(
+        "secret_missing",
+        "The stored business permission is missing",
+      );
     }
     if (secret.accessExpiresAt - this.now() > ACCESS_TOKEN_MIN_REMAINING_MS) {
       return secret.accessToken;
@@ -207,7 +215,10 @@ export class PactGrantService {
     refresh: (refreshToken: string) => Promise<DelegationToken>,
   ): Promise<string> {
     if (!secret.refreshToken) {
-      await this.deps.repo.updateGrant(grant.id, { state: "expired", stateReason: "access_expired" });
+      await this.deps.repo.updateGrant(grant.id, {
+        state: "expired",
+        stateReason: "access_expired",
+      });
       throw new PactGrantUnavailableError("expired", "The business permission expired");
     }
     let token: DelegationToken;
@@ -221,7 +232,10 @@ export class PactGrantService {
           "The business no longer accepts this permission; reconnect to continue",
         );
       }
-      throw new PactGrantUnavailableError("refresh_failed", "The business permission could not be refreshed");
+      throw new PactGrantUnavailableError(
+        "refresh_failed",
+        "The business permission could not be refreshed",
+      );
     }
     const next: PactGrantSecret = {
       accessToken: token.accessToken,
@@ -232,18 +246,21 @@ export class PactGrantService {
     const facts = tokenFacts(token.accessToken);
     const now = this.now();
     const expectedRevision = grant.secretRevision;
-    const committed = this.deps.secrets.rotateGrant(grant.secretRef, next, (db: Database.Database) =>
-      new PactStore(db, () => now).updateGrant(
-        grant.id,
-        {
-          secretRevision: expectedRevision + 1,
-          accessExpiresAt: token.expiresAt,
-          // Narrower returned scopes replace what CoWork assumed.
-          scopes: token.scopes,
-          ...(facts.remoteGrantId ? { remoteGrantId: facts.remoteGrantId } : {}),
-        },
-        expectedRevision,
-      ) !== null,
+    const committed = this.deps.secrets.rotateGrant(
+      grant.secretRef,
+      next,
+      (db: Database.Database) =>
+        new PactStore(db, () => now).updateGrant(
+          grant.id,
+          {
+            secretRevision: expectedRevision + 1,
+            accessExpiresAt: token.expiresAt,
+            // Narrower returned scopes replace what CoWork assumed.
+            scopes: token.scopes,
+            ...(facts.remoteGrantId ? { remoteGrantId: facts.remoteGrantId } : {}),
+          },
+          expectedRevision,
+        ) !== null,
     );
     if (!committed) {
       // Another writer rotated first; its tokens are current. Our rotated refresh token is
@@ -251,7 +268,10 @@ export class PactGrantService {
       const latest = await this.deps.repo.getGrant(grant.id);
       const latestSecret = latest ? this.deps.secrets.getGrant(latest.secretRef) : undefined;
       if (latest?.state === "active" && latestSecret) return latestSecret.accessToken;
-      throw new PactGrantUnavailableError("refresh_failed", "The business permission changed during refresh");
+      throw new PactGrantUnavailableError(
+        "refresh_failed",
+        "The business permission changed during refresh",
+      );
     }
     return token.accessToken;
   }

@@ -57,7 +57,10 @@ export function createBrowserPactDefinitions(options: {
     validate: (args) => [schema.parse(args[0])],
     handler: ([value]) => run(async () => handler(value as T, await owner())),
   });
-  const noArgs = (handler: (principal: PactPrincipal) => unknown, mutation = false): BrowserDesktopDefinition => ({
+  const noArgs = (
+    handler: (principal: PactPrincipal) => unknown,
+    mutation = false,
+  ): BrowserDesktopDefinition => ({
     capability: "pact.manage",
     mutation,
     minArgs: 0,
@@ -68,22 +71,38 @@ export function createBrowserPactDefinitions(options: {
   return {
     getPactStatus: noArgs((principal) => service.status(principal)),
     getPactSettings: noArgs(() => service.getSettings()),
-    updatePactSettings: action(PactSettingsUpdateSchema, (value) => service.updateSettings(value), true),
+    updatePactSettings: action(
+      PactSettingsUpdateSchema,
+      (value) => service.updateSettings(value),
+      true,
+    ),
     setPactSignerCredential: action(
       PactSignerCredentialSchema,
       (value) => service.setSignerCredential(value.credential),
       true,
     ),
     createPactDeviceKey: noArgs(() => service.ensureDeviceKey(), true),
-    discoverPactBusiness: action(PactDiscoverSchema, (value, principal) => service.discover(principal, value), true),
+    discoverPactBusiness: action(
+      PactDiscoverSchema,
+      (value, principal) => service.discover(principal, value),
+      true,
+    ),
     listPactBusinesses: noArgs(() => service.listBusinesses()),
-    getPactConversation: action(PactIdSchema, (value, principal) => service.getConversation(principal, value.id), false),
+    getPactConversation: action(
+      PactIdSchema,
+      (value, principal) => service.getConversation(principal, value.id),
+      false,
+    ),
     listPactConversations: action(
       PactConversationListSchema,
       (value, principal) => service.listConversations(principal, value),
       false,
     ),
-    sendPactMessage: action(PactSendSchema, (value, principal) => service.send(principal, value), true),
+    sendPactMessage: action(
+      PactSendSchema,
+      (value, principal) => service.send(principal, value),
+      true,
+    ),
     acknowledgePactEvidence: action(
       PactIdSchema,
       (value, principal) => service.acknowledgeEvidence(principal, value.id),
@@ -94,7 +113,11 @@ export function createBrowserPactDefinitions(options: {
       (value, principal) => service.startAuthorization(principal, value),
       true,
     ),
-    getPactAuthorization: action(PactIdSchema, (value, principal) => service.getAuthorization(principal, value.id), false),
+    getPactAuthorization: action(
+      PactIdSchema,
+      (value, principal) => service.getAuthorization(principal, value.id),
+      false,
+    ),
     getPactAuthorizationForInput: action(
       PactAuthorizationByInputSchema,
       (value, principal) => service.getAuthorizationByInputRequest(principal, value.inputRequestId),
@@ -120,7 +143,15 @@ export function createBrowserPactDefinitions(options: {
       false,
     ),
     listPactGrants: noArgs((principal) => service.listGrants(principal)),
-    disconnectPactGrant: action(PactIdSchema, (value, principal) => service.disconnectGrant(principal, value.id), true),
-    getPactReceipt: action(PactIdSchema, (value, principal) => service.getReceipt(principal, value.id), false),
+    disconnectPactGrant: action(
+      PactIdSchema,
+      (value, principal) => service.disconnectGrant(principal, value.id),
+      true,
+    ),
+    getPactReceipt: action(
+      PactIdSchema,
+      (value, principal) => service.getReceipt(principal, value.id),
+      false,
+    ),
   };
 }

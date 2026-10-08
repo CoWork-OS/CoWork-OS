@@ -52,7 +52,12 @@ export type PactTurnResult =
       sentAt: number;
       receivedAt: number;
     }
-  | { kind: "auth_required"; message: PactMessageRecord; missingScopes: string[]; promptText: string }
+  | {
+      kind: "auth_required";
+      message: PactMessageRecord;
+      missingScopes: string[];
+      promptText: string;
+    }
   | { kind: "outcome_unknown"; message: PactMessageRecord; reason: string }
   | {
       kind: "failed";
@@ -139,7 +144,11 @@ export class PactConversationService {
     let message: PactMessageRecord | null;
     if (input.reuse) {
       if (input.reuse.bodyDigest !== bodyDigest(input.reuse.bodyText)) {
-        return { kind: "failed", reason: "not_executed", detail: "Stored turn failed its integrity check" };
+        return {
+          kind: "failed",
+          reason: "not_executed",
+          detail: "Stored turn failed its integrity check",
+        };
       }
       message = input.reuse;
     } else {
@@ -166,7 +175,8 @@ export class PactConversationService {
           ? {
               kind: "failed",
               reason: "unresolved_operation",
-              detail: "An earlier request to this business has an unknown outcome; resolve it first",
+              detail:
+                "An earlier request to this business has an unknown outcome; resolve it first",
             }
           : {
               kind: "failed",
@@ -179,10 +189,18 @@ export class PactConversationService {
       ? await this.deps.repo.beginReconcile(message.id, this.deps.leaseOwner, MESSAGE_LEASE_MS)
       : await this.deps.repo.beginAttempt(message.id, this.deps.leaseOwner, MESSAGE_LEASE_MS);
     if (!started) {
-      return { kind: "failed", message, reason: "conversation_busy", detail: "The turn is held by another runtime" };
+      return {
+        kind: "failed",
+        message,
+        reason: "conversation_busy",
+        detail: "The turn is held by another runtime",
+      };
     }
     message = started;
-    await this.deps.repo.updateConversation(input.conversation.id, { state: "sending", stateReason: null });
+    await this.deps.repo.updateConversation(input.conversation.id, {
+      state: "sending",
+      stateReason: null,
+    });
 
     const contextId = input.conversation.contextId ?? undefined;
     const sentAt = this.now();
@@ -287,7 +305,10 @@ export class PactConversationService {
       replyText,
       replyMessageId: reply.messageId,
     });
-    await this.deps.repo.updateConversation(input.conversation.id, { state: "replied", stateReason: null });
+    await this.deps.repo.updateConversation(input.conversation.id, {
+      state: "replied",
+      stateReason: null,
+    });
     return {
       kind: "replied",
       message: finished ?? message,
@@ -349,7 +370,10 @@ export class PactConversationService {
       state: "failed",
       stateReason: reason,
     });
-    await this.deps.repo.updateConversation(input.conversation.id, { state: "closed", stateReason: reason });
+    await this.deps.repo.updateConversation(input.conversation.id, {
+      state: "closed",
+      stateReason: reason,
+    });
     return { kind: "failed", message: finished ?? message, reason, detail };
   }
 
@@ -379,7 +403,12 @@ export class PactConversationService {
     if (error instanceof A2AError) {
       switch (error.reason) {
         case "UNSUPPORTED_OPERATION":
-          return this.closeConversation(message, input, "context_closed", "The business closed this conversation");
+          return this.closeConversation(
+            message,
+            input,
+            "context_closed",
+            "The business closed this conversation",
+          );
         case "INVALID_PARAMS":
           if (input.conversation.contextId) {
             return this.closeConversation(
@@ -389,7 +418,12 @@ export class PactConversationService {
               "The business does not accept this conversation for this account",
             );
           }
-          return this.notExecuted(message, input, "not_executed", `The business rejected the message: ${error.message}`);
+          return this.notExecuted(
+            message,
+            input,
+            "not_executed",
+            `The business rejected the message: ${error.message}`,
+          );
         case "CONTENT_TYPE_NOT_SUPPORTED":
         case "TASK_NOT_FOUND":
         case "PUSH_NOTIFICATION_NOT_SUPPORTED":
@@ -403,15 +437,30 @@ export class PactConversationService {
     }
     if (error instanceof A2AHttpError) {
       if (error.status === 401) {
-        return this.notExecuted(message, input, "identity_rejected", "The business did not accept CoWork's identity");
+        return this.notExecuted(
+          message,
+          input,
+          "identity_rejected",
+          "The business did not accept CoWork's identity",
+        );
       }
       if (error.status === 404) {
-        return this.notExecuted(message, input, "business_not_found", "The business agent was not found");
+        return this.notExecuted(
+          message,
+          input,
+          "business_not_found",
+          "The business agent was not found",
+        );
       }
       if (error.status >= 500 && effectful) {
         return this.unknown(message, input, `http_${error.status}`);
       }
-      return this.notExecuted(message, input, "not_executed", `The business returned HTTP ${error.status}`);
+      return this.notExecuted(
+        message,
+        input,
+        "not_executed",
+        `The business returned HTTP ${error.status}`,
+      );
     }
     if (error instanceof PactTransportError) {
       if (
@@ -422,7 +471,12 @@ export class PactConversationService {
         return this.notExecuted(message, input, "policy_denied", error.message);
       }
       if (error.code === "rate_limited") {
-        return this.notExecuted(message, input, "rate_limited", "The business is rate limiting requests");
+        return this.notExecuted(
+          message,
+          input,
+          "rate_limited",
+          "The business is rate limiting requests",
+        );
       }
       if (error.code === "aborted") {
         // Cancel in flight: the dispatched operation may have happened.

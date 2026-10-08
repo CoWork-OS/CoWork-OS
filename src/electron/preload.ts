@@ -91,7 +91,9 @@ import type {
   PactStatusView,
 } from "../shared/pact";
 
-type PactSettingsUpdate = Partial<Pick<PactSettings, "enabled" | "preference" | "identity" | "providers">>;
+type PactSettingsUpdate = Partial<
+  Pick<PactSettings, "enabled" | "preference" | "identity" | "providers">
+>;
 interface PactSendRequestInput {
   businessId: string;
   conversationId?: string;
@@ -8255,13 +8257,18 @@ export interface ElectronAPI {
   getPactStatus: () => Promise<PactStatusView>;
   getPactSettings: () => Promise<PactSettings>;
   updatePactSettings: (data: PactSettingsUpdate) => Promise<PactSettings>;
-  setPactSignerCredential: (data: { credential: string | null }) => Promise<{ configured: boolean }>;
+  setPactSignerCredential: (data: {
+    credential: string | null;
+  }) => Promise<{ configured: boolean }>;
   createPactDeviceKey: () => Promise<{ publicJwk: Record<string, unknown> }>;
   discoverPactBusiness: (data: {
     domain?: string;
     cardUrl?: string;
     refresh?: boolean;
-  }) => Promise<{ business: PactBusinessView; route: { route: string; reason: string; message?: string } }>;
+  }) => Promise<{
+    business: PactBusinessView;
+    route: { route: string; reason: string; message?: string };
+  }>;
   listPactBusinesses: () => Promise<PactBusinessView[]>;
   getPactConversation: (data: { id: string }) => Promise<PactConversationView>;
   listPactConversations: (data: {
@@ -8277,7 +8284,9 @@ export interface ElectronAPI {
     purpose?: string;
   }) => Promise<PactAuthorizationView>;
   getPactAuthorization: (data: { id: string }) => Promise<PactAuthorizationView>;
-  getPactAuthorizationForInput: (data: { inputRequestId: string }) => Promise<PactAuthorizationView>;
+  getPactAuthorizationForInput: (data: {
+    inputRequestId: string;
+  }) => Promise<PactAuthorizationView>;
   listPactAuthorizations: (data: {
     pendingOnly?: boolean;
     taskId?: string;
@@ -8289,7 +8298,9 @@ export interface ElectronAPI {
   /** Browser build only: the link, for the owner's own browser tab. */
   getPactSignIn?: (data: { id: string }) => Promise<PactAuthorizationSignIn>;
   listPactGrants: () => Promise<PactGrantView[]>;
-  disconnectPactGrant: (data: { id: string }) => Promise<{ grant: PactGrantView; revokedAtBusiness: false }>;
+  disconnectPactGrant: (data: {
+    id: string;
+  }) => Promise<{ grant: PactGrantView; revokedAtBusiness: false }>;
   getPactReceipt: (data: { id: string }) => Promise<PactReceiptView>;
   readMemoryRepoLines: (refs: string[]) => Promise<MemoryRepoLine[]>;
   getMemoryRepoDreams: () => Promise<MemoryRepoDreamsReport>;

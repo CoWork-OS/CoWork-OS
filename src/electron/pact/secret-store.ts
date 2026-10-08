@@ -57,7 +57,11 @@ export interface PactSecretStore {
    * Replace a grant's tokens and apply `alsoApply` (SQL only) in the same transaction. Returns
    * false without writing when `alsoApply` refuses, e.g. because another refresh won.
    */
-  rotateGrant(ref: string, secret: PactGrantSecret, alsoApply: (db: Database.Database) => boolean): boolean;
+  rotateGrant(
+    ref: string,
+    secret: PactGrantSecret,
+    alsoApply: (db: Database.Database) => boolean,
+  ): boolean;
   deleteGrant(ref: string): void;
   getAuthorization(ref: string): PactAuthorizationSecret | undefined;
   putAuthorization(ref: string, secret: PactAuthorizationSecret): void;

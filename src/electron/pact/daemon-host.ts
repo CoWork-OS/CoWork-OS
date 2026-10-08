@@ -7,7 +7,10 @@ import type Database from "better-sqlite3";
 import type { PactAuthorizationState, PactAuthorizationView } from "../../shared/pact";
 import type { Workspace } from "../../shared/types";
 import { loadPolicies } from "../admin/policies";
-import { applyAccessProfileToWorkspace, resolveEffectiveAccessProfile } from "../security/access-profile-resolver";
+import {
+  applyAccessProfileToWorkspace,
+  resolveEffectiveAccessProfile,
+} from "../security/access-profile-resolver";
 import type { NetworkPolicyDecision } from "../security/network-policy";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import type { NetworkPolicyContext } from "../security/policy-checked-fetch";
@@ -92,7 +95,9 @@ export class DaemonPactHost implements PactHost {
     });
   }
 
-  async networkContextForWorkspace(workspaceId: string | null): Promise<NetworkPolicyContext | null> {
+  async networkContextForWorkspace(
+    workspaceId: string | null,
+  ): Promise<NetworkPolicyContext | null> {
     if (!workspaceId) return null;
     const workspace = this.daemon.getWorkspaceForPact(workspaceId);
     return networkContextOf(workspace ? effectiveWorkspace(workspace) : undefined);
@@ -103,7 +108,10 @@ export class DaemonPactHost implements PactHost {
   }
 }
 
-export function createDaemonPactRuntime(daemon: PactDaemonLike, db: Database.Database): PactRuntime {
+export function createDaemonPactRuntime(
+  daemon: PactDaemonLike,
+  db: Database.Database,
+): PactRuntime {
   return new PactRuntime({
     db,
     secrets: new SecureSettingsPactSecretStore(),

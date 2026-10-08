@@ -7890,7 +7890,8 @@ export class AgentDaemon extends EventEmitter {
     message: string,
   ): Promise<void> {
     const request = await this.inputRequestRepo.findById(inputRequestId);
-    if (!request || request.status !== "pending" || !isPactAuthorizationInputRequest(request)) return;
+    if (!request || request.status !== "pending" || !isPactAuthorizationInputRequest(request))
+      return;
     const granted = state === "granted";
     const resolved = await this.inputRequestRepo.resolve(
       inputRequestId,
@@ -7910,14 +7911,21 @@ export class AgentDaemon extends EventEmitter {
     if (terminal) return;
     if (live) {
       // The tool call that opened the wait is still running and continues with the outcome.
-      this.updateTask(request.taskId, { status: "executing", terminalStatus: undefined, failureClass: undefined });
+      this.updateTask(request.taskId, {
+        status: "executing",
+        terminalStatus: undefined,
+        failureClass: undefined,
+      });
       return;
     }
     // After a restart no tool call is waiting: hand the outcome to the task as a follow-up.
     try {
       await this.resumeTaskAfterDurableWait(request.taskId, `PACT sign-in ${state}: ${message}`);
     } catch (error) {
-      console.warn(`[AgentDaemon] Failed to resume task ${request.taskId} after PACT sign-in:`, error);
+      console.warn(
+        `[AgentDaemon] Failed to resume task ${request.taskId} after PACT sign-in:`,
+        error,
+      );
     }
   }
 

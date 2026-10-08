@@ -269,7 +269,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     if (args.command === "pact") {
       const pactDaemon = daemon;
-      return await runPactDirectCommand(pactDaemon, args, (payload, text) => writeEvent(args, payload, text));
+      return await runPactDirectCommand(pactDaemon, args, (payload, text) =>
+        writeEvent(args, payload, text),
+      );
     }
 
     try {
@@ -945,7 +947,12 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         i++;
         break;
       case "--pact-scope":
-        args.pactScopes = [...(args.pactScopes ?? []), ...String(next ?? "").split(",").filter(Boolean)];
+        args.pactScopes = [
+          ...(args.pactScopes ?? []),
+          ...String(next ?? "")
+            .split(",")
+            .filter(Boolean),
+        ];
         i++;
         break;
       case "--pact-id":

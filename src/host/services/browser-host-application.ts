@@ -220,7 +220,9 @@ export function createBrowserHostApplication(
       service: getAwarenessService(),
       resolveWorkspace: resolveBrowserWorkspace,
     }),
-    ...(options.agentDaemon ? createBrowserPactDefinitions({ agentDaemon: options.agentDaemon }) : {}),
+    ...(options.agentDaemon
+      ? createBrowserPactDefinitions({ agentDaemon: options.agentDaemon })
+      : {}),
     ...createBrowserMemoryDefinitions({
       db: options.db,
       resolveWorkspace: resolveBrowserWorkspace,

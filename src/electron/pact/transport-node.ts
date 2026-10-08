@@ -9,7 +9,12 @@ import {
   type NetworkPolicyContext,
 } from "../security/policy-checked-fetch";
 import type { NetworkPolicyDecision } from "../security/network-policy";
-import { PactTransport, PactTransportError, type PactHttpResponse, type PolicyCheckedHttp } from "./transport";
+import {
+  PactTransport,
+  PactTransportError,
+  type PactHttpResponse,
+  type PolicyCheckedHttp,
+} from "./transport";
 
 const PACT_TOOL_NAME = "pact";
 
@@ -89,7 +94,12 @@ export function createPolicyCheckedHttp(options: {
             ...(options.onDecision ? { onDecision: options.onDecision } : {}),
           },
         );
-        const bytes = await readBoundedResponse(response, input.maxBytes, "PACT response", controller.signal);
+        const bytes = await readBoundedResponse(
+          response,
+          input.maxBytes,
+          "PACT response",
+          controller.signal,
+        );
         return {
           status: response.status,
           headers: { get: (name: string) => response.headers.get(name) },

@@ -280,7 +280,8 @@ const ORCHESTRATION_INTENT_PATTERN =
 const BUSINESS_INTERACTION_INTENT_PATTERN =
   /\b(?:my|our|the)\s+(?:order|orders|booking|bookings|reservation|reservations|flight|flights|trip|trips|delivery|deliveries|package|parcel|shipment|subscription|subscriptions|account|bill|invoice|refund|return|appointment|ticket|plan|membership|policy|claim)\b|\b(?:cancel|refund|rebook|reschedule|return|exchange|track|upgrade|downgrade|renew)\b[\s\S]{0,60}\b(?:order|booking|reservation|flight|trip|delivery|package|shipment|subscription|account|appointment|ticket|plan|membership|purchase)\b|\b(?:customer (?:service|support)|support agent|contact (?:the )?(?:store|shop|airline|merchant|business|company|retailer)|(?:ask|tell|message|talk to|chat with) (?:the )?(?:store|shop|airline|merchant|business|company|retailer|support))\b/i;
 /** Explicit references, used alone when auto-routing is off. */
-const PACT_EXPLICIT_INTENT_PATTERN = /\b(?:pact|business agent|agent card|pact_discover|pact_send_message)\b/i;
+const PACT_EXPLICIT_INTENT_PATTERN =
+  /\b(?:pact|business agent|agent card|pact_discover|pact_send_message)\b/i;
 const ADMIN_INTENT_PATTERN =
   /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup)\b/i;
 
@@ -498,7 +499,8 @@ export function evaluateToolAvailability(
     case "business":
       // explicit_only: an administrator turned automatic routing off (`pact.autoRoute`).
       if (PACT_EXPLICIT_INTENT_PATTERN.test(taskText)) return { decision: "allow", metadata };
-      return metadata.exposure !== "explicit_only" && BUSINESS_INTERACTION_INTENT_PATTERN.test(taskText)
+      return metadata.exposure !== "explicit_only" &&
+        BUSINESS_INTERACTION_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }
         : { decision: "defer", reason: "business_interaction_intent_missing", metadata };
     case "admin":

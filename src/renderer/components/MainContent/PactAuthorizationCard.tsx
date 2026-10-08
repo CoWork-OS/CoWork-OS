@@ -75,7 +75,11 @@ export function PactAuthorizationCard({ request, onCancel }: PactAuthorizationCa
 
   const businessName = view?.businessName ?? "the business";
   return (
-    <div className="input-request-composer-shell" role="region" aria-label="Business sign-in required">
+    <div
+      className="input-request-composer-shell"
+      role="region"
+      aria-label="Business sign-in required"
+    >
       <div className="input-request-card input-request-card-inline pact-authorization-card">
         <div className="input-request-progress">
           <span className="input-request-header">Sign in</span>

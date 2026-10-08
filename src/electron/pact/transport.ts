@@ -115,7 +115,10 @@ export class PactTransport {
   async request(request: PactHttpRequest): Promise<PactHttpResponse> {
     const limits = LIMITS[request.purpose];
     if (request.method !== "GET" && limits.maxRedirects !== 0) {
-      throw new PactTransportError("redirect_not_allowed", "Only GET requests may follow redirects");
+      throw new PactTransportError(
+        "redirect_not_allowed",
+        "Only GET requests may follow redirects",
+      );
     }
     const headers: Record<string, string> = { Accept: "application/json", ...request.headers };
     if (request.purpose === "message") {

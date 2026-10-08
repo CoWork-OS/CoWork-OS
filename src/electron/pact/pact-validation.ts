@@ -5,7 +5,10 @@
 import { z } from "zod";
 
 const Id = z.string().trim().min(1).max(200);
-const ScopeId = z.string().regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/).max(200);
+const ScopeId = z
+  .string()
+  .regex(/^[\x21\x23-\x5B\x5D-\x7E]+$/)
+  .max(200);
 const HttpsUrl = z.string().trim().min(1).max(2048);
 
 export const PactNoArgsSchema = z.union([z.undefined(), z.object({}).strict()]);

@@ -61,7 +61,10 @@ export async function verifyPactReceipt(
   const digest = receiptDigest(receipt);
   let payload: unknown;
   try {
-    const verified = await verifyCompactJws(receipt.jws, jwks.resolver(expected.jwksUri, transport));
+    const verified = await verifyCompactJws(
+      receipt.jws,
+      jwks.resolver(expected.jwksUri, transport),
+    );
     payload = JSON.parse(verified.payload.toString("utf8")) as unknown;
   } catch (error) {
     if (error instanceof JwsError && error.code !== "unknown_key" && error.code !== "invalid_key") {
@@ -87,7 +90,10 @@ export async function verifyPactReceipt(
       status: "invalid",
       reason:
         error instanceof ReceiptVerificationError
-          ? error.message.replace(/^Receipt /, "").replace(/\s+/g, "_").toLowerCase()
+          ? error.message
+              .replace(/^Receipt /, "")
+              .replace(/\s+/g, "_")
+              .toLowerCase()
           : "claims_invalid",
       digest,
     };

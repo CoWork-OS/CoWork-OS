@@ -249,5 +249,7 @@ export const PACT_AUTHORIZATION_CANCEL_OPTION = "Cancel sign-in";
 export function isPactAuthorizationInputRequest(
   request: { questions?: { id: string }[] } | null | undefined,
 ): boolean {
-  return Boolean(request?.questions?.some((question) => question.id === PACT_AUTHORIZATION_QUESTION_ID));
+  return Boolean(
+    request?.questions?.some((question) => question.id === PACT_AUTHORIZATION_QUESTION_ID),
+  );
 }

@@ -3,7 +3,12 @@
  * refresh, and `message:send`. The upstream client's response handling is reused from
  * ./upstream/client-delegation; only the network layer differs (policy-aware, no global fetch).
  */
-import { DELEGATION_HEADER, DEVICE_CODE_GRANT_TYPE, REFRESH_TOKEN_GRANT_TYPE, formatScope } from "./upstream/delegation";
+import {
+  DELEGATION_HEADER,
+  DEVICE_CODE_GRANT_TYPE,
+  REFRESH_TOKEN_GRANT_TYPE,
+  formatScope,
+} from "./upstream/delegation";
 import {
   readBody,
   throwForOAuthResponse,
@@ -49,7 +54,12 @@ async function postForm(
 
 export async function requestDeviceAuthorization(
   transport: PactTransport,
-  input: { url: string; scopes: readonly string[]; credentials: PactClientCredentials; now: number },
+  input: {
+    url: string;
+    scopes: readonly string[];
+    credentials: PactClientCredentials;
+    now: number;
+  },
 ): Promise<DeviceAuthorization> {
   const body = await postForm(
     transport,
@@ -84,7 +94,12 @@ export async function requestDeviceToken(
 
 export async function refreshDelegationToken(
   transport: PactTransport,
-  input: { url: string; refreshToken: string; credentials: PactClientCredentials; now: () => number },
+  input: {
+    url: string;
+    refreshToken: string;
+    credentials: PactClientCredentials;
+    now: () => number;
+  },
 ): Promise<DelegationToken> {
   const body = await postForm(
     transport,

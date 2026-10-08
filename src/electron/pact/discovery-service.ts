@@ -172,7 +172,10 @@ export class PactDiscoveryService {
       throw new PactDiscoveryError("not_found", "The business does not publish an agent card");
     }
     if (response.status !== 200) {
-      throw new PactDiscoveryError("fetch_failed", `The agent card request returned ${response.status}`);
+      throw new PactDiscoveryError(
+        "fetch_failed",
+        `The agent card request returned ${response.status}`,
+      );
     }
     const raw = parseJson(response.bodyText);
     const support = evaluateCardSupport(raw, input.rules);
@@ -187,9 +190,10 @@ export class PactDiscoveryService {
       const provider = await this.deps.providers.resolve(placeholderOrigin, input.providerContext);
       const { business, securityChanged } = await this.deps.repo.upsertBusiness({
         cardUrl,
-        displayName: typeof (raw as { name?: unknown })?.name === "string"
-          ? String((raw as { name: string }).name).slice(0, 200)
-          : new URL(cardUrl).hostname,
+        displayName:
+          typeof (raw as { name?: unknown })?.name === "string"
+            ? String((raw as { name: string }).name).slice(0, 200)
+            : new URL(cardUrl).hostname,
         originChain,
         providerId: provider.id,
         interfaceUrl: response.url,

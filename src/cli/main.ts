@@ -878,7 +878,9 @@ async function pactCommand(ctx: CommandContext): Promise<number> {
   const [action = "status", second, third] = ctx.parsed.rest;
   const scopes = getFlag(ctx.parsed, "--scope");
   const subaction =
-    action === "authorization" || action === "auth" ? `authorization-${second ?? "status"}` : action;
+    action === "authorization" || action === "auth"
+      ? `authorization-${second ?? "status"}`
+      : action;
   const id = action === "authorization" || action === "auth" ? third : second;
   if (hasFlag(ctx.parsed, "--remote")) return pactRemote(ctx, subaction, id);
   const map: Record<string, string> = {
@@ -898,25 +900,43 @@ async function pactCommand(ctx: CommandContext): Promise<number> {
   const direct = map[subaction];
   if (!direct) return usageError(PACT_USAGE);
   const domain = action === "discover" && second && !second.startsWith("http") ? second : undefined;
-  const cardUrl = getFlag(ctx.parsed, "--card-url") || (action === "discover" && second?.startsWith("http") ? second : undefined);
+  const cardUrl =
+    getFlag(ctx.parsed, "--card-url") ||
+    (action === "discover" && second?.startsWith("http") ? second : undefined);
   return runDirectCommandProcess(ctx, [
     "--pact",
     direct,
-    ...(domain || getFlag(ctx.parsed, "--domain") ? ["--pact-domain", (domain || getFlag(ctx.parsed, "--domain"))!] : []),
+    ...(domain || getFlag(ctx.parsed, "--domain")
+      ? ["--pact-domain", (domain || getFlag(ctx.parsed, "--domain"))!]
+      : []),
     ...(cardUrl ? ["--pact-card-url", cardUrl] : []),
-    ...(getFlag(ctx.parsed, "--business") ? ["--pact-business", getFlag(ctx.parsed, "--business")!] : []),
-    ...(getFlag(ctx.parsed, "--message") ? ["--pact-message", getFlag(ctx.parsed, "--message")!] : []),
+    ...(getFlag(ctx.parsed, "--business")
+      ? ["--pact-business", getFlag(ctx.parsed, "--business")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--message")
+      ? ["--pact-message", getFlag(ctx.parsed, "--message")!]
+      : []),
     ...(getFlag(ctx.parsed, "--effect") ? ["--pact-effect", getFlag(ctx.parsed, "--effect")!] : []),
     ...(scopes ? ["--pact-scope", scopes] : []),
-    ...(getFlag(ctx.parsed, "--conversation") ? ["--pact-conversation", getFlag(ctx.parsed, "--conversation")!] : []),
-    ...(getFlag(ctx.parsed, "--reconcile") ? ["--pact-reconcile", getFlag(ctx.parsed, "--reconcile")!] : []),
-    ...(getFlag(ctx.parsed, "--workspace-id") ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!] : []),
+    ...(getFlag(ctx.parsed, "--conversation")
+      ? ["--pact-conversation", getFlag(ctx.parsed, "--conversation")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--reconcile")
+      ? ["--pact-reconcile", getFlag(ctx.parsed, "--reconcile")!]
+      : []),
+    ...(getFlag(ctx.parsed, "--workspace-id")
+      ? ["--workspace-id", getFlag(ctx.parsed, "--workspace-id")!]
+      : []),
     ...(id && !["discover"].includes(action) ? ["--pact-id", id] : []),
     ...(hasFlag(ctx.parsed, "--yes") ? ["--yes"] : []),
   ]);
 }
 
-async function pactRemote(ctx: CommandContext, subaction: string, id: string | undefined): Promise<number> {
+async function pactRemote(
+  ctx: CommandContext,
+  subaction: string,
+  id: string | undefined,
+): Promise<number> {
   const scopes = (getFlag(ctx.parsed, "--scope") || "").split(",").filter(Boolean);
   const requests: Record<string, () => [string, unknown]> = {
     status: () => [Methods.PACT_STATUS, undefined],
@@ -934,8 +954,12 @@ async function pactRemote(ctx: CommandContext, subaction: string, id: string | u
         effect: getFlag(ctx.parsed, "--effect") || "inspect",
         requiredScopes: scopes,
         confirmed: hasFlag(ctx.parsed, "--yes"),
-        ...(getFlag(ctx.parsed, "--conversation") ? { conversationId: getFlag(ctx.parsed, "--conversation") } : {}),
-        ...(getFlag(ctx.parsed, "--reconcile") ? { reconcileOperationId: getFlag(ctx.parsed, "--reconcile") } : {}),
+        ...(getFlag(ctx.parsed, "--conversation")
+          ? { conversationId: getFlag(ctx.parsed, "--conversation") }
+          : {}),
+        ...(getFlag(ctx.parsed, "--reconcile")
+          ? { reconcileOperationId: getFlag(ctx.parsed, "--reconcile") }
+          : {}),
       },
     ],
     grants: () => [Methods.PACT_GRANT_LIST, undefined],

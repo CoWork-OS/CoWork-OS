@@ -375,9 +375,9 @@ export class PactStore {
   }
 
   listProviders(): PactProviderRecord[] {
-    return (
-      this.db.prepare("SELECT * FROM pact_providers ORDER BY origin").all() as Row[]
-    ).map(mapProvider);
+    return (this.db.prepare("SELECT * FROM pact_providers ORDER BY origin").all() as Row[]).map(
+      mapProvider,
+    );
   }
 
   // --------------------------------------------------------------- businesses
@@ -478,7 +478,9 @@ export class PactStore {
 
   listBusinesses(): PactBusinessRecord[] {
     return (
-      this.db.prepare("SELECT * FROM pact_businesses ORDER BY updated_at DESC LIMIT 500").all() as Row[]
+      this.db
+        .prepare("SELECT * FROM pact_businesses ORDER BY updated_at DESC LIMIT 500")
+        .all() as Row[]
     ).map(mapBusiness);
   }
 
@@ -655,7 +657,9 @@ export class PactStore {
     const values = [...built.values, this.now(), id];
     const guard = expectedSecretRevision === undefined ? "" : " AND secret_revision = ?";
     if (expectedSecretRevision !== undefined) values.push(expectedSecretRevision);
-    const result = this.db.prepare(`UPDATE pact_grants SET ${sets} WHERE id = ?${guard}`).run(...values);
+    const result = this.db
+      .prepare(`UPDATE pact_grants SET ${sets} WHERE id = ?${guard}`)
+      .run(...values);
     if (result.changes === 0) return null;
     return this.getGrant(id);
   }
@@ -925,7 +929,9 @@ export class PactStore {
   ): PactMessageRecord | null {
     const built = buildPatch(patch, MESSAGE_PATCH_COLUMNS);
     const sets = [built.sql, "updated_at = ?"].filter(Boolean).join(", ");
-    this.db.prepare(`UPDATE pact_messages SET ${sets} WHERE id = ?`).run(...built.values, this.now(), id);
+    this.db
+      .prepare(`UPDATE pact_messages SET ${sets} WHERE id = ?`)
+      .run(...built.values, this.now(), id);
     return this.getMessage(id);
   }
 
@@ -1016,9 +1022,9 @@ export class PactStore {
   }
 
   getAuthorization(id: string): PactAuthorizationRecord | null {
-    const row = this.db.prepare("SELECT * FROM pact_authorization_requests WHERE id = ?").get(id) as
-      | Row
-      | undefined;
+    const row = this.db
+      .prepare("SELECT * FROM pact_authorization_requests WHERE id = ?")
+      .get(id) as Row | undefined;
     return row ? mapAuthorization(row) : null;
   }
 
@@ -1094,7 +1100,9 @@ export class PactStore {
   ): PactAuthorizationRecord | null {
     const built = buildPatch(patch, AUTHORIZATION_PATCH_COLUMNS);
     const release =
-      patch.state && patch.state !== "pending" ? ", lease_owner = NULL, lease_expires_at = NULL" : "";
+      patch.state && patch.state !== "pending"
+        ? ", lease_owner = NULL, lease_expires_at = NULL"
+        : "";
     const sets = [built.sql, "updated_at = ?"].filter(Boolean).join(", ");
     const ownerGuard = owner === undefined ? "" : " AND lease_owner = ?";
     const values = [...built.values, this.now(), id];

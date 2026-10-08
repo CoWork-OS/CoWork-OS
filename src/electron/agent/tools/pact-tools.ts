@@ -12,7 +12,11 @@ import { canAnswerInlineApproval } from "../approval-policy";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 
-export const PACT_TOOL_NAMES = ["pact_discover", "pact_send_message", "pact_get_conversation"] as const;
+export const PACT_TOOL_NAMES = [
+  "pact_discover",
+  "pact_send_message",
+  "pact_get_conversation",
+] as const;
 
 const EFFECTS: readonly PactEffectClass[] = ["inspect", "change", "unknown"];
 const MAX_SCOPES = 20;
@@ -99,7 +103,10 @@ export class PactTools {
               type: "string",
               description: "An HTTPS agent card URL the user or the business provided",
             },
-            refresh: { type: "boolean", description: "Fetch the card again instead of using the cache" },
+            refresh: {
+              type: "boolean",
+              description: "Fetch the card again instead of using the cache",
+            },
           },
           required: [],
         },
@@ -162,7 +169,10 @@ export class PactTools {
         input_schema: {
           type: "object",
           properties: {
-            conversation_id: { type: "string", description: "conversation_id from pact_send_message" },
+            conversation_id: {
+              type: "string",
+              description: "conversation_id from pact_send_message",
+            },
           },
           required: ["conversation_id"],
         },
@@ -222,7 +232,8 @@ export class PactTools {
       if (toolName === "pact_discover") {
         const cardUrl = stringInput(record.card_url, 2048);
         const domain = stringInput(record.domain, 253);
-        const url = cardUrl ?? (domain ? `https://${domain}/.well-known/agent-card.json` : undefined);
+        const url =
+          cardUrl ?? (domain ? `https://${domain}/.well-known/agent-card.json` : undefined);
         return url ? { permissionInput: { url } } : {};
       }
       if (toolName === "pact_send_message") {
@@ -232,7 +243,10 @@ export class PactTools {
         return business
           ? {
               permissionInput: { url: business.interfaceUrl },
-              pactDestination: { interfaceUrl: business.interfaceUrl, originChain: business.originChain },
+              pactDestination: {
+                interfaceUrl: business.interfaceUrl,
+                originChain: business.originChain,
+              },
             }
           : {};
       }
@@ -252,7 +266,11 @@ export class PactTools {
     try {
       const { business, route } = await this.daemon.getPactRuntime().discover(
         await this.principal(),
-        { ...(domain ? { domain } : {}), ...(cardUrl ? { cardUrl } : {}), refresh: record.refresh === true },
+        {
+          ...(domain ? { domain } : {}),
+          ...(cardUrl ? { cardUrl } : {}),
+          refresh: record.refresh === true,
+        },
         this.callContext(),
       );
       return {
@@ -266,12 +284,13 @@ export class PactTools {
         ...(business.unsupportedReason ? { unsupported_reason: business.unsupportedReason } : {}),
         account_access: business.profile === "delegated",
         permissions: business.scopes,
-        skills: business.skills.map((skill) => ({ name: skill.name, description: skill.description })),
+        skills: business.skills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+        })),
         route: route.route,
         guidance:
-          route.route === "pact"
-            ? "Use pact_send_message with this business_id."
-            : route.message,
+          route.route === "pact" ? "Use pact_send_message with this business_id." : route.message,
       };
     } catch (error) {
       return { success: false, error: redactPactError(error) };
@@ -286,7 +305,8 @@ export class PactTools {
     const effect = EFFECTS.includes(record.effect as PactEffectClass)
       ? (record.effect as PactEffectClass)
       : "unknown";
-    if (!businessId) return { success: false, error: "business_id is required (from pact_discover)." };
+    if (!businessId)
+      return { success: false, error: "business_id is required (from pact_discover)." };
     if (!reconcile && !message.trim()) return { success: false, error: "message is required." };
     try {
       const conversationId = stringInput(record.conversation_id, 200);
@@ -349,7 +369,9 @@ export class PactTools {
     const record = (input ?? {}) as Record<string, unknown>;
     const conversationId = stringInput(record.conversation_id, 200);
     if (!conversationId) return { success: false, error: "conversation_id is required." };
-    const view = await this.daemon.getPactRuntime().getConversation(await this.principal(), conversationId);
+    const view = await this.daemon
+      .getPactRuntime()
+      .getConversation(await this.principal(), conversationId);
     if (!view) return { success: false, error: "Unknown conversation." };
     return {
       success: true,

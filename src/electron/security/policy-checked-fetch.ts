@@ -11,7 +11,11 @@
  * - a cross-origin hop resets caller headers to `publicHeaders` and refuses to carry a body;
  * - at most `maxRedirects` redirects.
  */
-import { evaluateNetworkPolicy, type NetworkPolicyDecision, type NetworkPolicyRequest } from "./network-policy";
+import {
+  evaluateNetworkPolicy,
+  type NetworkPolicyDecision,
+  type NetworkPolicyRequest,
+} from "./network-policy";
 import { pinnedFetch } from "./pinned-fetch";
 
 export type NetworkPolicyContext = Pick<
@@ -108,7 +112,10 @@ export async function fetchWithPolicyCheckedRedirects(
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
     const parsedUrl = new URL(currentUrl);
     if (!isHttpUrl(parsedUrl)) {
-      throw new PolicyCheckedFetchError("unsupported_scheme", "Only HTTP and HTTPS URLs are supported");
+      throw new PolicyCheckedFetchError(
+        "unsupported_scheme",
+        "Only HTTP and HTTPS URLs are supported",
+      );
     }
     // A redirect target was already evaluated when the redirect was accepted.
     if (checkedUrl !== parsedUrl.toString()) assertPolicyAllowsUrl(parsedUrl.toString(), options);
@@ -144,7 +151,7 @@ export async function fetchWithPolicyCheckedRedirects(
           "Cross-origin redirects with a request body are not allowed",
         );
       }
-      currentInit = { ...currentInit, headers: { ...(options.publicHeaders ?? {}) } };
+      currentInit = { ...currentInit, headers: { ...options.publicHeaders } };
     }
     currentUrl = nextUrl.toString();
   }

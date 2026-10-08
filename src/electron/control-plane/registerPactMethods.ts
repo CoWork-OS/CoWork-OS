@@ -41,7 +41,9 @@ export function registerPactMethods(input: {
     const id = (client as { id?: unknown })?.id;
     const owner = await input.agentDaemon
       .getPactRuntime()
-      .ownerPrincipal(`control_plane:${typeof id === "string" || typeof id === "number" ? id : "unknown"}`);
+      .ownerPrincipal(
+        `control_plane:${typeof id === "string" || typeof id === "number" ? id : "unknown"}`,
+      );
     return { ...owner, kind: "control_plane_client" };
   };
 
@@ -74,7 +76,9 @@ export function registerPactMethods(input: {
     });
   };
 
-  register(Methods.PACT_STATUS, "read", PactNoArgsSchema, (_params, principal) => service.status(principal));
+  register(Methods.PACT_STATUS, "read", PactNoArgsSchema, (_params, principal) =>
+    service.status(principal),
+  );
   register(Methods.PACT_SETTINGS_GET, "read", PactNoArgsSchema, () => service.getSettings());
   register(Methods.PACT_SETTINGS_UPDATE, "admin", PactSettingsUpdateSchema, (params) =>
     service.updateSettings(params),
@@ -82,7 +86,9 @@ export function registerPactMethods(input: {
   register(Methods.PACT_IDENTITY_SET_CREDENTIAL, "admin", PactSignerCredentialSchema, (params) =>
     service.setSignerCredential(params.credential),
   );
-  register(Methods.PACT_IDENTITY_DEVICE_KEY, "admin", PactNoArgsSchema, () => service.ensureDeviceKey());
+  register(Methods.PACT_IDENTITY_DEVICE_KEY, "admin", PactNoArgsSchema, () =>
+    service.ensureDeviceKey(),
+  );
   register(Methods.PACT_BUSINESS_DISCOVER, "write", PactDiscoverSchema, (params, principal) =>
     service.discover(principal, params),
   );
@@ -90,28 +96,42 @@ export function registerPactMethods(input: {
   register(Methods.PACT_CONVERSATION_GET, "read", PactIdSchema, (params, principal) =>
     service.getConversation(principal, params.id),
   );
-  register(Methods.PACT_CONVERSATION_LIST, "read", PactConversationListSchema, (params, principal) =>
-    service.listConversations(principal, params),
+  register(
+    Methods.PACT_CONVERSATION_LIST,
+    "read",
+    PactConversationListSchema,
+    (params, principal) => service.listConversations(principal, params),
   );
   register(Methods.PACT_CONVERSATION_SEND, "write", PactSendSchema, (params, principal) =>
     service.send(principal, params),
   );
-  register(Methods.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE, "write", PactIdSchema, (params, principal) =>
-    service.acknowledgeEvidence(principal, params.id),
+  register(
+    Methods.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE,
+    "write",
+    PactIdSchema,
+    (params, principal) => service.acknowledgeEvidence(principal, params.id),
   );
-  register(Methods.PACT_AUTHORIZATION_START, "operator", PactAuthorizationStartSchema, (params, principal) =>
-    service.startAuthorization(principal, params),
+  register(
+    Methods.PACT_AUTHORIZATION_START,
+    "operator",
+    PactAuthorizationStartSchema,
+    (params, principal) => service.startAuthorization(principal, params),
   );
   register(Methods.PACT_AUTHORIZATION_GET, "read", PactIdSchema, (params, principal) =>
     service.getAuthorization(principal, params.id),
   );
-  register(Methods.PACT_AUTHORIZATION_LIST, "read", PactAuthorizationListSchema, (params, principal) =>
-    service.listAuthorizations(principal, params),
+  register(
+    Methods.PACT_AUTHORIZATION_LIST,
+    "read",
+    PactAuthorizationListSchema,
+    (params, principal) => service.listAuthorizations(principal, params),
   );
   register(Methods.PACT_AUTHORIZATION_CANCEL, "operator", PactIdSchema, (params, principal) =>
     service.cancelAuthorization(principal, params.id),
   );
-  register(Methods.PACT_GRANT_LIST, "read", PactNoArgsSchema, (_params, principal) => service.listGrants(principal));
+  register(Methods.PACT_GRANT_LIST, "read", PactNoArgsSchema, (_params, principal) =>
+    service.listGrants(principal),
+  );
   register(Methods.PACT_GRANT_DISCONNECT, "operator", PactIdSchema, (params, principal) =>
     service.disconnectGrant(principal, params.id),
   );
@@ -119,9 +139,14 @@ export function registerPactMethods(input: {
     service.getReceipt(principal, params.id),
   );
   // The sign-in link is a grant operation: operator or admin only, and never logged.
-  register(Methods.PACT_AUTHORIZATION_SIGN_IN, "operator", PactIdSchema, async (params, principal) => {
-    const signIn = await service.authorizationSignIn(principal, params.id);
-    if (!signIn) throw new PactSurfaceError("not_found", "No pending sign-in");
-    return signIn;
-  });
+  register(
+    Methods.PACT_AUTHORIZATION_SIGN_IN,
+    "operator",
+    PactIdSchema,
+    async (params, principal) => {
+      const signIn = await service.authorizationSignIn(principal, params.id);
+      if (!signIn) throw new PactSurfaceError("not_found", "No pending sign-in");
+      return signIn;
+    },
+  );
 }

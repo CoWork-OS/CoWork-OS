@@ -105,11 +105,16 @@ export function PactSettings() {
           changes your account.
         </p>
         <div className="settings-status-row">
-          <span className={`settings-badge status-${status.available ? "connected" : "disconnected"}`}>
-            {status.available ? "Available" : UNAVAILABLE_LABELS[status.unavailableReason ?? ""] ?? "Unavailable"}
+          <span
+            className={`settings-badge status-${status.available ? "connected" : "disconnected"}`}
+          >
+            {status.available
+              ? "Available"
+              : (UNAVAILABLE_LABELS[status.unavailableReason ?? ""] ?? "Unavailable")}
           </span>
           <span className="settings-muted">
-            {status.activeGrants} connected permission(s) · {status.pendingAuthorizations} pending sign-in(s)
+            {status.activeGrants} connected permission(s) · {status.pendingAuthorizations} pending
+            sign-in(s)
           </span>
         </div>
 
@@ -120,7 +125,9 @@ export function PactSettings() {
               checked={settings.enabled}
               disabled={busy !== null}
               onChange={(event) =>
-                void run("enabled", () => window.electronAPI.updatePactSettings({ enabled: event.target.checked }))
+                void run("enabled", () =>
+                  window.electronAPI.updatePactSettings({ enabled: event.target.checked }),
+                )
               }
             />{" "}
             Use PACT for business interactions
@@ -156,7 +163,9 @@ export function PactSettings() {
       <div className="settings-section">
         <h4>Identity</h4>
         <div className="settings-status-row">
-          <span className={`settings-badge status-${status.identity.ready ? "connected" : "error"}`}>
+          <span
+            className={`settings-badge status-${status.identity.ready ? "connected" : "error"}`}
+          >
             {status.identity.ready ? "Ready" : "Not ready"}
           </span>
           <span className="settings-muted">
@@ -171,11 +180,13 @@ export function PactSettings() {
             value={deployment}
             onChange={(event) => setDeployment(event.target.value as PactIdentityDeployment)}
           >
-            {(["none", "managed", "self_hosted", "development"] as PactIdentityDeployment[]).map((value) => (
-              <option key={value} value={value}>
-                {DEPLOYMENT_LABELS[value]}
-              </option>
-            ))}
+            {(["none", "managed", "self_hosted", "development"] as PactIdentityDeployment[]).map(
+              (value) => (
+                <option key={value} value={value}>
+                  {DEPLOYMENT_LABELS[value]}
+                </option>
+              ),
+            )}
           </select>
         </div>
         {deployment !== "none" && (
@@ -234,7 +245,9 @@ export function PactSettings() {
                     },
                   });
                   if (credential.trim()) {
-                    await window.electronAPI.setPactSignerCredential({ credential: credential.trim() });
+                    await window.electronAPI.setPactSignerCredential({
+                      credential: credential.trim(),
+                    });
                     setCredential("");
                   }
                 },
@@ -325,8 +338,8 @@ export function PactSettings() {
         <h4>Connected businesses</h4>
         {activeGrants.length === 0 && (
           <div className="settings-hint">
-            No business permissions yet. CoWork asks you to sign in with a business the first time
-            a request needs access to your account there.
+            No business permissions yet. CoWork asks you to sign in with a business the first time a
+            request needs access to your account there.
           </div>
         )}
         {activeGrants.map((grant) => (

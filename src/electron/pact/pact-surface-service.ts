@@ -117,7 +117,10 @@ export class PactSurfaceService {
     });
   }
 
-  listConversations(principal: PactPrincipal, filter: { businessId?: string; taskId?: string; limit?: number }) {
+  listConversations(
+    principal: PactPrincipal,
+    filter: { businessId?: string; taskId?: string; limit?: number },
+  ) {
     return this.guard(() => this.deps.runtime().listConversations(principal, filter));
   }
 
@@ -133,7 +136,9 @@ export class PactSurfaceService {
           requiredScopes: input.requiredScopes,
           ...(input.conversationId ? { conversationId: input.conversationId } : {}),
           ...(input.purpose ? { purpose: input.purpose } : {}),
-          ...(input.reconcileOperationId ? { reconcileOperationId: input.reconcileOperationId } : {}),
+          ...(input.reconcileOperationId
+            ? { reconcileOperationId: input.reconcileOperationId }
+            : {}),
         },
         await this.context(input.workspaceId, { preApproved: input.confirmed }),
       ),
@@ -164,14 +169,19 @@ export class PactSurfaceService {
 
   getAuthorizationByInputRequest(principal: PactPrincipal, inputRequestId: string) {
     return this.guard(async () => {
-      const view = await this.deps.runtime().getAuthorizationByInputRequest(principal, inputRequestId);
+      const view = await this.deps
+        .runtime()
+        .getAuthorizationByInputRequest(principal, inputRequestId);
       if (!view) throw new PactSurfaceError("not_found", "Unknown authorization");
       return view;
     });
   }
 
   /** The verified sign-in link; callers must already have checked the caller is the owner. */
-  authorizationSignIn(principal: PactPrincipal, id: string): Promise<PactAuthorizationSignIn | null> {
+  authorizationSignIn(
+    principal: PactPrincipal,
+    id: string,
+  ): Promise<PactAuthorizationSignIn | null> {
     return this.guard(() => this.deps.runtime().getAuthorizationSignIn(principal, id));
   }
 

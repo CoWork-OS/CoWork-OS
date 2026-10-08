@@ -18,8 +18,13 @@ import type {
   PactReceiptRecord,
 } from "./types";
 
-export function scopeViews(business: PactBusinessRecord | null, ids: readonly string[]): PactScopeView[] {
-  const known = new Map((business?.descriptor.delegation?.scopes ?? []).map((scope) => [scope.id, scope]));
+export function scopeViews(
+  business: PactBusinessRecord | null,
+  ids: readonly string[],
+): PactScopeView[] {
+  const known = new Map(
+    (business?.descriptor.delegation?.scopes ?? []).map((scope) => [scope.id, scope]),
+  );
   return ids.map((id) => ({ id, description: known.get(id)?.description ?? id }));
 }
 
@@ -80,7 +85,10 @@ export function toConversationView(
   };
 }
 
-export function toGrantView(grant: PactGrantRecord, business: PactBusinessRecord | null): PactGrantView {
+export function toGrantView(
+  grant: PactGrantRecord,
+  business: PactBusinessRecord | null,
+): PactGrantView {
   return {
     id: grant.id,
     businessId: grant.businessId,

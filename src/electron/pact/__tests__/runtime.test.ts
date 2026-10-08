@@ -45,13 +45,19 @@ interface Harness {
   db: InstanceType<NonNullable<typeof nativeSqlite>>;
 }
 
-function makeHarness(options: { delegated?: boolean; leaseOwner?: string; shared?: Partial<Harness> } = {}): Harness {
+function makeHarness(
+  options: { delegated?: boolean; leaseOwner?: string; shared?: Partial<Harness> } = {},
+): Harness {
   const db = options.shared?.db ?? new nativeSqlite!(":memory:");
   ensurePactSchema(db);
   const clock = options.shared?.clock ?? { now: Date.parse("2026-10-08T10:00:00Z") };
   const signer =
     options.shared?.signer ??
-    new DevelopmentPactSigner({ subject: "subject-opaque-1", issuer: ISSUER, now: () => clock.now });
+    new DevelopmentPactSigner({
+      subject: "subject-opaque-1",
+      issuer: ISSUER,
+      now: () => clock.now,
+    });
   const provider =
     options.shared?.provider ??
     new FakePactProvider({
@@ -80,7 +86,9 @@ function makeHarness(options: { delegated?: boolean; leaseOwner?: string; shared
   };
   const policies =
     options.shared?.policies ??
-    ({ pact: { enabled: true, autoRoute: true, blockedProviders: [] } } as unknown as AdminPolicies);
+    ({
+      pact: { enabled: true, autoRoute: true, blockedProviders: [] },
+    } as unknown as AdminPolicies);
   const secrets = options.shared?.secrets ?? new MemoryPactSecretStore(db);
   const host: Harness["host"] = {
     approvals: [],
@@ -158,12 +166,20 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
   });
 
   async function discover() {
-    const { business } = await harness.runtime.discover(owner, { domain: "shop.example" }, taskContext());
+    const { business } = await harness.runtime.discover(
+      owner,
+      { domain: "shop.example" },
+      taskContext(),
+    );
     return business;
   }
 
   it("discovers through the brand redirect and records the origin chain", async () => {
-    const { business, route } = await harness.runtime.discover(owner, { domain: "shop.example" }, taskContext());
+    const { business, route } = await harness.runtime.discover(
+      owner,
+      { domain: "shop.example" },
+      taskContext(),
+    );
     expect(business.originChain).toEqual([
       "https://shop.example/.well-known/agent-card.json",
       harness.provider.cardUrl,
@@ -181,10 +197,19 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Please cancel order A-88213.", effect: "change", requiredScopes: ["orders:cancel", "orders:read"] },
+      {
+        businessId: business.id,
+        text: "Please cancel order A-88213.",
+        effect: "change",
+        requiredScopes: ["orders:cancel", "orders:read"],
+      },
       taskContext(),
     );
-    expect(outcome).toMatchObject({ status: "replied", replyText: "Order #A-88213 is cancelled.", evidence: "verified" });
+    expect(outcome).toMatchObject({
+      status: "replied",
+      replyText: "Order #A-88213 is cancelled.",
+      evidence: "verified",
+    });
     expect(harness.host.approvals).toHaveLength(1);
     expect(harness.host.waits).toHaveLength(1);
     expect(harness.host.settled).toEqual([{ requestId: "input-1", state: "granted" }]);
@@ -198,8 +223,14 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(sends[1]!.headers["A2A-Version"]).toBe("1.0");
     // Events never carry secrets.
     expect(JSON.stringify(harness.host.events)).not.toMatch(/dc_|rt_|eyJ/);
-    const receipt = await harness.runtime.getReceipt(owner, (outcome as { receiptId: string }).receiptId);
-    expect(receipt).toMatchObject({ verification: "verified", scopesUsed: ["orders:cancel", "orders:read"] });
+    const receipt = await harness.runtime.getReceipt(
+      owner,
+      (outcome as { receiptId: string }).receiptId,
+    );
+    expect(receipt).toMatchObject({
+      verification: "verified",
+      scopesUsed: ["orders:cancel", "orders:read"],
+    });
   });
 
   it("stops when the user declines consent at the business", async () => {
@@ -207,7 +238,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.provider.approvalPolicy = () => "deny";
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "denied", reason: "consent_denied" });
@@ -220,7 +256,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.provider.approvalPolicy = () => ["orders:read"];
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Cancel order A-1", effect: "change", requiredScopes: ["orders:cancel"] },
+      {
+        businessId: business.id,
+        text: "Cancel order A-1",
+        effect: "change",
+        requiredScopes: ["orders:cancel"],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "denied", reason: "insufficient_permission" });
@@ -230,13 +271,23 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     const first = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "What is the status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "What is the status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(first).toMatchObject({ status: "replied", evidence: "verified" });
     const second = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Now cancel it please.", effect: "change", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Now cancel it please.",
+        effect: "change",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(second).toMatchObject({ status: "replied", evidence: "verified" });
@@ -250,32 +301,58 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Check status please?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Check status please?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     harness.network.dropReplyFor = /message:send$/;
     const lost = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Cancel order A-7", effect: "change", requiredScopes: ["orders:cancel", "orders:read"] },
+      {
+        businessId: business.id,
+        text: "Cancel order A-7",
+        effect: "change",
+        requiredScopes: ["orders:cancel", "orders:read"],
+      },
       taskContext(),
     );
     expect(lost).toMatchObject({ status: "outcome_unknown" });
-    const operationId = /operation ([0-9a-f-]{36})/.exec(lost.status === "outcome_unknown" ? lost.message : "")?.[1];
+    const operationId = /operation ([0-9a-f-]{36})/.exec(
+      lost.status === "outcome_unknown" ? lost.message : "",
+    )?.[1];
     expect(operationId).toBeTruthy();
 
     const blockedTurn = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Cancel order A-8", effect: "change", requiredScopes: ["orders:cancel", "orders:read"] },
+      {
+        businessId: business.id,
+        text: "Cancel order A-8",
+        effect: "change",
+        requiredScopes: ["orders:cancel", "orders:read"],
+      },
       taskContext(),
     );
     expect(blockedTurn).toMatchObject({ status: "blocked", reason: "unresolved_operation" });
 
     const reconciled = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "", effect: "change", requiredScopes: [], reconcileOperationId: operationId! },
+      {
+        businessId: business.id,
+        text: "",
+        effect: "change",
+        requiredScopes: [],
+        reconcileOperationId: operationId!,
+      },
       taskContext(),
     );
-    expect(reconciled).toMatchObject({ status: "replied", replyText: "Order #A-88213 is cancelled." });
+    expect(reconciled).toMatchObject({
+      status: "replied",
+      replyText: "Order #A-88213 is cancelled.",
+    });
     const sends = harness.network.log.filter((entry) => entry.url.endsWith("/message:send"));
     const lostBody = JSON.parse(sends.at(-2)!.body!).message;
     const retryBody = JSON.parse(sends.at(-1)!.body!).message;
@@ -298,7 +375,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     });
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "What are your opening hours?", effect: "inspect", requiredScopes: [] },
+      {
+        businessId: business.id,
+        text: "What are your opening hours?",
+        effect: "inspect",
+        requiredScopes: [],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "replied", evidence: "not_applicable" });
@@ -313,19 +395,34 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     harness.provider.omitNextReceipt = true;
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status again?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status again?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "replied", evidence: "missing" });
     const next = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Cancel order A-1", effect: "change", requiredScopes: ["orders:cancel", "orders:read"] },
+      {
+        businessId: business.id,
+        text: "Cancel order A-1",
+        effect: "change",
+        requiredScopes: ["orders:cancel", "orders:read"],
+      },
       taskContext({ conversationId: undefined } as never),
     );
     expect(next).toMatchObject({ status: "blocked", reason: "evidence_review_required" });
@@ -333,7 +430,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     await harness.runtime.acknowledgeEvidence(owner, conversationId);
     const afterReview = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Cancel order A-1", effect: "change", requiredScopes: ["orders:cancel", "orders:read"] },
+      {
+        businessId: business.id,
+        text: "Cancel order A-1",
+        effect: "change",
+        requiredScopes: ["orders:cancel", "orders:read"],
+      },
       taskContext(),
     );
     expect(afterReview).toMatchObject({ status: "replied" });
@@ -344,7 +446,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.provider.tamperNextReceipt = true;
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "replied", evidence: "invalid" });
@@ -355,7 +462,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.provider.overreachNextReceipt = true;
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "replied", evidence: "needs_review" });
@@ -365,13 +477,23 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     harness.provider.revokeAllGrants();
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "blocked", reason: "reconnect_required" });
@@ -383,7 +505,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "My card is 4111 1111 1111 1111, what is my order status?", effect: "inspect", requiredScopes: [] },
+      {
+        businessId: business.id,
+        text: "My card is 4111 1111 1111 1111, what is my order status?",
+        effect: "inspect",
+        requiredScopes: [],
+      },
       taskContext(),
     );
     expect(outcome).toMatchObject({ status: "blocked", reason: "sensitive_content" });
@@ -394,7 +521,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     for (const origin of ["bot", "sub_agent", "gateway"] as const) {
       const outcome = await harness.runtime.send(
         owner,
-        { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: [] },
+        {
+          businessId: business.id,
+          text: "Where is my order?",
+          effect: "inspect",
+          requiredScopes: [],
+        },
         taskContext({ origin }),
       );
       expect(outcome).toMatchObject({ status: "blocked", reason: "delegation_required" });
@@ -405,10 +537,18 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext({ humanInput: "none" }),
     );
-    expect(outcome).toMatchObject({ status: "blocked", reason: "interactive_approval_unavailable" });
+    expect(outcome).toMatchObject({
+      status: "blocked",
+      reason: "interactive_approval_unavailable",
+    });
     expect(harness.host.unavailable).toHaveLength(1);
   });
 
@@ -417,7 +557,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.host.onWait = () => undefined;
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext({ waitForConsent: false, humanInput: "out_of_band" }),
     );
     expect(outcome).toMatchObject({ status: "needs_user_action" });
@@ -425,7 +570,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const signIn = await harness.runtime.getAuthorizationSignIn(owner, authorizationId);
     expect(signIn?.verificationOrigin).toBe("https://brand.example");
     // Another principal cannot read the link.
-    expect(await harness.runtime.getAuthorizationSignIn({ id: "other", kind: "local_owner" }, authorizationId)).toBeNull();
+    expect(
+      await harness.runtime.getAuthorizationSignIn(
+        { id: "other", kind: "local_owner" },
+        authorizationId,
+      ),
+    ).toBeNull();
     const cancelled = await harness.runtime.cancelAuthorization(owner, authorizationId);
     expect(cancelled?.state).toBe("cancelled");
   });
@@ -435,7 +585,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.policies.pact.blockedProviders = ["provider.example"];
     const blockedProvider = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: [] },
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: [],
+      },
       taskContext(),
     );
     expect(blockedProvider).toMatchObject({ status: "blocked", reason: "provider_blocked" });
@@ -443,7 +598,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.policies.pact.enabled = false;
     const disabledByAdmin = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: [] },
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: [],
+      },
       taskContext(),
     );
     expect(disabledByAdmin).toMatchObject({ status: "blocked", reason: "disabled_by_admin" });
@@ -454,7 +614,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.host.approve = false;
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Cancel order A-1", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Cancel order A-1",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     // Declared "inspect", but the text asks for a cancellation: the runtime takes the stronger class.
@@ -471,12 +636,21 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
       { businessId: business.id, text: "Opening hours?", effect: "inspect", requiredScopes: [] },
       taskContext(),
     );
-    const conversation = await harness.runtime.getConversation(owner, (first as { conversationId: string }).conversationId);
+    const conversation = await harness.runtime.getConversation(
+      owner,
+      (first as { conversationId: string }).conversationId,
+    );
     const contextId = [...harness.provider.conversations.keys()][0]!;
     harness.provider.closeConversation(contextId);
     const second = await harness.runtime.send(
       owner,
-      { businessId: business.id, conversationId: conversation!.id, text: "And on Sunday?", effect: "inspect", requiredScopes: [] },
+      {
+        businessId: business.id,
+        conversationId: conversation!.id,
+        text: "And on Sunday?",
+        effect: "inspect",
+        requiredScopes: [],
+      },
       taskContext(),
     );
     expect(second).toMatchObject({ status: "replied" });
@@ -487,7 +661,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     const business = await discover();
     await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     const [grant] = await harness.runtime.listGrants(owner);
@@ -495,20 +674,32 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(result?.state).toBe("disconnected");
     const record = await harness.runtime.repo.getGrant(grant!.id);
     expect(harness.secrets.getGrant(record!.secretRef)).toBeUndefined();
-    expect(await harness.runtime.disconnectGrant({ id: "someone-else", kind: "local_owner" }, grant!.id)).toBeNull();
+    expect(
+      await harness.runtime.disconnectGrant({ id: "someone-else", kind: "local_owner" }, grant!.id),
+    ).toBeNull();
   });
 
   it("refreshes an expiring token with rotation and invalidates the grant when refresh is rejected", async () => {
     const business = await discover();
     await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     harness.clock.now += 3590_000;
     const refreshed = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(refreshed).toMatchObject({ status: "replied" });
@@ -519,7 +710,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.clock.now += 3590_000;
     const rejected = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Status of my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext(),
     );
     expect(rejected).toMatchObject({ status: "blocked", reason: "reconnect_required" });
@@ -558,7 +754,9 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(result.abandoned).toBe(1);
     const after = await harness.runtime.repo.getMessage(message!.id);
     expect(after?.state).toBe("outcome_unknown");
-    expect(harness.network.log.filter((entry) => entry.url.endsWith("/message:send"))).toHaveLength(0);
+    expect(harness.network.log.filter((entry) => entry.url.endsWith("/message:send"))).toHaveLength(
+      0,
+    );
   });
 
   it("lets only one runtime poll a device code", async () => {
@@ -566,14 +764,162 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     harness.host.onWait = () => undefined;
     const outcome = await harness.runtime.send(
       owner,
-      { businessId: business.id, text: "Where is my order?", effect: "inspect", requiredScopes: ["orders:read"] },
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
       taskContext({ waitForConsent: false }),
     );
     const authorizationId = (outcome as { authorizationId: string }).authorizationId;
     const other = makeHarness({ leaseOwner: "second-runtime", shared: harness });
-    expect(await other.runtime.repo.acquireAuthorizationLease(authorizationId, "second-runtime", 30_000)).toBe(false);
+    expect(
+      await other.runtime.repo.acquireAuthorizationLease(authorizationId, "second-runtime", 30_000),
+    ).toBe(false);
     await harness.runtime.cancelAuthorization(owner, authorizationId);
     await other.runtime.shutdown();
+  });
+
+  it("detects a receipt replayed from an earlier turn", async () => {
+    const business = await discover();
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    harness.provider.replayNextReceipt = true;
+    const replayed = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status again?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    expect(replayed).toMatchObject({ status: "replied", evidence: "invalid" });
+    const receipt = await harness.runtime.getReceipt(
+      owner,
+      (replayed as { receiptId: string }).receiptId,
+    );
+    expect(receipt?.verificationReason).toBe("replayed_receipt");
+  });
+
+  it("stops when the business asks for the same scope again right after it was granted", async () => {
+    const business = await discover();
+    harness.provider.alwaysMissingScope = "orders:cancel";
+    const outcome = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    expect(outcome).toMatchObject({ status: "denied", reason: "insufficient_permission" });
+    expect(harness.provider.devices.length).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps polling through slow_down and reports an expired device code", async () => {
+    const business = await discover();
+    harness.provider.slowDownPolls = 2;
+    const slowed = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    expect(slowed).toMatchObject({ status: "replied" });
+    harness.host.onWait = () => {
+      const pending = harness.provider.devices.find((device) => device.status === "pending");
+      if (pending) pending.expiresAt = 0;
+    };
+    const expired = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Cancel order A-1",
+        effect: "change",
+        requiredScopes: ["orders:cancel"],
+      },
+      taskContext(),
+    );
+    expect(expired).toMatchObject({ status: "expired", reason: "consent_expired" });
+    expect(harness.host.settled.at(-1)?.state).toBe("expired");
+  });
+
+  it("keeps grants and conversations per principal and per subject", async () => {
+    const business = await discover();
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    const other = { id: "principal-other", kind: "local_owner" as const };
+    expect(await harness.runtime.listGrants(other)).toEqual([]);
+    harness.host.onWait = () => undefined;
+    const otherSend = await harness.runtime.send(
+      other,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext({ waitForConsent: false }),
+    );
+    // The other principal has no grant of its own: it must consent itself.
+    expect(otherSend).toMatchObject({ status: "needs_user_action" });
+    const [conversation] = await harness.runtime.listConversations(owner);
+    expect(await harness.runtime.getConversation(other, conversation!.id)).toBeNull();
+    await harness.runtime.cancelAuthorization(
+      other,
+      (otherSend as { authorizationId: string }).authorizationId,
+    );
+  });
+
+  it("invalidates grants and closes conversations when the signer reports a new subject", async () => {
+    const business = await discover();
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    const binding = (await harness.runtime.repo.listGrants({ principalId: owner.id }))[0]!
+      .subjectBindingId;
+    const changed = await harness.runtime.repo.ensureSubjectBinding({
+      principalId: owner.id,
+      deployment: "development",
+      issuer: ISSUER,
+      subject: "subject-opaque-2",
+    });
+    expect(changed.subjectChanged).toBe(true);
+    expect(changed.binding.id).toBe(binding);
+    const grants = await harness.runtime.listGrants(owner);
+    expect(grants.every((grant) => grant.state !== "active")).toBe(true);
   });
 
   it("selects the interface by binding and version and rejects unsupported cards", async () => {
@@ -582,10 +928,16 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
       status: 200,
       body: JSON.stringify({
         ...card,
-        supportedInterfaces: [{ url: "https://odd.example/a2a", protocolBinding: "JSONRPC", protocolVersion: "1.0" }],
+        supportedInterfaces: [
+          { url: "https://odd.example/a2a", protocolBinding: "JSONRPC", protocolVersion: "1.0" },
+        ],
       }),
     }));
-    const { business, route } = await harness.runtime.discover(owner, { domain: "odd.example" }, taskContext());
+    const { business, route } = await harness.runtime.discover(
+      owner,
+      { domain: "odd.example" },
+      taskContext(),
+    );
     expect(business.supported).toBe(false);
     expect(business.unsupportedReason).toBe("no_http_json_1_0_interface");
     expect(route.route).toBe("other");

@@ -56,7 +56,10 @@ export class DevelopmentPactSigner implements PactSigner {
     if (this.server) return this.issuer;
     const server = createServer((request, response) => {
       if (request.method === "GET" && request.url === "/.well-known/jwks.json") {
-        response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        response.writeHead(200, {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store",
+        });
         response.end(JSON.stringify(this.jwks()));
         return;
       }

@@ -46,7 +46,11 @@ function defaultRateLimit(channel: string): void {
 export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler> {
   const limit = deps.checkRateLimit ?? defaultRateLimit;
   const handler =
-    <T>(channel: string, schema: ZodType<T>, run: (value: T, principal: PactPrincipal) => unknown): Handler =>
+    <T>(
+      channel: string,
+      schema: ZodType<T>,
+      run: (value: T, principal: PactPrincipal) => unknown,
+    ): Handler =>
     async (raw) => {
       limit(channel);
       const value = validateInput(schema, raw, "PACT request");
@@ -54,37 +58,53 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
     };
   const svc = () => deps.service();
   return {
-    [IPC_CHANNELS.PACT_STATUS]: handler(IPC_CHANNELS.PACT_STATUS, PactNoArgsSchema, (_v, p) => svc().status(p)),
-    [IPC_CHANNELS.PACT_SETTINGS_GET]: handler(IPC_CHANNELS.PACT_SETTINGS_GET, PactNoArgsSchema, () =>
-      svc().getSettings(),
+    [IPC_CHANNELS.PACT_STATUS]: handler(IPC_CHANNELS.PACT_STATUS, PactNoArgsSchema, (_v, p) =>
+      svc().status(p),
     ),
-    [IPC_CHANNELS.PACT_SETTINGS_UPDATE]: handler(IPC_CHANNELS.PACT_SETTINGS_UPDATE, PactSettingsUpdateSchema, (v) =>
-      svc().updateSettings(v),
+    [IPC_CHANNELS.PACT_SETTINGS_GET]: handler(
+      IPC_CHANNELS.PACT_SETTINGS_GET,
+      PactNoArgsSchema,
+      () => svc().getSettings(),
+    ),
+    [IPC_CHANNELS.PACT_SETTINGS_UPDATE]: handler(
+      IPC_CHANNELS.PACT_SETTINGS_UPDATE,
+      PactSettingsUpdateSchema,
+      (v) => svc().updateSettings(v),
     ),
     [IPC_CHANNELS.PACT_IDENTITY_SET_CREDENTIAL]: handler(
       IPC_CHANNELS.PACT_IDENTITY_SET_CREDENTIAL,
       PactSignerCredentialSchema,
       (v) => svc().setSignerCredential(v.credential),
     ),
-    [IPC_CHANNELS.PACT_IDENTITY_DEVICE_KEY]: handler(IPC_CHANNELS.PACT_IDENTITY_DEVICE_KEY, PactNoArgsSchema, () =>
-      svc().ensureDeviceKey(),
+    [IPC_CHANNELS.PACT_IDENTITY_DEVICE_KEY]: handler(
+      IPC_CHANNELS.PACT_IDENTITY_DEVICE_KEY,
+      PactNoArgsSchema,
+      () => svc().ensureDeviceKey(),
     ),
-    [IPC_CHANNELS.PACT_BUSINESS_DISCOVER]: handler(IPC_CHANNELS.PACT_BUSINESS_DISCOVER, PactDiscoverSchema, (v, p) =>
-      svc().discover(p, v),
+    [IPC_CHANNELS.PACT_BUSINESS_DISCOVER]: handler(
+      IPC_CHANNELS.PACT_BUSINESS_DISCOVER,
+      PactDiscoverSchema,
+      (v, p) => svc().discover(p, v),
     ),
-    [IPC_CHANNELS.PACT_BUSINESS_LIST]: handler(IPC_CHANNELS.PACT_BUSINESS_LIST, PactNoArgsSchema, () =>
-      svc().listBusinesses(),
+    [IPC_CHANNELS.PACT_BUSINESS_LIST]: handler(
+      IPC_CHANNELS.PACT_BUSINESS_LIST,
+      PactNoArgsSchema,
+      () => svc().listBusinesses(),
     ),
-    [IPC_CHANNELS.PACT_CONVERSATION_GET]: handler(IPC_CHANNELS.PACT_CONVERSATION_GET, PactIdSchema, (v, p) =>
-      svc().getConversation(p, v.id),
+    [IPC_CHANNELS.PACT_CONVERSATION_GET]: handler(
+      IPC_CHANNELS.PACT_CONVERSATION_GET,
+      PactIdSchema,
+      (v, p) => svc().getConversation(p, v.id),
     ),
     [IPC_CHANNELS.PACT_CONVERSATION_LIST]: handler(
       IPC_CHANNELS.PACT_CONVERSATION_LIST,
       PactConversationListSchema,
       (v, p) => svc().listConversations(p, v),
     ),
-    [IPC_CHANNELS.PACT_CONVERSATION_SEND]: handler(IPC_CHANNELS.PACT_CONVERSATION_SEND, PactSendSchema, (v, p) =>
-      svc().send(p, v),
+    [IPC_CHANNELS.PACT_CONVERSATION_SEND]: handler(
+      IPC_CHANNELS.PACT_CONVERSATION_SEND,
+      PactSendSchema,
+      (v, p) => svc().send(p, v),
     ),
     [IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE]: handler(
       IPC_CHANNELS.PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE,
@@ -96,8 +116,10 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
       PactAuthorizationStartSchema,
       (v, p) => svc().startAuthorization(p, v),
     ),
-    [IPC_CHANNELS.PACT_AUTHORIZATION_GET]: handler(IPC_CHANNELS.PACT_AUTHORIZATION_GET, PactIdSchema, (v, p) =>
-      svc().getAuthorization(p, v.id),
+    [IPC_CHANNELS.PACT_AUTHORIZATION_GET]: handler(
+      IPC_CHANNELS.PACT_AUTHORIZATION_GET,
+      PactIdSchema,
+      (v, p) => svc().getAuthorization(p, v.id),
     ),
     [IPC_CHANNELS.PACT_AUTHORIZATION_FOR_INPUT]: handler(
       IPC_CHANNELS.PACT_AUTHORIZATION_FOR_INPUT,
@@ -109,8 +131,10 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
       PactAuthorizationListSchema,
       (v, p) => svc().listAuthorizations(p, v),
     ),
-    [IPC_CHANNELS.PACT_AUTHORIZATION_CANCEL]: handler(IPC_CHANNELS.PACT_AUTHORIZATION_CANCEL, PactIdSchema, (v, p) =>
-      svc().cancelAuthorization(p, v.id),
+    [IPC_CHANNELS.PACT_AUTHORIZATION_CANCEL]: handler(
+      IPC_CHANNELS.PACT_AUTHORIZATION_CANCEL,
+      PactIdSchema,
+      (v, p) => svc().cancelAuthorization(p, v.id),
     ),
     [IPC_CHANNELS.PACT_AUTHORIZATION_OPEN_SIGN_IN]: handler(
       IPC_CHANNELS.PACT_AUTHORIZATION_OPEN_SIGN_IN,
@@ -119,19 +143,30 @@ export function createPactIpcHandlers(deps: PactIpcDeps): Record<string, Handler
         const signIn = await svc().authorizationSignIn(p, v.id);
         if (!signIn) throw new Error("This sign-in is no longer pending.");
         const url = new URL(signIn.verificationUriComplete);
-        if (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "127.0.0.1")) {
+        if (
+          url.protocol !== "https:" &&
+          !(url.protocol === "http:" && url.hostname === "127.0.0.1")
+        ) {
           throw new Error("CoWork only opens HTTPS sign-in pages.");
         }
         // The user's own browser: CoWork never frames, proxies or observes the login.
         await deps.openExternal(url.toString());
-        return { opened: true, verificationOrigin: signIn.verificationOrigin, userCode: signIn.userCode };
+        return {
+          opened: true,
+          verificationOrigin: signIn.verificationOrigin,
+          userCode: signIn.userCode,
+        };
       },
     ),
-    [IPC_CHANNELS.PACT_GRANT_LIST]: handler(IPC_CHANNELS.PACT_GRANT_LIST, PactNoArgsSchema, (_v, p) =>
-      svc().listGrants(p),
+    [IPC_CHANNELS.PACT_GRANT_LIST]: handler(
+      IPC_CHANNELS.PACT_GRANT_LIST,
+      PactNoArgsSchema,
+      (_v, p) => svc().listGrants(p),
     ),
-    [IPC_CHANNELS.PACT_GRANT_DISCONNECT]: handler(IPC_CHANNELS.PACT_GRANT_DISCONNECT, PactIdSchema, (v, p) =>
-      svc().disconnectGrant(p, v.id),
+    [IPC_CHANNELS.PACT_GRANT_DISCONNECT]: handler(
+      IPC_CHANNELS.PACT_GRANT_DISCONNECT,
+      PactIdSchema,
+      (v, p) => svc().disconnectGrant(p, v.id),
     ),
     [IPC_CHANNELS.PACT_RECEIPT_GET]: handler(IPC_CHANNELS.PACT_RECEIPT_GET, PactIdSchema, (v, p) =>
       svc().getReceipt(p, v.id),

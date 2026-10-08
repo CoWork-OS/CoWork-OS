@@ -117,7 +117,10 @@ export function runBoundedPoll<T>(options: BoundedPollOptions<T>): Promise<Bound
           finish({ kind: "done", value: step.value });
           return;
         case "slow_down":
-          interval = Math.min(maxInterval, interval + (options.slowDownIncrementMs ?? DEFAULT_SLOW_DOWN_MS));
+          interval = Math.min(
+            maxInterval,
+            interval + (options.slowDownIncrementMs ?? DEFAULT_SLOW_DOWN_MS),
+          );
           schedule(interval);
           return;
         case "retry_after":

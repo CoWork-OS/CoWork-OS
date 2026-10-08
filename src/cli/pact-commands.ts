@@ -112,7 +112,10 @@ export async function runPactDirectCommand(
   const service = surface(daemon);
   const principal = await daemon.getPactRuntime().ownerPrincipal("cli");
   const show = (payload: unknown, text: string) =>
-    write({ type: "pact", action: args.pactAction, result: payload as Record<string, unknown> }, text);
+    write(
+      { type: "pact", action: args.pactAction, result: payload as Record<string, unknown> },
+      text,
+    );
 
   switch (args.pactAction) {
     case "status": {
@@ -123,7 +126,10 @@ export async function runPactDirectCommand(
           `PACT: ${status.available ? "available" : `unavailable (${status.unavailableReason})`}`,
           `Preference: ${status.preference}`,
           `Identity: ${status.identity.deployment} ${status.identity.ready ? "ready" : `not ready${status.identity.reason ? ` (${status.identity.reason})` : ""}`}`,
-          ...status.providers.map((provider) => `Provider ${provider.origin}: ${provider.ready ? "ready" : provider.reason ?? "not ready"}`),
+          ...status.providers.map(
+            (provider) =>
+              `Provider ${provider.origin}: ${provider.ready ? "ready" : (provider.reason ?? "not ready")}`,
+          ),
           `Connected permissions: ${status.activeGrants}; pending sign-ins: ${status.pendingAuthorizations}`,
         ].join("\n"),
       );
@@ -161,7 +167,10 @@ export async function runPactDirectCommand(
       });
       const outcome = await service.send(principal, input);
       if (outcome.status === "replied") {
-        show(outcome, `${outcome.replyText}\n[evidence: ${outcome.evidence}; conversation ${outcome.conversationId}]`);
+        show(
+          outcome,
+          `${outcome.replyText}\n[evidence: ${outcome.evidence}; conversation ${outcome.conversationId}]`,
+        );
         return 0;
       }
       if (outcome.status === "needs_user_action") {
@@ -172,7 +181,10 @@ export async function runPactDirectCommand(
         );
         return EXIT_NEEDS_USER_ACTION;
       }
-      show(outcome, `${outcome.status}: ${outcome.message}${outcome.reason === "local_approval_required" ? " (re-run with --yes to confirm)" : ""}`);
+      show(
+        outcome,
+        `${outcome.status}: ${outcome.message}${outcome.reason === "local_approval_required" ? " (re-run with --yes to confirm)" : ""}`,
+      );
       return outcome.reason === "local_approval_required" ? EXIT_NEEDS_USER_ACTION : 1;
     }
     case "grants": {
@@ -181,15 +193,24 @@ export async function runPactDirectCommand(
         grants,
         grants.length
           ? grants
-              .map((grant) => `${grant.id}  ${grant.businessName}  ${grant.state}  ${grant.scopes.map((scope) => scope.id).join(" ")}`)
+              .map(
+                (grant) =>
+                  `${grant.id}  ${grant.businessName}  ${grant.state}  ${grant.scopes.map((scope) => scope.id).join(" ")}`,
+              )
               .join("\n")
           : "No business permissions.",
       );
       return 0;
     }
     case "disconnect": {
-      const result = await service.disconnectGrant(principal, requireValue(args.pactId, "<grantId>"));
-      show(result, `Disconnected ${result.grant.businessName} locally. The business was not notified (PACT 1.0 has no revocation).`);
+      const result = await service.disconnectGrant(
+        principal,
+        requireValue(args.pactId, "<grantId>"),
+      );
+      show(
+        result,
+        `Disconnected ${result.grant.businessName} locally. The business was not notified (PACT 1.0 has no revocation).`,
+      );
       return 0;
     }
     case "authorizations": {
@@ -197,7 +218,12 @@ export async function runPactDirectCommand(
       show(
         list,
         list.length
-          ? list.map((entry) => `${entry.id}  ${entry.businessName}  ${entry.state}  expires ${new Date(entry.expiresAt).toISOString()}`).join("\n")
+          ? list
+              .map(
+                (entry) =>
+                  `${entry.id}  ${entry.businessName}  ${entry.state}  expires ${new Date(entry.expiresAt).toISOString()}`,
+              )
+              .join("\n")
           : "No sign-in requests.",
       );
       return 0;
@@ -210,7 +236,10 @@ export async function runPactDirectCommand(
       });
       const view = await service.startAuthorization(principal, input);
       const signIn = await service.authorizationSignIn(principal, view.id);
-      show({ authorization: view, ...(signIn ? { signIn } : {}) }, signIn ? formatSignIn(signIn, view.businessName) : `Started ${view.id}`);
+      show(
+        { authorization: view, ...(signIn ? { signIn } : {}) },
+        signIn ? formatSignIn(signIn, view.businessName) : `Started ${view.id}`,
+      );
       const settled = await service.awaitAuthorization(principal, view.id);
       show(settled ?? view, `Sign-in ${settled?.state ?? "pending"}.`);
       return settled?.state === "granted" ? 0 : 1;
@@ -221,26 +250,42 @@ export async function runPactDirectCommand(
       let view = await service.getAuthorization(principal, id);
       if (args.pactAction === "authorization-wait" && view.state === "pending") {
         const signIn = await service.authorizationSignIn(principal, id);
-        if (signIn) write({ type: "needs_user_action", authorizationId: id, signIn }, formatSignIn(signIn, view.businessName));
+        if (signIn)
+          write(
+            { type: "needs_user_action", authorizationId: id, signIn },
+            formatSignIn(signIn, view.businessName),
+          );
         // Resume polling in this process; a granted wait resumes its task here.
         view = (await daemon.getPactRuntime().resumeAuthorization(principal, id)) ?? view;
       }
-      show(view, `${view.businessName}: ${view.state}${view.stateReason ? ` (${view.stateReason})` : ""}`);
+      show(
+        view,
+        `${view.businessName}: ${view.state}${view.stateReason ? ` (${view.stateReason})` : ""}`,
+      );
       if (view.state === "pending") return EXIT_NEEDS_USER_ACTION;
       return view.state === "granted" ? 0 : 1;
     }
     case "authorization-cancel": {
-      const view = await service.cancelAuthorization(principal, requireValue(args.pactId, "<authorizationId>"));
+      const view = await service.cancelAuthorization(
+        principal,
+        requireValue(args.pactId, "<authorizationId>"),
+      );
       show(view, `${view.businessName}: ${view.state}`);
       return 0;
     }
     case "conversation": {
-      const view = await service.getConversation(principal, requireValue(args.pactId, "<conversationId>"));
+      const view = await service.getConversation(
+        principal,
+        requireValue(args.pactId, "<conversationId>"),
+      );
       show(
         view,
         [
           `${view.businessName}: ${view.state}${view.stateReason ? ` (${view.stateReason})` : ""}`,
-          ...view.turns.map((turn) => `> ${turn.text}\n< ${turn.replyText ?? `[${turn.state}]`}  [evidence: ${turn.evidence}; operation ${turn.operationId}]`),
+          ...view.turns.map(
+            (turn) =>
+              `> ${turn.text}\n< ${turn.replyText ?? `[${turn.state}]`}  [evidence: ${turn.evidence}; operation ${turn.operationId}]`,
+          ),
         ].join("\n"),
       );
       return 0;

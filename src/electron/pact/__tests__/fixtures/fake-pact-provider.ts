@@ -14,11 +14,7 @@ import {
   verifyCompactJws,
   type Es256KeyPair,
 } from "../../jws";
-import {
-  PactTransportError,
-  type PactHttpResponse,
-  type PolicyCheckedHttp,
-} from "../../transport";
+import { PactTransportError, type PactHttpResponse, type PolicyCheckedHttp } from "../../transport";
 
 export interface FakeRequest {
   method: string;
@@ -36,7 +32,11 @@ export interface FakeResponse {
 export type FakeHandler = (request: FakeRequest) => FakeResponse | Promise<FakeResponse>;
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): FakeResponse {
-  return { status, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) };
+  return {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  };
 }
 
 function a2aError(reason: string, message: string): FakeResponse {
@@ -54,7 +54,13 @@ function a2aError(reason: string, message: string): FakeResponse {
         code,
         status,
         message,
-        details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason, domain: "a2a-protocol.org" }],
+        details: [
+          {
+            "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+            reason,
+            domain: "a2a-protocol.org",
+          },
+        ],
       },
     },
     code,
@@ -62,7 +68,9 @@ function a2aError(reason: string, message: string): FakeResponse {
 }
 
 function header(request: FakeRequest, name: string): string | undefined {
-  const key = Object.keys(request.headers).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+  const key = Object.keys(request.headers).find(
+    (candidate) => candidate.toLowerCase() === name.toLowerCase(),
+  );
   return key ? request.headers[key] : undefined;
 }
 
@@ -138,6 +146,13 @@ export class FakePactProvider {
   tamperNextReceipt = false;
   /** Report scopes outside the grant in the next receipt. */
   overreachNextReceipt = false;
+  /** Attach the previous turn's receipt to the next reply (replayed evidence). */
+  replayNextReceipt = false;
+  /** Keep demanding this scope on every turn, even after it is granted (a broken provider). */
+  alwaysMissingScope: string | null = null;
+  /** Answer the next N token polls with slow_down. */
+  slowDownPolls = 0;
+  private lastReceipt: unknown = null;
   /** Map the user's scope approval: given requested scopes, which to grant (or "deny"). */
   approvalPolicy: (requested: string[]) => string[] | "deny" = (requested) => requested;
   brandUserId = "brand-user-4471";
@@ -187,7 +202,9 @@ export class FakePactProvider {
                     deviceCode: {
                       deviceAuthorizationUrl: `${this.oauthIssuer}/device_authorization`,
                       tokenUrl: `${this.oauthIssuer}/token`,
-                      scopes: Object.fromEntries(this.scopes.map((scope) => [scope.id, scope.description])),
+                      scopes: Object.fromEntries(
+                        this.scopes.map((scope) => [scope.id, scope.description]),
+                      ),
                     },
                   },
                   oauth2MetadataUrl: `${this.oauthIssuer}/.well-known/oauth-authorization-server`,
@@ -198,11 +215,20 @@ export class FakePactProvider {
       },
       securityRequirements: [
         { schemes: { platformJwt: { list: [] } } },
-        ...(delegated ? [{ schemes: { platformJwt: { list: [] }, userDelegation: { list: [] } } }] : []),
+        ...(delegated
+          ? [{ schemes: { platformJwt: { list: [] }, userDelegation: { list: [] } } }]
+          : []),
       ],
       defaultInputModes: ["text/plain"],
       defaultOutputModes: ["text/plain"],
-      skills: [{ id: "orders", name: "Orders", description: "Order status and changes.", tags: ["orders"] }],
+      skills: [
+        {
+          id: "orders",
+          name: "Orders",
+          description: "Order status and changes.",
+          tags: ["orders"],
+        },
+      ],
     };
   }
 
@@ -265,22 +291,37 @@ export class FakePactProvider {
     }
     const now = Math.floor(this.now() / 1000);
     if (claims.aud !== this.options.audience) return null;
-    if (typeof claims.sub !== "string" || typeof claims.iat !== "number" || typeof claims.exp !== "number") return null;
-    if (claims.exp - claims.iat > 300 || claims.iat > now + 30 || claims.exp < now - 30) return null;
+    if (
+      typeof claims.sub !== "string" ||
+      typeof claims.iat !== "number" ||
+      typeof claims.exp !== "number"
+    )
+      return null;
+    if (claims.exp - claims.iat > 300 || claims.iat > now + 30 || claims.exp < now - 30)
+      return null;
     return { issuer, sub: claims.sub };
   }
 
   private signProviderJwt(claims: Record<string, unknown>, typ: string): string {
-    return signCompactJws(JSON.stringify(claims), { alg: "ES256", kid: this.key.publicJwk.kid, typ }, this.key.privateKey);
+    return signCompactJws(
+      JSON.stringify(claims),
+      { alg: "ES256", kid: this.key.publicJwk.kid, typ },
+      this.key.privateKey,
+    );
   }
 
-  private async verifyDelegation(request: FakeRequest, issuer: string): Promise<GrantRow | null | "invalid"> {
+  private async verifyDelegation(
+    request: FakeRequest,
+    issuer: string,
+  ): Promise<GrantRow | null | "invalid"> {
     const value = header(request, "x-a2a-user-delegation");
     if (value === undefined) return null;
     const token = value.match(/^Bearer\s+(\S+)$/i)?.[1];
     if (!token) return "invalid";
     try {
-      const verified = await verifyCompactJws(token, async () => publicKeyFromJwk(this.key.publicJwk));
+      const verified = await verifyCompactJws(token, async () =>
+        publicKeyFromJwk(this.key.publicJwk),
+      );
       const claims = JSON.parse(verified.payload.toString("utf8")) as Record<string, unknown>;
       if (claims.aud !== this.interfaceUrl || claims.client_id !== issuer) return "invalid";
       if (typeof claims.exp !== "number" || claims.exp * 1000 < this.now()) return "invalid";
@@ -332,7 +373,10 @@ export class FakePactProvider {
     if (request.method === "GET" && path === `${base}/.well-known/agent-card.json`) {
       return json(this.card(), 200, { "cache-control": "public, max-age=300" });
     }
-    if (request.method === "GET" && path === `${base}/oauth/.well-known/oauth-authorization-server`) {
+    if (
+      request.method === "GET" &&
+      path === `${base}/oauth/.well-known/oauth-authorization-server`
+    ) {
       return json({
         issuer: this.oauthIssuer,
         device_authorization_endpoint: `${this.oauthIssuer}/device_authorization`,
@@ -349,7 +393,10 @@ export class FakePactProvider {
       if (!auth) return { status: 401, headers: { "www-authenticate": 'Bearer realm="a2a"' } };
       const form = new URLSearchParams(request.body ?? "");
       if (form.get("client_id") !== auth.issuer) {
-        return json({ error: "invalid_client", error_description: "client_id must equal issuer" }, 401);
+        return json(
+          { error: "invalid_client", error_description: "client_id must equal issuer" },
+          401,
+        );
       }
       if (path.endsWith("device_authorization")) {
         const scopes = (form.get("scope") ?? "").split(" ").filter(Boolean);
@@ -384,6 +431,10 @@ export class FakePactProvider {
         if (row.expiresAt <= this.now()) return json({ error: "expired_token" }, 400);
         if (row.status === "denied") return json({ error: "access_denied" }, 400);
         if (row.status === "consumed") return json({ error: "invalid_grant" }, 400);
+        if (this.slowDownPolls > 0) {
+          this.slowDownPolls -= 1;
+          return json({ error: "slow_down" }, 400);
+        }
         if (row.status === "pending") {
           row.lastPolledAt = this.now();
           return json({ error: "authorization_pending" }, 400);
@@ -405,7 +456,10 @@ export class FakePactProvider {
       if (!auth) return { status: 401, headers: { "www-authenticate": 'Bearer realm="a2a"' } };
       const delegation = await this.verifyDelegation(request, auth.issuer);
       if (delegation === "invalid") {
-        return { status: 401, headers: { "www-authenticate": 'Bearer realm="a2a", error="invalid_token"' } };
+        return {
+          status: 401,
+          headers: { "www-authenticate": 'Bearer realm="a2a", error="invalid_token"' },
+        };
       }
       let body: { message?: Record<string, unknown> };
       try {
@@ -415,8 +469,11 @@ export class FakePactProvider {
       }
       const message = body.message ?? {};
       if (message.taskId !== undefined) return a2aError("TASK_NOT_FOUND", "Task not found");
-      if (message.role !== "ROLE_USER") return a2aError("INVALID_PARAMS", "Message role must be ROLE_USER");
-      const parts = Array.isArray(message.parts) ? (message.parts as Record<string, unknown>[]) : [];
+      if (message.role !== "ROLE_USER")
+        return a2aError("INVALID_PARAMS", "Message role must be ROLE_USER");
+      const parts = Array.isArray(message.parts)
+        ? (message.parts as Record<string, unknown>[])
+        : [];
       if (parts.length === 0 || parts.some((part) => typeof part.text !== "string")) {
         return a2aError("CONTENT_TYPE_NOT_SUPPORTED", "Content type not supported");
       }
@@ -426,21 +483,37 @@ export class FakePactProvider {
       let conversation: Conversation | undefined;
       if (typeof message.contextId === "string") {
         conversation = this.conversations.get(message.contextId);
-        if (!conversation || conversation.paUser !== paUser) return a2aError("INVALID_PARAMS", "Unknown contextId");
+        if (!conversation || conversation.paUser !== paUser)
+          return a2aError("INVALID_PARAMS", "Unknown contextId");
         if (conversation.closed) return a2aError("UNSUPPORTED_OPERATION", "Conversation closed");
-        if (delegation && conversation.brandUserId && conversation.brandUserId !== delegation.brandUserId) {
+        if (
+          delegation &&
+          conversation.brandUserId &&
+          conversation.brandUserId !== delegation.brandUserId
+        ) {
           return a2aError("INVALID_PARAMS", "contextId already runs as a different Brand user");
         }
       } else {
-        conversation = { id: randomUUID(), paUser, brandUserId: delegation?.brandUserId ?? null, closed: false, messages: [] };
+        conversation = {
+          id: randomUUID(),
+          paUser,
+          brandUserId: delegation?.brandUserId ?? null,
+          closed: false,
+          messages: [],
+        };
         this.conversations.set(conversation.id, conversation);
       }
       const messageId = String(message.messageId ?? "");
-      const duplicate = conversation.messages.findIndex((stored) => stored.messageId === messageId && stored.role === "ROLE_USER");
+      const duplicate = conversation.messages.findIndex(
+        (stored) => stored.messageId === messageId && stored.role === "ROLE_USER",
+      );
       if (duplicate >= 0) {
         const reply = conversation.messages[duplicate + 1];
         if (!reply || reply.role !== "ROLE_AGENT") {
-          return a2aError("INVALID_PARAMS", "messageId was already received in this context and has no reply yet");
+          return a2aError(
+            "INVALID_PARAMS",
+            "messageId was already received in this context and has no reply yet",
+          );
         }
         return json({
           message: {
@@ -456,6 +529,7 @@ export class FakePactProvider {
       if (required) {
         const granted = new Set(delegation?.scopes ?? []);
         const missing = required.filter((scope) => !granted.has(scope));
+        if (this.alwaysMissingScope) missing.push(this.alwaysMissingScope);
         if (missing.length > 0 || !delegation) {
           // Spec §5.5 step-up: not failed, not stored; the context stays open.
           return json({
@@ -464,7 +538,12 @@ export class FakePactProvider {
               contextId: conversation.id,
               status: {
                 state: "TASK_STATE_AUTH_REQUIRED",
-                message: { messageId: randomUUID(), contextId: conversation.id, role: "ROLE_AGENT", parts: [{ text: "I need permission." }] },
+                message: {
+                  messageId: randomUUID(),
+                  contextId: conversation.id,
+                  role: "ROLE_AGENT",
+                  parts: [{ text: "I need permission." }],
+                },
               },
               metadata: {
                 "pact.missingScopes": missing.length > 0 ? missing : required,
@@ -477,9 +556,14 @@ export class FakePactProvider {
       conversation.messages.push({ messageId, role: "ROLE_USER", text });
       if (this.processingOnce.has(messageId)) {
         this.processingOnce.delete(messageId);
-        return a2aError("INVALID_PARAMS", "messageId was already received in this context and has no reply yet");
+        return a2aError(
+          "INVALID_PARAMS",
+          "messageId was already received in this context and has no reply yet",
+        );
       }
-      const replyText = /\bcancel\b/i.test(text) ? "Order #A-88213 is cancelled." : `Reply to: ${text.slice(0, 80)}`;
+      const replyText = /\bcancel\b/i.test(text)
+        ? "Order #A-88213 is cancelled."
+        : `Reply to: ${text.slice(0, 80)}`;
       let metadata: Record<string, unknown> | undefined;
       if (delegation && !this.omitNextReceipt) {
         const claims = {
@@ -487,20 +571,39 @@ export class FakePactProvider {
           user: delegation.brandUserId,
           pa: auth.issuer,
           brand: this.interfaceUrl,
-          scopesUsed: this.overreachNextReceipt ? [...(required ?? []), "orders:refund"] : required ?? [],
-          actions: required?.includes("orders:cancel") ? [{ tool: "cancel_order", argsHash: "h1" }] : [{ tool: "lookup_orders" }],
+          scopesUsed: this.overreachNextReceipt
+            ? [...(required ?? []), "orders:refund"]
+            : (required ?? []),
+          actions: required?.includes("orders:cancel")
+            ? [{ tool: "cancel_order", argsHash: "h1" }]
+            : [{ tool: "lookup_orders" }],
           ts: new Date(this.now()).toISOString(),
         };
-        const jws = signCompactJws(JSON.stringify(claims), { alg: "ES256", kid: this.key.publicJwk.kid, typ: "pact-receipt+jws" }, this.key.privateKey);
-        metadata = {
-          "pact.receipt": { jws, claims: this.tamperNextReceipt ? { ...claims, actions: [] } : claims },
+        const jws = signCompactJws(
+          JSON.stringify(claims),
+          { alg: "ES256", kid: this.key.publicJwk.kid, typ: "pact-receipt+jws" },
+          this.key.privateKey,
+        );
+        const receipt = {
+          jws,
+          claims: this.tamperNextReceipt ? { ...claims, actions: [] } : claims,
         };
+        metadata = {
+          "pact.receipt": this.replayNextReceipt && this.lastReceipt ? this.lastReceipt : receipt,
+        };
+        this.lastReceipt = receipt;
         conversation.brandUserId = delegation.brandUserId;
       }
       this.omitNextReceipt = false;
       this.tamperNextReceipt = false;
       this.overreachNextReceipt = false;
-      const reply: StoredMessage = { messageId: randomUUID(), role: "ROLE_AGENT", text: replyText, ...(metadata ? { metadata } : {}) };
+      this.replayNextReceipt = false;
+      const reply: StoredMessage = {
+        messageId: randomUUID(),
+        role: "ROLE_AGENT",
+        text: replyText,
+        ...(metadata ? { metadata } : {}),
+      };
       conversation.messages.push(reply);
       return json({
         message: {
@@ -526,7 +629,8 @@ export class FakePactProvider {
  */
 export class FakeNetwork implements PolicyCheckedHttp {
   readonly routes = new Map<string, FakeHandler>();
-  readonly log: { url: string; method: string; headers: Record<string, string>; body?: string }[] = [];
+  readonly log: { url: string; method: string; headers: Record<string, string>; body?: string }[] =
+    [];
   /** Requests to these URL prefixes are refused as policy denials. */
   denied: string[] = [];
   /** Drop the reply of the next request whose URL matches (the handler still runs). */
@@ -548,14 +652,30 @@ export class FakeNetwork implements PolicyCheckedHttp {
       const origin = new URL(url).origin;
       const handler = this.routes.get(origin);
       if (!handler) throw new PactTransportError("destination_refused", "unknown host");
-      this.log.push({ url, method: input.method, headers: input.headers, ...(input.body ? { body: input.body } : {}) });
-      const response = await handler({ method: input.method, url, headers: input.headers, ...(input.body === undefined ? {} : { body: input.body }) });
+      this.log.push({
+        url,
+        method: input.method,
+        headers: input.headers,
+        ...(input.body ? { body: input.body } : {}),
+      });
+      const response = await handler({
+        method: input.method,
+        url,
+        headers: input.headers,
+        ...(input.body === undefined ? {} : { body: input.body }),
+      });
       if (this.dropReplyFor && this.dropReplyFor.test(url)) {
         this.dropReplyFor = null;
         throw new PactTransportError("timeout", "The request timed out");
       }
-      const headers = Object.fromEntries(Object.entries(response.headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
-      if (input.maxRedirects > 0 && [301, 302, 303, 307, 308].includes(response.status) && headers.location) {
+      const headers = Object.fromEntries(
+        Object.entries(response.headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+      );
+      if (
+        input.maxRedirects > 0 &&
+        [301, 302, 303, 307, 308].includes(response.status) &&
+        headers.location
+      ) {
         url = new URL(headers.location, url).toString();
         continue;
       }
@@ -563,7 +683,13 @@ export class FakeNetwork implements PolicyCheckedHttp {
       if (Buffer.byteLength(body) > input.maxBytes) {
         throw new PactTransportError("too_large", "The response is larger than CoWork accepts");
       }
-      return { status: response.status, headers: { get: (name) => headers[name.toLowerCase()] ?? null }, bodyText: body, url, chain };
+      return {
+        status: response.status,
+        headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+        bodyText: body,
+        url,
+        chain,
+      };
     }
     throw new PactTransportError("too_many_redirects", "Too many redirects");
   }

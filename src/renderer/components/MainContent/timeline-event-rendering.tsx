@@ -1868,7 +1868,9 @@ export function renderEventDetails(
     case "pact_receipt_verified":
     case "pact_evidence_issue": {
       const actions: unknown[] = Array.isArray(event.payload?.actions) ? event.payload.actions : [];
-      const scopes: unknown[] = Array.isArray(event.payload?.scopesUsed) ? event.payload.scopesUsed : [];
+      const scopes: unknown[] = Array.isArray(event.payload?.scopesUsed)
+        ? event.payload.scopesUsed
+        : [];
       if (actions.length === 0 && scopes.length === 0 && !event.payload?.reason) return null;
       return (
         <div className="event-details">

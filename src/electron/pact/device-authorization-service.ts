@@ -13,7 +13,11 @@ import type { PactSecretStore } from "./secret-store";
 import type { PactAuthorizationRecord, PactBusinessRecord } from "./types";
 import { runBoundedPoll } from "./bounded-poller";
 import { checkPactUrl, type PactUrlRules } from "./protocol-adapter";
-import { requestDeviceAuthorization, requestDeviceToken, type PactClientCredentials } from "./protocol-client";
+import {
+  requestDeviceAuthorization,
+  requestDeviceToken,
+  type PactClientCredentials,
+} from "./protocol-client";
 import { PactTransportError, type PactTransport } from "./transport";
 import {
   assertRequestableScopes,
@@ -82,7 +86,10 @@ export class PactDeviceAuthorizationService {
   }): Promise<{ record: PactAuthorizationRecord; verificationOrigin: string }> {
     const delegation = input.business.descriptor.delegation;
     if (!delegation) {
-      throw new PactAuthorizationError("not_delegated", "This business does not offer account access");
+      throw new PactAuthorizationError(
+        "not_delegated",
+        "This business does not offer account access",
+      );
     }
     try {
       assertRequestableScopes(input.scopes, delegation.scopes);
@@ -102,14 +109,22 @@ export class PactDeviceAuthorizationService {
       });
     } catch (error) {
       if (error instanceof OAuthError && error.error === "invalid_scope") {
-        throw new PactAuthorizationError("invalid_scope", "The business rejected the requested permissions");
+        throw new PactAuthorizationError(
+          "invalid_scope",
+          "The business rejected the requested permissions",
+        );
       }
       if (error instanceof OAuthError) {
-        throw new PactAuthorizationError("provider_rejected", `The business refused the sign-in request (${error.error})`);
+        throw new PactAuthorizationError(
+          "provider_rejected",
+          `The business refused the sign-in request (${error.error})`,
+        );
       }
       throw new PactAuthorizationError(
         "unavailable",
-        error instanceof PactTransportError ? error.message : "The sign-in request could not be started",
+        error instanceof PactTransportError
+          ? error.message
+          : "The sign-in request could not be started",
       );
     }
     // The link goes to the user's own browser: only an HTTPS URL without credentials is shown.
@@ -163,6 +178,8 @@ export class PactDeviceAuthorizationService {
     let decided: PactAuthorizationOutcome | undefined;
     const outcome = await runBoundedPoll<DelegationToken>({
       intervalMs: this.deps.pollIntervalMs ?? input.record.intervalSeconds * 1000,
+      // RFC 8628 §3.5: +5 s per slow_down (tests scale it with their poll interval).
+      slowDownIncrementMs: this.deps.pollIntervalMs ?? 5_000,
       deadline: input.record.expiresAt,
       now: () => this.now(),
       ...(input.signal ? { signal: input.signal } : {}),
@@ -228,11 +245,7 @@ export class PactDeviceAuthorizationService {
     extra: { grantId?: string; grantedScopes?: string[]; inputRequestId?: string } = {},
   ): Promise<PactAuthorizationRecord | null> {
     const state =
-      outcome.kind === "granted"
-        ? "granted"
-        : outcome.kind === "failed"
-          ? "failed"
-          : outcome.kind;
+      outcome.kind === "granted" ? "granted" : outcome.kind === "failed" ? "failed" : outcome.kind;
     const settled = await this.deps.repo.settleAuthorization(record.id, {
       state,
       stateReason: outcome.kind === "failed" ? outcome.reason : null,

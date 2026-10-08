@@ -106,7 +106,11 @@ export function admitPactOperation(input: PactAdmissionInput): PactAdmission {
   }
   const text = input.text.trim();
   if (!text) {
-    return { decision: "deny", reason: "blank_message", message: "The message to the business is empty." };
+    return {
+      decision: "deny",
+      reason: "blank_message",
+      message: "The message to the business is empty.",
+    };
   }
   if (text.length > MAX_OUTBOUND_TEXT_CHARS) {
     return {
@@ -125,7 +129,11 @@ export function admitPactOperation(input: PactAdmissionInput): PactAdmission {
     };
   }
   if (input.business.supportStatus !== "supported") {
-    return { decision: "deny", reason: "unsupported", message: "This business is not a supported PACT agent." };
+    return {
+      decision: "deny",
+      reason: "unsupported",
+      message: "This business is not a supported PACT agent.",
+    };
   }
   const advertised = new Map(
     (input.business.descriptor.delegation?.scopes ?? []).map((scope) => [scope.id, scope]),
@@ -156,8 +164,11 @@ export function admitPactOperation(input: PactAdmissionInput): PactAdmission {
     approvalReasons.length > 0 &&
     // The owner's own explicit request satisfies the local gate for changes; unknown effects and
     // over-broad tokens still need review.
-    !(input.localAuthority === "explicit_user_request" && effectClass === "change" &&
-      !approvalReasons.includes("token_exceeds_operation"));
+    !(
+      input.localAuthority === "explicit_user_request" &&
+      effectClass === "change" &&
+      !approvalReasons.includes("token_exceeds_operation")
+    );
   return { decision: "admit", effectClass, approvalRequired, approvalReasons };
 }
 

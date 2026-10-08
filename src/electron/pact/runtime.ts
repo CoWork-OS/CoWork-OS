@@ -49,7 +49,11 @@ import { generateEs256KeyPair, privateKeyFromJwk, type Es256KeyPair } from "./jw
 import { PactRepository } from "./pact-repository";
 import { serviceStatements } from "../database/service-statements";
 import { refreshDelegationToken, type PactClientCredentials } from "./protocol-client";
-import { PactProviderBlockedError, PactProviderRegistry, type PactProviderContext } from "./provider-registry";
+import {
+  PactProviderBlockedError,
+  PactProviderRegistry,
+  type PactProviderContext,
+} from "./provider-registry";
 import { verifyPactReceipt } from "./receipt-verifier";
 import { redactPact, redactPactError } from "./redaction";
 import { evaluatePactAvailability, resolveBusinessRoute, type PactRouteDecision } from "./routing";
@@ -73,7 +77,14 @@ import type {
   PactProviderRecord,
   PactSubjectBindingRecord,
 } from "./types";
-import { toAuthorizationView, toBusinessView, toConversationView, toGrantView, toReceiptView, scopeViews } from "./views";
+import {
+  toAuthorizationView,
+  toBusinessView,
+  toConversationView,
+  toGrantView,
+  toReceiptView,
+  scopeViews,
+} from "./views";
 
 /** Context of a call: where it came from and what it may do. */
 export interface PactCallContext {
@@ -162,7 +173,10 @@ interface ResolvedIdentity {
 
 class PactBlocked extends Error {
   constructor(
-    readonly outcome: Extract<PactSendOutcome, { status: "blocked" | "denied" | "expired" | "cancelled" | "unsupported" | "outcome_unknown" }>,
+    readonly outcome: Extract<
+      PactSendOutcome,
+      { status: "blocked" | "denied" | "expired" | "cancelled" | "unsupported" | "outcome_unknown" }
+    >,
   ) {
     super(outcome.message);
   }
@@ -199,7 +213,8 @@ export class PactRuntime {
   >();
   private identityState: IdentityState | null = null;
   private ownerId: string | null = null;
-  private signerStatusCache: { fingerprint: string; at: number; status: PactSignerStatus } | null = null;
+  private signerStatusCache: { fingerprint: string; at: number; status: PactSignerStatus } | null =
+    null;
   private stopped = false;
 
   constructor(private readonly deps: PactRuntimeDeps) {
@@ -214,7 +229,9 @@ export class PactRuntime {
       secrets: deps.secrets,
       leaseOwner: this.leaseOwner,
       now,
-      ...(deps.authorizationPollIntervalMs ? { pollIntervalMs: deps.authorizationPollIntervalMs } : {}),
+      ...(deps.authorizationPollIntervalMs
+        ? { pollIntervalMs: deps.authorizationPollIntervalMs }
+        : {}),
     });
     this.conversations = new PactConversationService({
       repo: this.repo,
@@ -238,7 +255,8 @@ export class PactRuntime {
     if (!this.ownerId) {
       this.ownerId = this.deps.ownerPrincipalId
         ? await this.deps.ownerPrincipalId()
-        : (await serviceStatements(this.deps.db).unit("sessionMembership_getLocalPrincipal", [])).principalId;
+        : (await serviceStatements(this.deps.db).unit("sessionMembership_getLocalPrincipal", []))
+            .principalId;
     }
     return { id: this.ownerId, kind: "local_owner", ...(actor ? { actor } : {}) };
   }
@@ -259,7 +277,11 @@ export class PactRuntime {
     });
   }
 
-  private emit(ctx: { taskId?: string } | undefined, type: string, payload: Record<string, unknown>) {
+  private emit(
+    ctx: { taskId?: string } | undefined,
+    type: string,
+    payload: Record<string, unknown>,
+  ) {
     if (!ctx?.taskId) return;
     try {
       this.deps.host.logEvent(ctx.taskId, type, redactPact(payload));
@@ -289,7 +311,10 @@ export class PactRuntime {
       if (!isPactDevelopmentEnabled(this.deps.env)) return null;
       const signer = new DevelopmentPactSigner({
         // Opaque and stable per local principal; never the principal id itself.
-        subject: `cowork-dev-${createHash("sha256").update(this.ownerId ?? "owner").digest("hex").slice(0, 32)}`,
+        subject: `cowork-dev-${createHash("sha256")
+          .update(this.ownerId ?? "owner")
+          .digest("hex")
+          .slice(0, 32)}`,
         ...(identity.issuer ? { issuer: identity.issuer } : {}),
         audiences: Object.fromEntries(settings.providers.map((p) => [p.origin, p.audience])),
       });
@@ -346,7 +371,8 @@ export class PactRuntime {
   /** Generate (once) the install's device key for account-free enrollment; returns the public JWK. */
   ensureDeviceKey(): Es256KeyPair["publicJwk"] {
     const existing = this.deps.secrets.getSigner();
-    if (existing?.deviceKey) return existing.deviceKey.publicJwk as unknown as Es256KeyPair["publicJwk"];
+    if (existing?.deviceKey)
+      return existing.deviceKey.publicJwk as unknown as Es256KeyPair["publicJwk"];
     const pair = generateEs256KeyPair();
     const privateJwk = pair.privateKey.export({ format: "jwk" }) as Record<string, string>;
     this.deps.secrets.putSigner({
@@ -372,7 +398,8 @@ export class PactRuntime {
   private async resolveIdentity(principal: PactPrincipal): Promise<ResolvedIdentity> {
     await this.ownerPrincipal();
     const identity = this.identity();
-    if (!identity) throw blocked("identity_not_ready", "PACT identity is not configured in Settings.");
+    if (!identity)
+      throw blocked("identity_not_ready", "PACT identity is not configured in Settings.");
     if (identity.development && !identity.issuer) {
       identity.issuer = await identity.development.start();
     }
@@ -417,14 +444,17 @@ export class PactRuntime {
     const identity = this.identity();
     if (!identity) return null;
     try {
-      if (identity.development && !identity.issuer) identity.issuer = await identity.development.start();
+      if (identity.development && !identity.issuer)
+        identity.issuer = await identity.development.start();
       return await this.signerStatus(identity);
     } catch {
       return null;
     }
   }
 
-  private async providerContext(signerStatus: PactSignerStatus | null): Promise<PactProviderContext> {
+  private async providerContext(
+    signerStatus: PactSignerStatus | null,
+  ): Promise<PactProviderContext> {
     return {
       settings: this.settings(),
       policies: this.deps.policies(),
@@ -438,13 +468,17 @@ export class PactRuntime {
     provider: PactProviderRecord,
     binding: PactSubjectBindingRecord,
   ): Promise<PactClientCredentials> {
-    if (!provider.audience) throw blocked("provider_not_ready", "The provider has no audience configured.");
+    if (!provider.audience)
+      throw blocked("provider_not_ready", "The provider has no audience configured.");
     let token;
     try {
       token = await identity.tokens.token(provider.audience);
     } catch (error) {
       if (error instanceof PactSignerError) {
-        throw blocked(error.code === "disabled" ? "identity_disabled" : "identity_not_ready", error.message);
+        throw blocked(
+          error.code === "disabled" ? "identity_disabled" : "identity_not_ready",
+          error.message,
+        );
       }
       throw error;
     }
@@ -467,7 +501,8 @@ export class PactRuntime {
     const identity = this.identity();
     if (identity) {
       try {
-        if (identity.development && !identity.issuer) identity.issuer = await identity.development.start();
+        if (identity.development && !identity.issuer)
+          identity.issuer = await identity.development.start();
         signerStatus = await this.signerStatus(identity, true);
         identityReady = signerStatus.ok;
         identityReason = signerStatus.reason;
@@ -476,7 +511,9 @@ export class PactRuntime {
       }
     } else {
       identityReason =
-        settings.identity.deployment === "none" ? "Identity is not configured" : "Identity configuration is incomplete";
+        settings.identity.deployment === "none"
+          ? "Identity is not configured"
+          : "Identity configuration is incomplete";
     }
     const context = await this.providerContext(signerStatus);
     const origins = new Set<string>([
@@ -558,17 +595,28 @@ export class PactRuntime {
     const grants = await this.repo.listGrants({ businessId: business.id, states: ["active"] });
     const authorizationServer = business.descriptor.delegation?.authorizationServer ?? "";
     for (const grant of grants) {
-      if (grant.interfaceUrl !== business.interfaceUrl || grant.authorizationServer !== authorizationServer) {
+      if (
+        grant.interfaceUrl !== business.interfaceUrl ||
+        grant.authorizationServer !== authorizationServer
+      ) {
         await this.grants.invalidate(grant.id, "business_card_changed");
       }
     }
   }
 
-  private async loadBusiness(businessId: string, ctx: PactCallContext, signerStatus: PactSignerStatus | null) {
+  private async loadBusiness(
+    businessId: string,
+    ctx: PactCallContext,
+    signerStatus: PactSignerStatus | null,
+  ) {
     const business = await this.repo.getBusiness(businessId);
     if (!business) throw blocked("unknown_business", "Unknown business handle; discover it first.");
     if (business.supportStatus !== "supported") {
-      throw new PactBlocked({ status: "unsupported", reason: business.unsupportedReason ?? "unsupported", message: "This business is not a supported PACT agent." });
+      throw new PactBlocked({
+        status: "unsupported",
+        reason: business.unsupportedReason ?? "unsupported",
+        message: "This business is not a supported PACT agent.",
+      });
     }
     const revalidated = await this.discovery.revalidate(business, {
       transport: this.deps.transportFor(ctx.networkContext, ctx.taskId),
@@ -577,26 +625,41 @@ export class PactRuntime {
     });
     if (revalidated.securityChanged) await this.onBusinessSecurityChanged(revalidated.business);
     if (revalidated.support.status !== "supported") {
-      throw new PactBlocked({ status: "unsupported", reason: "card_changed", message: "The business's card no longer advertises a supported PACT agent." });
+      throw new PactBlocked({
+        status: "unsupported",
+        reason: "card_changed",
+        message: "The business's card no longer advertises a supported PACT agent.",
+      });
     }
     return revalidated;
   }
 
   // ----------------------------------------------------------------------- send
 
-  async send(principal: PactPrincipal, request: PactSendRequest, ctx: PactCallContext): Promise<PactSendOutcome> {
+  async send(
+    principal: PactPrincipal,
+    request: PactSendRequest,
+    ctx: PactCallContext,
+  ): Promise<PactSendOutcome> {
     try {
       return await this.sendInner(principal, request, ctx, { stepUps: 0, contextRestarts: 0 });
     } catch (error) {
       if (error instanceof PactBlocked) {
-        this.emit(ctx, "pact_operation_blocked", { reason: error.outcome.reason, message: error.outcome.message });
+        this.emit(ctx, "pact_operation_blocked", {
+          reason: error.outcome.reason,
+          message: error.outcome.message,
+        });
         return error.outcome;
       }
       if (error instanceof PactProviderBlockedError) {
         return { status: "blocked", reason: "provider_blocked", message: error.message };
       }
       if (error instanceof PactDiscoveryError) {
-        return { status: "blocked", reason: `discovery_${error.code}`, message: redactPactError(error) };
+        return {
+          status: "blocked",
+          reason: `discovery_${error.code}`,
+          message: redactPactError(error),
+        };
       }
       throw error;
     }
@@ -606,20 +669,38 @@ export class PactRuntime {
     principal: PactPrincipal,
     request: PactSendRequest,
     ctx: PactCallContext,
-    loop: { stepUps: number; contextRestarts: number; lastMissing?: string; grantJustObtained?: boolean },
+    loop: {
+      stepUps: number;
+      contextRestarts: number;
+      lastMissing?: string;
+      grantJustObtained?: boolean;
+    },
   ): Promise<PactSendOutcome> {
     const availability = this.availability();
     if (!availability.available) {
-      throw blocked(availability.reason ?? "pact_disabled", "PACT is not available for this profile.");
+      throw blocked(
+        availability.reason ?? "pact_disabled",
+        "PACT is not available for this profile.",
+      );
     }
     if (effectivePactPreference(this.settings()) === "disabled") {
       throw blocked("pact_disabled", "PACT is turned off for business interactions.");
     }
     const { identity, binding, status } = await this.resolveIdentity(principal);
-    const { business, provider: resolvedProvider } = await this.loadBusiness(request.businessId, ctx, status);
-    const provider = await this.providers.requireReady(new URL(business.interfaceUrl).origin, await this.providerContext(status));
+    const { business, provider: resolvedProvider } = await this.loadBusiness(
+      request.businessId,
+      ctx,
+      status,
+    );
+    const provider = await this.providers.requireReady(
+      new URL(business.interfaceUrl).origin,
+      await this.providerContext(status),
+    );
     if (provider.readiness !== "ready") {
-      throw blocked("provider_not_ready", "CoWork is not registered with this business's PACT provider yet.");
+      throw blocked(
+        "provider_not_ready",
+        "CoWork is not registered with this business's PACT provider yet.",
+      );
     }
     void resolvedProvider;
 
@@ -635,7 +716,10 @@ export class PactRuntime {
         throw blocked("unknown_conversation", "Unknown conversation handle.");
       }
       if (conversation.subjectBindingId !== binding.id) {
-        throw blocked("conversation_other_identity", "That conversation belongs to a different PACT identity.");
+        throw blocked(
+          "conversation_other_identity",
+          "That conversation belongs to a different PACT identity.",
+        );
       }
       if (["closed", "unsupported", "cancelled"].includes(conversation.state)) {
         conversation = null;
@@ -657,7 +741,13 @@ export class PactRuntime {
     });
 
     if (request.reconcileOperationId) {
-      return this.reconcile(principal, request, ctx, { identity, binding, business, provider, conversation });
+      return this.reconcile(principal, request, ctx, {
+        identity,
+        binding,
+        business,
+        provider,
+        conversation,
+      });
     }
 
     const delegation = business.descriptor.delegation;
@@ -675,7 +765,9 @@ export class PactRuntime {
         }
       : null;
     let grant: PactGrantRecord | null =
-      grantKey && requiredScopes.length > 0 ? await this.grants.findCoveringGrant(grantKey, requiredScopes) : null;
+      grantKey && requiredScopes.length > 0
+        ? await this.grants.findCoveringGrant(grantKey, requiredScopes)
+        : null;
 
     if (conversation.state === "evidence_invalid" && request.effect !== "inspect") {
       throw blocked(
@@ -696,7 +788,8 @@ export class PactRuntime {
       requiredScopes,
       tokenScopes: grant?.scopes ?? [],
     });
-    if (admission.decision === "deny") throw blocked(admission.reason, admission.message, conversation.id);
+    if (admission.decision === "deny")
+      throw blocked(admission.reason, admission.message, conversation.id);
     this.emit(ctx, "pact_operation_admitted", {
       businessId: business.id,
       conversationId: conversation.id,
@@ -706,14 +799,22 @@ export class PactRuntime {
     });
     if (admission.approvalRequired && !ctx.preApproved) {
       if (!ctx.taskId) {
-        throw blocked("local_approval_required", "Confirm this request before it is sent to the business.", conversation.id);
+        throw blocked(
+          "local_approval_required",
+          "Confirm this request before it is sent to the business.",
+          conversation.id,
+        );
       }
       if (ctx.humanInput === "none") {
         this.deps.host.logInteractiveApprovalUnavailable(
           ctx.taskId,
           `Sending a ${admission.effectClass} request to ${business.displayName} needs approval, but this task cannot ask.`,
         );
-        throw blocked("interactive_approval_unavailable", "This task cannot ask for the approval this request needs.", conversation.id);
+        throw blocked(
+          "interactive_approval_unavailable",
+          "This task cannot ask for the approval this request needs.",
+          conversation.id,
+        );
       }
       const approved = await this.deps.host.requestLocalApproval(
         ctx.taskId,
@@ -744,7 +845,12 @@ export class PactRuntime {
         },
       );
       if (!approved) {
-        return { status: "denied", conversationId: conversation.id, reason: "local_approval_denied", message: "The request was not approved." };
+        return {
+          status: "denied",
+          conversationId: conversation.id,
+          reason: "local_approval_denied",
+          message: "The request was not approved.",
+        };
       }
     }
 
@@ -769,7 +875,13 @@ export class PactRuntime {
 
     // Effectful operations go only into a known context: open it with an introduction.
     if (!conversation.contextId && admission.effectClass !== "inspect") {
-      conversation = await this.openContext(principal, ctx, { identity, binding, business, provider, conversation });
+      conversation = await this.openContext(principal, ctx, {
+        identity,
+        binding,
+        business,
+        provider,
+        conversation,
+      });
     }
 
     const operationId = randomUUID();
@@ -787,38 +899,40 @@ export class PactRuntime {
     const transport = this.deps.transportFor(ctx.networkContext, ctx.taskId);
     const credentials = () => this.credentialsFor(identity, provider, binding);
     const usedGrant = grant;
-    const turn = await this.conversations.sendTurn({
-      conversation,
-      operationId,
-      kind: "operation",
-      text: request.text.trim(),
-      effectClass: admission.effectClass,
-      requiredScopes,
-      authorityFingerprint: fingerprint,
-      cardRevision: business.revision,
-      providerRevision: provider.configRevision,
-      grantId: usedGrant?.id ?? null,
-      interfaceUrl: business.interfaceUrl,
-      transport,
-      paJwt: async () => (await credentials()).paJwt,
-      delegationToken: async () =>
-        usedGrant
-          ? this.grants.accessToken(usedGrant, async (refreshToken) =>
-              refreshDelegationToken(transport, {
-                url: delegation!.refreshUrl,
-                refreshToken,
-                credentials: await credentials(),
-                now: () => this.now(),
-              }),
-            )
-          : undefined,
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
-    }).catch((error: unknown) => {
-      if (error instanceof PactGrantUnavailableError) {
-        throw blocked("reconnect_required", error.message, conversation!.id);
-      }
-      throw error;
-    });
+    const turn = await this.conversations
+      .sendTurn({
+        conversation,
+        operationId,
+        kind: "operation",
+        text: request.text.trim(),
+        effectClass: admission.effectClass,
+        requiredScopes,
+        authorityFingerprint: fingerprint,
+        cardRevision: business.revision,
+        providerRevision: provider.configRevision,
+        grantId: usedGrant?.id ?? null,
+        interfaceUrl: business.interfaceUrl,
+        transport,
+        paJwt: async () => (await credentials()).paJwt,
+        delegationToken: async () =>
+          usedGrant
+            ? this.grants.accessToken(usedGrant, async (refreshToken) =>
+                refreshDelegationToken(transport, {
+                  url: delegation!.refreshUrl,
+                  refreshToken,
+                  credentials: await credentials(),
+                  now: () => this.now(),
+                }),
+              )
+            : undefined,
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      })
+      .catch((error: unknown) => {
+        if (error instanceof PactGrantUnavailableError) {
+          throw blocked("reconnect_required", error.message, conversation!.id);
+        }
+        throw error;
+      });
     this.emit(ctx, "pact_message_sent", {
       conversationId: conversation.id,
       operationId,
@@ -842,7 +956,12 @@ export class PactRuntime {
     principal: PactPrincipal,
     request: PactSendRequest,
     ctx: PactCallContext,
-    loop: { stepUps: number; contextRestarts: number; lastMissing?: string; grantJustObtained?: boolean },
+    loop: {
+      stepUps: number;
+      contextRestarts: number;
+      lastMissing?: string;
+      grantJustObtained?: boolean;
+    },
     state: {
       turn: PactTurnResult;
       identity: IdentityState;
@@ -871,25 +990,42 @@ export class PactRuntime {
         };
       }
       case "auth_required": {
-        const advertised = new Set((business.descriptor.delegation?.scopes ?? []).map((scope) => scope.id));
+        const advertised = new Set(
+          (business.descriptor.delegation?.scopes ?? []).map((scope) => scope.id),
+        );
         const missing = union(turn.missingScopes);
         if (!state.grantKey || missing.some((scope) => !advertised.has(scope))) {
-          throw blocked("step_up_unsupported", "The business asked for permissions it does not advertise.", conversation.id);
+          throw blocked(
+            "step_up_unsupported",
+            "The business asked for permissions it does not advertise.",
+            conversation.id,
+          );
         }
         const missingKey = missing.join(" ");
-        if (loop.stepUps >= MAX_STEP_UPS || (loop.grantJustObtained && loop.lastMissing === missingKey)) {
+        if (
+          loop.stepUps >= MAX_STEP_UPS ||
+          (loop.grantJustObtained && loop.lastMissing === missingKey)
+        ) {
           return {
             status: "denied",
             conversationId: conversation.id,
             reason: "insufficient_permission",
-            message: "The business still needs permissions after sign-in; the operation was stopped.",
+            message:
+              "The business still needs permissions after sign-in; the operation was stopped.",
           };
         }
-        this.emit(ctx, "pact_step_up_required", { conversationId: conversation.id, missingScopes: missing });
+        this.emit(ctx, "pact_step_up_required", {
+          conversationId: conversation.id,
+          missingScopes: missing,
+        });
         // Resend the same logical operation after consent; re-admission runs with the wider scopes.
         return this.sendInner(
           principal,
-          { ...request, conversationId: conversation.id, requiredScopes: union(state.requiredScopes, missing) },
+          {
+            ...request,
+            conversationId: conversation.id,
+            requiredScopes: union(state.requiredScopes, missing),
+          },
           ctx,
           { ...loop, stepUps: loop.stepUps + 1, lastMissing: missingKey, grantJustObtained: false },
         );
@@ -910,13 +1046,25 @@ export class PactRuntime {
         switch (turn.reason) {
           case "delegation_rejected":
             if (state.grant) await this.grants.invalidate(state.grant.id, "delegation_rejected");
-            throw blocked("reconnect_required", `${business.displayName} no longer accepts the stored permission. Reconnect to continue.`, conversation.id);
+            throw blocked(
+              "reconnect_required",
+              `${business.displayName} no longer accepts the stored permission. Reconnect to continue.`,
+              conversation.id,
+            );
           case "identity_rejected":
             state.identity.tokens.invalidate();
-            throw blocked("identity_rejected", `${business.displayName} did not accept CoWork's identity.`, conversation.id);
+            throw blocked(
+              "identity_rejected",
+              `${business.displayName} did not accept CoWork's identity.`,
+              conversation.id,
+            );
           case "context_closed":
             if (loop.contextRestarts >= 1) {
-              throw blocked("context_closed", "The business keeps closing the conversation.", conversation.id);
+              throw blocked(
+                "context_closed",
+                "The business keeps closing the conversation.",
+                conversation.id,
+              );
             }
             // A closed context with no unresolved operation may start over; authority is rechecked.
             return this.sendInner(principal, { ...request, conversationId: undefined }, ctx, {
@@ -931,22 +1079,36 @@ export class PactRuntime {
 
   private async recordEvidence(
     ctx: PactCallContext,
-    state: { identity: IdentityState; business: PactBusinessRecord; conversation: PactConversationRecord; grant: PactGrantRecord | null },
+    state: {
+      identity: IdentityState;
+      business: PactBusinessRecord;
+      conversation: PactConversationRecord;
+      grant: PactGrantRecord | null;
+    },
     turn: Extract<PactTurnResult, { kind: "replied" }>,
   ): Promise<{ status: PactEvidenceStatus; receiptId?: string }> {
     const { business, conversation, grant } = state;
     if (!grant) {
       // Identity-profile replies carry no receipt, and that is expected.
       if (turn.receipt) {
-        this.emit(ctx, "pact_evidence_issue", { conversationId: conversation.id, issue: "unexpected_receipt" });
+        this.emit(ctx, "pact_evidence_issue", {
+          conversationId: conversation.id,
+          issue: "unexpected_receipt",
+        });
       }
       await this.repo.updateConversation(conversation.id, { state: "replied" });
       return { status: "not_applicable" };
     }
     if (!turn.receipt) {
       await this.repo.updateMessage(turn.message.id, { evidence: "missing" });
-      await this.repo.updateConversation(conversation.id, { state: "evidence_invalid", stateReason: "missing_receipt" });
-      this.emit(ctx, "pact_evidence_issue", { conversationId: conversation.id, issue: "missing_receipt" });
+      await this.repo.updateConversation(conversation.id, {
+        state: "evidence_invalid",
+        stateReason: "missing_receipt",
+      });
+      this.emit(ctx, "pact_evidence_issue", {
+        conversationId: conversation.id,
+        issue: "missing_receipt",
+      });
       return { status: "missing" };
     }
     const claims = this.grants.grantClaims(grant);
@@ -969,7 +1131,10 @@ export class PactRuntime {
         )
       : { status: "unverifiable" as const, reason: "no_jwks_uri", digest: "" };
     const receiptRef = randomUUID();
-    this.deps.secrets.putReceipt(receiptRef, { jws: turn.receipt.jws, claims: turn.receipt.claims });
+    this.deps.secrets.putReceipt(receiptRef, {
+      jws: turn.receipt.jws,
+      claims: turn.receipt.claims,
+    });
     const { receipt } = await this.repo.insertReceipt({
       messageId: turn.message.id,
       conversationId: conversation.id,
@@ -1041,14 +1206,19 @@ export class PactRuntime {
         grantId: null,
         interfaceUrl: state.business.interfaceUrl,
         transport,
-        paJwt: async () => (await this.credentialsFor(state.identity, state.provider, state.binding)).paJwt,
+        paJwt: async () =>
+          (await this.credentialsFor(state.identity, state.provider, state.binding)).paJwt,
         delegationToken: async () => undefined,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
       if (turn.kind === "replied" && conversation.contextId) return conversation;
       const refreshed = await this.repo.getConversation(conversation.id);
       if (turn.kind === "replied" && refreshed?.contextId) return refreshed;
-      if (turn.kind === "failed" && !["conversation_busy"].includes(turn.reason) && turn.reason !== "context_closed") {
+      if (
+        turn.kind === "failed" &&
+        !["conversation_busy"].includes(turn.reason) &&
+        turn.reason !== "context_closed"
+      ) {
         throw blocked(turn.reason, turn.detail, conversation.id);
       }
       // A lost introduction leaves an unknown context behind; start a fresh one, rate-limited.
@@ -1069,7 +1239,11 @@ export class PactRuntime {
       await this.repo.updateConversation(conversation.id, { contextAttempts: attempt + 1 });
       conversation.contextAttempts = attempt + 1;
     }
-    throw blocked("context_limit", "CoWork could not open a conversation with this business.", conversation.id);
+    throw blocked(
+      "context_limit",
+      "CoWork could not open a conversation with this business.",
+      conversation.id,
+    );
   }
 
   private async reconcile(
@@ -1089,7 +1263,11 @@ export class PactRuntime {
       .filter((message) => message.operationId === request.reconcileOperationId)
       .sort((left, right) => right.seq - left.seq)[0];
     if (!target || target.state !== "outcome_unknown") {
-      throw blocked("nothing_to_reconcile", "No unresolved operation with that id.", state.conversation.id);
+      throw blocked(
+        "nothing_to_reconcile",
+        "No unresolved operation with that id.",
+        state.conversation.id,
+      );
     }
     if (!state.conversation.contextId) {
       throw blocked(
@@ -1100,7 +1278,11 @@ export class PactRuntime {
     }
     const grant = target.grantId ? await this.repo.getGrant(target.grantId) : null;
     if (target.grantId && (!grant || grant.state !== "active")) {
-      throw blocked("reconnect_required", "The permission used for that request is no longer active.", state.conversation.id);
+      throw blocked(
+        "reconnect_required",
+        "The permission used for that request is no longer active.",
+        state.conversation.id,
+      );
     }
     const delegation = state.business.descriptor.delegation;
     const transport = this.deps.transportFor(ctx.networkContext, ctx.taskId);
@@ -1133,14 +1315,24 @@ export class PactRuntime {
       reuse: target,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
-    this.emit(ctx, "pact_operation_reconciled", { conversationId: state.conversation.id, operationId: target.operationId, outcome: turn.kind });
-    return this.handleTurn(principal, request, ctx, { stepUps: MAX_STEP_UPS, contextRestarts: 1 }, {
-      turn,
-      ...state,
-      grant,
-      grantKey: null,
-      requiredScopes: target.requiredScopes,
+    this.emit(ctx, "pact_operation_reconciled", {
+      conversationId: state.conversation.id,
+      operationId: target.operationId,
+      outcome: turn.kind,
     });
+    return this.handleTurn(
+      principal,
+      request,
+      ctx,
+      { stepUps: MAX_STEP_UPS, contextRestarts: 1 },
+      {
+        turn,
+        ...state,
+        grant,
+        grantKey: null,
+        requiredScopes: target.requiredScopes,
+      },
+    );
   }
 
   // ------------------------------------------------------------------- consent
@@ -1161,8 +1353,7 @@ export class PactRuntime {
       operationId: string | null;
     },
   ): Promise<
-    | { status: "granted"; grant: PactGrantRecord }
-    | { status: "other"; outcome: PactSendOutcome }
+    { status: "granted"; grant: PactGrantRecord } | { status: "other"; outcome: PactSendOutcome }
   > {
     const { business } = state;
     if (ctx.humanInput === "none") {
@@ -1203,7 +1394,9 @@ export class PactRuntime {
     }
     let record = started.record;
     if (state.conversation) {
-      await this.repo.updateConversation(state.conversation.id, { state: "awaiting_business_consent" });
+      await this.repo.updateConversation(state.conversation.id, {
+        state: "awaiting_business_consent",
+      });
     }
     if (ctx.taskId) {
       const inputRequestId = await this.deps.host.openAuthorizationWait(
@@ -1221,7 +1414,14 @@ export class PactRuntime {
       verificationOrigin: started.verificationOrigin,
       expiresAt: record.expiresAt,
     });
-    const poller = this.startPoller(record, business, state.provider, state.binding, state.identity, ctx.networkContext);
+    const poller = this.startPoller(
+      record,
+      business,
+      state.provider,
+      state.binding,
+      state.identity,
+      ctx.networkContext,
+    );
     if (!ctx.waitForConsent) {
       return {
         status: "other",
@@ -1237,7 +1437,9 @@ export class PactRuntime {
     }
     const onAbort = () => poller.abort.abort();
     ctx.signal?.addEventListener("abort", onAbort, { once: true });
-    const outcome = await poller.promise.finally(() => ctx.signal?.removeEventListener("abort", onAbort));
+    const outcome = await poller.promise.finally(() =>
+      ctx.signal?.removeEventListener("abort", onAbort),
+    );
     if (outcome.kind === "granted" && outcome.grantId) {
       const grant = await this.repo.getGrant(outcome.grantId);
       const covered = grant && state.mustInclude.every((scope) => grant.scopes.includes(scope));
@@ -1252,7 +1454,10 @@ export class PactRuntime {
         },
       };
     }
-    return { status: "other", outcome: this.consentOutcome(outcome, business, state.conversation?.id) };
+    return {
+      status: "other",
+      outcome: this.consentOutcome(outcome, business, state.conversation?.id),
+    };
   }
 
   private consentOutcome(
@@ -1263,17 +1468,47 @@ export class PactRuntime {
     const base = conversationId ? { conversationId } : {};
     switch (outcome.kind) {
       case "denied":
-        return { status: "denied", ...base, reason: "consent_denied", message: `The user declined access at ${business.displayName}.` };
+        return {
+          status: "denied",
+          ...base,
+          reason: "consent_denied",
+          message: `The user declined access at ${business.displayName}.`,
+        };
       case "expired":
-        return { status: "expired", ...base, reason: "consent_expired", message: `The sign-in with ${business.displayName} expired.` };
+        return {
+          status: "expired",
+          ...base,
+          reason: "consent_expired",
+          message: `The sign-in with ${business.displayName} expired.`,
+        };
       case "cancelled":
-        return { status: "cancelled", ...base, reason: "consent_cancelled", message: "The sign-in was cancelled." };
+        return {
+          status: "cancelled",
+          ...base,
+          reason: "consent_cancelled",
+          message: "The sign-in was cancelled.",
+        };
       case "lease_lost":
-        return { status: "blocked", ...base, reason: "consent_elsewhere", message: "Another CoWork window is handling this sign-in." };
+        return {
+          status: "blocked",
+          ...base,
+          reason: "consent_elsewhere",
+          message: "Another CoWork window is handling this sign-in.",
+        };
       case "failed":
-        return { status: "blocked", ...base, reason: outcome.reason, message: `The sign-in with ${business.displayName} failed.` };
+        return {
+          status: "blocked",
+          ...base,
+          reason: outcome.reason,
+          message: `The sign-in with ${business.displayName} failed.`,
+        };
       default:
-        return { status: "blocked", ...base, reason: "consent_unknown", message: "The sign-in did not complete." };
+        return {
+          status: "blocked",
+          ...base,
+          reason: "consent_unknown",
+          message: "The sign-in did not complete.",
+        };
     }
   }
 
@@ -1304,7 +1539,10 @@ export class PactRuntime {
         },
         signal: abort.signal,
       })
-      .catch((error: unknown): PactAuthorizationOutcome => ({ kind: "failed", reason: redactPactError(error) }))
+      .catch((error: unknown): PactAuthorizationOutcome => ({
+        kind: "failed",
+        reason: redactPactError(error),
+      }))
       .then(async (outcome): Promise<PactAuthorizationOutcome & { grantId?: string }> => {
         if (outcome.kind === "lease_lost") return outcome;
         // Shutting down is not a user cancel: leave the wait pending so it resumes on restart.
@@ -1331,7 +1569,11 @@ export class PactRuntime {
         });
         const latest = settled ?? (await this.repo.getAuthorization(record.id));
         const state: PactAuthorizationState =
-          outcome.kind === "granted" ? "granted" : outcome.kind === "failed" ? "failed" : outcome.kind;
+          outcome.kind === "granted"
+            ? "granted"
+            : outcome.kind === "failed"
+              ? "failed"
+              : outcome.kind;
         if (latest?.inputRequestId && settled) {
           await this.deps.host
             .settleAuthorizationWait(
@@ -1358,7 +1600,11 @@ export class PactRuntime {
     return entry;
   }
 
-  private authorizationMessage(state: PactAuthorizationState, business: PactBusinessRecord, granted?: string[]): string {
+  private authorizationMessage(
+    state: PactAuthorizationState,
+    business: PactBusinessRecord,
+    granted?: string[],
+  ): string {
     switch (state) {
       case "granted":
         return `Access to ${business.displayName} was approved (${(granted ?? []).join(", ") || "no scopes"}). Retry the pending PACT request to continue.`;
@@ -1381,13 +1627,19 @@ export class PactRuntime {
   ): Promise<PactAuthorizationView> {
     try {
       const availability = this.availability();
-      if (!availability.available) throw blocked(availability.reason ?? "pact_disabled", "PACT is not available.");
+      if (!availability.available)
+        throw blocked(availability.reason ?? "pact_disabled", "PACT is not available.");
       const { identity, binding, status } = await this.resolveIdentity(principal);
       const { business } = await this.loadBusiness(input.businessId, ctx, status);
-      const provider = await this.providers.requireReady(new URL(business.interfaceUrl).origin, await this.providerContext(status));
-      if (provider.readiness !== "ready") throw blocked("provider_not_ready", "The provider is not ready.");
+      const provider = await this.providers.requireReady(
+        new URL(business.interfaceUrl).origin,
+        await this.providerContext(status),
+      );
+      if (provider.readiness !== "ready")
+        throw blocked("provider_not_ready", "The provider is not ready.");
       const delegation = business.descriptor.delegation;
-      if (!delegation) throw blocked("not_delegated", "This business does not offer account access.");
+      if (!delegation)
+        throw blocked("not_delegated", "This business does not offer account access.");
       const scopes = union(input.scopes);
       const credentials = await this.credentialsFor(identity, provider, binding);
       const started = await this.authorizations.start({
@@ -1425,7 +1677,10 @@ export class PactRuntime {
     return view;
   }
 
-  async getAuthorization(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationView | null> {
+  async getAuthorization(
+    principal: PactPrincipal,
+    authorizationId: string,
+  ): Promise<PactAuthorizationView | null> {
     const record = await this.repo.getAuthorization(authorizationId);
     if (!record || record.principalId !== principal.id) return null;
     return this.authorizationView(record);
@@ -1438,7 +1693,10 @@ export class PactRuntime {
   }
 
   /** The sign-in link, for the owner's own surfaces only. */
-  async getAuthorizationSignIn(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationSignIn | null> {
+  async getAuthorizationSignIn(
+    principal: PactPrincipal,
+    authorizationId: string,
+  ): Promise<PactAuthorizationSignIn | null> {
     const record = await this.repo.getAuthorization(authorizationId);
     if (!record || record.principalId !== principal.id || record.state !== "pending") return null;
     if (record.expiresAt <= this.now()) return null;
@@ -1454,14 +1712,18 @@ export class PactRuntime {
     };
   }
 
-  async listAuthorizations(principal: PactPrincipal, filter: { pendingOnly?: boolean; taskId?: string } = {}) {
+  async listAuthorizations(
+    principal: PactPrincipal,
+    filter: { pendingOnly?: boolean; taskId?: string } = {},
+  ) {
     const records = await this.repo.listAuthorizations({
       principalId: principal.id,
       ...(filter.pendingOnly ? { states: ["pending"] } : {}),
       ...(filter.taskId ? { taskId: filter.taskId } : {}),
     });
     const views: PactAuthorizationView[] = [];
-    for (const record of records) views.push(toAuthorizationView(record, await this.repo.getBusiness(record.businessId)));
+    for (const record of records)
+      views.push(toAuthorizationView(record, await this.repo.getBusiness(record.businessId)));
     return views;
   }
 
@@ -1469,7 +1731,10 @@ export class PactRuntime {
    * Resume polling a pending authorization in this process (CLI `authorization wait`), with the
    * same validation as startup: unexpired, same owner, task still waiting, provider ready.
    */
-  async resumeAuthorization(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationView | null> {
+  async resumeAuthorization(
+    principal: PactPrincipal,
+    authorizationId: string,
+  ): Promise<PactAuthorizationView | null> {
     const record = await this.repo.getAuthorization(authorizationId);
     if (!record || record.principalId !== principal.id) return null;
     if (record.state === "pending" && !this.pollers.has(record.id)) {
@@ -1481,14 +1746,19 @@ export class PactRuntime {
         );
         if (settled?.inputRequestId) {
           await this.deps.host
-            .settleAuthorizationWait(settled.inputRequestId, settled.state, `The sign-in could not continue (${blocker}).`)
+            .settleAuthorizationWait(
+              settled.inputRequestId,
+              settled.state,
+              `The sign-in could not continue (${blocker}).`,
+            )
             .catch(() => undefined);
         }
         return this.getAuthorization(principal, authorizationId);
       }
       const { identity, binding } = await this.resolveIdentity(principal);
       const business = await this.repo.getBusiness(record.businessId);
-      if (!business || binding.id !== record.subjectBindingId) return this.getAuthorization(principal, authorizationId);
+      if (!business || binding.id !== record.subjectBindingId)
+        return this.getAuthorization(principal, authorizationId);
       const provider = await this.providers.requireReady(
         new URL(business.interfaceUrl).origin,
         await this.providerContext(await this.currentSignerStatus()),
@@ -1502,13 +1772,19 @@ export class PactRuntime {
   }
 
   /** Wait for an authorization this runtime is polling (CLI `--wait`). */
-  async awaitAuthorization(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationView | null> {
+  async awaitAuthorization(
+    principal: PactPrincipal,
+    authorizationId: string,
+  ): Promise<PactAuthorizationView | null> {
     const poller = this.pollers.get(authorizationId);
     if (poller) await poller.promise;
     return this.getAuthorization(principal, authorizationId);
   }
 
-  async cancelAuthorization(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationView | null> {
+  async cancelAuthorization(
+    principal: PactPrincipal,
+    authorizationId: string,
+  ): Promise<PactAuthorizationView | null> {
     const record = await this.repo.getAuthorization(authorizationId);
     if (!record || record.principalId !== principal.id) return null;
     const poller = this.pollers.get(authorizationId);
@@ -1520,7 +1796,11 @@ export class PactRuntime {
       if (settled?.inputRequestId) {
         const business = await this.repo.getBusiness(record.businessId);
         await this.deps.host
-          .settleAuthorizationWait(settled.inputRequestId, "cancelled", this.authorizationMessage("cancelled", business!, undefined))
+          .settleAuthorizationWait(
+            settled.inputRequestId,
+            "cancelled",
+            this.authorizationMessage("cancelled", business!, undefined),
+          )
           .catch(() => undefined);
       }
     }
@@ -1541,7 +1821,10 @@ export class PactRuntime {
 
   // ---------------------------------------------------------- views and grants
 
-  async getConversation(principal: PactPrincipal, conversationId: string): Promise<PactConversationView | null> {
+  async getConversation(
+    principal: PactPrincipal,
+    conversationId: string,
+  ): Promise<PactConversationView | null> {
     const conversation = await this.repo.getConversation(conversationId);
     if (!conversation || conversation.principalId !== principal.id) return null;
     const [business, messages] = await Promise.all([
@@ -1551,23 +1834,39 @@ export class PactRuntime {
     return toConversationView(conversation, business, messages);
   }
 
-  async listConversations(principal: PactPrincipal, filter: { businessId?: string; taskId?: string; limit?: number } = {}) {
-    const conversations = await this.repo.listConversations({ principalId: principal.id, ...filter });
+  async listConversations(
+    principal: PactPrincipal,
+    filter: { businessId?: string; taskId?: string; limit?: number } = {},
+  ) {
+    const conversations = await this.repo.listConversations({
+      principalId: principal.id,
+      ...filter,
+    });
     const views: PactConversationView[] = [];
     for (const conversation of conversations) {
       views.push(
-        toConversationView(conversation, await this.repo.getBusiness(conversation.businessId), await this.repo.listMessages(conversation.id)),
+        toConversationView(
+          conversation,
+          await this.repo.getBusiness(conversation.businessId),
+          await this.repo.listMessages(conversation.id),
+        ),
       );
     }
     return views;
   }
 
   /** Clear an evidence issue after the user reviewed it; further changes are allowed again. */
-  async acknowledgeEvidence(principal: PactPrincipal, conversationId: string): Promise<PactConversationView | null> {
+  async acknowledgeEvidence(
+    principal: PactPrincipal,
+    conversationId: string,
+  ): Promise<PactConversationView | null> {
     const conversation = await this.repo.getConversation(conversationId);
     if (!conversation || conversation.principalId !== principal.id) return null;
     if (conversation.state === "evidence_invalid") {
-      await this.repo.updateConversation(conversationId, { state: "replied", stateReason: "evidence_reviewed" });
+      await this.repo.updateConversation(conversationId, {
+        state: "replied",
+        stateReason: "evidence_reviewed",
+      });
     }
     return this.getConversation(principal, conversationId);
   }
@@ -1584,7 +1883,8 @@ export class PactRuntime {
   async listGrants(principal: PactPrincipal): Promise<PactGrantView[]> {
     const grants = await this.repo.listGrants({ principalId: principal.id });
     const views: PactGrantView[] = [];
-    for (const grant of grants) views.push(toGrantView(grant, await this.repo.getBusiness(grant.businessId)));
+    for (const grant of grants)
+      views.push(toGrantView(grant, await this.repo.getBusiness(grant.businessId)));
     return views;
   }
 
@@ -1653,14 +1953,21 @@ export class PactRuntime {
           await this.providerContext(await this.currentSignerStatus()),
         );
         const networkContext = await this.deps.host.networkContextForWorkspace(record.workspaceId);
-        if (!networkContext || binding.id !== record.subjectBindingId || provider.readiness !== "ready") {
+        if (
+          !networkContext ||
+          binding.id !== record.subjectBindingId ||
+          provider.readiness !== "ready"
+        ) {
           throw new Error("validation_changed");
         }
         this.startPoller(record, business, provider, binding, identity, networkContext);
         resumed += 1;
       } catch (error) {
         expired += 1;
-        await this.authorizations.settle(record, { kind: "failed", reason: redactPactError(error) });
+        await this.authorizations.settle(record, {
+          kind: "failed",
+          reason: redactPactError(error),
+        });
       }
     }
     return { abandoned: abandoned.length, resumed, expired };
@@ -1670,7 +1977,8 @@ export class PactRuntime {
     if (record.expiresAt <= this.now()) return "expired";
     if (!this.availability().available) return "pact_unavailable";
     if (record.principalId !== (await this.ownerPrincipal()).id) return "owner_changed";
-    if (record.taskId && !(await this.deps.host.taskStillWaiting(record.taskId))) return "task_not_waiting";
+    if (record.taskId && !(await this.deps.host.taskStillWaiting(record.taskId)))
+      return "task_not_waiting";
     const business = await this.repo.getBusiness(record.businessId);
     if (!business || business.supportStatus !== "supported") return "business_changed";
     return null;

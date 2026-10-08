@@ -92,7 +92,8 @@ export function checkSignedToken(input: {
     throw new PactSignerError("invalid_token", "Signer token payload is not JSON");
   }
   const { iss, sub, aud, iat, exp } = claims;
-  if (iss !== input.issuer) throw new PactSignerError("invalid_token", "Signer token issuer differs");
+  if (iss !== input.issuer)
+    throw new PactSignerError("invalid_token", "Signer token issuer differs");
   if (aud !== input.audience) {
     throw new PactSignerError("invalid_token", "Signer token audience differs");
   }
@@ -105,7 +106,12 @@ export function checkSignedToken(input: {
   if (input.nonce !== undefined && claims.jti !== undefined && typeof claims.jti !== "string") {
     throw new PactSignerError("invalid_token", "Signer token jti is not a string");
   }
-  if (typeof iat !== "number" || typeof exp !== "number" || !Number.isInteger(iat) || !Number.isInteger(exp)) {
+  if (
+    typeof iat !== "number" ||
+    typeof exp !== "number" ||
+    !Number.isInteger(iat) ||
+    !Number.isInteger(exp)
+  ) {
     throw new PactSignerError("invalid_token", "Signer token has no integer iat/exp");
   }
   const nowSeconds = Math.floor(input.nowMs / 1000);
@@ -115,7 +121,8 @@ export function checkSignedToken(input: {
   if (iat > nowSeconds + PACT_JWT_MAX_FUTURE_IAT_SECONDS) {
     throw new PactSignerError("invalid_token", "Signer token is issued in the future");
   }
-  if (exp <= nowSeconds) throw new PactSignerError("invalid_token", "Signer token is already expired");
+  if (exp <= nowSeconds)
+    throw new PactSignerError("invalid_token", "Signer token is already expired");
   return {
     token: input.token,
     issuer: iss,
@@ -263,14 +270,18 @@ export class HttpPactSigner implements PactSigner {
       }
       throw new PactSignerError("unavailable", "The PACT signer could not be reached");
     }
-    if (response.status === 403) throw new PactSignerError("disabled", "The PACT signer is disabled");
+    if (response.status === 403)
+      throw new PactSignerError("disabled", "The PACT signer is disabled");
     if (response.status === 401) {
       throw new PactSignerError("rejected", "The PACT signer rejected this device");
     }
     if (response.status === 404 || response.status === 422) {
       const parsed = readJsonObject(response.bodyText || "{}");
       if (parsed.error === "audience_not_registered") {
-        throw new PactSignerError("audience_not_registered", "The signer has no registration for this provider");
+        throw new PactSignerError(
+          "audience_not_registered",
+          "The signer has no registration for this provider",
+        );
       }
     }
     if (response.status !== 200) {
@@ -325,7 +336,9 @@ export class HttpPactSigner implements PactSigner {
       const body = await this.post("/pact/status", {});
       const audiences: Record<string, string> = {};
       if (body.audiences && typeof body.audiences === "object" && !Array.isArray(body.audiences)) {
-        for (const [origin, audience] of Object.entries(body.audiences as Record<string, unknown>)) {
+        for (const [origin, audience] of Object.entries(
+          body.audiences as Record<string, unknown>,
+        )) {
           if (typeof audience === "string" && audience) audiences[origin] = audience;
         }
       }

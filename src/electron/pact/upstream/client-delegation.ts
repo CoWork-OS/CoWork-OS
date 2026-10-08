@@ -220,12 +220,7 @@ export function interpretSendResponse(input: {
     const parsedError = A2AErrorResponseSchema.safeParse(input.body);
     if (parsedError.success) {
       const error = parsedError.data.error;
-      throw new A2AError(
-        input.status,
-        error.status,
-        error.details[0]?.reason ?? "",
-        error.message,
-      );
+      throw new A2AError(input.status, error.status, error.details[0]?.reason ?? "", error.message);
     }
     if (
       input.status === 401 &&

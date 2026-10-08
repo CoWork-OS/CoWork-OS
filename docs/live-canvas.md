@@ -93,6 +93,12 @@ Use Live Canvas when an agent is actively iterating on an HTML/CSS/JavaScript ex
 
 Use [Web Page Artifacts](web-page-artifacts.md) when a task creates a local `.html` / `.htm` file or built React output such as `dist/index.html`, `build/index.html`, or `out/index.html`. Those files render as compact task-feed artifact cards and open in the shared artifact sidebar/fullscreen viewer with a sandboxed iframe, browser/folder/copy actions, and follow-up composer context. The artifact viewer does not auto-start React, Vite, or Next dev servers; source projects need built HTML output before they can preview in this path.
 
+## Build View (Calm)
+
+In the Calm visual style (**Settings > Appearance > Visual style**), **More > Build** opens a dedicated Build view: describe a dashboard, tool or small app, optionally attach files, and CoWork writes the code and shows a live preview. The prompt and attachments are kept as a draft while you move around the app, recent builds are listed with their state, and the use-case gallery's **Build** tab can fill the prompt.
+
+While a build runs, its live preview opens next to the session automatically. The preview is served from the isolated `cowork-preview://` origin with a strict content security policy and no network access (see [Web Page Artifacts](web-page-artifacts.md#preview-model)), and the agent can check its own work with the `preview_web_page` tool. The **Changes** button on the build's status strip opens a panel with every file the build changed and the line diff of each write and edit.
+
 ## Build Mode
 
 Build Mode is a dedicated "idea → working prototype" workflow layered on top of Live Canvas. It guides the agent through four structured phases, each producing a named checkpoint that you can revert to or diff against.

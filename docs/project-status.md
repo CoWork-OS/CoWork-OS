@@ -21,6 +21,19 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 
 ## What's Built and Working
 
+### Added in 0.5.60
+
+- [x] Memory folder: what CoWork knows about you and your workspaces as markdown notes in a local git repo (`~/CoWork Memory`), with daily Dreaming, review and undo, private git sync, read-only team memory, and four memory tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`)
+- [x] Bots page with responsibilities (trigger, sources, mode, review boundary, budget; saved paused) and a per-bot work view
+- [x] Icon-rail sidebar (Home, Inbox, Bots, Automations, More) with a session panel, Cmd/Ctrl+K search, and **Running** / **Needs you** filters
+- [x] Opt-in Calm visual style with Library and Build views
+- [x] Sandboxed `cowork-preview://` web previews and the `preview_web_page` tool
+- [x] Interactive answer components, a per-task Cost panel with a $10 default cap, an Automation Library, and **Settings > Add tools**
+- [x] SQLite in worker threads (on by default; `COWORK_DB_WORKER=0` returns to the previous path)
+- [x] WhatsApp Business (Cloud API) and Twilio SMS channels, GPT-6 models, OpenAI's official Sign in with ChatGPT, and the oMLX local provider
+
+See [Release Notes 0.5.60](release-notes-0.5.60.md).
+
 ### 1. Core Architecture
 
 #### Reliability Flywheel (Eval + Risk Gates)

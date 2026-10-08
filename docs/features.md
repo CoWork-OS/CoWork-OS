@@ -68,8 +68,8 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Additive Skill Runtime**: Skills can still be proactively shortlisted from task semantics, but they now apply as additive context and scoped runtime directives. They never replace the original task prompt. See [Skills Runtime Model](skills-runtime-model.md).
 
 <p align="center">
-  <img src="../resources/branding/images/cowork-os-3.webp" alt="Agents Hub" width="700">
-  <br><em>Agents Hub turns reusable agent definitions into a first-class product surface.</em>
+  <img src="../resources/branding/images/cowork-os-3.webp" alt="Bots page" width="700">
+  <br><em>The Bots page turns reusable bots, templates and workspace agents into a first-class product surface.</em>
 </p>
 
 - **Chat Mode**: Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. Uploaded PDF turns that need deeper document reading are narrowly promoted into read-only analysis so the document parser can run. See [Chat Mode](chat-mode.md).

@@ -46,7 +46,7 @@
 
 
 <p align="center">
-  <img src="resources/branding/images/cowork-os-1.webp" alt="CoWork OS home interface" width="700">
+  <img src="resources/branding/images/cowork-os-1.webp" alt="CoWork OS home in the Calm style" width="700">
 </p>
 
 ### Why CoWork OS?
@@ -204,11 +204,25 @@ Generated 2026-10-08T10:31:41.129Z. These are public GitHub/npm adoption signals
 6. **Respond when needed** — Actions requiring approval pause according to the selected access profile and hard guardrails. Plan overrides can pause for structured input, and location requests stay explicit and session-scoped.
 
 <p align="center">
-  <img src="resources/branding/images/cowork-os-4.webp" alt="Running task monitor" width="700">
-  <br><em>Task execution stays visible with live progress, grouped work, and reviewable outputs.</em>
+  <img src="resources/branding/images/cowork-os-4.webp" alt="Task feed of a running session" width="700">
+  <br><em>The task feed groups each turn: the agent's commentary, one-line activity rows, and the files it changed.</em>
 </p>
 
 ## Features
+
+### Calm interface
+
+An optional **Calm** visual style (Settings > Appearance) next to Modern and Terminal, in light or dark. The sidebar is an icon rail (Home, Inbox, Bots, Automations, plus Library in Calm) with a session panel: search sessions with Cmd/Ctrl+K and filter to **Running** or **Needs you**. Mission Control, Devices, Everyday, Build and Add tools sit under **More**, and you can pin them to the rail. Notifications are grouped, with what needs you first. [Features](docs/features.md)
+
+<p align="center">
+  <img src="resources/branding/images/cowork-os-22.webp" alt="Appearance settings with the Calm visual style selected" width="700">
+</p>
+
+<p align="center">
+  <img src="resources/branding/images/cowork-os-21.webp" alt="Sidebar with session filters and the notifications panel" width="345">
+  <img src="resources/branding/images/cowork-os-20.webp" alt="Library" width="345">
+  <br><em>Grouped notifications next to the session panel, and the Library of everything your tasks produced.</em>
+</p>
 
 ### Agent Runtime
 
@@ -221,8 +235,16 @@ Real terminal tabs now sit beside the task runtime: xterm.js renders the termina
 Side Chat gives active sessions a read-only inspection lane. `/side [question]` opens a right-side conversation about the selected running task with hidden inherited parent context, a fresh parent-status snapshot for progress questions, a side-only visible transcript, and mutating tools denied. [Learn more](docs/side-chat.md)
 
 <p align="center">
-  <img src="resources/branding/images/cowork-os-3.webp" alt="Agents Hub" width="700">
-  <br><em>Agents Hub collects reusable managed agents, templates, and starter prompts.</em>
+  <img src="resources/branding/images/cowork-os-3.webp" alt="Bots page" width="700">
+  <br><em>The Bots page shows your bots, what they need from you, what is scheduled, and templates for new ones.</em>
+</p>
+
+Give a bot a **responsibility**: a trigger, sources, a mode (Observe, Propose, or Act within granted scope), a review boundary and a budget. It is saved paused and runs only once you turn it on; each bot's Work view shows what needs you, what is working, what is scheduled and its results. [Bots and conversations](docs/bots-and-conversations.md)
+
+<p align="center">
+  <img src="resources/branding/images/cowork-os-15.webp" alt="A bot's active responsibility in its Work view" width="345">
+  <img src="resources/branding/images/cowork-os-16.webp" alt="A bot's Results tab" width="345">
+  <br><em>An active responsibility (Propose mode) and the brief it produced in Results.</em>
 </p>
 
 ### Chronicle (Desktop Research Preview)
@@ -333,7 +355,12 @@ Everyday Agent turns personal priorities into a reviewable operating plan: goals
 
 ### Live Canvas & Build Mode
 
-Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. **Build Mode** adds a phased idea-to-prototype workflow with named checkpoints and revert support. [Learn more](docs/live-canvas.md)
+Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. **Build Mode** adds a phased idea-to-prototype workflow with named checkpoints and revert support. Build previews open in a sandboxed `cowork-preview://` frame next to the session, with the changed files one click away. [Learn more](docs/live-canvas.md)
+
+<p align="center">
+  <img src="resources/branding/images/cowork-os-14.webp" alt="Build session with a live preview of the generated page" width="700">
+  <br><em>A Build session with its sandboxed live preview.</em>
+</p>
 
 ### Multichannel Gateway
 
@@ -461,11 +488,24 @@ Built-in structured entity and relationship memory backed by SQLite. The agent b
 
 ### Memory & Context
 
-Persistent memory with privacy protection, FTS5 search, and a contract-driven workspace kit (`.cowork/`) for durable human-edited context. Facts about the user and workspace live in one store (`memory_items`), written through a single `MemoryWriter` that every producer (agent tools, Memory Hub, imports, core memory candidates) shares. Dreaming curates it in the background: safe changes are applied and undoable, the rest wait in the Memory Hub Review tab, and each chat reply can show which memories it used. The runtime makes memory explicit as a four-layer wake-up model: `L0` (the pinned profile) and `L1` (memory relevant to the request) are prompt-visible by default, while `L2 Topic Packs` and `L3 Deep Recall` stay tool-driven through four memory tools: `memory_recall`, `memory_remember`, `memory_forget` and `context_recall`. In controlled runs, `COWORK_MEMORY_WRITE_APPROVAL_MODE` can stage archive, fact, background, or external-provider writes for explicit approval. Opt-in Durable Runtime Context lets `context_recall` recover compacted active-task facts from source-linked summaries without broadening into cross-task memory. Runtime-native checkpoints capture both compact structured summaries and verbatim evidence packets before compaction, on meaningful task completion, and periodically during long runs. See [Memory Engine](docs/memory-engine.md).
+CoWork keeps what it learns about you and your workspaces in a **memory folder**: plain markdown notes in a local git repo (`~/CoWork Memory` by default, in the open [Agent Memory Repo](https://github.com/AgentMemoryRepo/agentmemoryrepo) format), with `MEMORY.md`, `me.md`, `lessons.md` and one file per workspace. Every change is a commit you can inspect, and you can edit notes in any editor or in **Settings > Memory > What CoWork knows** (edit, pin, delete). The agent saves preferences, corrections, decisions and lessons as it works and recalls them when they are relevant, through four tools: `memory_remember`, `memory_recall`, `memory_forget` and `context_recall`. Each reply can show the memories it used. Anything learned after reading web pages, email or other untrusted content goes to an unreviewed inbox that is never put in prompts, and commitments and notes about other people stay in the local database. [Memory Engine](docs/memory-engine.md)
 
-The workspace kit separates workspace-wide files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `SOUL.md`, `IDENTITY.md`, `RULES.md`, `VIBES.md`, and `LORE.md` from project-scoped files such as `.cowork/projects/<projectId>/CONTEXT.md` and `.cowork/projects/<projectId>/ACCESS.md`. Special files get dedicated lifecycle handling: `BOOTSTRAP.md` is a one-time onboarding checklist tracked through `.cowork/workspace-state.json`, while `HEARTBEAT.md` is reserved for recurring Heartbeat v3 checklist work instead of general task context.
+About once a day, or when you press **Dream now**, **Dreaming** tidies the folder: it merges duplicates, removes stale notes and saves things you said that were not saved yet. Changes to the agent's own notes are applied as one commit you can undo; anything that touches your notes waits in the **Review** tab as a diff you accept or reject. Dreaming uses your model provider within a daily token budget (50,000 tokens by default) and can be turned off. You can also sync the folder across your machines through a private git remote you own, add up to three read-only **team memory** folders, import notes from another folder or what another AI assistant knows about you, and agents working on one goal share a notes folder so work is not repeated. [Dreaming](docs/dreaming.md)
 
-Every tracked file follows a shared parser/linter model with freshness windows, secret detection, missing-file status, and revision snapshots stored under `.cowork/**/.history/`. Workspace kit health is surfaced in the app and can be checked locally with `npm run kit:lint` for human-readable output or JSON export. **Import your ChatGPT history** to eliminate the cold-start problem — CoWork OS knows you from day one. Imported history stays local in SQLite and uses privacy filtering; selected sensitive settings/fields use OS keychain/AES-backed encryption, but the main SQLite file is not whole-file encrypted. **Structured memory observations** add inspectable local metadata, Memory Hub privacy controls, deterministic rebuild/backfill, and soft-delete suppression on top of archive memory. **Memory Write Governance** can stage durable memory writes in `pending_memory_writes`, atomically claim approvals as `applying`, and block sensitive external-memory payloads before they are stored in the approval queue. **Durable Runtime Context** stores sanitized active-task messages and source-linked summary DAG nodes when enabled, is erased by Clear memory, and keeps `context_recall` active-task scoped. **Optional Supermemory integration** adds an external provider lane (the `external` scope of `memory_recall`, and `memory_forget` for its ids), plus optional prompt-time profile injection and background mirroring of non-private local memory captures. **Proactive session compaction** automatically generates comprehensive structured summaries when context reaches 90% capacity, and checkpoint capture preserves exact supporting spans so recall quality survives compaction. [Learn more](docs/features.md#persistent-memory-system) | [Structured Memory](docs/memory-observations.md) | [Durable Runtime Context](docs/durable-runtime-context.md) | [Supermemory](docs/supermemory.md) | [Context Compaction](docs/context-compaction.md)
+Private memories and anything marked `<no-memory>` never reach prompts or recall, secrets are redacted at every memory write, group chats and sub-agents get no memory by default, and **Compact history** removes old versions so deleted memories are really gone. Task outcomes, errors and feedback are kept in a local archive with full-text search, structured observations and Memory Hub privacy controls; **Import your ChatGPT history** to start with context instead of from zero. Optional extras: **Supermemory** as an external memory provider, **Durable Runtime Context** so `context_recall` can recover compacted facts from the active task, and **proactive compaction** that summarizes long sessions at 90% of the context window while checkpoints keep the exact supporting evidence. [Learn more](docs/features.md#persistent-memory-system) | [Structured Memory](docs/memory-observations.md) | [Durable Runtime Context](docs/durable-runtime-context.md) | [Supermemory](docs/supermemory.md) | [Context Compaction](docs/context-compaction.md)
+
+The workspace kit (`.cowork/`) holds durable, human-edited context. Workspace-wide files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `SOUL.md`, `IDENTITY.md`, `RULES.md`, `VIBES.md` and `LORE.md` sit next to project files such as `.cowork/projects/<projectId>/CONTEXT.md` and `ACCESS.md`; hand edits to `USER.md` and `MEMORY.md` sync back into memory. `BOOTSTRAP.md` is a one-time onboarding checklist and `HEARTBEAT.md` holds recurring Heartbeat checklist work. Every kit file is linted for freshness, secrets and missing files, with revision snapshots under `.cowork/**/.history/`; check it locally with `npm run kit:lint`.
+
+<p align="center">
+  <img src="resources/branding/images/cowork-os-17.webp" alt="What CoWork knows, notes grouped by file" width="345">
+  <img src="resources/branding/images/cowork-os-18.webp" alt="Memory review of a dream change" width="345">
+  <br><em>The memory folder's notes by file, and a dream change waiting for review.</em>
+</p>
+
+<p align="center">
+  <img src="resources/branding/images/cowork-os-19.webp" alt="A reply showing the memories it used" width="700">
+  <br><em>Each reply can show which memories it used.</em>
+</p>
 
 ## Architecture
 

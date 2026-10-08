@@ -14,6 +14,7 @@ import {
   hasUnrecoveredToolFailureForAssistantOutput,
   hasVerificationEvidence,
   getBestFinalResponseCandidate,
+  parseVerificationProtocolOutcome,
   responseHasDecisionSignal,
   responseLooksOperationalOnly,
   responseHasExecutionReportEvidenceSignal,
@@ -3335,6 +3336,20 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
       expect(extractExplicitOutputExtensions("Task", prompt)).toEqual(expected);
     },
   );
+});
+
+describe("parseVerificationProtocolOutcome", () => {
+  it.each([
+    ["OK", "pass"],
+    ["**OK**", "pass"],
+    ["WARN_NON_BLOCKING — workbook exists; euro format missing.", "warn_non_blocking"],
+    ["FAIL_BLOCKING: the agenda is missing.", "fail_blocking"],
+    ["PENDING_USER_ACTION - open the app and confirm.", "pending_user_action"],
+    ["Okay, everything looks fine.", null],
+    ["The check found a WARN_NON_BLOCKING issue.", null],
+  ])("reads %s as %s", (text, expected) => {
+    expect(parseVerificationProtocolOutcome(text)).toBe(expected);
+  });
 });
 
 describe("buildCompletionGuidancePrompt", () => {

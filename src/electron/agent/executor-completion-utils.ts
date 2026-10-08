@@ -85,6 +85,24 @@ const COMMAND_OR_API_EVIDENCE_TOOLS = new Set([
   "web_fetch",
 ]);
 
+/**
+ * Reads the leading token of a final verification reply ("OK", "WARN_NON_BLOCKING
+ * — ...", "FAIL_BLOCKING — ..."). Returns null when the reply does not open with
+ * one of the protocol tokens the verification prompts ask for.
+ */
+export function parseVerificationProtocolOutcome(
+  text: string,
+): "pass" | "warn_non_blocking" | "fail_blocking" | "pending_user_action" | null {
+  const head = String(text || "")
+    .trim()
+    .replace(/^[*_`#>\s]+/, "");
+  if (/^ok\b/i.test(head)) return "pass";
+  const match = /^(WARN_NON_BLOCKING|FAIL_BLOCKING|PENDING_USER_ACTION)\b/i.exec(head);
+  return match
+    ? (match[1]!.toLowerCase() as "warn_non_blocking" | "fail_blocking" | "pending_user_action")
+    : null;
+}
+
 export function normalizePromptForContracts(taskPrompt: string): string {
   const raw = String(taskPrompt || "");
   if (!raw.trim()) return "";

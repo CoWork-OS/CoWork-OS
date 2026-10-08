@@ -59,4 +59,21 @@ describe("text-only quality passes", () => {
       ),
     ).toBe(true);
   });
+
+  it("rejects a rewrite that drops a file link or denies an available output", () => {
+    const draft =
+      "Created meetup-budget.xlsx with Transactions and Summary sheets. Final total €320.25. Download: [meetup-budget.xlsx](meetup-budget.xlsx)";
+    expect(
+      isQualityRewriteFaithful(
+        "Created meetup-budget.xlsx with Transactions and Summary sheets and a final total of €320.25. Download it here: meetup-budget.xlsx",
+        draft,
+      ),
+    ).toBe(false);
+    expect(
+      isQualityRewriteFaithful(
+        `${draft} I can’t confirm that the workbook is available to download.`,
+        draft,
+      ),
+    ).toBe(false);
+  });
 });

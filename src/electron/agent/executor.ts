@@ -485,6 +485,7 @@ import {
   shouldPreserveExistingDeliverableForRecovery as shouldPreserveExistingDeliverableForRecoveryUtil,
   shouldRequireExecutionEvidence as shouldRequireExecutionEvidenceUtil,
   detectReadOnlyConstraint as detectReadOnlyConstraintUtil,
+  parseVerificationProtocolOutcome as parseVerificationProtocolOutcomeUtil,
   extractExplicitOutputExtensions as extractExplicitOutputExtensionsUtil,
   buildCompletionGuidancePrompt as buildCompletionGuidancePromptUtil,
   hasUnrecoveredBlockingPlanFailureForAssistantOutput as hasUnrecoveredBlockingPlanFailureForAssistantOutputUtil,
@@ -14412,9 +14413,77 @@ ${transcript}
    */
   private reconcileSummaryWithWorkspaceOutputs(summary: string): string {
     const normalized = String(summary || "").trim();
-    if (!normalized || !/\bno file changes were necessary\b/i.test(normalized)) {
-      return normalized;
+    if (!normalized) return normalized;
+    return this.reconcileOutputAvailabilityClaims(this.reconcileNoFileChangesClaim(normalized));
+  }
+
+  /**
+   * A file this task created and that still exists is authoritative evidence.
+   * Drop sentences that deny it can be provided or downloaded, and give the
+   * requested link when the reply omits it. Caveats about the file's contents
+   * (formatting, values) are kept.
+   */
+  private reconcileOutputAvailabilityClaims(summary: string): string {
+    const workspaceRoot = this.workspace?.path ? path.resolve(this.workspace.path) : "";
+    if (!workspaceRoot) return summary;
+    const inability =
+      /\b(?:can['’]?t|cannot|could\s*n['’]?t|could\s+not|unable\s+to|not\s+able\s+to)\b/i;
+    const promptAsksForLink = /\b(?:link|download(?:able)?|attach(?:ment)?)\b/i.test(
+      `${this.task?.title || ""}\n${this.getContractPrompt() || ""}`,
+    );
+    if (!inability.test(summary) && !promptAsksForLink) return summary;
+    let outputSummary: TaskOutputSummary | undefined;
+    try {
+      outputSummary = this.buildTaskOutputSummary();
+    } catch {
+      return summary;
     }
+    const outputs = (Array.isArray(outputSummary?.created) ? outputSummary.created : [])
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .map((rawPath) =>
+        path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(workspaceRoot, rawPath),
+      )
+      .filter((resolved) => this.isPathInsideWorkspace(resolved) && fs.existsSync(resolved))
+      .map((resolved) => path.relative(workspaceRoot, resolved).replace(/\\/g, "/"))
+      // Helper scripts the agent wrote along the way are not deliverables.
+      .filter((relative) => relative && !/\.(?:py|[cm]?js|tsx?|sh|rb|pl)$/i.test(relative))
+      .slice(0, 5);
+    if (outputs.length === 0) return summary;
+
+    const basenames = outputs.map((relative) => path.posix.basename(relative).toLowerCase());
+    const availability =
+      /\b(?:provide|share|attach|deliver|download(?:able)?|available|accessible|exists?|(?:was|been)\s+saved|saved\s+(?:workbook|file|spreadsheet|document)|create\s+(?:the|a)\s+(?:file|workbook|spreadsheet|document))\b/i;
+    const fileNoun = /\b(?:file|workbook|spreadsheet|document|download|link)\b/i;
+    let removedDenial = false;
+    const reconciled = summary
+      .split("\n")
+      .map((line) => {
+        const sentences = line.split(/(?<=[.!?])\s+/);
+        const kept = sentences.filter((sentence) => {
+          const lower = sentence.toLowerCase();
+          const deniesOutput =
+            inability.test(sentence) &&
+            availability.test(sentence) &&
+            (basenames.some((name) => lower.includes(name)) || fileNoun.test(sentence));
+          if (deniesOutput) removedDenial = true;
+          return !deniesOutput;
+        });
+        return kept.length === sentences.length ? line : kept.join(" ");
+      })
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    const missingLinks = outputs.filter((relative) => !reconciled.includes(`](${relative})`));
+    if ((!removedDenial && !promptAsksForLink) || missingLinks.length === 0) return reconciled;
+    const links = missingLinks
+      .map((relative) => `[${path.posix.basename(relative)}](${relative})`)
+      .join(", ");
+    return `${reconciled}\n\nSaved ${missingLinks.length === 1 ? "file" : "files"}: ${links}`.trim();
+  }
+
+  private reconcileNoFileChangesClaim(normalized: string): string {
+    if (!/\bno file changes were necessary\b/i.test(normalized)) return normalized;
 
     const outputSummary = this.buildTaskOutputSummary();
     const created = Array.isArray(outputSummary?.created)
@@ -15666,7 +15735,7 @@ ${transcript}
     if (verificationState.nonBlockingVerificationFailedStepIds.has(id)) return true;
     if (this.getBudgetConstrainedFailureStepIdSet().has(id)) return true;
     const error = String(step.error || "").toLowerCase();
-    return /\b(optional|non-blocking|nice-to-have|warning)\b/.test(error);
+    return /\b(optional|non-blocking|nice-to-have|warning|warn_non_blocking)\b/.test(error);
   }
 
   private hasUnrecoveredBlockingPlanFailureBeforeStep(step: PlanStep): boolean {
@@ -24618,7 +24687,9 @@ You are continuing a previous conversation. The context from the previous conver
     terminalStatus: NonNullable<Task["terminalStatus"]>;
     failureClass: Task["failureClass"] | undefined;
   } {
-    if (!this.verificationOutcomeV2Enabled || !this.completionVerificationMetadata) {
+    // The metadata is recorded by the V2 classifier, or by an explicit
+    // WARN_NON_BLOCKING verification reply when V2 is off.
+    if (!this.completionVerificationMetadata) {
       return { terminalStatus: baseTerminalStatus, failureClass: baseFailureClass };
     }
 
@@ -33737,11 +33808,15 @@ Return ONLY a JSON object:
           }
 
           // Optional quality loop only for final/summary responses to limit churn.
+          // A step that just wrote a file is reported from evidence the
+          // text-only refiner cannot see ("Add a Summary sheet" reads as a
+          // summary step); a rewrite there can deny the file it created.
           const shouldApplyQuality =
             !isVerifyStep &&
             !isPlanVerifyStep &&
             (isLastStep || isSummaryStep) &&
-            step.kind !== "recovery";
+            step.kind !== "recovery" &&
+            !stepSucceededWithFileMutation;
           response = await this.maybeApplyQualityPasses({
             response,
             enabled: shouldApplyQuality,
@@ -38502,11 +38577,35 @@ Return ONLY a JSON object:
         !this.isVerificationPassing(finalAssistantText) &&
         !(textChecklistEvaluation.applied && textChecklistEvaluation.passed)
       ) {
-        stepFailed = true;
-        if (!lastFailureReason) {
-          lastFailureReason = finalAssistantText
-            ? `Verification failed: ${finalAssistantText}`
-            : 'Verification failed: verification step did not return "OK".';
+        if (
+          !this.verificationOutcomeV2Enabled &&
+          parseVerificationProtocolOutcomeUtil(finalAssistantText) === "warn_non_blocking"
+        ) {
+          // The verifier answered with the explicit non-blocking warning token the
+          // verification prompt offers. The checked work exists; carry the warning
+          // into the terminal status instead of failing the step.
+          this.upsertCompletionVerificationMetadata({
+            outcome: "warn_non_blocking",
+            scope: this.classifyVerificationScope(step, finalAssistantText),
+            evidenceMode: this.classifyVerificationEvidenceMode(step, finalAssistantText),
+            pendingChecklist: this.extractVerificationPendingChecklist(finalAssistantText),
+            reason:
+              finalAssistantText
+                .replace(/^\W*WARN_NON_BLOCKING\b[\s:\u2014\u2013-]*/i, "")
+                .trim() || finalAssistantText,
+          });
+          this.emitEvent("log", {
+            message: "Verification returned WARN_NON_BLOCKING; step completed with a warning.",
+            stepId: step.id,
+            verificationOutcome: "warn_non_blocking",
+          });
+        } else {
+          stepFailed = true;
+          if (!lastFailureReason) {
+            lastFailureReason = finalAssistantText
+              ? `Verification failed: ${finalAssistantText}`
+              : 'Verification failed: verification step did not return "OK".';
+          }
         }
       }
 
@@ -40148,7 +40247,7 @@ Return ONLY a JSON object:
       return "pending_user_action";
     }
     if (
-      /\boptional\b|\bnice[-\s]?to[-\s]?have\b|\bnon[-\s]?blocking\b|\bwarning\b|\bwould improve\b/.test(
+      /\boptional\b|\bnice[-\s]?to[-\s]?have\b|\bnon[-\s]?blocking\b|\bwarn_non_blocking\b|\bwarning\b|\bwould improve\b/.test(
         lower,
       )
     ) {

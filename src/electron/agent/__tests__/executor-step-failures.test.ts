@@ -1413,6 +1413,70 @@ describe("TaskExecutor executeStep failure handling", () => {
     }
   });
 
+  it("completes a final verification that answers WARN_NON_BLOCKING and keeps the warning", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-verify-warn-"));
+    try {
+      fs.writeFileSync(path.join(workspacePath, "meetup-budget.xlsx"), "PK");
+      const warning =
+        "WARN_NON_BLOCKING — meetup-budget.xlsx exists, but the amount cells use General format instead of euro formatting. Download: [meetup-budget.xlsx](meetup-budget.xlsx)";
+      executor = createExecutorWithStubs([textResponse(warning)], {});
+      (executor as Any).workspace.path = workspacePath;
+      (executor as Any).task.prompt = "Create meetup-budget.xlsx and check the saved workbook.";
+      const step: Any = {
+        id: "verify-workbook-warn",
+        description:
+          "Verify the saved workbook meetup-budget.xlsx exists and uses euro formatting.",
+        kind: "verification",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+
+      await (executor as Any).executeStep(step);
+
+      expect(step.status, String(step.error || "")).toBe("completed");
+      expect((executor as Any).completionVerificationMetadata).toMatchObject({
+        verificationOutcome: "warn_non_blocking",
+      });
+      expect(
+        (executor as Any).applyVerificationOutcomeToTerminalStatus("ok", undefined).terminalStatus,
+      ).toBe("partial_success");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces a denial of a created, existing file with its link in the final summary", () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-output-claims-"));
+    try {
+      fs.writeFileSync(path.join(workspacePath, "meetup-budget.xlsx"), "PK");
+      fs.writeFileSync(path.join(workspacePath, "repair.py"), "print(1)");
+      const reconciler = Object.create(TaskExecutor.prototype) as Any;
+      reconciler.workspace = { path: workspacePath };
+      reconciler.task = {
+        id: "task-1",
+        title: "Meetup budget",
+        prompt:
+          "Create meetup-budget.xlsx. In your reply give me the totals and a link to the workbook.",
+      };
+      reconciler.fileOperationTracker = {
+        getCreatedFiles: () => ["meetup-budget.xlsx", "repair.py"],
+      };
+      reconciler.daemon = { getTaskEvents: () => [] };
+
+      const summary = reconciler.reconcileSummaryWithWorkspaceOutputs(
+        "Final total: €320.25. Venue €150.00, Catering €96.50.\n\nI can’t verify or provide a saved workbook from here, so I can’t confirm that `meetup-budget.xlsx` is available to download. The euro number format could not be confirmed.",
+      );
+
+      expect(summary).not.toMatch(/can’t verify or provide/);
+      expect(summary).toContain("Final total: €320.25");
+      expect(summary).toContain("The euro number format could not be confirmed.");
+      expect(summary).toContain("[meetup-budget.xlsx](meetup-budget.xlsx)");
+      expect(summary).not.toContain("repair.py");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a verifier worker's evidence-backed draft out of the text-only refiner", async () => {
     const verifier = Object.create(TaskExecutor.prototype) as Any;
     verifier.task = { id: "verify-1", title: "Verify: checklist", workerRole: "verifier" };

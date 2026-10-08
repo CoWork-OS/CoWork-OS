@@ -228,6 +228,7 @@ import {
   getResponsibilityActionReviewContext,
   responsibilityWriteReviewTarget,
 } from "../../automation/responsibility-task-policy";
+import { SPREADSHEET_NUMBER_FORMATS_SCHEMA } from "../../utils/document-generators/spreadsheet-cells";
 
 function sanitizeFilename(raw: string, maxLen = 120): string {
   const base = path.basename(String(raw || "").trim() || "artifact");
@@ -7584,7 +7585,10 @@ ${skillDescriptions}`;
     return [
       {
         name: "create_spreadsheet",
-        description: "Create an Excel spreadsheet with data, formulas, and formatting",
+        description:
+          "Create an Excel spreadsheet with data, formulas, and number formats (currency, decimals, percentages, dates). " +
+          "Results of common formulas (SUM, SUMIF(S), AVERAGE, COUNT(IF), MIN, MAX, ROUND, IF) are saved with the file; " +
+          "the result lists any formula left for Excel to calculate on open.",
         input_schema: {
           type: "object",
           properties: {
@@ -7620,6 +7624,7 @@ ${skillDescriptions}`;
                       items: { ...SPREADSHEET_CELL_SCHEMA },
                     },
                   },
+                  numberFormats: { ...SPREADSHEET_NUMBER_FORMATS_SCHEMA },
                 },
               },
             },

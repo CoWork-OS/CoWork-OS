@@ -61,4 +61,34 @@ describe("generateXLSX (generate_spreadsheet)", () => {
     expect(sheet.getCell("A2").value).toBe(JSON.stringify(link));
     expect(sheet.getCell("B2").value).toBe('["nested",1]');
   });
+
+  it("saves formula results and applies number formats", async () => {
+    const dir = path.join(os.tmpdir(), `cowork-xlsx-${randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const outputPath = path.join(dir, "totals.xlsx");
+
+    const result = await generateXLSX(outputPath, {
+      sheets: [
+        {
+          name: "Totals",
+          headers: ["Item", "Amount"],
+          rows: [
+            ["Room", "180"],
+            ["Snacks", "96.5"],
+            ["Total", "=SUM(B2:B3)"],
+          ],
+          numberFormats: [{ column: "Amount", numFmt: "€#,##0.00" }],
+        },
+      ],
+    });
+
+    expect(result.formulas).toEqual({ computed: 1, uncached: [] });
+    expect(result.warnings).toEqual([]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(outputPath);
+    const sheet = workbook.getWorksheet("Totals")!;
+    expect(sheet.getCell("B4").value).toEqual({ formula: "SUM(B2:B3)", result: 276.5 });
+    expect(sheet.getCell("B4").numFmt).toBe("€#,##0.00");
+    expect(sheet.getCell("B1").numFmt).toBeUndefined();
+  });
 });

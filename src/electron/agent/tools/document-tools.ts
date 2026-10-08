@@ -15,6 +15,8 @@ import { LLMTool } from "../llm/types";
 import { generatePDF } from "../../utils/document-generators/pdf-generator";
 import { generatePPTX } from "../../utils/document-generators/pptx-generator";
 import { generateXLSX } from "../../utils/document-generators/xlsx-generator";
+import { SPREADSHEET_NUMBER_FORMATS_SCHEMA } from "../../utils/document-generators/spreadsheet-cells";
+import { summarizeFormulaReport } from "../../utils/document-generators/spreadsheet-formulas";
 import { generateEPUB } from "../../utils/document-generators/epub-generator";
 import { generateLandingPage } from "../../utils/document-generators/html-page-generator";
 import { compileLatex } from "../../utils/document-generators/latex-compiler";
@@ -546,6 +548,7 @@ export class DocumentTools {
                     items: { type: "number" },
                     description: "Optional column widths",
                   },
+                  numberFormats: { ...SPREADSHEET_NUMBER_FORMATS_SCHEMA },
                 },
                 required: ["name", "headers", "rows"],
               },
@@ -807,11 +810,16 @@ export class DocumentTools {
       );
     }
 
+    const { formulas, warning } = summarizeFormulaReport(result.formulas);
+    const warnings = [...result.warnings, ...(warning ? [warning] : [])];
+
     return {
       success: result.success,
       path: result.path,
       size: result.size,
       sheetCount: result.sheetCount,
+      formulas,
+      ...(warnings.length > 0 ? { warnings } : {}),
       impactMetrics: [
         {
           kind: "rows_processed",

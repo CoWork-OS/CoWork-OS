@@ -8,6 +8,10 @@ import { PresentationBuilder } from "../skills/presentation";
 import { FolderOrganizer } from "../skills/organizer";
 import { editPdfRegion } from "../../documents/pdf-region-editor";
 import {
+  summarizeFormulaReport,
+  type FormulaReportSummary,
+} from "../../utils/document-generators/spreadsheet-formulas";
+import {
   createWorkspaceFilesystemApprovalHandlers,
   resolveWorkspaceFilesystemAccessWithApproval,
 } from "../../security/access-profile-paths";
@@ -88,8 +92,14 @@ export class SkillTools {
       data?: Any[][];
       headers?: Any[];
       rows?: Any[][];
+      numberFormats?: Any[];
     }>;
-  }): Promise<{ success: boolean; path: string }> {
+  }): Promise<{
+    success: boolean;
+    path: string;
+    formulas?: FormulaReportSummary;
+    warnings?: string[];
+  }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
     }
@@ -115,7 +125,11 @@ export class SkillTools {
         );
       }
 
-      return { name, data };
+      return {
+        name,
+        data,
+        ...(sheet.numberFormats !== undefined ? { numberFormats: sheet.numberFormats } : {}),
+      };
     });
 
     const filename = input.filename.endsWith(".xlsx") ? input.filename : `${input.filename}.xlsx`;
@@ -126,7 +140,9 @@ export class SkillTools {
       "spreadsheet output",
     );
 
-    await this.spreadsheetBuilder.create(outputPath, sheets);
+    const report = await this.spreadsheetBuilder.create(outputPath, sheets);
+    const { formulas, warning } = summarizeFormulaReport(report.formulas);
+    const warnings = [...report.warnings, ...(warning ? [warning] : [])];
 
     this.daemon.logEvent(this.taskId, "file_created", {
       path: filename,
@@ -137,6 +153,8 @@ export class SkillTools {
     return {
       success: true,
       path: filename,
+      formulas,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 

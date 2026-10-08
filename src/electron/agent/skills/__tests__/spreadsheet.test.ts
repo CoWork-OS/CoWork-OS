@@ -3,6 +3,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import type { Workspace } from "../../../../shared/types";
 import { SpreadsheetBuilder } from "../spreadsheet";
 
@@ -141,4 +142,107 @@ describe("SpreadsheetBuilder", () => {
       expect(ws.getCell(`A${index + 2}`).value).toBe(JSON.stringify(cell));
     });
   });
+
+  it("saves formula results and asks Excel to recalculate on open", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-spreadsheet-"));
+    const outPath = path.join(tmpDir, "budget.xlsx");
+
+    const report = await new SpreadsheetBuilder(createWorkspace(tmpDir)).create(outPath, [
+      {
+        name: "Transactions",
+        data: [
+          ["Category", "Amount EUR"],
+          ["Venue", "180"],
+          ["Catering", "96.5"],
+          ["Venue", "-30"],
+        ],
+      },
+      {
+        name: "Summary",
+        data: [
+          ["Category", "Total EUR"],
+          ["Venue", "=SUMIF(Transactions!A2:A4,A2,Transactions!B2:B4)"],
+          ["Total", "=SUM(Transactions!B2:B4)"],
+          ["Lookup", '=XLOOKUP("Venue",A2:A3,B2:B3)'],
+        ],
+      },
+    ]);
+
+    expect(report.formulas.computed).toBe(2);
+    expect(report.formulas.uncached).toEqual([
+      {
+        sheet: "Summary",
+        address: "B4",
+        formula: 'XLOOKUP("Venue",A2:A3,B2:B3)',
+        reason: "XLOOKUP is not evaluated by CoWork",
+      },
+    ]);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(outPath);
+    const summary = wb.getWorksheet("Summary")!;
+    expect(summary.getCell("B2").value).toEqual({
+      formula: "SUMIF(Transactions!A2:A4,A2,Transactions!B2:B4)",
+      result: 150,
+    });
+    expect(summary.getCell("B3").value).toEqual({
+      formula: "SUM(Transactions!B2:B4)",
+      result: 246.5,
+    });
+    expect(summary.getCell("B4").value).toEqual({ formula: 'XLOOKUP("Venue",A2:A3,B2:B3)' });
+    const workbookXml = await (
+      await JSZip.loadAsync(await fs.readFile(outPath))
+    )
+      .file("xl/workbook.xml")!
+      .async("string");
+    expect(workbookXml).toMatch(/<calcPr[^>]*fullCalcOnLoad="1"/);
+  });
+
+  it("applies number formats by header, column letter and range, skipping the header row", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-spreadsheet-"));
+    const outPath = path.join(tmpDir, "formats.xlsx");
+    const euro = "€#,##0.00;[Red]-€#,##0.00";
+
+    const report = await new SpreadsheetBuilder(createWorkspace(tmpDir)).create(outPath, [
+      {
+        name: "Data",
+        data: [
+          ["Item", "Amount EUR", "Share", "Total"],
+          ["Room", "180", "0.5", "=B2"],
+          ["Snacks", "96.5", "0.25", "=B3"],
+        ],
+        numberFormats: [
+          { column: "amount eur", numFmt: euro },
+          { column: "C", numFmt: "0.0%" },
+          { range: "D2:D3", numFmt: "#,##0" },
+          { column: "Missing", numFmt: "0.00" },
+          { column: "B", numFmt: "" },
+          { range: "not-a-range", numFmt: "0.00" },
+        ],
+      },
+    ]);
+
+    expect(report.warnings).toEqual([
+      'Sheet "Data": column "Missing" was not found, so "0.00" was not applied.',
+      'Sheet "Data": skipped invalid number format "".',
+      'Sheet "Data": range "not-a-range" is not a usable A1 range, so "0.00" was not applied.',
+    ]);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(outPath);
+    const ws = wb.getWorksheet("Data")!;
+    expect(ws.getCell("B1").numFmt).toBeUndefined();
+    expect([ws.getCell("B2").numFmt, ws.getCell("B3").numFmt]).toEqual([euro, euro]);
+    expect(ws.getCell("C2").numFmt).toBe("0.0%");
+    expect(ws.getCell("D3").numFmt).toBe("#,##0");
+    expect(ws.getCell("B2").value).toBe(180);
+  });
 });
+
+function createWorkspace(tmpDir: string): Workspace {
+  return {
+    id: "test-workspace",
+    name: "test-workspace",
+    path: tmpDir,
+    createdAt: Date.now(),
+    permissions: { read: true, write: true, delete: true, network: true, shell: false },
+  };
+}

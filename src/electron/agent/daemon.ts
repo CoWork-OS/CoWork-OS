@@ -7810,6 +7810,10 @@ export class AgentDaemon extends EventEmitter {
     return this.workspaceRepo.findById(workspaceId) ?? undefined;
   }
 
+  async getPendingInputRequests(taskId: string): Promise<InputRequest[]> {
+    return this.inputRequestRepo.findPendingByTaskId(taskId);
+  }
+
   async isTaskWaitingForInput(taskId: string): Promise<boolean> {
     const task = this.taskRepo.findById(taskId);
     if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return false;

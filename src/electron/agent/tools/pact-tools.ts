@@ -203,7 +203,9 @@ export class PactTools {
       origin,
       localAuthority: "task",
       humanInput,
-      waitForConsent: humanInput === "interactive",
+      // `cowork run` prints the sign-in link and keeps waiting (or exits with a distinct code
+      // when unattended); either way the poll runs here until the sign-in settles.
+      waitForConsent: humanInput !== "none",
       networkContext: networkContextOf(effective) ?? { networkEnabled: false },
       ...(signal ? { signal } : {}),
     };

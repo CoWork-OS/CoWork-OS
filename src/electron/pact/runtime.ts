@@ -1287,6 +1287,8 @@ export class PactRuntime {
       .catch((error: unknown): PactAuthorizationOutcome => ({ kind: "failed", reason: redactPactError(error) }))
       .then(async (outcome): Promise<PactAuthorizationOutcome & { grantId?: string }> => {
         if (outcome.kind === "lease_lost") return outcome;
+        // Shutting down is not a user cancel: leave the wait pending so it resumes on restart.
+        if (outcome.kind === "cancelled" && this.stopped) return outcome;
         let grantId: string | undefined;
         let grantedScopes: string[] | undefined;
         if (outcome.kind === "granted") {
@@ -1441,6 +1443,42 @@ export class PactRuntime {
     const views: PactAuthorizationView[] = [];
     for (const record of records) views.push(toAuthorizationView(record, await this.repo.getBusiness(record.businessId)));
     return views;
+  }
+
+  /**
+   * Resume polling a pending authorization in this process (CLI `authorization wait`), with the
+   * same validation as startup: unexpired, same owner, task still waiting, provider ready.
+   */
+  async resumeAuthorization(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationView | null> {
+    const record = await this.repo.getAuthorization(authorizationId);
+    if (!record || record.principalId !== principal.id) return null;
+    if (record.state === "pending" && !this.pollers.has(record.id)) {
+      const blocker = await this.resumeBlocker(record);
+      if (blocker) {
+        const settled = await this.authorizations.settle(
+          record,
+          blocker === "expired" ? { kind: "expired" } : { kind: "failed", reason: blocker },
+        );
+        if (settled?.inputRequestId) {
+          await this.deps.host
+            .settleAuthorizationWait(settled.inputRequestId, settled.state, `The sign-in could not continue (${blocker}).`)
+            .catch(() => undefined);
+        }
+        return this.getAuthorization(principal, authorizationId);
+      }
+      const { identity, binding } = await this.resolveIdentity(principal);
+      const business = await this.repo.getBusiness(record.businessId);
+      if (!business || binding.id !== record.subjectBindingId) return this.getAuthorization(principal, authorizationId);
+      const provider = await this.providers.requireReady(
+        new URL(business.interfaceUrl).origin,
+        await this.providerContext(await this.currentSignerStatus()),
+      );
+      const networkContext =
+        (await this.deps.host.networkContextForWorkspace(record.workspaceId)) ??
+        ({ networkEnabled: true, accessNetworkMode: "enabled" } as NetworkPolicyContext);
+      this.startPoller(record, business, provider, binding, identity, networkContext);
+    }
+    return this.awaitAuthorization(principal, authorizationId);
   }
 
   /** Wait for an authorization this runtime is polling (CLI `--wait`). */

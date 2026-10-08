@@ -28,6 +28,12 @@ export const NATIVE_INTEGRATIONS = [
     name: "Teams meeting transcripts",
     description: "Save transcripts of Teams meetings you organize as local notes.",
   },
+  {
+    key: "pact",
+    name: "PACT business agents",
+    description:
+      "Talk to a business's own agent for you, with account access you approve on its sign-in page.",
+  },
 ] as const;
 
 export type NativeIntegrationKey = (typeof NATIVE_INTEGRATIONS)[number]["key"];

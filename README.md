@@ -212,7 +212,7 @@ Generated 2026-10-07T10:12:57.950Z. These are public GitHub/npm adoption signals
 
 ### Calm interface
 
-An optional **Calm** visual style (Settings > Appearance) next to Modern and Terminal, in light or dark. The sidebar is an icon rail with a session panel: search sessions with Cmd/Ctrl+K, filter to **Running** or **Needs you**, and open Library, Mission Control, Build and more from the rail. Notifications are grouped, with what needs you first. [Features](docs/features.md)
+An optional **Calm** visual style (Settings > Appearance) next to Modern and Terminal, in light or dark. The sidebar is an icon rail (Home, Inbox, Bots, Automations, plus Library in Calm) with a session panel: search sessions with Cmd/Ctrl+K and filter to **Running** or **Needs you**. Mission Control, Devices, Everyday, Build and Add tools sit under **More**, and you can pin them to the rail. Notifications are grouped, with what needs you first. [Features](docs/features.md)
 
 <p align="center">
   <img src="resources/branding/images/cowork-os-22.webp" alt="Appearance settings with the Calm visual style selected" width="700">

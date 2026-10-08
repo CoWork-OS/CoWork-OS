@@ -2230,6 +2230,11 @@ export class TaskExecutor {
   }
 
   private isBoundedDocumentAnalysisTask(): boolean {
+    // Worker-role children (verifier, researcher, ...) carry their own prompt
+    // and completion contract. Their wrapper prompts quote the parent task and
+    // its file names, which would otherwise look like a document-review request
+    // and swap the role's tool-backed plan for the internal extraction pipeline.
+    if (resolveWorkerRoleKind(this.task?.workerRole)) return false;
     const taskTitle = String(this.task?.title || "");
     const rawTaskPrompt = String(
       this.task?.rawPrompt || this.task?.userPrompt || this.getContractPrompt() || "",
@@ -4127,6 +4132,21 @@ export class TaskExecutor {
       return true;
     }
     if (desc.startsWith("review")) {
+      // Reviewing supplied inputs to pull material out of them ("Review the
+      // team analyses and extract their recommendations") is source gathering,
+      // not a checkpoint on the deliverable. Classifying it as verification
+      // injects the answer-exactly-OK protocol into a content step.
+      const reviewsSuppliedInputs =
+        /^review\s+(?:only\s+)?(?:all\s+|each\s+of\s+)?(?:the\s+)?(?:\w+\s+){0,3}(?:provided|supplied|given|attached|dependency|team|specialist|input|source)\s+(?:\w+\s+){0,2}(?:analys[ie]s|inputs?|sources?|notes|findings|outputs?|reports?|materials?|documents?)\b/.test(
+          desc,
+        );
+      const hasExtractionVerb =
+        /\b(?:extract|collect|gather|compile|catalog(?:ue)?|summari[sz]e|list)\b/.test(desc) ||
+        (/\bidentify\b/.test(desc) &&
+          !/\bidentify\b[^.;\n]{0,40}\b(?:issues?|gaps?|errors?|problems?|bugs?|defects?|mistakes?|inconsistenc\w*|missing)\b/.test(
+            desc,
+          ));
+      if (reviewsSuppliedInputs || hasExtractionVerb) return false;
       const hasMutationVerb =
         /\b(tighten|edit|fix|update|rewrite|revise|modify|change|improve|refactor|clean|polish|rework|adjust|correct|enhance|optimize|replace|remove|add|implement|apply|write|create|draft|generate|save)\b/.test(
           desc,
@@ -4935,8 +4955,18 @@ export class TaskExecutor {
         return step;
       }
 
+      // Lowercase "documents", "movies" or "desktop" are ordinary nouns
+      // ("identify the planning documents"); only folder names (capitalized,
+      // ~/-prefixed, or followed by folder/directory) mean a personal-folder
+      // search. Matching the bare nouns rewrote unrelated research steps into
+      // a workspace file hunt.
       const namesLikelyPersonalFolders =
-        /\b(?:desktop|downloads?|movies?|documents?|home\s+directory|likely\s+(?:media\s+)?folders?|common\s+(?:media\s+)?folders?|personal\s+folders?)\b/i.test(
+        /\b(?:Desktop|Downloads?|Movies|Documents)\b/.test(description) ||
+        /~\/(?:desktop|downloads|movies|documents)\b/i.test(description) ||
+        /\b(?:desktop|downloads?|movies|documents)\s+(?:folders?|director(?:y|ies))\b/i.test(
+          description,
+        ) ||
+        /\b(?:home\s+directory|likely\s+(?:media\s+)?folders?|common\s+(?:media\s+)?folders?|personal\s+folders?)\b/i.test(
           description,
         );
       if (!namesLikelyPersonalFolders) {
@@ -16316,6 +16346,18 @@ ${transcript}
    */
   private async autoGenerateReport(): Promise<void> {
     if (!this.task.agentConfig?.autoReportEnabled) return;
+    // Child lanes (collab members, verifiers, synthesis) hand their output to
+    // the parent; writing a report file for each surfaced internal notes as
+    // user deliverables. A user who asks to keep the answer in chat or not to
+    // create files gets no report file either.
+    if (this.task.parentTaskId) return;
+    if (
+      /\b(?:keep\s+(?:this|it|everything|the\s+answer)\s+in\s+(?:the\s+)?chat|(?:do\s+not|don['’]?t|never)\s+(?:create|write|save|make)\s+(?:any\s+)?(?:new\s+)?files?|no\s+files?)\b/i.test(
+        this.getContractPrompt(),
+      )
+    ) {
+      return;
+    }
 
     try {
       const elapsed = this.task.createdAt ? Date.now() - this.task.createdAt : 0;
@@ -20522,7 +20564,10 @@ You are continuing a previous conversation. The context from the previous conver
       ) ||
       /\b(?:i can(?:not|'?t)|unable to)\s+(?:run|execute|perform|create|complete)\b/.test(lower) ||
       (/\bin this environment\b/.test(lower) && /\b(?:cannot|can't|unable|no)\b/.test(lower)) ||
-      /\b(?:no|without)\s+(?:wallet keys?|solana cli|cli access|shell access|permissions?)\b/.test(
+      /\b(?:no|without)\s+(?:wallet keys?|solana cli|cli access|shell access)\b/.test(lower) ||
+      // Bare "without permission" is ordinary deliverable prose ("do not imply
+      // endorsement without permission"); only a first-person lack counts.
+      /\b(?:i\s+(?:have\s+no|lack|do\s+not\s+have|don['’]?t\s+have)|i(?:['’]m|\s+am)\s+without)\s+(?:the\s+)?(?:necessary\s+|required\s+)?permissions?\b/.test(
         lower,
       ) ||
       /\b(?:only\s+supports?|supports?\s+only)\b/.test(lower) ||
@@ -20531,6 +20576,21 @@ You are continuing a previous conversation. The context from the previous conver
       /\b(?:isn['’]?t|is not)\s+available(?:\s+as\s+an?\s+option)?\b/.test(lower) ||
       /\bnot\s+available\s+as\s+an?\s+option\b/.test(lower)
     );
+  }
+
+  /**
+   * A long, structured answer (headings, tables, lists) is the step's
+   * deliverable even when it carries caveats such as "prices not verified".
+   * The limitation gate exists for short refusals, so it must not fail a
+   * drafted plan or report that merely mentions a constraint.
+   */
+  private isSubstantiveDeliverableResponse(text: string): boolean {
+    const trimmed = String(text || "").trim();
+    if (trimmed.length < 800) return false;
+    const headings = (trimmed.match(/^#{1,6}\s+\S/gm) || []).length;
+    const tableRows = (trimmed.match(/^\|.*\|\s*$/gm) || []).length;
+    const listItems = (trimmed.match(/^\s*(?:[-*+]|\d+[.)])\s+\S/gm) || []).length;
+    return headings >= 2 || tableRows >= 3 || listItems >= 5;
   }
 
   private followUpRequiresCommandExecution(message: string): boolean {
@@ -33908,6 +33968,7 @@ Return ONLY a JSON object:
             !hadAnyToolSuccess &&
             !hadToolError &&
             this.isCapabilityRefusal(assistantText) &&
+            !this.isSubstantiveDeliverableResponse(assistantText) &&
             !isPlanVerifyStep &&
             !this.isSummaryStep(step)
           ) {

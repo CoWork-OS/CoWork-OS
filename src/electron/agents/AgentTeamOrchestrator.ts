@@ -81,7 +81,15 @@ export type AgentTeamOrchestratorDeps = {
   }) => Promise<Task>;
   cancelTask: (taskId: string) => Promise<void>;
   wrapUpTask?: (taskId: string) => Promise<void>;
-  completeRootTask?: (taskId: string, status: "completed" | "failed", summary: string) => void;
+  completeRootTask?: (
+    taskId: string,
+    status: "completed" | "failed",
+    summary: string,
+    metadata?: {
+      terminalStatus?: Task["terminalStatus"];
+      terminalStatusReason?: string;
+    },
+  ) => void;
   createOrchestrationGraphRun?: (params: {
     rootTaskId: string;
     workspaceId: string;
@@ -353,7 +361,8 @@ export class AgentTeamOrchestrator {
           ? refreshedItems.find((i) => i.title === SYNTHESIS_ITEM_TITLE)?.status === "failed"
           : refreshedItems.some((i) => i.status === "failed");
         const status = hasFailures ? "failed" : "completed";
-        const summary = this.buildRunSummary(refreshedItems);
+        const needsReviewTitles = await this.listItemsNeedingReview(refreshedItems);
+        const summary = this.buildRunSummary(refreshedItems, needsReviewTitles);
         const completedPhase = run.collaborativeMode ? "complete" : undefined;
         const updated = await this.runRepo.update(run.id, {
           status,
@@ -371,11 +380,25 @@ export class AgentTeamOrchestrator {
         this.wrapUpRequestedRunIds.delete(run.id);
         // When a collaborative run finishes, mark the root task as completed/failed
         if (run.collaborativeMode && !childAgentCollaborativeRun && this.deps.completeRootTask) {
-          this.deps.completeRootTask(
-            run.rootTaskId,
-            status === "failed" ? "failed" : "completed",
-            summary,
-          );
+          // The root task's result is what the user reads in the parent chat:
+          // lead with the synthesized deliverable rather than only item counts,
+          // and do not report "ok" when a lane finished with warnings.
+          const synthesisText = refreshedItems
+            .find((i) => i.title === SYNTHESIS_ITEM_TITLE && i.status === "done")
+            ?.resultSummary?.trim();
+          const rootSummary = synthesisText ? `${synthesisText}\n\n---\n${summary}` : summary;
+          if (status !== "failed" && needsReviewTitles.length > 0) {
+            this.deps.completeRootTask(run.rootTaskId, "completed", rootSummary, {
+              terminalStatus: "partial_success",
+              terminalStatusReason: `Needs review: ${needsReviewTitles.join(", ")}`,
+            });
+          } else {
+            this.deps.completeRootTask(
+              run.rootTaskId,
+              status === "failed" ? "failed" : "completed",
+              rootSummary,
+            );
+          }
         }
         return;
       }
@@ -857,13 +880,38 @@ export class AgentTeamOrchestrator {
     return parts.join("\n");
   }
 
-  private buildRunSummary(items: Array<{ status: AgentTeamItemStatus; title: string }>): string {
-    const done = items.filter((i) => i.status === "done").length;
+  private buildRunSummary(
+    items: Array<{ status: AgentTeamItemStatus; title: string }>,
+    needsReviewTitles: string[] = [],
+  ): string {
+    // "done" means the lane's task lifecycle finished; a lane that completed
+    // with partial_success is counted separately so the summary does not read
+    // as every requested piece of work succeeding.
+    const needsReview = new Set(needsReviewTitles);
+    const done = items.filter((i) => i.status === "done" && !needsReview.has(i.title)).length;
+    const reviewCount = items.filter((i) => i.status === "done" && needsReview.has(i.title)).length;
     const failed = items.filter((i) => i.status === "failed").length;
     const blocked = items.filter((i) => i.status === "blocked").length;
     const total = items.length;
-    const lines = [`Items: ${done} done, ${failed} failed, ${blocked} blocked (total: ${total})`];
+    const reviewPart = reviewCount > 0 ? `, ${reviewCount} need review` : "";
+    const lines = [
+      `Items: ${done} done${reviewPart}, ${failed} failed, ${blocked} blocked (total: ${total})`,
+    ];
     return lines.join("\n");
+  }
+
+  /** Titles of done items whose task finished with a non-ok terminal status. */
+  private async listItemsNeedingReview(
+    items: Array<{ status: AgentTeamItemStatus; title: string; sourceTaskId?: string }>,
+  ): Promise<string[]> {
+    const titles: string[] = [];
+    for (const item of items) {
+      if (item.status !== "done" || !item.sourceTaskId) continue;
+      const task = await this.deps.getTaskById(item.sourceTaskId);
+      const terminalStatus = task?.terminalStatus;
+      if (terminalStatus && terminalStatus !== "ok") titles.push(item.title);
+    }
+    return titles;
   }
 
   private completeRootTaskBestEffort(

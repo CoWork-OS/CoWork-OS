@@ -1283,4 +1283,32 @@ describe("AgentTeamOrchestrator", () => {
       expect.stringContaining("Synthesis timed out"),
     );
   });
+  it("counts lanes that finished with warnings as needing review", async () => {
+    const tasks = new Map<string, Any>([
+      ["t1", { id: "t1", status: "completed", terminalStatus: "ok" }],
+      ["t2", { id: "t2", status: "completed", terminalStatus: "partial_success" }],
+    ]);
+    const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+    const orch = new AgentTeamOrchestrator(
+      {
+        getDatabase: () => ({}) as Any,
+        getTaskById: async (taskId: string) => tasks.get(taskId),
+        createChildTask: vi.fn(),
+        cancelTask: async () => {},
+      },
+      makeRepos({ team: {} as Any, run: {} as Any, items: [] }),
+    );
+    const items = [
+      { title: "Anansi", status: "done", sourceTaskId: "t1" },
+      { title: "Synthesis", status: "done", sourceTaskId: "t2" },
+    ];
+    const needsReview = await (orch as Any).listItemsNeedingReview(items);
+    expect(needsReview).toEqual(["Synthesis"]);
+    expect((orch as Any).buildRunSummary(items, needsReview)).toBe(
+      "Items: 1 done, 1 need review, 0 failed, 0 blocked (total: 2)",
+    );
+    expect((orch as Any).buildRunSummary(items)).toBe(
+      "Items: 2 done, 0 failed, 0 blocked (total: 2)",
+    );
+  });
 });

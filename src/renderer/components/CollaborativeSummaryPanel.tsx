@@ -12,7 +12,7 @@ import { useEffect, useState, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import type { Task, AgentTeamRun, AgentThought, AgentTeamItem } from "../../shared/types";
 import type { TaskEvent } from "../../shared/types";
 import { isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
@@ -36,7 +36,7 @@ function truncate(str: string, maxLen: number): string {
 type TimelineEntry =
   | { kind: "strategic"; id: string; content: string; ts: number }
   | { kind: "lifecycle"; id: string; row: AgentLifecycleRowModel; ts: number }
-  | { kind: "status"; id: string; label: string; ts: number }
+  | { kind: "status"; id: string; label: string; ts: number; settled?: boolean }
   | { kind: "thought"; id: string; thought: AgentThought; ts: number };
 
 interface CollaborativeSummaryPanelProps {
@@ -197,6 +197,31 @@ export function CollaborativeSummaryPanel({
       });
     }
 
+    // 5. Once every agent has ended, call out lanes that failed or finished with
+    // warnings — a "finished" glyph line alone would read as every agent succeeding.
+    const settled =
+      memberTasks.length > 0 &&
+      memberTasks.every(
+        (t) => t.status === "completed" || t.status === "failed" || t.status === "cancelled",
+      );
+    if (settled) {
+      const needsReviewCount = memberTasks.filter(
+        (t) =>
+          t.status === "failed" ||
+          t.status === "cancelled" ||
+          (t.terminalStatus !== undefined && t.terminalStatus !== "ok"),
+      ).length;
+      if (needsReviewCount > 0) {
+        entries.push({
+          kind: "status",
+          id: "status-complete",
+          label: `${memberTasks.length} agents finished · ${needsReviewCount} need review`,
+          ts: collaborativeRun.completedAt ?? Date.now(),
+          settled: true,
+        });
+      }
+    }
+
     return entries.sort((a, b) => a.ts - b.ts);
   }, [
     thoughts,
@@ -206,6 +231,7 @@ export function CollaborativeSummaryPanel({
     userPrompt,
     mainTaskCompleted,
     collaborativeRun.startedAt,
+    collaborativeRun.completedAt,
   ]);
 
   const isErrorLike = (text: string) =>
@@ -268,8 +294,15 @@ export function CollaborativeSummaryPanel({
           }
           if (entry.kind === "status") {
             return (
-              <div key={entry.id} className="collab-timeline-status">
-                <Loader2 className="collab-summary-spinner" size={13} strokeWidth={2.5} />
+              <div
+                key={entry.id}
+                className={`collab-timeline-status${entry.settled ? " collab-timeline-status-review" : ""}`}
+              >
+                {entry.settled ? (
+                  <AlertTriangle size={13} strokeWidth={2.25} />
+                ) : (
+                  <Loader2 className="collab-summary-spinner" size={13} strokeWidth={2.5} />
+                )}
                 <span>{entry.label}</span>
               </div>
             );

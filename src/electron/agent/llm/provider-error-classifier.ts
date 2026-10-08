@@ -314,7 +314,12 @@ function messageTransientReason(text: string, legacy: boolean): ProviderErrorRea
   }
   if (
     !legacy &&
-    /terminated|stream disconnected|connection reset|unexpected eof|socket hang up/.test(text)
+    // A provider WebSocket that closes before the response completes (seen
+    // as "WebSocket closed 1000" from the ChatGPT transport) is a dropped
+    // stream like the others here, not a rejected request.
+    /terminated|stream disconnected|connection reset|unexpected eof|socket hang up|websocket closed|websocket connection closed/.test(
+      text,
+    )
   ) {
     return "connection";
   }

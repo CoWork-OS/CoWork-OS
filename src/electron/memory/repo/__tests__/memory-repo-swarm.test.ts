@@ -268,3 +268,33 @@ describeWithGit("swarm folders in MemoryRepoService", () => {
     expect(block).not.toContain("<system>");
   });
 });
+
+describe("buildSwarmContextBlock folder hint", () => {
+  const swarm = {
+    slug: swarmSlug("Plan a meetup", ROOT_ID),
+    rootTaskId: ROOT_ID,
+    goal: "Plan a meetup",
+    members: [{ taskId: ROOT_ID, label: "lead" }],
+  };
+
+  it("does not point agents at note files that do not exist yet", async () => {
+    const block = await buildSwarmContextBlock(
+      { root: "/memory", readFile: async () => null },
+      swarm,
+    );
+    expect(block).toContain("no notes written yet, so there is nothing to read");
+    expect(block).not.toContain("read_file");
+  });
+
+  it("names only the note files that exist", async () => {
+    const block = await buildSwarmContextBlock(
+      {
+        root: "/memory",
+        readFile: async (relPath) => (relPath.endsWith("findings.md") ? "# Findings\n\n" : null),
+      },
+      swarm,
+    );
+    expect(block).toContain("(findings.md; the latest notes are below");
+    expect(block).not.toContain("questions.md;");
+  });
+});

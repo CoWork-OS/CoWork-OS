@@ -456,6 +456,18 @@ export class SecurityPolicyManager {
       };
     }
 
+    // PACT: a message to a business agent can change the user's account there. The PACT
+    // admission service is the authoritative gate (effect class, scopes, destination); this rule
+    // states the same boundary for callers of the full policy evaluation. Discovery and
+    // conversation reads stay on the group:network rules.
+    if (toolName === "pact_send_message") {
+      return {
+        layer: "tool_specific",
+        decision: "require_approval",
+        reason: "Messages to a business agent require PACT admission and approval",
+      };
+    }
+
     return { layer: "tool_specific", decision: "pass" };
   }
 

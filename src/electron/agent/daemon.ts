@@ -330,6 +330,15 @@ import { extractCanonicalTaskImpactMetrics } from "./canonical-task-impact";
 import { getBackgroundProcessManager } from "./tools/background-processes";
 import { emitCorrectionLearningSignal } from "../agents/heartbeat-signal-bus";
 import { InFlightWork } from "../utils/in-flight-work";
+import {
+  PACT_AUTHORIZATION_CANCEL_OPTION,
+  PACT_AUTHORIZATION_QUESTION_ID,
+  isPactAuthorizationInputRequest,
+  type PactAuthorizationState,
+  type PactAuthorizationView,
+} from "../../shared/pact";
+import type { PactRuntime } from "../pact/runtime";
+import { createDaemonPactRuntime } from "../pact/daemon-host";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
@@ -773,6 +782,9 @@ export class AgentDaemon extends EventEmitter {
       resolved: boolean;
     }
   > = new Map();
+  /** PACT consent waits whose tool call is still running in this process. */
+  private livePactAuthorizationWaits: Set<string> = new Set();
+  private pactRuntime: PactRuntime | null = null;
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private maintenanceIntervalHandle?: ReturnType<typeof setInterval>;
   private vacuumRetryHandle?: ReturnType<typeof setTimeout>;
@@ -2193,6 +2205,8 @@ export class AgentDaemon extends EventEmitter {
     // rows before queue recovery so a restart leaves the task visibly blocked
     // and response handlers can safely resolve the persisted request.
     await this.reconcileDurableWaitsOnStartup();
+    // PACT: interrupted sends become outcome_unknown and still-valid consent waits resume.
+    await this.reconcilePactOnStartup();
 
     // A follow-up can be journaled before an idle executor changes a terminal
     // task back to executing. If the host exits in that short admission window,
@@ -7786,6 +7800,120 @@ export class AgentDaemon extends EventEmitter {
     });
   }
 
+  /** The PACT runtime for this process (desktop main, Node daemon or `cowork run`). */
+  getPactRuntime(): PactRuntime {
+    this.pactRuntime ??= createDaemonPactRuntime(this);
+    return this.pactRuntime;
+  }
+
+  getWorkspaceForPact(workspaceId: string): Workspace | undefined {
+    return this.workspaceRepo.findById(workspaceId) ?? undefined;
+  }
+
+  async isTaskWaitingForInput(taskId: string): Promise<boolean> {
+    const task = this.taskRepo.findById(taskId);
+    if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return false;
+    return (await this.inputRequestRepo.findPendingByTaskId(taskId)).length > 0;
+  }
+
+  private async reconcilePactOnStartup(): Promise<void> {
+    try {
+      const result = await this.getPactRuntime().reconcileOnStartup();
+      if (result.abandoned || result.resumed || result.expired) {
+        console.log(
+          `[AgentDaemon] PACT startup: ${result.abandoned} unknown outcomes, ${result.resumed} sign-ins resumed, ${result.expired} expired`,
+        );
+      }
+    } catch (error) {
+      console.warn("[AgentDaemon] PACT startup reconciliation failed:", error);
+    }
+  }
+
+  /**
+   * Open the durable wait for a PACT sign-in: an input request the runtime resolves when the
+   * business's token endpoint answers. The task card shows it; only Cancel is a user answer.
+   */
+  async openPactAuthorizationWait(taskId: string, view: PactAuthorizationView): Promise<string> {
+    const existingPending = await this.inputRequestRepo.findPendingByTaskId(taskId);
+    if (existingPending.length > 0) {
+      throw new Error(`Task ${taskId} already has a pending input request.`);
+    }
+    const scopes = view.requestedScopes.map((scope) => scope.description).join("; ");
+    const request = await this.inputRequestRepo.create({
+      taskId,
+      questions: [
+        {
+          id: PACT_AUTHORIZATION_QUESTION_ID,
+          header: "Sign in",
+          question: `Sign in with ${view.businessName} to allow: ${scopes}`.slice(0, 500),
+          options: [
+            {
+              label: "Waiting for sign-in",
+              description: `Open the sign-in link and approve on ${view.businessName}'s own page.`,
+            },
+            {
+              label: PACT_AUTHORIZATION_CANCEL_OPTION,
+              description: "Stop this request; nothing is sent to the business.",
+            },
+          ],
+        },
+      ],
+      requestedAt: Date.now(),
+      status: "pending",
+    });
+    this.livePactAuthorizationWaits.add(request.id);
+    this.updateTask(taskId, {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      failureClass: undefined,
+    });
+    this.logEvent(taskId, "input_request_created", { request, pactAuthorizationId: view.id });
+    this.logEvent(taskId, "task_paused", {
+      message: `Waiting for sign-in with ${view.businessName}.`,
+      reason: "pact_authorization",
+      requestId: request.id,
+    });
+    return request.id;
+  }
+
+  /** Settle a PACT sign-in wait with the runtime's outcome (granted, denied, expired, cancelled). */
+  async settlePactAuthorizationWait(
+    inputRequestId: string,
+    state: PactAuthorizationState,
+    message: string,
+  ): Promise<void> {
+    const request = await this.inputRequestRepo.findById(inputRequestId);
+    if (!request || request.status !== "pending" || !isPactAuthorizationInputRequest(request)) return;
+    const granted = state === "granted";
+    const resolved = await this.inputRequestRepo.resolve(
+      inputRequestId,
+      granted ? "submitted" : "dismissed",
+      granted ? { [PACT_AUTHORIZATION_QUESTION_ID]: { optionLabel: "granted" } } : undefined,
+    );
+    if (!resolved) return;
+    const live = this.livePactAuthorizationWaits.delete(inputRequestId);
+    const task = this.taskRepo.findById(request.taskId);
+    const terminal = !task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task));
+    this.logEvent(request.taskId, granted ? "input_request_resolved" : "input_request_dismissed", {
+      requestId: inputRequestId,
+      status: granted ? "submitted" : "dismissed",
+      pactAuthorization: state,
+      terminalTask: terminal,
+    });
+    if (terminal) return;
+    if (live) {
+      // The tool call that opened the wait is still running and continues with the outcome.
+      this.updateTask(request.taskId, { status: "executing", terminalStatus: undefined, failureClass: undefined });
+      return;
+    }
+    // After a restart no tool call is waiting: hand the outcome to the task as a follow-up.
+    try {
+      await this.resumeTaskAfterDurableWait(request.taskId, `PACT sign-in ${state}: ${message}`);
+    } catch (error) {
+      console.warn(`[AgentDaemon] Failed to resume task ${request.taskId} after PACT sign-in:`, error);
+    }
+  }
+
   /**
    * Replace the legacy approval modal with the same durable, inline task input
    * used by `request_user_input`. The assistant explains the blocked operation
@@ -9673,6 +9801,24 @@ export class AgentDaemon extends EventEmitter {
       if (request.status !== "pending") {
         inputRequestIdempotency.complete(idempotencyKey, { status: "duplicate" });
         return { status: "duplicate", requestId: response.requestId };
+      }
+      if (isPactAuthorizationInputRequest(request)) {
+        // The business's own login decides a PACT sign-in; a person can only cancel it here,
+        // and a "continue" answer is never evidence of a grant.
+        if (response.status === "submitted") {
+          inputRequestIdempotency.complete(idempotencyKey, { status: "in_progress" });
+          return { status: "in_progress", requestId: response.requestId };
+        }
+        await this.getPactRuntime()
+          .onAuthorizationInputDismissed(request.id)
+          .catch(() => undefined);
+        await this.settlePactAuthorizationWait(
+          request.id,
+          "cancelled",
+          "The user cancelled the sign-in. Stop the business request and tell the user it was not sent.",
+        );
+        inputRequestIdempotency.complete(idempotencyKey, { status: "handled" });
+        return { status: "handled", requestId: response.requestId };
       }
 
       const binding =
@@ -18631,6 +18777,9 @@ export class AgentDaemon extends EventEmitter {
       }
     });
     this.pendingInputRequests.clear();
+    // Consent pollers stop; their durable rows resume (or expire) on the next start.
+    this.livePactAuthorizationWaits.clear();
+    void this.pactRuntime?.shutdown().catch(() => undefined);
 
     // Save conversation snapshots and mark active tasks as "interrupted" so they
     // can be automatically resumed on next startup. Snapshots must be saved BEFORE

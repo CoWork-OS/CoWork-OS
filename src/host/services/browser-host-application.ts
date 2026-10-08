@@ -80,6 +80,7 @@ import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 import { createBrowserNotificationDefinitions } from "./browser-notification-methods";
 import { createBrowserReportDefinitions } from "./browser-report-methods";
 import { createBrowserMemoryDefinitions } from "./browser-memory-methods";
+import { createBrowserPactDefinitions } from "./browser-pact-methods";
 import { createBrowserAnswerSurfaceDefinitions } from "./browser-answer-surface-methods";
 import { AnswerImageService } from "../../electron/answer-surfaces/AnswerImageService";
 import { AnswerSurfaceStateStore } from "../../electron/answer-surfaces/AnswerSurfaceStateStore";
@@ -219,6 +220,7 @@ export function createBrowserHostApplication(
       service: getAwarenessService(),
       resolveWorkspace: resolveBrowserWorkspace,
     }),
+    ...(options.agentDaemon ? createBrowserPactDefinitions({ agentDaemon: options.agentDaemon }) : {}),
     ...createBrowserMemoryDefinitions({
       db: options.db,
       resolveWorkspace: resolveBrowserWorkspace,

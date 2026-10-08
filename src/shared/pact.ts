@@ -160,6 +160,8 @@ export interface PactAuthorizationView {
   grantedScopes?: PactScopeView[];
   state: PactAuthorizationState;
   stateReason?: string;
+  /** Origin of the business's sign-in page while pending (not the link itself). */
+  verificationOrigin?: string;
   expiresAt: number;
   createdAt: number;
 }
@@ -242,3 +244,10 @@ export type PactSendOutcome =
 /** Question id that marks an input request as a PACT authorization wait. */
 export const PACT_AUTHORIZATION_QUESTION_ID = "pact_authorization";
 export const PACT_AUTHORIZATION_CANCEL_OPTION = "Cancel sign-in";
+
+/** Whether an input request is a PACT authorization wait (resolved by the runtime, not the user). */
+export function isPactAuthorizationInputRequest(
+  request: { questions?: { id: string }[] } | null | undefined,
+): boolean {
+  return Boolean(request?.questions?.some((question) => question.id === PACT_AUTHORIZATION_QUESTION_ID));
+}

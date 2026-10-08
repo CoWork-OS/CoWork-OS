@@ -55,6 +55,7 @@ function failClosedPolicies(): AdminPolicies {
     updatedAt: new Date(0).toISOString(),
     packs: { allowed: [], blocked: [], required: [] },
     connectors: { blocked: [] },
+    pact: { enabled: false, autoRoute: false, blockedProviders: [] },
     agents: { maxHeartbeatFrequencySec: 60, maxConcurrentAgents: 1 },
     everydayAgent: {
       blocked: true,

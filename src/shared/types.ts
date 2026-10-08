@@ -961,7 +961,19 @@ export type EventType =
   | "timeline_error"
   // Persisted, task-scoped impact snapshots. Producers must only emit typed,
   // attributable counts; renderer code never derives these values from prose.
-  | "task_impact_updated";
+  | "task_impact_updated"
+  // PACT business-agent interactions (src/electron/pact); payloads are redacted.
+  | "pact_business_discovered"
+  | "pact_operation_admitted"
+  | "pact_operation_blocked"
+  | "pact_authorization_requested"
+  | "pact_authorization_resolved"
+  | "pact_message_sent"
+  | "pact_step_up_required"
+  | "pact_outcome_unknown"
+  | "pact_operation_reconciled"
+  | "pact_receipt_verified"
+  | "pact_evidence_issue";
 
 export type TimelineEventType =
   | "timeline_group_started"
@@ -1155,7 +1167,9 @@ export type RuntimeToolCapabilityTag =
   | "orchestration"
   | "admin"
   | "shell"
-  | "mcp";
+  | "mcp"
+  // Business-agent interactions (PACT); a lane of its own in tool-policy-engine.
+  | "business";
 
 export interface RuntimeToolMetadata {
   readOnly: boolean;
@@ -1606,6 +1620,10 @@ export type ToolType =
   | "browser_close"
   // X/Twitter
   | "x_action"
+  // PACT business agents
+  | "pact_discover"
+  | "pact_send_message"
+  | "pact_get_conversation"
   // Notion
   | "notion_action"
   // Box
@@ -1808,6 +1826,10 @@ export const TOOL_GROUPS = {
     "x_search",
     "voice_call",
     "x_action",
+    // PACT business agents: every call reaches a business over the network.
+    "pact_discover",
+    "pact_send_message",
+    "pact_get_conversation",
     "notion_action",
     "box_action",
     "onedrive_action",
@@ -2066,6 +2088,9 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   browser_save_pdf: "network",
   browser_close: "network",
   x_action: "network",
+  pact_discover: "network",
+  pact_send_message: "network",
+  pact_get_conversation: "network",
   notion_action: "network",
   box_action: "network",
   onedrive_action: "network",
@@ -9811,6 +9836,28 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_KEEP_ENTRY: "memoryRepo:keepEntry",
   // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
   MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
+  // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
+  // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
+  PACT_STATUS: "pact:status",
+  PACT_SETTINGS_GET: "pact:settingsGet",
+  PACT_SETTINGS_UPDATE: "pact:settingsUpdate",
+  PACT_IDENTITY_SET_CREDENTIAL: "pact:identitySetCredential",
+  PACT_IDENTITY_DEVICE_KEY: "pact:identityDeviceKey",
+  PACT_BUSINESS_DISCOVER: "pact:businessDiscover",
+  PACT_BUSINESS_LIST: "pact:businessList",
+  PACT_CONVERSATION_GET: "pact:conversationGet",
+  PACT_CONVERSATION_LIST: "pact:conversationList",
+  PACT_CONVERSATION_SEND: "pact:conversationSend",
+  PACT_CONVERSATION_ACKNOWLEDGE_EVIDENCE: "pact:conversationAcknowledgeEvidence",
+  PACT_AUTHORIZATION_START: "pact:authorizationStart",
+  PACT_AUTHORIZATION_GET: "pact:authorizationGet",
+  PACT_AUTHORIZATION_FOR_INPUT: "pact:authorizationForInput",
+  PACT_AUTHORIZATION_LIST: "pact:authorizationList",
+  PACT_AUTHORIZATION_CANCEL: "pact:authorizationCancel",
+  PACT_AUTHORIZATION_OPEN_SIGN_IN: "pact:authorizationOpenSignIn",
+  PACT_GRANT_LIST: "pact:grantList",
+  PACT_GRANT_DISCONNECT: "pact:grantDisconnect",
+  PACT_RECEIPT_GET: "pact:receiptGet",
 
   AWARENESS_GET_CONFIG: "awareness:getConfig",
   AWARENESS_SAVE_CONFIG: "awareness:saveConfig",

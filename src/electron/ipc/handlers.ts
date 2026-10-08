@@ -578,6 +578,8 @@ import { configuredImageSearch } from "../answer-surfaces/web-image-search";
 import { AnswerImageService } from "../answer-surfaces/AnswerImageService";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
+import { setupPactHandlers } from "./pact-handlers";
+import { PactSurfaceService } from "../pact/pact-surface-service";
 import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
@@ -11798,6 +11800,19 @@ export async function setupIpcHandlers(
       imageSearch: configuredImageSearch,
     }),
     store: AnswerSurfaceStateStore,
+  });
+
+  // PACT business agents: the renderer never receives a sign-in link; main opens it in the
+  // system browser.
+  const pactSurface = new PactSurfaceService({
+    runtime: () => agentDaemon.getPactRuntime(),
+    db: dbManager.getDatabase(),
+    findWorkspace: (workspaceId) => agentDaemon.getWorkspaceForPact(workspaceId),
+  });
+  setupPactHandlers({
+    service: () => pactSurface,
+    db: dbManager.getDatabase(),
+    openExternal: (url) => shell.openExternal(url),
   });
 
   // Memory folder: status, open, compact history and entry lines by ref. The

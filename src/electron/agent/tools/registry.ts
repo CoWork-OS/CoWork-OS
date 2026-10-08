@@ -70,6 +70,7 @@ import { VisualTools } from "./visual-tools";
 import { MentionTools } from "./mention-tools";
 import { XTools } from "./x-tools";
 import { XSearchTools } from "./x-search-tools";
+import { PACT_TOOL_NAMES, PactTools } from "./pact-tools";
 import { NotionTools } from "./notion-tools";
 import { BoxTools } from "./box-tools";
 import { OneDriveTools } from "./onedrive-tools";
@@ -297,6 +298,8 @@ const SPREADSHEET_CELL_SCHEMA = {
 };
 
 const SUB_AGENT_DEFAULT_DENIED_TOOLS = [
+  // A sub-agent never acts with the owner's business identity or grants (PACT).
+  ...PACT_TOOL_NAMES,
   "spawn_agent",
   "wait_for_agent",
   "get_agent_status",
@@ -614,6 +617,7 @@ export class ToolRegistry {
   private mentionTools: MentionTools;
   private xTools: XTools;
   private xSearchTools: XSearchTools;
+  private pactTools: PactTools;
   private notionTools: NotionTools;
   private boxTools: BoxTools;
   private oneDriveTools: OneDriveTools;
@@ -703,6 +707,7 @@ export class ToolRegistry {
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
     this.xTools = new XTools(workspace, daemon, taskId);
     this.xSearchTools = new XSearchTools(workspace, daemon, taskId);
+    this.pactTools = new PactTools(workspace, daemon, taskId);
     this.notionTools = new NotionTools(workspace, daemon, taskId);
     this.boxTools = new BoxTools(workspace, daemon, taskId);
     this.oneDriveTools = new OneDriveTools(workspace, daemon, taskId);
@@ -796,6 +801,7 @@ export class ToolRegistry {
     const integrationState = {
       x: XTools.isEnabled(),
       xSearch: XSearchTools.hasCredentials(),
+      pact: PactTools.isAvailable() ? (PactTools.autoRouteEnabled() ? "auto" : "explicit") : false,
       notion: NotionTools.isEnabled(),
       box: BoxTools.isEnabled(),
       oneDrive: OneDriveTools.isEnabled(),
@@ -1206,6 +1212,7 @@ export class ToolRegistry {
     this.visualTools.setWorkspace(workspace);
     this.xTools.setWorkspace(workspace);
     this.xSearchTools.setWorkspace(workspace);
+    this.pactTools.setWorkspace(workspace);
     this.notionTools.setWorkspace(workspace);
     this.boxTools.setWorkspace(workspace);
     this.oneDriveTools.setWorkspace(workspace);
@@ -1369,6 +1376,9 @@ export class ToolRegistry {
 
     // x_search is opt-in through built-in tool settings and only appears when
     // xAI OAuth or API-key credentials are configured.
+    if (PactTools.isAvailable()) {
+      allTools.push(...this.pactTools.getToolDefinitions());
+    }
     if (XSearchTools.hasCredentials()) {
       allTools.push(...this.getXSearchToolDefinitions());
     }
@@ -2083,6 +2093,8 @@ export class ToolRegistry {
     }
     if (canonicalToolName.endsWith("_action") || canonicalToolName === "voice_call")
       return "external_service";
+    // A message to a business agent can change the user's account there.
+    if (canonicalToolName === "pact_send_message") return "external_service";
     if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
       return "computer_use";
     }
@@ -2198,6 +2210,8 @@ export class ToolRegistry {
       toolName === "mcp_x402_fetch" ||
       toolName.endsWith("_action") ||
       toolName === "voice_call" ||
+      // The PACT admission service asks for approval per operation (effect class, scopes).
+      toolName === "pact_send_message" ||
       isComputerUseToolName(toolName)
     );
   }
@@ -2378,11 +2392,17 @@ export class ToolRegistry {
       const externalFilesystemBoundary =
         this.getExternalFilesystemBoundary(context.request.name, context.request.input) ||
         this.getSkillManagementFilesystemBoundary(context.request.name, context.request.input);
+      // PACT tools: the destination comes from the runtime's verified business record, not
+      // from model input, so PermissionEngine domain rules see the real interface URL.
+      const pactApproval = context.request.name.startsWith("pact_")
+        ? await this.pactTools.approvalDestination(context.request.name, context.request.input)
+        : {};
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
         ...(serverName ? { serverName } : {}),
         ...browserUseApproval,
+        ...pactApproval,
         ...(approvalType === "external_file_access" && externalFilesystemBoundary
           ? { ...externalFilesystemBoundary }
           : {}),
@@ -2880,6 +2900,25 @@ export class ToolRegistry {
         }
         return result;
       },
+      readParallelSchedulerSpec,
+    );
+    register(
+      "pact_discover",
+      async ({ request }) => this.pactTools.discover(request.input),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "pact_send_message",
+      async ({ request }) =>
+        this.pactTools.sendMessage(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "pact_get_conversation",
+      async ({ request }) => this.pactTools.getConversation(request.input),
       readParallelSchedulerSpec,
     );
     register(

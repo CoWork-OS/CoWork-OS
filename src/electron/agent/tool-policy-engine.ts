@@ -23,7 +23,8 @@ export type ToolLane =
   | "memory"
   | "system"
   | "admin"
-  | "orchestration";
+  | "orchestration"
+  | "business";
 
 export type ToolExposure = "always" | "conditional" | "explicit_only";
 
@@ -271,6 +272,15 @@ const WEB_SURFACE_PATTERN =
   /\b(browser|website|web page|web app|dom|url|https?:\/\/|localhost|127\.0\.0\.1|chrome|safari|firefox|brave|edge|browser tab|webview)\b/i;
 const ORCHESTRATION_INTENT_PATTERN =
   /\b(spawn agent|sub-?agent|child task|child agent|delegate|parallel agent|orchestrate|multi-agent|handoff|coordinate agents|agent team)\b/i;
+/**
+ * A request to get something done with a business: account objects ("my order", "my booking"),
+ * account actions with a business object, or support contact. The user does not need to say
+ * "PACT" or a scope name; the tools themselves never act without admission and consent.
+ */
+const BUSINESS_INTERACTION_INTENT_PATTERN =
+  /\b(?:my|our|the)\s+(?:order|orders|booking|bookings|reservation|reservations|flight|flights|trip|trips|delivery|deliveries|package|parcel|shipment|subscription|subscriptions|account|bill|invoice|refund|return|appointment|ticket|plan|membership|policy|claim)\b|\b(?:cancel|refund|rebook|reschedule|return|exchange|track|upgrade|downgrade|renew)\b[\s\S]{0,60}\b(?:order|booking|reservation|flight|trip|delivery|package|shipment|subscription|account|appointment|ticket|plan|membership|purchase)\b|\b(?:customer (?:service|support)|support agent|contact (?:the )?(?:store|shop|airline|merchant|business|company|retailer)|(?:ask|tell|message|talk to|chat with) (?:the )?(?:store|shop|airline|merchant|business|company|retailer|support))\b/i;
+/** Explicit references, used alone when auto-routing is off. */
+const PACT_EXPLICIT_INTENT_PATTERN = /\b(?:pact|business agent|agent card|pact_discover|pact_send_message)\b/i;
 const ADMIN_INTENT_PATTERN =
   /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup)\b/i;
 
@@ -354,6 +364,9 @@ function inferToolExposureMetadata(
   }
   if (SESSION_CHECKLIST_TOOLS.has(toolName)) {
     return { lane: "core", exposure: "conditional", overlapGroup: "session_checklist" };
+  }
+  if (toolName.startsWith("pact_")) {
+    return { lane: "business", exposure: "conditional", overlapGroup: "business_agent" };
   }
   if (
     INTEGRATION_TOOLS.has(toolName) ||
@@ -482,6 +495,12 @@ export function evaluateToolAvailability(
   }
 
   switch (metadata.lane) {
+    case "business":
+      // explicit_only: an administrator turned automatic routing off (`pact.autoRoute`).
+      if (PACT_EXPLICIT_INTENT_PATTERN.test(taskText)) return { decision: "allow", metadata };
+      return metadata.exposure !== "explicit_only" && BUSINESS_INTERACTION_INTENT_PATTERN.test(taskText)
+        ? { decision: "allow", metadata }
+        : { decision: "defer", reason: "business_interaction_intent_missing", metadata };
     case "admin":
       return ADMIN_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }
@@ -580,6 +599,8 @@ const ALWAYS_MUTATING = new Set([
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",
+  // Sends to a business agent, which may change the user's account: never in plan/analyze mode.
+  "pact_send_message",
   "cancel_agent",
   "pause_agent",
   "resume_agent",

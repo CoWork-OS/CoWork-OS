@@ -97,7 +97,12 @@ export interface PactCallContext {
 /** What the runtime needs from the daemon (or a test double). */
 export interface PactHost {
   localPrincipal(): PactPrincipal;
-  requestLocalApproval(taskId: string, summary: string, details: Record<string, unknown>): Promise<boolean>;
+  requestLocalApproval(
+    taskId: string,
+    summary: string,
+    details: Record<string, unknown>,
+    options: { requireExplicit: boolean },
+  ): Promise<boolean>;
   openAuthorizationWait(taskId: string, view: PactAuthorizationView): Promise<string>;
   settleAuthorizationWait(
     inputRequestId: string,
@@ -710,6 +715,12 @@ export class PactRuntime {
           },
           effectClass: admission.effectClass,
           approvalReasons: admission.approvalReasons,
+        },
+        {
+          // Unknown effects and over-broad tokens are never auto-approved.
+          requireExplicit:
+            admission.effectClass === "unknown" ||
+            admission.approvalReasons.includes("token_exceeds_operation"),
         },
       );
       if (!approved) {
@@ -1380,16 +1391,28 @@ export class PactRuntime {
     }
   }
 
+  private async authorizationView(record: PactAuthorizationRecord): Promise<PactAuthorizationView> {
+    const view = toAuthorizationView(record, await this.repo.getBusiness(record.businessId));
+    if (record.state !== "pending") return view;
+    try {
+      const secret = this.authorizations.signIn(record);
+      if (secret) view.verificationOrigin = new URL(secret.verificationUriComplete).origin;
+    } catch {
+      // Unreadable secret storage: the card still shows the business and scopes.
+    }
+    return view;
+  }
+
   async getAuthorization(principal: PactPrincipal, authorizationId: string): Promise<PactAuthorizationView | null> {
     const record = await this.repo.getAuthorization(authorizationId);
     if (!record || record.principalId !== principal.id) return null;
-    return toAuthorizationView(record, await this.repo.getBusiness(record.businessId));
+    return this.authorizationView(record);
   }
 
   async getAuthorizationByInputRequest(principal: PactPrincipal, inputRequestId: string) {
     const record = await this.repo.getAuthorizationByInputRequest(inputRequestId);
     if (!record || record.principalId !== principal.id) return null;
-    return toAuthorizationView(record, await this.repo.getBusiness(record.businessId));
+    return this.authorizationView(record);
   }
 
   /** The sign-in link, for the owner's own surfaces only. */

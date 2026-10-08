@@ -1,0 +1,136 @@
+/**
+ * Wires the PACT runtime to the agent daemon: approvals, the durable consent wait (an input
+ * request of the `pact_authorization` kind), task events, and workspace network context. Shared by
+ * the desktop main process, the Node daemon and `cowork run`, so it imports no Electron UI.
+ */
+import type Database from "better-sqlite3";
+import type { PactAuthorizationState, PactAuthorizationView } from "../../shared/pact";
+import type { Workspace } from "../../shared/types";
+import { loadPolicies } from "../admin/policies";
+import { applyAccessProfileToWorkspace, resolveEffectiveAccessProfile } from "../security/access-profile-resolver";
+import type { NetworkPolicyDecision } from "../security/network-policy";
+import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import type { NetworkPolicyContext } from "../security/policy-checked-fetch";
+import { SessionMembershipStore } from "../workspaces/SessionMembershipService";
+import { PactRuntime, type PactHost } from "./runtime";
+import { SecureSettingsPactSecretStore } from "./secret-store";
+import { PactSettingsManager } from "./settings";
+import { createPactTransport } from "./transport-node";
+import type { PactPrincipal } from "./types";
+
+/** The daemon surface the host needs; structural so pact/ does not import the daemon module. */
+export interface PactDaemonLike {
+  getDatabase(): Database.Database;
+  requestApproval(
+    taskId: string,
+    type: string,
+    description: string,
+    details: unknown,
+    opts?: { requireExplicitApproval?: boolean },
+  ): Promise<boolean>;
+  openPactAuthorizationWait(taskId: string, view: PactAuthorizationView): Promise<string>;
+  settlePactAuthorizationWait(
+    inputRequestId: string,
+    state: PactAuthorizationState,
+    message: string,
+  ): Promise<void>;
+  logEvent(taskId: string, type: string, payload: unknown): void;
+  isTaskWaitingForInput(taskId: string): Promise<boolean>;
+  getWorkspaceForPact(workspaceId: string): Workspace | undefined;
+}
+
+export function networkContextOf(workspace: Workspace | undefined): NetworkPolicyContext | null {
+  if (!workspace) return null;
+  return {
+    networkEnabled: workspace.permissions?.network,
+    accessNetworkMode: workspace.permissions?.accessNetworkMode,
+    profileDomainRules: workspace.permissions?.accessDomainRules,
+  };
+}
+
+/** Effective (access-profile-applied) workspace for calls made outside a task. */
+export function effectiveWorkspace(workspace: Workspace): Workspace {
+  const profile = resolveEffectiveAccessProfile({
+    workspace,
+    settings: PermissionSettingsManager.loadSettings(),
+    adminPolicies: loadPolicies(),
+  });
+  return applyAccessProfileToWorkspace(workspace, profile);
+}
+
+export function localOwnerPrincipal(db: Database.Database, actor?: string): PactPrincipal {
+  const principal = new SessionMembershipStore(db).getLocalPrincipal();
+  return { id: principal.principalId, kind: "local_owner", ...(actor ? { actor } : {}) };
+}
+
+export class DaemonPactHost implements PactHost {
+  constructor(private readonly daemon: PactDaemonLike) {}
+
+  localPrincipal(): PactPrincipal {
+    return localOwnerPrincipal(this.daemon.getDatabase());
+  }
+
+  requestLocalApproval(
+    taskId: string,
+    summary: string,
+    details: Record<string, unknown>,
+    options: { requireExplicit: boolean },
+  ): Promise<boolean> {
+    return this.daemon.requestApproval(taskId, "external_service", summary, details, {
+      requireExplicitApproval: options.requireExplicit,
+    });
+  }
+
+  openAuthorizationWait(taskId: string, view: PactAuthorizationView): Promise<string> {
+    return this.daemon.openPactAuthorizationWait(taskId, view);
+  }
+
+  settleAuthorizationWait(inputRequestId: string, state: PactAuthorizationState, message: string) {
+    return this.daemon.settlePactAuthorizationWait(inputRequestId, state, message);
+  }
+
+  logEvent(taskId: string, type: string, payload: Record<string, unknown>): void {
+    this.daemon.logEvent(taskId, type, payload);
+  }
+
+  logInteractiveApprovalUnavailable(taskId: string, message: string): void {
+    // Same structured record the daemon writes when an approval cannot be asked for.
+    this.daemon.logEvent(taskId, "log", {
+      type: "tool_authorization",
+      decision: "deny",
+      reason: "interactive_approval_unavailable",
+      approvalType: "external_service",
+      message,
+    });
+  }
+
+  async networkContextForWorkspace(workspaceId: string | null): Promise<NetworkPolicyContext | null> {
+    if (!workspaceId) return null;
+    const workspace = this.daemon.getWorkspaceForPact(workspaceId);
+    return networkContextOf(workspace ? effectiveWorkspace(workspace) : undefined);
+  }
+
+  taskStillWaiting(taskId: string): Promise<boolean> {
+    return this.daemon.isTaskWaitingForInput(taskId);
+  }
+}
+
+export function createDaemonPactRuntime(daemon: PactDaemonLike): PactRuntime {
+  return new PactRuntime({
+    db: daemon.getDatabase(),
+    secrets: new SecureSettingsPactSecretStore(),
+    host: new DaemonPactHost(daemon),
+    settings: () => PactSettingsManager.loadSettings(),
+    policies: () => loadPolicies(),
+    transportFor: (networkContext, taskId) =>
+      createPactTransport({
+        networkContext,
+        ...(taskId
+          ? {
+              onDecision: (decision: NetworkPolicyDecision) =>
+                daemon.logEvent(taskId, "network_policy_decision", decision),
+            }
+          : {}),
+      }),
+  });
+}

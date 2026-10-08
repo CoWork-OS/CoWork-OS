@@ -17,6 +17,8 @@ import {
 } from "../tool-semantics";
 
 const READ_PARALLEL_TOOLS = new Set([
+  "pact_discover",
+  "pact_get_conversation",
   "read_file",
   "read_files",
   "list_directory",
@@ -72,6 +74,8 @@ const EXCLUSIVE_TOOLS = new Set([
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",
+  // One business turn at a time per task; the runtime also serialises per conversation.
+  "pact_send_message",
   "cancel_agent",
   "pause_agent",
   "resume_agent",
@@ -87,6 +91,10 @@ const EXCLUSIVE_TOOLS = new Set([
  * find any of them with tool_search (found tools stay exposed for the rest of the task).
  */
 const DEFERRED_BY_DEFAULT_TOOLS = new Set([
+  // PACT business agents: exposed by the business-interaction intent or found by tool_search.
+  "pact_discover",
+  "pact_send_message",
+  "pact_get_conversation",
   // Persona and personality settings
   "set_personality",
   "add_behavioral_rule",

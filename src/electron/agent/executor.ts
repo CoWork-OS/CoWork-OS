@@ -658,6 +658,7 @@ const BATCH_EXTERNAL_SIDE_EFFECT_TOOLS = new Set([
   "dropbox_action",
   "sharepoint_action",
   "voice_call",
+  "pact_send_message",
 ]);
 
 // A task-level read-only constraint must win over mutation cues accidentally

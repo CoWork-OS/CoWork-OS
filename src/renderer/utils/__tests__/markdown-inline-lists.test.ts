@@ -221,6 +221,28 @@ describe("unwrapMarkdownCodeBlocks", () => {
     expect(output).toBe(input);
   });
 
+  it("keeps closing fences of consecutive language blocks separated by headings", () => {
+    const input = [
+      "### Prerequisites",
+      "```bash",
+      "xcode-select --install",
+      "```",
+      "",
+      "Source: [`docs/development.md`](docs/development.md).",
+      "",
+      "### Clone and set up",
+      "```bash",
+      "npm install",
+      "```",
+      "",
+      "### Run the app",
+      "```bash",
+      "npm run dev",
+      "```",
+    ].join("\n");
+    expect(unwrapMarkdownCodeBlocks(input)).toBe(input);
+  });
+
   it("unwraps plain ``` blocks when content starts with #", () => {
     const input = `Here is the deliverable:
 

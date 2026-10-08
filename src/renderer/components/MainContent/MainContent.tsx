@@ -6613,6 +6613,21 @@ function MainContentComponent({
     onChangeWorkspace?.();
   };
 
+  // A new session otherwise keeps the last real folder, and the dropdown had
+  // no way back to scratch work. Offered only before a task exists so an
+  // existing chat is never moved into a throwaway folder.
+  const canSwitchToTempWorkspace =
+    !task && !!workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id);
+  const handleUseTempWorkspace = async () => {
+    setShowWorkspaceDropdown(false);
+    try {
+      const tempWorkspace = await window.electronAPI?.getTempWorkspace?.({ createNew: true });
+      if (tempWorkspace) onSelectWorkspace?.(tempWorkspace);
+    } catch (error) {
+      console.error("Failed to switch to a temporary workspace:", error);
+    }
+  };
+
   const handleSkillSelect = (skill: CustomSkill) => {
     setShowSkillsMenu(false);
     setSkillsSearchQuery("");
@@ -10511,6 +10526,24 @@ function MainContentComponent({
                                 </svg>
                                 <span>Work in another folder...</span>
                               </button>
+                              {canSwitchToTempWorkspace && (
+                                <button
+                                  className="workspace-dropdown-item new-folder"
+                                  onClick={() => void handleUseTempWorkspace()}
+                                >
+                                  <svg
+                                    width="14"
+                                    height="14"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                  >
+                                    <path d="M18 6L6 18M6 6l12 12" />
+                                  </svg>
+                                  <span>Work without a folder</span>
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -11059,6 +11092,24 @@ function MainContentComponent({
                           </svg>
                           <span>Work in another folder...</span>
                         </button>
+                        {canSwitchToTempWorkspace && (
+                          <button
+                            className="workspace-dropdown-item new-folder"
+                            onClick={() => void handleUseTempWorkspace()}
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                            >
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                            <span>Work without a folder</span>
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -12583,6 +12634,24 @@ function MainContentComponent({
                       </svg>
                       <span>Work in another folder...</span>
                     </button>
+                    {canSwitchToTempWorkspace && (
+                      <button
+                        className="workspace-dropdown-item new-folder"
+                        onClick={() => void handleUseTempWorkspace()}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                        <span>Work without a folder</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -12796,6 +12865,24 @@ function MainContentComponent({
                         </svg>
                         <span>Work in another folder...</span>
                       </button>
+                      {canSwitchToTempWorkspace && (
+                        <button
+                          className="workspace-dropdown-item new-folder"
+                          onClick={() => void handleUseTempWorkspace()}
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                          <span>Work without a folder</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

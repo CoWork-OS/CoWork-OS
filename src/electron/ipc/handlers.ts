@@ -1790,14 +1790,14 @@ export async function setupIpcHandlers(
       agentDaemon.appendOrchestrationGraphNodes(params as Any),
     findOrchestrationGraphByTeamRunId: (teamRunId: string) =>
       agentDaemon.findOrchestrationGraphByTeamRunId(teamRunId),
-    completeRootTask: async (taskId, status, summary) => {
+    completeRootTask: async (taskId, status, summary, metadata) => {
       if (status === "failed") {
         agentDaemon.failTask(taskId, summary, {
           resultSummary: summary,
         });
         return;
       }
-      await agentDaemon.completeTask(taskId, summary);
+      await agentDaemon.completeTask(taskId, summary, metadata);
     },
   });
   agentDaemon.setTeamOrchestrator(teamOrchestrator);

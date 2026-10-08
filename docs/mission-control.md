@@ -4,7 +4,7 @@ Mission Control is a centralized, GUI-first agent orchestration and monitoring d
 
 Heartbeat v3 is the default background automation model exposed here. Mission Control should be read as pulse/defer/dispatch truth, not as a wake-queue monitor. Mission Control also surfaces the `Core Harness` and should eventually surface Dreaming runs/candidates as the reviewable memory-curation lane. See [Heartbeat v3](heartbeat-v3.md), [Dreaming](dreaming.md), and [Core Automation](core-automation.md) for the runtime model.
 
-Open **Mission Control** from the main sidebar in the standard interface, or from **More** in the Calm interface. The exact path depends on the app release and selected interface; see the [release surface reference](release-surface-reference.md) before following a version-specific navigation path.
+Open **Mission Control** from **More** on the left icon rail (in both the standard and Calm interfaces; pin it to keep it on the rail). The exact path depends on the app release; see the [release surface reference](release-surface-reference.md) before following a version-specific navigation path.
 
 Mission Control observes and configures tasks; it is not a second permission
 plane. When creating or editing an agent or automation, review the attached
@@ -197,7 +197,7 @@ It exposes:
 
 Use its **Planner** sub-tab to watch company-level planning move into executable task work.
 
-If the work itself is being executed on another machine, pair Mission Control with the **Devices** tab: Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
+If the work itself is being executed on another machine, pair Mission Control with **More > Devices**: Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
 
 ### Core Harness
 
@@ -249,15 +249,15 @@ See [Features — Agent Teams](features.md#agent-teams) for more details.
 
 ## Managed Agents
 
-Managed Agents are created and configured in **Agents Hub**, not inside Mission Control.
+Managed Agents are created and configured in **Workspace agents** on the Bots page, not inside Mission Control.
 
 Current behavior:
 
-- managed sessions are created through Agents Hub actions or the Control Plane
+- managed sessions are created through Workspace agents actions or the Control Plane
 - each managed session creates a backing task
 - team-mode managed sessions also create a backing team run
 - Mission Control remains the main place to observe those backing tasks and team runs once they exist
-- the selected-agent detail screen in Agents Hub does not host its own chat transcript; test, preview, and starter-prompt actions open the backing task in the main task UI
+- the selected-agent detail screen in Workspace agents does not host its own chat transcript; test, preview, and starter-prompt actions open the backing task in the main task UI
 
 Use this together with [Managed Agents](managed-agents.md) when testing reusable agents from the app.
 
@@ -307,7 +307,7 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 
 | Action                              | How                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------- |
-| Open Mission Control                | Main sidebar (standard) or More (Calm); see the [release surface reference](release-surface-reference.md) |
+| Open Mission Control                | More > Mission Control; see the [release surface reference](release-surface-reference.md)                 |
 | Add a new agent                     | Click "Add Agent" in the agents panel                                      |
 | Review core automation learning     | Open the `Core Harness` view                                               |
 | Configure the company planner       | Open the `Ops` tab, then its `Planner` sub-tab                             |

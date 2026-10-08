@@ -46,7 +46,7 @@ It can:
 - ask for approval before sensitive actions instead of silently assuming trust
 - route work across messaging channels like Slack, Telegram, Discord, WhatsApp, Teams, iMessage, email, and more
 - keep long-running operational loops alive through automations instead of waiting for the next prompt
-- separate profiles, companies, devices, skills, and policies so one setup does not leak into another
+- separate profiles, devices, skills, and policies so one setup does not leak into another
 
 In short: CoWork OS keeps the broader work surface and governance layer consistent while you choose among supported model routes. CoWork itself is free and MIT-licensed; model providers and connected services can apply separate eligibility, limits, and charges.
 
@@ -244,7 +244,7 @@ Later, add the more personal or operational channels once you know the trust mod
 
 ### 2. Add a remote device
 
-If you want work to run on another machine, use the Devices tab and connect a remote CoWork node. This is useful for persistent environments, isolated workloads, and automation that should not depend on your main laptop.
+If you want work to run on another machine, open **More > Devices** and connect a remote CoWork node. This is useful for persistent environments, isolated workloads, and automation that should not depend on your main laptop.
 
 ### 3. Build a governed company loop
 

@@ -185,7 +185,7 @@ features:
   - title: MLX-LM on Apple Silicon
     details: Run quantized local models through Apple's open-source MLX framework and MLX-LM's OpenAI-compatible server, with native-platform checks, Settings lifecycle controls, and local-only model requests. See the MLX-LM Local Inference guide.
   - title: GUI-First Agent Management
-    details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through Agents Hub, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
+    details: Create reusable agents, spawn parallel work, inspect delegated runs, assign tasks, review approvals, and monitor many agents through the Bots page, Mission Control, task timelines, and visual boards, while still having a terminal-native entrypoint for fast local runs.
   - title: First-Class CoWork CLI
     details: Type `cowork` for the interactive terminal UI or `cowork run "task"` for a local one-shot run. The default CLI path shares local desktop profile, provider, workspace, skills, and MCP settings without requiring a Control Plane token; remote mode is explicit.
   - title: One App For Daily Work
@@ -204,7 +204,7 @@ features:
     details: Connect supported accounts, APIs, gateways, cloud credentials, and local inference. Switch models per task or workflow phase, configure ordered fallback chains, and combine advisors and aggregators with Mixture of Agents presets. Model capabilities, eligibility, limits, and charges vary by provider.
   - title: Multi-Channel Gateway
     details: WhatsApp, Telegram, Discord, Slack, iMessage, Teams, Google Chat, Feishu/Lark, WeCom, and more. Chat with your AI from anywhere, with channel/chat/thread specialization for workspace, agent role, prompt guidance, tool policy, and shared-memory opt-in.
-  - title: Chat Mode
+  - title: Ask (Chat Mode)
     details: Direct LLM chat with no tools by default, same-session follow-ups, chat-only streaming for supported providers, and a narrow read-only analysis exception for uploaded PDF turns that need deeper document reading.
   - title: Side Chat
     details: Ask questions about an active running session from the right side panel without steering or stopping the parent task. Side Chat uses a read-only side fork with hidden parent context, live status snapshots for progress questions, a side-only visible transcript, and Markdown-rendered answers.
@@ -239,7 +239,7 @@ features:
   - title: Runtime Orchestration
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents
-    details: Agents Hub is the dedicated UI for reusable managed agents, templates, drafts, governance, channels, tools, skills, memory, and schedules. Clicking an agent opens a single-pane configuration detail view; test, preview, and starter-prompt actions create runtime managed sessions and open the backing task in the main window so work is observed through the standard task timeline, approvals, artifacts, and outputs.
+    details: Workspace agents on the Bots page is the dedicated UI for reusable managed agents, templates, drafts, governance, channels, tools, skills, memory, and schedules. Clicking an agent opens a single-pane configuration detail view; test, preview, and starter-prompt actions create runtime managed sessions and open the backing task in the main window so work is observed through the standard task timeline, approvals, artifacts, and outputs.
   - title: Composer Mentions
     details: Type `@` in the composer to pick Agents, configured Integrations, or Files. Integration chips render with icon and label in prompts and user message history, and selected integration metadata reaches the runtime as soft routing guidance rather than tool restrictions.
   - title: Message Box Shortcuts

@@ -7,11 +7,11 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 ### What CoWork OS Is
 
 - **Personal AI Super App**: Code, email, research, create documents, work with spreadsheets and decks, test web pages, automate work, and manage agents from the desktop app or the `cowork` CLI
-- **GUI-first Agent Management**: Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub, Mission Control, task boards, and approval dialogs
+- **GUI-first Agent Management**: Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through the Bots page, Mission Control, task boards, and approval dialogs
 - **CoWork CLI**: Run `cowork` for an interactive terminal UI or `cowork run "task"` for local one-shot work using the same local profile and providers as the desktop app
 - **Personal AI Gateway**: Connect your AI assistant to WhatsApp, Telegram, Discord, Slack, and iMessage
 - **Everything Workbench**: Create, open, review, edit, and revise generated documents, spreadsheets, presentations, web pages, PDFs, and previews from the same local-first task workspace
-- **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices tab
+- **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices view (More > Devices)
 - **Automation Studio**: A main-sidebar Discover/Library/Builder/Activity surface for versioned structured flows, dry runs, variables, branches, approvals, signed webhooks, durable activity, cancellation, and restart recovery; advanced queueing, prompt-based routines, schedules, triggers, briefing, and Workflow Intelligence remain grouped in Settings
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: Extensive automated test coverage, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows
@@ -135,7 +135,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 
 #### Managed Agents
 
-- [x] Agents Hub for managed-agent discovery, template-backed creation, draft editing, governance, channels, skills, runtime tools, memory, files, schedules, and deployment posture
+- [x] Workspace agents on the Bots page (formerly Agents Hub) for managed-agent discovery, template-backed creation, draft editing, governance, channels, skills, runtime tools, memory, files, schedules, and deployment posture
 - [x] Single-pane clicked-agent detail view with no local assistant sidebar or bottom ask box
 - [x] Test, preview, and starter-prompt actions create runtime managed sessions and open their backing tasks in the main task window
 - [x] Add advanced logic and Optimize this agent route to the agent draft/editor surface
@@ -300,7 +300,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - [x] Unified recall search across tasks, messages, files, memory, and knowledge-graph context
 - [x] Persistent shell session status and retained-state controls for long-running operator workflows
 - [x] Worktree Settings - Git worktree configuration UI
-- [x] Devices tab - saved remote devices, remote task feed, remote workspace browser, remote file picker
+- [x] Devices view (More > Devices) - saved remote devices, remote task feed, remote workspace browser, remote file picker
 - [x] Workflow Intelligence settings - heartbeat-triggered reflection, target kinds, last winner visibility, namespaced backlog, suggestion output, and dispatch history
 
 #### Settings UI
@@ -627,7 +627,7 @@ Expected behavior:
 - **Security**: Extensive automated test coverage, configurable guardrails, layered permission rules, approval workflows, and brute-force protection
 - **Multi-Channel**: WhatsApp, Telegram, Discord, Slack, iMessage integration
 - **Multi-Provider**: Supported account connections, APIs, compatible gateways, cloud credentials, local inference, ordered fallback routes, and Mixture of Agents presets
-- **GUI-first Agents + CLI entrypoint**: Agents Hub, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
+- **GUI-first Agents + CLI entrypoint**: the Bots page, Mission Control, visual task timelines, boards, and approval dialogs for creating, spawning, assigning, and monitoring many agents, plus `cowork` for local terminal starts against the same runtime
 - **Local-First**: Operational state is persisted locally by default, with explicit boundaries for configured remote providers and integrations
 - **Extensible**: MCP support (Client, Host, Registry), bundled and installable skills, and plugin packs
 

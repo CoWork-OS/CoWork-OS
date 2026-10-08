@@ -55,7 +55,7 @@ integration.
 | OpenRouter             | API key in Settings (default provider)                         | Free model options available; pay-per-token for premium models                                                     |
 | DeepSeek               | API key in Settings                                            | Provider billing                                                                                                   |
 | OpenAI (API Key)       | API key in Settings                                            | Pay-per-token                                                                                                      |
-| OpenAI (ChatGPT OAuth) | Sign in with an eligible ChatGPT account                       | Provider-controlled plan eligibility and usage limits apply                                                        |
+| OpenAI (ChatGPT)       | Sign in with ChatGPT (official flow; legacy Codex sign-in kept as an unofficial fallback) | Provider-controlled plan eligibility and usage limits apply                                                        |
 | AWS Bedrock            | AWS credentials in Settings (auto-resolves inference profiles) | Pay-per-token via AWS                                                                                              |
 | Azure OpenAI           | API key + endpoint in Settings                                 | Pay-per-token via Azure                                                                                            |
 | Mixture of Agents      | Presets composed from already-configured providers             | No separate billing; each selected provider bills normally                                                         |
@@ -508,19 +508,12 @@ For prompt caching, OpenRouter Claude routes use explicit Anthropic-style cache 
 ## OpenAI / ChatGPT
 
 - **Option 1: API Key** — Standard pay-per-token access to GPT models
-- **Option 2: ChatGPT OAuth** — Sign in with an eligible ChatGPT account
+- **Option 2: Sign in with ChatGPT** — OpenAI's official sign-in flow for third-party apps. Requests use the usage included in your ChatGPT plan, so no API key is needed. You can set a weekly CoWork OS usage cap or revoke access in ChatGPT settings. Image generation is not available with this sign-in.
+- **Legacy Codex sign-in (unofficial)** — The older ChatGPT/Codex OAuth route stays available as a fallback marked unofficial. OpenAI does not support it in third-party apps and it may stop working at any time; disconnect it and use Sign in with ChatGPT instead.
 
-### Models with ChatGPT OAuth
+### Models with Sign in with ChatGPT
 
-The current built-in catalog includes the following GPT-5.6 Codex routes. The
-signed-in account and OpenAI backend remain the source of truth for which models
-and controls are actually available:
-
-| Model ID        | Reasoning efforts                                   |
-| --------------- | --------------------------------------------------- |
-| `gpt-5.6-sol`   | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
-| `gpt-5.6-terra` | Low, Medium, High, Extra High (`xhigh`), Max, Ultra |
-| `gpt-5.6-luna`  | Low, Medium, High, Extra High (`xhigh`), Max        |
+After sign-in, CoWork reads your plan and suggests a model: GPT-6 Luna (`gpt-6-luna`) on the Free and Go plans, and GPT-6 Astra (`gpt-6-astra`) on paid plans. The built-in catalog also includes GPT-6 Sol (`gpt-6-sol`), GPT-6.1 Sol (`gpt-6.1-sol`) and the earlier GPT-5.x models. The signed-in account and OpenAI backend remain the source of truth for which models and controls are actually available.
 
 Reasoning effort is a request control, not a separate model ID. Choose the
 model first, then set its effort from either:
@@ -529,16 +522,11 @@ model first, then set its effort from either:
 - **Settings > AI & Models > OpenAI Request Controls** for the saved OpenAI
   provider configuration
 
-The UI only lists efforts supported by the selected GPT-5.6 model. In
-particular, Ultra is available for Sol and Terra but not Luna. Max requests the
-deepest standard reasoning mode; Ultra requests maximum reasoning with the
-ChatGPT/Codex automatic task-delegation mode. The selected effort and response
-verbosity are forwarded to the ChatGPT Codex Responses transport for OAuth
-requests.
-
-All three GPT-5.6 models support Low, Medium, and High response verbosity. The
-verbosity control changes final-answer detail independently of reasoning
-effort.
+The UI only lists efforts the selected model supports (from None through
+Extra High, Max and, on some models, Ultra). Max requests the deepest standard
+reasoning mode; Ultra requests maximum reasoning with the ChatGPT/Codex
+automatic task-delegation mode. Response verbosity (Low, Medium, High) changes
+final-answer detail independently of reasoning effort.
 
 Model and effort availability remains account-, plan-, and entitlement-dependent.
 If a model is listed locally but the ChatGPT backend rejects it, refresh the

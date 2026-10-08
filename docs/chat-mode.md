@@ -1,6 +1,6 @@
-# Chat Mode
+# Ask (Chat Mode)
 
-Chat mode is the direct conversational path in CoWork OS.
+**Ask** is the direct conversational path in CoWork OS. It runs on the stored `chat` execution mode, which is why this page and the code still call it chat mode; releases before 0.5.60 labelled it **Chat** in the composer. See [Ask and Do](interaction-modes.md).
 
 It is intentionally different from task execution modes:
 
@@ -35,14 +35,14 @@ Side Chat also uses chat execution mode internally, but it is a separate right-s
 
 ## When To Use It
 
-Use chat mode when you want a normal assistant conversation:
+Choose **Ask** when you want a normal assistant conversation:
 
 - ask a question
 - ask a follow-up
 - keep the same context
 - get a direct answer without task planning or tool use
 
-If you want CoWork OS to execute work, create artifacts, or use tools, use one of the task modes instead.
+If you want CoWork OS to execute work, create artifacts, or use tools, choose **Do** instead.
 
 If you attach a PDF and ask CoWork to summarize it, answer questions from it, extract clauses, compare sections, or transform it into another format, CoWork may leave direct chat for that turn and use read-only analysis so it can inspect the full document safely.
 

@@ -86,7 +86,7 @@ second key is needed.
 After your primary provider works, open:
 
 - **Settings > AI & Models** to set ordered fallback providers/models
-- **Settings > Web Search** to set primary and fallback search providers such as Tavily, Exa, Brave, SerpAPI, or Google
+- **Settings > AI & Models > Web Search** to set primary and fallback search providers such as Tavily, Exa, Brave, SerpAPI, or Google
 
 CoWork OS uses those ordered chains when a provider is unavailable, rate-limited, or lacks the needed capability for a task.
 
@@ -125,7 +125,7 @@ Three defaults use model tokens or money, so check them once:
 
 - **Dreaming**: about once a day, or when you press **Dream now** in the Memory folder card, one model pass tidies the memory folder (merges duplicates, removes stale notes, saves things you said that were not saved yet). It uses your configured model provider, up to 50,000 tokens a day by default. Turn it off in the Memory folder card.
 - **AI memory compression**: long memories get a one-line summary from your configured model, up to 20,000 tokens a day across workspaces. Adjust the budget or turn it off per workspace in **Settings > Memory > Settings > Advanced**. Private memories are never sent.
-- **Per-task cost cap**: each task is capped at $10 by default. A task's own budget can only lower it, and routes billed to a subscription skip the global cap. See [Guardrails](#guardrails).
+- **Per-task cost cap**: each task is capped at $10 by default. A task's own budget can only lower it, and routes billed to a subscription skip the global cap. Change it in **Settings > System & Security > Safety Limits**.
 
 Supermemory does not replace CoWork's local memory system. It adds an external profile/search layer (the `external` scope of `memory_recall`), optional prompt-time profile injection, and optional mirroring of non-private local memory captures. Local structured observations remain authoritative for privacy controls; private, redacted, and suppressed entries stay local. Dreaming never sends memory to Supermemory, but it does send memory-folder notes to your configured model provider. In a controlled run with an explicit review mode, mirror writes (and `memory_remember` with scope `external`) are staged for review; the normal no-prompt runtime commits them directly after the same sensitive-payload checks. See [Memory Engine](memory-engine.md), [Structured Memory Observations](memory-observations.md), [Durable Runtime Context](durable-runtime-context.md), [Dreaming](dreaming.md), [Workspace Memory Flow](workspace-memory-flow.md#memory-write-governance), and [Supermemory Integration](supermemory.md).
 
@@ -173,14 +173,14 @@ Once the app opens, the most important places to know are:
 - **Message box shortcuts**: type `/` in the main message box to search app commands and skill-backed workflow shortcuts in one menu. Use `/side` to ask read-only questions about the selected running session from the right panel, `/schedule` for standalone scheduled tasks, `/schedule here` for scheduled follow-ups in the selected thread, `/clear` to clear the current task view without deleting history, `/plan <task>` for the Plan runtime override, `/cost <task>` for estimates, `/multitask [N] <task>` for bounded parallel lane work, or shortcuts such as `/strategy`, `/batch-rename`, and `/gmail-summary-drive` from the bundled CoWork Shortcuts pack. Skill-backed selections insert the slash token first so you can add context before sending; Claude-for-Legal workflows can then show structured matter-context cards in the task view. See [Message Box Shortcuts](message-box-shortcuts.md), [Side Chat](side-chat.md), [Multitask Command](multitask.md), and [Claude-for-Legal Workflows](claude-for-legal.md).
 - **Task menu**: open a task and use the three-dot menu beside the title for pin/rename/archive, copy working directory/task ID/deeplink/Markdown, fork session, view outputs, or turn the current task into a same-thread or new-task automation. See [Task Automations](task-automations.md).
 - **Automations**: open the main-sidebar Automation Studio to discover templates, build a versioned structured flow, test it without external writes, turn it on, and inspect step-level activity. See [Automation Studio](automation-studio.md).
-- **Agents Hub**: create and inspect reusable managed agents from **Agents**. The clicked-agent detail page is for configuration and actions, not a separate chat. **Test this agent**, **Preview**, and starter prompts start a normal managed-session task and open it in the main task window, where follow-ups, approvals, responses, and outputs work like any other task. See [Managed Agents](managed-agents.md).
-- **Bots**: choose **Bots** beside **Sessions** to create reusable bot identities and keep multiple conversations under each one. Selecting a bot reuses its latest unarchived conversation or opens a dormant one; the first message starts execution. Edit the profile from the bot row or conversation header, and use conversation history for older streams. See [Bots, conversations, and tasks](bots-and-conversations.md).
-- **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
-- **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing controls
-- **Settings > Profiles**: create, switch, export, and import isolated app profiles
-- **Mission Control**: company and operator monitoring, Heartbeat-agent state, global runtime queue status, workspace Mission Board, feed, and Ops view
+- **Workspace agents**: select **Bots** on the left icon rail and expand **Workspace agents** to create and inspect reusable managed agents (called Agents Hub before 0.5.60). The clicked-agent detail page is for configuration and actions, not a separate chat. **Test this agent**, **Preview**, and starter prompts start a normal managed-session task and open it in the main task window, where follow-ups, approvals, responses, and outputs work like any other task. See [Managed Agents](managed-agents.md).
+- **Bots**: select **Bots** on the left icon rail to open the Bots page and the bot list, create reusable bot identities and keep multiple conversations under each one. Selecting a bot reuses its latest unarchived conversation or opens a dormant one; the first message starts execution. Edit the profile from the bot row or conversation header, and use conversation history for older streams. See [Bots, conversations, and tasks](bots-and-conversations.md).
+- **More > Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
+- **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, and Event Triggers; Daily Briefing has its own **Settings > Daily Briefing** tab
+- **Settings > System & Security > Profiles**: create, switch, export, and import isolated app profiles
+- **More > Mission Control**: company and operator monitoring, Heartbeat-agent state, global runtime queue status, workspace Mission Board, feed, and Ops view
 - **Settings > Skills**: Skill Store imports plus optional external read-only skill directories
-- **Settings > Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, channel/chat/thread specialization, and enterprise channels such as Feishu/Lark and WeCom
+- **Settings > WhatsApp**, **Telegram**, **Slack** and **More Channels**: Slack multi-workspace setup, Telegram group routing, Discord guild allowlists, channel/chat/thread specialization, and enterprise channels such as Feishu/Lark and WeCom
 - **Settings → Tools → Computer use** (macOS): Accessibility + Screen Recording onboarding, built-in tool toggles, and context for [desktop automation](computer-use.md)
 - **Settings → Tools → Chronicle**: primary Chronicle setup for consent-gated recent-screen context, pause/resume, capture scope, OCR status, and linked memory behavior. The dedicated `chronicle` tool category still lives in **Settings → Tools → Built-in tools**. See [Chronicle](chronicle.md).
 - **Spreadsheet artifacts**: when a task creates a spreadsheet, use the output card's **Open** action. Excel workbooks and CSV/TSV files open in the right sidebar; native Numbers, Google Sheets shortcut, ODS, and XLSB files use external-app/folder actions. Use fullscreen mode for editable spreadsheets with copy/save/zoom, row/column selection, attachments, voice input, and follow-up prompts. See [Spreadsheet Artifacts](spreadsheet-artifacts.md).
@@ -221,7 +221,7 @@ Use this when you want CoWork OS to run tasks on another machine, such as a Mac 
    - SSH tunnel
    - Tailscale
    - reverse proxy only when the Control Plane stays loopback/private and `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` is set
-3. On your main machine, open the **Devices** tab.
+3. On your main machine, open **More > Devices**.
 4. Click **Add new device**.
 5. Enter the gateway URL, token, display name, and purpose.
 6. Connect the device and confirm it appears in the device list.
@@ -237,7 +237,7 @@ Use profiles when you want separate CoWork environments for personal work, clien
 
 Typical profile workflow:
 
-1. Open **Settings > Profiles**.
+1. Open **Settings > System & Security > Profiles**.
 2. Create a new profile or duplicate your current one.
 3. Switch into that profile before configuring channels, providers, or skills.
 4. Use **Export Profile** to create a transferable profile bundle.
@@ -249,7 +249,7 @@ Each profile keeps its own local database, encrypted settings, managed skills, c
 
 Open **Automations** in the main sidebar when you want to build a structured flow. Start from a template, a conservative prompt-generated draft, or a blank flow; test it with sample JSON; review its scopes and approvals; save the draft; and select **Turn on** only after validation passes. See [Automation Studio](automation-studio.md).
 
-Open **Settings > Automations** for advanced queue policy, prompt-based Routines, lower-level schedules/hooks/triggers, Daily Briefing, and Workflow Intelligence.
+Open **Settings > Automations** for advanced queue policy, prompt-based Routines, lower-level schedules/hooks/triggers, and Workflow Intelligence, and **Settings > Daily Briefing** for the briefing.
 
 Recommended order:
 
@@ -332,15 +332,9 @@ CoWork samples the video into representative still frames for image-capable mode
 
 ### Sidebar (Left)
 
-- **Workspace Info**: Shows current workspace name and path
-- **Settings Button**: Configure LLM, search, and channel settings
-- **New Task Button**: Create a new task
-- **Task List**: All tasks sorted by creation date
-- **Task Status Indicators**:
-  - Blue = Active (planning/executing)
-  - Green = Completed
-  - Red = Failed/Cancelled
-  - Gray = Pending
+- **Icon rail**: **Home**, **Inbox**, **Bots** and **Automations**, plus **Library** in the Calm visual style. **More** holds Devices, Everyday, Mission Control, Add tools and, in Calm, Build; pin any of them to the rail. Use Cmd/Ctrl+number to jump to a rail item, and drag or Alt+Up/Down to reorder. **Settings** is at the bottom of the rail and opens inside the app window.
+- **Session panel**: **New session**, an always-visible search (Cmd/Ctrl+K), **Running** and **Needs you** filters, sessions grouped by day (Today, Yesterday, and so on), and a collapsed **Automated sessions** section for scheduled, hook, API and heartbeat runs.
+- **Notices**: one dismissable notice area above Automated sessions, for tips such as the use-case gallery.
 
 ### Task View (Right)
 
@@ -354,19 +348,15 @@ CoWork samples the video into representative still frames for image-capable mode
   - Files created/modified
   - Errors
 
-### Approval Dialogs
+### Approvals
 
-When the agent needs permission for:
-
-- Deleting files
-- Bulk operations
-- Command-tool calls
-
-You'll see a dialog with:
+When an action falls outside what the selected access profile allows without asking (for example deleting files, bulk operations or a command-tool call), the task shows an inline approval card in the task feed with:
 
 - What it wants to do
 - Why it needs to do it
-- Approve or Deny buttons
+- **Deny** and **Allow once** buttons
+
+A card that gets no answer times out after 5 minutes. Unattended runs (schedules, triggers) deny instead of waiting. See [Access Profiles](access-profiles.md).
 
 ## Configuring Providers
 
@@ -420,7 +410,7 @@ Advanced override: prompt caching can be disabled manually with `promptCaching.m
 
 ### Search Providers (Optional — DuckDuckGo works out of the box)
 
-Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **Web Search**:
+Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **AI & Models** > **Web Search**:
 
 | Provider   | Setup                                                                   |
 | ---------- | ----------------------------------------------------------------------- |
@@ -450,7 +440,7 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 #### Telegram Bot
 
 1. Create bot with [@BotFather](https://t.me/BotFather)
-2. Open **Settings** > **Channels** > **Telegram**
+2. Open **Settings** > **Telegram**
 3. Enter bot token
 4. Optionally set a group routing mode (`all`, `mentionsOnly`, `mentionsOrCommands`, `commandsOnly`)
 5. Optionally add allowed Telegram group chat IDs if the bot should only respond in specific groups
@@ -459,7 +449,7 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 #### Discord Bot
 
 1. Create app at [Discord Developer Portal](https://discord.com/developers/applications)
-2. Open **Settings** > **Channels** > **Discord**
+2. Open **Settings** > **More Channels** > **Discord**
 3. Enter bot token and application ID
 4. Invite bot to server
 5. Optionally add allowed Guild IDs if the bot should ignore other servers
@@ -472,7 +462,7 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 3. Add OAuth scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`, `files:write`
 4. Subscribe to events: `app_mention`, `message.im`
 5. Install to workspace and copy Bot Token (xoxb-...)
-6. Open **Settings** > **Channels** > **Slack**
+6. Open **Settings** > **Slack**
 7. Enter Bot Token and App-Level Token
 8. Repeat **Add Slack Workspace** if you want more than one Slack installation in the same CoWork profile
 9. Enable and test
@@ -481,14 +471,14 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 
 1. Create a bot/app in the Feishu or Lark developer console
 2. Copy the App ID, App Secret, verification token, and event encryption key
-3. Open **Settings** > **Channels** > **Feishu / Lark**
+3. Open **Settings** > **More Channels** > **Feishu / Lark**
 4. Enter credentials, set the webhook/event callback URL shown by CoWork, then enable and test
 
 #### WeCom
 
 1. Create a WeCom app in the WeCom admin console
 2. Copy the Corp ID, Agent ID, Secret, token, and EncodingAESKey
-3. Open **Settings** > **Channels** > **WeCom**
+3. Open **Settings** > **More Channels** > **WeCom**
 4. Enter credentials, configure the callback URL shown by CoWork in WeCom, then enable and test
 
 ### App Integrations (Optional)
@@ -510,7 +500,7 @@ For slash-searchable app commands and workflow shortcuts, type `/` in the same m
 
 ### Enterprise MCP Connectors (Optional)
 
-Install enterprise connectors from **Settings** > **Integrations** > **Browse Registry**:
+Install enterprise connectors from **Settings** > **MCP Servers** > **Browse Registry** (or browse everything in **Settings** > **Add tools**):
 
 | Connector            | Type             | Setup                                                                      |
 | -------------------- | ---------------- | -------------------------------------------------------------------------- |
@@ -534,7 +524,7 @@ Most service connectors provide tools like `search`, `get`, `create`, and `updat
 
 #### X (Twitter)
 
-1. Open **Settings** > **X (Twitter)**
+1. Open **Settings** > **More Channels** > **X (Twitter)**
 2. Choose Browser Cookies or Manual Cookies
 3. (Optional) Enable **Mention Trigger** and configure:
    - command prefix (default `do:`)
@@ -684,12 +674,12 @@ Don't use system folders like `/System` or `/Applications`.
 3. **Remote Access**: Set up WhatsApp, Telegram, Discord, or Slack bot for mobile/remote access
 4. **Document Creation**: Create professional Excel, Word, PDF, or PowerPoint files
 5. **Goal Mode**: Define success criteria and let the agent auto-retry until verification passes
-6. **Custom Skills**: Create reusable workflows with custom prompts in Settings > Custom Skills
-7. **MCP Servers**: Connect to external tools via MCP in Settings > MCP Servers
-8. **Enterprise Connectors**: Install shipped connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, Rhino, Blender, ComfyUI, and more) via Settings > Connectors
+6. **Custom Skills**: Create reusable workflows with custom prompts in **Settings > Skills > Custom Skills**
+7. **MCP Servers**: Connect to external tools via MCP in **Settings > MCP Servers**
+8. **Enterprise Connectors**: Install shipped connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, Rhino, Blender, ComfyUI, and more) via **Settings > Integrations > Connectors**
 9. **Cloud Storage/Productivity**: Connect Notion, Box, OneDrive, Google Workspace (Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks/Chat), Dropbox, or SharePoint — click their cards in Settings > Integrations
-10. **Parallel Tasks**: Run multiple tasks concurrently (configure in Settings > Task Queue)
-11. **Guardrails**: Set token/cost budgets and blocked commands in Settings > Guardrails
+10. **Parallel Tasks**: Run multiple tasks concurrently (configure in **Settings > Automations > Task Queue**)
+11. **Safety limits**: Set token/cost budgets and blocked commands in **Settings > System & Security > Safety Limits**
 
 ### Learn More
 

@@ -129,7 +129,7 @@ Moving to CoWork OS provides several advantages:
 | **Dozens of model routes**     | Built-in providers, compatible gateways, supported account connections, local runtimes, and Mixture of Agents presets                                           |
 | **Local LLM support**          | Run supported models locally with Ollama or MLX-LM on native Apple Silicon; model availability and hardware needs vary. See [MLX-LM Local Inference](mlx-lm.md) |
 | **Native desktop app**         | Full desktop UX on macOS and Windows (menu bar on macOS, system tray on Windows)                                                                                |
-| **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through Agents Hub and Mission Control                               |
+| **GUI-first agent management** | Create reusable agents, spawn many runs, inspect timelines, assign work, and monitor teams through the Bots page and Mission Control                               |
 | **Real-time timeline**         | See exactly what the agent is doing                                                                                                                             |
 | **Everyday document work**     | Excel, Word, PDF, and PowerPoint-style outputs built into the task workspace                                                                                    |
 | **Personality system**         | Customize how your AI communicates                                                                                                                              |

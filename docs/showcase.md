@@ -13,7 +13,7 @@ showcase workflow. Examples that use commands, files, browsers, connectors,
 devices, or automation should be run with the least-privileged profile that
 fits; a skill or provider route cannot widen it.
 
-CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents in Agents Hub, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
+CoWork makes many-agent work visible while still offering a terminal entrypoint: users can create reusable agents on the Bots page, spawn parallel lanes, watch delegated runs in task timelines, assign work through Mission Control, manage teams from GUI surfaces built for normal daily operation, and start local one-shot tasks with `cowork run`.
 
 ---
 

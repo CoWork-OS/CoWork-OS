@@ -130,7 +130,7 @@ current CoWork implementation does not treat a plain-text `config.toml` as the
 authority for access profiles. The visible **Custom** choice is the UI for the
 same named-profile concept, with settings validated before they are persisted.
 
-Agents Hub environments also have an **Access profile** field. It controls the
+Managed-agent environments (Workspace agents on the Bots page) also have an **Access profile** field. It controls the
 profile inherited by managed sessions; command tools, filesystem access,
 network access, and approvals follow that profile.
 

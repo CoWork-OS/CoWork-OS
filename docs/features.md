@@ -39,7 +39,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **GUI-first, CLI-capable AI Super App, Everything App, and Personal Agentic OS**: CoWork OS is a free, open-source, local-first super app for everyday AI work: coding, email, web design, research, documents, spreadsheets, presentations, automations, channels, devices, terminal tasks, and long-running work in one governed workspace.
 - **Open Multi-Provider Harness**: Supported provider accounts, APIs, compatible gateways, cloud credentials, and local models can use the same CoWork tools, skills, memory, agents, approvals, artifacts, and workflows. CoWork itself is free and MIT-licensed; provider eligibility, limits, and charges remain separate. See [Model Providers](providers.md) and [Compare CoWork OS](comparisons/index.md).
 - **MLX-LM Local Inference**: On native Apple Silicon Macs, the first-class **MLX (Apple Silicon)** provider runs quantized models through the local MLX-LM OpenAI-compatible server. Settings checks the native platform and Python imports, starts/stops the local server, shows download/loading logs, and routes normal agent requests through the shared provider interface. See [MLX-LM Local Inference](mlx-lm.md).
-- **GUI-first Agent Management**: Agents Hub, Mission Control, task timelines, visual boards, Teams, Devices, and Automations let users create reusable agents, spawn many parallel or specialized agents, inspect delegated runs, assign work, review approvals, and monitor outcomes through the desktop operator console.
+- **GUI-first Agent Management**: the Bots page, Mission Control, task timelines, visual boards, Teams, Devices, and Automations let users create reusable agents, spawn many parallel or specialized agents, inspect delegated runs, assign work, review approvals, and monitor outcomes through the desktop operator console.
 - **CoWork CLI**: `cowork` opens an interactive terminal UI for local agent work, and `cowork run "task"` starts one-shot local tasks using the same local profile, providers, workspaces, skills, and MCP configuration as the desktop app. Normal local CLI use does not require a Control Plane token; `--remote` is the explicit remote client path. See [CoWork OS CLI](cli.md).
 - **Governed Access Profiles**: The main composer offers Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles. A profile carries sandbox, approval, reviewer, network, filesystem, and domain policy across desktop, CLI, remote, managed, automation, and child-task surfaces. Command tools are derived from the selected profile; there is no separate new-task shell toggle. See [Access Profiles](access-profiles.md).
 - **Everything Workbench**: Generated documents, spreadsheets, presentations, web pages, PDFs, and previews share one artifact model: compact output card, sidebar open, fullscreen artifact workspace, follow-up composer, and refresh after the agent completes requested edits. This makes CoWork the default place to create, inspect, and revise everyday Word/Excel/PowerPoint-style work while keeping external app actions available for advanced native workflows. See [Everything Workbench](everything-workbench.md).
@@ -47,8 +47,8 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Browser Workbench / Browser V2**: live website and local-app testing opens in a visible right-sidebar/fullscreen browser by default. Browser-use tools target the same webview the user can see through Browser V2, with responsive viewport testing through `browser_emulate`, accessibility snapshot refs, CDP-backed actions, tabs, diagnostics, screenshots, annotation, and visible cursor movement during agent actions. Explicit fallback modes include local Playwright, a separately launched Chrome with your system profile after consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
 - **Task-Based Workflow**: Multi-step execution with plan-execute-observe loops
 - **Task Overflow Actions**: task view title menus expose supported task actions in place: pin/unpin, rename, archive, copy working directory, copy task ID, copy `cowork://tasks/<taskId>` deeplink, copy Markdown, fork session, view outputs, and create a same-thread or new-task automation from the current task. See [Task Automations](task-automations.md).
-- **Managed Agents**: Agents Hub provides a dedicated surface for creating, inspecting, publishing, suspending, and improving reusable agents. Agent detail screens are configuration-first and single-pane: test, preview, and starter-prompt actions create normal runtime managed sessions and open their backing tasks in the main task window, where questions, responses, approvals, artifacts, and outputs are handled like any other task. See [Managed Agents](managed-agents.md).
-- **Persistent Bots**: the sidebar Bots surface gives reusable agent roles a stable identity across many durable conversations. Bots open or create dormant conversations, keep history separate from Sessions, support profile editing/deactivation, expose notification and host-computer state, and can message verified teammates through the persistent CoWork Bot Team. See [Bots, conversations, and tasks](bots-and-conversations.md).
+- **Managed Agents**: **Workspace agents** on the Bots page (formerly Agents Hub) provides a dedicated surface for creating, inspecting, publishing, suspending, and improving reusable agents. Agent detail screens are configuration-first and single-pane: test, preview, and starter-prompt actions create normal runtime managed sessions and open their backing tasks in the main task window, where questions, responses, approvals, artifacts, and outputs are handled like any other task. See [Managed Agents](managed-agents.md).
+- **Persistent Bots**: the **Bots** rail item opens the Bots page (what your bots need from you, what is running and scheduled, templates for new bots) and the bot roster. Bots give reusable agent roles a stable identity across many durable conversations, open or create dormant conversations, keep history separate from Sessions, support profile editing/deactivation, expose notification and host-computer state, and can take **responsibilities** (a trigger, sources, a mode, a review boundary and a budget; saved paused). Bots you add to a team you configure can message verified teammates; CoWork no longer installs a default bot team. See [Bots, conversations, and tasks](bots-and-conversations.md).
 - **Runtime Orchestration**: SessionRuntime owns task-session state, session checklists, resume snapshots, recovery state, and task projection while the turn kernel handles each individual step, follow-up, or text turn; metadata-driven tool scheduling, graph-backed delegation, typed worker roles, verifier verdicts, semantic tool-batch summaries, and terminal-state reconciliation keep delegated work coherent across tasks, follow-ups, teams, and ACP runs.
 - **Prompt-Aware Tooling**: visible tools receive concise prompt-local guidance after policy filtering, and planning plus execution share the same render source for compact tool text and provider-facing tool descriptions.
 - **Composer Mentions**: type `@` in the main composer to choose Agents, configured Integrations, or Files. Integration mentions render as icon+name chips and add soft runtime routing guidance without changing permissions. See [Composer Mentions](composer-mentions.md).
@@ -72,7 +72,7 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
   <br><em>The Bots page turns reusable bots, templates and workspace agents into a first-class product surface.</em>
 </p>
 
-- **Chat Mode**: Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. Uploaded PDF turns that need deeper document reading are narrowly promoted into read-only analysis so the document parser can run. See [Chat Mode](chat-mode.md).
+- **Ask (chat mode)**: Direct LLM chat with no tools by default, no step timeline, same-session follow-ups, chat-only streaming for supported providers, and a fixed high output budget for explicit `executionMode: "chat"` sessions. Uploaded PDF turns that need deeper document reading are narrowly promoted into read-only analysis so the document parser can run. See [Chat Mode](chat-mode.md).
 - **Side Chat**: Right-side read-only questions about an active running session without steering or stopping the parent task. Side Chat uses a side-specific fork with hidden parent context, live parent-status snapshots for progress questions, a side-only visible transcript, and Markdown-rendered answers. See [Side Chat](side-chat.md).
 - **Document Creation**: Excel, Word, PDF, PowerPoint, HTML, and React-style outputs with professional formatting, first-class LaTeX/TikZ `.tex` -> PDF compilation when a system TeX engine is installed, plus the bundled [kami](skills/kami.md) workflow for editorial PDFs, resumes, one-pagers, and slide decks
 - **Document Artifact Workbench**: task-created Word-style files use compact artifact cards in the task feed. `.docx` opens directly into a resizable right-sidebar editor with a Google Docs-style toolbar, direct text editing, copy, save, external-open, and folder actions. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized as document artifacts and use best-effort preview or external-app/folder actions depending on parser support. Fullscreen mode expands editable documents across the app and keeps a functional follow-up composer with the main task model picker, voice input, attachments, send behavior, latest-turn/working context, and automatic preview refresh after follow-up edits. See [Document Artifacts](document-artifacts.md).
@@ -399,9 +399,9 @@ The task creation UI also includes higher-level toggles that change how tasks ar
 > when a trusted task needs that profile, and remember that export, location,
 > hard-guardrail, administrator, and explicit-deny boundaries still apply.
 
-### Chat Mode
+### Ask (Chat Mode)
 
-Chat mode is the direct assistant conversation surface. It is designed for normal Q&A, not task execution.
+**Ask** (stored as the `chat` execution mode; labelled **Chat** before 0.5.60) is the direct assistant conversation surface. It is designed for normal Q&A, not task execution.
 
 - **No tools by default**: the assistant does not plan or call tools in normal chat mode
 - **PDF exception**: chat turns with uploaded PDF attachment metadata are auto-promoted to read-only analysis when deeper PDF content is needed, so `parse_document` can read the file without enabling mutating tools
@@ -411,7 +411,7 @@ Chat mode is the direct assistant conversation surface. It is designed for norma
 - **High output budget**: explicit chat sessions use a fixed 48K target output cap, clamped to the active provider budget
 - **History strategy**: long chat sessions use a summary-plus-recent-window prompt strategy with cached summary reuse
 
-See [Chat Mode](chat-mode.md) for the full behavior contract.
+See [Ask (Chat Mode)](chat-mode.md) for the full behavior contract.
 
 ### Side Chat
 
@@ -801,7 +801,7 @@ Configure in **Mission Control** > **Teams**.
 
 ## Mission Control
 
-Centralized agent orchestration and monitoring dashboard. In the standard interface, open **Mission Control** from the main sidebar; in the Calm interface, open **More**. Availability and exact routes vary by release; see the [release surface reference](release-surface-reference.md). The surface separates Heartbeat-enabled agents, the global runtime queue, and workspace-scoped Mission Board work so users can tell whether an item is monitoring, waiting to execute, or tracked on the board.
+Centralized agent orchestration and monitoring dashboard. Open **More > Mission Control** from the left icon rail, in both the standard and Calm interfaces. Availability and exact routes vary by release; see the [release surface reference](release-surface-reference.md). The surface separates Heartbeat-enabled agents, the global runtime queue, and workspace-scoped Mission Board work so users can tell whether an item is monitoring, waiting to execute, or tracked on the board.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-8.webp" alt="Mission Control board" width="700">
@@ -1039,7 +1039,7 @@ Unified file aggregation service combining local workspace files, task artifacts
 | **Web page workbench**     | Generated HTML/HTM files and built React output open in a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions and follow-up refresh after completion                            |
 | **Source/rendered pairs**  | LaTeX `.tex` files compiled through `compile_latex` are paired with their generated PDFs in task artifact surfaces                                                                                                    |
 
-Access from the **File Hub** panel in the sidebar.
+In the Calm visual style, open **Library** on the left icon rail; the File Hub lives inside it. Generated files also open from each task's output cards and **Files** panel.
 
 ---
 
@@ -1586,6 +1586,7 @@ Customize agent behavior via Settings or conversation:
 | ------------ | --------------------------------------------------------------- |
 | **Modern**   | Refined non-terminal UI style with rounded components (default) |
 | **Terminal** | CLI-inspired interface with prompt-style visuals                |
+| **Calm**     | Opt-in cool-neutral style with a Home screen Ask / Do switch, simplified sidebar, and the Library and Build views |
 
 | Color Mode | Description                                   |
 | ---------- | --------------------------------------------- |

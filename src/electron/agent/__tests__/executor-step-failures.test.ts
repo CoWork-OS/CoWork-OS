@@ -1477,6 +1477,124 @@ describe("TaskExecutor executeStep failure handling", () => {
     }
   });
 
+  it("skips realignment and decomposition LLM rewrites once plan revisions are spent", async () => {
+    const planner = Object.create(TaskExecutor.prototype) as Any;
+    planner.task = {
+      id: "synthesis-1",
+      title: "Synthesis",
+      prompt: "Plan a workshop",
+      agentConfig: { deepWorkMode: true },
+    };
+    planner.plan = { description: "Plan", steps: [] };
+    planner.emitEvent = vi.fn();
+    planner.suggestAlignedReplacementSteps = vi
+      .fn()
+      .mockResolvedValue([{ description: "Replacement step for the workshop plan" }]);
+    const longStep: Any = {
+      id: "2",
+      description: Array.from({ length: 95 }, (_, index) => `word${index}`).join(" "),
+      kind: "primary",
+      status: "pending",
+    };
+
+    planner.planRevisionCount = 5;
+    planner.maxPlanRevisions = 5;
+    expect(await planner.maybeRealignLowAlignmentStep(longStep)).toBe(false);
+    expect(await planner.maybeDecomposeComplexStep(0, longStep)).toBe(false);
+
+    planner.planRevisionCount = 0;
+    const revisedStep = { ...longStep, id: "revised-1791477497086-0" };
+    expect(await planner.maybeRealignLowAlignmentStep(revisedStep)).toBe(false);
+    expect(await planner.maybeDecomposeComplexStep(0, revisedStep)).toBe(false);
+    expect(planner.suggestAlignedReplacementSteps).not.toHaveBeenCalled();
+  });
+
+  it("gives the last visible step of a chat-only plan every earlier section to assemble", () => {
+    const assembler = Object.create(TaskExecutor.prototype) as Any;
+    assembler.task = {
+      id: "synthesis-1",
+      title: "Workshop plan",
+      prompt:
+        "Give me one coherent workshop plan in this chat. Keep it in chat; do not create files.",
+    };
+    const steps: Any[] = [
+      { id: "1", description: "Draft the timed agenda", kind: "primary", status: "completed" },
+      {
+        id: "2",
+        description: "Assign volunteer responsibilities",
+        kind: "primary",
+        status: "completed",
+      },
+      {
+        id: "3",
+        description: "List risks and open decisions",
+        kind: "primary",
+        status: "in_progress",
+      },
+      { id: "4", description: "Verify the plan", kind: "verification", status: "pending" },
+    ];
+    assembler.plan = { description: "Plan", steps };
+    assembler.fileOperationTracker = { getCreatedFiles: () => [] };
+    assembler.recordAssistantOutput(
+      [{ role: "assistant", content: [{ type: "text", text: "## Agenda\n18:00 Welcome" }] }],
+      steps[0],
+    );
+    assembler.recordAssistantOutput(
+      [{ role: "assistant", content: [{ type: "text", text: "## Roles\nAna: check-in" }] }],
+      steps[1],
+    );
+
+    const earlier = assembler.buildEarlierStepOutputsForFinalAssembly(steps[2]);
+    expect(earlier).toContain("## Agenda");
+    expect(earlier).toContain("## Roles");
+    expect(earlier.indexOf("## Agenda")).toBeLessThan(earlier.indexOf("## Roles"));
+    expect(assembler.buildEarlierStepOutputsForFinalAssembly(steps[1])).toBe("");
+    expect(assembler.buildEarlierStepOutputsForFinalAssembly(steps[3])).toBe("");
+
+    assembler.fileOperationTracker = { getCreatedFiles: () => ["plan.md"] };
+    expect(assembler.buildEarlierStepOutputsForFinalAssembly(steps[2])).toBe("");
+  });
+
+  it("does not let a failed step's refusal replace an earlier complete answer", () => {
+    const recorder = Object.create(TaskExecutor.prototype) as Any;
+    recorder.task = {
+      id: "research-1",
+      title: "Coworking comparison",
+      prompt: "Compare three Lisbon coworking day passes in one table and recommend the best fit.",
+    };
+    recorder.plan = { description: "Plan", steps: [] };
+    const table = [
+      "| Option | Price | Hours | Calls |",
+      "|---|---|---|---|",
+      "| Heden | €20 + VAT | 09:00–19:00 | Phone booths |",
+      "| Second Home | €35 | 09:00–20:00 | Bookable rooms |",
+      "| Ávila Spaces | unknown | 08:30–19:00 | Meeting rooms |",
+      "",
+      "Recommendation: Heden is the best fit because it lists quiet phone booths for video calls; ask whether booths can be reserved.",
+    ].join("\n");
+    const compareStep: Any = { id: "3", description: "Compare the options", status: "completed" };
+    recorder.recordAssistantOutput(
+      [{ role: "assistant", content: [{ type: "text", text: table }] }],
+      compareStep,
+    );
+
+    const failedStep: Any = { id: "5", description: "Create the final file", status: "failed" };
+    recorder.recordAssistantOutput(
+      [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I couldn't create a valid file with the available tool." },
+          ],
+        },
+      ],
+      failedStep,
+      true,
+    );
+
+    expect(recorder.lastNonVerificationOutput).toBe(table);
+  });
+
   it("keeps a verifier worker's evidence-backed draft out of the text-only refiner", async () => {
     const verifier = Object.create(TaskExecutor.prototype) as Any;
     verifier.task = { id: "verify-1", title: "Verify: checklist", workerRole: "verifier" };

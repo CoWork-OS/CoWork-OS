@@ -749,6 +749,8 @@ export function responseHasDecisionSignal(text: string): boolean {
       normalized,
     ) ||
     /\bi recommend\b/.test(normalized) ||
+    /\brecommend(?:ation|ed)\s*:/.test(normalized) ||
+    /\bbest\s+(?:fit|option|choice|pick)\b/.test(normalized) ||
     /\byou should\b/.test(normalized) ||
     /\bshould (?:you|i|we)\b/.test(normalized) ||
     /\bgo with\b/.test(normalized) ||

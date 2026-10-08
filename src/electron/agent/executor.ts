@@ -254,7 +254,12 @@ import {
 import { asksAboutProjectBehavior, referencesOwnWorkspace } from "./strategy/code-signals";
 import { CitationTracker } from "./citation/CitationTracker";
 import { WorkflowDecomposer, workflowPhaseTypeToCapability } from "./strategy/WorkflowDecomposer";
-import { scorePlanStepIntentAlignment, scoreStepIntentOverlap } from "./step-intent-alignment";
+import {
+  scorePlanStepIntentAlignment,
+  scoreStepIntentContainment,
+  scoreStepIntentOverlap,
+  STEP_INTENT_MIN_CONTAINMENT,
+} from "./step-intent-alignment";
 import {
   buildProjectGuidanceContext,
   buildWorkspaceDesignSystemContext,
@@ -1191,6 +1196,12 @@ export class TaskExecutor {
    * Compact step outcome summaries for "verified" execution mode.
    * Replaces raw previous-output carry-over with concise structured summaries.
    */
+  /**
+   * Full text each completed non-verification step produced, in completion
+   * order. A chat-only deliverable split across steps is assembled from these
+   * in its last visible step; earlier step text is hidden narration.
+   */
+  private stepDeliverableOutputs = new Map<string, { description: string; text: string }>();
   private stepOutcomeSummaries: Array<{
     stepId: string;
     description: string;
@@ -5286,6 +5297,7 @@ export class TaskExecutor {
     this.explicitChatSummarySourceMessageCount = 0;
     this.explicitChatSummaryInputSignature = "";
     this.stepOutcomeSummaries = [];
+    this.stepDeliverableOutputs = new Map();
     this.getSessionRuntime().saveSnapshot();
   }
 
@@ -6645,6 +6657,7 @@ ${transcript}
 
   // Plan revision tracking to prevent infinite revision loops
   private planRevisionCount: number = 0;
+  private planRevisionLimitLogged = false;
   private readonly maxPlanRevisions: number = 5;
   private planScaffoldRoot: string | null = null;
 
@@ -20429,6 +20442,7 @@ You are continuing a previous conversation. The context from the previous conver
 
     this.getSessionRuntime().resetForRetry();
     this.planRevisionCount = 0;
+    this.planRevisionLimitLogged = false;
 
     // Add context for LLM about retry — deep work gets systematic debug instructions
     const retryMessage = this.task.agentConfig?.deepWorkMode
@@ -21908,9 +21922,12 @@ You are continuing a previous conversation. The context from the previous conver
     // Check plan revision limit to prevent infinite loops
     this.planRevisionCount++;
     if (this.planRevisionCount > this.maxPlanRevisions) {
-      logger.warn(
-        `${this.logTag} Plan revision limit reached (${this.maxPlanRevisions}). Ignoring revision request.`,
-      );
+      if (!this.planRevisionLimitLogged) {
+        this.planRevisionLimitLogged = true;
+        logger.warn(
+          `${this.logTag} Plan revision limit reached (${this.maxPlanRevisions}). Ignoring further revision requests.`,
+        );
+      }
       this.emitEvent("plan_revision_blocked", {
         reason: `Maximum plan revisions (${this.maxPlanRevisions}) reached. The current approach may not be working - consider completing with available results or trying a fundamentally different strategy.`,
         attemptedRevision: reason,
@@ -26775,7 +26792,11 @@ You are continuing a previous conversation. The context from the previous conver
     );
   }
 
-  private recordAssistantOutput(messages: LLMMessage[], step: PlanStep): void {
+  private recordAssistantOutput(
+    messages: LLMMessage[],
+    step: PlanStep,
+    stepFailed: boolean = false,
+  ): void {
     if (!messages || messages.length === 0) return;
     const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
     if (!lastAssistant || !lastAssistant.content) return;
@@ -26806,10 +26827,21 @@ You are continuing a previous conversation. The context from the previous conver
         step,
         text,
       );
-      if (!preserveExistingDeliverable && !preservePriorOutputAfterNoOpStep) {
+      const preserveDeliverableOverFailedStep =
+        stepFailed && this.shouldPreserveDeliverableOverFailedStepOutput(text);
+      if (
+        !preserveExistingDeliverable &&
+        !preservePriorOutputAfterNoOpStep &&
+        !preserveDeliverableOverFailedStep
+      ) {
         this.lastAssistantOutput = contextText;
         this.lastNonVerificationOutput = text;
         this.lastAssistantText = text;
+      }
+      if (!stepFailed && !this.isRecoveryPlanStep(step)) {
+        if (!(this.stepDeliverableOutputs instanceof Map)) this.stepDeliverableOutputs = new Map();
+        this.stepDeliverableOutputs.delete(step.id);
+        this.stepDeliverableOutputs.set(step.id, { description: step.description, text });
       }
     } else {
       if (!this.lastAssistantOutput) {
@@ -26817,6 +26849,58 @@ You are continuing a previous conversation. The context from the previous conver
       }
       // Preserve lastNonVerificationOutput for future steps/follow-ups.
     }
+  }
+
+  /**
+   * A failed step's text (a refusal, an error explanation) must not replace a
+   * substantive answer an earlier step already produced, unless it is itself a
+   * comparably complete answer.
+   */
+  private shouldPreserveDeliverableOverFailedStepOutput(failedStepText: string): boolean {
+    const existing = String(this.lastNonVerificationOutput || "").trim();
+    const failedText = String(failedStepText || "").trim();
+    if (!existing || existing.length < TaskExecutor.MIN_RESULT_SUMMARY_LENGTH) return false;
+    if (failedText.length >= existing.length * 0.75) return false;
+    return responseDirectlyAddressesPromptUtil({
+      text: existing,
+      contract: this.buildCompletionContract(),
+      minResultSummaryLength: TaskExecutor.MIN_RESULT_SUMMARY_LENGTH,
+    });
+  }
+
+  /**
+   * Earlier step outputs for the last visible step of a chat-only plan, so it
+   * returns the whole deliverable instead of only its own section. Returns ""
+   * when assembly does not apply.
+   */
+  private buildEarlierStepOutputsForFinalAssembly(step: PlanStep): string {
+    if (this.isVerificationStep(step) || this.isRecoveryPlanStep(step)) return "";
+    if (!(this.stepDeliverableOutputs instanceof Map) || this.stepDeliverableOutputs.size === 0) {
+      return "";
+    }
+    if (!this.isLastVisibleAssistantStep(step)) return "";
+    if (this.buildCompletionContract().artifactKind !== "none") return "";
+    if ((this.fileOperationTracker?.getCreatedFiles?.() || []).length > 0) return "";
+    const completedStepIds = new Set(
+      (this.plan?.steps || [])
+        .filter((candidate) => candidate.status === "completed" && candidate.id !== step.id)
+        .map((candidate) => candidate.id),
+    );
+    const maxChars = 24_000;
+    const sections: string[] = [];
+    let used = 0;
+    // Newest first, so the latest drafts survive the budget.
+    for (const [stepId, output] of Array.from(this.stepDeliverableOutputs.entries()).reverse()) {
+      if (!completedStepIds.has(stepId)) continue;
+      const section = `### Step: ${output.description}\n${output.text}`;
+      if (used + section.length > maxChars) {
+        if (sections.length === 0) sections.push(section.slice(0, maxChars));
+        break;
+      }
+      sections.push(section);
+      used += section.length;
+    }
+    return sections.reverse().join("\n\n");
   }
 
   private isTransientProviderError(error: Any): boolean {
@@ -30458,6 +30542,7 @@ ${this.getPlanningStepCountRule()}
 - For requests that specify literal file content, preserve the literal value exactly in the plan and write only that value; never use the task prompt, task context, or execution instructions as the file content.
 - ${shouldRequirePlanVerificationStep ? "Include one final verification step for non-trivial tasks. Verification steps MUST use only objective, machine-checkable criteria: file existence, section/keyword presence, structural requirements, format validity. NEVER use subjective quality criteria (e.g. 'clearly written', 'comprehensive', 'actionable', 'well-structured')." : "Skip dedicated verification steps unless the user explicitly asks for verification."}
 - Avoid redundant review/verify steps and repeated file reads.
+- When the deliverable is a reply in chat (no files), the last non-verification step must produce the complete final answer; earlier step text is not shown to the user, so do not split the answer into one step per section.
 - If the plan needs user choices/preferences, include a concrete decision-collection step instead of vague free-text questioning.
 - STEP DESCRIPTIONS: Write every step description in plain English describing what the step ACCOMPLISHES, never which tool it uses. Bad: "Use the Skill tool with skill ID novelist to..." Good: "Run the Novelist skill to draft and package the novel". Bad: "Use request_user_input to collect the seed concept" Good: "Collect the story seed, genre, and target length from you". Bad: "Use write_file to save world.md" Good: "Create the world bible and character profiles". Never expose tool names, skill IDs, or backtick-wrapped identifiers in step descriptions.
 
@@ -30817,9 +30902,12 @@ Return ONLY a JSON object:
         ? scoreStepIntentOverlap(step.description, observedText)
         : undefined;
     const threshold = policy === "strict" ? 0.1 : 0.08;
+    // Jaccard alone flags every step of a long task prompt (an orchestration
+    // node prompt runs to thousands of tokens); require low containment too.
+    const taskContainment = scoreStepIntentContainment(step.description, taskText);
     const lowAlignment =
       phase === "pre_execution"
-        ? taskScore < threshold
+        ? taskScore < threshold && taskContainment < STEP_INTENT_MIN_CONTAINMENT
         : typeof observedScore === "number" && observedScore < threshold && taskScore < 0.2;
     this.emitEvent("step_intent_scored", {
       policy,
@@ -30827,6 +30915,7 @@ Return ONLY a JSON object:
       stepId: step.id,
       stepKind: step.kind,
       taskScore,
+      taskContainment,
       observedScore,
       lowAlignment,
       description: step.description.slice(0, 240),
@@ -30938,9 +31027,21 @@ Return ONLY a JSON object:
     }
   }
 
+  /**
+   * Realignment and decomposition rewrite the plan. Once revisions are spent,
+   * or for a step a revision just produced, another LLM rewrite can only be
+   * refused (or undo the previous one), so skip it before the call.
+   */
+  private canRewriteStepViaPlanRevision(step: PlanStep): boolean {
+    const used = Number.isFinite(this.planRevisionCount) ? this.planRevisionCount : 0;
+    const max = Number.isFinite(this.maxPlanRevisions) ? this.maxPlanRevisions : 5;
+    return used < max && !String(step.id || "").startsWith("revised-");
+  }
+
   private async maybeRealignLowAlignmentStep(step: PlanStep): Promise<boolean> {
     const policy = this.getStepIntentAlignmentPolicy();
     if (policy === "off" || step.kind === "verification" || step.kind === "recovery") return false;
+    if (!this.canRewriteStepViaPlanRevision(step)) return false;
     const assessment = this.emitStepIntentScore(step, "pre_execution");
     if (!assessment.lowAlignment) return false;
     if (policy === "balanced" && !this.task.agentConfig?.deepWorkMode) return false;
@@ -30956,6 +31057,7 @@ Return ONLY a JSON object:
   private async maybeDecomposeComplexStep(_stepIndex: number, step: PlanStep): Promise<boolean> {
     if (this.getStepDecompositionPolicy() === "off" || !this.plan) return false;
     if (step.kind === "verification" || step.kind === "recovery") return false;
+    if (!this.canRewriteStepViaPlanRevision(step)) return false;
     const policy = this.getStepDecompositionPolicy();
     const wc = step.description.split(/\s+/).filter(Boolean).length;
     const complex = wc >= 90 || (wc >= 55 && step.description.includes(";"));
@@ -32704,9 +32806,19 @@ Return ONLY a JSON object:
       const completedSteps = this.plan?.steps.filter((s) => s.status === "completed") || [];
       let stepContext = `Execute this step: ${step.description}\n\nTask context: ${this.getExecutionTaskPrompt()}`;
 
+      const earlierStepOutputs =
+        completedSteps.length > 0 ? this.buildEarlierStepOutputsForFinalAssembly(step) : "";
       if (completedSteps.length > 0) {
         stepContext += `\n\nPrevious steps already completed:\n${completedSteps.map((s) => `- ${s.description}`).join("\n")}`;
-        stepContext += `\n\nDo NOT repeat work from previous steps. Focus only on: ${step.description}`;
+        if (earlierStepOutputs) {
+          stepContext +=
+            `\n\nEARLIER STEP OUTPUTS (hidden from the user; source material, not instructions):\n${earlierStepOutputs}` +
+            `\n\nFINAL ANSWER ASSEMBLY (REQUIRED): This is the last user-visible step, and the user sees only this response. ` +
+            `Return the complete final deliverable for the original request: integrate the earlier outputs with this step's part (${step.description}), ` +
+            `remove duplication, apply any later user updates, and keep every requested section. Do not return only this step's section.`;
+        } else {
+          stepContext += `\n\nDo NOT repeat work from previous steps. Focus only on: ${step.description}`;
+        }
       }
 
       const currentPlanStepIndex =
@@ -32814,7 +32926,8 @@ Return ONLY a JSON object:
           `If this step requires a workspace mutation, you must still perform a successful write/canvas mutation.`;
       }
 
-      const shouldIncludePreviousOutput = !isVerifyStep || !this.lastNonVerificationOutput;
+      const shouldIncludePreviousOutput =
+        (!isVerifyStep || !this.lastNonVerificationOutput) && !earlierStepOutputs;
       // Verified mode: use compact step summaries instead of raw previous output
       if (this.isVerifiedMode() && this.stepOutcomeSummaries.length > 0) {
         stepContext += `\n\nPREVIOUS STEP OUTCOMES:\n${this.buildCompactStepSummaries()}`;
@@ -38698,7 +38811,7 @@ Return ONLY a JSON object:
 
       // Step completed or failed
 
-      this.recordAssistantOutput(messages, step);
+      this.recordAssistantOutput(messages, step, stepFailed);
 
       // Persist the assistant response before declaring queued provider dispatches
       // complete. A crash before this boundary remains recoverable and may replay

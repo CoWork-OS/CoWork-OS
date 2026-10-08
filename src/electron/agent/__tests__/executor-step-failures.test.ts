@@ -3251,6 +3251,118 @@ relationship_memory:
     }
   });
 
+  it("fails an inspection command that writes both OCR scratch and a project file", async () => {
+    executor = createExecutorWithStubs(
+      [
+        toolUseResponse("run_command", {
+          command: "printf recognized > .cowork/tmp/ocr.txt && printf changed > package.json",
+        }),
+        textResponse("Inspection completed."),
+      ],
+      {},
+    );
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ocr-mixed-write-"));
+    (executor as Any).workspace.path = tempDir;
+    fs.mkdirSync(path.join(tempDir, ".cowork", "tmp"), { recursive: true });
+    executor.toolRegistry.executeTool = vi.fn(async () => {
+      fs.writeFileSync(path.join(tempDir, ".cowork", "tmp", "ocr.txt"), "recognized\n");
+      fs.writeFileSync(path.join(tempDir, "package.json"), '{"changed":true}\n');
+      return { success: true, stdout: "", exitCode: 0 };
+    });
+    const step: Any = {
+      id: "inspect-image-mixed-write",
+      description: "Inspect the attached screenshot before changing any project files.",
+      status: "pending",
+    };
+
+    try {
+      await (executor as Any).executeStep(step);
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("Analysis/inspection step performed");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "does not exempt an OCR scratch symlink that writes into a project file",
+    async () => {
+      executor = createExecutorWithStubs(
+        [
+          toolUseResponse("run_command", {
+            command: "printf changed > .cowork/tmp/ocr.txt",
+          }),
+          textResponse("Inspection completed."),
+        ],
+        {},
+      );
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ocr-symlink-write-"));
+      (executor as Any).workspace.path = tempDir;
+      fs.mkdirSync(path.join(tempDir, ".cowork", "tmp"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "package.json"), "{}\n");
+      fs.symlinkSync(
+        path.join(tempDir, "package.json"),
+        path.join(tempDir, ".cowork", "tmp", "ocr.txt"),
+      );
+      executor.toolRegistry.executeTool = vi.fn(async () => {
+        fs.writeFileSync(path.join(tempDir, ".cowork", "tmp", "ocr.txt"), '{"changed":true}\n');
+        return { success: true, stdout: "", exitCode: 0 };
+      });
+      const step: Any = {
+        id: "inspect-image-symlink-write",
+        description: "Inspect the attached screenshot before changing any project files.",
+        status: "pending",
+      };
+
+      try {
+        await (executor as Any).executeStep(step);
+        expect(step.status).toBe("failed");
+        expect(String(step.error || "")).toContain("Analysis/inspection step performed");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "does not exempt a scratch directory symlinked to the workspace root",
+    async () => {
+      executor = createExecutorWithStubs(
+        [
+          toolUseResponse("run_command", {
+            command: "printf changed > .cowork/tmp/package.json",
+          }),
+          textResponse("Inspection completed."),
+        ],
+        {},
+      );
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ocr-dir-symlink-"));
+      (executor as Any).workspace.path = tempDir;
+      fs.mkdirSync(path.join(tempDir, ".cowork"), { recursive: true });
+      fs.symlinkSync(tempDir, path.join(tempDir, ".cowork", "tmp"), "dir");
+      executor.toolRegistry.executeTool = vi.fn(async () => {
+        fs.writeFileSync(
+          path.join(tempDir, ".cowork", "tmp", "package.json"),
+          '{"changed":true}\n',
+        );
+        return { success: true, stdout: "", exitCode: 0 };
+      });
+      const step: Any = {
+        id: "inspect-image-dir-symlink-write",
+        description: "Inspect the attached screenshot before changing any project files.",
+        status: "pending",
+      };
+
+      try {
+        await (executor as Any).executeStep(step);
+        expect(step.status).toBe("failed");
+        expect(String(step.error || "")).toContain("Analysis/inspection step performed");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("does not require a file write for an existing packaging audit", () => {
     executor = createExecutorWithStubs([], {});
     const step: Any = {
@@ -3262,6 +3374,27 @@ relationship_memory:
     const contract = (executor as Any).resolveStepExecutionContract(step);
     expect(contract.mode).toBe("analysis_only");
     expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+  });
+
+  it("selects the existing member of an alternate config path for an audit", () => {
+    executor = createExecutorWithStubs([], {});
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-config-alternatives-"));
+    (executor as Any).workspace.path = tempDir;
+    fs.writeFileSync(path.join(tempDir, "electron-builder.json"), "{}\n");
+    const step: Any = {
+      id: "audit-config-alternative",
+      description: "Read electron-builder.yml/.json and report which config exists.",
+      status: "pending",
+    };
+    try {
+      const contract = (executor as Any).resolveStepExecutionContract(step);
+      expect(contract.mode).toBe("analysis_only");
+      expect(contract.targetPaths).toEqual(["electron-builder.json"]);
+      expect(contract.requiredExtensions).toContain(".json");
+      expect(contract.requiredExtensions).not.toContain(".yml");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   async function runInspectThenEditStep(opts: {

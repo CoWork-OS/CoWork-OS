@@ -91,7 +91,7 @@ export const BUILTIN_ACCESS_PROFILES: readonly AccessProfileDefinition[] = [
     id: BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
     label: "Full access",
     description:
-      "Unrestricted local and network access without approval prompts, subject to OS/system protections.",
+      "Unrestricted local and network access without routine approval prompts; visual file analysis still asks for consent.",
     sandbox: "danger-full-access",
     approval: "never",
     reviewer: "none",

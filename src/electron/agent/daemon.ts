@@ -201,6 +201,7 @@ import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { APPROVAL_REQUEST_TIMEOUT_MS } from "./approval-timeouts";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
+import { isVisualAnalysisConsentRequest } from "./visual-consent-policy";
 import { isHeadlessMode } from "../utils/runtime-mode";
 import {
   buildAssistantApprovalMessage,
@@ -8566,7 +8567,14 @@ export class AgentDaemon extends EventEmitter {
         },
       };
     }
-    if (accessProfile.definition.approval === "never" && permission.evaluation.decision === "ask") {
+    const interactiveVisualConsent =
+      isVisualAnalysisConsentRequest(enrichedDetails.tool, type) &&
+      canAnswerInlineApproval(task, { headless: isHeadlessMode() });
+    if (
+      accessProfile.definition.approval === "never" &&
+      permission.evaluation.decision === "ask" &&
+      !interactiveVisualConsent
+    ) {
       this.logEvent(taskId, "log", {
         type: "tool_authorization",
         decision: "deny",
@@ -9097,9 +9105,17 @@ export class AgentDaemon extends EventEmitter {
     const details = (approval.details || {}) as Record<string, Any>;
     const current = await this.evaluatePermissionRequest(approval.taskId, approval.type, details);
     if (current.evaluation.decision === "deny") return false;
+    const currentTask =
+      typeof (this as Any).getTaskWithTransientAgentConfig === "function"
+        ? this.getTaskWithTransientAgentConfig(task)
+        : task;
+    const interactiveVisualConsent =
+      isVisualAnalysisConsentRequest(details.tool, approval.type) &&
+      canAnswerInlineApproval(currentTask, { headless: isHeadlessMode() });
     if (
       current.workspace?.permissions.accessApprovalPolicy === "never" &&
-      current.evaluation.decision !== "allow"
+      current.evaluation.decision !== "allow" &&
+      !interactiveVisualConsent
     )
       return false;
     const expectedKey = details.authorization?.key;

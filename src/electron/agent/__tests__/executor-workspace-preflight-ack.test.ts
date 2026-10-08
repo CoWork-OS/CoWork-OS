@@ -1255,8 +1255,9 @@ End with a final section titled "Verification Evidence".`,
     fakeThis.taskPinnedRoot = ".";
     fakeThis.taskPinnedRootSource = "fallback";
     fs.mkdirSync(path.join(workspaceDir, ".cowork", "tmp"), { recursive: true });
-    fs.mkdirSync(path.join(workspaceDir, "new-project"), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, "new-project", "src"), { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, "package.json"), "{}\n");
+    fs.writeFileSync(path.join(workspaceDir, "new-project", "src", "main.ts"), "export {};\n");
 
     try {
       (TaskExecutor as Any).prototype.maybePinTaskRootFromMutationPath.call(
@@ -1285,6 +1286,34 @@ End with a final section titled "Verification Evidence".`,
           "src/main.ts",
           { requireSourceMissing: true },
         )?.normalizedPath,
+      ).toBe("new-project/src/main.ts");
+      expect(
+        (TaskExecutor as Any).prototype.normalizeTaskRootPathCandidate.call(fakeThis, "LICENSE", {
+          requireSourceMissing: true,
+        }),
+      ).toBeNull();
+
+      fakeThis.taskPathRootPolicy = "strict_fail";
+      expect(
+        (TaskExecutor as Any).prototype.detectStrictTaskRootPathViolationInInput.call(
+          fakeThis,
+          "read_file",
+          { path: "package.json" },
+        ),
+      ).toBeNull();
+      expect(
+        (TaskExecutor as Any).prototype.detectStrictTaskRootPathViolationInInput.call(
+          fakeThis,
+          "write_file",
+          { path: "LICENSE" },
+        ),
+      ).toBeNull();
+      expect(
+        (TaskExecutor as Any).prototype.detectStrictTaskRootPathViolationInInput.call(
+          fakeThis,
+          "read_file",
+          { path: "src/main.ts" },
+        )?.expected,
       ).toBe("new-project/src/main.ts");
     } finally {
       fs.rmSync(workspaceDir, { recursive: true, force: true });

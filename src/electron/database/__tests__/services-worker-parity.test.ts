@@ -24,11 +24,9 @@ import { RoutineService } from "../../routines/service";
 import { ManagedSessionService } from "../../managed/ManagedSessionService";
 import { ManagedRepository } from "../../managed/managed-repository-facades";
 import { ContactIdentityService } from "../../identity/identity-repository-facades";
-import { EvalService } from "../../eval/eval-repository-facades";
 import { ActivityRepository } from "../../activity/activity-repository-facades";
 import { MissionControlIntelligenceService } from "../../mission-control/mission-control-repository-facades";
 import { registerPendingTimelineWrites } from "../timeline-write-registry";
-import { WorkSessionProtocolService } from "../../sessions/WorkSessionProtocolService";
 import {
   SessionMembershipService,
   WorkContextService,
@@ -753,107 +751,6 @@ describe("agent repositories on the host and in the database worker", () => {
     expect(result.unreadAfter).toBe(1);
     expect(result.unreadListed).toEqual(["Committed activity"]);
     expect(result.pendingCommitted).toBe(true);
-  });
-
-  async function runEvalWorkload(backend: "host" | "worker") {
-    const dir = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), `cowork-services-eval-${backend}-`)),
-    );
-    process.env.COWORK_USER_DATA_DIR = dir;
-    const manager = new DatabaseManager();
-    const db = manager.getDatabase();
-    const start = Date.now();
-    db.prepare(
-      `INSERT INTO workspaces (id, name, path, created_at, permissions)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run("workspace-1", "Workspace", path.join(dir, "workspace"), 1, "{}");
-    const tasks = new TaskStore(db);
-    const task = tasks.create({
-      title: "Replay case",
-      prompt: "Produce the replay output",
-      status: "executing",
-      workspaceId: "workspace-1",
-      source: "test",
-    } as never);
-    const protocol = new WorkSessionProtocolService(db);
-    for (const [id, type, payload] of [
-      ["replay-assistant", "assistant_message", { message: "replay says 42" }],
-      ["replay-complete", "task_completed", { resultSummary: "replay says 42" }],
-    ] as const) {
-      protocol.recordTaskEvent(task.id, {
-        id,
-        eventId: id,
-        taskId: task.id,
-        timestamp: start,
-        type,
-        schemaVersion: 2,
-        payload,
-      } as never);
-    }
-    tasks.update(task.id, { status: "completed", terminalStatus: "ok" } as never);
-    let calls = 0;
-    let client: DatabaseClient | null = null;
-    if (backend === "worker") {
-      client = await DatabaseClient.start({
-        dbPath: manager.getDatabasePath(),
-        requiredTables: requiredTablesFor(DATABASE_COMMANDS),
-        workerPath,
-      });
-      const execute = client.execute.bind(client);
-      vi.spyOn(client, "execute").mockImplementation(((name: string, args: unknown) => {
-        if (name.startsWith("statements.")) calls += 1;
-        return execute(name as Parameters<typeof execute>[0], args as never);
-      }) as typeof client.execute);
-      setStatementClient("services", manager.getDatabasePath(), client);
-    }
-    cleanups.push(async () => {
-      await client?.close(2_000);
-      manager.close();
-      fs.rmSync(dir, { recursive: true, force: true });
-    });
-
-    const evals = new EvalService(db);
-    // Creating a case links it on the task and adds it to the default suite in one unit;
-    // a suite run grades every case and records the results in one unit.
-    const evalCase = await evals.createCaseFromTask(task.id);
-    const suites = await evals.listSuites();
-    const run = await evals.runSuite(suites[0]!.id);
-    const reloaded = await evals.getRun(run.id);
-    const linked = db.prepare("SELECT eval_case_id FROM tasks WHERE id = ?").get(task.id) as {
-      eval_case_id?: string;
-    };
-    const result = stable(
-      {
-        linkedOnTask: linked.eval_case_id === evalCase.id,
-        caseName: evalCase.name.replace(task.id.slice(0, 8), "<id>"),
-        assertions: evalCase.assertions,
-        suites: suites.map((suite) => ({ name: suite.name, caseCount: suite.caseCount })),
-        run: {
-          status: run.status,
-          passCount: run.passCount,
-          failCount: run.failCount,
-          caseRuns: reloaded?.caseRuns.map((caseRun) => caseRun.status),
-        },
-        metrics: await evals.getBaselineMetrics(30),
-      },
-      start,
-    );
-    return { calls, result };
-  }
-
-  it("creates and runs eval cases the same on either backend", async () => {
-    const host = await runEvalWorkload("host");
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-    setStatementClient(null, null, null);
-    vi.restoreAllMocks();
-    const worker = await runEvalWorkload("worker");
-
-    expect(host.calls).toBe(0);
-    expect(worker.calls).toBe(5);
-    expect(worker.result).toEqual(host.result);
-    const result = host.result as Record<string, Any>;
-    expect(result.linkedOnTask).toBe(true);
-    expect(result.run).toMatchObject({ status: "completed", passCount: 1, caseRuns: ["pass"] });
   });
 
   async function runWorkspaceWorkload(backend: "host" | "worker") {

@@ -47,7 +47,7 @@ Added indexes:
 - `idx_tasks_eval_case_id`
 - `idx_tasks_eval_run_id`
 
-### Shared Types and IPC
+### Shared Types
 
 Added in `src/shared/types.ts`:
 
@@ -59,24 +59,12 @@ Added in `src/shared/types.ts`:
 - `Task.evalCaseId?: string`
 - `Task.evalRunId?: string`
 
-IPC channels:
-
-- `eval:listSuites`
-- `eval:runSuite`
-- `eval:getRun`
-- `eval:getCase`
-- `eval:createCaseFromTask`
-
-Wired in:
-
-- `src/electron/ipc/handlers.ts`
-- `src/electron/preload.ts`
-
 ### Eval Runtime Services
 
-Deterministic local eval service:
-
-- `src/electron/eval/EvalService.ts`
+Eval cases, suites and runs live in the eval tables and are driven by the QA scripts
+(`scripts/qa/build_eval_corpus.cjs`, `scripts/qa/run_eval_suite.cjs`). The app has no
+in-process eval service and no eval IPC endpoints; the earlier `eval:*` channels and the
+service behind them were removed because no screen, host method or CLI command called them.
 
 Risk scoring + gate decision matrix:
 
@@ -186,7 +174,7 @@ Reliability V2 tags promoted into eval assertions/metadata:
 
 ### Baseline Metrics
 
-Computed in `EvalService.getBaselineMetrics(...)`:
+The reliability KPIs track these metrics (the shape is `EvalBaselineMetrics` in `src/shared/types.ts`; the in-app calculator was removed with the eval IPC endpoints, so derive them from `tasks` and `task_events`):
 
 - `taskSuccessRate`
 - `toolFailureRateByTool`
@@ -411,7 +399,6 @@ The following require runtime history, not new code:
 
 Core implementation files:
 
-- `src/electron/eval/EvalService.ts`
 - `src/electron/eval/risk.ts`
 - `src/electron/agent/daemon.ts`
 - `src/electron/agent/executor.ts`

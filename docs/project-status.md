@@ -41,7 +41,6 @@ See [Release Notes 0.5.60](release-notes-0.5.60.md).
 - [x] Eval corpus extraction from failed/partial tasks (`scripts/qa/build_eval_corpus.cjs`)
 - [x] Deterministic eval suite replay runner (`scripts/qa/run_eval_suite.cjs`)
 - [x] Eval schema and task metadata (`eval_cases`, `eval_suites`, `eval_runs`, `eval_case_runs`, task risk/eval columns)
-- [x] Eval service and IPC endpoints (`eval:listSuites`, `eval:runSuite`, `eval:getRun`, `eval:getCase`, `eval:createCaseFromTask`)
 - [x] Risk scoring and policy-driven tiered review gate (`off`, `balanced`, `strict`)
 - [x] Prompt reliability hardening (modular prompt sections, shared policy dedupe, token budgets)
 - [x] Session- and turn-scoped prompt section memoization for execution and follow-up prompt assembly

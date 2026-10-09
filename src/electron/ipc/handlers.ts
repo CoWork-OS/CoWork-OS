@@ -577,7 +577,6 @@ import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
 import type { MemorySettings } from "../database/repositories";
 import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
-import { EvalService } from "../eval/eval-repository-facades";
 import {
   createUniqueScopedTempWorkspaceDirectorySync,
   ensureTempWorkspaceDirectoryPathSync,
@@ -1163,8 +1162,6 @@ rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_CREATE, RATE_LIMIT_CONFIGS.limited)
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_UPDATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_DELETE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_MOVE, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.EVAL_RUN_SUITE, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_ROLLOUT_GET, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_ROLLOUT_UPDATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_METRICS_LIST, RATE_LIMIT_CONFIGS.frequent);
@@ -1611,7 +1608,6 @@ export async function setupIpcHandlers(
   const teamRunRepo = new AgentTeamRunRepository(db);
   const teamItemRepo = new AgentTeamItemRepository(db);
   const teamThoughtRepo = new AgentTeamThoughtRepository(db);
-  const evalService = new EvalService(db);
   const taskLabelRepo = new TaskLabelRepository(db);
   const workingStateRepo = new WorkingStateRepository(db);
   const documentEditorSessionService = new DocumentEditorSessionService(
@@ -10079,40 +10075,6 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TEAM_RUN_FIND_BY_ROOT_TASK, async (_, rootTaskId: string) => {
     const validated = validateInput(UUIDSchema, rootTaskId, "root task ID");
     return agentDaemon.ensureCollaborativeRunForParentTask(validated) || null;
-  });
-
-  // Eval Suites / Runs (Reliability Flywheel)
-  ipcMain.handle(IPC_CHANNELS.EVAL_LIST_SUITES, async (_, options?: { windowDays?: number }) => {
-    const windowDays =
-      typeof options?.windowDays === "number" && Number.isFinite(options.windowDays)
-        ? options.windowDays
-        : 30;
-    return {
-      suites: await evalService.listSuites(),
-      metrics: await evalService.getBaselineMetrics(windowDays),
-    };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, async (_, data: { taskId: string }) => {
-    checkRateLimit(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK);
-    const taskId = validateInput(UUIDSchema, data?.taskId, "task ID");
-    return evalService.createCaseFromTask(taskId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.EVAL_GET_CASE, async (_, caseId: string) => {
-    const validated = validateInput(UUIDSchema, caseId, "eval case ID");
-    return evalService.getCase(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.EVAL_RUN_SUITE, async (_, suiteId: string) => {
-    checkRateLimit(IPC_CHANNELS.EVAL_RUN_SUITE);
-    const validated = validateInput(UUIDSchema, suiteId, "eval suite ID");
-    return evalService.runSuite(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.EVAL_GET_RUN, async (_, runId: string) => {
-    const validated = validateInput(UUIDSchema, runId, "eval run ID");
-    return evalService.getRun(validated);
   });
 
   // Local operator controls for Phase 5 rollout, observability, and replay.

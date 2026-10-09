@@ -38,6 +38,23 @@ export const WEB_PREVIEW_CSP =
   "form-action 'none'; " +
   "base-uri 'none'";
 
+/** Previews never need device, payment or clipboard access. */
+export const WEB_PREVIEW_PERMISSIONS_POLICY = [
+  "camera=()",
+  "microphone=()",
+  "geolocation=()",
+  "payment=()",
+  "usb=()",
+  "serial=()",
+  "hid=()",
+  "bluetooth=()",
+  "clipboard-read=()",
+  "clipboard-write=()",
+  "display-capture=()",
+  "screen-wake-lock=()",
+  "publickey-credentials-get=()",
+].join(", ");
+
 type PreviewRecord = { html: string; expiresAt: number };
 
 const previewStore = new Map<string, PreviewRecord>();
@@ -87,6 +104,10 @@ export function createWebPreviewUrl(html: string): string {
   const existingRecord = existing ? previewStore.get(existing) : undefined;
   if (existing && existingRecord) {
     existingRecord.expiresAt = Date.now() + TOKEN_TTL_MS;
+    // Least recently used goes first: re-inserting moves a reopened page to the back, so
+    // a surface still on screen is not evicted ahead of ones scrolled away long ago.
+    previewStore.delete(existing);
+    previewStore.set(existing, existingRecord);
     return `${WEB_PREVIEW_SCHEME}://local/${existing}`;
   }
   while (previewStore.size >= MAX_ENTRIES) {
@@ -115,6 +136,10 @@ export function resolveWebPreviewRequest(rawUrl: string): Response {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": WEB_PREVIEW_CSP,
+      "Permissions-Policy": WEB_PREVIEW_PERMISSIONS_POLICY,
+      "Referrer-Policy": "no-referrer",
+      // Resource hints are outside the CSP; this keeps the page from resolving hostnames.
+      "X-DNS-Prefetch-Control": "off",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },

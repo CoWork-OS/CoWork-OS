@@ -1,16 +1,27 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ExternalLink } from "lucide-react";
 import type { FileViewerResult } from "../../electron/preload";
+import { htmlSurfaceKey } from "../../shared/answer-surfaces/blocks";
+import {
+  HtmlSurfaceStateSchema,
+  summarizeHtmlSurfaceState,
+  type HtmlSurfaceState,
+} from "../../shared/answer-surfaces/html-bridge";
 import {
   applyRichFrameDesignLanguage,
+  buildRichFrameDesignCss,
   type RichFrameDesignOptions,
   type RichFrameTheme,
 } from "../../shared/rich-frame-design-language";
+import { loadSurfaceState, saveSurfaceState } from "../hooks/useAnswerSurfaceState";
+import { HtmlSurfaceBridgeHost, createSurfaceNonce } from "../utils/html-surface-bridge";
 
 type InlineHtmlPreviewVariant = "default" | "frame";
 
 type InlineHtmlPreviewProps = {
   filePath: string;
+  /** Saves the surface's inputs for this task, so they survive restarts and reach the model. */
+  taskId?: string;
   workspacePath: string;
   title?: string;
   className?: string;
@@ -23,6 +34,7 @@ type InlineHtmlPreviewProps = {
 
 type InlineHtmlSourcePreviewProps = {
   htmlContent: string;
+  taskId?: string;
   title?: string;
   className?: string;
   variant?: InlineHtmlPreviewVariant;
@@ -41,14 +53,14 @@ const formatFileSize = (bytes: number): string => {
 };
 
 function extractHtmlTitle(htmlContent: string): string {
-  const titleMatch = htmlContent.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  const titleMatch = htmlContent.match(/<title\b[^>]{0,2000}>([\s\S]{0,2000}?)<\/title>/i);
   const title = titleMatch?.[1]
     ?.replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (title) return title;
 
-  const headingMatch = htmlContent.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+  const headingMatch = htmlContent.match(/<h1\b[^>]{0,2000}>([\s\S]{0,2000}?)<\/h1>/i);
   const heading = headingMatch?.[1]
     ?.replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
@@ -125,6 +137,196 @@ function buildFrameStyle({
   };
 }
 
+const SAVE_DELAY_MS = 500;
+const STATE_LOAD_TIMEOUT_MS = 400;
+/** If a frame never reports a height, it falls back to the fixed CSS size. */
+const SIZE_FALLBACK_MS = 2000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise.catch(() => fallback),
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
+/**
+ * One inline HTML surface. On the desktop the document is registered with main, which
+ * injects the design tokens and the bridge, and is framed from `cowork-preview://` so its
+ * scripts run on an opaque origin with no network. The bridge sizes the frame to its
+ * content, follows theme changes without a reload, and saves the user's inputs. Where
+ * registration is unavailable (the browser host) it falls back to a static srcdoc frame.
+ */
+function HtmlSurfaceFrame({
+  html,
+  title,
+  designLanguage,
+  designOptions,
+  autosize,
+  taskId,
+  onSizeChange,
+}: {
+  html: string;
+  title: string;
+  designLanguage: boolean;
+  designOptions: RichFrameDesignOptions;
+  autosize: boolean;
+  taskId?: string;
+  onSizeChange: (height: number | null) => void;
+}) {
+  const register =
+    typeof window === "undefined" ? undefined : window.electronAPI?.registerHtmlSurface;
+  const [url, setUrl] = useState<string | null>(null);
+  const [registrationFailed, setRegistrationFailed] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const optionsRef = useRef(designOptions);
+  optionsRef.current = designOptions;
+  const initializedRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const surfaceKey = useMemo(() => htmlSurfaceKey(html), [html]);
+
+  useEffect(() => {
+    if (!register) return;
+    let cancelled = false;
+    setUrl(null);
+    setRegistrationFailed(false);
+    // The document is themed for the theme at mount; later changes go over the bridge.
+    const { theme, hostBackground } = optionsRef.current;
+    register({ html, theme: theme ?? "light", hostBackground, designLanguage })
+      .then((result) => {
+        if (!cancelled) setUrl(result.url);
+      })
+      .catch(() => {
+        if (!cancelled) setRegistrationFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [designLanguage, html, register]);
+
+  const bridge = useMemo(() => {
+    if (!url) return null;
+    const persist = (state: HtmlSurfaceState) => {
+      if (!taskId) return;
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        saveSurfaceState(taskId, surfaceKey, state, summarizeHtmlSurfaceState(state));
+      }, SAVE_DELAY_MS);
+    };
+    return new HtmlSurfaceBridgeHost(() => iframeRef.current?.contentWindow, createSurfaceNonce(), {
+      onResize: (height) => autosize && onSizeChange(height),
+      onState: persist,
+    });
+  }, [autosize, onSizeChange, surfaceKey, taskId, url]);
+
+  useEffect(() => {
+    if (!bridge) return;
+    const listener = (event: MessageEvent) => bridge.handle(event);
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, [bridge]);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!bridge || !initializedRef.current) return;
+    const theme = designOptions.theme ?? "light";
+    bridge.setTheme({
+      theme,
+      css: designLanguage ? buildRichFrameDesignCss(theme, designOptions.hostBackground) : null,
+    });
+  }, [bridge, designLanguage, designOptions]);
+
+  const handleLoad = async () => {
+    if (!bridge) return;
+    initializedRef.current = false;
+    const saved = taskId
+      ? await withTimeout(loadSurfaceState(taskId, surfaceKey), STATE_LOAD_TIMEOUT_MS, null)
+      : null;
+    const parsed = HtmlSurfaceStateSchema.safeParse(saved ?? {});
+    const { theme = "light", hostBackground } = optionsRef.current;
+    bridge.init({
+      state: parsed.success ? parsed.data : {},
+      theme,
+      css: designLanguage ? buildRichFrameDesignCss(theme, hostBackground) : null,
+      autosize,
+    });
+    initializedRef.current = true;
+  };
+
+  useEffect(() => {
+    if (!url || !autosize) return;
+    const timer = setTimeout(() => onSizeChange(null), SIZE_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, [autosize, onSizeChange, url]);
+
+  if (!register || registrationFailed) {
+    const fallbackHtml = designLanguage ? applyRichFrameDesignLanguage(html, designOptions) : html;
+    return (
+      <iframe
+        className="inline-html-frame"
+        srcDoc={fallbackHtml}
+        sandbox="allow-scripts allow-forms"
+        title={title}
+      />
+    );
+  }
+  if (!url) return <div className="inline-html-frame inline-html-frame-pending" />;
+  return (
+    <>
+      <iframe
+        ref={iframeRef}
+        className="inline-html-frame"
+        src={url}
+        // No allow-same-origin: the document stays on an opaque origin with no app access.
+        sandbox="allow-scripts allow-forms"
+        referrerPolicy="no-referrer"
+        title={title}
+        // Chromium paints an opaque backdrop behind a frame whose color scheme differs
+        // from its element's, which shows as square corners behind rounded cards.
+        style={{ colorScheme: designOptions.theme ?? "light" }}
+        onLoad={() => void handleLoad()}
+      />
+      {/* Drawn by the app, outside the frame, so generated content can't pass as app UI. */}
+      <div className="inline-html-surface-badge">
+        Interactive content · runs offline in a sandbox
+      </div>
+    </>
+  );
+}
+
+/**
+ * The frame's measured height: null until it reports one (or gives up), so the wrapper
+ * keeps its fixed CSS size for frames that never talk to the bridge.
+ */
+function useSurfaceSize(autosize: boolean) {
+  const [height, setHeight] = useState<number | null>(null);
+  const [settled, setSettled] = useState(false);
+  const onSizeChange = useMemo(
+    () => (next: number | null) => {
+      setSettled(true);
+      if (next !== null) setHeight(next);
+    },
+    [],
+  );
+  const sizing = autosize && !settled;
+  const sized = autosize && height !== null;
+  const style: CSSProperties | undefined = sized
+    ? ({ "--inline-html-frame-auto-height": `${height}px` } as CSSProperties)
+    : undefined;
+  const className = sized
+    ? "inline-html-preview-autosized"
+    : sizing
+      ? "inline-html-preview-sizing"
+      : "";
+  return { onSizeChange, style, className };
+}
+
 function InlineHtmlHeader({
   displayTitle,
   subtitle,
@@ -175,6 +377,7 @@ function InlineHtmlHeader({
 
 export function InlineHtmlSourcePreview({
   htmlContent,
+  taskId,
   title,
   className = "",
   variant = "default",
@@ -186,26 +389,27 @@ export function InlineHtmlSourcePreview({
   const isFrame = variant === "frame";
   const hideChrome = isFrame && !showChrome;
   const style = buildFrameStyle({ frameHeight, aspectRatio });
-  const frameDesignOptions = useRichFrameDesignOptions(isFrame);
-  const previewHtmlContent = useMemo(
-    () => (isFrame ? applyRichFrameDesignLanguage(htmlContent, frameDesignOptions) : htmlContent),
-    [frameDesignOptions, htmlContent, isFrame],
-  );
+  const frameDesignOptions = useRichFrameDesignOptions(true);
+  const autosize = !style;
+  const size = useSurfaceSize(autosize);
 
   return (
     <div
-      className={`inline-html-preview inline-html-preview-source ${isFrame ? "inline-html-preview-frame" : ""} ${className}`.trim()}
-      style={style}
+      className={`inline-html-preview inline-html-preview-source ${isFrame ? "inline-html-preview-frame" : ""} ${size.className} ${className}`.trim()}
+      style={{ ...style, ...size.style }}
     >
       {!hideChrome && (
         <InlineHtmlHeader displayTitle={displayTitle} subtitle={isFrame ? "Frame" : "HTML form"} />
       )}
       <div className="inline-html-frame-wrap">
-        <iframe
-          className="inline-html-frame"
-          srcDoc={previewHtmlContent}
-          sandbox="allow-scripts allow-forms"
+        <HtmlSurfaceFrame
+          html={htmlContent}
           title={displayTitle}
+          designLanguage={isFrame}
+          designOptions={frameDesignOptions}
+          autosize={autosize}
+          taskId={taskId}
+          onSizeChange={size.onSizeChange}
         />
       </div>
     </div>
@@ -215,6 +419,7 @@ export function InlineHtmlSourcePreview({
 export function InlineHtmlPreview({
   filePath,
   workspacePath,
+  taskId,
   title,
   className = "",
   variant = "default",
@@ -236,11 +441,10 @@ export function InlineHtmlPreview({
   const isFrame = variant === "frame";
   const hideChrome = isFrame && !showChrome;
   const style = buildFrameStyle({ frameHeight, aspectRatio });
-  const frameDesignOptions = useRichFrameDesignOptions(isFrame);
-  const previewHtmlContent = useMemo(() => {
-    const htmlContent = result?.htmlContent || "";
-    return isFrame ? applyRichFrameDesignLanguage(htmlContent, frameDesignOptions) : htmlContent;
-  }, [frameDesignOptions, isFrame, result?.htmlContent]);
+  const frameDesignOptions = useRichFrameDesignOptions(true);
+  const previewHtmlContent = result?.htmlContent || "";
+  const autosize = !style;
+  const size = useSurfaceSize(autosize);
 
   useEffect(() => {
     let cancelled = false;
@@ -295,8 +499,8 @@ export function InlineHtmlPreview({
 
   return (
     <div
-      className={`inline-html-preview ${isFrame ? "inline-html-preview-frame" : ""} ${className}`.trim()}
-      style={style}
+      className={`inline-html-preview ${isFrame ? "inline-html-preview-frame" : ""} ${size.className} ${className}`.trim()}
+      style={{ ...style, ...size.style }}
     >
       {loading && <div className="inline-html-loading">Loading HTML preview…</div>}
 
@@ -309,11 +513,14 @@ export function InlineHtmlPreview({
           )}
 
           <div className="inline-html-frame-wrap">
-            <iframe
-              className="inline-html-frame"
-              srcDoc={previewHtmlContent}
-              sandbox="allow-scripts allow-forms"
+            <HtmlSurfaceFrame
+              html={previewHtmlContent}
               title={displayTitle}
+              designLanguage={isFrame}
+              designOptions={frameDesignOptions}
+              autosize={autosize}
+              taskId={taskId}
+              onSizeChange={size.onSizeChange}
             />
           </div>
         </>

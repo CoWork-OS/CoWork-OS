@@ -312,7 +312,7 @@ describe("execution prompt routing blocks", () => {
     expect(base).not.toContain("CLOUD STORAGE ROUTING");
     expect(base).not.toContain("ATTACHED PDFS");
     expect(base).not.toContain("RICH INLINE SURFACES");
-    expect(base).not.toContain("Default rich-frame design language");
+    expect(base).not.toContain("Inline HTML design kit");
     // Core operating guidance stays.
     expect(base).toContain("OPERATING RULES:");
     expect(base).toContain("PATH DISCOVERY (CRITICAL):");
@@ -336,11 +336,7 @@ describe("execution prompt routing blocks", () => {
       "Summarize the attached contract.\n\nPDF attachment: contract.pdf\nPath: uploads/contract.pdf",
       "ATTACHED PDFS",
     ],
-    [
-      "rich surface",
-      "Show my weekly running distance as a chart.",
-      "Default rich-frame design language",
-    ],
+    ["rich surface", "Show my weekly running distance as a chart.", "Inline HTML design kit"],
   ])("includes the %s block when its intent detector fires", (_label, prompt, heading) => {
     const executor = makePromptExecutor({
       title: "Help",

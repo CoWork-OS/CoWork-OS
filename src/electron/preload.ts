@@ -7023,6 +7023,7 @@ export interface ElectronAPI {
     homeResearchVaultEnabled?: boolean;
     homeNextActionsEnabled?: boolean;
     costReceiptEnabled?: boolean;
+    subAgentStatsEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;
@@ -7055,6 +7056,7 @@ export interface ElectronAPI {
     homeResearchVaultEnabled?: boolean;
     homeNextActionsEnabled?: boolean;
     costReceiptEnabled?: boolean;
+    subAgentStatsEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;

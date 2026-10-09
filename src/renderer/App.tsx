@@ -785,6 +785,7 @@ type SelectedTaskWorkspaceViewProps = {
   homeResearchVaultEnabled: boolean;
   homeNextActionsEnabled: boolean;
   costReceiptEnabled: boolean;
+  subAgentStatsEnabled: boolean;
   rendererPerfLoggingEnabled: boolean;
   taskSwitchId: string | null;
   hasMoreTimelineHistory: boolean;
@@ -869,6 +870,9 @@ type SelectedTaskWorkspaceViewProps = {
   onOpenBrowserView?: (url?: string) => void;
   onRevealRightSidebar?: () => void;
   onViewTaskOutputs: (taskId: string, primaryOutputPath?: string) => void;
+  onViewSubAgents: () => void;
+  subAgentsFocusRequest: number;
+  onSubAgentsFocusConsumed: () => void;
   onTasksChanged: () => void | Promise<void>;
   onCancelTaskById: (taskId: string) => Promise<void>;
   onHighlightConsumed: () => void;
@@ -951,6 +955,7 @@ const SelectedTaskWorkspaceView = memo(
     homeResearchVaultEnabled,
     homeNextActionsEnabled,
     costReceiptEnabled,
+    subAgentStatsEnabled,
     rendererPerfLoggingEnabled,
     taskSwitchId,
     hasMoreTimelineHistory,
@@ -995,6 +1000,9 @@ const SelectedTaskWorkspaceView = memo(
     onOpenBrowserView,
     onRevealRightSidebar,
     onViewTaskOutputs,
+    onViewSubAgents,
+    subAgentsFocusRequest,
+    onSubAgentsFocusConsumed,
     onTasksChanged,
     onCancelTaskById,
     onHighlightConsumed,
@@ -1662,6 +1670,7 @@ const SelectedTaskWorkspaceView = memo(
               onDismissInputRequest={onDismissInputRequest}
               onOpenBrowserView={canUseInteractiveBrowser ? onOpenBrowserView : undefined}
               onViewTaskOutputs={onViewTaskOutputs}
+              onViewSubAgents={onViewSubAgents}
               onTasksChanged={onTasksChanged}
               selectedModel={selectedModel}
               selectedProvider={selectedProvider}
@@ -1883,6 +1892,9 @@ const SelectedTaskWorkspaceView = memo(
                 onOpenWebArtifact={openWebArtifact}
                 rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
                 costReceiptEnabled={costReceiptEnabled}
+                subAgentStatsEnabled={subAgentStatsEnabled}
+                subAgentsFocusRequest={subAgentsFocusRequest}
+                onSubAgentsFocusConsumed={onSubAgentsFocusConsumed}
                 highlightOutputPath={rightPanelInput.highlightOutputPath}
                 onHighlightConsumed={onHighlightConsumed}
               />
@@ -1938,6 +1950,8 @@ const SelectedTaskWorkspaceView = memo(
     prev.homeResearchVaultEnabled === next.homeResearchVaultEnabled &&
     prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
     prev.costReceiptEnabled === next.costReceiptEnabled &&
+    prev.subAgentStatsEnabled === next.subAgentStatsEnabled &&
+    prev.subAgentsFocusRequest === next.subAgentsFocusRequest &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
     prev.terminalTabsOpen === next.terminalTabsOpen &&
@@ -2345,6 +2359,7 @@ export function App() {
   const [homeResearchVaultEnabled, setHomeResearchVaultEnabled] = useState(false);
   const [homeNextActionsEnabled, setHomeNextActionsEnabled] = useState(false);
   const [costReceiptEnabled, setCostReceiptEnabled] = useState(false);
+  const [subAgentStatsEnabled, setSubAgentStatsEnabled] = useState(false);
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -3361,6 +3376,13 @@ export function App() {
   const handleRevealRightSidebar = useCallback(() => {
     setRightSidebarCollapsed(false);
   }, []);
+  // Bumped to make the right panel expand and scroll to its Sub Agents section.
+  const [subAgentsFocusRequest, setSubAgentsFocusRequest] = useState(0);
+  const handleViewSubAgents = useCallback(() => {
+    setRightSidebarCollapsed(false);
+    setSubAgentsFocusRequest((count) => count + 1);
+  }, []);
+  const handleSubAgentsFocusConsumed = useCallback(() => setSubAgentsFocusRequest(0), []);
 
   const handleShowOnboarding = () => {
     // Reset onboarding state to show the wizard again
@@ -3439,6 +3461,7 @@ export function App() {
         setHomeResearchVaultEnabled(settings.homeResearchVaultEnabled === true);
         setHomeNextActionsEnabled(settings.homeNextActionsEnabled === true);
         setCostReceiptEnabled(settings.costReceiptEnabled === true);
+        setSubAgentStatsEnabled(settings.subAgentStatsEnabled === true);
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
         setOnboardingCompleted(settings.onboardingCompleted ?? false);
         setOnboardingCompletedAt(settings.onboardingCompletedAt);
@@ -7009,6 +7032,13 @@ export function App() {
     });
   };
 
+  const handleSubAgentStatsEnabledChange = (enabled: boolean) => {
+    setSubAgentStatsEnabled(enabled);
+    void window.electronAPI?.saveAppearanceSettings?.({
+      subAgentStatsEnabled: enabled,
+    });
+  };
+
   // Smart right panel visibility: auto-collapse on welcome screen in focused mode
   const effectiveRightCollapsed =
     currentView !== "main"
@@ -8551,6 +8581,7 @@ export function App() {
                   homeResearchVaultEnabled={homeResearchVaultEnabled}
                   homeNextActionsEnabled={homeNextActionsEnabled}
                   costReceiptEnabled={costReceiptEnabled}
+                  subAgentStatsEnabled={subAgentStatsEnabled}
                   rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
                   taskSwitchId={selectedTaskSwitchId}
                   hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}
@@ -8599,6 +8630,9 @@ export function App() {
                   onOpenBrowserView={handleOpenBrowserView}
                   onRevealRightSidebar={handleRevealRightSidebar}
                   onViewTaskOutputs={handleViewTaskOutputsFromMainContent}
+                  onViewSubAgents={handleViewSubAgents}
+                  subAgentsFocusRequest={subAgentsFocusRequest}
+                  onSubAgentsFocusConsumed={handleSubAgentsFocusConsumed}
                   onTasksChanged={refreshTaskLists}
                   onCancelTaskById={handleCancelTaskById}
                   onHighlightConsumed={handleRightPanelHighlightConsumed}
@@ -8696,6 +8730,8 @@ export function App() {
               onHomeNextActionsEnabledChange={handleHomeNextActionsEnabledChange}
               costReceiptEnabled={costReceiptEnabled}
               onCostReceiptEnabledChange={handleCostReceiptEnabledChange}
+              subAgentStatsEnabled={subAgentStatsEnabled}
+              onSubAgentStatsEnabledChange={handleSubAgentStatsEnabledChange}
               initialTab={settingsTab}
               memoryReviewRequest={memoryReviewRequest}
               focusAutomation={focusAutomationOwner}

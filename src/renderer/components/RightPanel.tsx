@@ -863,6 +863,11 @@ interface RightPanelProps {
   rendererPerfLoggingEnabled?: boolean;
   /** Opt-in Appearance setting; the Cost section is hidden by default. */
   costReceiptEnabled?: boolean;
+  /** Opt-in Appearance setting; sub-agent runtime/token/cost totals are hidden by default. */
+  subAgentStatsEnabled?: boolean;
+  /** Bumped to expand the Sub Agents section and scroll it into view. */
+  subAgentsFocusRequest?: number;
+  onSubAgentsFocusConsumed?: () => void;
   highlightOutputPath?: string | null;
   onHighlightConsumed?: () => void;
 }
@@ -1578,6 +1583,8 @@ const CollaborativeAgentsSection = memo(
     totals,
     toggleSection,
     onSelectTask,
+    statsEnabled = false,
+    sectionRef,
     rendererPerfLoggingEnabled,
   }: {
     visible: boolean;
@@ -1585,6 +1592,8 @@ const CollaborativeAgentsSection = memo(
     totals: CollaborativeAgentTotals | null;
     toggleSection: () => void;
     onSelectTask?: (taskId: string) => void;
+    statsEnabled?: boolean;
+    sectionRef?: React.Ref<HTMLDivElement>;
     rendererPerfLoggingEnabled?: boolean;
   }) {
     recordRendererRender(
@@ -1606,7 +1615,10 @@ const CollaborativeAgentsSection = memo(
       .join(" · ");
 
     return (
-      <div className="right-panel-section cli-section collaborative-agents-section">
+      <div
+        ref={sectionRef}
+        className="right-panel-section cli-section collaborative-agents-section"
+      >
         <button
           type="button"
           className="cli-section-header"
@@ -1626,46 +1638,48 @@ const CollaborativeAgentsSection = memo(
         </button>
         {expanded && (
           <div className="cli-section-content">
-            <div className="collab-agents-summary-card">
-              <div className="collab-agents-summary-head">
-                <strong>{totals.total} background agents</strong>
-                <span>{statusSummary || "No status yet"}</span>
+            {statsEnabled ? (
+              <div className="collab-agents-summary-card">
+                <div className="collab-agents-summary-head">
+                  <strong>{totals.total} background agents</strong>
+                  <span>{statusSummary || "No status yet"}</span>
+                </div>
+                <div className="collab-agents-stat-grid" aria-label="Sub-agent totals">
+                  <div>
+                    <span>Runtime</span>
+                    <strong>{formatRightPanelDuration(totals.wallDurationMs)}</strong>
+                  </div>
+                  <div>
+                    <span>Events</span>
+                    <strong>{formatCompactNumber(totals.eventCount)}</strong>
+                  </div>
+                  <div>
+                    <span>Tools</span>
+                    <strong>{formatCompactNumber(totals.toolCallCount)}</strong>
+                  </div>
+                  <div>
+                    <span>LLM calls</span>
+                    <strong>{formatCompactNumber(totals.llmCallCount)}</strong>
+                  </div>
+                  <div>
+                    <span>Tokens</span>
+                    <strong>{formatCompactNumber(totalTokens)}</strong>
+                  </div>
+                  <div>
+                    <span>Cost</span>
+                    <strong
+                      title={
+                        totals.costKnown
+                          ? undefined
+                          : "Some models used here have no known price, so the real cost is higher."
+                      }
+                    >
+                      {totals.hasUsage ? formatCost(totals.cost, totals.costKnown) : "—"}
+                    </strong>
+                  </div>
+                </div>
               </div>
-              <div className="collab-agents-stat-grid" aria-label="Sub-agent totals">
-                <div>
-                  <span>Runtime</span>
-                  <strong>{formatRightPanelDuration(totals.wallDurationMs)}</strong>
-                </div>
-                <div>
-                  <span>Events</span>
-                  <strong>{formatCompactNumber(totals.eventCount)}</strong>
-                </div>
-                <div>
-                  <span>Tools</span>
-                  <strong>{formatCompactNumber(totals.toolCallCount)}</strong>
-                </div>
-                <div>
-                  <span>LLM calls</span>
-                  <strong>{formatCompactNumber(totals.llmCallCount)}</strong>
-                </div>
-                <div>
-                  <span>Tokens</span>
-                  <strong>{formatCompactNumber(totalTokens)}</strong>
-                </div>
-                <div>
-                  <span>Cost</span>
-                  <strong
-                    title={
-                      totals.costKnown
-                        ? undefined
-                        : "Some models used here have no known price, so the real cost is higher."
-                    }
-                  >
-                    {totals.hasUsage ? formatCost(totals.cost, totals.costKnown) : "—"}
-                  </strong>
-                </div>
-              </div>
-            </div>
+            ) : null}
             <div className="collab-agents-list">
               {totals.rows.map((row) => (
                 <div key={row.task.id} className={`collab-agent-summary-row ${row.statusKind}`}>
@@ -1676,13 +1690,15 @@ const CollaborativeAgentsSection = memo(
                       )}
                     </span>
                   </div>
-                  <div className="collab-agent-summary-meta">
-                    <span>{formatRightPanelDuration(row.durationMs)}</span>
-                    <span>{formatCompactNumber(row.toolCallCount)} tools</span>
-                    <span>
-                      {formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok
-                    </span>
-                  </div>
+                  {statsEnabled ? (
+                    <div className="collab-agent-summary-meta">
+                      <span>{formatRightPanelDuration(row.durationMs)}</span>
+                      <span>{formatCompactNumber(row.toolCallCount)} tools</span>
+                      <span>
+                        {formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok
+                      </span>
+                    </div>
+                  ) : null}
                   <span className={`collab-agent-summary-status ${row.statusKind}`}>
                     {row.statusLabel}
                   </span>
@@ -1708,6 +1724,7 @@ const CollaborativeAgentsSection = memo(
     prev.expanded === next.expanded &&
     prev.totals === next.totals &&
     prev.onSelectTask === next.onSelectTask &&
+    prev.statsEnabled === next.statsEnabled &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
@@ -1727,6 +1744,9 @@ function RightPanelComponent({
   onOpenWebArtifact,
   rendererPerfLoggingEnabled = false,
   costReceiptEnabled = false,
+  subAgentStatsEnabled = false,
+  subAgentsFocusRequest = 0,
+  onSubAgentsFocusConsumed,
   highlightOutputPath = null,
   onHighlightConsumed,
 }: RightPanelProps) {
@@ -2205,6 +2225,23 @@ function RightPanelComponent({
   const showCollaborativeAgentsSection = Boolean(
     collaborativeAgentTotals && (childTasks.length > 0 || task?.agentConfig?.collaborativeMode),
   );
+  const collaborativeAgentsSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!subAgentsFocusRequest) return;
+    if (showCollaborativeAgentsSection) {
+      setExpandedSections((prev) =>
+        prev.collaborativeAgents ? prev : { ...prev, collaborativeAgents: true },
+      );
+      requestAnimationFrame(() => {
+        collaborativeAgentsSectionRef.current?.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        });
+      });
+    }
+    // Consume either way so reopening the panel later doesn't jump here again.
+    onSubAgentsFocusConsumed?.();
+  }, [onSubAgentsFocusConsumed, showCollaborativeAgentsSection, subAgentsFocusRequest]);
   const taskCostSummary = useMemo(() => getTaskCostSummary(events), [events]);
   const [taskCostEstimate, setTaskCostEstimate] = useState<TaskCostEstimate | null>(null);
   const taskIdForCost = task?.id;
@@ -2443,6 +2480,8 @@ function RightPanelComponent({
         totals={collaborativeAgentTotals}
         toggleSection={() => toggleSection("collaborativeAgents")}
         onSelectTask={onSelectTask}
+        statsEnabled={subAgentStatsEnabled}
+        sectionRef={collaborativeAgentsSectionRef}
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
       />
 
@@ -2552,6 +2591,9 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.onOpenWebArtifact === next.onOpenWebArtifact &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.costReceiptEnabled === next.costReceiptEnabled &&
+    prev.subAgentStatsEnabled === next.subAgentStatsEnabled &&
+    prev.subAgentsFocusRequest === next.subAgentsFocusRequest &&
+    prev.onSubAgentsFocusConsumed === next.onSubAgentsFocusConsumed &&
     prev.highlightOutputPath === next.highlightOutputPath &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onHighlightConsumed === next.onHighlightConsumed

@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   homeResearchVaultEnabled: false,
   homeNextActionsEnabled: false,
   costReceiptEnabled: false,
+  subAgentStatsEnabled: false,
   disclaimerAccepted: false,
   onboardingCompleted: false,
   onboardingCompletedAt: undefined,
@@ -154,7 +155,8 @@ export class AppearanceManager {
             typeof stored.devRunLoggingEnabled !== "boolean" ||
             typeof stored.homeResearchVaultEnabled !== "boolean" ||
             typeof stored.homeNextActionsEnabled !== "boolean" ||
-            typeof stored.costReceiptEnabled !== "boolean"
+            typeof stored.costReceiptEnabled !== "boolean" ||
+            typeof stored.subAgentStatsEnabled !== "boolean"
           ) {
             needsWrite = true;
           }
@@ -207,6 +209,10 @@ export class AppearanceManager {
         settings.costReceiptEnabled = DEFAULT_SETTINGS.costReceiptEnabled;
         needsWrite = true;
       }
+      if (typeof settings.subAgentStatsEnabled !== "boolean") {
+        settings.subAgentStatsEnabled = DEFAULT_SETTINGS.subAgentStatsEnabled;
+        needsWrite = true;
+      }
     } catch (error) {
       console.error("[AppearanceManager] Failed to load settings:", error);
       settings = { ...DEFAULT_SETTINGS };
@@ -230,6 +236,7 @@ export class AppearanceManager {
             homeResearchVaultEnabled: settings.homeResearchVaultEnabled,
             homeNextActionsEnabled: settings.homeNextActionsEnabled,
             costReceiptEnabled: settings.costReceiptEnabled,
+            subAgentStatsEnabled: settings.subAgentStatsEnabled,
           }),
         );
       } catch {
@@ -348,6 +355,10 @@ export class AppearanceManager {
           typeof settings.costReceiptEnabled === "boolean"
             ? settings.costReceiptEnabled
             : existingSettings.costReceiptEnabled,
+        subAgentStatsEnabled:
+          typeof settings.subAgentStatsEnabled === "boolean"
+            ? settings.subAgentStatsEnabled
+            : existingSettings.subAgentStatsEnabled,
       };
 
       const repository = SecureSettingsRepository.getInstance();

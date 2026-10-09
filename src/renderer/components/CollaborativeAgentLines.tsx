@@ -442,6 +442,10 @@ export function CollaborativeAgentLines({
     { completed: 0, failed: 0, warning: 0, running: 0, pending: 0 },
   );
 
+  // Live strip only: once every agent has settled, the right panel's Sub Agents
+  // section is the record, so don't keep finished rows above the composer.
+  if (statusCounts.running === 0 && statusCounts.pending === 0) return null;
+
   return (
     <div className="collaborative-agent-lines">
       <div className="collab-lines-header">

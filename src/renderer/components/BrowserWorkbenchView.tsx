@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type {
+  ApprovalRequest,
+  ApprovalResponseAction,
   ImageAttachment,
   Annotation,
   BrowserAnnotationTargetRef,
@@ -60,6 +62,7 @@ import {
   PERMISSION_PROMPT_SYNC_MS,
   PermissionPrompt,
 } from "./BrowserWorkbench/PermissionPrompt";
+import { type BrowserPageDialogRequest, PageDialog } from "./BrowserWorkbench/PageDialog";
 import { useBrowserTabs } from "./BrowserWorkbench/useBrowserTabs";
 import {
   AgentDrivingBanner,
@@ -67,6 +70,7 @@ import {
   SignInBanner,
   useAgentDriving,
 } from "./BrowserWorkbench/AgentDrivingBanner";
+import { BrowserApprovalCard } from "./BrowserWorkbench/BrowserApprovalCard";
 import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
 import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
 import { type AdjustChanges, describeAdjustChanges } from "./BrowserWorkbench/adjust-changes";
@@ -148,6 +152,9 @@ type BrowserWorkbenchViewProps = {
   }) => void;
   onOpenSettings?: (tab?: BrowserSettingsTab) => void;
   turnContext?: SpreadsheetTurnContext | null;
+  /** The task's pending browser approval, answered over the tab instead of in a dialog. */
+  pendingApproval?: ApprovalRequest | null;
+  onApprovalRespond?: (approval: ApprovalRequest, action: ApprovalResponseAction) => void;
 };
 
 const BROWSER_NAVIGATION_PROTOCOLS = new Set(["http:", "https:"]);
@@ -279,6 +286,8 @@ export function BrowserWorkbenchView({
   onModelChange,
   onOpenSettings,
   turnContext,
+  pendingApproval,
+  onApprovalRespond,
 }: BrowserWorkbenchViewProps) {
   const initialNavigationUrl = normalizeUrl(initialUrl || "");
   const {
@@ -306,6 +315,51 @@ export function BrowserWorkbenchView({
     initialNavigationUrl,
     // Settings load asynchronously; undefined restores (the default) until they arrive.
     browserSettingsLoaded ? browserSettings.restoreTabs : undefined,
+  );
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  // The page's "Leave site?" check runs before a tab the user closes goes away.
+  const confirmTabClose = useCallback(
+    async (id: string): Promise<boolean> => {
+      const before = tabsRef.current.find((tab) => tab.id === id);
+      let close = true;
+      try {
+        const result = await window.electronAPI.checkBrowserWorkbenchTabClose?.({
+          taskId,
+          sessionId,
+          tabId: id,
+        });
+        close = result?.close !== false;
+      } catch {
+        close = true;
+      }
+      // The check navigates the page away; reopening the tab should bring back the page.
+      if (close && before) {
+        updateTab(id, { url: before.url, title: before.title, favicon: before.favicon });
+      }
+      return close;
+    },
+    [sessionId, taskId, updateTab],
+  );
+  const closeTabChecked = useCallback(
+    (id: string) => {
+      void confirmTabClose(id).then((close) => {
+        if (close) closeTab(id);
+      });
+    },
+    [closeTab, confirmTabClose],
+  );
+  const closeTabsChecked = useCallback(
+    (ids: string[]) => {
+      void (async () => {
+        const closing: string[] = [];
+        for (const id of ids) {
+          if (await confirmTabClose(id)) closing.push(id);
+        }
+        if (closing.length > 0) closeTabs(closing);
+      })();
+    },
+    [closeTabs, confirmTabClose],
   );
   const searchEngine = browserSettings.searchEngine;
   const drivingState = useAgentDriving(taskId, sessionId);
@@ -619,6 +673,43 @@ export function BrowserWorkbenchView({
     };
   }, [hasPermissionRequests, sessionId, tabIdsKey, taskId]);
 
+  // Page alert/confirm while CoWork's debugger owns the page's dialogs.
+  const [pageDialogs, setPageDialogs] = useState<BrowserPageDialogRequest[]>([]);
+  useEffect(() => {
+    setPageDialogs([]);
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchPageDialog?.((event) => {
+      if (event.taskId !== taskId || event.sessionId !== sessionId) return;
+      if (event.state === "closed") {
+        setPageDialogs((current) => current.filter((dialog) => dialog.dialogId !== event.dialogId));
+        return;
+      }
+      setPageDialogs((current) =>
+        current.some((dialog) => dialog.dialogId === event.dialogId)
+          ? current
+          : [...current, event],
+      );
+      // Like a browser, bring the tab that is waiting for an answer to the front.
+      activateTab(event.tabId);
+    });
+    return () => unsubscribe?.();
+  }, [activateTab, sessionId, taskId]);
+
+  const respondToPageDialog = useCallback(
+    (dialog: BrowserPageDialogRequest, accept: boolean) => {
+      setPageDialogs((current) => current.filter((entry) => entry.dialogId !== dialog.dialogId));
+      void window.electronAPI
+        .respondBrowserWorkbenchPageDialog?.({
+          taskId,
+          sessionId,
+          tabId: dialog.tabId,
+          dialogId: dialog.dialogId,
+          accept,
+        })
+        .catch(() => undefined);
+    },
+    [sessionId, taskId],
+  );
+
   const respondToPermission = useCallback((requestId: string, choice: BrowserPermissionChoice) => {
     answeredPermissionIdsRef.current.add(requestId);
     setPermissionRequests((current) =>
@@ -708,17 +799,17 @@ export function BrowserWorkbenchView({
           tabHandlesRef.current.get(tabId)?.setAudioMuted(!tab.muted);
           break;
         case "close":
-          closeTab(tabId);
+          closeTabChecked(tabId);
           break;
         case "close-others":
-          closeTabs(
+          closeTabsChecked(
             tabs
               .filter((candidate) => candidate.id !== tabId && !candidate.pinned)
               .map((candidate) => candidate.id),
           );
           break;
         case "close-right":
-          closeTabs(
+          closeTabsChecked(
             tabs
               .slice(index + 1)
               .filter((candidate) => !candidate.pinned)
@@ -730,7 +821,7 @@ export function BrowserWorkbenchView({
           break;
       }
     },
-    [closeTab, closeTabs, openNewTab, openTab, reopenClosedTab, tabs, togglePinTab],
+    [closeTabChecked, closeTabsChecked, openNewTab, openTab, reopenClosedTab, tabs, togglePinTab],
   );
 
   const runShortcut = useCallback(
@@ -746,7 +837,7 @@ export function BrowserWorkbenchView({
           openNewTab();
           break;
         case "close-tab":
-          closeTab(activeTabId);
+          closeTabChecked(activeTabId);
           break;
         case "reopen-tab":
           reopenClosedTab();
@@ -809,7 +900,7 @@ export function BrowserWorkbenchView({
       activateTab,
       activeTab.zoomLevel,
       activeTabId,
-      closeTab,
+      closeTabChecked,
       findOpen,
       mode,
       onExitFullscreen,
@@ -1733,7 +1824,7 @@ export function BrowserWorkbenchView({
           activeTabId={activeTabId}
           canReopenClosed={canReopenClosed}
           onActivate={activateTab}
-          onClose={closeTab}
+          onClose={closeTabChecked}
           onNewTab={() => openNewTab()}
           onMove={moveTab}
           onMenuCommand={handleTabMenuCommand}
@@ -1980,6 +2071,9 @@ export function BrowserWorkbenchView({
       </div>
       {isLoading && <div className="browser-workbench-progress" aria-hidden="true" />}
       <AgentDrivingBanner taskId={taskId} sessionId={sessionId} state={drivingState} />
+      {pendingApproval && onApprovalRespond && (
+        <BrowserApprovalCard approval={pendingApproval} onRespond={onApprovalRespond} />
+      )}
       {signInUrl && (
         <SignInBanner
           url={signInUrl}
@@ -2128,6 +2222,12 @@ export function BrowserWorkbenchView({
                 </BrowserTabView>
               ),
             )}
+            {pageDialogs
+              .filter((dialog) => dialog.tabId === activeTabId)
+              .slice(0, 1)
+              .map((dialog) => (
+                <PageDialog key={dialog.dialogId} dialog={dialog} onRespond={respondToPageDialog} />
+              ))}
             {permissionRequests
               .filter((request) => request.tabId === activeTabId)
               .slice(0, 1)

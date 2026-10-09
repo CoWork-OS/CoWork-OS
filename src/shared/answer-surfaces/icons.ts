@@ -1,0 +1,147 @@
+/**
+ * Icon names a model may use in a surface. The renderer maps each to a bundled icon; the
+ * list is shared so the schema can drop names the app cannot draw.
+ */
+export const ANSWER_SURFACE_ICONS = [
+  "activity",
+  "alert",
+  "apple",
+  "award",
+  "baby",
+  "bed",
+  "bell",
+  "bike",
+  "book",
+  "brain",
+  "briefcase",
+  "building",
+  "cake",
+  "calculator",
+  "calendar",
+  "camera",
+  "car",
+  "chart-bar",
+  "chart-line",
+  "chart-pie",
+  "check",
+  "check-circle",
+  "chef-hat",
+  "clock",
+  "cloud",
+  "code",
+  "coffee",
+  "coins",
+  "compass",
+  "credit-card",
+  "crown",
+  "dollar",
+  "droplet",
+  "dumbbell",
+  "euro",
+  "film",
+  "flag",
+  "flame",
+  "footprints",
+  "gamepad",
+  "gem",
+  "gift",
+  "globe",
+  "graduation-cap",
+  "heart",
+  "heart-pulse",
+  "home",
+  "hotel",
+  "hourglass",
+  "info",
+  "key",
+  "landmark",
+  "laptop",
+  "layers",
+  "leaf",
+  "lightbulb",
+  "list-checks",
+  "lock",
+  "mail",
+  "map",
+  "map-pin",
+  "medal",
+  "message",
+  "moon",
+  "mountain",
+  "music",
+  "package",
+  "palette",
+  "party",
+  "paw",
+  "percent",
+  "phone",
+  "piggy-bank",
+  "pill",
+  "pizza",
+  "plane",
+  "pound",
+  "rain",
+  "receipt",
+  "recycle",
+  "repeat",
+  "rocket",
+  "ruler",
+  "scale",
+  "shield",
+  "ship",
+  "shirt",
+  "shopping-bag",
+  "shopping-cart",
+  "smartphone",
+  "snowflake",
+  "sparkles",
+  "sprout",
+  "star",
+  "store",
+  "sun",
+  "sunrise",
+  "sunset",
+  "target",
+  "tent",
+  "thermometer",
+  "ticket",
+  "timer",
+  "train",
+  "tree",
+  "trending-down",
+  "trending-up",
+  "trophy",
+  "truck",
+  "umbrella",
+  "user",
+  "users",
+  "utensils",
+  "wallet",
+  "waves",
+  "wind",
+  "wine",
+  "wrench",
+  "zap",
+] as const;
+
+export type AnswerSurfaceIconName = (typeof ANSWER_SURFACE_ICONS)[number];
+
+const ICON_SET = new Set<string>(ANSWER_SURFACE_ICONS);
+
+export function isAnswerSurfaceIcon(name: string): name is AnswerSurfaceIconName {
+  return ICON_SET.has(name);
+}
+
+/**
+ * Normalizes a model-supplied icon: a known name (any case, spaces or underscores) or a
+ * short emoji. Anything else is dropped rather than failing the whole surface.
+ */
+export function normalizeSurfaceIcon(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  const name = trimmed.toLowerCase().replace(/[\s_]+/g, "-");
+  if (isAnswerSurfaceIcon(name)) return name;
+  // Emoji and other pictographs: short, and no ASCII letters or digits.
+  if (trimmed.length > 0 && trimmed.length <= 8 && !/[A-Za-z0-9]/.test(trimmed)) return trimmed;
+  return undefined;
+}

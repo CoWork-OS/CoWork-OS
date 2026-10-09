@@ -8,6 +8,7 @@ import type { BrowserContextAction } from "./browser-context-menu";
 import {
   BrowserSessionManager,
   type BrowserNavigationBlockedEvent,
+  type BrowserPageDialogEvent,
   type BrowserSnapshotOptions,
   type BrowserTabKind,
   DEFAULT_BROWSER_TAB_ID,
@@ -322,6 +323,31 @@ export class BrowserWorkbenchService {
     this.browserSessionManager.setNavigationBlockedListener?.((event) =>
       this.sendToRenderer(IPC_CHANNELS.BROWSER_WORKBENCH_NAVIGATION_BLOCKED, event),
     );
+    // Tabs show page dialogs in the workbench; popup windows have no workbench UI.
+    this.browserSessionManager.setPageDialogListener?.((event) => {
+      if (event.kind === "popup") {
+        if (event.state === "open") this.popupDialogHandler?.(event);
+        return;
+      }
+      this.sendToRenderer(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG, event);
+    });
+  }
+
+  private popupDialogHandler: ((event: BrowserPageDialogEvent) => void) | null = null;
+
+  /** Shows a popup window's alert/confirm (main process, native dialog). */
+  setPopupDialogHandler(handler: ((event: BrowserPageDialogEvent) => void) | null): void {
+    this.popupDialogHandler = handler;
+  }
+
+  respondToPageDialog(input: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+    dialogId: string;
+    accept: boolean;
+  }): Promise<boolean> {
+    return this.browserSessionManager.respondToPageDialog(input).catch(() => false);
   }
 
   /** Site permission handling for the browser partitions (one instance per app). */
@@ -1683,6 +1709,7 @@ export class BrowserWorkbenchService {
     channel: string,
     payload:
       | BrowserNavigationBlockedEvent
+      | BrowserPageDialogEvent
       | BrowserPermissionPrompt
       | BrowserWorkbenchTabCommand
       | BrowserWorkbenchShortcutEvent

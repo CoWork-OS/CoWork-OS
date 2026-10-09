@@ -248,6 +248,7 @@ import { getBrowserWorkbenchService } from "./browser/browser-workbench-service"
 import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
 import { getBrowserSessionManager } from "./browser/browser-session-manager";
 import { attachBrowserGuest } from "./browser/browser-guest-attach";
+import { BrowserUnloadGuard } from "./browser/browser-unload-guard";
 import { applyBrowserUserAgent } from "./browser/browser-user-agent";
 import { BrowserDownloadManager } from "./browser/browser-download-manager";
 import {
@@ -678,6 +679,69 @@ function prepareBrowserWorkbenchPartition(partition: string): void {
   browserWorkbenchSessions.set(browserSession, partition);
 }
 
+let browserUnloadGuard: BrowserUnloadGuard | null = null;
+function getBrowserUnloadGuard(): BrowserUnloadGuard {
+  browserUnloadGuard ??= new BrowserUnloadGuard({
+    manager: getBrowserSessionManager(),
+    service: getBrowserWorkbenchService(),
+    confirmLeave: (guest, { closingTab }) => {
+      const owner = guest.hostWebContents || guest;
+      const window = BrowserWindow.fromWebContents(owner) || mainWindow;
+      const options = {
+        type: "question" as const,
+        buttons: [closingTab ? "Close Tab" : "Leave", "Stay"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        message: "Leave site?",
+        detail: "Changes you made may not be saved.",
+      };
+      const choice =
+        window && !window.isDestroyed()
+          ? dialog.showMessageBoxSync(window, options)
+          : dialog.showMessageBoxSync(options);
+      return choice === 0;
+    },
+  });
+  // Popup windows have no workbench UI: their page dialogs use a native dialog.
+  getBrowserWorkbenchService().setPopupDialogHandler((event) => {
+    const contentsId = getBrowserSessionManager().getTabWebContentsId(
+      event.taskId,
+      event.tabId,
+      event.sessionId,
+    );
+    const popup = typeof contentsId === "number" ? webContents.fromId(contentsId) : undefined;
+    const window = popup ? BrowserWindow.fromWebContents(popup) : null;
+    const options = {
+      type: "none" as const,
+      buttons: event.type === "alert" ? ["OK"] : ["OK", "Cancel"],
+      defaultId: 0,
+      cancelId: event.type === "alert" ? 0 : 1,
+      noLink: true,
+      message: event.origin ? `${new URL(event.origin).host} says` : "This page says",
+      detail: event.message || "",
+    };
+    void (
+      window && !window.isDestroyed()
+        ? dialog.showMessageBox(window, options)
+        : dialog.showMessageBox(options)
+    ).then(({ response }) =>
+      getBrowserWorkbenchService().respondToPageDialog({
+        taskId: event.taskId,
+        sessionId: event.sessionId,
+        tabId: event.tabId,
+        dialogId: event.dialogId,
+        accept: response === 0,
+      }),
+    );
+  });
+  const guard = browserUnloadGuard;
+  getBrowserSessionManager().setBeforeUnloadDialogHandler((contents) =>
+    guard.decideDialog(contents),
+  );
+  return browserUnloadGuard;
+}
+
 app.on("web-contents-created", (_event, contents) => {
   attachImageContextMenu(contents, clipboard);
   contents.on("did-attach-webview", (_event, guest) => {
@@ -699,6 +763,7 @@ app.on("web-contents-created", (_event, contents) => {
         openExternal: (url) => void openExternalIfSafe(url),
         recordHistory: createBrowserHistoryRecorder(() => dbManager.getDatabase(), profileKey),
         isDeveloperMode: () => BrowserSettingsManager.loadSettings().developerMode,
+        unloadGuard: getBrowserUnloadGuard(),
       });
     }
   });
@@ -4864,6 +4929,45 @@ if (isMacSafeStorageMigrationWorker) {
         tabId,
       });
       return { success };
+    });
+    ipcMain.handle(
+      IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG_RESPOND,
+      async (_event, data: Any) => {
+        const tabId = readBrowserTabId(data?.tabId);
+        if (
+          !data ||
+          typeof data.taskId !== "string" ||
+          !tabId ||
+          typeof data.dialogId !== "string" ||
+          !/^dialog-[a-z0-9]+-\d+$/.test(data.dialogId) ||
+          typeof data.accept !== "boolean"
+        ) {
+          return { success: false };
+        }
+        const success = await getBrowserWorkbenchService().respondToPageDialog({
+          taskId: data.taskId,
+          sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+          tabId,
+          dialogId: data.dialogId,
+          accept: data.accept,
+        });
+        return { success };
+      },
+    );
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_CLOSE_CHECK, async (event, data: Any) => {
+      const tabId = readBrowserTabId(data?.tabId);
+      if (!data || typeof data.taskId !== "string" || !tabId) return { close: true };
+      const contentsId = getBrowserSessionManager().getTabWebContentsId(
+        data.taskId,
+        tabId,
+        typeof data.sessionId === "string" ? data.sessionId : "default",
+      );
+      const guest = typeof contentsId === "number" ? webContents.fromId(contentsId) : undefined;
+      // Only the window hosting the tab may run its unload check (it navigates the page).
+      if (!guest || guest.isDestroyed() || guest.hostWebContents?.id !== event.sender.id) {
+        return { close: true };
+      }
+      return { close: await getBrowserUnloadGuard().confirmClose(guest) };
     });
     ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_USER_NAVIGATE, async (_event, data: Any) => {
       const sessionId = typeof data?.sessionId === "string" ? data.sessionId : "default";

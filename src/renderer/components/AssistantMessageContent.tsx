@@ -678,6 +678,7 @@ export function AssistantMessageContent({
             >
               <InlineHtmlSourcePreview
                 htmlContent={segment.html}
+                taskId={taskId}
                 title={segment.title}
                 className="inline-html-preview-embedded"
               />
@@ -693,6 +694,7 @@ export function AssistantMessageContent({
             >
               <InlineHtmlSourcePreview
                 htmlContent={segment.html}
+                taskId={taskId}
                 title={segment.directive.title}
                 className="inline-html-preview-embedded"
                 variant="frame"
@@ -725,6 +727,7 @@ export function AssistantMessageContent({
               <InlineHtmlPreview
                 filePath={segment.directive.path}
                 workspacePath={workspacePath}
+                taskId={taskId}
                 title={segment.directive.title}
                 onOpenViewer={onOpenViewer}
                 className="inline-html-preview-embedded"
@@ -750,6 +753,7 @@ export function AssistantMessageContent({
               <InlineHtmlPreview
                 filePath={segment.directive.path}
                 workspacePath={workspacePath}
+                taskId={taskId}
                 title={segment.directive.title}
                 onOpenViewer={onOpenViewer}
                 className="inline-html-preview-embedded"

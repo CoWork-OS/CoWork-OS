@@ -111,6 +111,9 @@ type BrowserWorkbenchViewProps = {
   }) => void;
   onOpenSettings?: (tab?: BrowserSettingsTab) => void;
   turnContext?: SpreadsheetTurnContext | null;
+  /** Accepted for prop parity with the current view; the classic view keeps approvals in the dialog. */
+  pendingApproval?: unknown;
+  onApprovalRespond?: unknown;
 };
 
 const BROWSER_NAVIGATION_PROTOCOLS = new Set(["http:", "https:"]);

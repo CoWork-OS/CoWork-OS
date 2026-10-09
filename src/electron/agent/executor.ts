@@ -76,6 +76,8 @@ import {
 import { parseNaturalLlmWikiPrompt } from "../../shared/llm-wiki-prompt-routing";
 import { parseOnboardingSlashCommand } from "../../shared/onboarding";
 import { RICH_FRAME_DESIGN_LANGUAGE_PROMPT } from "../../shared/rich-frame-design-language";
+import { HTML_SURFACE_RUNTIME_PROMPT } from "../../shared/answer-surfaces/html-bridge";
+import { formatAnswerSurfaceChanges } from "../answer-surfaces/answer-surface-changes";
 import { ANSWER_SURFACE_PROMPT } from "../../shared/answer-surfaces/prompt";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
@@ -18487,6 +18489,7 @@ ${transcript}
             "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
             "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
             RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
+            HTML_SURFACE_RUNTIME_PROMPT,
             "",
             ...(this.shouldOfferAnswerSurfaces() ? [ANSWER_SURFACE_PROMPT, ""] : []),
           ]
@@ -18859,10 +18862,7 @@ ${transcript}
         this.task.id,
         changes.map((change) => change.key),
       );
-      return [
-        "INTERACTIVE ANSWER STATE (values the user set in the controls of your earlier answers; build on them):",
-        ...changes.flatMap((change) => change.summary.split("\n").map((line) => `- ${line}`)),
-      ].join("\n");
+      return formatAnswerSurfaceChanges(changes);
     } catch {
       return "";
     }

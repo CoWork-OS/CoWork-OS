@@ -52,11 +52,22 @@ const POPUP = `<!doctype html><html><head><title>Sign in</title></head><body>
   </script>
 </body></html>`;
 
+// A form with unsaved changes: leaving asks first.
+const UNSAVED = `<!doctype html><html><head><title>Unsaved form</title></head><body>
+  <textarea id="draft"></textarea>
+  <script>
+    window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });
+  </script>
+</body></html>`;
+
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, "http://127.0.0.1");
   if (url.pathname === "/page") {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end(PAGE(url.searchParams.get("n") || "1"));
+  } else if (url.pathname === "/unsaved") {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(UNSAVED);
   } else if (url.pathname === "/popup") {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end(POPUP);
@@ -156,6 +167,7 @@ async function navigateActiveTab(url) {
 }
 
 const workbenchModule = `${root}/dist/electron/electron/browser/browser-workbench-service.js`;
+const sessionManagerModule = `${root}/dist/electron/electron/browser/browser-session-manager.js`;
 
 /** Select the task in the sidebar and open its browser from the title bar, as a user does. */
 async function openWorkbench(taskTitle) {
@@ -334,6 +346,203 @@ try {
     await main.locator(".browser-workbench-download.is-completed").waitFor({ timeout: 10000 });
     const saved = await fs.readFile(path.join(workspaceDir, "downloads", "report.txt"), "utf8");
     assert.match(saved, /TEST DATA report/);
+  });
+
+  await step("closing a tab with unsaved changes asks Leave site? first", async () => {
+    await main.getByRole("button", { name: "New tab", exact: true }).click();
+    await navigateActiveTab(`${site}/unsaved`);
+    const page = await guestFor("/unsaved");
+    // Once CoWork has used a tab its debugger owns the page's dialogs, so this
+    // checks that path: attach it (as diagnostics do), and keep the test
+    // driver's own dialog handling out of the way.
+    const driverPage = await waitFor(
+      async () =>
+        desktop
+          .context()
+          .pages()
+          .find((candidate) => candidate.url().endsWith("/unsaved")),
+      "the page in the test driver",
+    );
+    driverPage.on("dialog", () => undefined);
+    await desktop.evaluate(
+      (_, input) =>
+        process.mainModule
+          .require(input.module)
+          .getBrowserSessionManager()
+          .getTabDiagnostics({ taskId: input.taskId, sessionId: "default", kind: "console" })
+          .then(() => true),
+      { module: sessionManagerModule, taskId: task.id },
+    );
+    // Chromium only honours beforeunload after the user interacted with the page.
+    const interact = () =>
+      desktop.evaluate(({ webContents }, id) => {
+        const guest = webContents.fromId(id);
+        guest.focus();
+        for (const type of ["mouseDown", "mouseUp"]) {
+          guest.sendInputEvent({ type, x: 20, y: 20, button: "left", clickCount: 1 });
+        }
+      }, page.id);
+    // The native dialog can't be clicked from here: answer it in the main process.
+    const answerWith = (choice) =>
+      desktop.evaluate(({ dialog }, answer) => {
+        globalThis.__leaveSiteAsked = [];
+        dialog.showMessageBoxSync = (...args) => {
+          globalThis.__leaveSiteAsked.push(args[args.length - 1]?.message);
+          return answer;
+        };
+      }, choice);
+    const closeActiveTab = () =>
+      main
+        .locator(".browser-workbench-tab-shell.is-active")
+        .getByRole("button", { name: "Close tab" })
+        .click();
+
+    await interact();
+    await sleep(300);
+    await answerWith(1);
+    await closeActiveTab();
+    await sleep(1200);
+    const asked = await desktop.evaluate(() => globalThis.__leaveSiteAsked);
+    assert.deepEqual(asked, ["Leave site?"], "asked once");
+    assert.ok(
+      (await guests()).some((guest) => guest.url.endsWith("/unsaved")),
+      "Stay keeps the tab and its page",
+    );
+
+    await interact();
+    await sleep(300);
+    await answerWith(0);
+    await closeActiveTab();
+    await waitFor(
+      async () => !(await guests()).some((guest) => guest.id === page.id),
+      "the tab to close after Leave",
+    );
+  });
+
+  await step(
+    "alert and confirm are shown in the tab once CoWork's debugger is attached",
+    async () => {
+      await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+      const first = await guestFor("/page?n=1");
+      // Keep the test driver's own dialog handling out of the way, then attach
+      // CoWork's debugger (as diagnostics and agent actions do).
+      const driverPage = await waitFor(
+        async () =>
+          desktop
+            .context()
+            .pages()
+            .find((candidate) => candidate.url().endsWith("/page?n=1")),
+        "the page in the test driver",
+      );
+      driverPage.on("dialog", () => undefined);
+      await desktop.evaluate(
+        (_, input) =>
+          process.mainModule
+            .require(input.module)
+            .getBrowserSessionManager()
+            .getTabDiagnostics({ taskId: input.taskId, sessionId: "default", kind: "console" })
+            .then(() => true),
+        { module: sessionManagerModule, taskId: task.id },
+      );
+      const dialog = main.locator(".browser-workbench-page-dialog");
+
+      await inGuest(
+        first.id,
+        `setTimeout(() => { window.__confirmed = confirm("Delete this draft?"); }, 0); 1`,
+      );
+      await dialog.waitFor({ timeout: 8000 });
+      await dialog.getByText("Delete this draft?").waitFor();
+      await main.screenshot({ path: path.join(outputDir, "page-dialog.png") });
+      await dialog.getByRole("button", { name: "OK" }).click();
+      assert.equal(
+        await waitFor(async () => inGuest(first.id, "window.__confirmed"), "the confirm answer"),
+        true,
+      );
+
+      await inGuest(
+        first.id,
+        `setTimeout(() => { window.__cancelled = confirm("Discard?"); }, 0); 1`,
+      );
+      await dialog.waitFor({ timeout: 8000 });
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await waitFor(
+        async () => (await inGuest(first.id, "typeof window.__cancelled")) === "boolean",
+        "the second confirm answer",
+      );
+      assert.equal(await inGuest(first.id, "window.__cancelled"), false);
+
+      await inGuest(
+        first.id,
+        `setTimeout(() => { alert("Saved"); window.__alerted = true; }, 0); 1`,
+      );
+      await dialog.waitFor({ timeout: 8000 });
+      await main.keyboard.press("Enter");
+      await waitFor(
+        async () => inGuest(first.id, "window.__alerted === true"),
+        "the alert to close",
+      );
+      assert.equal(await dialog.count(), 0, "no dialog left");
+    },
+  );
+
+  await step("a CoWork approval is answered over the tab instead of a dialog", async () => {
+    await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+    const approval = {
+      id: "qa-approval-1",
+      taskId: task.id,
+      type: "network_access",
+      description: "Allow CoWork to use 127.0.0.1?",
+      details: { kind: "browser_use_domain_access", origin: site, browserSessionId: "default" },
+      status: "pending",
+      requestedAt: Date.now(),
+    };
+    await desktop.evaluate(
+      ({ BrowserWindow }, input) => {
+        const now = Date.now();
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send("task:event", {
+            id: "qa-approval-event",
+            eventId: "qa-approval-event",
+            taskId: input.taskId,
+            type: "approval_requested",
+            payload: { approval: input.approval },
+            timestamp: now,
+            ts: now,
+            schemaVersion: 2,
+          });
+        }
+      },
+      { taskId: task.id, approval },
+    );
+    const card = main.locator(".browser-workbench-approval");
+    await card.waitFor({ timeout: 8000 });
+    assert.equal(await main.locator(".browser-use-approval-overlay").count(), 0, "no dialog too");
+    await main.screenshot({ path: path.join(outputDir, "approval.png") });
+    await card.getByRole("button", { name: "Deny", exact: true }).click();
+    // The daemon never created this approval, so it can't resolve it: end it the
+    // way the daemon does, and the card must go away.
+    await sleep(800);
+    const cardAfterDeny = await card.count();
+    await desktop.evaluate(
+      ({ BrowserWindow }, input) => {
+        const now = Date.now();
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send("task:event", {
+            id: "qa-approval-denied",
+            eventId: "qa-approval-denied",
+            taskId: input.taskId,
+            type: "approval_denied",
+            payload: { approvalId: "qa-approval-1", action: "deny_once" },
+            timestamp: now,
+            ts: now,
+            schemaVersion: 2,
+          });
+        }
+      },
+      { taskId: task.id },
+    );
+    await waitFor(async () => (await card.count()) === 0, "the card to clear");
+    return { cardAfterDeny };
   });
 
   await step("closing and reopening the workbench restores its tabs", async () => {

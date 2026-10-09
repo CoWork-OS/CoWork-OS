@@ -7661,6 +7661,9 @@ export const IPC_CHANNELS = {
   BROWSER_WORKBENCH_CURSOR: "browserWorkbench:cursor",
   BROWSER_WORKBENCH_VIEWPORT: "browserWorkbench:viewport",
   BROWSER_WORKBENCH_TAB_ACTIVATE: "browserWorkbench:tabActivate",
+  BROWSER_WORKBENCH_TAB_CLOSE_CHECK: "browserWorkbench:tabCloseCheck",
+  BROWSER_WORKBENCH_PAGE_DIALOG: "browserWorkbench:pageDialog",
+  BROWSER_WORKBENCH_PAGE_DIALOG_RESPOND: "browserWorkbench:pageDialogRespond",
   BROWSER_WORKBENCH_TAB_COMMAND: "browserWorkbench:tabCommand",
   BROWSER_WORKBENCH_USER_NAVIGATE: "browserWorkbench:userNavigate",
   BROWSER_WORKBENCH_NAVIGATION_BLOCKED: "browserWorkbench:navigationBlocked",
@@ -8609,6 +8612,7 @@ export const IPC_CHANNELS = {
   ANSWER_SURFACE_GET_STATE: "answerSurfaces:getState",
   ANSWER_SURFACE_SAVE_STATE: "answerSurfaces:saveState",
   ANSWER_SURFACE_RESOLVE_IMAGES: "answerSurfaces:resolveImages",
+  ANSWER_SURFACE_REGISTER_HTML: "answerSurfaces:registerHtml",
 
   // Memory folder: the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
   MEMORY_REPO_STATUS: "memoryRepo:status",

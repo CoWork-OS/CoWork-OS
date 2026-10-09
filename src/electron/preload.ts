@@ -2297,6 +2297,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_ACTIVATE, data) as Promise<{
       success: boolean;
     }>,
+  checkBrowserWorkbenchTabClose: (data: { taskId: string; sessionId?: string; tabId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_CLOSE_CHECK, data) as Promise<{
+      close: boolean;
+    }>,
   browserWorkbenchUserNavigate: (data: {
     taskId: string;
     sessionId?: string;
@@ -2499,6 +2503,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
   },
+  onBrowserWorkbenchPageDialog: (callback: (event: BrowserWorkbenchPageDialogEvent) => void) => {
+    const handler = (_: Any, event: BrowserWorkbenchPageDialogEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG, handler);
+  },
+  respondBrowserWorkbenchPageDialog: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+    dialogId: string;
+    accept: boolean;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG_RESPOND, data) as Promise<{
+      success: boolean;
+    }>,
   onBrowserWorkbenchNavigationBlocked: (
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => {
@@ -4542,6 +4561,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE, data),
   resolveAnswerImages: (data: { taskId?: string; requests: AnswerImageRequest[] }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_RESOLVE_IMAGES, data),
+  registerHtmlSurface: (data: {
+    html: string;
+    theme: "light" | "dark";
+    hostBackground?: string;
+    designLanguage: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML, data),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -5731,6 +5756,17 @@ export interface BrowserWorkbenchTabCommand {
 
 export type BrowserWorkbenchBlockReason = "policy" | "local_preview" | "scheme";
 
+export interface BrowserWorkbenchPageDialogEvent {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  dialogId: string;
+  state: "open" | "closed";
+  type?: "alert" | "confirm";
+  message?: string;
+  origin?: string;
+}
+
 export interface BrowserWorkbenchNavigationBlockedEvent {
   taskId: string;
   sessionId: string;
@@ -6028,6 +6064,12 @@ export interface ElectronAPI {
     sessionId?: string;
     tabId: string;
   }) => Promise<{ success: boolean }>;
+  /** Runs the page's "Leave site?" check; close is false when the user chose to stay. */
+  checkBrowserWorkbenchTabClose: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+  }) => Promise<{ close: boolean }>;
   browserWorkbenchUserNavigate: (data: {
     taskId: string;
     sessionId?: string;
@@ -6182,6 +6224,17 @@ export interface ElectronAPI {
   onBrowserWorkbenchNavigationBlocked: (
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => () => void;
+  /** A page's alert/confirm the workbench shows while CoWork's debugger owns page dialogs. */
+  onBrowserWorkbenchPageDialog: (
+    callback: (event: BrowserWorkbenchPageDialogEvent) => void,
+  ) => () => void;
+  respondBrowserWorkbenchPageDialog: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+    dialogId: string;
+    accept: boolean;
+  }) => Promise<{ success: boolean }>;
   onBrowserWorkbenchPermissionRequest: (
     callback: (prompt: BrowserWorkbenchPermissionPrompt) => void,
   ) => () => void;
@@ -8377,6 +8430,13 @@ export interface ElectronAPI {
     taskId?: string;
     requests: AnswerImageRequest[];
   }) => Promise<Array<AnswerImageResult | null>>;
+  /** Desktop only; absent in the browser host, where frames stay static. */
+  registerHtmlSurface?: (data: {
+    html: string;
+    theme: "light" | "dark";
+    hostBackground?: string;
+    designLanguage: boolean;
+  }) => Promise<{ url: string }>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

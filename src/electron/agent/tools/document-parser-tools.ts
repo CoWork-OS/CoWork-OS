@@ -12,6 +12,7 @@ import { readDocumentArchiveBuffer } from "../../security/document-archive";
 import * as fsSync from "fs";
 import * as fs from "fs/promises";
 import * as path from "path";
+import JSZip from "jszip";
 import type { SensitiveSourceRef, Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
@@ -102,12 +103,24 @@ export function calculateDocumentWindow(input: {
 }
 
 /**
+ * ExcelJS reads a date cell as the UTC instant of its serial value, so the UTC
+ * fields are the date Excel shows. Printing the Date directly would shift it
+ * into the local time zone ("Mon Oct 05 2026 01:00:00 GMT+0100").
+ */
+function formatSpreadsheetDate(value: Date): string {
+  if (Number.isNaN(value.getTime())) return "";
+  const iso = value.toISOString();
+  return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso.slice(0, 19);
+}
+
+/**
  * Text for one ExcelJS cell value. Formula cells are objects: print the cached result when the
  * file has one, otherwise the formula itself; rich text and hyperlinks print their text.
  */
 function formatSpreadsheetCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (typeof value !== "object" || value instanceof Date) return String(value);
+  if (value instanceof Date) return formatSpreadsheetDate(value);
+  if (typeof value !== "object") return String(value);
   const cell = value as Record<string, unknown>;
   if ("formula" in cell || "sharedFormula" in cell) {
     const result = cell.result;
@@ -127,6 +140,170 @@ function formatSpreadsheetCell(value: unknown): string {
 const MAX_SPREADSHEET_DETAIL_ENTRIES = 60;
 
 /**
+ * Cell texts for one row. ExcelJS leaves a 0 or FALSE formula result out of
+ * cell.value but keeps it on cell.result, so formula cells read the result there.
+ */
+function formatSpreadsheetRow(row: import("exceljs").Row): string[] {
+  return (row.values as unknown[]).slice(1).map((value, index) => {
+    if (value && typeof value === "object" && ("formula" in value || "sharedFormula" in value)) {
+      const result = row.getCell(index + 1).result as unknown;
+      if (result !== undefined && result !== null) return formatSpreadsheetCell(result);
+    }
+    return formatSpreadsheetCell(value);
+  });
+}
+
+/**
+ * The stored type and value of a cell, so a check can tell text from numbers
+ * and dates without reading the workbook XML (an ID such as "00041" kept as
+ * text, a VAT rate stored as the number 0.23, a real date versus date text).
+ */
+function describeSpreadsheetCellValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return `date ${formatSpreadsheetDate(value)}`;
+  if (typeof value === "number") return `number ${value}`;
+  if (typeof value === "boolean") return `boolean ${value ? "TRUE" : "FALSE"}`;
+  if (typeof value === "string") return `text ${JSON.stringify(value)}`;
+  if (typeof value === "object") {
+    const cell = value as Record<string, unknown>;
+    if ("error" in cell) return `error ${String(cell.error ?? "")}`;
+    return `text ${JSON.stringify(formatSpreadsheetCell(value))}`;
+  }
+  return null;
+}
+
+/**
+ * ECMA-376 built-in number formats that ExcelJS does not resolve to a format
+ * code (en-US forms). Without them a currency or accounting cell would be
+ * reported as General.
+ */
+const UNRESOLVED_BUILT_IN_NUMBER_FORMATS: Record<number, string> = {
+  5: '"$"#,##0_);("$"#,##0)',
+  6: '"$"#,##0_);[Red]("$"#,##0)',
+  7: '"$"#,##0.00_);("$"#,##0.00)',
+  8: '"$"#,##0.00_);[Red]("$"#,##0.00)',
+  41: '_(* #,##0_);_(* \\(#,##0\\);_(* "-"_);_(@_)',
+  42: '_("$"* #,##0_);_("$"* \\(#,##0\\);_("$"* "-"_);_(@_)',
+  43: '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)',
+  44: '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)',
+};
+
+/** Built-in format ids ExcelJS maps to a format code itself. */
+const EXCELJS_RESOLVED_BUILT_IN_FORMAT_IDS = new Set([
+  0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 37, 38, 39, 40, 45, 46, 47,
+  48, 49,
+]);
+
+function readXmlAttribute(attributes: string, name: string): string | null {
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(attributes);
+  if (!match) return null;
+  return (match[1] ?? match[2] ?? "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function resolvePackagePartPath(sourcePart: string, target: string): string {
+  if (target.startsWith("/")) return path.posix.normalize(target.slice(1));
+  return path.posix.normalize(path.posix.join(path.posix.dirname(sourcePart), target));
+}
+
+async function readRelationshipTargets(
+  zip: JSZip,
+  sourcePart: string,
+): Promise<Array<{ id: string; type: string; target: string }>> {
+  const relsPath = path.posix.join(
+    path.posix.dirname(sourcePart),
+    "_rels",
+    `${path.posix.basename(sourcePart)}.rels`,
+  );
+  const xml = await zip.file(relsPath.replace(/^\.\//, ""))?.async("string");
+  if (!xml) return [];
+  const relationships: Array<{ id: string; type: string; target: string }> = [];
+  for (const match of xml.matchAll(/<Relationship\b([^>]*)>/g)) {
+    const attributes = match[1] || "";
+    const target = readXmlAttribute(attributes, "Target");
+    if (!target || readXmlAttribute(attributes, "TargetMode") === "External") continue;
+    relationships.push({
+      id: readXmlAttribute(attributes, "Id") || "",
+      type: readXmlAttribute(attributes, "Type") || "",
+      target: resolvePackagePartPath(sourcePart, target),
+    });
+  }
+  return relationships;
+}
+
+/**
+ * Format codes, by sheet name and cell address, for cells whose style uses a
+ * built-in number format that ExcelJS leaves unresolved. Empty for most
+ * workbooks, which only use formats ExcelJS already reports.
+ */
+async function collectUnresolvedBuiltInFormats(
+  buffer: Buffer,
+): Promise<Map<string, Map<string, string>>> {
+  const formatsBySheet = new Map<string, Map<string, string>>();
+  // The buffer already passed the archive size and entry limits in
+  // readDocumentArchiveBuffer, so it is opened directly here.
+  const zip = await JSZip.loadAsync(buffer);
+  const rootRelationships = await readRelationshipTargets(zip, "");
+  const workbookPart =
+    rootRelationships.find((rel) => rel.type.endsWith("/officeDocument"))?.target ||
+    "xl/workbook.xml";
+  const workbookRelationships = await readRelationshipTargets(zip, workbookPart);
+  const stylesPart = workbookRelationships.find((rel) => rel.type.endsWith("/styles"))?.target;
+  const stylesXml = stylesPart ? await zip.file(stylesPart)?.async("string") : undefined;
+  if (!stylesXml) return formatsBySheet;
+
+  const customFormatIds = new Set<number>();
+  for (const match of stylesXml.matchAll(/<numFmt\b([^>]*)>/g)) {
+    const id = Number(readXmlAttribute(match[1] || "", "numFmtId"));
+    if (Number.isInteger(id)) customFormatIds.add(id);
+  }
+  const cellXfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml)?.[1] || "";
+  const unresolvedByStyleIndex = new Map<string, string>();
+  let styleIndex = 0;
+  for (const match of cellXfs.matchAll(/<xf\b([^>]*)>/g)) {
+    const id = Number(readXmlAttribute(match[1] || "", "numFmtId") ?? 0);
+    if (
+      Number.isInteger(id) &&
+      id > 0 &&
+      id < 164 &&
+      !customFormatIds.has(id) &&
+      !EXCELJS_RESOLVED_BUILT_IN_FORMAT_IDS.has(id)
+    ) {
+      const code = UNRESOLVED_BUILT_IN_NUMBER_FORMATS[id];
+      unresolvedByStyleIndex.set(
+        String(styleIndex),
+        code ? `${code} [built-in format ${id}]` : `[built-in format ${id}, locale-specific]`,
+      );
+    }
+    styleIndex += 1;
+  }
+  if (unresolvedByStyleIndex.size === 0) return formatsBySheet;
+
+  const workbookXml = (await zip.file(workbookPart)?.async("string")) || "";
+  const sheetTargets = new Map(workbookRelationships.map((rel) => [rel.id, rel.target]));
+  for (const match of workbookXml.matchAll(/<sheet\b([^>]*)>/g)) {
+    const attributes = match[1] || "";
+    const name = readXmlAttribute(attributes, "name");
+    const target = sheetTargets.get(readXmlAttribute(attributes, "r:id") || "");
+    const sheetXml = target ? await zip.file(target)?.async("string") : undefined;
+    if (!name || !sheetXml) continue;
+    const formats = new Map<string, string>();
+    for (const cellMatch of sheetXml.matchAll(/<c\b([^>]*)>/g)) {
+      const cellAttributes = cellMatch[1] || "";
+      const format = unresolvedByStyleIndex.get(readXmlAttribute(cellAttributes, "s") || "0");
+      const address = readXmlAttribute(cellAttributes, "r");
+      if (format && address) formats.set(address, format);
+    }
+    if (formats.size > 0) formatsBySheet.set(name, formats);
+  }
+  return formatsBySheet;
+}
+
+/**
  * Formula and number-format lines for one sheet. Cell values alone cannot show
  * whether a total is a live formula or whether an amount is stored with a
  * currency format, which is what a workbook check usually needs to confirm.
@@ -134,6 +311,7 @@ const MAX_SPREADSHEET_DETAIL_ENTRIES = 60;
 function describeSheetFormulasAndFormats(
   sheet: import("exceljs").Worksheet,
   date1904: boolean,
+  fallbackFormats?: Map<string, string>,
 ): string[] {
   const formulas: string[] = [];
   const formats: string[] = [];
@@ -156,23 +334,34 @@ function describeSheetFormulasAndFormats(
           formulas.push(`- ${cell.address}: =${cell.formula || ""} (${saved})`);
         }
       }
-      const numFmt = typeof cell.numFmt === "string" ? cell.numFmt.trim() : "";
+      const numFmt =
+        (typeof cell.numFmt === "string" ? cell.numFmt.trim() : "") ||
+        fallbackFormats?.get(cell.address) ||
+        "";
       if (numFmt && !/^general$/i.test(numFmt)) {
         formatCount += 1;
         if (formats.length < MAX_SPREADSHEET_DETAIL_ENTRIES) {
           const value = isFormula ? (cell.result as unknown) : raw;
+          // A built-in code found in the styles part carries its id; format with the code alone.
+          const displayFormat = numFmt.startsWith("[built-in format")
+            ? ""
+            : numFmt.replace(/ \[built-in format \d+\]$/, "");
           const shown =
             typeof value === "number" || value instanceof Date
-              ? formatSpreadsheetValue(value, numFmt, { date1904 })
+              ? formatSpreadsheetValue(value, displayFormat, { date1904 })
               : null;
-          // A date format on text changes nothing in Excel; say so, so a check
-          // that reads only the format cannot pass a date stored as text.
-          const textUnderDateFormat =
-            typeof value === "string" && isDateNumberFormat(numFmt)
-              ? ` (text ${JSON.stringify(value)}, not a date value)`
-              : "";
+          const valueDescription = describeSpreadsheetCellValue(value);
+          const details = [
+            valueDescription ? `${isFormula ? "formula result " : ""}${valueDescription}` : "",
+            shown?.trim() ? `shown as ${shown.trim()}` : "",
+            // A date format on text changes nothing in Excel; say so, so a check
+            // that reads only the format cannot pass a date stored as text.
+            typeof value === "string" && isDateNumberFormat(displayFormat)
+              ? "not a date value"
+              : "",
+          ].filter(Boolean);
           formats.push(
-            `- ${cell.address}: ${numFmt}${shown ? ` (shown as ${shown})` : ""}${textUnderDateFormat}`,
+            `- ${cell.address}: ${numFmt}${details.length > 0 ? ` (${details.join(", ")})` : ""}`,
           );
         }
       }
@@ -390,9 +579,14 @@ export class DocumentParserTools {
   private async parseXlsx(filePath: string, format: "text" | "structured"): Promise<string> {
     const ExcelJS = await import("exceljs");
     const workbook = new ExcelJS.default.Workbook();
-    await workbook.xlsx.load(
-      (await readDocumentArchiveBuffer(filePath)) as unknown as import("exceljs").Buffer,
-    );
+    const buffer = await readDocumentArchiveBuffer(filePath);
+    await workbook.xlsx.load(buffer as unknown as import("exceljs").Buffer);
+    let fallbackFormats = new Map<string, Map<string, string>>();
+    try {
+      fallbackFormats = await collectUnresolvedBuiltInFormats(buffer);
+    } catch {
+      // The cell grid and the formats ExcelJS resolved are still reported.
+    }
 
     const lines: string[] = [];
     const date1904 = Boolean(workbook.properties?.date1904);
@@ -400,17 +594,19 @@ export class DocumentParserTools {
       if (format === "structured") {
         lines.push(`\n## Sheet: ${sheet.name}\n`);
         sheet.eachRow((row) => {
-          const cells = (row.values as unknown[]).slice(1).map(formatSpreadsheetCell).join(" | ");
-          lines.push(`| ${cells} |`);
+          lines.push(`| ${formatSpreadsheetRow(row).join(" | ")} |`);
         });
       } else {
         lines.push(`Sheet: ${sheet.name}`);
         sheet.eachRow((row) => {
-          const cells = (row.values as unknown[]).slice(1).map(formatSpreadsheetCell).join("\t");
-          lines.push(cells);
+          lines.push(formatSpreadsheetRow(row).join("\t"));
         });
       }
-      lines.push("", ...describeSheetFormulasAndFormats(sheet, date1904), "");
+      lines.push(
+        "",
+        ...describeSheetFormulasAndFormats(sheet, date1904, fallbackFormats.get(sheet.name)),
+        "",
+      );
     });
 
     return lines.join("\n");
@@ -459,6 +655,10 @@ export class DocumentParserTools {
         name: "parse_document",
         description:
           "Read and extract text from a local document file. Supports PDF, DOCX, XLSX, PPTX, CSV, JSON, and Markdown. " +
+          "Use it whenever you need to read or check the contents of an Office or PDF file, including checking a file " +
+          "you just created: for XLSX it reports each sheet's cell values plus every formula with its saved result and " +
+          "every non-General number format with the cell's stored type (text, number, date) and displayed value; for " +
+          "PDF it reports the page count. Do not unzip or hand-parse the OOXML XML instead. " +
           "Output is capped at max_chars (default 50,000). Use format='structured' for tabular data (CSV/XLSX) " +
           "to receive markdown tables. Prefer read_file for plain text files.",
         input_schema: {

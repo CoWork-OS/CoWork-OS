@@ -325,6 +325,7 @@ export class VerificationRuntime {
       "9. Include at least one adversarial probe.",
       '10. A requested document, checklist, or plan passes when its actual contents cover every requested item and respect stated limits (for example "do not publish or upload"). Do not mark it PARTIAL because the actions it describes were not carried out.',
       "11. A link or path in the reply to a file the evidence shows exists in the workspace is a valid file link; the app resolves workspace-relative links. Check that it names the right file, but do not mark the result PARTIAL because you cannot demonstrate clicking or downloading it.",
+      "12. To inspect .xlsx, .xlsm, .docx, .pptx or .pdf files use parse_document: it reports cell types, formulas with saved results, number formats and PDF page counts. Do not hand-parse the files' zip/XML parts.",
     ].join("\n");
   }
 }

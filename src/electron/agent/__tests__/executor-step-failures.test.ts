@@ -7063,6 +7063,274 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  describe("verification repair pass", () => {
+    const pdfFinding =
+      "FAIL_BLOCKING — The PDF has 3 pages, not 2; the open decisions section overflows onto page 3.";
+
+    let workspacePath = "";
+
+    beforeEach(() => {
+      workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-verify-repair-"));
+      for (const name of ["Northstar-brief.docx", "Northstar-brief.pdf"]) {
+        fs.writeFileSync(path.join(workspacePath, name), "PK");
+      }
+    });
+
+    afterEach(() => {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    });
+
+    function createBriefPlanExecutor(responses: LLMResponse[]) {
+      const executor = createExecutorWithStubs(responses, {}) as Any;
+      executor.workspace.path = workspacePath;
+      executor.fileOperationTracker.getCreatedFiles = vi.fn(() => [
+        path.join(workspacePath, "Northstar-brief.docx"),
+        path.join(workspacePath, "Northstar-brief.pdf"),
+      ]);
+      executor.task.prompt =
+        "Prepare a two-page client brief and save Northstar-brief.docx and Northstar-brief.pdf.";
+      executor.plan = {
+        description: "Plan",
+        steps: [
+          {
+            id: "1",
+            description: "Draft the brief content.",
+            kind: "primary",
+            status: "completed",
+          },
+          {
+            id: "2",
+            description:
+              "Verify both files exist and the PDF has exactly two pages with every required section.",
+            kind: "verification",
+            status: "pending",
+          },
+        ],
+      };
+      return executor;
+    }
+
+    async function runPendingSteps(executor: Any): Promise<Map<string, string>> {
+      // Mirrors executePlan's loop: run steps in order, including steps the
+      // failure path appends while the loop is running.
+      const stepContexts = new Map<string, string>();
+      for (let index = 0; index < executor.plan.steps.length; index += 1) {
+        const step = executor.plan.steps[index];
+        if (step.status !== "pending") continue;
+        await executor.executeStep(step);
+        stepContexts.set(
+          step.id,
+          JSON.stringify(
+            (executor.conversationHistory as Any[]).find((entry) => entry.role === "user")?.content,
+          ),
+        );
+      }
+      return stepContexts;
+    }
+
+    it("runs exactly one repair and one re-check after a blocking final verification", async () => {
+      const executor = createBriefPlanExecutor([
+        textResponse(pdfFinding),
+        textResponse(
+          "Tightened the open decisions section and regenerated Northstar-brief.pdf; it now has two pages. " +
+            "The brief is saved as Northstar-brief.docx and Northstar-brief.pdf.",
+        ),
+        textResponse("OK"),
+      ]);
+
+      const stepContexts = await runPendingSteps(executor);
+
+      const steps = executor.plan.steps;
+      expect(steps.map((step: Any) => step.description)).toEqual([
+        "Draft the brief content.",
+        "Verify both files exist and the PDF has exactly two pages with every required section.",
+        "Repair the delivered work so it resolves the blocking issues found by the final check.",
+        "Verify the repaired deliverable against the task requirements and the issues the final check reported.",
+      ]);
+      expect(steps[1].status).toBe("failed");
+      expect(steps[2]).toMatchObject({ kind: "recovery", status: "completed" });
+      expect(steps[3]).toMatchObject({ kind: "verification", status: "completed" });
+      expect(executor.callLLMWithRetry).toHaveBeenCalledTimes(3);
+      expect(executor.verificationRepairPassesUsed).toBe(1);
+
+      // The repair step got the findings and the write tools; the re-check got the findings.
+      expect(stepContexts.get(steps[2].id)).toContain("VERIFICATION REPAIR PASS");
+      expect(stepContexts.get(steps[2].id)).toContain("The PDF has 3 pages, not 2");
+      expect(stepContexts.get(steps[3].id)).toContain("ISSUES REPORTED BY THE FIRST CHECK");
+      executor.currentStepId = steps[2].id;
+      const repairTools = executor
+        .applyStepScopedToolPolicy(executor.getAvailableTools())
+        .map((tool: Any) => tool.name);
+      expect(repairTools).toEqual(expect.arrayContaining(["write_file", "generate_document"]));
+      executor.currentStepId = null;
+
+      // The repaired answer, not the pre-repair claim, becomes the final summary candidate.
+      expect(executor.buildResultSummary()).toContain("it now has two pages");
+
+      // The original failure is recovered by the completed repair, so the plan completes.
+      expect(executor.getResolvedRecoveredFailureStepIds()).toContain("2");
+      executor.executeStep = vi.fn();
+      await expect(executor.executePlan()).resolves.toBeUndefined();
+    });
+
+    it("finishes as partial success with the unmet requirement first when the re-check fails", async () => {
+      const executor = createBriefPlanExecutor([
+        textResponse(pdfFinding),
+        textResponse("Shortened the risks section and regenerated Northstar-brief.pdf."),
+        textResponse("FAIL_BLOCKING — The PDF still has 3 pages."),
+      ]);
+
+      await runPendingSteps(executor);
+
+      // No second repair pass: the plan ends with the failed re-check.
+      expect(executor.plan.steps).toHaveLength(4);
+      expect(executor.plan.steps[3].status).toBe("failed");
+      expect(executor.verificationRepairPassesUsed).toBe(1);
+      expect(executor.daemon.logEvent).toHaveBeenCalledWith(
+        "task-1",
+        "log",
+        expect.objectContaining({
+          metric: "verification_repair_skipped",
+          reason: "recheck_step",
+        }),
+      );
+
+      executor.executeStep = vi.fn();
+      executor.buildResultSummary = vi.fn(
+        () =>
+          "Created Northstar-brief.docx and Northstar-brief.pdf with the overview, schedule, budget, risks, and open decisions for the onboarding pilot.",
+      );
+      const error = await executor.executePlan().catch((caught: unknown) => caught);
+      expect(String((error as Error)?.message)).toMatch(/^Task failed: 1 step\(s\) failed/);
+      expect(executor.shouldFinalizeAsPartialSuccess(error)).toBe(true);
+
+      const waived = executor.getWaivableFailedStepIdsAtCompletion();
+      const notes = executor.buildCompletionNotes({
+        terminalStatus: "partial_success",
+        reason: "Execution completed with partial results.",
+        waivedStepIds: waived,
+      });
+      expect(waived).toEqual([]);
+      expect(notes).not.toContain("(waived)");
+      expect(notes.split("\n").slice(0, 2)).toEqual([
+        "Completion notes:",
+        "- Unmet requirement: The PDF still has 3 pages.",
+      ]);
+      const summary = executor.appendCompletionFooters(
+        "Created both files with pagination.",
+        notes,
+      );
+      expect(
+        summary.startsWith("Completion notes:\n- Unmet requirement: The PDF still has 3 pages."),
+      ).toBe(true);
+    });
+
+    it("recovers the findings from the failed verification step after a resume", () => {
+      const executor = createBriefPlanExecutor([]);
+      executor.plan.steps[1].status = "failed";
+      executor.plan.steps[1].error = `Verification failed: ${pdfFinding}`;
+      const repairStep = {
+        id: "revised-1",
+        description:
+          "Repair the delivered work so it resolves the blocking issues found by the final check.",
+        kind: "recovery",
+        status: "pending",
+      };
+      executor.plan.steps.push(repairStep);
+
+      expect(executor.getVerificationRepairFindingsForStep(repairStep)).toBe(
+        "The PDF has 3 pages, not 2; the open decisions section overflows onto page 3.",
+      );
+      expect(executor.getVerificationRepairFindingsForStep(executor.plan.steps[0])).toBeUndefined();
+    });
+
+    it("does not repair after a WARN_NON_BLOCKING verdict", async () => {
+      const executor = createBriefPlanExecutor([
+        toolUseResponse("get_file_info", { path: "Northstar-brief.pdf" }),
+        toolUseResponse("get_file_info", { path: "Northstar-brief.docx" }),
+        textResponse("WARN_NON_BLOCKING — The PDF title page could use a larger heading."),
+      ]);
+
+      await runPendingSteps(executor);
+
+      expect(executor.plan.steps).toHaveLength(2);
+      expect(executor.plan.steps[1].status, String(executor.plan.steps[1].error || "")).toBe(
+        "completed",
+      );
+      expect(executor.verificationRepairPassesUsed ?? 0).toBe(0);
+    });
+
+    it("does not repair a blocking verdict that needs the user's input", async () => {
+      const executor = createBriefPlanExecutor([
+        textResponse(
+          "FAIL_BLOCKING — The user must provide the client's legal name before the brief can be finalized.",
+        ),
+      ]);
+
+      await runPendingSteps(executor);
+
+      expect(executor.plan.steps).toHaveLength(2);
+      expect(executor.plan.steps[1].status).toBe("failed");
+      expect(executor.daemon.logEvent).toHaveBeenCalledWith(
+        "task-1",
+        "log",
+        expect.objectContaining({
+          metric: "verification_repair_skipped",
+          reason: "needs_user_or_external_access",
+        }),
+      );
+    });
+
+    it("does not repair a blocking verdict about a source the task cannot reach", async () => {
+      const executor = createBriefPlanExecutor([
+        textResponse(
+          "FAIL_BLOCKING — The vendor pricing page could not be fetched (403 Forbidden).",
+        ),
+      ]);
+
+      await runPendingSteps(executor);
+
+      expect(executor.plan.steps).toHaveLength(2);
+    });
+
+    it("does not repair when the task has no turns left for it", async () => {
+      const executor = createBriefPlanExecutor([textResponse(pdfFinding)]);
+      executor.getRemainingTurnBudget = vi.fn(() => 2);
+
+      await runPendingSteps(executor);
+
+      expect(executor.plan.steps).toHaveLength(2);
+      expect(executor.daemon.logEvent).toHaveBeenCalledWith(
+        "task-1",
+        "log",
+        expect.objectContaining({
+          metric: "verification_repair_skipped",
+          reason: "budget_exhausted",
+        }),
+      );
+    });
+
+    it("tells an Office-file verification step to read the file with parse_document", async () => {
+      const executor = createExecutorWithStubs([textResponse("OK")], {}) as Any;
+      executor.task.prompt = "Create Northstar-pilot-costs.xlsx with an Expenses sheet.";
+      const step: Any = {
+        id: "verify-xlsx",
+        description: "Verify the workbook opens and keeps the invoice IDs as text.",
+        kind: "verification",
+        status: "pending",
+      };
+      executor.plan = { description: "Plan", steps: [step] };
+
+      await executor.executeStep(step);
+
+      const stepContext = JSON.stringify(
+        (executor.conversationHistory as Any[]).find((entry) => entry.role === "user")?.content,
+      );
+      expect(stepContext).toContain("read them with parse_document");
+      expect(stepContext).toContain("Do not unzip the file or parse its XML with a custom script");
+    });
+  });
+
   describe("verification rewind", () => {
     it("gives the rewound verification step the failed checks to fix", async () => {
       const executor = createExecutorWithStubs(

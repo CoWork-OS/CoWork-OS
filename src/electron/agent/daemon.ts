@@ -147,7 +147,6 @@ import {
   TaskFollowUpInput,
   AgentMessageDeliveryStatus,
   AgentMessageSendResult,
-  MULTI_LLM_PROVIDER_DISPLAY,
   AgentTeamRun,
   AgentTeamItem,
   AgentTeamItemStatus,
@@ -295,7 +294,6 @@ import {
   resolveAccessControlledPath,
   type AccessFilesystemOperation,
 } from "../security/access-profile-paths";
-import type { ComparisonService } from "../git/ComparisonService";
 import {
   deriveEntropySweepDecision,
   deriveReviewGateDecision,
@@ -834,8 +832,6 @@ export class AgentDaemon extends EventEmitter {
   private pendingCompletionVerifications: Set<string> = new Set();
   /** Git worktree manager for task isolation. */
   private worktreeManager: WorktreeManager;
-  /** Comparison service for agent comparison mode. */
-  private comparisonService: ComparisonService | null = null;
   private taskSeqById: Map<string, number> = new Map();
   private activeTimelineStageByTask: Map<string, TimelineStage> = new Map();
   private activeStepIdsByTask: Map<string, Set<string>> = new Map();
@@ -966,16 +962,6 @@ export class AgentDaemon extends EventEmitter {
   /** Get the worktree manager instance. */
   getWorktreeManager(): WorktreeManager {
     return this.worktreeManager;
-  }
-
-  /** Set the comparison service (initialized after daemon construction). */
-  setComparisonService(service: ComparisonService): void {
-    this.comparisonService = service;
-  }
-
-  /** Get the comparison service instance. */
-  getComparisonService(): ComparisonService | null {
-    return this.comparisonService;
   }
 
   private getAdmittedStartOperations(): Set<Promise<void>> {
@@ -1806,7 +1792,6 @@ export class AgentDaemon extends EventEmitter {
     if (
       config.collaborativeMode ||
       config.multitaskMode ||
-      config.multiLlmMode ||
       config.verificationAgent ||
       task.parentTaskId ||
       task.source === "cron" ||
@@ -1971,7 +1956,6 @@ export class AgentDaemon extends EventEmitter {
       config.verificationAgent ||
       config.collaborativeMode ||
       config.multitaskMode ||
-      config.multiLlmMode ||
       task.parentTaskId
     ) {
       return { task, changed: false, status: "skipped", reason: "explicit_or_orchestrated_task" };
@@ -3169,7 +3153,7 @@ export class AgentDaemon extends EventEmitter {
     if (source === "subconscious") return false;
     if (task.parentTaskId) return false;
     if (task.agentType === "sub" || task.agentType === "parallel") return false;
-    if (task.agentConfig?.collaborativeMode || task.agentConfig?.multiLlmMode) return false;
+    if (task.agentConfig?.collaborativeMode) return false;
     if (/^heartbeat:/i.test(title)) return false;
     if (/^routine prep:/i.test(title)) return false;
     return true;
@@ -5934,7 +5918,7 @@ export class AgentDaemon extends EventEmitter {
   }
 
   private async maybeLaunchCollaborativeTask(task: Task): Promise<boolean> {
-    if (!task.agentConfig?.collaborativeMode && !task.agentConfig?.multiLlmMode) {
+    if (!task.agentConfig?.collaborativeMode) {
       return false;
     }
     if (!this.teamOrchestrator) {
@@ -5942,11 +5926,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     this.taskRepo.update(task.id, { status: "executing", updatedAt: Date.now(), error: undefined });
-    this.logEvent(task.id, "log", {
-      message: task.agentConfig?.multiLlmMode
-        ? "Launching multi-LLM collaborative run."
-        : "Launching collaborative agent team run.",
-    });
+    this.logEvent(task.id, "log", { message: "Launching collaborative agent team run." });
 
     const db = this.dbManager.getDatabase();
     const teamRepo = new AgentTeamStore(db);
@@ -5974,48 +5954,6 @@ export class AgentDaemon extends EventEmitter {
         });
       }
       void this.teamOrchestrator.tickRun(existingRun.id, "daemon_existing_collab_run");
-      return true;
-    }
-
-    if (task.agentConfig.multiLlmMode && task.agentConfig.multiLlmConfig) {
-      const config = task.agentConfig.multiLlmConfig;
-      const participants = config.participants;
-      const allRoles = this.agentRoleRepo.findAll(false).filter((role) => role.isActive);
-      const sentinelRoleId = allRoles.length > 0 ? allRoles[0].id : undefined;
-      if (!sentinelRoleId) {
-        throw new Error("No agent role available to anchor multi-LLM run");
-      }
-      const maxParallelAgents =
-        typeof config.maxParallelParticipants === "number" && config.maxParallelParticipants > 0
-          ? Math.min(participants.length, Math.floor(config.maxParallelParticipants))
-          : participants.length;
-      const team = teamRepo.create({
-        workspaceId: task.workspaceId,
-        name: `MultiLLM-${Date.now()}`,
-        description: `Programmatic multi-LLM comparison for: ${task.title}`,
-        leadAgentRoleId: sentinelRoleId,
-        maxParallelAgents,
-      });
-      const run = teamRunRepo.create({
-        teamId: team.id,
-        rootTaskId: task.id,
-        status: "running",
-        collaborativeMode: true,
-        multiLlmMode: true,
-      });
-      for (let i = 0; i < participants.length; i++) {
-        const participant = participants[i];
-        teamItemRepo.create({
-          teamRunId: run.id,
-          title: participant.seatLabel || participant.displayName,
-          description: task.prompt,
-          ownerAgentRoleId: sentinelRoleId,
-          status: "todo",
-          sortOrder: (i + 1) * 10,
-        });
-      }
-      this.emitTeamRunEvent({ type: "team_run_created", timestamp: Date.now(), run });
-      void this.teamOrchestrator.tickRun(run.id, "daemon_programmatic_multi_llm");
       return true;
     }
 
@@ -11707,27 +11645,13 @@ export class AgentDaemon extends EventEmitter {
     let agentIcon: string;
     let agentColor: string;
 
-    if (run.multiLlmMode) {
-      // Multi-LLM mode: derive identity from task's provider config
-      const providerType = task.agentConfig?.providerType || "unknown";
-      const modelKey = task.agentConfig?.modelKey || "default";
-      const providerInfo = MULTI_LLM_PROVIDER_DISPLAY[providerType];
-      agentRoleId = `multi-llm-${providerType}-${modelKey}`;
-      agentDisplayName = providerInfo
-        ? `${providerInfo.name} (${modelKey})`
-        : `${providerType} (${modelKey})`;
-      agentIcon = providerInfo?.icon || "\u{1F916}";
-      agentColor = providerInfo?.color || "#6366f1";
-    } else {
-      // Standard collaborative mode: use agent role
-      if (!task.assignedAgentRoleId) return;
-      const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
-      if (!role) return;
-      agentRoleId = role.id;
-      agentDisplayName = role.displayName;
-      agentIcon = role.icon;
-      agentColor = role.color;
-    }
+    if (!task.assignedAgentRoleId) return;
+    const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
+    if (!role) return;
+    agentRoleId = role.id;
+    agentDisplayName = role.displayName;
+    agentIcon = role.icon;
+    agentColor = role.color;
 
     try {
       const thought = thoughtRepo.create({
@@ -11824,7 +11748,7 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
-   * Forward streaming progress from a child task to the collaborative/multi-LLM
+   * Forward streaming progress from a child task to the collaborative
    * thought panel as an ephemeral streaming indicator (no DB write).
    */
   private maybeEmitTeamStreamingProgress(taskId: string, payload: Any): void {
@@ -11862,25 +11786,13 @@ export class AgentDaemon extends EventEmitter {
     let agentIcon: string;
     let agentColor: string;
 
-    if (run.multiLlmMode) {
-      const providerType = task.agentConfig?.providerType || "unknown";
-      const modelKey = task.agentConfig?.modelKey || "default";
-      const providerInfo = MULTI_LLM_PROVIDER_DISPLAY[providerType];
-      agentRoleId = `multi-llm-${providerType}-${modelKey}`;
-      agentDisplayName = providerInfo
-        ? `${providerInfo.name} (${modelKey})`
-        : `${providerType} (${modelKey})`;
-      agentIcon = providerInfo?.icon || "\u{1F916}";
-      agentColor = providerInfo?.color || "#6366f1";
-    } else {
-      if (!task.assignedAgentRoleId) return;
-      const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
-      if (!role) return;
-      agentRoleId = role.id;
-      agentDisplayName = role.displayName;
-      agentIcon = role.icon;
-      agentColor = role.color;
-    }
+    if (!task.assignedAgentRoleId) return;
+    const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
+    if (!role) return;
+    agentRoleId = role.id;
+    agentDisplayName = role.displayName;
+    agentIcon = role.icon;
+    agentColor = role.color;
 
     const outputTokens = payload?.outputTokens ?? 0;
     const elapsedMs = payload?.elapsedMs ?? 0;
@@ -15898,20 +15810,6 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
-    // === COMPARISON SESSION CALLBACK ===
-    // Notify the comparison service when a task in a comparison session completes.
-    // This must be outside the auto-commit block so it fires regardless of worktree settings.
-    const comparisonSvc = this.comparisonService;
-    if (isCompletedOutcome && existingTask?.comparisonSessionId && comparisonSvc) {
-      void (async () => {
-        try {
-          await comparisonSvc.onTaskCompleted(taskId);
-        } catch (error: Any) {
-          console.error(`[AgentDaemon] Comparison callback failed for task ${taskId}:`, error);
-        }
-      })();
-    }
-
     try {
       const isTopLevelTask =
         existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? "main") === "main";
@@ -18117,7 +18015,7 @@ export class AgentDaemon extends EventEmitter {
   } {
     const task = this.taskRepo.findById(taskId);
     const config = task?.agentConfig;
-    if (!task || (!config?.collaborativeMode && !config?.multiLlmMode)) {
+    if (!task || !config?.collaborativeMode) {
       return { deferred: false, activeChildCount: 0 };
     }
     // Child-agent runs are driven by the parent's own executor, not completeRootTask.
@@ -18145,10 +18043,7 @@ export class AgentDaemon extends EventEmitter {
     rootMessageId?: string,
   ): void {
     const config = rootTask.agentConfig;
-    if (
-      (!config?.collaborativeMode && !config?.multiLlmMode) ||
-      config.childAgentCollaborativeRun
-    ) {
+    if (!config?.collaborativeMode || config.childAgentCollaborativeRun) {
       return;
     }
     const text = String(message || "").trim();

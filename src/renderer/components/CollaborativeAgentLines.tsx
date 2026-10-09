@@ -58,7 +58,6 @@ const FAILURE_EVENT_TYPES = new Set([
   "step_failed",
   "timeline_error",
   "agent_failed",
-  "workflow_phase_failed",
   "orchestration_node_failed",
 ]);
 
@@ -124,7 +123,6 @@ function getStepLabelFromEvent(event: TaskEvent): string {
     }
     case "timeline_error":
     case "agent_failed":
-    case "workflow_phase_failed":
     case "orchestration_node_failed":
       return desc ? `Failed: ${desc}` : "Failed";
     case "progress_update":
@@ -282,7 +280,6 @@ export function CollaborativeAgentLines({
   const [streamingByAgent, setStreamingByAgent] = useState<Map<string, AgentThought>>(new Map());
   const fallbackAgentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
   const agentGlyphs = providedAgentGlyphs ?? fallbackAgentGlyphs;
-  const isMultiLlm = collaborativeRun?.multiLlmMode === true;
   const collaborativeRunId = collaborativeRun?.id ?? null;
 
   // Subscribe to streaming thoughts for "is thinking" indicator (maps agentRoleId -> thought)
@@ -450,9 +447,7 @@ export function CollaborativeAgentLines({
             />
           ))}
         </span>
-        <span className="collab-lines-title">
-          {agentLines.length} {isMultiLlm ? "models" : "background agents"}
-        </span>
+        <span className="collab-lines-title">{agentLines.length} background agents</span>
         <span className="collab-lines-summary">{formatAgentSummary(statusCounts)}</span>
         <span className="collab-lines-hint">@ to tag agents</span>
       </div>
@@ -513,11 +508,7 @@ export function CollaborativeAgentLines({
       {!mainTaskCompleted && collaborativeRun && onWrapUp && (
         <div className="collab-lines-actions">
           <span className="collab-lines-status">
-            {isWrappingUp
-              ? "Wrapping up..."
-              : isMultiLlm
-                ? "Models are working..."
-                : "Agents are working..."}
+            {isWrappingUp ? "Wrapping up..." : "Agents are working..."}
           </span>
           <button
             type="button"

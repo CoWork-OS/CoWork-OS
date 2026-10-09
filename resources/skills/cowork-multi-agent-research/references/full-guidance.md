@@ -110,7 +110,6 @@ Search terms examples:
 - "agent handoff context transfer"
 - "hierarchical multi-agent"
 - "collaborative AI agents production"
-- "multi-LLM synthesis"
 
 ### Step 4: Write Research Document
 
@@ -137,9 +136,8 @@ Search terms examples:
 - **Agent Teams**: Persistent or ephemeral teams with shared checklists, coordinated runs, and team management UI.
 - **Sub-agents**: `spawn_agent` with nesting; sub-agents can run in parallel.
 - **Collaborative Mode**: Ephemeral multi-agent teams with real-time thought sharing; leader agent synthesizes the final result.
-- **Multi-LLM** mode: Compare providers with a judge.
 - **Mention tools**: Enable multi-agent collaboration and task delegation.
-- **Orchestration**: `IntentRouter`, `TaskStrategyService`, `WorkflowDecomposer`, `WorkflowPipeline`.
+- **Orchestration**: `IntentRouter`, `TaskStrategyService`, `WorkflowDecomposer`.
 
 ## Search Tips
 

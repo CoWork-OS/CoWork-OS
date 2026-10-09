@@ -46,8 +46,6 @@ export interface CreateTaskOptions {
   multitaskMode?: boolean;
   multitaskLaneCount?: number;
   multitaskAssignmentMode?: "auto_split";
-  multiLlmMode?: boolean;
-  multiLlmConfig?: import("../../../shared/types").MultiLlmConfig;
   verificationAgent?: boolean;
   executionMode?: ExecutionMode;
   assignedAgentRoleId?: string;

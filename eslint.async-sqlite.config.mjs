@@ -64,7 +64,6 @@ export const ASYNC_SQLITE_LINT_FILES = [
   "src/electron/database/schema.ts",
   "src/electron/database/sqlite-instrumentation.ts",
   "src/electron/eval/EvalService.ts",
-  "src/electron/git/ComparisonService.ts",
   "src/electron/main.ts",
   "src/electron/memory/MemoryService.ts",
   "src/electron/managed/ManagedSessionService.ts",

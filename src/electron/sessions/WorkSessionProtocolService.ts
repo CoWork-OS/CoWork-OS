@@ -32,13 +32,11 @@ const TERMINAL_EVENT_STATUS: Partial<
   follow_up_completed: "completed",
   agent_completed: "completed",
   orchestration_run_completed: "completed",
-  pipeline_completed: "completed",
   task_cancelled: "cancelled",
   task_failed: "failed",
   follow_up_failed: "failed",
   agent_failed: "failed",
   orchestration_run_failed: "failed",
-  pipeline_failed: "failed",
 };
 
 const WAITING_EVENT_TYPES = new Set([

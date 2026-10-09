@@ -12,7 +12,7 @@ describe("bot conversation query isolation", () => {
         agent_config TEXT, created_at INTEGER, updated_at INTEGER, session_id TEXT, source TEXT,
         is_pinned INTEGER, completed_at INTEGER, last_run_duration_ms INTEGER, parent_task_id TEXT,
         agent_type TEXT, worker_role TEXT, board_column TEXT, priority INTEGER,
-        comparison_session_id TEXT, branch_from_task_id TEXT, branch_from_event_id TEXT,
+        branch_from_task_id TEXT, branch_from_event_id TEXT,
         branch_label TEXT, resume_strategy TEXT, strategy_lock TEXT, budget_profile TEXT,
         terminal_status TEXT, failure_class TEXT, verification_verdict TEXT, continuation_count INTEGER,
         awaiting_user_input_reason_code TEXT, worktree_path TEXT, target_node_id TEXT, company_id TEXT,

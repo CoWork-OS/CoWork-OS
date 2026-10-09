@@ -3028,7 +3028,6 @@ export class ManagedSessionService {
     if (version.executionMode === "team") {
       const template = version.teamTemplate || {};
       if (template.collaborativeMode) agentConfig.collaborativeMode = true;
-      if (template.multiLlmMode) agentConfig.multiLlmMode = true;
     }
 
     return agentConfig;
@@ -3086,7 +3085,6 @@ export class ManagedSessionService {
       rootTaskId: rootTask.id,
       status: "running",
       collaborativeMode: template.collaborativeMode ?? true,
-      multiLlmMode: template.multiLlmMode ?? false,
     });
 
     const memberRoleIds = template.memberAgentRoleIds?.length

@@ -1540,14 +1540,13 @@ Save this as "weekly-metrics-review" and schedule it for Mondays at 9am.
 
 ---
 
-### Multi-LLM Comparison & Routing
+### Model Routing
 
-Route tasks to the best model for the job — compare outputs across providers, run A/B tests, and optimize for cost, speed, or quality.
+Route tasks to the best model for the job and optimize for cost, speed, or quality.
 
 **What it handles:**
 
 - Multiple supported model routes — account connections, provider APIs, compatible gateways, cloud credentials, and local inference
-- Side-by-side output comparison for the same prompt
 - Automatic model selection based on task type (coding → Claude, creative → GPT-4)
 - Cost tracking and budget management per model
 - Latency monitoring and provider failover
@@ -1555,12 +1554,11 @@ Route tasks to the best model for the job — compare outputs across providers, 
 **Example prompt:**
 
 ```
-Compare Claude Sonnet and GPT-4o on this code review task.
-Show me both outputs side by side, highlight where they agree and
-disagree, and recommend which review I should trust for this PR.
+Review this PR with the strongest available model, but use the
+cheapest route for the summary I post to the team channel.
 ```
 
-**Powered by:** Provider factory, multi-LLM routing, model comparison tools
+**Powered by:** Provider factory, model routing, Mixture of Agents presets
 
 ---
 
@@ -1930,7 +1928,7 @@ Rate the attractiveness of entering with a [specific angle].
 | **Smart Home & IoT**       | Lighting, sleep devices, cameras, ambiance scenes                                                   | OpenHue MCP, Eight Sleep MCP, RTSP/ONVIF tools               |
 | **Financial Intelligence** | Risk analysis, tax planning, crypto, CFO modeling, ESG                                              | 8 financial skills, ccxt MCP, Wealth Management pack         |
 | **Knowledge & Notes**      | Apple Notes, knowledge graph, memory, deep research                                                 | Memory service, FTS5 index, scratchpad tools                 |
-| **AI Agent Ecosystem**     | Agent teams, build mode, playbooks, multi-LLM routing                                               | Orchestration engine, provider factory, playbook engine      |
+| **AI Agent Ecosystem**     | Agent teams, build mode, playbooks, model routing                                               | Orchestration engine, provider factory, playbook engine      |
 | **Everyday Automation**    | Food ordering, scheduling, PDF editing, desktop control                                             | Foodora MCP, Calendly MCP, nano-pdf, Peekaboo                |
 | **Content Intelligence**   | Video analysis, blog monitoring, humanization, research                                             | YouTube tools, RSS parsing, web research, style matching     |
 

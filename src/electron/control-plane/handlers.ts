@@ -1882,7 +1882,6 @@ const ManagedAgentTeamTemplateSchema = z
     memberAgentRoleIds: z.array(z.string().trim().min(1).max(200)).max(25).optional(),
     maxParallelAgents: z.number().int().min(1).max(25).optional(),
     collaborativeMode: z.boolean().optional(),
-    multiLlmMode: z.boolean().optional(),
   })
   .strict();
 

@@ -66,7 +66,7 @@ The task UI now exposes live provider/model state so users can see:
 - which skills were actually applied
 - follow-up trigger messages and summary-mode completion relays for delegated or orphaned follow-up work
 
-Automatic routing remains automatic, but it is now observable by default. Manual overrides and multi-LLM judge flows are still supported.
+Automatic routing remains automatic, but it is now observable by default. Manual overrides are still supported.
 
 ### 5. Applied skills stay separate from the task request
 

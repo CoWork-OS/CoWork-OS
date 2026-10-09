@@ -5263,16 +5263,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveWorktreeSettings: (settings: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_SAVE_SETTINGS, settings),
 
-  // Agent Comparison APIs
-  createComparison: (params: Any) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CREATE, params),
-  getComparison: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_GET, sessionId),
-  listComparisons: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_LIST, workspaceId),
-  cancelComparison: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_CANCEL, sessionId),
-  getComparisonResult: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.COMPARISON_GET_RESULT, sessionId),
-
   // Usage Insights
   getUsageInsights: (workspaceId: string, periodDays?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.USAGE_INSIGHTS_GET, workspaceId, periodDays),
@@ -8727,13 +8717,6 @@ export interface ElectronAPI {
   getWorktreeDiff: (taskId: string) => Promise<Any>;
   getWorktreeSettings: () => Promise<Any>;
   saveWorktreeSettings: (settings: Any) => Promise<{ success: boolean; error?: string }>;
-
-  // Agent Comparison APIs
-  createComparison: (params: Any) => Promise<Any>;
-  getComparison: (sessionId: string) => Promise<Any>;
-  listComparisons: (workspaceId: string) => Promise<Any[]>;
-  cancelComparison: (sessionId: string) => Promise<{ success: boolean }>;
-  getComparisonResult: (sessionId: string) => Promise<Any>;
 
   // Usage Insights
   getUsageInsights: (workspaceId: string, periodDays?: number) => Promise<Any>;

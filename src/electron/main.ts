@@ -92,7 +92,6 @@ import { setupAdminPolicyHandlers } from "./ipc/admin-policy-handlers";
 import { setupAgentSecurityHandlers } from "./ipc/agent-security-handlers";
 import { NumbatService } from "./security/numbat";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
-import { ComparisonService } from "./git/ComparisonService";
 
 import { UsageInsightsProjector } from "./reports/UsageInsightsProjector";
 import { describeCronRunStatus } from "../shared/cron-outcomes";
@@ -3476,9 +3475,7 @@ if (isMacSafeStorageMigrationWorker) {
         startupActionGate.open();
         CanvasManager.getInstance().setMainWindow(mainWindow);
 
-        // Initialize Git Worktree & Comparison handlers
-        const comparisonService = new ComparisonService(dbManager.getDatabase(), agentDaemon);
-        agentDaemon.setComparisonService(comparisonService);
+        // Initialize Git Worktree handlers
         setupWorktreeHandlers(agentDaemon);
 
         const channelInitStartedAt = Date.now();

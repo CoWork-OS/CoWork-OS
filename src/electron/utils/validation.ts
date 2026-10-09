@@ -243,28 +243,6 @@ export const AgentConfigSchema = z
     multitaskMode: z.boolean().optional(),
     multitaskLaneCount: z.number().int().min(2).max(8).optional(),
     multitaskAssignmentMode: z.literal("auto_split").optional(),
-    multiLlmMode: z.boolean().optional(),
-    multiLlmConfig: z
-      .object({
-        participants: z
-          .array(
-            z.object({
-              providerType: z.enum(LLM_PROVIDER_TYPES),
-              modelKey: z.string().max(200),
-              displayName: z.string().max(200),
-              isJudge: z.boolean(),
-              seatLabel: z.string().max(200).optional(),
-              roleInstruction: z.string().max(5000).optional(),
-              isIdeaProposer: z.boolean().optional(),
-            }),
-          )
-          .min(2)
-          .max(10),
-        judgeProviderType: z.enum(LLM_PROVIDER_TYPES),
-        judgeModelKey: z.string().max(200),
-        maxParallelParticipants: z.number().int().min(1).max(10).optional(),
-      })
-      .optional(),
     researchWorkflow: z
       .object({
         enabled: z.boolean(),
@@ -2587,7 +2565,7 @@ export const SetImportedRecallIgnoredSchema = z.object({
   ignored: z.boolean(),
 });
 
-// ============ Worktree/Comparison Schemas ============
+// ============ Worktree Schemas ============
 
 export const WorktreeSettingsSchema = z
   .object({
@@ -2596,23 +2574,6 @@ export const WorktreeSettingsSchema = z
     autoCleanOnMerge: z.boolean(),
     branchPrefix: z.string().trim().min(1).max(100),
     commitMessagePrefix: z.string().max(200),
-  })
-  .strict();
-
-export const ComparisonAgentSpecSchema = z
-  .object({
-    label: z.string().trim().min(1).max(100).optional(),
-    agentConfig: AgentConfigSchema.optional(),
-    assignedAgentRoleId: z.string().uuid().optional(),
-  })
-  .strict();
-
-export const ComparisonCreateSchema = z
-  .object({
-    title: z.string().trim().min(1).max(MAX_TITLE_LENGTH),
-    prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
-    workspaceId: WorkspaceIdSchema,
-    agents: z.array(ComparisonAgentSpecSchema).min(2).max(8),
   })
   .strict();
 

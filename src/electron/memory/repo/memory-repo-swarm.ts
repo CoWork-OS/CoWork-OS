@@ -3,7 +3,7 @@
  * they share `swarms/<slug>/` in the memory folder.
  *
  * - A swarm is the root of a task's `parentTaskId` chain when it has child tasks or a team
- *   run (sub-agents, collaborative runs, workflow pipelines). Bot teams are not
+ *   run (sub-agents, collaborative runs). Bot teams are not
  *   covered: their tasks share no goal id.
  * - The slug is `<title slug>-<first 8 of the root id>`; it always comes from the task chain,
  *   never from the model.

@@ -33,7 +33,7 @@ function createGraphSchema(db: Database.Database): void {
       worker_role TEXT, parent_task_id TEXT, assigned_agent_role_id TEXT, capability_hint TEXT,
       acp_agent_id TEXT, agent_config TEXT, task_id TEXT, remote_task_id TEXT, public_handle TEXT,
       summary TEXT, output TEXT, error TEXT, team_run_id TEXT, team_item_id TEXT,
-      workflow_phase_id TEXT, acp_task_id TEXT, metadata TEXT, verification_verdict TEXT,
+      acp_task_id TEXT, metadata TEXT, verification_verdict TEXT,
       verification_report TEXT, semantic_summary TEXT, created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL, started_at INTEGER, completed_at INTEGER
     );

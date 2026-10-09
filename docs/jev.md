@@ -235,7 +235,7 @@ boundary and retain the result in the existing task/runtime path:
 - **Adaptive task strategy** lets Jev choose single-agent, team, multitask, or
   verification execution for eligible foreground tasks, including tasks that
   initially look single-agent. Low-complexity tasks and explicit,
-  child/background, already-collaborative, multitask, multi-LLM, or verification
+  child/background, already-collaborative, multitask, or verification
   tasks bypass the promotion decision. Deterministic eligibility checks still
   decide whether the selected strategy can be applied.
 - **Snapshot-bound browser action selection** lets Jev select only unchanged,

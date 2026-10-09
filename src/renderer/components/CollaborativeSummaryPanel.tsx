@@ -1,7 +1,7 @@
 /**
  * CollaborativeSummaryPanel
  *
- * Chronological view of a collaborative or multi-LLM run, in the same voice as
+ * Chronological view of a collaborative run, in the same voice as
  * the rest of the transcript: the coordinator's plan as prose, one glyph line
  * when the agents start ("Anansi, Ares and 2 more started working") and when
  * they end, each agent's thoughts under its own colorful glyph, then the
@@ -270,9 +270,6 @@ export function CollaborativeSummaryPanel({
     );
   })();
 
-  const isMultiLlm = collaborativeRun.multiLlmMode === true;
-  const agentNoun = isMultiLlm ? "Models" : "Agents";
-
   return (
     <div className="collaborative-summary-panel">
       <div className="collab-summary-timeline">
@@ -383,7 +380,7 @@ export function CollaborativeSummaryPanel({
               ? "Wrapping up"
               : allDone
                 ? "Finalizing"
-                : `${workingCount} of ${memberTasks.length} ${agentNoun.toLowerCase()} working`}
+                : `${workingCount} of ${memberTasks.length} agents working`}
           </span>
           {onWrapUp && (
             <button

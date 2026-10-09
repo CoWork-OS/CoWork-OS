@@ -98,9 +98,6 @@ import {
   WorktreeInfo,
   WorktreeStatus,
   MergeResult,
-  ComparisonSession,
-  ComparisonSessionStatus,
-  ComparisonResult,
   ChannelSpecialization,
   CreateChannelSpecializationRequest,
   UpdateChannelSpecializationRequest,
@@ -707,7 +704,6 @@ export class TaskStore {
     worktreePath: "worktree_path",
     worktreeBranch: "worktree_branch",
     worktreeStatus: "worktree_status",
-    comparisonSessionId: "comparison_session_id",
     sessionId: "session_id",
     branchFromTaskId: "branch_from_task_id",
     branchFromEventId: "branch_from_event_id",
@@ -1029,7 +1025,6 @@ export class TaskStore {
     "worktreePath",
     "worktreeBranch",
     "worktreeStatus",
-    "comparisonSessionId",
     "sessionId",
     "branchFromTaskId",
     "branchFromEventId",
@@ -1422,7 +1417,6 @@ export class TaskStore {
         worker_role,
         board_column,
         priority,
-        comparison_session_id,
         session_id,
         branch_from_task_id,
         branch_from_event_id,
@@ -1478,11 +1472,6 @@ export class TaskStore {
           THEN json_extract(agent_config, '$.collaborativeMode')
           ELSE NULL
         END AS agent_config_collaborative_mode,
-        CASE
-          WHEN agent_config IS NOT NULL AND json_valid(agent_config)
-          THEN json_extract(agent_config, '$.multiLlmMode')
-          ELSE NULL
-        END AS agent_config_multi_llm_mode,
         CASE
           WHEN agent_config IS NOT NULL AND json_valid(agent_config)
           THEN json_extract(agent_config, '$.autonomousMode')
@@ -2012,7 +2001,6 @@ export class TaskStore {
       worktreePath: row.worktree_path || undefined,
       worktreeBranch: row.worktree_branch || undefined,
       worktreeStatus: (row.worktree_status as Task["worktreeStatus"]) || undefined,
-      comparisonSessionId: row.comparison_session_id || undefined,
       sessionId: row.session_id || undefined,
       sessionArchived: Number(row.session_archived) === 1 ? true : undefined,
       branchFromTaskId: row.branch_from_task_id || undefined,
@@ -2078,12 +2066,7 @@ export class TaskStore {
       agentConfig.taskOrigin = "build";
     }
     const setBooleanAgentConfig = (
-      key:
-        | "videoGenerationMode"
-        | "multitaskMode"
-        | "collaborativeMode"
-        | "multiLlmMode"
-        | "autonomousMode",
+      key: "videoGenerationMode" | "multitaskMode" | "collaborativeMode" | "autonomousMode",
       value: unknown,
     ): void => {
       if (value === null || value === undefined) return;
@@ -2093,7 +2076,6 @@ export class TaskStore {
     setBooleanAgentConfig("videoGenerationMode", row.agent_config_video_generation_mode);
     setBooleanAgentConfig("multitaskMode", row.agent_config_multitask_mode);
     setBooleanAgentConfig("collaborativeMode", row.agent_config_collaborative_mode);
-    setBooleanAgentConfig("multiLlmMode", row.agent_config_multi_llm_mode);
     setBooleanAgentConfig("autonomousMode", row.agent_config_autonomous_mode);
 
     if (typeof row.agent_config_task_domain === "string") {
@@ -2145,7 +2127,6 @@ export class TaskStore {
       boardColumn: row.board_column || undefined,
       priority: row.priority ?? undefined,
       worktreePath: row.worktree_path || undefined,
-      comparisonSessionId: row.comparison_session_id || undefined,
       sessionId: row.session_id || undefined,
       branchFromTaskId: row.branch_from_task_id || undefined,
       branchFromEventId: row.branch_from_event_id || undefined,
@@ -8657,144 +8638,6 @@ export class WorktreeInfoStore {
           )
         : undefined,
     };
-  }
-}
-
-// ============ Comparison Session Repository ============
-
-export class ComparisonSessionStore {
-  constructor(private db: Database.Database) {}
-
-  create(params: Omit<ComparisonSession, "id" | "createdAt">): ComparisonSession {
-    const session: ComparisonSession = {
-      id: uuidv4(),
-      ...params,
-      createdAt: Date.now(),
-    };
-
-    const stmt = this.db.prepare(`
-      INSERT INTO comparison_sessions (id, title, prompt, workspace_id, status, task_ids, created_at, completed_at, comparison_result)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      session.id,
-      session.title,
-      session.prompt,
-      session.workspaceId,
-      session.status,
-      JSON.stringify(session.taskIds),
-      session.createdAt,
-      session.completedAt ?? null,
-      session.comparisonResult ? JSON.stringify(session.comparisonResult) : null,
-    );
-    return session;
-  }
-
-  findById(id: string): ComparisonSession | undefined {
-    const stmt = this.db.prepare("SELECT * FROM comparison_sessions WHERE id = ?");
-    const row = stmt.get(id) as Record<string, unknown> | undefined;
-    if (!row) return undefined;
-    return this.reconcileTaskIds(this.mapRow(row));
-  }
-
-  findByWorkspaceId(workspaceId: string): ComparisonSession[] {
-    const stmt = this.db.prepare(
-      "SELECT * FROM comparison_sessions WHERE workspace_id = ? ORDER BY created_at DESC",
-    );
-    const rows = stmt.all(workspaceId) as Record<string, unknown>[];
-    return rows.map((row) => this.reconcileTaskIds(this.mapRow(row)));
-  }
-
-  update(id: string, updates: Partial<ComparisonSession>): void {
-    const fields: string[] = [];
-    const values: unknown[] = [];
-
-    if (updates.status !== undefined) {
-      fields.push("status = ?");
-      values.push(updates.status);
-    }
-    if (updates.taskIds !== undefined) {
-      // Keep materialized task_ids aligned with the canonical task linkage source.
-      const canonicalTaskIds = this.getTaskIdsForSession(id);
-      fields.push("task_ids = ?");
-      values.push(JSON.stringify(canonicalTaskIds));
-    }
-    if (updates.completedAt !== undefined) {
-      fields.push("completed_at = ?");
-      values.push(updates.completedAt);
-    }
-    if (updates.comparisonResult !== undefined) {
-      fields.push("comparison_result = ?");
-      values.push(JSON.stringify(updates.comparisonResult));
-    }
-
-    if (fields.length === 0) return;
-
-    values.push(id);
-    const stmt = this.db.prepare(
-      `UPDATE comparison_sessions SET ${fields.join(", ")} WHERE id = ?`,
-    );
-    stmt.run(...values);
-  }
-
-  delete(id: string): void {
-    const stmt = this.db.prepare("DELETE FROM comparison_sessions WHERE id = ?");
-    stmt.run(id);
-  }
-
-  syncTaskIdsFromTasks(sessionId: string): string[] {
-    const taskIds = this.getTaskIdsForSession(sessionId);
-    const stmt = this.db.prepare("UPDATE comparison_sessions SET task_ids = ? WHERE id = ?");
-    stmt.run(JSON.stringify(taskIds), sessionId);
-    return taskIds;
-  }
-
-  private mapRow(row: Record<string, unknown>): ComparisonSession {
-    return {
-      id: row.id as string,
-      title: row.title as string,
-      prompt: row.prompt as string,
-      workspaceId: row.workspace_id as string,
-      status: row.status as ComparisonSessionStatus,
-      taskIds: safeJsonParse<string[]>(row.task_ids as string, [], "comparisonSession.taskIds"),
-      createdAt: row.created_at as number,
-      completedAt: (row.completed_at as number) || undefined,
-      comparisonResult: row.comparison_result
-        ? safeJsonParse<ComparisonResult>(
-            row.comparison_result as string,
-            { taskResults: [] },
-            "comparisonSession.comparisonResult",
-          )
-        : undefined,
-    };
-  }
-
-  private reconcileTaskIds(session: ComparisonSession): ComparisonSession {
-    const canonicalTaskIds = this.getTaskIdsForSession(session.id);
-    if (this.arraysEqual(session.taskIds, canonicalTaskIds)) {
-      return session;
-    }
-    const stmt = this.db.prepare("UPDATE comparison_sessions SET task_ids = ? WHERE id = ?");
-    stmt.run(JSON.stringify(canonicalTaskIds), session.id);
-    return { ...session, taskIds: canonicalTaskIds };
-  }
-
-  private getTaskIdsForSession(sessionId: string): string[] {
-    const stmt = this.db.prepare(
-      "SELECT id FROM tasks WHERE comparison_session_id = ? ORDER BY created_at ASC",
-    );
-    const rows = stmt.all(sessionId) as Array<{ id: string }>;
-    return rows
-      .map((row) => row.id)
-      .filter((id): id is string => typeof id === "string" && id.length > 0);
-  }
-
-  private arraysEqual(a: string[], b: string[]): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
   }
 }
 

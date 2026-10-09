@@ -45,7 +45,7 @@ runtime applies the result only when deterministic eligibility checks pass.
 
 The following remain outside this promotion boundary:
 
-- explicit collaborative, multitask, multi-LLM, or verification tasks
+- explicit collaborative, multitask, or verification tasks
 - child/delegated tasks
 - cron and subconscious/background tasks
 - low-complexity tasks that do not need a provider decision

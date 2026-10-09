@@ -308,7 +308,6 @@ See [Release Notes 0.5.60](release-notes-0.5.60.md).
 - [x] Parallel task queue panel
 - [x] Collaborative Thoughts Panel - Real-time agent thinking display
 - [x] Comparison View - Side-by-side agent/model output comparison
-- [x] Multi-LLM Selection Panel - Configure multi-provider runs
 - [x] Live router visibility - active provider, active model, and fallback state surfaced in the task UI
 - [x] Unified recall search across tasks, messages, files, memory, and knowledge-graph context
 - [x] Persistent shell session status and retained-state controls for long-running operator workflows
@@ -516,12 +515,10 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 
 ### Sub-Agents / Multi-Agent Collaboration
 
-- **Status**: Implemented (Collaborative Mode, `/multitask`, Multi-LLM Mode, Agent Comparison)
+- **Status**: Implemented (Collaborative Mode, `/multitask`)
 - **What's built**:
   - Collaborative Mode: ephemeral multi-agent teams with real-time thought sharing
   - `/multitask`: one-shot collaborative runs with bounded lane planning, lane-specific child tasks, queue-respecting dispatch, and synthesis
-  - Multi-LLM Mode: same task dispatched to multiple providers with judge synthesis
-  - Agent Comparison Mode: side-by-side output comparison across agents/models
   - Capability Matcher: auto-select agents based on task requirements
   - Git Worktree Isolation: per-task isolated branches with auto-commit/merge/cleanup
 
@@ -550,11 +547,9 @@ unavailable read-only profile. See [Access Profiles](access-profiles.md) and [Pe
 19. Run tasks in isolated git worktrees with auto-commit and merge
 20. Use collaborative mode for multi-agent team reasoning
 21. Use `/multitask [N] <task>` for bounded parallel lane work
-22. Use multi-LLM mode to compare outputs across providers
-23. Compare agent outputs side by side
-24. Pin tasks for quick access
-25. Gracefully wrap up running tasks
-26. Use git tools (commit, diff, branch) within tasks
+22. Pin tasks for quick access
+23. Gracefully wrap up running tasks
+24. Use git tools (commit, diff, branch) within tasks
 
 ### You Cannot (Yet):
 
@@ -650,8 +645,6 @@ Expected behavior:
 - Web search and browser automation
 - Code tools (glob, grep, edit_file) and git tools (commit, diff, branch)
 - Collaborative Mode with real-time thought sharing
-- Multi-LLM Mode with judge-based synthesis
-- Agent Comparison Mode for side-by-side output comparison
 - Git Worktree Isolation for per-task branch isolation
 - Task pinning and graceful wrap-up
 - Personality customization (6 styles, 9 personas)

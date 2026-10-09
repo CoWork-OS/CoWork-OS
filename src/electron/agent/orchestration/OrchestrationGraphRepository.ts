@@ -54,7 +54,6 @@ interface NodeRow {
   error: string | null;
   team_run_id: string | null;
   team_item_id: string | null;
-  workflow_phase_id: string | null;
   acp_task_id: string | null;
   metadata: string | null;
   verification_verdict: VerificationVerdict | null;
@@ -112,7 +111,6 @@ function rowToNode(row: NodeRow): OrchestrationGraphNode {
     error: row.error ?? undefined,
     teamRunId: row.team_run_id ?? undefined,
     teamItemId: row.team_item_id ?? undefined,
-    workflowPhaseId: row.workflow_phase_id ?? undefined,
     acpTaskId: row.acp_task_id ?? undefined,
     metadata: safeJsonParse<Record<string, unknown>>(row.metadata, {}),
     verificationVerdict: row.verification_verdict ?? undefined,
@@ -513,10 +511,10 @@ export class OrchestrationGraphStore {
           id, run_id, node_key, title, prompt, kind, status, dispatch_target, worker_role,
           parent_task_id, assigned_agent_role_id, capability_hint, acp_agent_id, agent_config,
           task_id, remote_task_id, public_handle, summary, output, error,
-          team_run_id, team_item_id, workflow_phase_id, acp_task_id, metadata,
+          team_run_id, team_item_id, acp_task_id, metadata,
           verification_verdict, verification_report, semantic_summary,
           created_at, updated_at, started_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
 
       for (const node of nodes) {
@@ -543,7 +541,6 @@ export class OrchestrationGraphStore {
           node.error ?? null,
           node.teamRunId ?? null,
           node.teamItemId ?? null,
-          node.workflowPhaseId ?? null,
           node.acpTaskId ?? null,
           JSON.stringify(node.metadata || {}),
           node.verificationVerdict ?? null,
@@ -613,10 +610,10 @@ export class OrchestrationGraphStore {
           id, run_id, node_key, title, prompt, kind, status, dispatch_target, worker_role,
           parent_task_id, assigned_agent_role_id, capability_hint, acp_agent_id, agent_config,
           task_id, remote_task_id, public_handle, summary, output, error,
-          team_run_id, team_item_id, workflow_phase_id, acp_task_id, metadata,
+          team_run_id, team_item_id, acp_task_id, metadata,
           verification_verdict, verification_report, semantic_summary,
           created_at, updated_at, started_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const node of nodes) {
         insertNode.run(
@@ -642,7 +639,6 @@ export class OrchestrationGraphStore {
           node.error ?? null,
           node.teamRunId ?? null,
           node.teamItemId ?? null,
-          node.workflowPhaseId ?? null,
           node.acpTaskId ?? null,
           JSON.stringify(node.metadata || {}),
           node.verificationVerdict ?? null,

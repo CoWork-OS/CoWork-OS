@@ -99,7 +99,7 @@ export function buildTaskEventHistoryForTransport(params: {
 
   const events = eventRepo.findRecentByTaskId(taskId, safeLimit);
   const task = taskRepo.findById(taskId);
-  if (task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode) {
+  if (task?.agentConfig?.collaborativeMode) {
     const childTasks = taskRepo.findByParent(taskId);
     if (childTasks.length > 0) {
       const childFileEvents = eventRepo.findByTaskIds(
@@ -132,10 +132,9 @@ export function buildTaskTimelinePageForTransport(params: {
 }): TaskTimelinePageResult {
   const { request, taskRepo, eventRepo, sanitizeValue } = params;
   const task = taskRepo.findById(request.taskId);
-  const childTaskIds =
-    task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode
-      ? taskRepo.findByParent(request.taskId).map((child) => child.id)
-      : [];
+  const childTaskIds = task?.agentConfig?.collaborativeMode
+    ? taskRepo.findByParent(request.taskId).map((child) => child.id)
+    : [];
   const page = eventRepo.findTimelinePage({
     ...request,
     ...(childTaskIds.length > 0
@@ -159,10 +158,9 @@ export function buildTaskEventDetailForTransport(params: {
 }): TaskEventDetailResult {
   const { request, taskRepo, eventRepo, sanitizeValue } = params;
   const task = taskRepo.findById(request.taskId);
-  const childTaskIds =
-    task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode
-      ? taskRepo.findByParent(request.taskId).map((child) => child.id)
-      : [];
+  const childTaskIds = task?.agentConfig?.collaborativeMode
+    ? taskRepo.findByParent(request.taskId).map((child) => child.id)
+    : [];
   const detail = eventRepo.findEventDetailById(request.eventId, {
     taskId: request.taskId,
     ...(childTaskIds.length > 0

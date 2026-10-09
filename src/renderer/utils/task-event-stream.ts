@@ -112,9 +112,7 @@ export function shouldIncludeTaskEventInSelectedSession(params: {
   if (!childTask?.parentTaskId || childTask.parentTaskId !== selectedTaskId) return false;
 
   const parentTask = tasks.find((task) => task.id === selectedTaskId);
-  return Boolean(
-    parentTask?.agentConfig?.collaborativeMode || parentTask?.agentConfig?.multiLlmMode,
-  );
+  return Boolean(parentTask?.agentConfig?.collaborativeMode);
 }
 
 export function shouldRefreshCanonicalEventsForTerminalUpdate(params: {

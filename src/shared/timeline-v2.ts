@@ -284,16 +284,8 @@ function inferLegacyTimelineType(
     return "timeline_step_updated";
   }
 
-  if (legacyType === "workflow_phase_started" || legacyType === "workflow_detected") {
+  if (legacyType === "workflow_detected") {
     return "timeline_group_started";
-  }
-
-  if (
-    legacyType === "workflow_phase_completed" ||
-    legacyType === "pipeline_completed" ||
-    legacyType === "workflow_phase_failed"
-  ) {
-    return "timeline_group_finished";
   }
 
   return "timeline_step_updated";

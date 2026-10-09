@@ -79,7 +79,11 @@ export function AgentLifecycleRow({
             const detail = getAgentDetail(task, phase);
             const body = (
               <>
-                <AgentGlyph glyph={glyphFor(task)} size={18} state={getAgentGlyphState(task.status)} />
+                <AgentGlyph
+                  glyph={glyphFor(task)}
+                  size={18}
+                  state={getAgentGlyphState(task.status)}
+                />
                 <span className="agent-lifecycle-item-name">
                   {resolveAgentDisplayName(task.title)}
                 </span>

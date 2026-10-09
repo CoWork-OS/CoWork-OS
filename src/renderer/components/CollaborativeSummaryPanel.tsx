@@ -187,7 +187,12 @@ export function CollaborativeSummaryPanel({
 
     // 4. A live status line while the run is in flight.
     if (phase === "synthesize") {
-      entries.push({ kind: "status", id: "status-synthesize", label: "Synthesizing", ts: Date.now() });
+      entries.push({
+        kind: "status",
+        id: "status-synthesize",
+        label: "Synthesizing",
+        ts: Date.now(),
+      });
     } else if (memberTasks.length === 0 && !mainTaskCompleted) {
       entries.push({
         kind: "status",
@@ -255,7 +260,8 @@ export function CollaborativeSummaryPanel({
     const lastAssistant = [...childEvents]
       .reverse()
       .find(
-        (e) => e.taskId === synthesisTask.id && getEffectiveTaskEventType(e) === "assistant_message",
+        (e) =>
+          e.taskId === synthesisTask.id && getEffectiveTaskEventType(e) === "assistant_message",
       );
     return (
       synthesisTask.resultSummary?.trim() ||
@@ -312,7 +318,9 @@ export function CollaborativeSummaryPanel({
             truncate(normalizeMarkdownForCollab(entry.thought.content), 300),
           );
           const thoughtTaskId = entry.thought.sourceTaskId;
-          const canOpen = Boolean(openChildAgent && thoughtTaskId && childTasksById.has(thoughtTaskId));
+          const canOpen = Boolean(
+            openChildAgent && thoughtTaskId && childTasksById.has(thoughtTaskId),
+          );
           return (
             <div
               key={entry.id}

@@ -432,8 +432,7 @@ export class UsageInsightsProjector {
         void this.flushPendingRefreshesAsync().catch((error: unknown) => {
           console.warn("[UsageInsightsProjector] Rollup refresh failed:", error);
         });
-      }
-      else this.flushPendingRefreshes();
+      } else this.flushPendingRefreshes();
     }, 250);
   }
 

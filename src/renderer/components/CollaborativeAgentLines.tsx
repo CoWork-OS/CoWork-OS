@@ -260,7 +260,13 @@ function formatAgentSummary(counts: Record<AgentLineStatusKind, number>): string
 }
 
 const glyphStateFor = (kind: AgentLineStatusKind): AgentGlyphState =>
-  kind === "running" ? "working" : kind === "completed" ? "done" : kind === "failed" ? "failed" : "idle";
+  kind === "running"
+    ? "working"
+    : kind === "completed"
+      ? "done"
+      : kind === "failed"
+        ? "failed"
+        : "idle";
 
 export function CollaborativeAgentLines({
   collaborativeRun,

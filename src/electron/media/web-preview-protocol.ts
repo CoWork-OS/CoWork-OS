@@ -11,9 +11,11 @@ import { createHash, randomUUID } from "crypto";
  * `sandbox="allow-scripts …"` (no `allow-same-origin`), so they run in an
  * opaque origin with no access to the app, its storage or the preload API.
  *
- * Only HTML the main process built itself (from a path the viewer handler has
- * already resolved inside the workspace) is registered, behind an unguessable
- * one-hour token.
+ * Three kinds of page are registered, each behind an unguessable one-hour token:
+ * HTML artifacts the viewer handler resolved inside the workspace, model-written
+ * inline answer surfaces (answer-surfaces/html-surface-document.ts), and the static
+ * runner page that executes surface logic in workers (shared/answer-surfaces/logic.ts).
+ * All are untrusted content as far as this origin is concerned.
  */
 const WEB_PREVIEW_SCHEME = "cowork-preview";
 const TOKEN_TTL_MS = 60 * 60 * 1000;

@@ -2127,3 +2127,20 @@
     transition: none;
   }
 }
+
+/* The hidden runner frame for surface logic (one per window, see surface-logic-runner.ts). */
+.answer-surface-logic-runner {
+  position: fixed;
+  width: 0;
+  height: 0;
+  border: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Until the first logic result arrives, computed numbers fade in rather than flash "—". */
+.answer-surface.as-logic-starting .as-hero-value,
+.answer-surface.as-logic-starting .as-metric-value,
+.answer-surface.as-logic-starting .as-values-row dd {
+  opacity: 0.35;
+}

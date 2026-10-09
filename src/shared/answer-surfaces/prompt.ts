@@ -176,6 +176,91 @@ export const ANSWER_SURFACE_EXAMPLES = {
       },
     ],
   },
+  mortgage: {
+    type: "card",
+    theme: "forest",
+    icon: "home",
+    eyebrow: "Mortgage",
+    title: "Your repayment plan",
+    logic: {
+      outputs: ["payment", "interest", "total", "yearLabels", "balances", "schedule"],
+      code: 'function compute(s) {\n  const r = s.rate / 100 / 12, n = s.years * 12;\n  const payment = r === 0 ? s.principal / n : (s.principal * r) / (1 - Math.pow(1 + r, -n));\n  let balance = s.principal, interest = 0;\n  const yearLabels = ["0"], balances = [s.principal], schedule = [];\n  for (let y = 1; y <= s.years; y++) {\n    let yearInterest = 0, yearPrincipal = 0;\n    for (let m = 0; m < 12; m++) {\n      const i = balance * r, p = Math.min(balance, payment - i);\n      balance -= p; yearInterest += i; yearPrincipal += p;\n    }\n    interest += yearInterest;\n    yearLabels.push(String(y)); balances.push(Math.round(balance));\n    if (y % 5 === 0 || y === s.years) schedule.push(["Year " + y, Math.round(yearInterest), Math.round(yearPrincipal), Math.round(balance)]);\n  }\n  return { payment, interest, total: payment * n, yearLabels, balances, schedule };\n}',
+    },
+    children: [
+      {
+        type: "hero",
+        title: "Monthly payment",
+        value: { expr: "payment", decimals: 0, prefix: "$" },
+        caption: "{{years}} years at {{rate}}%",
+        icon: "home",
+      },
+      {
+        type: "grid",
+        columns: 2,
+        children: [
+          {
+            type: "number",
+            id: "principal",
+            label: "Loan",
+            default: 300000,
+            min: 1000,
+            prefix: "$",
+          },
+          {
+            type: "stepper",
+            id: "years",
+            label: "Term",
+            min: 5,
+            max: 40,
+            step: 5,
+            default: 25,
+            unit: "years",
+          },
+        ],
+      },
+      {
+        type: "slider",
+        id: "rate",
+        label: "Interest rate",
+        min: 0,
+        max: 10,
+        step: 0.1,
+        default: 5.5,
+        unit: "%",
+      },
+      {
+        type: "metrics",
+        style: "colorful",
+        items: [
+          {
+            label: "Total interest",
+            value: { expr: "interest", decimals: 0, prefix: "$" },
+            icon: "percent",
+            tone: "orange",
+          },
+          {
+            label: "Total paid",
+            value: { expr: "total", decimals: 0, prefix: "$" },
+            icon: "wallet",
+            tone: "green",
+          },
+        ],
+      },
+      {
+        type: "chart",
+        kind: "area",
+        title: "Balance by year",
+        prefix: "$",
+        labels: { bind: "yearLabels" },
+        series: [{ name: "Balance", values: { bind: "balances" } }],
+      },
+      {
+        type: "table",
+        columns: ["Year", "Interest", "Principal", "Balance"],
+        rows: { bind: "schedule" },
+      },
+    ],
+  },
 } as const;
 
 const example = (value: unknown) => ["```cowork-ui", JSON.stringify(value), "```"].join("\n");
@@ -212,11 +297,13 @@ export const ANSWER_SURFACE_PROMPT = [
   "- Tones: accent, blue, teal, green, yellow, orange, red, pink, purple, gray. Icons (lowercase names): piggy-bank, wallet, coins, dollar, euro, pound, credit-card, receipt, chart-line, chart-bar, chart-pie, trending-up, trending-down, percent, calculator, target, trophy, flag, calendar, clock, timer, hourglass, sun, moon, cloud, rain, snowflake, thermometer, wind, droplet, flame, leaf, tree, sprout, mountain, waves, plane, car, train, bike, ship, map, map-pin, compass, globe, home, building, hotel, landmark, store, utensils, chef-hat, coffee, wine, pizza, apple, cake, shopping-cart, shopping-bag, gift, package, truck, heart, heart-pulse, activity, dumbbell, footprints, bed, brain, pill, baby, user, users, paw, music, film, camera, gamepad, ticket, party, book, graduation-cap, briefcase, laptop, smartphone, code, rocket, zap, lightbulb, sparkles, star, gem, crown, award, medal, shield, lock, key, bell, mail, message, phone, check, check-circle, info, alert, list-checks, layers, palette, shirt, scale, ruler, wrench, recycle, repeat, tent, umbrella, sunrise, sunset.",
   '- Values: a number, a string, or {"expr": "people * 0.4", "decimals": 1, "unit": "kg", "prefix": "£"} or {"value": 1200, "prefix": "$"}. Formulas read control ids (a checklist id gives its ticked count) and `computed` names; they support + - * / % ^, comparisons, && || !, cond ? a : b, min, max, round(x, d), ceil, floor, abs, sqrt, pow, exp, log, clamp. Any text may embed {{formula}}.',
   "- Formulas must give a number for every input in range: guard division (`r == 0 ? need / months : need * r / (growth - 1)`), and check the result at the defaults.",
+  '- Logic: when formulas are not enough (loops, schedules and amortization, simulations, sorting or filtering lists), add "logic": {"outputs": [names], "code": "function compute(state) { … return {name: value} }"} on the block\'s outer object. `state` holds the control values by id. Return numbers, strings or booleans for formulas ({"expr": "payment"}), lists for chart labels and series values, and lists of rows for tables; bind lists with {"bind": "name"}. The code is plain JavaScript that runs offline in a sandbox: no network, DOM or imports; keep it deterministic and under a second. Use formulas for simple arithmetic.',
   '- Images: {"query": "roast leg of lamb with rosemary on a platter", "alt": "Roast lamb"}; the app finds a matching photo. Write a concrete visual description. For food, travel, places, outfits and products, photos make the answer: a 3-photo collage gallery near the top, a hero with style image, or a photo per media_list item. Never use images for abstract topics. Never invent image URLs; use "src" only for an https image URL a tool gave you.',
   "- Accuracy: use well-established ratios and real data. Do not invent prices, places, quotes or statistics; if key data is missing, give a useful partial answer with editable defaults or ask one focused question.",
   '- When the user later changes controls, their values come back to you as "Interactive answer state". Build on them.',
-  "Examples (a calculator, a chart story, a trip plan):",
+  "Examples (a calculator, a chart story, a trip plan, a schedule with logic):",
   example(ANSWER_SURFACE_EXAMPLES.calculator),
   example(ANSWER_SURFACE_EXAMPLES.chart),
   example(ANSWER_SURFACE_EXAMPLES.plan),
+  example(ANSWER_SURFACE_EXAMPLES.mortgage),
 ].join("\n");

@@ -235,6 +235,118 @@ async function readRelationshipTargets(
   return relationships;
 }
 
+function decodeXmlText(text: string): string {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Visible text of a DOCX header or footer part, with fields shown by name
+ * ("{PAGE} / {NUMPAGES}") instead of their cached results, which Word
+ * recomputes on every page.
+ */
+export function describeDocxStoryText(xml: string): { text: string; fields: string[] } {
+  const fields: string[] = [];
+  let text = "";
+  let fieldDepth = 0;
+  let inFieldResult = false;
+  let pendingInstruction = "";
+  const token =
+    /<w:fldSimple\b([^>]*?)(\/?)>|<\/w:fldSimple>|<w:fldChar\b([^>]*)\/?>|<w:instrText\b[^>]*>([^<]*)<\/w:instrText>|<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>|<\/w:p>/g;
+  const fieldName = (instruction: string): string => {
+    const name = decodeXmlText(instruction).trim().split(/\s+/)[0]?.toUpperCase() || "";
+    if (name) fields.push(name);
+    return name ? `{${name}}` : "";
+  };
+  let simpleDepth = 0;
+  for (const match of xml.matchAll(token)) {
+    const raw = match[0];
+    if (raw.startsWith("<w:fldSimple")) {
+      text += fieldName(readXmlAttribute(match[1] || "", "w:instr") || "");
+      if (match[2] !== "/") simpleDepth += 1;
+    } else if (raw === "</w:fldSimple>") {
+      simpleDepth = Math.max(0, simpleDepth - 1);
+    } else if (raw.startsWith("<w:fldChar")) {
+      const type = readXmlAttribute(match[3] || "", "w:fldCharType");
+      if (type === "begin") {
+        fieldDepth += 1;
+        pendingInstruction = "";
+      } else if (type === "separate" && fieldDepth > 0) {
+        text += fieldName(pendingInstruction);
+        inFieldResult = true;
+      } else if (type === "end" && fieldDepth > 0) {
+        if (!inFieldResult) text += fieldName(pendingInstruction);
+        fieldDepth -= 1;
+        inFieldResult = false;
+        pendingInstruction = "";
+      }
+    } else if (match[4] !== undefined) {
+      if (fieldDepth > 0) pendingInstruction += match[4];
+    } else if (match[5] !== undefined) {
+      if (simpleDepth === 0 && !inFieldResult) text += decodeXmlText(match[5]);
+    } else if (raw === "<w:tab/>") {
+      if (simpleDepth === 0 && !inFieldResult) text += "\t";
+    } else {
+      text += "\n";
+    }
+  }
+  return { text: text.replace(/[ \t]+\n/g, "\n").trim(), fields };
+}
+
+/**
+ * Page layout facts a DOCX text extraction drops: header and footer text
+ * (with page-number fields) and explicit page breaks. Word decides where
+ * pages end, so this reports what the file asks for, not a page count.
+ */
+async function describeDocxLayout(buffer: Buffer): Promise<string[]> {
+  // The buffer already passed the archive size and entry limits in
+  // readDocumentArchiveBuffer, so it is opened directly here.
+  const zip = await JSZip.loadAsync(buffer);
+  const rootRelationships = await readRelationshipTargets(zip, "");
+  const documentPart =
+    rootRelationships.find((rel) => rel.type.endsWith("/officeDocument"))?.target ||
+    "word/document.xml";
+  const documentXml = await zip.file(documentPart)?.async("string");
+  if (!documentXml) return [];
+  const relationships = await readRelationshipTargets(zip, documentPart);
+  const targetsById = new Map(relationships.map((rel) => [rel.id, rel]));
+
+  const lines: string[] = [];
+  const explicitBreaks =
+    (documentXml.match(/<w:br\b[^>]*w:type="page"[^>]*\/?>/g) || []).length +
+    (documentXml.match(/<w:pageBreakBefore(?:\s*\/>|\s+w:val="(?:1|true|on)"\s*\/>)/g) || [])
+      .length;
+  const sectionCount = (documentXml.match(/<w:sectPr\b/g) || []).length;
+  lines.push(`- Explicit page breaks: ${explicitBreaks}`);
+  if (sectionCount > 1) lines.push(`- Sections: ${sectionCount}`);
+
+  const references = [...documentXml.matchAll(/<w:(header|footer)Reference\b([^>]*)\/?>/g)];
+  const seen = new Set<string>();
+  for (const reference of references) {
+    const kind = reference[1];
+    const attributes = reference[2] || "";
+    const id = readXmlAttribute(attributes, "r:id") || "";
+    const placement = readXmlAttribute(attributes, "w:type") || "default";
+    const part = targetsById.get(id)?.target;
+    if (!part || seen.has(`${kind}:${placement}:${part}`)) continue;
+    seen.add(`${kind}:${placement}:${part}`);
+    const xml = await zip.file(part)?.async("string");
+    if (!xml) continue;
+    const story = describeDocxStoryText(xml);
+    const label = `${kind === "header" ? "Header" : "Footer"} (${placement === "default" ? "every page" : `${placement} pages`})`;
+    const pageField = story.fields.some((field) => field === "PAGE")
+      ? "; page-number field: yes"
+      : "";
+    lines.push(`- ${label}: ${story.text ? JSON.stringify(story.text) : "(empty)"}${pageField}`);
+  }
+  if (!references.length) lines.push("- Headers and footers: none");
+  return lines;
+}
+
 /**
  * Format codes, by sheet name and cell address, for cells whose style uses a
  * built-in number format that ExcelJS leaves unresolved. Empty for most
@@ -573,7 +685,15 @@ export class DocumentParserTools {
     const mammoth = await import("mammoth");
     const buffer = await readDocumentArchiveBuffer(filePath);
     const result = await mammoth.extractRawText({ buffer });
-    return result.value || "";
+    const text = result.value || "";
+    let layout: string[] = [];
+    try {
+      layout = await describeDocxLayout(buffer);
+    } catch {
+      // The body text is still reported when the package parts can't be read.
+    }
+    if (!layout.length) return text;
+    return `${text}\n\nPage layout (from the file; Word decides where pages end when it opens it):\n${layout.join("\n")}`;
   }
 
   private async parseXlsx(filePath: string, format: "text" | "structured"): Promise<string> {

@@ -419,6 +419,72 @@ try {
     );
   });
 
+  await step(
+    "alert and confirm are shown in the tab once CoWork's debugger is attached",
+    async () => {
+      await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+      const first = await guestFor("/page?n=1");
+      // Keep the test driver's own dialog handling out of the way, then attach
+      // CoWork's debugger (as diagnostics and agent actions do).
+      const driverPage = await waitFor(
+        async () =>
+          desktop
+            .context()
+            .pages()
+            .find((candidate) => candidate.url().endsWith("/page?n=1")),
+        "the page in the test driver",
+      );
+      driverPage.on("dialog", () => undefined);
+      await desktop.evaluate(
+        (_, input) =>
+          process.mainModule
+            .require(input.module)
+            .getBrowserSessionManager()
+            .getTabDiagnostics({ taskId: input.taskId, sessionId: "default", kind: "console" })
+            .then(() => true),
+        { module: sessionManagerModule, taskId: task.id },
+      );
+      const dialog = main.locator(".browser-workbench-page-dialog");
+
+      await inGuest(
+        first.id,
+        `setTimeout(() => { window.__confirmed = confirm("Delete this draft?"); }, 0); 1`,
+      );
+      await dialog.waitFor({ timeout: 8000 });
+      await dialog.getByText("Delete this draft?").waitFor();
+      await main.screenshot({ path: path.join(outputDir, "page-dialog.png") });
+      await dialog.getByRole("button", { name: "OK" }).click();
+      assert.equal(
+        await waitFor(async () => inGuest(first.id, "window.__confirmed"), "the confirm answer"),
+        true,
+      );
+
+      await inGuest(
+        first.id,
+        `setTimeout(() => { window.__cancelled = confirm("Discard?"); }, 0); 1`,
+      );
+      await dialog.waitFor({ timeout: 8000 });
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await waitFor(
+        async () => (await inGuest(first.id, "typeof window.__cancelled")) === "boolean",
+        "the second confirm answer",
+      );
+      assert.equal(await inGuest(first.id, "window.__cancelled"), false);
+
+      await inGuest(
+        first.id,
+        `setTimeout(() => { alert("Saved"); window.__alerted = true; }, 0); 1`,
+      );
+      await dialog.waitFor({ timeout: 8000 });
+      await main.keyboard.press("Enter");
+      await waitFor(
+        async () => inGuest(first.id, "window.__alerted === true"),
+        "the alert to close",
+      );
+      assert.equal(await dialog.count(), 0, "no dialog left");
+    },
+  );
+
   await step("a CoWork approval is answered over the tab instead of a dialog", async () => {
     await main.getByRole("tab", { name: /Fixture 1$/ }).click();
     const approval = {

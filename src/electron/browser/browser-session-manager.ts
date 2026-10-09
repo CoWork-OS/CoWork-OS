@@ -140,6 +140,23 @@ export interface ElectronWorkbenchSessionRegistration {
 
 export type BrowserNavigationBlockReason = "policy" | "local_preview" | "scheme";
 
+/**
+ * A page's alert/confirm while CoWork's debugger is attached. Chromium then
+ * routes the dialog to CDP and shows nothing, so the workbench shows it.
+ * (Electron doesn't support prompt(): it throws in the page.)
+ */
+export interface BrowserPageDialogEvent {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  kind: BrowserTabKind;
+  dialogId: string;
+  state: "open" | "closed";
+  type?: "alert" | "confirm";
+  message?: string;
+  origin?: string;
+}
+
 export interface BrowserNavigationBlockedEvent {
   taskId: string;
   sessionId: string;
@@ -186,6 +203,8 @@ interface BrowserSessionRecord {
   consoleEntries: BrowserConsoleEntry[];
   networkEntries: BrowserNetworkEntry[];
   downloads: BrowserNetworkEntry[];
+  /** The page dialog waiting for an answer, as shown to the user. */
+  openDialogId?: string;
   lastDialog?: {
     type?: string;
     message?: string;
@@ -477,6 +496,8 @@ export class BrowserSessionManager {
   private userLoopbackOrigins = new Map<string, Set<string>>();
   private navigationBlockedListener: ((event: BrowserNavigationBlockedEvent) => void) | null = null;
   private beforeUnloadDialogHandler: ((contents: Any) => boolean) | null = null;
+  private pageDialogListener: ((event: BrowserPageDialogEvent) => void) | null = null;
+  private pageDialogCounter = 0;
   private recentBlocks = new Map<string, number>();
 
   private static readonly LOCAL_PREVIEW_TTL_MS = 5 * 60_000;
@@ -687,6 +708,27 @@ export class BrowserSessionManager {
    */
   setBeforeUnloadDialogHandler(handler: ((contents: Any) => boolean) | null): void {
     this.beforeUnloadDialogHandler = handler;
+  }
+
+  setPageDialogListener(listener: ((event: BrowserPageDialogEvent) => void) | null): void {
+    this.pageDialogListener = listener;
+  }
+
+  /** The user's answer to a page dialog shown by the workbench. False when it is no longer open. */
+  async respondToPageDialog(input: {
+    taskId: string;
+    sessionId?: unknown;
+    tabId: string;
+    dialogId: string;
+    accept: boolean;
+  }): Promise<boolean> {
+    const session = this.getTab(input.taskId, input.sessionId, input.tabId);
+    if (!session || !session.openDialogId || session.openDialogId !== input.dialogId) return false;
+    const contents = await this.getWebContents(session);
+    if (!contents) return false;
+    await this.sendCommand(contents, "Page.handleJavaScriptDialog", { accept: input.accept });
+    session.lastDialog = undefined;
+    return true;
   }
 
   async getGuardedWebContents(
@@ -2320,6 +2362,45 @@ export class BrowserSessionManager {
             return this.sendCommand(contents, "Page.handleJavaScriptDialog", { accept });
           })
           .catch(() => undefined);
+      } else if (
+        (params?.type === "alert" || params?.type === "confirm") &&
+        this.pageDialogListener
+      ) {
+        this.pageDialogCounter += 1;
+        const dialogId = `dialog-${Date.now().toString(36)}-${this.pageDialogCounter}`;
+        session.openDialogId = dialogId;
+        let origin: string | undefined;
+        try {
+          origin = new URL(String(params?.url || "")).origin;
+        } catch {
+          origin = undefined;
+        }
+        this.pageDialogListener({
+          taskId: session.taskId,
+          sessionId: session.sessionId,
+          tabId: session.tabId,
+          kind: session.kind,
+          dialogId,
+          state: "open",
+          type: params.type,
+          // Shown to the user only (agent context keeps the redacted copy above).
+          message: String(params?.message || "").slice(0, 2000),
+          ...(origin && origin !== "null" ? { origin } : {}),
+        });
+      }
+    } else if (method === "Page.javascriptDialogClosed") {
+      const dialogId = session.openDialogId;
+      session.openDialogId = undefined;
+      session.lastDialog = undefined;
+      if (dialogId) {
+        this.pageDialogListener?.({
+          taskId: session.taskId,
+          sessionId: session.sessionId,
+          tabId: session.tabId,
+          kind: session.kind,
+          dialogId,
+          state: "closed",
+        });
       }
     } else if (method === "Page.downloadWillBegin" || method === "Browser.downloadWillBegin") {
       const entry = {

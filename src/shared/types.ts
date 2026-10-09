@@ -7662,6 +7662,8 @@ export const IPC_CHANNELS = {
   BROWSER_WORKBENCH_VIEWPORT: "browserWorkbench:viewport",
   BROWSER_WORKBENCH_TAB_ACTIVATE: "browserWorkbench:tabActivate",
   BROWSER_WORKBENCH_TAB_CLOSE_CHECK: "browserWorkbench:tabCloseCheck",
+  BROWSER_WORKBENCH_PAGE_DIALOG: "browserWorkbench:pageDialog",
+  BROWSER_WORKBENCH_PAGE_DIALOG_RESPOND: "browserWorkbench:pageDialogRespond",
   BROWSER_WORKBENCH_TAB_COMMAND: "browserWorkbench:tabCommand",
   BROWSER_WORKBENCH_USER_NAVIGATE: "browserWorkbench:userNavigate",
   BROWSER_WORKBENCH_NAVIGATION_BLOCKED: "browserWorkbench:navigationBlocked",

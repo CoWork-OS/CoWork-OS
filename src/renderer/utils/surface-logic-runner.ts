@@ -53,9 +53,10 @@ export class SurfaceLogicChannel {
     });
   }
 
-  load(id: string, code: string, listener: Listener): void {
+  /** Data (parsed workspace tables) goes once with the code, as JSON text. */
+  load(id: string, code: string, listener: Listener, data?: Record<string, unknown>): void {
     this.listeners.set(id, listener);
-    this.post({ type: "load", id, code });
+    this.post({ type: "load", id, code, ...(data ? { dataJson: JSON.stringify(data) } : {}) });
   }
 
   run(id: string, seq: number, state: Record<string, unknown>): void {

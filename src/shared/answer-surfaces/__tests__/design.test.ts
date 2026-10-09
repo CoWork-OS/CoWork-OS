@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { answerSurfaceToPlainText, summarizeSurfaceChanges } from "../blocks";
 import { normalizeSurfaceIcon } from "../icons";
-import { runLogicForTest } from "./logic-helpers";
+import { SAMPLE_SALES, runLogicForTest } from "./logic-helpers";
 import { ANSWER_SURFACE_EXAMPLES, ANSWER_SURFACE_PROMPT } from "../prompt";
 import {
   buildSurfaceScope,
@@ -29,7 +29,7 @@ describe("prompt examples", () => {
   for (const [name, example] of Object.entries(ANSWER_SURFACE_EXAMPLES)) {
     it(`${name} parses and every formula has a value at its defaults`, () => {
       const spec = parse(example);
-      const outputs = runLogicForTest(spec, initialSurfaceState(spec));
+      const outputs = runLogicForTest(spec, initialSurfaceState(spec), { sales: SAMPLE_SALES });
       expect(lintAnswerSurface(spec, outputs.scope)).toEqual([]);
       expect(ANSWER_SURFACE_PROMPT).toContain(JSON.stringify(example));
     });

@@ -37,9 +37,11 @@ import {
 } from "../../../shared/answer-surfaces/runtime";
 import { answerImageCredit } from "../../../shared/answer-surfaces/images";
 import { useAnswerSurfaceState } from "../../hooks/useAnswerSurfaceState";
+import { useSurfaceData, type SurfaceDataState } from "../../hooks/useSurfaceData";
 import { useSurfaceLogic } from "../../hooks/useSurfaceLogic";
 import { useTweenedNumber } from "../../hooks/useTweenedNumber";
 import { SurfaceIcon } from "./AnswerSurfaceIcon";
+import { describeAnswerData } from "../../../shared/answer-surfaces/data";
 import {
   answerImageKey,
   useAnswerImages,
@@ -149,7 +151,11 @@ function AnswerSurfaceView({
   persist: boolean;
 }) {
   const [state, setValue] = useAnswerSurfaceState(spec, { taskId, surfaceKey, persist });
-  const logic = useSurfaceLogic(spec, state);
+  const dataState = useSurfaceData(spec.data, taskId);
+  // Logic runs on complete data only: a missing file must not turn into silent zeros.
+  const tables =
+    dataState.status === "ready" && dataState.errors.length === 0 ? dataState.tables : null;
+  const logic = useSurfaceLogic(spec, state, spec.data ? tables : undefined);
   const scope = useMemo(
     () => buildSurfaceScope(spec, state, logic.outputs.scope),
     [spec, state, logic.outputs.scope],
@@ -178,7 +184,36 @@ function AnswerSurfaceView({
       {logic.status === "unavailable" && (
         <p className="as-notice">Some values in this answer are calculated in the desktop app.</p>
       )}
+      {spec.data && <SurfaceDataSource state={dataState} />}
     </div>
+  );
+}
+
+/**
+ * Where a data-backed answer's numbers come from, drawn by the app (not the model) so it
+ * cannot be faked: the files, their row counts, and whether any were cut or unreadable.
+ */
+function SurfaceDataSource({ state }: { state: SurfaceDataState }) {
+  if (state.status === "none") return null;
+  if (state.status === "loading") {
+    return <p className="as-data-source as-data-loading">Reading data…</p>;
+  }
+  if (state.status === "unavailable") {
+    return <p className="as-data-source as-data-problem">{state.reason}</p>;
+  }
+  if (state.errors.length > 0) {
+    return (
+      <p className="as-data-source as-data-problem" role="status">
+        Couldn't read {state.errors.map((item) => `${item.file} (${item.error})`).join(", ")}, so
+        the values from it are not shown.
+      </p>
+    );
+  }
+  return (
+    <p className="as-data-source">
+      <SurfaceIcon name="layers" className="as-icon" />
+      Calculated from {Object.values(state.tables).map(describeAnswerData).join(", ")}
+    </p>
   );
 }
 

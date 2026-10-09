@@ -177,8 +177,23 @@ export async function buildSpreadsheetPreviewFromFile(
   };
 }
 
-function parseDelimitedRows(text: string, delimiter: string): string[][] {
+/**
+ * Parses delimited text into rows, dropping blank lines. With `maxRows`, rows past the
+ * limit are counted (see `onRowsSkipped`) but not kept, so memory stays bounded.
+ */
+export function parseDelimitedRows(
+  text: string,
+  delimiter: string,
+  options: { maxRows?: number; onRowsSkipped?: (count: number) => void } = {},
+): string[][] {
   const rows: string[][] = [];
+  const maxRows = options.maxRows ?? Infinity;
+  let skipped = 0;
+  const commit = (entry: string[]) => {
+    if (entry.length === 1 && entry[0] === "") return;
+    if (rows.length < maxRows) rows.push(entry);
+    else skipped += 1;
+  };
   let row: string[] = [];
   let cell = "";
   let inQuotes = false;
@@ -216,7 +231,7 @@ function parseDelimitedRows(text: string, delimiter: string): string[][] {
     if (ch === "\n" || ch === "\r") {
       row.push(cell);
       cell = "";
-      rows.push(row);
+      commit(row);
       row = [];
       if (ch === "\r" && text[i + 1] === "\n") i += 2;
       else i += 1;
@@ -229,10 +244,11 @@ function parseDelimitedRows(text: string, delimiter: string): string[][] {
 
   if (cell.length > 0 || row.length > 0) {
     row.push(cell);
-    rows.push(row);
+    commit(row);
   }
 
-  return rows.filter((entry) => !(entry.length === 1 && entry[0] === ""));
+  if (skipped > 0) options.onRowsSkipped?.(skipped);
+  return rows;
 }
 
 function escapeDelimitedCell(value: string, delimiter: string): string {

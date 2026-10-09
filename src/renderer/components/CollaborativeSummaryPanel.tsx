@@ -15,7 +15,10 @@ import remarkBreaks from "remark-breaks";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import type { Task, AgentTeamRun, AgentThought, AgentTeamItem } from "../../shared/types";
 import type { TaskEvent } from "../../shared/types";
-import { isSynthesisChildTask } from "../../shared/synthesis-agent-detection";
+import {
+  getLatestSynthesisChildTask,
+  isSynthesisChildTask,
+} from "../../shared/synthesis-agent-detection";
 import { getEffectiveTaskEventType } from "../utils/task-event-compat";
 import { normalizeMarkdownForCollab, fixUnclosedBold } from "../utils/markdown-inline-lists";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
@@ -255,7 +258,7 @@ export function CollaborativeSummaryPanel({
   };
 
   const synthesisOutput = (() => {
-    const synthesisTask = childTasks.find((t) => isSynthesisChildTask(t));
+    const synthesisTask = getLatestSynthesisChildTask(childTasks);
     if (!synthesisTask) return null;
     const lastAssistant = [...childEvents]
       .reverse()

@@ -46,6 +46,39 @@ describe("SkillTools access profile boundaries", () => {
     ).rejects.toThrow(/active access profile/i);
   });
 
+  it("appends a page break to an existing Word document", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-tools-"));
+    tempDirs.push(directory);
+    const workspace: Workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: directory,
+      createdAt: Date.now(),
+      permissions: { read: true, write: true, delete: true, network: false, shell: false },
+    };
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    await tools.createDocument({
+      filename: "brief.docx",
+      format: "docx",
+      content: [{ type: "paragraph", text: "Page one" }],
+    } as Any);
+
+    await tools.editDocument({
+      sourcePath: "brief.docx",
+      action: "append",
+      newContent: [
+        { type: "page_break" } as Any,
+        { type: "heading", text: "Responsibilities", level: 2 },
+      ],
+    });
+
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(fs.readFileSync(path.join(directory, "brief.docx")));
+    const xml = await zip.file("word/document.xml")!.async("string");
+    expect(xml).toMatch(/w:br w:type="page"|w:pageBreakBefore/);
+    expect(xml.indexOf("Responsibilities")).toBeGreaterThan(xml.indexOf("Page one"));
+  });
+
   it("creates and reads back a workbook from headers and rows sheet data", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-tools-"));
     tempDirs.push(directory);

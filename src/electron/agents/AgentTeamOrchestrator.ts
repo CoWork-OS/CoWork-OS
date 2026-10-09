@@ -29,6 +29,7 @@ import type { OrchestrationGraphNodeInput } from "../agent/orchestration/Orchest
 import type { OrchestrationGraphSnapshot } from "../agent/orchestration/OrchestrationGraphRepository";
 
 import { createLogger } from "../utils/logger";
+import { SUPERSEDED_SYNTHESIS_ITEM_TITLE } from "../../shared/synthesis-agent-detection";
 
 const log = createLogger("AgentTeamOrchestrator");
 
@@ -163,7 +164,7 @@ function emitTeamEvent(event: Any): void {
 /** Sentinel title used to identify the synthesis item created by transitionToSynthesizePhase. */
 const SYNTHESIS_ITEM_TITLE = "Synthesis";
 /** Title of a synthesis attempt that failed and was replaced by a retry. */
-const SUPERSEDED_SYNTHESIS_TITLE = `${SYNTHESIS_ITEM_TITLE} (failed)`;
+const SUPERSEDED_SYNTHESIS_TITLE = SUPERSEDED_SYNTHESIS_ITEM_TITLE;
 const MAX_FAILURE_REASON_CHARS = 240;
 
 type TeamItemOutcomeLike = {

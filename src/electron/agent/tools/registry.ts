@@ -7709,18 +7709,19 @@ ${skillDescriptions}`;
             },
             newContent: {
               type: "array",
-              description: "For append/insert_after_section/replace_blocks: Content blocks to add",
+              description:
+                "For append/insert_after_section/replace_blocks: Content blocks to add. Use a page_break block (no other fields) where new content must start on a new page.",
               items: {
                 type: "object",
                 properties: {
                   type: {
                     type: "string",
-                    enum: ["heading", "paragraph", "list", "table"],
+                    enum: ["heading", "paragraph", "list", "table", "page_break"],
                     description: "Type of content block",
                   },
                   text: {
                     type: "string",
-                    description: "Text content for the block",
+                    description: "Text content for the block (not needed for page_break)",
                   },
                   level: {
                     type: "number",
@@ -7740,7 +7741,7 @@ ${skillDescriptions}`;
                     description: "For tables: 2D array of cell values",
                   },
                 },
-                required: ["type", "text"],
+                required: ["type"],
               },
             },
             blockIds: {

@@ -1,3 +1,8 @@
+import { ComposerPredictionCoordinator } from "../agent/ComposerPredictionCoordinator";
+import {
+  COMPOSER_PREDICTION_CHANNEL,
+  COMPOSER_PREDICTION_CANCEL_CHANNEL,
+} from "../../shared/composer-predictions";
 import {
   readAuthorizedApprovalDraftPreview,
   readAuthorizedInlineApprovalDraftReview,
@@ -1560,6 +1565,96 @@ export async function setupIpcHandlers(
   const taskStore = new TaskStore(db);
   const workspaceStore = new WorkspaceStore(db);
   const taskEventRepo = new TaskEventRepository(db);
+  const composerPredictions = new ComposerPredictionCoordinator();
+  const predictionOwners = new Set<number>();
+  ipcMain.handle(COMPOSER_PREDICTION_CANCEL_CHANNEL, (event, requestId: string) => {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow || senderWindow !== computerUseMainWindow())
+      throw new Error("Predictions require the main app window");
+    if (typeof requestId !== "string" || !requestId || requestId.length > 200) return;
+    composerPredictions.cancel(event.sender.id, requestId);
+  });
+  ipcMain.handle(
+    COMPOSER_PREDICTION_CHANNEL,
+    async (
+      event,
+      request: import("../../shared/composer-predictions").ComposerPredictionRequest,
+    ) => {
+      const senderWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!senderWindow || senderWindow !== computerUseMainWindow())
+        throw new Error("Predictions require the main app window");
+      if (!predictionOwners.has(event.sender.id)) {
+        const owner = event.sender.id;
+        predictionOwners.add(owner);
+        event.sender.once("destroyed", () => {
+          predictionOwners.delete(owner);
+          composerPredictions.cancelOwner(owner);
+        });
+      }
+      const taskId = validateInput(UUIDSchema, request?.taskId, "task ID");
+      if (typeof request?.revision !== "string" || request.revision.length > 200) return null;
+      const task = await taskRepo.findById(taskId);
+      if (!task || task.status !== "completed") return null;
+      const events = await taskEventRepo.findByTaskIdAndTypes(
+        taskId,
+        ["user_message", "assistant_message", "task_completed"],
+        20,
+      );
+      const { predictionRevision } = await import("../../shared/composer-predictions");
+      if (predictionRevision(events) !== request.revision) return null;
+      if (
+        typeof request.requestId !== "string" ||
+        !request.requestId ||
+        request.requestId.length > 200
+      )
+        return null;
+      const { resolveComposerPredictionModel } = await import("../agent/composer-prediction-model");
+      const selection = resolveComposerPredictionModel(task);
+      const key = `${taskId}:${request.revision}:${selection.providerType}:${selection.modelId}`;
+      const prediction = await composerPredictions.request(
+        event.sender.id,
+        request.requestId,
+        key,
+        async (signal) => {
+          const queuedTask = await taskRepo.findById(taskId);
+          const queuedEvents = await taskEventRepo.findByTaskIdAndTypes(
+            taskId,
+            ["user_message", "assistant_message", "task_completed"],
+            20,
+          );
+          if (
+            signal.aborted ||
+            queuedTask?.status !== "completed" ||
+            predictionRevision(queuedEvents) !== request.revision
+          )
+            return null;
+          const provider = LLMProviderFactory.createProvider({
+            type: selection.providerType,
+            model: selection.modelId,
+          });
+          const { generateComposerPrediction } = await import("../agent/ComposerPredictionService");
+          return generateComposerPrediction(
+            task,
+            events,
+            request.revision,
+            provider,
+            selection.modelId,
+            signal,
+          );
+        },
+      );
+      const current = await taskRepo.findById(taskId);
+      const latestEvents = await taskEventRepo.findByTaskIdAndTypes(
+        taskId,
+        ["user_message", "assistant_message", "task_completed"],
+        20,
+      );
+      return current?.status === "completed" &&
+        predictionRevision(latestEvents) === request.revision
+        ? prediction
+        : null;
+    },
+  );
   const composerDraftRepo = new ComposerDraftRepository(db);
   const composerDraftAttachmentStore = new ComposerDraftAttachmentStore(
     path.join(getUserDataDir(), "composer-draft-attachments"),

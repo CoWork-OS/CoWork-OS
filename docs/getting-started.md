@@ -39,6 +39,8 @@ Choose **Do** (shown as **Smart** in releases before 0.5.60) and try:
 
 When the task finishes, open its output card, review the contents, and ask for one revision. Task duration depends on the model and work requested; CoWork shows progress in the task timeline. You can choose a folder containing your own files later.
 
+After a response, an empty composer may suggest a next message. Press **Tab** to accept it, edit if needed, then send. Predictions use your selected LLM provider and consume tokens even if you dismiss them; the configured Cheap model is used when profile routing is enabled. Turn the feature on or off under **Settings → Appearance → Composer → Enable composer predictions**. The first available prediction also opens a one-time sidebar tip. See [Composer Predictions](composer-predictions.md).
+
 ### Optional: Detailed provider setup
 
 If you need to configure a route manually, choose the path that fits your setup:

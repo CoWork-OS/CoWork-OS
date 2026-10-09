@@ -650,6 +650,9 @@ export class ChannelGateway {
       this.router.setMainWindow(mainWindow);
     }
 
+    // Delete rows of discontinued channel types before any adapter loads.
+    await this.removeRetiredChannels();
+
     // Load and register enabled channels
     await this.loadChannels();
 
@@ -2067,6 +2070,45 @@ export class ChannelGateway {
       }
     } catch (error) {
       console.error("Failed to clear WhatsApp auth directory:", error);
+    }
+  }
+
+  /**
+   * Delete channels whose type is no longer supported (the discontinued Twitch
+   * and X channels): the row with its sealed config and credentials, and its
+   * pairings, sessions and message log. Tasks those channels created are kept.
+   * There is no adapter to log out. A failing row is retried on the next start.
+   */
+  private async removeRetiredChannels(): Promise<void> {
+    let channels: Channel[];
+    try {
+      channels = await this.channelRepo.findAll();
+    } catch (error) {
+      logger.warn("Failed to list channels for retired channel cleanup:", error);
+      return;
+    }
+
+    const removedByType = new Map<string, number>();
+    for (const channel of channels) {
+      if ((CHANNEL_TYPES as readonly string[]).includes(channel.type)) continue;
+      try {
+        await this.channelRepo.delete(channel.id);
+      } catch (error) {
+        logger.warn(`Failed to remove retired ${channel.type} channel ${channel.id}:`, error);
+        continue;
+      }
+      removedByType.set(channel.type, (removedByType.get(channel.type) ?? 0) + 1);
+      // Channel ids are UUIDs; never resolve a recursive delete from anything else.
+      if (/^[A-Za-z0-9_-]+$/.test(channel.id)) {
+        await fs.promises
+          .rm(this.getWebhookStateDir(channel.id), { recursive: true, force: true })
+          .catch((error) => logger.warn("Failed to remove retired channel state:", error));
+      }
+    }
+
+    if (removedByType.size > 0) {
+      const summary = [...removedByType].map(([type, count]) => `${type} x${count}`).join(", ");
+      logger.info(`Removed discontinued channels: ${summary}`);
     }
   }
 

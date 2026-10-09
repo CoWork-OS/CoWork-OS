@@ -389,6 +389,133 @@ describe("CronService", () => {
     });
   });
 
+  describe("delivery to discontinued channels", () => {
+    const outboxEntry = (id: string, channelType: string, runAtMs: number) => ({
+      id,
+      jobId: "job-twitch",
+      runAtMs,
+      queuedAtMs: runAtMs,
+      nextAttemptAtMs: 0,
+      attempts: 1,
+      maxAttempts: 5,
+      status: "ok" as const,
+      channelType: channelType as Any,
+      channelId: "chat-1",
+      idempotencyKey: `${id}-key`,
+      state: "queued" as const,
+    });
+
+    it("keeps the job running but turns off its delivery and drops queued sends", async () => {
+      (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
+        version: 1,
+        jobs: [
+          {
+            id: "job-twitch",
+            name: "Stream digest",
+            enabled: true,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            workspaceId: "ws-1",
+            taskPrompt: "Summarize today's notes",
+            schedule: { kind: "every" as const, everyMs: 60000 },
+            delivery: {
+              enabled: true,
+              channelType: "twitch" as Any,
+              channelDbId: "channel-twitch",
+              channelId: "#stream",
+              deliverOnError: false,
+              summaryOnly: true,
+            },
+            state: {
+              nextRunAtMs: 2000000,
+              runHistory: [
+                {
+                  runAtMs: 800000,
+                  durationMs: 10,
+                  status: "ok" as const,
+                  deliveryStatus: "skipped" as const,
+                  deliveryMode: "outbox" as const,
+                  deliverableStatus: "queued" as const,
+                },
+              ],
+            },
+          },
+          {
+            id: "job-slack",
+            name: "Team digest",
+            enabled: true,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            workspaceId: "ws-1",
+            taskPrompt: "Summarize the team channel",
+            schedule: { kind: "every" as const, everyMs: 60000 },
+            delivery: { enabled: true, channelType: "slack" as Any, channelId: "C1" },
+            state: { nextRunAtMs: 2000000 },
+          },
+        ],
+        outbox: [
+          outboxEntry("out-twitch", "twitch", 800000),
+          outboxEntry("out-x", "x", 700000),
+          { ...outboxEntry("out-slack", "slack", 800000), jobId: "job-slack" },
+        ],
+      } satisfies CronStoreFile);
+
+      service = createService();
+      await service.start();
+
+      const job = await service.get("job-twitch");
+      expect(job?.enabled).toBe(true);
+      expect(job?.state.nextRunAtMs).toBe(2000000);
+      expect(job?.delivery).toEqual({ enabled: false, deliverOnError: false, summaryOnly: true });
+      expect(job?.state.lastError).toContain("no longer sent to Twitch");
+      expect(job?.state.runHistory?.[0]).toMatchObject({
+        deliveryStatus: "skipped",
+        deliverableStatus: "none",
+        deliveryError: expect.stringContaining("discontinued"),
+      });
+
+      const slackJob = await service.get("job-slack");
+      expect(slackJob?.delivery).toEqual({ enabled: true, channelType: "slack", channelId: "C1" });
+      expect(slackJob?.state.lastError).toBeUndefined();
+
+      const internalStore = (service as Any).state.store as CronStoreFile;
+      expect(internalStore.outbox?.map((entry) => entry.id)).toEqual(["out-slack"]);
+      expect(saveCronStore).toHaveBeenCalled();
+    });
+
+    it("runs the job without attempting delivery after the delivery was turned off", async () => {
+      const deliverToChannel = vi.fn().mockResolvedValue(undefined);
+      (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
+        version: 1,
+        jobs: [
+          {
+            id: "job-x",
+            name: "Mentions digest",
+            enabled: true,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            workspaceId: "ws-1",
+            taskPrompt: "Summarize mentions",
+            schedule: { kind: "every" as const, everyMs: 60000 },
+            delivery: { enabled: true, channelType: "x" as Any, channelId: "me" },
+            state: { nextRunAtMs: 2000000 },
+          },
+        ],
+      } satisfies CronStoreFile);
+
+      service = createService({
+        deliverToChannel,
+        getTaskStatus: async () => ({ status: "completed", terminalStatus: "ok" }),
+        getTaskResultText: async () => "OK",
+      });
+      await service.start();
+
+      const ran = await service.run("job-x", "force");
+      expect(ran).toEqual({ ok: true, ran: true, taskId: "task-123" });
+      expect(deliverToChannel).not.toHaveBeenCalled();
+    });
+  });
+
   describe("status", () => {
     it("should return service status", async () => {
       service = createService();

@@ -1,3 +1,4 @@
+import { CHANNEL_TYPES } from "../../shared/gateway-channel-types";
 import type { CronJob } from "./types";
 
 /**
@@ -18,4 +19,30 @@ export function getRetiredCronJobReason(job: Pick<CronJob, "taskPrompt">): strin
   const prompt = typeof job.taskPrompt === "string" ? job.taskPrompt.trim() : "";
   if (RETIRED_COUNCIL_TRIGGER.test(prompt)) return RETIRED_COUNCIL_JOB_REASON;
   return null;
+}
+
+/** Display names for discontinued channels that scheduled tasks could deliver to. */
+const RETIRED_DELIVERY_CHANNEL_LABELS: Record<string, string> = {
+  twitch: "Twitch",
+  x: "X",
+};
+
+/**
+ * True for a delivery channel type that the gateway no longer supports, such as
+ * the discontinued Twitch and X channels. Missing types are not retired.
+ */
+export function isRetiredDeliveryChannelType(channelType: unknown): boolean {
+  return (
+    typeof channelType === "string" &&
+    channelType.length > 0 &&
+    !(CHANNEL_TYPES as readonly string[]).includes(channelType)
+  );
+}
+
+export function getRetiredDeliveryReason(channelType: string): string {
+  const label = RETIRED_DELIVERY_CHANNEL_LABELS[channelType] ?? channelType;
+  return (
+    `Results are no longer sent to ${label} because that channel has been discontinued. ` +
+    "The scheduled task still runs; choose another delivery channel to receive its results."
+  );
 }

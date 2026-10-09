@@ -20,7 +20,12 @@ vi.mock("../../security/export-permission-context", async (importOriginal) => {
   };
 });
 
-import { calculateDocumentWindow, DocumentParserTools } from "../document-parser-tools";
+import {
+  calculateDocumentWindow,
+  describeDocxStoryText,
+  DocumentParserTools,
+} from "../document-parser-tools";
+import { SkillTools } from "../skill-tools";
 
 describe("DocumentParserTools", () => {
   let tmpDir: string;
@@ -524,5 +529,79 @@ describe("DocumentParserTools", () => {
     expect(window.end).toBeGreaterThan(100_000_000);
     expect(window.note).toBe("");
     expect(40 + window.end - 100_000_000).toBeLessThanOrEqual(100);
+  });
+
+  describe("DOCX page layout", () => {
+    const workspaceFor = (dir: string) =>
+      ({
+        id: "ws-1",
+        name: "Test Workspace",
+        path: dir,
+        createdAt: Date.now(),
+        permissions: {
+          read: true,
+          write: true,
+          delete: true,
+          network: false,
+          shell: false,
+          allowedPaths: [],
+        },
+      }) as Any;
+
+    it("reports footer page-number fields and explicit page breaks", async () => {
+      const skills = new SkillTools(workspaceFor(tmpDir), { logEvent: vi.fn() } as Any, "task-1");
+      await skills.createDocument({
+        filename: "brief.docx",
+        format: "docx",
+        pageNumbers: true,
+        content: [
+          { type: "heading", text: "Página 1", level: 1 },
+          { type: "paragraph", text: "Visão geral" },
+          { type: "page_break" },
+          { type: "heading", text: "Página 2", level: 1 },
+        ],
+      } as Any);
+
+      const result = await new DocumentParserTools(workspaceFor(tmpDir)).parseDocument({
+        path: "brief.docx",
+      });
+
+      expect(result.content).toContain("Visão geral");
+      expect(result.content).toContain("Page layout");
+      expect(result.content).toContain("- Explicit page breaks: 1");
+      expect(result.content).toContain(
+        '- Footer (every page): "{PAGE} / {NUMPAGES}"; page-number field: yes',
+      );
+    });
+
+    it("says when a document has no headers or footers", async () => {
+      const skills = new SkillTools(workspaceFor(tmpDir), { logEvent: vi.fn() } as Any, "task-1");
+      await skills.createDocument({
+        filename: "plain.docx",
+        format: "docx",
+        content: [{ type: "paragraph", text: "Just text" }],
+      } as Any);
+
+      const result = await new DocumentParserTools(workspaceFor(tmpDir)).parseDocument({
+        path: "plain.docx",
+      });
+
+      expect(result.content).toContain("- Explicit page breaks: 0");
+      expect(result.content).toContain("- Headers and footers: none");
+    });
+
+    it("names simple and complex fields instead of their cached results", () => {
+      const simple = describeDocxStoryText(
+        '<w:ftr><w:p><w:r><w:t xml:space="preserve">Page </w:t></w:r><w:fldSimple w:instr=" PAGE \\* MERGEFORMAT "><w:r><w:t>3</w:t></w:r></w:fldSimple><w:r><w:t xml:space="preserve"> of </w:t></w:r><w:fldSimple w:instr="NUMPAGES"/></w:p></w:ftr>',
+      );
+      expect(simple.text).toBe("Page {PAGE} of {NUMPAGES}");
+      expect(simple.fields).toEqual(["PAGE", "NUMPAGES"]);
+
+      const complex = describeDocxStoryText(
+        '<w:hdr><w:p><w:r><w:t>Brief &amp; plan</w:t></w:r><w:r><w:tab/></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:hdr>',
+      );
+      expect(complex.text).toBe("Brief & plan\t{PAGE}");
+      expect(complex.fields).toEqual(["PAGE"]);
+    });
   });
 });

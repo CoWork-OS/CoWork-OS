@@ -50,6 +50,12 @@ export interface DocumentCreateReport {
   /** Blocks with nothing to write, by position in the request. */
   droppedBlocks: Array<{ index: number; type: string; reason: string }>;
   warnings: string[];
+  /** Pages in the written PDF; absent for other formats. */
+  pageCount?: number;
+  /** Whether the PDF is within `maxPages`; present only when a budget was given for a PDF. */
+  fittedToMaxPages?: boolean;
+  /** Index into PDF_FIT_LADDER of the layout the PDF was written with; 0 is the default layout. */
+  layoutLevel?: number;
 }
 
 /** A normalized block: every field a renderer reads is present. */
@@ -184,6 +190,13 @@ export interface DocumentOptions {
   };
   /** Print "N / M" centered in the footer of every page. */
   pageNumbers?: boolean;
+  /**
+   * Page budget for a PDF. When the default layout runs longer, the PDF is
+   * laid out again with progressively tighter spacing, fonts and margins
+   * (see PDF_FIT_LADDER) until it fits or the readable floor is reached.
+   * DOCX pagination is decided by the word processor and is not measured.
+   */
+  maxPages?: number;
 }
 
 /** Space between table cell text and the cell's edges and rules, in points. */
@@ -192,10 +205,138 @@ const PDF_CELL_PAD_Y = 4;
 /** Space above and below a heading, in points. */
 const PDF_HEADING_SPACE_ABOVE = 8;
 const PDF_HEADING_SPACE_BELOW = 6;
+/** Space after a paragraph or code block, between paragraph lines, and after a list item. */
+const PDF_PARAGRAPH_GAP = 8;
+const PDF_LINE_GAP = 4;
+const PDF_LIST_ITEM_GAP = 4;
+/** Space after each block, in lines of the current font. */
+const PDF_BLOCK_GAP_LINES = 0.5;
 /** How deep a run of consecutive headings is followed when keeping it with its content. */
 const PDF_KEEP_WITH_NEXT_DEPTH = 4;
+/** Fitting never makes body text smaller or margins narrower than this, in points. */
+const PDF_MIN_BODY_FONT_SIZE = 9;
+const PDF_MIN_MARGIN = 36;
+
+/** Multipliers applied to the default PDF layout; 1 everywhere is the default layout. */
+export interface PdfLayoutProfile {
+  /** Space between blocks, list items and paragraph lines, and around headings. */
+  spacing: number;
+  /** Table cell padding. */
+  cellPadding: number;
+  /** Body, heading, table and code font sizes (not the page number). */
+  fontScale: number;
+  /** Page margins. */
+  marginScale: number;
+}
+
+/**
+ * Layouts tried, in order, when a PDF must fit a page budget: tighter
+ * spacing first, then table padding, then smaller type, then narrower
+ * margins. The first entry is the default layout. Font sizes and margins
+ * are also held at PDF_MIN_BODY_FONT_SIZE and PDF_MIN_MARGIN.
+ */
+export const PDF_FIT_LADDER: readonly PdfLayoutProfile[] = [
+  { spacing: 1, cellPadding: 1, fontScale: 1, marginScale: 1 },
+  { spacing: 0.75, cellPadding: 1, fontScale: 1, marginScale: 1 },
+  { spacing: 0.5, cellPadding: 1, fontScale: 1, marginScale: 1 },
+  { spacing: 0.5, cellPadding: 0.6, fontScale: 1, marginScale: 1 },
+  { spacing: 0.5, cellPadding: 0.6, fontScale: 0.95, marginScale: 1 },
+  { spacing: 0.5, cellPadding: 0.6, fontScale: 0.9, marginScale: 1 },
+  { spacing: 0.5, cellPadding: 0.6, fontScale: 0.86, marginScale: 1 },
+  { spacing: 0.5, cellPadding: 0.6, fontScale: 0.86, marginScale: 0.75 },
+  { spacing: 0.5, cellPadding: 0.6, fontScale: 0.86, marginScale: 0.5 },
+];
+
+export interface PageFit {
+  /** Index of the chosen layout. */
+  level: number;
+  pageCount: number;
+  fitted: boolean;
+}
+
+/**
+ * Picks the first layout level whose page count is within `maxPages`.
+ * `pagesAt(level)` lays the content out at that level and returns its page
+ * count. The default level is tried first and kept when it fits; when even
+ * the last (tightest) level does not fit, that level is returned unfitted
+ * without trying the levels in between.
+ */
+export function choosePageFit(
+  maxPages: number,
+  levelCount: number,
+  pagesAt: (level: number) => number,
+): PageFit {
+  const first = pagesAt(0);
+  if (first <= maxPages || levelCount <= 1) {
+    return { level: 0, pageCount: first, fitted: first <= maxPages };
+  }
+  const last = levelCount - 1;
+  const tightest = pagesAt(last);
+  if (tightest > maxPages) return { level: last, pageCount: tightest, fitted: false };
+  for (let level = 1; level < last; level++) {
+    const pageCount = pagesAt(level);
+    if (pageCount <= maxPages) return { level, pageCount, fitted: true };
+  }
+  return { level: last, pageCount: tightest, fitted: true };
+}
+
+/**
+ * Reads a page budget sent with a tool call: a positive whole number, or
+ * its decimal string. Absent means no budget.
+ */
+export function parseMaxPages(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = typeof value === "string" ? Number(value.trim()) : value;
+  if (typeof parsed !== "number" || !Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `Invalid "maxPages" ${JSON.stringify(value)}: use a positive whole number such as 2.`,
+    );
+  }
+  return parsed;
+}
 
 type PdfDocument = InstanceType<typeof PDFDocument>;
+
+/** Sizes the renderer draws with, after a layout profile is applied. */
+interface PdfMetrics {
+  baseFontSize: number;
+  /** Points added to the body size per heading level above h6. */
+  headingStep: number;
+  headingSpaceAbove: number;
+  headingSpaceBelow: number;
+  paragraphGap: number;
+  lineGap: number;
+  listItemGap: number;
+  blockGapLines: number;
+  cellPadX: number;
+  cellPadY: number;
+}
+
+function pdfMetrics(baseFontSize: number, profile: PdfLayoutProfile): PdfMetrics {
+  const { spacing, cellPadding, fontScale } = profile;
+  return {
+    // A font already below the floor is kept as given rather than enlarged.
+    baseFontSize: Math.max(
+      baseFontSize * fontScale,
+      Math.min(baseFontSize, PDF_MIN_BODY_FONT_SIZE),
+    ),
+    headingStep: 2 * fontScale,
+    headingSpaceAbove: PDF_HEADING_SPACE_ABOVE * spacing,
+    headingSpaceBelow: PDF_HEADING_SPACE_BELOW * spacing,
+    paragraphGap: PDF_PARAGRAPH_GAP * spacing,
+    lineGap: PDF_LINE_GAP * spacing,
+    listItemGap: PDF_LIST_ITEM_GAP * spacing,
+    blockGapLines: PDF_BLOCK_GAP_LINES * spacing,
+    cellPadX: PDF_CELL_PAD_X * cellPadding,
+    cellPadY: PDF_CELL_PAD_Y * cellPadding,
+  };
+}
+
+/** A page margin in points: `inches` (default 1) scaled, but never below PDF_MIN_MARGIN unless given that way. */
+function pdfMargin(inches: number | undefined, marginScale: number): number {
+  const points = (inches || 1) * 72;
+  return Math.max(points * marginScale, Math.min(points, PDF_MIN_MARGIN));
+}
 
 /**
  * Lays content blocks out on a pdfkit document.
@@ -211,12 +352,16 @@ type PdfDocument = InstanceType<typeof PDFDocument>;
 class PdfBlockRenderer {
   private readonly warnings: string[] = [];
 
+  private readonly baseFontSize: number;
+
   constructor(
     private readonly doc: PdfDocument,
     private readonly fonts: { regular: string; bold: string },
-    private readonly baseFontSize: number,
+    private readonly metrics: PdfMetrics,
     private readonly codeFont: (text: string) => string,
-  ) {}
+  ) {
+    this.baseFontSize = metrics.baseFontSize;
+  }
 
   render(blocks: RenderBlock[]): string[] {
     blocks.forEach((block, index) => this.renderBlock(blocks, index));
@@ -276,7 +421,10 @@ class PdfBlockRenderer {
   }
 
   private headingFontSize(level: number): number {
-    return this.baseFontSize + (7 - Math.min(Math.max(level || 1, 1), 6)) * 2; // h1 = base+12
+    // h1 = base + 6 steps (12pt at the default layout).
+    return (
+      this.baseFontSize + (7 - Math.min(Math.max(level || 1, 1), 6)) * this.metrics.headingStep
+    );
   }
 
   /** Height of a heading including the space above and below it. */
@@ -284,10 +432,10 @@ class PdfBlockRenderer {
     const { doc } = this;
     doc.font(this.fonts.bold).fontSize(this.headingFontSize(block.level));
     return (
-      PDF_HEADING_SPACE_ABOVE +
+      this.metrics.headingSpaceAbove +
       doc.heightOfString(block.text, {
         width: this.contentWidth,
-        paragraphGap: PDF_HEADING_SPACE_BELOW,
+        paragraphGap: this.metrics.headingSpaceBelow,
       })
     );
   }
@@ -300,7 +448,7 @@ class PdfBlockRenderer {
   private minimumHeight(blocks: RenderBlock[], index: number, depth = 0): number {
     const block = blocks[index];
     if (!block || block.type === PAGE_BREAK) return 0;
-    const { doc } = this;
+    const { doc, metrics } = this;
     const width = this.contentWidth;
     switch (block.type) {
       case "heading":
@@ -317,39 +465,45 @@ class PdfBlockRenderer {
         return doc.heightOfString(`• ${block.items[0] ?? ""}`, {
           width,
           indent: 20,
-          paragraphGap: 4,
+          paragraphGap: metrics.listItemGap,
         });
       case "code": {
         doc.font(this.codeFont(block.text)).fontSize(this.baseFontSize - 2);
-        const full = doc.heightOfString(block.text, { width, paragraphGap: 8 });
+        const full = doc.heightOfString(block.text, { width, paragraphGap: metrics.paragraphGap });
         return Math.min(full, doc.currentLineHeight(true) * 2);
       }
       default: {
         doc.font(this.fonts.regular).fontSize(this.baseFontSize);
-        const full = doc.heightOfString(block.text, { width, paragraphGap: 8, lineGap: 4 });
-        return Math.min(full, (doc.currentLineHeight(true) + 4) * 2);
+        const full = doc.heightOfString(block.text, {
+          width,
+          paragraphGap: metrics.paragraphGap,
+          lineGap: metrics.lineGap,
+        });
+        return Math.min(full, (doc.currentLineHeight(true) + metrics.lineGap) * 2);
       }
     }
   }
 
   private renderBlock(blocks: RenderBlock[], index: number): void {
-    const { doc } = this;
+    const { doc, metrics } = this;
     const block = blocks[index];
     const baseFontSize = this.baseFontSize;
     switch (block.type) {
       case PAGE_BREAK:
-        // A break on an empty page would only add a blank page.
-        if (!this.atPageTop()) doc.addPage();
+        // A break on an empty page, or with nothing after it, would only add a blank page.
+        if (!this.atPageTop() && blocks.slice(index + 1).some((next) => next.type !== PAGE_BREAK)) {
+          doc.addPage();
+        }
         break;
 
       case "heading": {
         this.ensureSpace(this.minimumHeight(blocks, index));
         // More space above a heading than below it ties it to its own section.
-        if (!this.atPageTop()) doc.y += PDF_HEADING_SPACE_ABOVE;
+        if (!this.atPageTop()) doc.y += metrics.headingSpaceAbove;
         doc
           .font(this.fonts.bold)
           .fontSize(this.headingFontSize(block.level))
-          .text(block.text, { paragraphGap: PDF_HEADING_SPACE_BELOW });
+          .text(block.text, { paragraphGap: metrics.headingSpaceBelow });
         break;
       }
 
@@ -357,16 +511,16 @@ class PdfBlockRenderer {
         doc
           .font(this.fonts.regular)
           .fontSize(baseFontSize)
-          .text(block.text, { paragraphGap: 8, lineGap: 4 });
-        doc.moveDown(0.5);
+          .text(block.text, { paragraphGap: metrics.paragraphGap, lineGap: metrics.lineGap });
+        doc.moveDown(metrics.blockGapLines);
         break;
 
       case "list": {
         doc.font(this.fonts.regular).fontSize(baseFontSize);
         for (const item of block.items) {
-          doc.text(`• ${item}`, { indent: 20, paragraphGap: 4 });
+          doc.text(`• ${item}`, { indent: 20, paragraphGap: metrics.listItemGap });
         }
-        doc.moveDown(0.5);
+        doc.moveDown(metrics.blockGapLines);
         break;
       }
 
@@ -379,14 +533,14 @@ class PdfBlockRenderer {
           .font(this.codeFont(block.text))
           .fontSize(baseFontSize - 2)
           .fillColor("#333333")
-          .text(block.text, { paragraphGap: 8 });
+          .text(block.text, { paragraphGap: metrics.paragraphGap });
         doc.fillColor("#000000");
-        doc.moveDown(0.5);
+        doc.moveDown(metrics.blockGapLines);
         break;
 
       default:
         doc.font(this.fonts.regular).fontSize(baseFontSize).text(block.text);
-        doc.moveDown(0.5);
+        doc.moveDown(metrics.blockGapLines);
     }
   }
 
@@ -395,7 +549,7 @@ class PdfBlockRenderer {
   }
 
   private cellTextWidth(columnCount: number): number {
-    return this.contentWidth / columnCount - PDF_CELL_PAD_X * 2;
+    return this.contentWidth / columnCount - this.metrics.cellPadX * 2;
   }
 
   /** Height of each row: its tallest wrapped cell plus top and bottom padding. */
@@ -406,7 +560,7 @@ class PdfBlockRenderer {
     return rows.map((row, rowIndex) => {
       doc.font(rowIndex === 0 ? this.fonts.bold : this.fonts.regular);
       const textHeight = Math.max(...row.map((cell) => doc.heightOfString(cell || " ", { width })));
-      return textHeight + PDF_CELL_PAD_Y * 2;
+      return textHeight + this.metrics.cellPadY * 2;
     });
   }
 
@@ -425,6 +579,7 @@ class PdfBlockRenderer {
 
   private renderTable(rows: string[][]): void {
     const { doc } = this;
+    const { cellPadX, cellPadY } = this.metrics;
     const columnCount = rows[0].length;
     const colWidth = this.contentWidth / columnCount;
     const cellWidth = this.cellTextWidth(columnCount);
@@ -450,9 +605,9 @@ class PdfBlockRenderer {
       }
       doc.font(rowIndex === 0 ? this.fonts.bold : this.fonts.regular).fontSize(this.tableFontSize);
       for (let colIndex = 0; colIndex < row.length; colIndex++) {
-        doc.text(row[colIndex], left + colIndex * colWidth + PDF_CELL_PAD_X, y + PDF_CELL_PAD_Y, {
+        doc.text(row[colIndex], left + colIndex * colWidth + cellPadX, y + cellPadY, {
           width: cellWidth,
-          ...(clip ? { height: rowHeight - PDF_CELL_PAD_Y * 2, ellipsis: true } : {}),
+          ...(clip ? { height: rowHeight - cellPadY * 2, ellipsis: true } : {}),
         });
       }
       y += rowHeight;
@@ -477,8 +632,41 @@ class PdfBlockRenderer {
     // Cells moved the cursor into the last column; later blocks start at the margin.
     doc.x = doc.page.margins.left;
     doc.y = y;
-    doc.font(this.fonts.regular).fontSize(this.baseFontSize).moveDown(0.5);
+    doc.font(this.fonts.regular).fontSize(this.baseFontSize).moveDown(this.metrics.blockGapLines);
   }
+}
+
+/** All text a PDF will draw, for choosing fonts that can encode it. */
+function pdfText(blocks: RenderBlock[]): string {
+  return blocks.flatMap((block) => [block.text, ...block.items, ...block.rows.flat()]).join("\n");
+}
+
+/** Pages the page_break blocks alone require: breaks with content on both sides, runs counted once. */
+function pagesForcedByBreaks(blocks: RenderBlock[]): number {
+  let pages = 0;
+  let pendingBreak = true;
+  for (const block of blocks) {
+    if (block.type === PAGE_BREAK) {
+      pendingBreak = true;
+    } else if (pendingBreak) {
+      pages++;
+      pendingBreak = false;
+    }
+  }
+  return pages;
+}
+
+/** Tells the model a PDF is over its page budget and that the text must be shortened. */
+function pageBudgetWarning(blocks: RenderBlock[], pageCount: number, maxPages: number): string {
+  const forced = pagesForcedByBreaks(blocks);
+  const cause =
+    forced > maxPages
+      ? ` The page_break blocks alone start ${forced} pages; remove page breaks or merge pages.`
+      : " Shorten the content (trim long paragraphs, list items and table cells, or drop a section) and create the document again.";
+  return (
+    `The PDF has ${pageCount} pages, more than maxPages ${maxPages}, even with the tightest ` +
+    `readable layout (smaller spacing, type and margins); it was written that way.${cause}`
+  );
 }
 
 /**
@@ -522,7 +710,11 @@ export class DocumentBuilder {
     }
 
     if (ext === ".pdf" || format === "pdf") {
-      report.warnings.push(...(await this.createPDF(outputPath, blocks, options)));
+      const pdf = await this.createPDF(outputPath, blocks, options);
+      report.warnings.push(...pdf.warnings);
+      report.pageCount = pdf.pageCount;
+      report.layoutLevel = pdf.layoutLevel;
+      if (pdf.fittedToMaxPages !== undefined) report.fittedToMaxPages = pdf.fittedToMaxPages;
       return report;
     }
 
@@ -784,67 +976,126 @@ export class DocumentBuilder {
   }
 
   /**
-   * Creates a PDF document. Returns warnings about text it cannot draw.
+   * Page count of `content` as a PDF at each layout in PDF_FIT_LADDER, in
+   * ladder order. Nothing is written.
+   */
+  measurePdfLayouts(
+    content: ContentBlockInput[] | ContentBlockInput | string | undefined,
+    options: DocumentOptions = {},
+  ): number[] {
+    const { blocks } = this.normalizeContent(content);
+    const fontChoice = resolvePdfFonts(pdfText(blocks));
+    return PDF_FIT_LADDER.map(
+      (profile) => this.layoutPdf(blocks, options, fontChoice, profile).pageCount,
+    );
+  }
+
+  /**
+   * Lays content out on a new PDF document with one layout profile. The
+   * document is not ended or written, so the same pass can be measured and,
+   * when chosen, saved.
+   */
+  private layoutPdf(
+    content: RenderBlock[],
+    options: DocumentOptions,
+    fontChoice: ReturnType<typeof resolvePdfFonts>,
+    profile: PdfLayoutProfile,
+  ): { doc: PdfDocument; renderer: PdfBlockRenderer; warnings: string[]; pageCount: number } {
+    const doc = new PDFDocument({
+      size: "LETTER",
+      margins: {
+        top: pdfMargin(options.margins?.top, profile.marginScale),
+        bottom: pdfMargin(options.margins?.bottom, profile.marginScale),
+        left: pdfMargin(options.margins?.left, profile.marginScale),
+        right: pdfMargin(options.margins?.right, profile.marginScale),
+      },
+      // Pages stay open until the end so footers can be stamped once the page count is known.
+      bufferPages: true,
+      info: {
+        Title: options.title || "",
+        Author: options.author || "CoWork OS",
+        Subject: options.subject || "",
+      },
+    });
+
+    const fonts = { regular: "Helvetica", bold: "Helvetica-Bold" };
+    if (fontChoice.font) {
+      const { regular, bold } = fontChoice.font;
+      doc.registerFont("UnicodeRegular", regular.path, regular.postscriptName);
+      doc.registerFont("UnicodeBold", bold.path, bold.postscriptName);
+      fonts.regular = "UnicodeRegular";
+      fonts.bold = "UnicodeBold";
+    }
+
+    const renderer = new PdfBlockRenderer(
+      doc,
+      fonts,
+      pdfMetrics(options.fontSize || 12, profile),
+      (text) =>
+        // Courier is Latin-1 only; code with other characters uses the Unicode font.
+        fontChoice.font && needsUnicodeFont(text) ? fonts.regular : "Courier",
+    );
+    const warnings = renderer.render(content);
+    return { doc, renderer, warnings, pageCount: doc.bufferedPageRange().count };
+  }
+
+  /**
+   * Creates a PDF document. With `maxPages`, a layout that runs over the
+   * budget is redone with tighter layouts from PDF_FIT_LADDER and the first
+   * that fits is written; if none fits, the tightest is written and a
+   * warning gives its page count. Returns warnings about text it cannot draw.
    */
   private async createPDF(
     outputPath: string,
     content: RenderBlock[],
     options: DocumentOptions,
-  ): Promise<string[]> {
+  ): Promise<{
+    warnings: string[];
+    pageCount: number;
+    layoutLevel: number;
+    fittedToMaxPages?: boolean;
+  }> {
     // The built-in PDF fonts only encode Latin-1; text beyond that needs an
     // embedded Unicode font or it is written as the wrong glyphs.
-    const fontChoice = resolvePdfFonts(
-      content.flatMap((block) => [block.text, ...block.items, ...block.rows.flat()]).join("\n"),
-    );
-    return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({
-        size: "LETTER",
-        margins: {
-          top: (options.margins?.top || 1) * 72,
-          bottom: (options.margins?.bottom || 1) * 72,
-          left: (options.margins?.left || 1) * 72,
-          right: (options.margins?.right || 1) * 72,
-        },
-        // Pages stay open until the end so footers can be stamped once the page count is known.
-        bufferPages: true,
-        info: {
-          Title: options.title || "",
-          Author: options.author || "CoWork OS",
-          Subject: options.subject || "",
-        },
-      });
+    const fontChoice = resolvePdfFonts(pdfText(content));
+    const layouts = new Map<number, ReturnType<DocumentBuilder["layoutPdf"]>>();
+    const layoutAt = (level: number): ReturnType<DocumentBuilder["layoutPdf"]> => {
+      let layout = layouts.get(level);
+      if (!layout) {
+        layout = this.layoutPdf(content, options, fontChoice, PDF_FIT_LADDER[level]);
+        layouts.set(level, layout);
+      }
+      return layout;
+    };
 
+    const { maxPages } = options;
+    const fit =
+      maxPages === undefined
+        ? undefined
+        : choosePageFit(maxPages, PDF_FIT_LADDER.length, (level) => layoutAt(level).pageCount);
+    const level = fit?.level ?? 0;
+    const { doc, renderer, warnings: layoutWarnings, pageCount } = layoutAt(level);
+    if (options.pageNumbers) renderer.stampPageNumbers();
+
+    const warnings = [...fontChoice.warnings, ...layoutWarnings];
+    if (fit && !fit.fitted) {
+      warnings.push(pageBudgetWarning(content, pageCount, maxPages as number));
+    }
+
+    await new Promise<void>((resolve, reject) => {
       const stream = fs.createWriteStream(outputPath);
       stream.on("error", reject);
+      stream.on("finish", () => resolve());
       doc.pipe(stream);
-
-      const fonts = { regular: "Helvetica", bold: "Helvetica-Bold" };
-      if (fontChoice.font) {
-        const { regular, bold } = fontChoice.font;
-        doc.registerFont("UnicodeRegular", regular.path, regular.postscriptName);
-        doc.registerFont("UnicodeBold", bold.path, bold.postscriptName);
-        fonts.regular = "UnicodeRegular";
-        fonts.bold = "UnicodeBold";
-      }
-
-      const renderer = new PdfBlockRenderer(doc, fonts, options.fontSize || 12, (text) =>
-        // Courier is Latin-1 only; code with other characters uses the Unicode font.
-        fontChoice.font && needsUnicodeFont(text) ? fonts.regular : "Courier",
-      );
-      let warnings: string[];
-      try {
-        warnings = [...fontChoice.warnings, ...renderer.render(content)];
-        if (options.pageNumbers) renderer.stampPageNumbers();
-      } catch (error) {
-        stream.destroy();
-        reject(error);
-        return;
-      }
-
       doc.end();
-
-      stream.on("finish", () => resolve(warnings));
     });
+
+    return {
+      warnings,
+      pageCount,
+      layoutLevel: level,
+      ...(fit ? { fittedToMaxPages: fit.fitted } : {}),
+    };
   }
 
   /**

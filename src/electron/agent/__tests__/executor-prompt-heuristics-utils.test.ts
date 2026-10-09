@@ -3,6 +3,7 @@ import {
   detectTestRequirement,
   extractNamedTestCommands,
   isBuildCheckCommand,
+  isLatexPdfRequest,
   isTestCommand,
   promptRequestsDecision,
   stripEmbeddedAgentOutputs,
@@ -200,5 +201,25 @@ describe("promptRequestsDecision with embedded agent outputs", () => {
     ].join("\n");
     expect(promptRequestsDecision("Launch decision", prompt)).toBe(true);
     expect(promptRequestsDecision("Upgrade", "Should I upgrade the plan?")).toBe(true);
+  });
+});
+
+describe("isLatexPdfRequest", () => {
+  it("treats a Word document with a matching PDF as an ordinary document request", () => {
+    expect(
+      isLatexPdfRequest(
+        "Prepare a polished two-page client brief in Portuguese (Portugal) for the Northstar onboarding pilot. Save both an editable Word document and a matching PDF: Northstar-brief.docx and Northstar-brief.pdf.",
+      ),
+    ).toBe(false);
+    expect(isLatexPdfRequest("Create a report as a PDF for the board")).toBe(false);
+    expect(isLatexPdfRequest("Write the texto do relatório and export a PDF document")).toBe(false);
+  });
+
+  it("recognises explicit LaTeX intent", () => {
+    expect(isLatexPdfRequest("Write the paper in LaTeX")).toBe(true);
+    expect(isLatexPdfRequest("Draw the diagram with TikZ")).toBe(true);
+    expect(isLatexPdfRequest("Update main.tex with the new section")).toBe(true);
+    expect(isLatexPdfRequest("Write a short paper and compile it into a PDF")).toBe(true);
+    expect(isLatexPdfRequest("Draft the article, then compile the PDF")).toBe(true);
   });
 });

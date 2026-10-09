@@ -7626,6 +7626,8 @@ ${skillDescriptions}`;
           "Create a Word document (.docx) or PDF. Only use when the user EXPLICITLY requests Word/DOCX/PDF format. For all other documents, prefer writing Markdown (.md) files with write_file. " +
           'One call writes one file; for both a DOCX and a PDF, call it once per format with each file\'s full name (e.g. "Northstar-brief.docx" and "Northstar-brief.pdf"). ' +
           'When the user asks for content on a specific page ("Page 2: ..."), insert a page_break block where that page starts. When the user asks for page numbers, set pageNumbers: true. ' +
+          "When the user asks for a document of N pages (e.g. 'a two-page brief'), set maxPages: N. " +
+          "A PDF that runs longer is laid out again with tighter spacing, type and margins until it fits; the result reports pageCount and fittedToMaxPages, and if it still does not fit, a warning gives the actual page count and the content must be shortened. " +
           "Headings stay on the same page as the content after them, and table header rows repeat on every page a table continues onto.",
         input_schema: {
           type: "object",
@@ -7644,6 +7646,12 @@ ${skillDescriptions}`;
               type: "boolean",
               description:
                 'Print the page number ("N / M") centered in the footer of every page. Use when the user asks for page numbers.',
+            },
+            maxPages: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Most pages the document may have. When the user asks for a document of N pages (e.g. 'a two-page brief'), set maxPages: N. Measured and enforced for PDF; DOCX pagination is left to the word processor.",
             },
             content: {
               type: "array",

@@ -274,8 +274,6 @@ SQLite with 6 tables:
 | SkillsSettings | `SkillsSettings.tsx` | Custom skills management |
 | PersonalitySettings | `PersonalitySettings.tsx` | Agent personality config |
 | MCPSettings | `MCPSettings.tsx` | MCP server config |
-| WorkspaceSelector | `WorkspaceSelector.tsx` | Folder picker |
-| ApprovalDialog | `ApprovalDialog.tsx` | Permission requests |
 | FileViewer | `FileViewer.tsx` | In-app artifact viewer |
 
 ### 8. Auto-Update System
@@ -527,9 +525,7 @@ cowork-os/
         │   ├── DiscordSettings.tsx
         │   ├── SlackSettings.tsx
         │   ├── UpdateSettings.tsx
-        │   ├── PersonalitySettings.tsx
-        │   ├── WorkspaceSelector.tsx
-        │   └── ApprovalDialog.tsx
+        │   └── PersonalitySettings.tsx
         │
         └── styles/
             └── index.css

@@ -172,7 +172,6 @@ This keeps the deck review experience responsive without introducing a partial P
 - `src/renderer/components/PresentationArtifactCard.tsx`
 - `src/renderer/components/PresentationArtifactViewer.tsx`
 - `src/renderer/components/PresentationViewer.tsx`
-- `src/renderer/components/InlinePresentationPreview.tsx`
 - `src/renderer/styles/index.css`
 
 ## Verification

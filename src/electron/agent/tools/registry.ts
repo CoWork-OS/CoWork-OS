@@ -7573,7 +7573,10 @@ ${skillDescriptions}`;
         description:
           "Create an Excel spreadsheet with data, formulas, and number formats (currency, decimals, percentages, dates). " +
           "Results of common formulas (SUM, SUMIF(S), AVERAGE, COUNT(IF), MIN, MAX, ROUND, IF) are saved with the file; " +
-          "the result lists any formula left for Excel to calculate on open.",
+          "the result lists any formula left for Excel to calculate on open. " +
+          'Pass dates as ISO text ("2026-10-05"); they are saved as real Excel dates, shown with a date numFmt such as "dd/mm/yyyy" if you give one. ' +
+          'To keep a column as text (IDs with leading zeros), give it numFmt "@". ' +
+          "Apply formats here rather than post-processing with openpyxl; if a command does change a workbook, dropped formula results are restored afterwards and the run_command result lists them in workbookNotes.",
         input_schema: {
           type: "object",
           properties: {
@@ -7620,26 +7623,42 @@ ${skillDescriptions}`;
       {
         name: "create_document",
         description:
-          "Create a Word document (.docx) or PDF. Only use when the user EXPLICITLY requests Word/DOCX/PDF format. For all other documents, prefer writing Markdown (.md) files with write_file.",
+          "Create a Word document (.docx) or PDF. Only use when the user EXPLICITLY requests Word/DOCX/PDF format. For all other documents, prefer writing Markdown (.md) files with write_file. " +
+          'One call writes one file; for both a DOCX and a PDF, call it once per format with each file\'s full name (e.g. "Northstar-brief.docx" and "Northstar-brief.pdf"). ' +
+          'When the user asks for content on a specific page ("Page 2: ..."), insert a page_break block where that page starts. When the user asks for page numbers, set pageNumbers: true. ' +
+          "Headings stay on the same page as the content after them, and table header rows repeat on every page a table continues onto.",
         input_schema: {
           type: "object",
           properties: {
-            filename: { type: "string", description: "Name of the document" },
-            format: { type: "string", enum: ["docx", "pdf"], description: "Output format" },
+            filename: {
+              type: "string",
+              description:
+                'Exact output file name including the extension, e.g. "Northstar-brief.pdf". When the user names the file, pass that name unchanged; never add suffixes such as "-pdf". A name without an extension gets the format\'s extension appended.',
+            },
+            format: {
+              type: "string",
+              enum: ["docx", "pdf"],
+              description: "Output format; must match the filename's extension",
+            },
+            pageNumbers: {
+              type: "boolean",
+              description:
+                'Print the page number ("N / M") centered in the footer of every page. Use when the user asks for page numbers.',
+            },
             content: {
               type: "array",
               description:
-                "Document content blocks. heading/paragraph/code use text; list uses items; table uses rows.",
+                "Document content blocks. heading/paragraph/code use text; list uses items; table uses rows; page_break takes no other fields and starts a new page.",
               items: {
                 type: "object",
                 properties: {
                   type: {
                     type: "string",
-                    enum: ["heading", "paragraph", "list", "table", "code"],
+                    enum: ["heading", "paragraph", "list", "table", "code", "page_break"],
                   },
                   text: {
                     type: "string",
-                    description: "Block text (not needed for list or table blocks)",
+                    description: "Block text (not needed for list, table or page_break blocks)",
                   },
                   level: { type: "number", description: "For headings: 1-6" },
                   items: {

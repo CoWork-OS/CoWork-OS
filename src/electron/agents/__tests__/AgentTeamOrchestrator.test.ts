@@ -1138,4 +1138,200 @@ describe("AgentTeamOrchestrator", () => {
       "Items: 2 done, 0 failed, 0 blocked (total: 2)",
     );
   });
+
+  describe("synthesis retry supersession", () => {
+    const plan =
+      "# Launch plan\n\n## Proposed schedule\n\n| Day | Session |\n|---|---|\n| Mon | 1 |";
+
+    async function makeRetryHarness(suffix: string) {
+      const fixture = makeSynthesisFixture(suffix);
+      const { run, item, tasksById } = fixture;
+      run.phase = "synthesize";
+      const failedSynthesisTask: Task = {
+        id: `task-synth-${suffix}`,
+        title: "Synthesis",
+        prompt: "Synthesize",
+        status: "failed",
+        error:
+          "Task missing direct answer: the request asks for a decision or recommendation, but the final response does not state one.",
+        resultSummary: plan,
+        workspaceId: fixture.team.workspaceId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        parentTaskId: fixture.rootTask.id,
+        agentType: "sub",
+        depth: 1,
+      };
+      tasksById.set(failedSynthesisTask.id, failedSynthesisTask);
+      const synthesisItem: AgentTeamItem = {
+        id: `item-synth-${suffix}`,
+        teamRunId: run.id,
+        title: "Synthesis",
+        sourceTaskId: failedSynthesisTask.id,
+        status: "in_progress",
+        sortOrder: 9999,
+        createdAt: Date.now() - 1000,
+        updatedAt: Date.now() - 1000,
+      };
+      const repos = makeRepos({ team: fixture.team, run, items: [item, synthesisItem] });
+      const completeRootTask = vi.fn();
+      const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+      const orch = new AgentTeamOrchestrator(
+        {
+          getDatabase: () => ({}) as Any,
+          getTaskById: async (taskId: string) => tasksById.get(taskId),
+          createChildTask: fixture.createChildTask,
+          cancelTask: async () => {},
+          completeRootTask,
+        },
+        repos,
+      );
+      vi.spyOn((orch as Any).thoughtRepo, "listByRun").mockReturnValue([]);
+      const finish = () => {
+        for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+      };
+      return {
+        ...fixture,
+        repos,
+        orch,
+        completeRootTask,
+        failedSynthesisTask,
+        synthesisItem,
+        finish,
+      };
+    }
+
+    it("completes the parent when a failed synthesis is recovered by its retry", async () => {
+      const h = await makeRetryHarness("recovered");
+
+      await h.orch.onTaskTerminal(h.failedSynthesisTask.id);
+
+      expect(h.createChildTask).toHaveBeenCalledTimes(1);
+      const firstAttempt = h.repos.itemRepo
+        .listByRun(h.run.id)
+        .find((i) => i.id === h.synthesisItem.id);
+      expect(firstAttempt?.title).toBe("Synthesis (failed)");
+      expect(firstAttempt?.status).toBe("failed");
+      expect(firstAttempt?.resultSummary).toContain("does not state one");
+      expect(h.completeRootTask).not.toHaveBeenCalled();
+
+      const retryTask = await h.createChildTask.mock.results[0].value;
+      h.tasksById.set(retryTask.id, {
+        ...retryTask,
+        status: "completed",
+        terminalStatus: "ok",
+        resultSummary: plan,
+      });
+      await h.orch.onTaskTerminal(retryTask.id);
+
+      expect(h.repos.runRepo.findById(h.run.id)?.status).toBe("completed");
+      expect(h.completeRootTask).toHaveBeenCalledTimes(1);
+      const [, status, summary] = h.completeRootTask.mock.calls[0];
+      expect(status).toBe("completed");
+      expect(summary.startsWith(plan)).toBe(true);
+      expect(summary).toContain("Items: 2 done, 0 failed, 0 blocked (total: 2)");
+      expect(summary).toContain("1 failed synthesis attempt was recovered by a successful retry.");
+      // The failed attempt remains visible as history.
+      const rows = h.repos.itemRepo.listByRun(h.run.id);
+      expect(rows.map((row) => [row.title, row.status])).toEqual(
+        expect.arrayContaining([
+          ["Synthesis (failed)", "failed"],
+          ["Synthesis", "done"],
+        ]),
+      );
+      h.finish();
+    });
+
+    it("retries a synthesis whose failure was recorded before the retry started", async () => {
+      const h = await makeRetryHarness("race");
+      // The graph notification marked the attempt failed before the task-terminal hook ran.
+      h.repos.itemRepo.update({ id: h.synthesisItem.id, status: "failed", resultSummary: plan });
+
+      await h.orch.tickRun(h.run.id, "graph_node_notification");
+
+      expect(h.createChildTask).toHaveBeenCalledTimes(1);
+      expect(h.completeRootTask).not.toHaveBeenCalled();
+      expect(h.repos.runRepo.findById(h.run.id)?.status).toBe("running");
+
+      // The late task-terminal hook must not start a second retry.
+      await h.orch.onTaskTerminal(h.failedSynthesisTask.id);
+      expect(h.createChildTask).toHaveBeenCalledTimes(1);
+      expect(h.completeRootTask).not.toHaveBeenCalled();
+      h.finish();
+    });
+
+    it("fails the parent with the retry's reason when the retry also fails", async () => {
+      const h = await makeRetryHarness("retry-failed");
+      await h.orch.onTaskTerminal(h.failedSynthesisTask.id);
+      const retryTask = await h.createChildTask.mock.results[0].value;
+      h.tasksById.set(retryTask.id, {
+        ...retryTask,
+        status: "failed",
+        error: "Provider request failed: quota exceeded",
+      });
+
+      await h.orch.onTaskTerminal(retryTask.id);
+
+      expect(h.repos.runRepo.findById(h.run.id)?.status).toBe("failed");
+      expect(h.completeRootTask).toHaveBeenCalledTimes(1);
+      const [, status, summary, metadata] = h.completeRootTask.mock.calls[0];
+      expect(status).toBe("failed");
+      const reason =
+        "Team run failed: 1 work item failed without recovery: Synthesis (Provider request failed: quota exceeded).";
+      expect(metadata).toEqual({ failureReason: reason });
+      expect(summary.startsWith(reason)).toBe(true);
+      expect(summary).toContain("Items: 1 done, 1 failed, 0 blocked (total: 2)");
+      expect(h.repos.runRepo.findById(h.run.id)?.error).toBe(reason);
+      h.finish();
+    });
+
+    it("still fails the parent for an unrecovered lane failure and explains it", async () => {
+      const h = await makeRetryHarness("lane-failed");
+      h.tasksById.set(h.item.sourceTaskId!, {
+        ...h.tasksById.get(h.item.sourceTaskId!)!,
+        status: "failed",
+        error: "Error: web_fetch was blocked by policy\nstack details",
+        resultSummary: plan,
+      });
+      h.repos.itemRepo.update({ id: h.item.id, status: "failed", resultSummary: plan });
+      h.tasksById.set(h.failedSynthesisTask.id, {
+        ...h.failedSynthesisTask,
+        status: "completed",
+        error: undefined,
+        resultSummary: plan,
+      });
+
+      await h.orch.onTaskTerminal(h.failedSynthesisTask.id);
+
+      expect(h.createChildTask).not.toHaveBeenCalled();
+      const [, status, summary, metadata] = h.completeRootTask.mock.calls[0];
+      expect(status).toBe("failed");
+      expect(metadata.failureReason).toBe(
+        "Team run failed: 1 work item failed without recovery: Analysis lane (web_fetch was blocked by policy).",
+      );
+      expect(summary.startsWith(metadata.failureReason)).toBe(true);
+      expect(summary).toContain(plan);
+      h.finish();
+    });
+  });
+
+  it("resolves synthesis attempts to one logical work item", async () => {
+    const { resolveTeamItemAttempts } = await import("../AgentTeamOrchestrator");
+    const lane = { title: "Lane", status: "done" as const, createdAt: 1 };
+    const failedAttempt = { title: "Synthesis (failed)", status: "failed" as const, createdAt: 2 };
+    const retryDone = { title: "Synthesis", status: "done" as const, createdAt: 3 };
+    const recovered = resolveTeamItemAttempts([lane, failedAttempt, retryDone]);
+    expect(recovered.effective).toEqual([lane, retryDone]);
+    expect(recovered.recovered).toEqual([failedAttempt]);
+    expect(recovered.synthesis).toBe(retryDone);
+
+    const retryFailed = { title: "Synthesis", status: "failed" as const, createdAt: 3 };
+    const unrecovered = resolveTeamItemAttempts([lane, failedAttempt, retryFailed]);
+    expect(unrecovered.effective).toEqual([lane, retryFailed]);
+    expect(unrecovered.recovered).toEqual([]);
+
+    const single = resolveTeamItemAttempts([lane, { ...retryFailed }]);
+    expect(single.effective).toHaveLength(2);
+    expect(single.superseded).toEqual([]);
+  });
 });

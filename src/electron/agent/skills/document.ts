@@ -8,12 +8,15 @@ import {
   Paragraph,
   TextRun,
   HeadingLevel,
-  AlignmentType as _AlignmentType,
+  AlignmentType,
   Table,
   TableRow,
   TableCell,
   WidthType,
   BorderStyle,
+  Footer,
+  PageBreak,
+  PageNumber,
 } from "docx";
 import PDFDocument from "pdfkit";
 import * as mammoth from "mammoth";
@@ -22,7 +25,7 @@ import { parseMarkdownTable } from "../../utils/document-generators/markdown-tab
 import { needsUnicodeFont, resolvePdfFonts } from "../../utils/pdf-unicode-fonts";
 
 export interface ContentBlock {
-  type: string; // 'heading' | 'paragraph' | 'list' | 'table' | 'code'
+  type: string; // 'heading' | 'paragraph' | 'list' | 'table' | 'code' | 'page_break'
   text: string;
   level?: number; // For headings: 1-6
   items?: string[]; // For lists
@@ -60,6 +63,10 @@ interface RenderBlock {
 }
 
 const LIST_MARKER = /^\s*(?:[-*+•]|\d+[.)])\s+/;
+
+/** Block type that ends the current page; it carries no text. */
+const PAGE_BREAK = "page_break";
+const PAGE_BREAK_ALIASES = new Set([PAGE_BREAK, "pagebreak", "page-break", "page break"]);
 
 function blockText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -99,6 +106,7 @@ function normalizeBlock(raw: unknown): RenderBlock | { type: string; reason: str
   const rows = normalizeRows(block.rows);
   const level = Math.min(Math.max(Math.trunc(Number(block.level)) || 1, 1), 6);
 
+  if (PAGE_BREAK_ALIASES.has(type)) return renderBlock(PAGE_BREAK, {});
   if (type === "table") {
     if (rows.length > 0) return renderBlock(type, { rows });
     // A markdown table sent as text becomes a real table rather than pipes.
@@ -123,6 +131,44 @@ function normalizeBlock(raw: unknown): RenderBlock | { type: string; reason: str
   return { type, reason: "no text" };
 }
 
+const DOCUMENT_FORMATS = ["docx", "pdf"] as const;
+type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
+
+/**
+ * The file name create_document writes. A name that already ends in the
+ * format's extension (in any case) is used exactly as given; a name without
+ * one gets it appended. The format may be left out when the name's
+ * extension states it. A name ending in the other format's extension is
+ * rejected instead of being written as "report.docx.pdf".
+ */
+export function resolveDocumentFilename(
+  filename: unknown,
+  format: unknown,
+): { filename: string; format: DocumentFormat } {
+  const name = typeof filename === "string" ? filename.trim() : "";
+  if (!name) throw new Error('Missing required "filename", for example "report.pdf".');
+  const extension = path.extname(name).slice(1).toLowerCase();
+  const nameFormat = DOCUMENT_FORMATS.find((candidate) => candidate === extension);
+  const requested = typeof format === "string" ? format.trim().toLowerCase() : "";
+  if (requested && !DOCUMENT_FORMATS.some((candidate) => candidate === requested)) {
+    throw new Error(`Unsupported document format "${String(format)}". Use "docx" or "pdf".`);
+  }
+  const resolved = (requested || nameFormat) as DocumentFormat | undefined;
+  if (!resolved) {
+    throw new Error(
+      `Missing "format" for "${name}". Use "docx" or "pdf", or end the filename in .docx or .pdf.`,
+    );
+  }
+  if (nameFormat && nameFormat !== resolved) {
+    const stem = name.slice(0, -(extension.length + 1));
+    throw new Error(
+      `Filename "${name}" ends in .${nameFormat} but format is "${resolved}". ` +
+        `Use filename "${stem}.${resolved}" for a ${resolved.toUpperCase()} file.`,
+    );
+  }
+  return { filename: nameFormat ? name : `${name}.${resolved}`, format: resolved };
+}
+
 export interface DocumentOptions {
   title?: string;
   author?: string;
@@ -136,6 +182,303 @@ export interface DocumentOptions {
     left?: number;
     right?: number;
   };
+  /** Print "N / M" centered in the footer of every page. */
+  pageNumbers?: boolean;
+}
+
+/** Space between table cell text and the cell's edges and rules, in points. */
+const PDF_CELL_PAD_X = 5;
+const PDF_CELL_PAD_Y = 4;
+/** Space above and below a heading, in points. */
+const PDF_HEADING_SPACE_ABOVE = 8;
+const PDF_HEADING_SPACE_BELOW = 6;
+/** How deep a run of consecutive headings is followed when keeping it with its content. */
+const PDF_KEEP_WITH_NEXT_DEPTH = 4;
+
+type PdfDocument = InstanceType<typeof PDFDocument>;
+
+/**
+ * Lays content blocks out on a pdfkit document.
+ *
+ * Tables use one layout model: a row is as tall as its tallest wrapped cell
+ * plus top and bottom padding, its rule is drawn exactly at the row's bottom
+ * edge, and the next row starts there. Rules therefore always sit in the
+ * padding between rows. A row that does not fit above the bottom margin
+ * starts a new page, where the header row is drawn again. Headings move to a
+ * new page when the first part of the content they introduce would not fit
+ * below them.
+ */
+class PdfBlockRenderer {
+  private readonly warnings: string[] = [];
+
+  constructor(
+    private readonly doc: PdfDocument,
+    private readonly fonts: { regular: string; bold: string },
+    private readonly baseFontSize: number,
+    private readonly codeFont: (text: string) => string,
+  ) {}
+
+  render(blocks: RenderBlock[]): string[] {
+    blocks.forEach((block, index) => this.renderBlock(blocks, index));
+    return this.warnings;
+  }
+
+  /** Writes "N / M" centered in the bottom margin of every page. */
+  stampPageNumbers(): void {
+    const { doc } = this;
+    const range = doc.bufferedPageRange();
+    for (let index = 0; index < range.count; index++) {
+      doc.switchToPage(range.start + index);
+      const { margins } = doc.page;
+      const bottomMargin = margins.bottom;
+      // Text inside the bottom margin would otherwise start another page.
+      margins.bottom = 0;
+      doc
+        .font(this.fonts.regular)
+        .fontSize(9)
+        .fillColor("#666666")
+        .text(
+          `${index + 1} / ${range.count}`,
+          margins.left,
+          doc.page.height - bottomMargin / 2 - 4,
+          { width: this.contentWidth, align: "center", lineBreak: false },
+        );
+      margins.bottom = bottomMargin;
+    }
+    doc.fillColor("#000000");
+  }
+
+  private get contentWidth(): number {
+    const { page } = this.doc;
+    return page.width - page.margins.left - page.margins.right;
+  }
+
+  private get contentBottom(): number {
+    const { page } = this.doc;
+    return page.height - page.margins.bottom;
+  }
+
+  private get contentHeight(): number {
+    const { page } = this.doc;
+    return page.height - page.margins.top - page.margins.bottom;
+  }
+
+  private atPageTop(): boolean {
+    return this.doc.y <= this.doc.page.margins.top + 0.5;
+  }
+
+  /** Starts a new page unless `height` fits below the cursor or the page is still empty. */
+  private ensureSpace(height: number): void {
+    if (this.atPageTop()) return;
+    if (this.doc.y + Math.min(height, this.contentHeight) > this.contentBottom) {
+      this.doc.addPage();
+    }
+  }
+
+  private headingFontSize(level: number): number {
+    return this.baseFontSize + (7 - Math.min(Math.max(level || 1, 1), 6)) * 2; // h1 = base+12
+  }
+
+  /** Height of a heading including the space above and below it. */
+  private headingHeight(block: RenderBlock): number {
+    const { doc } = this;
+    doc.font(this.fonts.bold).fontSize(this.headingFontSize(block.level));
+    return (
+      PDF_HEADING_SPACE_ABOVE +
+      doc.heightOfString(block.text, {
+        width: this.contentWidth,
+        paragraphGap: PDF_HEADING_SPACE_BELOW,
+      })
+    );
+  }
+
+  /**
+   * The part of block `index` that must share a page with a heading before
+   * it: up to two lines of text, the first list item, or a table's header
+   * and first row. A heading counts with what follows it.
+   */
+  private minimumHeight(blocks: RenderBlock[], index: number, depth = 0): number {
+    const block = blocks[index];
+    if (!block || block.type === PAGE_BREAK) return 0;
+    const { doc } = this;
+    const width = this.contentWidth;
+    switch (block.type) {
+      case "heading":
+        return (
+          this.headingHeight(block) +
+          (depth < PDF_KEEP_WITH_NEXT_DEPTH ? this.minimumHeight(blocks, index + 1, depth + 1) : 0)
+        );
+      case "table": {
+        const heights = this.tableRowHeights(block.rows);
+        return heights[0] + (heights[1] ?? 0);
+      }
+      case "list":
+        doc.font(this.fonts.regular).fontSize(this.baseFontSize);
+        return doc.heightOfString(`• ${block.items[0] ?? ""}`, {
+          width,
+          indent: 20,
+          paragraphGap: 4,
+        });
+      case "code": {
+        doc.font(this.codeFont(block.text)).fontSize(this.baseFontSize - 2);
+        const full = doc.heightOfString(block.text, { width, paragraphGap: 8 });
+        return Math.min(full, doc.currentLineHeight(true) * 2);
+      }
+      default: {
+        doc.font(this.fonts.regular).fontSize(this.baseFontSize);
+        const full = doc.heightOfString(block.text, { width, paragraphGap: 8, lineGap: 4 });
+        return Math.min(full, (doc.currentLineHeight(true) + 4) * 2);
+      }
+    }
+  }
+
+  private renderBlock(blocks: RenderBlock[], index: number): void {
+    const { doc } = this;
+    const block = blocks[index];
+    const baseFontSize = this.baseFontSize;
+    switch (block.type) {
+      case PAGE_BREAK:
+        // A break on an empty page would only add a blank page.
+        if (!this.atPageTop()) doc.addPage();
+        break;
+
+      case "heading": {
+        this.ensureSpace(this.minimumHeight(blocks, index));
+        // More space above a heading than below it ties it to its own section.
+        if (!this.atPageTop()) doc.y += PDF_HEADING_SPACE_ABOVE;
+        doc
+          .font(this.fonts.bold)
+          .fontSize(this.headingFontSize(block.level))
+          .text(block.text, { paragraphGap: PDF_HEADING_SPACE_BELOW });
+        break;
+      }
+
+      case "paragraph":
+        doc
+          .font(this.fonts.regular)
+          .fontSize(baseFontSize)
+          .text(block.text, { paragraphGap: 8, lineGap: 4 });
+        doc.moveDown(0.5);
+        break;
+
+      case "list": {
+        doc.font(this.fonts.regular).fontSize(baseFontSize);
+        for (const item of block.items) {
+          doc.text(`• ${item}`, { indent: 20, paragraphGap: 4 });
+        }
+        doc.moveDown(0.5);
+        break;
+      }
+
+      case "table":
+        if (block.rows.length > 0) this.renderTable(block.rows);
+        break;
+
+      case "code":
+        doc
+          .font(this.codeFont(block.text))
+          .fontSize(baseFontSize - 2)
+          .fillColor("#333333")
+          .text(block.text, { paragraphGap: 8 });
+        doc.fillColor("#000000");
+        doc.moveDown(0.5);
+        break;
+
+      default:
+        doc.font(this.fonts.regular).fontSize(baseFontSize).text(block.text);
+        doc.moveDown(0.5);
+    }
+  }
+
+  private get tableFontSize(): number {
+    return this.baseFontSize - 1;
+  }
+
+  private cellTextWidth(columnCount: number): number {
+    return this.contentWidth / columnCount - PDF_CELL_PAD_X * 2;
+  }
+
+  /** Height of each row: its tallest wrapped cell plus top and bottom padding. */
+  private tableRowHeights(rows: string[][]): number[] {
+    const { doc } = this;
+    const width = this.cellTextWidth(rows[0].length);
+    doc.fontSize(this.tableFontSize);
+    return rows.map((row, rowIndex) => {
+      doc.font(rowIndex === 0 ? this.fonts.bold : this.fonts.regular);
+      const textHeight = Math.max(...row.map((cell) => doc.heightOfString(cell || " ", { width })));
+      return textHeight + PDF_CELL_PAD_Y * 2;
+    });
+  }
+
+  private tableRule(y: number, strong: boolean): void {
+    const { doc } = this;
+    const left = doc.page.margins.left;
+    doc
+      .save()
+      .lineWidth(strong ? 0.8 : 0.5)
+      .strokeColor(strong ? "#444444" : "#AAAAAA")
+      .moveTo(left, y)
+      .lineTo(left + this.contentWidth, y)
+      .stroke()
+      .restore();
+  }
+
+  private renderTable(rows: string[][]): void {
+    const { doc } = this;
+    const columnCount = rows[0].length;
+    const colWidth = this.contentWidth / columnCount;
+    const cellWidth = this.cellTextWidth(columnCount);
+    const hasHeader = rows.length > 1;
+    const heights = this.tableRowHeights(rows);
+
+    // The header never ends a page without the first row under it.
+    this.ensureSpace(heights[0] + (hasHeader ? heights[1] : 0));
+    let y = doc.y;
+    this.tableRule(y, true);
+
+    const drawRow = (rowIndex: number, available: number): void => {
+      const row = rows[rowIndex];
+      const left = doc.page.margins.left;
+      // A row taller than a whole page is cut at the page bottom rather
+      // than letting its cells flow onto pages of their own.
+      const clip = heights[rowIndex] > available;
+      const rowHeight = clip ? available : heights[rowIndex];
+      if (clip) {
+        this.warnings.push(
+          `Table row ${rowIndex + 1} is taller than a page and was shortened to fit.`,
+        );
+      }
+      doc.font(rowIndex === 0 ? this.fonts.bold : this.fonts.regular).fontSize(this.tableFontSize);
+      for (let colIndex = 0; colIndex < row.length; colIndex++) {
+        doc.text(row[colIndex], left + colIndex * colWidth + PDF_CELL_PAD_X, y + PDF_CELL_PAD_Y, {
+          width: cellWidth,
+          ...(clip ? { height: rowHeight - PDF_CELL_PAD_Y * 2, ellipsis: true } : {}),
+        });
+      }
+      y += rowHeight;
+      this.tableRule(y, rowIndex === 0 && hasHeader);
+    };
+
+    // Body rows drawn on the current page; a page holding only the header
+    // keeps the next row even when that row has to be shortened.
+    let bodyRowsOnPage = 0;
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      if (rowIndex > 0 && bodyRowsOnPage > 0 && y + heights[rowIndex] > this.contentBottom) {
+        doc.addPage();
+        y = doc.y;
+        this.tableRule(y, true);
+        if (hasHeader) drawRow(0, this.contentHeight);
+        bodyRowsOnPage = 0;
+      }
+      drawRow(rowIndex, this.contentBottom - y);
+      if (rowIndex > 0 || !hasHeader) bodyRowsOnPage++;
+    }
+
+    // Cells moved the cursor into the last column; later blocks start at the margin.
+    doc.x = doc.page.margins.left;
+    doc.y = y;
+    doc.font(this.fonts.regular).fontSize(this.baseFontSize).moveDown(0.5);
+  }
 }
 
 /**
@@ -236,7 +579,7 @@ export class DocumentBuilder {
       if ("reason" in normalized) droppedBlocks.push({ index, ...normalized });
       else blocks.push(normalized);
     });
-    if (blocks.length === 0) {
+    if (!blocks.some((block) => block.type !== PAGE_BREAK)) {
       throw new Error(
         "All content blocks are empty. Provide text, list items, or table rows. " +
           `Received ${input.length} block(s), none with anything to write.`,
@@ -254,10 +597,24 @@ export class DocumentBuilder {
     content: RenderBlock[],
     options: DocumentOptions,
   ): Promise<void> {
-    const children: Paragraph[] = [];
+    const children: Array<Paragraph | Table> = [];
+    const textSize = (options.fontSize || 12) * 2;
+    // A page break starts the next paragraph on a new page, so the new page
+    // does not open with an empty line. A break with nothing after it is
+    // written as an explicit break.
+    let breakBeforeNext = false;
+    const takePageBreak = (): boolean => {
+      const value = breakBeforeNext;
+      breakBeforeNext = false;
+      return value;
+    };
 
     for (const block of content) {
       switch (block.type) {
+        case PAGE_BREAK:
+          breakBeforeNext = true;
+          break;
+
         case "heading": {
           const level = Math.min(Math.max(block.level || 1, 1), 6);
           const headingLevel = this.getHeadingLevel(level);
@@ -266,6 +623,10 @@ export class DocumentBuilder {
               text: block.text,
               heading: headingLevel,
               spacing: { before: 240, after: 120 },
+              // A heading never ends a page apart from the content it introduces.
+              keepNext: true,
+              keepLines: true,
+              pageBreakBefore: takePageBreak(),
             }),
           );
           break;
@@ -274,8 +635,9 @@ export class DocumentBuilder {
         case "paragraph":
           children.push(
             new Paragraph({
-              children: [new TextRun({ text: block.text, size: (options.fontSize || 12) * 2 })],
+              children: [new TextRun({ text: block.text, size: textSize })],
               spacing: { after: 200 },
+              pageBreakBefore: takePageBreak(),
             }),
           );
           break;
@@ -284,9 +646,10 @@ export class DocumentBuilder {
           for (const item of block.items) {
             children.push(
               new Paragraph({
-                children: [new TextRun({ text: item, size: (options.fontSize || 12) * 2 })],
+                children: [new TextRun({ text: item, size: textSize })],
                 bullet: { level: 0 },
                 spacing: { after: 100 },
+                pageBreakBefore: takePageBreak(),
               }),
             );
           }
@@ -300,22 +663,28 @@ export class DocumentBuilder {
             const textWidth =
               11906 - ((options.margins?.left || 1) + (options.margins?.right || 1)) * 1440;
             const columnCount = block.rows[0].length;
+            const hasHeader = block.rows.length > 1;
             const table = new Table({
               width: { size: 100, type: WidthType.PERCENTAGE },
               columnWidths: Array<number>(columnCount).fill(Math.floor(textWidth / columnCount)),
               rows: block.rows.map(
                 (row, rowIndex) =>
                   new TableRow({
+                    // The header repeats on every page the table reaches.
+                    tableHeader: hasHeader && rowIndex === 0 ? true : undefined,
+                    cantSplit: true,
                     children: row.map(
                       (cell) =>
                         new TableCell({
                           children: [
                             new Paragraph({
+                              // Keeps the header on the same page as the first row.
+                              keepNext: hasHeader && rowIndex === 0 ? true : undefined,
                               children: [
                                 new TextRun({
                                   text: cell,
                                   bold: rowIndex === 0,
-                                  size: (options.fontSize || 12) * 2,
+                                  size: textSize,
                                 }),
                               ],
                             }),
@@ -331,8 +700,12 @@ export class DocumentBuilder {
                   }),
               ),
             });
-            children.push(new Paragraph({ children: [] })); // Spacing before table
-            children.push(table as Any);
+            // Spacing before the table; it carries the page break and stays
+            // with the table so a preceding heading does too.
+            children.push(
+              new Paragraph({ children: [], keepNext: true, pageBreakBefore: takePageBreak() }),
+            );
+            children.push(table);
             children.push(new Paragraph({ children: [] })); // Spacing after table
           }
           break;
@@ -350,6 +723,7 @@ export class DocumentBuilder {
                 }),
               ],
               spacing: { before: 200, after: 200 },
+              pageBreakBefore: takePageBreak(),
             }),
           );
           break;
@@ -357,11 +731,13 @@ export class DocumentBuilder {
         default:
           children.push(
             new Paragraph({
-              children: [new TextRun({ text: block.text, size: (options.fontSize || 12) * 2 })],
+              children: [new TextRun({ text: block.text, size: textSize })],
+              pageBreakBefore: takePageBreak(),
             }),
           );
       }
     }
+    if (breakBeforeNext) children.push(new Paragraph({ children: [new PageBreak()] }));
 
     const doc = new Document({
       creator: options.author || "CoWork OS",
@@ -379,6 +755,25 @@ export class DocumentBuilder {
               },
             },
           },
+          ...(options.pageNumbers
+            ? {
+                footers: {
+                  default: new Footer({
+                    children: [
+                      new Paragraph({
+                        alignment: AlignmentType.CENTER,
+                        children: [
+                          new TextRun({
+                            children: [PageNumber.CURRENT, " / ", PageNumber.TOTAL_PAGES],
+                            size: 18,
+                          }),
+                        ],
+                      }),
+                    ],
+                  }),
+                },
+              }
+            : {}),
           children,
         },
       ],
@@ -410,6 +805,8 @@ export class DocumentBuilder {
           left: (options.margins?.left || 1) * 72,
           right: (options.margins?.right || 1) * 72,
         },
+        // Pages stay open until the end so footers can be stamped once the page count is known.
+        bufferPages: true,
         info: {
           Title: options.title || "",
           Author: options.author || "CoWork OS",
@@ -418,6 +815,7 @@ export class DocumentBuilder {
       });
 
       const stream = fs.createWriteStream(outputPath);
+      stream.on("error", reject);
       doc.pipe(stream);
 
       const fonts = { regular: "Helvetica", bold: "Helvetica-Bold" };
@@ -429,101 +827,23 @@ export class DocumentBuilder {
         fonts.bold = "UnicodeBold";
       }
 
-      const baseFontSize = options.fontSize || 12;
-
-      for (const block of content) {
-        switch (block.type) {
-          case "heading": {
-            const level = Math.min(Math.max(block.level || 1, 1), 6);
-            const fontSize = baseFontSize + (7 - level) * 2; // h1 = base+12, h6 = base+2
-            doc.font(fonts.bold).fontSize(fontSize).text(block.text, { paragraphGap: 10 });
-            doc.moveDown(0.5);
-            break;
-          }
-
-          case "paragraph":
-            doc
-              .font(fonts.regular)
-              .fontSize(baseFontSize)
-              .text(block.text, { paragraphGap: 8, lineGap: 4 });
-            doc.moveDown(0.5);
-            break;
-
-          case "list": {
-            doc.font(fonts.regular).fontSize(baseFontSize);
-            for (const item of block.items) {
-              doc.text(`• ${item}`, { indent: 20, paragraphGap: 4 });
-            }
-            doc.moveDown(0.5);
-            break;
-          }
-
-          case "table": {
-            if (block.rows.length > 0) {
-              doc.font(fonts.regular).fontSize(baseFontSize - 1);
-              const columnCount = block.rows[0].length;
-              const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-              const colWidth = pageWidth / columnCount;
-
-              for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
-                const row = block.rows[rowIndex];
-                doc.font(rowIndex === 0 ? fonts.bold : fonts.regular);
-                // A row is as tall as its tallest cell and starts on a new
-                // page when it would cross the bottom margin.
-                const rowHeight = Math.max(
-                  ...row.map((cell) => doc.heightOfString(cell || " ", { width: colWidth - 10 })),
-                );
-                if (doc.y + rowHeight > doc.page.height - doc.page.margins.bottom) {
-                  doc.addPage();
-                }
-                const startY = doc.y;
-
-                // Draw cells
-                for (let colIndex = 0; colIndex < row.length; colIndex++) {
-                  const x = doc.page.margins.left + colIndex * colWidth;
-                  doc.text(row[colIndex], x, startY, {
-                    width: colWidth - 10,
-                    continued: false,
-                  });
-                }
-                doc.y = startY + rowHeight;
-
-                // Draw horizontal line
-                doc
-                  .moveTo(doc.page.margins.left, doc.y + 5)
-                  .lineTo(doc.page.margins.left + pageWidth, doc.y + 5)
-                  .stroke();
-
-                doc.moveDown(0.3);
-              }
-              // Cells moved the cursor into the last column; later blocks start at the margin.
-              doc.x = doc.page.margins.left;
-              doc.moveDown(0.5);
-            }
-            break;
-          }
-
-          case "code":
-            doc
-              // Courier is Latin-1 only; code with other characters uses the Unicode font.
-              .font(fontChoice.font && needsUnicodeFont(block.text) ? fonts.regular : "Courier")
-              .fontSize(baseFontSize - 2)
-              .fillColor("#333333")
-              .text(block.text, { paragraphGap: 8 });
-            doc.fillColor("#000000");
-            doc.moveDown(0.5);
-            break;
-
-          default:
-            doc.font(fonts.regular).fontSize(baseFontSize).text(block.text);
-            doc.moveDown(0.5);
-        }
+      const renderer = new PdfBlockRenderer(doc, fonts, options.fontSize || 12, (text) =>
+        // Courier is Latin-1 only; code with other characters uses the Unicode font.
+        fontChoice.font && needsUnicodeFont(text) ? fonts.regular : "Courier",
+      );
+      let warnings: string[];
+      try {
+        warnings = [...fontChoice.warnings, ...renderer.render(content)];
+        if (options.pageNumbers) renderer.stampPageNumbers();
+      } catch (error) {
+        stream.destroy();
+        reject(error);
+        return;
       }
 
       doc.end();
 
-      stream.on("finish", () => resolve(fontChoice.warnings));
-      stream.on("error", reject);
+      stream.on("finish", () => resolve(warnings));
     });
   }
 
@@ -555,6 +875,9 @@ export class DocumentBuilder {
           }
           case "code":
             return `\`\`\`${block.language || ""}\n${block.text}\n\`\`\`\n`;
+          case PAGE_BREAK:
+            // Markdown has no page break; this is what HTML and PDF converters honor.
+            return '<div style="page-break-after: always;"></div>\n';
           default:
             return `${block.text}\n`;
         }
@@ -709,6 +1032,10 @@ export class DocumentBuilder {
           }
           break;
         }
+
+        case PAGE_BREAK:
+          xmlParts.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+          break;
 
         default:
           xmlParts.push(this.createOoxmlParagraph(block.text));

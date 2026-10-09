@@ -419,11 +419,23 @@ function isFormulaValue(value: ExcelJS.CellValue): value is ExcelJS.CellFormulaV
 }
 
 /**
+ * Whether a formula cell has no cached result. Reads Cell.result: ExcelJS leaves a 0 or FALSE
+ * result out of Cell.value, so `value.result` cannot tell a zero total from a missing one.
+ */
+export function isFormulaResultMissing(cell: ExcelJS.Cell): boolean {
+  const result: unknown = cell.result;
+  return isFormulaValue(cell.value) && (result === null || result === undefined);
+}
+
+/**
  * Stores a cached result on every formula cell the evaluator understands, recomputing results
  * that are already there. Formula cells it cannot evaluate are left as they are and reported.
+ * With `onlyMissing`, cells that already carry a result (such as one Excel saved) keep it, and
+ * only formulas without one are computed and counted.
  */
 export function computeWorkbookFormulaResults(
   workbook: ExcelJS.Workbook,
+  options: { onlyMissing?: boolean } = {},
 ): FormulaComputationReport {
   const report: FormulaComputationReport = { computed: 0, uncached: [] };
   const epoch = workbook.properties?.date1904 ? EXCEL_1904_EPOCH_MS : EXCEL_1900_EPOCH_MS;
@@ -539,6 +551,7 @@ export function computeWorkbookFormulaResults(
       row.eachCell({ includeEmpty: false }, (cell) => {
         const value = cell.value;
         if (!isFormulaValue(value)) return;
+        if (options.onlyMissing && !isFormulaResultMissing(cell)) return;
         try {
           const result = evaluateCell(sheet, cell);
           // A formula over a blank cell shows 0 in Excel.

@@ -8,6 +8,7 @@
  */
 
 import { Citation, CitationBundle } from "./types";
+import { type AnswerCitationReconciliation, reconcileAnswerCitations } from "./answer-citations";
 
 function flattenPromptText(value: string, maxChars: number): string {
   const flat = String(value || "")
@@ -111,14 +112,48 @@ export class CitationTracker {
       ...(omitted > 0 ? [`(${omitted} more collected sources are not listed.)`] : []),
       "",
       "When presenting findings, cite sources inline using [N] notation, only for sources that support the claim.",
+      "Each [N] is a fixed source ID: cite only numbers listed above, and use a direct link for any other page.",
+      "If you add a numbered source list, label each entry with the same [N] as above; do not renumber the list from 1.",
     ].join("\n");
+  }
+
+  /**
+   * Rewrite a final answer so its inline [N] markers and any numbered source
+   * list it contains use this registry's indices, the numbering the sources
+   * panel shows. Sources the answer cites by URL but the registry lacks are
+   * registered so they get a stable index too.
+   */
+  reconcileAnswer(text: string): AnswerCitationReconciliation {
+    return reconcileAnswerCitations(text, this.citations, {
+      registerSource: (url, title) => this.addAnswerSource(url, title),
+    });
   }
 
   // ── internal ──────────────────────────────────────────────────────
 
+  private addAnswerSource(url: string, title: string): number | undefined {
+    if (!url) return undefined;
+    this.addOne({
+      url,
+      title: title || extractDomain(url),
+      snippet: "",
+      sourceTool: "answer_link",
+    });
+    return this.urlIndex.get(url.replace(/\/+$/, "").toLowerCase());
+  }
+
   private addOne(input: { url: string; title: string; snippet: string; sourceTool: string }): void {
     const normalized = input.url.replace(/\/+$/, "").toLowerCase();
-    if (this.urlIndex.has(normalized)) return; // dedupe
+    const existingIndex = this.urlIndex.get(normalized);
+    if (existingIndex !== undefined) {
+      // A page first seen in search results and then fetched was read in full;
+      // mark it fetched so a capped prompt list keeps it.
+      const existing = this.citations[existingIndex - 1];
+      if (input.sourceTool === "web_fetch" && existing && existing.sourceTool !== "web_fetch") {
+        this.citations[existingIndex - 1] = { ...existing, sourceTool: "web_fetch" };
+      }
+      return; // dedupe
+    }
 
     const index = this.citations.length + 1;
     const citation: Citation = {

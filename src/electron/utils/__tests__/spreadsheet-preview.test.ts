@@ -13,6 +13,7 @@ import {
   writeDelimitedSpreadsheetPreviewToFile,
   writeSpreadsheetPreviewToFile,
 } from "../spreadsheet-preview";
+import { buildOpenpyxlStyleWorkbook } from "../document-generators/__tests__/openpyxl-style-workbook";
 
 describe("spreadsheet preview extraction", () => {
   it("extracts sheets, formulas, empty cells, styles, and bounds", async () => {
@@ -275,13 +276,13 @@ describe("spreadsheet preview extraction", () => {
       });
       // A shared formula is still a formula, translated for its own row.
       expect(summary.rows[2][2]).toMatchObject({ value: "493", formula: "B3*2" });
-      // No saved result: say so with the formula instead of a blank total.
+      // No saved result: computed for display (the file itself is not changed).
       expect(summary.rows[3][1]).toMatchObject({
-        value: "",
-        displayValue: "=SUM(B2:B3)",
-        formulaPending: true,
+        value: "396.5",
+        displayValue: "€396.50",
         formula: "SUM(B2:B3)",
       });
+      expect(summary.rows[3][1].formulaPending).toBeUndefined();
       expect(spreadsheetPreviewToTsv(preview)).toContain("Venue\t€150.00\t300");
     });
 
@@ -346,6 +347,92 @@ describe("spreadsheet preview extraction", () => {
         .file("xl/workbook.xml")!
         .async("string");
       expect(workbookXml).toMatch(/<calcPr[^>]*fullCalcOnLoad="1"/);
+    });
+  });
+
+  describe("workbooks saved by other tools", () => {
+    it("shows values for formulas saved without results and keeps the file unchanged", async () => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-xlsx-openpyxl-"));
+      const outPath = path.join(tmpDir, "Northstar-pilot-costs.xlsx");
+      await fs.writeFile(outPath, await buildOpenpyxlStyleWorkbook());
+      const bytes = await fs.readFile(outPath);
+
+      const preview = await buildSpreadsheetPreviewFromFile(outPath);
+      const [expenses, summary] = preview.sheets;
+
+      expect(expenses.rows[1][5]).toMatchObject({
+        value: "27.6",
+        displayValue: "€27.60",
+        formula: "D2*E2",
+        valueType: "number",
+      });
+      expect(expenses.rows[3][6]).toMatchObject({ value: "-24.6", displayValue: "-€24.60" });
+      // A zero result (0% VAT) is shown as a value, not as its formula.
+      expect(expenses.rows[4][5]).toMatchObject({ value: "0", displayValue: "€0.00" });
+      expect(expenses.rows[4][5].formulaPending).toBeUndefined();
+      expect(summary.rows.slice(1).map((row) => row[1].displayValue)).toEqual([
+        "€225.50",
+        "€33.47",
+        "€258.97",
+      ]);
+      // Date text with a date format is still text, and shown as Excel shows it.
+      expect(expenses.rows[1][1]).toMatchObject({
+        value: "2026-10-05",
+        valueType: "string",
+        numFmt: "DD/MM/YYYY",
+      });
+      expect(expenses.rows[1][1].displayValue).toBeUndefined();
+      expect(expenses.rows[1][0]).toMatchObject({ value: "00041", valueType: "string" });
+      expect((await fs.readFile(outPath)).equals(bytes)).toBe(true);
+    });
+
+    it("keeps formulas CoWork cannot compute pending", async () => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-xlsx-pending-"));
+      const outPath = path.join(tmpDir, "pending.xlsx");
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Data");
+      sheet.addRow(["Key", "Lookup"]);
+      sheet.addRow(["a", { formula: "VLOOKUP(A2,A1:B2,2,FALSE)" }]);
+      await workbook.xlsx.writeFile(outPath);
+
+      const preview = await buildSpreadsheetPreviewFromFile(outPath);
+
+      expect(preview.sheets[0].rows[1][1]).toMatchObject({
+        value: "",
+        displayValue: "=VLOOKUP(A2,A1:B2,2,FALSE)",
+        formulaPending: true,
+      });
+    });
+
+    it("shows real dates in their date format and saves edited dates as dates", async () => {
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-xlsx-dates-"));
+      const outPath = path.join(tmpDir, "dates.xlsx");
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet("Expenses");
+      sheet.addRow(["Invoice ID", "Date"]);
+      sheet.addRow(["00041", new Date(Date.UTC(2026, 9, 5))]);
+      sheet.addRow(["00042", new Date(Date.UTC(2026, 9, 7))]);
+      sheet.getCell("B2").numFmt = "DD/MM/YYYY";
+      sheet.getCell("B3").numFmt = "DD/MM/YYYY";
+      await workbook.xlsx.writeFile(outPath);
+
+      const preview = await buildSpreadsheetPreviewFromFile(outPath);
+      expect(preview.sheets[0].rows[1][1]).toMatchObject({
+        displayValue: "05/10/2026",
+        valueType: "date",
+      });
+
+      preview.sheets[0].rows[2][1] = { ...preview.sheets[0].rows[2][1], value: "08/10/2026" };
+      preview.sheets[0].rows[2][0] = { ...preview.sheets[0].rows[2][0], value: "00044" };
+      const saved = await writeSpreadsheetPreviewToFile(outPath, preview);
+
+      const reread = new ExcelJS.Workbook();
+      await reread.xlsx.readFile(outPath);
+      const savedSheet = reread.getWorksheet("Expenses")!;
+      expect(savedSheet.getCell("B3").value).toEqual(new Date(Date.UTC(2026, 9, 8)));
+      expect(savedSheet.getCell("B3").numFmt).toBe("DD/MM/YYYY");
+      expect(savedSheet.getCell("A3").value).toBe("00044");
+      expect(saved.sheets[0].rows[2][1].displayValue).toBe("08/10/2026");
     });
   });
 });

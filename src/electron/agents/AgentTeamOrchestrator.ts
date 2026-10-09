@@ -84,6 +84,11 @@ export type AgentTeamOrchestratorDeps = {
     metadata?: {
       terminalStatus?: Task["terminalStatus"];
       terminalStatusReason?: string;
+      /**
+       * For a failed run: why it failed, without the deliverable. `summary`
+       * still carries the deliverable so it is not lost.
+       */
+      failureReason?: string;
     },
   ) => void;
   createOrchestrationGraphRun?: (params: {
@@ -157,6 +162,65 @@ function emitTeamEvent(event: Any): void {
 
 /** Sentinel title used to identify the synthesis item created by transitionToSynthesizePhase. */
 const SYNTHESIS_ITEM_TITLE = "Synthesis";
+/** Title of a synthesis attempt that failed and was replaced by a retry. */
+const SUPERSEDED_SYNTHESIS_TITLE = `${SYNTHESIS_ITEM_TITLE} (failed)`;
+const MAX_FAILURE_REASON_CHARS = 240;
+
+type TeamItemOutcomeLike = {
+  title: string;
+  status: AgentTeamItemStatus;
+  createdAt?: number;
+};
+
+function isSynthesisAttempt(item: Pick<TeamItemOutcomeLike, "title">): boolean {
+  return item.title === SYNTHESIS_ITEM_TITLE || item.title === SUPERSEDED_SYNTHESIS_TITLE;
+}
+
+/**
+ * Every synthesis attempt (the original and its retry) is one logical work
+ * item. The latest attempt is authoritative; earlier attempts are superseded
+ * and stay in the checklist as history. A superseded attempt that failed is
+ * recovered when the authoritative attempt succeeded, so it no longer
+ * decides the run's outcome. Items without a retry are their own logical item.
+ */
+export function resolveTeamItemAttempts<T extends TeamItemOutcomeLike>(
+  items: T[],
+): { effective: T[]; superseded: T[]; recovered: T[]; synthesis?: T } {
+  const attempts = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => isSynthesisAttempt(item))
+    .sort((a, b) => (a.item.createdAt ?? 0) - (b.item.createdAt ?? 0) || a.index - b.index);
+  if (attempts.length === 0) return { effective: items, superseded: [], recovered: [] };
+  const synthesis = attempts[attempts.length - 1].item;
+  const superseded = attempts.slice(0, -1).map(({ item }) => item);
+  if (superseded.length === 0) {
+    return { effective: items, superseded: [], recovered: [], synthesis };
+  }
+  const supersededSet = new Set<T>(superseded);
+  const recovered =
+    synthesis.status === "done"
+      ? superseded.filter((item) => item.status === "failed" || item.status === "blocked")
+      : [];
+  return {
+    effective: items.filter((item) => !supersededSet.has(item)),
+    superseded,
+    recovered,
+    synthesis,
+  };
+}
+
+function summarizeFailureReason(text: string | null | undefined): string {
+  const firstLine =
+    String(text || "")
+      .replace(/^error:\s*/i, "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) || "";
+  if (!firstLine) return "";
+  return firstLine.length > MAX_FAILURE_REASON_CHARS
+    ? `${firstLine.slice(0, MAX_FAILURE_REASON_CHARS - 1).trimEnd()}…`
+    : firstLine;
+}
 
 const MAX_SYNTHESIS_PROMPT_CHARS = 100_000;
 const SYNTHESIS_WATCHDOG_MS = 5 * 60 * 1000;
@@ -244,6 +308,8 @@ export class AgentTeamOrchestrator {
   private wrapUpRequestedRunIds = new Set<string>();
   /** Tracks team run IDs where synthesis has already been retried after provider failover. */
   private synthesisRetried = new Set<string>();
+  /** Runs whose synthesis retry is being created; the run must not finalize meanwhile. */
+  private synthesisRetryPending = new Set<string>();
 
   constructor(
     private deps: AgentTeamOrchestratorDeps,
@@ -339,6 +405,8 @@ export class AgentTeamOrchestrator {
       // If everything is terminal, complete or transition the run.
       const nonTerminal = refreshedItems.filter((i) => !isTerminalItemStatus(i.status));
       if (nonTerminal.length === 0) {
+        // A failed synthesis is being replaced; its retry decides the outcome.
+        if (this.synthesisRetryPending.has(run.id)) return;
         // In collaborative mode, transition to synthesis phase instead of completing.
         // This also handles the wrap-up path where phase was set to "synthesize"
         // before the synthesis task was actually spawned.
@@ -368,19 +436,45 @@ export class AgentTeamOrchestrator {
           return;
         }
 
+        const attempts = resolveTeamItemAttempts(refreshedItems);
+        // A synthesis whose failure was recorded before its retry was started
+        // (the graph notification and the task-terminal hook race) still gets
+        // its one retry instead of ending the run.
+        if (
+          run.collaborativeMode &&
+          !childAgentCollaborativeRun &&
+          attempts.synthesis?.title === SYNTHESIS_ITEM_TITLE &&
+          attempts.synthesis.status === "failed" &&
+          !this.synthesisRetried.has(run.id)
+        ) {
+          const failedTask = attempts.synthesis.sourceTaskId
+            ? await this.deps.getTaskById(attempts.synthesis.sourceTaskId)
+            : undefined;
+          if (await this.retryFailedSynthesis(attempts.synthesis, failedTask?.error)) return;
+        }
+
+        // Outcome is decided by logical work items: a failed attempt whose
+        // retry succeeded is recovered, while its row stays visible as history.
+        const effectiveItems = attempts.effective;
         // When wrap-up was user-initiated, only synthesis failure should mark the run
         // as failed — pre-synthesis items may have been cut short intentionally.
         const wasUserWrapUp = this.wrapUpRequestedRunIds.has(run.id);
         const hasFailures = wasUserWrapUp
-          ? refreshedItems.find((i) => i.title === SYNTHESIS_ITEM_TITLE)?.status === "failed"
-          : refreshedItems.some((i) => i.status === "failed");
+          ? attempts.synthesis?.status === "failed"
+          : effectiveItems.some((i) => i.status === "failed");
         const status = hasFailures ? "failed" : "completed";
-        const needsReviewTitles = await this.listItemsNeedingReview(refreshedItems);
+        const needsReviewTitles = await this.listItemsNeedingReview(effectiveItems);
         const summary = this.buildRunSummary(refreshedItems, needsReviewTitles);
+        const failureReason = hasFailures
+          ? await this.describeUnrecoveredFailures(
+              wasUserWrapUp && attempts.synthesis ? [attempts.synthesis] : effectiveItems,
+            )
+          : undefined;
         const completedPhase = run.collaborativeMode ? "complete" : undefined;
         const updated = await this.runRepo.update(run.id, {
           status,
           summary,
+          ...(failureReason ? { error: failureReason } : {}),
           ...(completedPhase ? { phase: completedPhase } : {}),
         });
         if (updated) {
@@ -397,21 +491,30 @@ export class AgentTeamOrchestrator {
           // The root task's result is what the user reads in the parent chat:
           // lead with the synthesized deliverable rather than only item counts,
           // and do not report "ok" when a lane finished with warnings.
-          const synthesisText = refreshedItems
-            .find((i) => i.title === SYNTHESIS_ITEM_TITLE && i.status === "done")
-            ?.resultSummary?.trim();
-          const rootSummary = synthesisText ? `${synthesisText}\n\n---\n${summary}` : summary;
-          if (status !== "failed" && needsReviewTitles.length > 0) {
-            this.deps.completeRootTask(run.rootTaskId, "completed", rootSummary, {
+          const synthesisText =
+            attempts.synthesis?.status === "done"
+              ? attempts.synthesis.resultSummary?.trim()
+              : undefined;
+          const deliverableSummary = synthesisText
+            ? `${synthesisText}\n\n---\n${summary}`
+            : summary;
+          if (status === "failed") {
+            // Lead with what failed so the task error explains the failure
+            // instead of opening with a plan that reads as a success.
+            const reason = failureReason || "A team work item failed.";
+            this.deps.completeRootTask(
+              run.rootTaskId,
+              "failed",
+              `${reason}\n\n---\n${deliverableSummary}`,
+              { failureReason: reason },
+            );
+          } else if (needsReviewTitles.length > 0) {
+            this.deps.completeRootTask(run.rootTaskId, "completed", deliverableSummary, {
               terminalStatus: "partial_success",
               terminalStatusReason: `Needs review: ${needsReviewTitles.join(", ")}`,
             });
           } else {
-            this.deps.completeRootTask(
-              run.rootTaskId,
-              status === "failed" ? "failed" : "completed",
-              rootSummary,
-            );
+            this.deps.completeRootTask(run.rootTaskId, "completed", deliverableSummary);
           }
         }
         return;
@@ -619,25 +722,10 @@ export class AgentTeamOrchestrator {
       if (
         item.title === SYNTHESIS_ITEM_TITLE &&
         nextStatus === "failed" &&
-        !this.synthesisRetried.has(item.teamRunId)
+        !this.synthesisRetried.has(item.teamRunId) &&
+        (await this.retryFailedSynthesis(item, task.error))
       ) {
-        this.synthesisRetried.add(item.teamRunId);
-        const run = await this.runRepo.findById(item.teamRunId);
-        const rootTask = run ? await this.deps.getTaskById(run.rootTaskId) : null;
-        const team = run?.teamId ? await this.teamRepo.findById(run.teamId) : null;
-        if (run && rootTask && team) {
-          // Rename the old synthesis item so the guard in transitionToSynthesizePhase
-          // does not block re-entry (it checks for items titled SYNTHESIS_ITEM_TITLE).
-          await this.itemRepo.update({
-            id: item.id,
-            title: `${SYNTHESIS_ITEM_TITLE} (failed)`,
-            status: "blocked" as AgentTeamItemStatus,
-            resultSummary: "Synthesis failed — retrying with compacted prompt",
-          });
-          const allItems = await this.itemRepo.listByRun(run.id);
-          await this.transitionToSynthesizePhaseCompact(run, team, rootTask, allItems);
-          continue;
-        }
+        continue;
       }
 
       const updated = await this.itemRepo.update({
@@ -753,7 +841,11 @@ export class AgentTeamOrchestrator {
 
       if (childAgentCollaborativeRun) {
         if (stillInProgress.length === 0) {
-          const status = refreshedItems.some((i) => i.status === "failed") ? "failed" : "completed";
+          const status = resolveTeamItemAttempts(refreshedItems).effective.some(
+            (i) => i.status === "failed",
+          )
+            ? "failed"
+            : "completed";
           const updated = await this.runRepo.update(run.id, {
             status,
             phase: "complete",
@@ -859,9 +951,12 @@ export class AgentTeamOrchestrator {
   }
 
   private buildRunSummary(
-    items: Array<{ status: AgentTeamItemStatus; title: string }>,
+    allItems: TeamItemOutcomeLike[],
     needsReviewTitles: string[] = [],
   ): string {
+    // Counts are per logical work item: a synthesis retry replaces its failed
+    // attempt rather than adding a second item.
+    const { effective: items, recovered } = resolveTeamItemAttempts(allItems);
     // "done" means the lane's task lifecycle finished; a lane that completed
     // with partial_success is counted separately so the summary does not read
     // as every requested piece of work succeeding.
@@ -875,7 +970,85 @@ export class AgentTeamOrchestrator {
     const lines = [
       `Items: ${done} done${reviewPart}, ${failed} failed, ${blocked} blocked (total: ${total})`,
     ];
+    if (recovered.length > 0) {
+      lines.push(
+        recovered.length === 1
+          ? "1 failed synthesis attempt was recovered by a successful retry."
+          : `${recovered.length} failed synthesis attempts were recovered by a successful retry.`,
+      );
+    }
     return lines.join("\n");
+  }
+
+  /** One sentence naming each unrecovered failed item and its recorded error. */
+  private async describeUnrecoveredFailures(
+    items: Array<
+      TeamItemOutcomeLike & { sourceTaskId?: string; resultSummary?: string | undefined }
+    >,
+  ): Promise<string> {
+    const failed = items.filter((item) => item.status === "failed");
+    if (failed.length === 0) return "";
+    const parts: string[] = [];
+    for (const item of failed) {
+      const task = item.sourceTaskId ? await this.deps.getTaskById(item.sourceTaskId) : undefined;
+      // Prefer the task's own error. A failed item's result summary can be the
+      // full deliverable the failing guard rejected, which is not a reason.
+      const fromSummary = /^error:/i.test(String(item.resultSummary || "").trim())
+        ? item.resultSummary
+        : "";
+      const reason = summarizeFailureReason(task?.error || fromSummary);
+      parts.push(`${item.title} (${reason || "no error details were recorded"})`);
+    }
+    const label = failed.length === 1 ? "work item" : "work items";
+    return `Team run failed: ${failed.length} ${label} failed without recovery: ${parts.join("; ")}.`;
+  }
+
+  /**
+   * Replace a failed synthesis attempt with one compacted retry. The failed
+   * attempt keeps its row (renamed) as history and is superseded by the retry.
+   */
+  private async retryFailedSynthesis(
+    item: AgentTeamItem,
+    failureError?: string | null,
+  ): Promise<boolean> {
+    if (this.synthesisRetried.has(item.teamRunId)) return false;
+    this.synthesisRetried.add(item.teamRunId);
+    const run = await this.runRepo.findById(item.teamRunId);
+    if (!run || run.status !== "running") return false;
+    const rootTask = await this.deps.getTaskById(run.rootTaskId);
+    const team = run.teamId ? await this.teamRepo.findById(run.teamId) : undefined;
+    if (!rootTask || !team) return false;
+
+    this.synthesisRetryPending.add(run.id);
+    try {
+      const reason = summarizeFailureReason(failureError);
+      // Rename the old synthesis item so the guard in transitionToSynthesizePhase
+      // does not block re-entry (it checks for items titled SYNTHESIS_ITEM_TITLE).
+      const updated = await this.itemRepo.update({
+        id: item.id,
+        title: SUPERSEDED_SYNTHESIS_TITLE,
+        status: "failed",
+        resultSummary: `Synthesis attempt failed and was retried with a compacted prompt.${
+          reason ? ` Reason: ${reason}` : ""
+        }`,
+      });
+      if (updated) {
+        emitTeamEvent({
+          type: "team_item_updated",
+          timestamp: Date.now(),
+          teamRunId: updated.teamRunId,
+          item: updated,
+        });
+      }
+      const allItems = await this.itemRepo.listByRun(run.id);
+      await this.transitionToSynthesizePhaseCompact(run, team, rootTask, allItems);
+      return true;
+    } catch (error) {
+      log.error("Failed to start the synthesis retry:", error);
+      return false;
+    } finally {
+      this.synthesisRetryPending.delete(run.id);
+    }
   }
 
   /** Titles of done items whose task finished with a non-ok terminal status. */

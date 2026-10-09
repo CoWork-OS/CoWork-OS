@@ -119,7 +119,13 @@ export class SpreadsheetBuilder {
           let maxLength = 10;
           column.eachCell?.({ includeEmpty: true }, (cell) => {
             const cellValue = cell.value;
-            const length = cellValue ? String(cellValue).length : 0;
+            // A date shows as its number format ("dd/mm/yyyy"), not as Date#toString().
+            const length =
+              cellValue instanceof Date
+                ? Math.max(10, typeof cell.numFmt === "string" ? cell.numFmt.length : 0)
+                : cellValue
+                  ? String(cellValue).length
+                  : 0;
             if (length > maxLength) {
               maxLength = Math.min(length, 50); // Cap at 50 characters
             }

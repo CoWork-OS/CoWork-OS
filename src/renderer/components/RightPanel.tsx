@@ -86,6 +86,12 @@ import {
 } from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { measureRendererPerf, recordRendererRender } from "../utils/renderer-perf";
+import {
+  isLlmUsageEvent,
+  readLlmUsageTotals,
+  type TaskUsageTotals,
+  type TaskUsageTotalsByTaskId,
+} from "../utils/task-usage-totals";
 import { SessionProgressCard } from "./SessionProgressCard";
 import { SessionDashboardCard } from "./SessionDashboardCard";
 import { SessionMembersCard } from "./SessionMembersCard";
@@ -342,13 +348,11 @@ type CollaborativeAgentTotals = {
   outputTokens: number;
   cost: number;
   costKnown: boolean;
+  /** False until any sub-agent has reported usage, so the cost reads as unknown, not $0. */
+  hasUsage: boolean;
   wallDurationMs: number;
   rows: CollaborativeAgentRow[];
 };
-
-function toFiniteNumber(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
 
 function formatCompactNumber(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
@@ -405,22 +409,38 @@ function getCollaborativeAgentStatusLabel(kind: CollaborativeAgentStatusKind, ta
 }
 
 function getLatestUsageTotals(events: TaskEvent[]): CollaborativeAgentUsage {
-  const latest = [...events]
-    .reverse()
-    .find((event) => getEffectiveTaskEventType(event) === "llm_usage");
-  const payload =
-    latest?.payload && typeof latest.payload === "object" && !Array.isArray(latest.payload)
-      ? (latest.payload as Record<string, unknown>)
-      : {};
-  const totals =
-    payload.totals && typeof payload.totals === "object" && !Array.isArray(payload.totals)
-      ? (payload.totals as Record<string, unknown>)
-      : payload;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (isLlmUsageEvent(events[index])) return readLlmUsageTotals(events[index]);
+  }
+  return { inputTokens: 0, outputTokens: 0, cost: 0, costKnown: true };
+}
+
+/**
+ * A sub-agent's usage from its retained events combined with the cumulative usage kept
+ * outside the event cap. Totals are cumulative, so the higher value is the current one.
+ */
+function getCollaborativeAgentUsage(
+  taskEvents: TaskEvent[],
+  accumulated: TaskUsageTotals | undefined,
+): { usage: CollaborativeAgentUsage; llmCallCount: number; hasUsage: boolean } {
+  const retainedUsageEvents = taskEvents.filter(isLlmUsageEvent).length;
+  const retained = getLatestUsageTotals(taskEvents);
+  if (!accumulated) {
+    return {
+      usage: retained,
+      llmCallCount: retainedUsageEvents,
+      hasUsage: retainedUsageEvents > 0,
+    };
+  }
   return {
-    inputTokens: toFiniteNumber(totals.inputTokens ?? totals.input_tokens),
-    outputTokens: toFiniteNumber(totals.outputTokens ?? totals.output_tokens),
-    cost: toFiniteNumber(totals.cost ?? totals.totalCost ?? payload.totalCost),
-    costKnown: totals.costKnown !== false,
+    usage: {
+      inputTokens: Math.max(retained.inputTokens, accumulated.inputTokens),
+      outputTokens: Math.max(retained.outputTokens, accumulated.outputTokens),
+      cost: Math.max(retained.cost, accumulated.cost),
+      costKnown: retained.costKnown && accumulated.costKnown,
+    },
+    llmCallCount: Math.max(retainedUsageEvents, accumulated.llmCallCount),
+    hasUsage: true,
   };
 }
 
@@ -587,9 +607,12 @@ const CostSection = memo(function CostSection({
   );
 });
 
+const EMPTY_CHILD_USAGE: TaskUsageTotalsByTaskId = {};
+
 function getCollaborativeAgentTotals(
   childTasks: Task[],
   childEvents: TaskEvent[],
+  childUsageByTaskId: TaskUsageTotalsByTaskId = {},
 ): CollaborativeAgentTotals | null {
   if (childTasks.length === 0) return null;
   const eventsByTaskId = new Map<string, TaskEvent[]>();
@@ -599,13 +622,15 @@ function getCollaborativeAgentTotals(
     eventsByTaskId.set(event.taskId, list);
   }
 
+  let hasUsage = false;
   const rows = childTasks
     .slice()
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
     .map((task): CollaborativeAgentRow => {
       const taskEvents = eventsByTaskId.get(task.id) || [];
       const statusKind = getCollaborativeAgentStatusKind(task);
-      const usage = getLatestUsageTotals(taskEvents);
+      const agentUsage = getCollaborativeAgentUsage(taskEvents, childUsageByTaskId[task.id]);
+      hasUsage = hasUsage || agentUsage.hasUsage;
       const endMs = task.completedAt ?? task.updatedAt ?? task.createdAt;
       return {
         task,
@@ -615,9 +640,8 @@ function getCollaborativeAgentTotals(
         toolCallCount: taskEvents.filter(
           (event) => getEffectiveTaskEventType(event) === "tool_call",
         ).length,
-        llmCallCount: taskEvents.filter((event) => getEffectiveTaskEventType(event) === "llm_usage")
-          .length,
-        usage,
+        llmCallCount: agentUsage.llmCallCount,
+        usage: agentUsage.usage,
         durationMs: Math.max(0, endMs - task.createdAt),
       };
     });
@@ -657,6 +681,7 @@ function getCollaborativeAgentTotals(
   return {
     total: rows.length,
     ...counts,
+    hasUsage,
     wallDurationMs: Math.max(0, lastEndedAt - firstStartedAt),
     rows,
   };
@@ -822,6 +847,8 @@ interface RightPanelProps {
   hasActiveChildren?: boolean;
   childTasks?: Task[];
   childEvents?: TaskEvent[];
+  /** Cumulative usage per child task, independent of the capped childEvents. */
+  childUsageByTaskId?: TaskUsageTotalsByTaskId;
   onSelectTask?: (taskId: string) => void;
   onOpenSpreadsheetArtifact?: (path: string) => void;
   onOpenDocumentArtifact?: (path: string) => void;
@@ -1628,7 +1655,7 @@ const CollaborativeAgentsSection = memo(
                         : "Some models used here have no known price, so the real cost is higher."
                     }
                   >
-                    {formatCost(totals.cost, totals.costKnown)}
+                    {totals.hasUsage ? formatCost(totals.cost, totals.costKnown) : "—"}
                   </strong>
                 </div>
               </div>
@@ -1686,6 +1713,7 @@ function RightPanelComponent({
   hasActiveChildren = false,
   childTasks = [],
   childEvents = [],
+  childUsageByTaskId = EMPTY_CHILD_USAGE,
   onSelectTask,
   onOpenSpreadsheetArtifact,
   onOpenDocumentArtifact,
@@ -2165,8 +2193,8 @@ function RightPanelComponent({
   );
   const showChecklistSection = !!stableChecklistState && stableChecklistState.items.length > 0;
   const collaborativeAgentTotals = useMemo(
-    () => getCollaborativeAgentTotals(childTasks, childEvents),
-    [childTasks, childEvents],
+    () => getCollaborativeAgentTotals(childTasks, childEvents, childUsageByTaskId),
+    [childTasks, childEvents, childUsageByTaskId],
   );
   const showCollaborativeAgentsSection = Boolean(
     collaborativeAgentTotals && (childTasks.length > 0 || task?.agentConfig?.collaborativeMode),
@@ -2511,6 +2539,7 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.hasActiveChildren === next.hasActiveChildren &&
     areChildTaskStatsEqual(prev.childTasks || [], next.childTasks || []) &&
     areTaskEventListsEqual(prev.childEvents || [], next.childEvents || []) &&
+    prev.childUsageByTaskId === next.childUsageByTaskId &&
     prev.onOpenSpreadsheetArtifact === next.onOpenSpreadsheetArtifact &&
     prev.onOpenDocumentArtifact === next.onOpenDocumentArtifact &&
     prev.onOpenPresentationArtifact === next.onOpenPresentationArtifact &&

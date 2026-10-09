@@ -3,6 +3,7 @@ import { spawn, ChildProcess, execSync } from "child_process";
 import * as path from "path";
 import * as os from "os";
 import { existsSync } from "fs";
+import * as fsp from "fs/promises";
 import type { Workspace, CommandTerminationReason } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import { GuardrailManager, containsShellControlOperator } from "../../guardrails/guardrail-manager";
@@ -23,6 +24,15 @@ import {
   RUN_COMMAND_MAX_TIMEOUT_MS,
 } from "../run-command-timeouts";
 import { createLogger } from "../../utils/logger";
+import {
+  describeFormulaCacheRestore,
+  restoreXlsxFormulaCaches,
+} from "../../utils/document-generators/spreadsheet-formula-cache";
+import {
+  findChangedWorkbooks,
+  snapshotWorkbooks,
+  type WorkbookSnapshot,
+} from "../../utils/document-generators/spreadsheet-workbook-changes";
 
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
 import {
@@ -77,7 +87,12 @@ type RunCommandResult = {
   truncated?: boolean;
   terminationReason?: CommandTerminationReason;
   hint?: string;
+  /** Formula results restored in workbooks the command saved without them (see runCommand). */
+  workbookNotes?: string[];
 };
+
+/** Workbooks restored after one command; more are left as the command saved them. */
+const MAX_RESTORED_WORKBOOKS = 10;
 
 /**
  * Strip ANSI/VT control sequences and normalize line endings produced by the
@@ -1650,8 +1665,55 @@ export class ShellTools {
     },
   ): Promise<RunCommandResult> {
     const { cwd, policies, beforeEffect } = await this.authorizeCommand(command, options);
+    const workbooks = await snapshotWorkbooks(command, cwd, [cwd, this.workspace.path]);
     const result = await this.runAuthorizedCommand(command, cwd, policies, beforeEffect, options);
-    return withLongRunningCommandHint(command, result);
+    return withLongRunningCommandHint(
+      command,
+      await this.restoreWorkbookFormulaResults(workbooks, result),
+    );
+  }
+
+  /**
+   * Scripts that edit workbooks (openpyxl above all) keep formulas but drop their cached results
+   * on save, so previews and data-only readers show "=D2*E2" instead of values. After a command
+   * finishes, compute the missing results of the workbooks it created or changed and write them
+   * into the file in place, leaving formulas and formatting as saved. Only files the workspace
+   * may write are touched; the result says what was restored and what still has no result.
+   */
+  private async restoreWorkbookFormulaResults(
+    snapshot: WorkbookSnapshot,
+    result: RunCommandResult,
+  ): Promise<RunCommandResult> {
+    // A stopped command may have left a half-written file behind.
+    if (result.terminationReason && result.terminationReason !== "normal") return result;
+    if (this.workspace.permissions?.write === false) return result;
+    let changed: string[];
+    try {
+      changed = await findChangedWorkbooks(snapshot);
+    } catch (error) {
+      log.warn("Could not check workbooks changed by a command:", error);
+      return result;
+    }
+    const notes: string[] = [];
+    for (const file of changed.slice(0, MAX_RESTORED_WORKBOOKS)) {
+      try {
+        const realPath = await fsp.realpath(file);
+        if (
+          evaluateWorkspaceFilesystemAccess(this.workspace, realPath, "write").decision !== "allow"
+        ) {
+          continue;
+        }
+        const restore = await restoreXlsxFormulaCaches(realPath);
+        const relative = path.relative(this.workspace.path, file);
+        const label =
+          relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : file;
+        const note = describeFormulaCacheRestore(label, restore);
+        if (note) notes.push(note);
+      } catch (error) {
+        log.warn(`Could not restore formula results in ${file}:`, error);
+      }
+    }
+    return notes.length > 0 ? { ...result, workbookNotes: notes } : result;
   }
 
   /**

@@ -147,8 +147,31 @@ export function promptRequiresDirectAnswer(taskTitle: string, taskPrompt: string
   );
 }
 
+const ORCHESTRATION_NODE_PREAMBLE = "You are executing a dependency-aware orchestration node.";
+const ORCHESTRATION_NODE_TASK_MARKER = "\n---\n\nYour task:\n";
+const TEAM_ANALYSES_BLOCK =
+  /=== TEAM MEMBER ANALYSES(?: \([A-Z ]+\))? ===[\s\S]*?=== END OF TEAM MEMBER ANALYSES ===/g;
+
+/**
+ * Remove other agents' outputs quoted into a coordination prompt: dependency
+ * outputs prepended to an orchestration node and the team analyses embedded in
+ * a synthesis prompt. That material is input to work on, not the user's
+ * request, so wording inside it ("decide whether...", "recommended design")
+ * must not create obligations for the answer.
+ */
+export function stripEmbeddedAgentOutputs(prompt: string): string {
+  let remaining = String(prompt || "");
+  if (remaining.trimStart().startsWith(ORCHESTRATION_NODE_PREAMBLE)) {
+    const taskIndex = remaining.lastIndexOf(ORCHESTRATION_NODE_TASK_MARKER);
+    if (taskIndex >= 0) {
+      remaining = remaining.slice(taskIndex + ORCHESTRATION_NODE_TASK_MARKER.length);
+    }
+  }
+  return remaining.replace(TEAM_ANALYSES_BLOCK, " ");
+}
+
 export function promptRequestsDecision(taskTitle: string, taskPrompt: string): boolean {
-  const prompt = `${taskTitle}\n${taskPrompt}`.toLowerCase();
+  const prompt = `${taskTitle}\n${stripEmbeddedAgentOutputs(taskPrompt)}`.toLowerCase();
   return (
     /\bshould i\b/.test(prompt) ||
     /\bwhether\b/.test(prompt) ||

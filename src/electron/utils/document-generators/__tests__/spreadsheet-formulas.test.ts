@@ -173,4 +173,19 @@ describe("computeWorkbookFormulaResults", () => {
       formulas: { computed: 1, uncached: [] },
     });
   });
+
+  it("with onlyMissing, fills formulas without a result and keeps saved ones, zero included", () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Expenses");
+    sheet.addRow([80, 0, { formula: "A1*B1", result: 0 }, { formula: "A1+C1", result: 999 }]);
+    sheet.addRow([{ formula: "A1*2" }, { formula: "C1+1" }]);
+
+    const report = computeWorkbookFormulaResults(workbook, { onlyMissing: true });
+
+    expect(report).toEqual({ computed: 2, uncached: [] });
+    expect(sheet.getCell("C1").result).toBe(0);
+    expect(sheet.getCell("D1").result).toBe(999);
+    expect(sheet.getCell("A2").result).toBe(160);
+    expect(sheet.getCell("B2").result).toBe(1);
+  });
 });

@@ -113,7 +113,7 @@ describe("SpreadsheetWorkbookSessionService", () => {
     const cells = opened.viewport!.cells;
     expect(cells[1][1]).toMatchObject({ value: "180", displayValue: "€180.00", type: "number" });
     expect(cells[3][1]).toMatchObject({ value: "276.5", displayValue: "€276.50", type: "formula" });
-    expect(cells[4][1]).toMatchObject({ displayValue: "=B4*2", type: "formula" });
+    expect(cells[4][1]).toMatchObject({ value: "553", displayValue: "€553.00", type: "formula" });
 
     const sessionId = opened.session!.sessionId;
     const sheetId = opened.session!.sheets[0].id;

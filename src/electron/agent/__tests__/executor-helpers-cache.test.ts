@@ -217,6 +217,25 @@ describe("FileOperationTracker cache invalidation", () => {
     expect(second.reason || "").toContain("tool batch");
   });
 
+  it("treats a DOCX/PDF pair sharing one base name as two files in a batch", () => {
+    const fakeThis: Any = Object.create(TaskExecutor.prototype);
+    fakeThis.fileOperationTracker = new FileOperationTracker();
+    fakeThis.logTag = "[Executor:test]";
+
+    const batchCreatedPaths = new Set<string>();
+    const check = (input: Any) =>
+      (TaskExecutor as Any).prototype.checkFileOperation.call(
+        fakeThis,
+        "create_document",
+        input,
+        batchCreatedPaths,
+      );
+
+    expect(check({ filename: "Northstar-brief", format: "docx" }).blocked).toBe(false);
+    expect(check({ filename: "Northstar-brief", format: "pdf" }).blocked).toBe(false);
+    expect(check({ filename: "Northstar-brief.pdf", format: "pdf" }).blocked).toBe(true);
+  });
+
   it("releases a failed batch file reservation so the same path can be retried", () => {
     const fakeThis: Any = Object.create(TaskExecutor.prototype);
     fakeThis.fileOperationTracker = new FileOperationTracker();

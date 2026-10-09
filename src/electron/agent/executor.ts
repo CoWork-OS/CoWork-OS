@@ -477,6 +477,7 @@ import {
   promptRequestsPresentationArtifactOutput as promptRequestsPresentationArtifactOutputUtil,
   responseDirectlyAddressesPrompt as responseDirectlyAddressesPromptUtil,
   responseHasDecisionSignal as responseHasDecisionSignalUtil,
+  responseIsStructuredRecommendation as responseIsStructuredRecommendationUtil,
   responseHasReasonedConclusionSignal as responseHasReasonedConclusionSignalUtil,
   responseHasReviewReportEvidenceSignal as responseHasReviewReportEvidenceSignalUtil,
   responseHasVerificationSignal as responseHasVerificationSignalUtil,
@@ -1841,6 +1842,17 @@ export class TaskExecutor {
       return;
     }
 
+    // A user update queued while this turn ran supersedes its answer; the
+    // daemon keeps the task executing and runs the update next.
+    const pendingUserUpdate = (this.daemon as Any).reconcilePendingUserUpdateBeforeCompletion?.(
+      this.task.id,
+    ) as { deferred: boolean } | undefined;
+    if (pendingUserUpdate?.deferred) {
+      this.task.status = "executing";
+      this.task.completedAt = undefined;
+      return;
+    }
+
     // A follow-up on a collaborative root while its team is still working is
     // an update for the team, not the end of the task: the team's synthesis
     // completes the root when it lands.
@@ -1926,7 +1938,7 @@ export class TaskExecutor {
       if (!this.isUsefulResultSummaryCandidate(trimmed)) continue;
       // This value is persisted and rendered as the final answer. Keep it
       // lossless; only prompt-context copies are bounded below.
-      return trimmed;
+      return this.reconcileAnswerCitations(trimmed);
     }
 
     return "";
@@ -3535,6 +3547,14 @@ export class TaskExecutor {
       String(payloadObj.message || payloadObj.content || "").trim().length > 0
     ) {
       this.sessionKickoffSummarySettled = true;
+    }
+    if (
+      type === "assistant_message" &&
+      payloadObj.internal !== true &&
+      typeof payloadObj.message === "string"
+    ) {
+      const reconciled = this.reconcileAnswerCitations(payloadObj.message, { log: true });
+      if (reconciled !== payloadObj.message) payloadObj = { ...payloadObj, message: reconciled };
     }
 
     // Some tests instantiate TaskExecutor-like objects without running the constructor.
@@ -11538,8 +11558,8 @@ ${transcript}
     const fileCreationTools = new Set(["write_file", "copy_file", "generate_video"]);
     if (fileCreationTools.has(toolName) || isArtifactGenerationToolNameUtil(toolName)) {
       const filename = input?.filename || input?.path || input?.destPath || input?.destination;
-      if (filename) {
-        const normalizedFilename = String(filename).toLowerCase().replace(/\\/g, "/");
+      const normalizedFilename = this.getBatchCreatedPathReservation(toolName, input);
+      if (filename && normalizedFilename) {
         if (batchCreatedPaths?.has(normalizedFilename)) {
           return {
             blocked: true,
@@ -11616,7 +11636,14 @@ ${transcript}
     }
     const filename = input?.filename || input?.path || input?.destPath || input?.destination;
     if (!filename) return null;
-    return String(filename).toLowerCase().replace(/\\/g, "/");
+    let reservation = String(filename).toLowerCase().replace(/\\/g, "/");
+    // create_document appends the format extension when the filename has none, so a
+    // DOCX/PDF pair sharing one base name are two distinct files.
+    const format = typeof input?.format === "string" ? input.format.trim().toLowerCase() : "";
+    if (toolName === "create_document" && format && !reservation.endsWith(`.${format}`)) {
+      reservation = `${reservation}.${format}`;
+    }
+    return reservation;
   }
 
   private releaseBatchCreatedPathReservation(
@@ -14791,6 +14818,20 @@ ${transcript}
     return String(task.prompt || "");
   }
 
+  /**
+   * A user update injected into a running step reaches only that step's
+   * message list. Later plan steps rebuild their context from the task prompt
+   * and the original plan, so without this note they finalize with the values
+   * the update replaced. Keep the update in the task context that every later
+   * step, and the final answer assembly, receive.
+   */
+  private recordAcceptedRunUserUpdate(message: string): void {
+    this.appendTaskContextNote(
+      "USER UPDATE (accepted while this task was running; it supersedes any conflicting value in the original request, the plan step descriptions, and earlier step outputs):",
+      String(message || ""),
+    );
+  }
+
   private appendTaskContextNote(label: string, content: string): void {
     const normalizedLabel = String(label || "").trim();
     const normalizedContent = String(content || "").trim();
@@ -15865,6 +15906,7 @@ ${transcript}
       fallbackContainsDirectAnswer: (completionContract) =>
         this.fallbackContainsDirectAnswer(completionContract),
       hasVerificationEvidence: (candidate) => this.hasVerificationEvidence(candidate),
+      minResultSummaryLength: TaskExecutor.MIN_RESULT_SUMMARY_LENGTH,
     });
     if (baseGuardError) {
       if (/Task missing artifact evidence/i.test(baseGuardError)) {
@@ -15905,6 +15947,7 @@ ${transcript}
             fallbackPasses: fallbackHasDirectAnswer,
             looksOperationalOnly: this.responseLooksOperationalOnly(bestCandidate),
             hasDecisionSignal: this.responseHasDecisionSignal(bestCandidate),
+            isStructuredRecommendation: responseIsStructuredRecommendationUtil(bestCandidate),
           },
           verification: {
             bestCandidatePasses: this.hasVerificationEvidence(bestCandidate),
@@ -15954,6 +15997,31 @@ ${transcript}
 
   private getFinalResponseGuardError(): string | null {
     return this.getFinalOutcomeGuardError();
+  }
+
+  /**
+   * Inline [N] markers and a numbered source list written by the model can use
+   * different numberings. Put both on the task's source registry so a number
+   * names the same source in the answer, its source list, and the sources panel.
+   */
+  private reconcileAnswerCitations(text: string, opts?: { log?: boolean }): string {
+    const tracker = this.citationTracker;
+    if (!tracker || typeof text !== "string" || !text) return text;
+    try {
+      const result = tracker.reconcileAnswer(text);
+      if (result.changed && opts?.log) {
+        this.emitEvent("log", {
+          metric: "answer_citations_reconciled",
+          renumberedMarkers: result.renumberedMarkers,
+          bibliographyRewritten: result.bibliographyRewritten,
+          dropped: result.dropped,
+        });
+      }
+      return result.text;
+    } catch (error) {
+      logger.warn(`${this.logTag} Citation reconciliation failed:`, error);
+      return text;
+    }
   }
 
   private selectFinalTaskSummary(requestedSummary?: string): string {
@@ -16093,7 +16161,9 @@ ${transcript}
         failureClass = "required_verification";
       }
     }
-    const summaryCandidate = this.selectFinalTaskSummary(resultSummary);
+    const summaryCandidate = this.reconcileAnswerCitations(
+      this.selectFinalTaskSummary(resultSummary),
+    );
     const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
     const runtimeProjection = this.applyRuntimeTaskProjectionToTask();
     this.task.status = "completed";
@@ -16193,7 +16263,9 @@ ${transcript}
     const nonBlockingFailedStepIds = this.getNonBlockingFailedStepIdsAtCompletion();
     const failedMutationRequiredStepIds = this.getFailedMutationRequiredStepIdsAtCompletion();
     const waivedVerificationStepIds = this.getVerificationStepIds(waivableFailedStepIds);
-    const summaryCandidate = this.selectFinalTaskSummary(resultSummary);
+    const summaryCandidate = this.reconcileAnswerCitations(
+      this.selectFinalTaskSummary(resultSummary),
+    );
     const summary = this.reconcileSummaryWithWorkspaceOutputs(summaryCandidate);
     this.task.status = "completed";
     this.task.completedAt = Date.now();
@@ -25088,6 +25160,13 @@ You are continuing a previous conversation. The context from the previous conver
       tokens.add(normalizedAbsolute);
     }
 
+    // Parsers report symlink-resolved provenance (for example /private/var on
+    // macOS for a /var workspace). The resolved form identifies the same file.
+    const resolvedAbsolute = this.normalizeArtifactReadPathForComparison(trimmed);
+    if (resolvedAbsolute) {
+      tokens.add(resolvedAbsolute);
+    }
+
     return tokens;
   }
 
@@ -25294,8 +25373,22 @@ You are continuing a previous conversation. The context from the previous conver
     artifactTargetTokens: Set<string>,
     artifactTargetUniqueBasenames: Set<string>,
   ): { matched: boolean; matchedExtensions: string[] } {
-    if (!["read_file", "get_file_info", "read_files"].includes(toolName)) {
-      return { matched: false, matchedExtensions: [] };
+    const noEvidence = { matched: false, matchedExtensions: [] as string[] };
+    const canonicalToolName = canonicalizeToolNameUtil(String(toolName || ""));
+    if (canonicalToolName === "run_command") {
+      return this.getShellArtifactInspectionEvidence(
+        input,
+        result,
+        requiredExtensions,
+        artifactTargetTokens,
+      );
+    }
+    if (
+      !["read_file", "get_file_info", "read_files", "parse_document", "glob"].includes(
+        canonicalToolName,
+      )
+    ) {
+      return noEvidence;
     }
 
     const candidates = new Set<string>();
@@ -25306,22 +25399,46 @@ You are continuing a previous conversation. The context from the previous conver
       candidates.add(trimmed);
     };
 
-    addCandidate(input?.path);
-    addCandidate(input?.filename);
-    addCandidate(result?.path);
-    addCandidate(result?.filename);
-
-    if (Array.isArray(input?.paths)) {
-      for (const pathValue of input.paths) {
-        addCandidate(pathValue);
+    // Format-checked parser evidence: parse_document reports errors in the
+    // result body rather than with success=false, and its detected type is
+    // the parser it actually ran. Only a clean parse of a file whose
+    // extension matches that parser counts.
+    let parsedType = "";
+    if (canonicalToolName === "parse_document") {
+      if (result?.success === false || result?.error) return noEvidence;
+      parsedType = String(result?.detected_type || "")
+        .trim()
+        .toLowerCase();
+      if (!parsedType || parsedType === "unknown") return noEvidence;
+      addCandidate(input?.path);
+      addCandidate(result?.provenance?.path);
+    } else if (canonicalToolName === "glob") {
+      // A glob listing only establishes presence of the exact paths it
+      // returned; the search pattern itself is never evidence.
+      if (result?.success === false || result?.error) return noEvidence;
+      if (Array.isArray(result?.matches)) {
+        for (const match of result.matches) {
+          addCandidate(typeof match === "string" ? match : match?.path);
+        }
       }
-    }
+    } else {
+      addCandidate(input?.path);
+      addCandidate(input?.filename);
+      addCandidate(result?.path);
+      addCandidate(result?.filename);
 
-    if (Array.isArray(result?.files)) {
-      for (const fileEntry of result.files) {
-        addCandidate(fileEntry?.path);
-        addCandidate(fileEntry?.filename);
-        addCandidate(fileEntry?.name);
+      if (Array.isArray(input?.paths)) {
+        for (const pathValue of input.paths) {
+          addCandidate(pathValue);
+        }
+      }
+
+      if (Array.isArray(result?.files)) {
+        for (const fileEntry of result.files) {
+          addCandidate(fileEntry?.path);
+          addCandidate(fileEntry?.filename);
+          addCandidate(fileEntry?.name);
+        }
       }
     }
 
@@ -25329,6 +25446,7 @@ You are continuing a previous conversation. The context from the previous conver
     let matched = false;
     for (const candidate of candidates) {
       if (!this.matchesArtifactExtension(candidate, requiredExtensions)) continue;
+      if (parsedType && path.extname(candidate).toLowerCase() !== `.${parsedType}`) continue;
 
       const candidateTokens = this.buildArtifactPathTokens(candidate);
       const fullTokenMatch =
@@ -25348,6 +25466,107 @@ You are continuing a previous conversation. The context from the previous conver
     }
 
     return { matched, matchedExtensions: Array.from(matchedExtensions) };
+  }
+
+  /**
+   * A shell inspection (pdfinfo, a Python open of the workbook, unzip -t, ...)
+   * is artifact evidence only for the exact artifact path its command text
+   * names. The command must have exited 0 with non-empty, non-error output,
+   * and the referenced file must exist. A successful command that does not
+   * name the artifact proves nothing about it.
+   */
+  private getShellArtifactInspectionEvidence(
+    input: Any,
+    result: Any,
+    requiredExtensions: string[],
+    artifactTargetTokens: Set<string>,
+  ): { matched: boolean; matchedExtensions: string[] } {
+    const noEvidence = { matched: false, matchedExtensions: [] as string[] };
+    const command = typeof input?.command === "string" ? input.command : "";
+    if (!command.trim() || artifactTargetTokens.size === 0) return noEvidence;
+    if (!result || typeof result !== "object") return noEvidence;
+    if (result.success === false || result.error) return noEvidence;
+    if (result.exitCode !== 0) return noEvidence;
+    if (result.terminationReason && result.terminationReason !== "normal") return noEvidence;
+    const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
+    if (!stdout) return noEvidence;
+    if (
+      /no such file|cannot (?:open|find|access|stat|read)|not found|permission denied|traceback \(most recent call last\)|badzipfile|is not a (?:valid|zip|pdf)|^\s*(?:error|exception)\b/im.test(
+        stdout,
+      )
+    ) {
+      return noEvidence;
+    }
+
+    const rawCwd =
+      typeof input?.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : this.workspace.path;
+    const commandCwd = path.isAbsolute(rawCwd) ? rawCwd : path.resolve(this.workspace.path, rawCwd);
+    const cwdTokens = new Set<string>();
+    for (const token of [
+      this.normalizeArtifactPathForComparison(commandCwd),
+      this.normalizeArtifactReadPathForComparison(commandCwd),
+    ]) {
+      if (token) cwdTokens.add(token);
+    }
+
+    const haystack = command.replace(/\\/g, "/");
+    const lowerHaystack = haystack.toLowerCase();
+    const isPathChar = (char: string): boolean => /[a-z0-9_\-/~$]/i.test(char);
+    const findReferences = (reference: string): string[] => {
+      const found: string[] = [];
+      let index = lowerHaystack.indexOf(reference);
+      while (index >= 0) {
+        const before = index > 0 ? lowerHaystack[index - 1] : "";
+        const end = index + reference.length;
+        const after = end < lowerHaystack.length ? lowerHaystack[end] : "";
+        const afterNext = end + 1 < lowerHaystack.length ? lowerHaystack[end + 1] : "";
+        const boundedBefore = !before || (!isPathChar(before) && before !== ".");
+        const boundedAfter =
+          !after || (!isPathChar(after) && !(after === "." && /[a-z0-9_]/i.test(afterNext)));
+        if (boundedBefore && boundedAfter) {
+          found.push(
+            lowerHaystack.length === haystack.length ? haystack.slice(index, end) : reference,
+          );
+        }
+        index = lowerHaystack.indexOf(reference, index + 1);
+      }
+      return found;
+    };
+
+    const matchedExtensions = new Set<string>();
+    for (const token of artifactTargetTokens) {
+      const isAbsoluteToken = path.isAbsolute(token) || /^[a-z]:\//.test(token);
+      if (!isAbsoluteToken) continue;
+      if (!this.matchesArtifactExtension(token, requiredExtensions)) continue;
+
+      const references = new Set<string>([token]);
+      for (const cwdToken of cwdTokens) {
+        const relative = path.posix.relative(cwdToken, token);
+        if (!relative || relative.startsWith("..") || path.posix.isAbsolute(relative)) continue;
+        references.add(relative);
+        references.add(`./${relative}`);
+      }
+
+      let referenced = false;
+      for (const reference of references) {
+        for (const literal of findReferences(reference)) {
+          const resolved = path.isAbsolute(literal) ? literal : path.resolve(commandCwd, literal);
+          if (fs.existsSync(resolved) || fs.existsSync(token)) {
+            referenced = true;
+            break;
+          }
+        }
+        if (referenced) break;
+      }
+      if (!referenced) continue;
+
+      const extension = path.extname(token).toLowerCase();
+      if (extension) matchedExtensions.add(extension);
+    }
+
+    return matchedExtensions.size > 0
+      ? { matched: true, matchedExtensions: Array.from(matchedExtensions) }
+      : noEvidence;
   }
 
   private getKnownTaskPathForBasename(candidate: string): string | null {
@@ -33403,6 +33622,9 @@ Return ONLY a JSON object:
               } catch (error) {
                 messages.pop();
                 throw error;
+              }
+              if (!isPendingBotHandoff && pendingMsg.deliveryMode === "follow_up") {
+                this.recordAcceptedRunUserUpdate(pendingMsg.message);
               }
               if (hasDurableFollowUpReceipt) {
                 await this.acceptQueuedFollowUpAfterSnapshot(pendingMsg, messages);
@@ -41828,6 +42050,9 @@ Return ONLY a JSON object:
               );
               // messages === this.conversationHistory here, so push persists automatically
               messages.push({ role: "user" as const, content });
+              if (!isPendingBotHandoff && pendingMsg.deliveryMode === "follow_up") {
+                this.recordAcceptedRunUserUpdate(pendingMsg.message);
+              }
               if (hasDurableFollowUpReceipt) {
                 await this.acceptQueuedFollowUpAfterSnapshot(pendingMsg, messages);
                 if (isQueuedHumanFollowUp) {

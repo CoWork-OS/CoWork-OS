@@ -4,6 +4,8 @@ import {
   extractNamedTestCommands,
   isBuildCheckCommand,
   isTestCommand,
+  promptRequestsDecision,
+  stripEmbeddedAgentOutputs,
 } from "../executor-prompt-heuristics-utils";
 
 describe("detectTestRequirement", () => {
@@ -157,5 +159,46 @@ describe("extractNamedTestCommands", () => {
       ),
     ).toEqual(["./scripts/ci.sh --fast"]);
     expect(extractNamedTestCommands("Run `npm run build` to bundle the app.")).toEqual([]);
+  });
+});
+
+describe("promptRequestsDecision with embedded agent outputs", () => {
+  const request =
+    "Help me plan the pilot. Get separate perspectives and combine them into one practical launch plan in chat.";
+  const analysis =
+    "## Planning basis\n---\nDecide whether all 12 staff attend. Recommended learning design: practise.\n---";
+
+  it("ignores decision wording inside dependency outputs of an orchestration node", () => {
+    const prompt = [
+      "You are executing a dependency-aware orchestration node.",
+      "",
+      `Dependency 1 (Explorer) output:\n---\n${analysis}\n---`,
+      "",
+      "Your task:",
+      `ORIGINAL REQUEST:\n${request}`,
+    ].join("\n");
+    expect(stripEmbeddedAgentOutputs(prompt)).toBe(`ORIGINAL REQUEST:\n${request}`);
+    expect(promptRequestsDecision("Launch plan", prompt)).toBe(false);
+  });
+
+  it("ignores decision wording inside embedded team analyses", () => {
+    const prompt = [
+      `ORIGINAL REQUEST: ${request}`,
+      "=== TEAM MEMBER ANALYSES (COMPACTED) ===",
+      analysis,
+      "=== END OF TEAM MEMBER ANALYSES ===",
+    ].join("\n");
+    expect(promptRequestsDecision("Launch plan", prompt)).toBe(false);
+  });
+
+  it("still detects a decision the user asked for", () => {
+    const prompt = [
+      `ORIGINAL REQUEST: Tell me whether we should launch now or wait.`,
+      "=== TEAM MEMBER ANALYSES (COMPLETE) ===",
+      analysis,
+      "=== END OF TEAM MEMBER ANALYSES ===",
+    ].join("\n");
+    expect(promptRequestsDecision("Launch decision", prompt)).toBe(true);
+    expect(promptRequestsDecision("Upgrade", "Should I upgrade the plan?")).toBe(true);
   });
 });

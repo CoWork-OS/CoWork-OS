@@ -3,7 +3,11 @@ import * as fs from "fs/promises";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { SpreadsheetBuilder } from "../skills/spreadsheet";
-import { DocumentBuilder, type ContentBlockInput } from "../skills/document";
+import {
+  DocumentBuilder,
+  resolveDocumentFilename,
+  type ContentBlockInput,
+} from "../skills/document";
 import { PresentationBuilder } from "../skills/presentation";
 import { FolderOrganizer } from "../skills/organizer";
 import { editPdfRegion } from "../../documents/pdf-region-editor";
@@ -163,8 +167,9 @@ export class SkillTools {
    */
   async createDocument(input: {
     filename: string;
-    format: "docx" | "pdf";
+    format?: "docx" | "pdf";
     content: ContentBlockInput[];
+    pageNumbers?: boolean;
   }): Promise<{
     success: boolean;
     path: string;
@@ -194,9 +199,8 @@ export class SkillTools {
       );
     }
 
-    const filename = input.filename.endsWith(`.${input.format}`)
-      ? input.filename
-      : `${input.filename}.${input.format}`;
+    // The requested name is kept exactly; only a missing extension is added.
+    const { filename, format } = resolveDocumentFilename(input.filename, input.format);
 
     const outputPath = await this.assertPathAllowed(
       path.join(this.workspace.path, filename),
@@ -204,7 +208,9 @@ export class SkillTools {
       "document output",
     );
 
-    const report = await this.documentBuilder.create(outputPath, input.format, input.content);
+    const report = await this.documentBuilder.create(outputPath, format, input.content, {
+      pageNumbers: input.pageNumbers === true,
+    });
 
     // Count what was written, not what was sent: a block with nothing to
     // write is reported back instead.
@@ -216,7 +222,7 @@ export class SkillTools {
     this.daemon.logEvent(this.taskId, "file_created", {
       path: filename,
       type: "document",
-      format: input.format,
+      format,
       contentBlocks: blockCount,
     });
 

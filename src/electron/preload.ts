@@ -2297,6 +2297,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_ACTIVATE, data) as Promise<{
       success: boolean;
     }>,
+  checkBrowserWorkbenchTabClose: (data: { taskId: string; sessionId?: string; tabId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_CLOSE_CHECK, data) as Promise<{
+      close: boolean;
+    }>,
   browserWorkbenchUserNavigate: (data: {
     taskId: string;
     sessionId?: string;
@@ -6032,6 +6036,12 @@ export interface ElectronAPI {
     sessionId?: string;
     tabId: string;
   }) => Promise<{ success: boolean }>;
+  /** Runs the page's "Leave site?" check; close is false when the user chose to stay. */
+  checkBrowserWorkbenchTabClose: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+  }) => Promise<{ close: boolean }>;
   browserWorkbenchUserNavigate: (data: {
     taskId: string;
     sessionId?: string;

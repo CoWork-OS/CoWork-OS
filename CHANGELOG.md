@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **In-app browser platform**: a download shelf (your downloads go to Downloads, the workspace or a save dialog; CoWork's go to the workspace after your approval), "CoWork is using this tab" with take over and resume, sign-in hand-back, per-workspace browsing history, clearing browsing data, and a new **Settings > Browser** (search engine, downloads, restore tabs, history, site permissions, CoWork downloads and uploads, developer mode).
 - **CoWork in the browser**: `@Browser` opens the in-app browser for the task, CoWork follows popups and new tabs (`switchedToTab`, `activeTabClosed`) and can open, switch and close workbench tabs (`browser_new_tab`), searches your browsing history only with permission (`browser_history_search`), and annotations can cover a dragged area or carry live **Adjust** edits (text, font, spacing, colors) with before/after screenshots.
 - **Settings > Browser > Use the classic browser**: a fallback to the previous single-tab browser for this release.
+- **In-app browser approvals and "Leave site?"**: approvals CoWork asks for while using the browser (site access, uploads, downloads, page scripts, history search) appear as a card over the tab while the browser is open. Pages with unsaved changes ask "Leave site?" before a reload, navigation or closing their tab or popup, instead of silently refusing to leave.
 
 ### Changed
 

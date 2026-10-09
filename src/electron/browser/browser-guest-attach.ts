@@ -19,6 +19,7 @@
 import { matchBrowserShortcut } from "../../shared/browser-shortcuts";
 import { buildBrowserContextMenuTemplate } from "./browser-context-menu";
 import type { BrowserSessionManager, BrowserTabOwner } from "./browser-session-manager";
+import type { BrowserUnloadGuard } from "./browser-unload-guard";
 import type { BrowserWorkbenchService } from "./browser-workbench-service";
 
 export interface BrowserGuestAttachDeps {
@@ -40,6 +41,8 @@ export interface BrowserGuestAttachDeps {
   ) => void;
   /** Developer mode (Settings > Browser) adds Inspect Element to the page menu. */
   isDeveloperMode?: () => boolean;
+  /** Asks "Leave site?" when a page wants to keep its unsaved changes. */
+  unloadGuard?: BrowserUnloadGuard;
 }
 
 export type BrowserWindowOpenRoute = "tab" | "background-tab" | "popup" | "deny";
@@ -186,6 +189,7 @@ export function attachBrowserGuest(
     attachHistoryRecording(guest, deps);
   }
   attachContextMenu(guest, deps, isPopup);
+  deps.unloadGuard?.attach(guest);
   guest.setWindowOpenHandler((details: Any) => {
     const url = String(details?.url || "");
     const disposition = String(details?.disposition || "");

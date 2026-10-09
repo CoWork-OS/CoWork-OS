@@ -1378,6 +1378,8 @@ export type ToolType =
   | "browser_tabs"
   | "browser_switch_tab"
   | "browser_close_tab"
+  | "browser_new_tab"
+  | "browser_history_search"
   | "browser_get_content"
   | "browser_click"
   | "browser_hover"
@@ -1641,6 +1643,8 @@ export const TOOL_GROUPS = {
     "browser_tabs",
     "browser_switch_tab",
     "browser_close_tab",
+    "browser_new_tab",
+    "browser_history_search",
     "browser_get_content",
     "browser_click",
     "browser_hover",
@@ -1842,6 +1846,8 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   browser_tabs: "network",
   browser_switch_tab: "network",
   browser_close_tab: "network",
+  browser_new_tab: "network",
+  browser_history_search: "read",
   browser_get_content: "network",
   browser_click: "network",
   browser_hover: "network",
@@ -4542,6 +4548,14 @@ export interface BrowserAnnotationTargetRef {
   accessibleName?: string;
   textQuote?: string;
   computedStyle?: Record<string, string>;
+  /** An annotated area: the outermost elements inside the dragged rectangle. */
+  elements?: Array<{
+    selector?: string;
+    tagName?: string;
+    role?: string;
+    accessibleName?: string;
+    textQuote?: string;
+  }>;
 }
 
 export interface BrowserAnnotationTargetResolveResult {
@@ -4599,6 +4613,8 @@ export interface AnnotationStylePatch {
   fontWeight?: string;
   lineHeight?: string;
   spacing?: string;
+  margin?: string;
+  padding?: string;
   alignment?: string;
   borderRadius?: string;
   notes?: string;
@@ -7643,6 +7659,36 @@ export const IPC_CHANNELS = {
   BROWSER_WORKBENCH_OPEN_REQUEST: "browserWorkbench:openRequest",
   BROWSER_WORKBENCH_CURSOR: "browserWorkbench:cursor",
   BROWSER_WORKBENCH_VIEWPORT: "browserWorkbench:viewport",
+  BROWSER_WORKBENCH_TAB_ACTIVATE: "browserWorkbench:tabActivate",
+  BROWSER_WORKBENCH_TAB_COMMAND: "browserWorkbench:tabCommand",
+  BROWSER_WORKBENCH_USER_NAVIGATE: "browserWorkbench:userNavigate",
+  BROWSER_WORKBENCH_NAVIGATION_BLOCKED: "browserWorkbench:navigationBlocked",
+  BROWSER_WORKBENCH_PERMISSION_REQUEST: "browserWorkbench:permissionRequest",
+  BROWSER_WORKBENCH_PERMISSION_RESPOND: "browserWorkbench:permissionRespond",
+  BROWSER_WORKBENCH_PERMISSION_LIST: "browserWorkbench:permissionList",
+  BROWSER_WORKBENCH_SHORTCUT: "browserWorkbench:shortcut",
+  BROWSER_WORKBENCH_CONTEXT_ACTION: "browserWorkbench:contextAction",
+  BROWSER_WORKBENCH_FOCUS: "browserWorkbench:focus",
+  BROWSER_WORKBENCH_DIAGNOSTICS_GET: "browserWorkbench:diagnosticsGet",
+  BROWSER_WORKBENCH_TRACE: "browserWorkbench:trace",
+  BROWSER_WORKBENCH_SNAPSHOT_GET: "browserWorkbench:snapshotGet",
+  BROWSER_WORKBENCH_DRIVING: "browserWorkbench:driving",
+  BROWSER_WORKBENCH_INSPECT_AREA: "browserWorkbench:inspectArea",
+  BROWSER_WORKBENCH_STYLE_PREVIEW: "browserWorkbench:stylePreview",
+  BROWSER_WORKBENCH_SET_PAUSED: "browserWorkbench:setPaused",
+  BROWSER_WORKBENCH_DOWNLOAD_EVENT: "browserWorkbench:downloadEvent",
+  BROWSER_WORKBENCH_DOWNLOAD_ACTION: "browserWorkbench:downloadAction",
+  BROWSER_WORKBENCH_DOWNLOAD_LIST: "browserWorkbench:downloadList",
+  BROWSER_WORKBENCH_SIGN_IN_REQUIRED: "browserWorkbench:signInRequired",
+  BROWSER_WORKBENCH_CLEAR_DATA: "browserWorkbench:clearData",
+  BROWSER_SETTINGS_GET: "browserSettings:get",
+  BROWSER_SETTINGS_SAVE: "browserSettings:save",
+  BROWSER_SITE_PERMISSIONS_LIST: "browserSettings:sitePermissionsList",
+  BROWSER_SITE_PERMISSIONS_RESET: "browserSettings:sitePermissionsReset",
+  BROWSER_HISTORY_SEARCH: "browserHistory:search",
+  BROWSER_HISTORY_LIST: "browserHistory:list",
+  BROWSER_HISTORY_REMOVE: "browserHistory:remove",
+  BROWSER_HISTORY_CLEAR: "browserHistory:clear",
   ANNOTATION_CREATE: "annotation:create",
   ANNOTATION_LIST: "annotation:list",
   ANNOTATION_UPDATE: "annotation:update",

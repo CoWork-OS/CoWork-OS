@@ -270,6 +270,13 @@ const WebArtifactViewer = lazy(() =>
     default: module.WebArtifactViewer,
   })),
 );
+import { BrowserWorkbenchDock } from "./components/BrowserWorkbench/BrowserWorkbenchDock";
+import { useBrowserSettings } from "./hooks/useBrowserSettings";
+const BrowserWorkbenchClassicView = lazy(() =>
+  import("./components/BrowserWorkbenchClassicView").then((module) => ({
+    default: module.BrowserWorkbenchClassicView,
+  })),
+);
 const BrowserWorkbenchView = lazy(() =>
   import("./components/BrowserWorkbenchView").then((module) => ({
     default: module.BrowserWorkbenchView,
@@ -1009,10 +1016,15 @@ const SelectedTaskWorkspaceView = memo(
     } | null>(null);
     const [browserWorkbench, setBrowserWorkbench] = useState<{
       sessionId: string;
+      /** URL of the latest open request; the workbench opens it once per requestId. */
       url?: string;
+      /** URL of the tab the user is looking at, reported by the workbench. */
+      currentUrl?: string;
       mode: "sidebar" | "fullscreen";
       requestId?: string;
     } | null>(null);
+    // The sidebar element the docked browser workbench is positioned over.
+    const [browserWorkbenchSlot, setBrowserWorkbenchSlot] = useState<HTMLDivElement | null>(null);
     const visibleBrowserWorkbench = canUseInteractiveBrowser ? browserWorkbench : null;
     const [spawnedAgentSidebar, setSpawnedAgentSidebar] = useState<{
       taskId: string;
@@ -1122,7 +1134,9 @@ const SelectedTaskWorkspaceView = memo(
     }, []);
     const updateBrowserWorkbenchStatus = useCallback((status: { url?: string }) => {
       setBrowserWorkbench((current) =>
-        current ? { ...current, url: status.url ?? current.url } : current,
+        current && status.url !== undefined && status.url !== current.currentUrl
+          ? { ...current, currentUrl: status.url }
+          : current,
       );
     }, []);
     const openBrowserWorkbenchSidebar = useCallback(
@@ -1140,24 +1154,33 @@ const SelectedTaskWorkspaceView = memo(
         setSpreadsheetSidebarWidth(
           clampResizableSidebarWidth(preferredBrowserWidth, containerWidth),
         );
-        setBrowserWorkbench({
-          sessionId: request.sessionId || "default",
+        const sessionId = request.sessionId || "default";
+        // Reopening the same session keeps its view mode and live tabs.
+        setBrowserWorkbench((current) => ({
+          sessionId,
           url: request.url,
-          mode: "sidebar",
+          currentUrl: current?.sessionId === sessionId ? current.currentUrl : undefined,
+          mode: current?.sessionId === sessionId ? current.mode : "sidebar",
           requestId: request.requestId,
-        });
+        }));
       },
       [canUseInteractiveBrowser, onRevealRightSidebar],
     );
+    const { settings: browserSettings } = useBrowserSettings();
     const openWebLinkInBrowserSidebar = useCallback(
       (url: string) => {
+        // Settings > Browser can send conversation links to the system browser instead.
+        if (!browserSettings.openChatLinksInBrowser && /^https?:\/\//i.test(url)) {
+          void window.electronAPI?.openExternal?.(url);
+          return;
+        }
         openBrowserWorkbenchSidebar({
           sessionId: "link-preview",
           url,
           requestId: `link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         });
       },
-      [openBrowserWorkbenchSidebar],
+      [browserSettings.openChatLinksInBrowser, openBrowserWorkbenchSidebar],
     );
     const openEmptyBrowserWorkbenchSidebar = useCallback(() => {
       openBrowserWorkbenchSidebar({
@@ -1368,7 +1391,10 @@ const SelectedTaskWorkspaceView = memo(
           ? buildSpreadsheetTurnContext({
               task,
               events: spreadsheetEvents,
-              filePath: visibleBrowserWorkbench.url || "browser workbench",
+              filePath:
+                visibleBrowserWorkbench.currentUrl ||
+                visibleBrowserWorkbench.url ||
+                "browser workbench",
               isWorking: effectiveSpreadsheetTaskWorking,
               durationLabel: spreadsheetWorkDuration,
               turnStartedAt: activeSpreadsheetTurnStartedAt,
@@ -1476,32 +1502,55 @@ const SelectedTaskWorkspaceView = memo(
       [childEvents, childTasks, replayControls.replayEvents, task],
     );
 
+    const WorkbenchComponent = browserSettings.classicWorkbench
+      ? BrowserWorkbenchClassicView
+      : BrowserWorkbenchView;
+    // One BrowserWorkbenchView instance serves both the sidebar and full view, so
+    // switching modes never remounts it (a remounted <webview> reloads its page).
+    const browserWorkbenchDock =
+      visibleBrowserWorkbench && task ? (
+        <BrowserWorkbenchDock
+          key={`browser-workbench:${visibleBrowserWorkbench.sessionId}`}
+          mode={visibleBrowserWorkbench.mode}
+          slot={browserWorkbenchSlot}
+        >
+          <Suspense fallback={<ArtifactSidebarFallback />}>
+            <WorkbenchComponent
+              taskId={task.id}
+              sessionId={visibleBrowserWorkbench.sessionId}
+              initialUrl={visibleBrowserWorkbench.url}
+              openRequestId={visibleBrowserWorkbench.requestId}
+              workspaceId={workspace?.id}
+              workspacePath={workspace?.path}
+              mode={visibleBrowserWorkbench.mode}
+              onClose={closeBrowserWorkbench}
+              onFullscreen={showBrowserFullscreen}
+              onExitFullscreen={showBrowserSidebar}
+              onStatusChange={updateBrowserWorkbenchStatus}
+              onSendMessage={sendSpreadsheetFullscreenMessage}
+              selectedModelLabel={
+                availableModels.find((model) => model.key === selectedModel)?.displayName ||
+                selectedModel
+              }
+              selectedModel={selectedModel}
+              selectedProvider={selectedProvider}
+              selectedReasoningEffort={selectedReasoningEffort}
+              availableModels={availableModels}
+              availableProviders={availableProviders}
+              onModelChange={onModelChange}
+              onOpenSettings={onOpenSettings}
+              turnContext={browserTurnContext}
+            />
+          </Suspense>
+        </BrowserWorkbenchDock>
+      ) : null;
+
     if (visibleBrowserWorkbench?.mode === "fullscreen" && task) {
-      const selectedModelLabel =
-        availableModels.find((model) => model.key === selectedModel)?.displayName || selectedModel;
       return (
-        <BrowserWorkbenchView
-          taskId={task.id}
-          sessionId={visibleBrowserWorkbench.sessionId}
-          initialUrl={visibleBrowserWorkbench.url}
-          workspaceId={workspace?.id}
-          workspacePath={workspace?.path}
-          mode="fullscreen"
-          onClose={closeBrowserWorkbench}
-          onFullscreen={showBrowserFullscreen}
-          onExitFullscreen={showBrowserSidebar}
-          onStatusChange={updateBrowserWorkbenchStatus}
-          onSendMessage={sendSpreadsheetFullscreenMessage}
-          selectedModelLabel={selectedModelLabel}
-          selectedModel={selectedModel}
-          selectedProvider={selectedProvider}
-          selectedReasoningEffort={selectedReasoningEffort}
-          availableModels={availableModels}
-          availableProviders={availableProviders}
-          onModelChange={onModelChange}
-          onOpenSettings={onOpenSettings}
-          turnContext={browserTurnContext}
-        />
+        <>
+          {browserWorkbenchDock}
+          {null}
+        </>
       );
     }
 
@@ -1609,296 +1658,288 @@ const SelectedTaskWorkspaceView = memo(
       !remoteTaskView,
     );
     return (
-      <div
-        ref={splitLayoutRef}
-        className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
-          isSpreadsheetResizing ? "is-resizing" : ""
-        }`}
-      >
-        <div className="selected-workspace-main-row">
-          <Suspense fallback={<TaskViewSkeleton />}>
-            <MainContent
-              headerPlacement="title-bar"
-              rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
-              task={task}
-              selectedTaskId={selectedTaskId}
-              workspace={workspace}
-              events={replayControls.replayEvents}
-              sharedTaskEventUi={replayControls.isReplayMode ? null : sharedTaskEventUi}
-              replayControls={replayControls}
-              botConversations={botConversations}
-              isLoadingBotConversations={isLoadingBotConversations}
-              conversationProjection={botConversationProjection}
-              draftValue={draftValue}
-              draftRevision={draftRevision}
-              onDraftValueChange={onDraftValueChange}
-              onDraftAccepted={onDraftAccepted}
-              draftSnapshot={draftSnapshot}
-              onDraftPatch={onDraftPatch}
-              onStageDraftAttachment={onStageDraftAttachment}
-              onResolveDraftAttachment={onResolveDraftAttachment}
-              onReleaseDraftAttachment={onReleaseDraftAttachment}
-              childTasks={remoteTaskView ? [] : childTasks}
-              childEvents={remoteTaskView ? [] : childEvents}
-              onSelectChildTask={onSelectChildTask}
-              onSelectBotConversation={onSelectBotConversation}
-              onNewBotConversation={onNewBotConversation}
-              onSelectTask={onSelectTask}
-              onSendMessage={onSendMessage}
-              onStartOnboarding={onStartOnboarding}
-              onStartFreshSession={onStartFreshSession}
-              onCreateTask={onCreateTask}
-              onAskInbox={onAskInbox}
-              onChangeWorkspace={onChangeWorkspace}
-              onSelectWorkspace={onSelectWorkspace}
-              onOpenSettings={onOpenSettings as Any}
-              onViewRoutine={onViewRoutine}
-              onStopTask={onStopTask}
-              onContinueWithoutCommandsForPausedTask={onContinueWithoutCommandsForPausedTask}
-              onWrapUpTask={onWrapUpTask}
-              inputRequest={activeInputRequest}
-              pendingInputRequests={pendingInputRequests}
-              onSubmitInputRequest={onSubmitInputRequest}
-              onDismissInputRequest={onDismissInputRequest}
-              onOpenBrowserView={canUseInteractiveBrowser ? onOpenBrowserView : undefined}
-              onViewTaskOutputs={onViewTaskOutputs}
-              onTasksChanged={onTasksChanged}
-              selectedModel={selectedModel}
-              selectedProvider={selectedProvider}
-              selectedReasoningEffort={selectedReasoningEffort}
-              availableModels={availableModels}
-              onModelChange={onModelChange}
-              availableProviders={availableProviders}
-              uiDensity={uiDensity}
-              homeResearchVaultEnabled={homeResearchVaultEnabled}
-              homeNextActionsEnabled={homeNextActionsEnabled}
-              rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-              taskSwitchId={taskSwitchId}
-              hasMoreTimelineHistory={hasMoreTimelineHistory}
-              isLoadingTimelineHistory={isLoadingTimelineHistory}
-              timelineHistoryError={timelineHistoryError}
-              onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
-              onLoadTaskEventDetail={onLoadTaskEventDetail}
-              onReleaseTaskEventDetail={onReleaseTaskEventDetail}
-              remoteSession={
-                remoteTaskView
-                  ? { deviceId: remoteTaskView.deviceId, deviceName: remoteTaskView.deviceName }
-                  : null
-              }
-              onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-              onOpenDocumentArtifact={openDocumentArtifact}
-              onOpenPresentationArtifact={openPresentationArtifact}
-              onOpenWebArtifact={openWebArtifact}
-              onOpenBrowserWorkbenchSidebar={
-                canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
-                  ? openEmptyBrowserWorkbenchSidebar
-                  : undefined
-              }
-              onOpenWebLinkInSidebar={
-                canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
-                  ? openWebLinkInBrowserSidebar
-                  : undefined
-              }
-              onOpenSideChat={onOpenSideChat}
-              onOpenChildAgentSidebar={openSpawnedAgentSidebar}
-            />
-          </Suspense>
-          {sideChat && workspace?.path && !remoteTaskView ? (
-            <>
-              <ResizableDividerHandle
-                className="spreadsheet-sidebar-resize-handle"
-                role="separator"
-                orientation="vertical"
-                aria-label="Resize side conversation"
-                aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
-                aria-valuenow={Math.round(spreadsheetSidebarWidth)}
-                tabIndex={0}
-                onPointerDown={handleSpreadsheetResizePointerDown}
-                onKeyDown={handleSpreadsheetResizeKeyDown}
-              />
-              <div
-                className="spreadsheet-resizable-sidebar"
-                style={{ width: `${spreadsheetSidebarWidth}px` }}
-              >
-                <Suspense fallback={<RightPanelFallback />}>
-                  <SideChatPanel
-                    parentTask={sideChat.parentTask}
-                    sideTask={sideChat.task}
-                    events={sideChat.events}
-                    loading={sideChat.loading}
-                    sending={sideChat.sending}
-                    onSendMessage={onSendSideChatMessage}
-                    draftValue={sideChatDraftValue}
-                    draftRevision={sideChatDraftRevision}
-                    draftSnapshot={sideChatDraftSnapshot}
-                    onDraftValueChange={onSideChatDraftValueChange}
-                    onDraftAccepted={onSideChatDraftAccepted}
-                    onClose={onCloseSideChat}
-                    onOpenSideTask={onOpenSideChatFullThread}
-                  />
-                </Suspense>
-              </div>
-            </>
-          ) : (spreadsheetArtifact || visibleBrowserWorkbench || spawnedAgentSidebar) &&
-            workspace?.path &&
-            !remoteTaskView ? (
-            <>
-              <ResizableDividerHandle
-                className="spreadsheet-sidebar-resize-handle"
-                role="separator"
-                orientation="vertical"
-                aria-label="Resize workbench sidebar"
-                aria-valuemin={sidebarWidthConstraints.minWidth}
-                aria-valuenow={Math.round(spreadsheetSidebarWidth)}
-                tabIndex={0}
-                onPointerDown={handleSpreadsheetResizePointerDown}
-                onKeyDown={handleSpreadsheetResizeKeyDown}
-              />
-              <div
-                className="spreadsheet-resizable-sidebar"
-                style={{ width: `${spreadsheetSidebarWidth}px` }}
-              >
-                <Suspense fallback={<ArtifactSidebarFallback />}>
-                  {spawnedAgentSidebar && task ? (
-                    <SpawnedAgentSidebar
-                      parentTask={task}
-                      childTasks={childTasks}
-                      childEvents={childEvents}
-                      selectedTaskId={spawnedAgentSidebar.taskId}
-                      workspace={workspace}
-                      selectedModel={selectedModel}
-                      selectedProvider={selectedProvider}
-                      selectedReasoningEffort={selectedReasoningEffort}
-                      availableModels={availableModels}
-                      availableProviders={availableProviders}
-                      uiDensity={uiDensity}
-                      rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-                      inputRequest={activeInputRequest}
-                      onSelectTask={selectSpawnedAgentSidebarTask}
-                      onClose={closeSpawnedAgentSidebar}
-                      onCancelTask={onCancelTaskById}
-                      onTasksChanged={onTasksChanged}
-                      onOpenSettings={onOpenSettings}
-                      onModelChange={onModelChange}
-                      onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
-                      onOpenDocumentArtifact={openDocumentArtifact}
-                      onOpenPresentationArtifact={openPresentationArtifact}
-                      onOpenWebArtifact={openWebArtifact}
-                    />
-                  ) : visibleBrowserWorkbench && task ? (
-                    <BrowserWorkbenchView
-                      key={visibleBrowserWorkbench.requestId || visibleBrowserWorkbench.sessionId}
-                      taskId={task.id}
-                      sessionId={visibleBrowserWorkbench.sessionId}
-                      initialUrl={visibleBrowserWorkbench.url}
-                      workspaceId={workspace.id}
-                      workspacePath={workspace.path}
-                      mode="sidebar"
-                      onClose={closeBrowserWorkbench}
-                      onFullscreen={showBrowserFullscreen}
-                      onExitFullscreen={showBrowserSidebar}
-                      onStatusChange={updateBrowserWorkbenchStatus}
-                      onSendMessage={sendSpreadsheetFullscreenMessage}
-                    />
-                  ) : spreadsheetArtifact?.kind === "document" ? (
-                    <DocumentArtifactViewer
-                      filePath={spreadsheetArtifact.path}
-                      workspacePath={workspace.path}
-                      mode="sidebar"
-                      onClose={closeSpreadsheetArtifact}
-                      onFullscreen={showSpreadsheetFullscreen}
-                      onExitFullscreen={showSpreadsheetSidebar}
-                      refreshKey={artifactRefreshKey}
-                    />
-                  ) : spreadsheetArtifact?.kind === "presentation" ? (
-                    <PresentationArtifactViewer
-                      filePath={spreadsheetArtifact.path}
-                      workspacePath={workspace.path}
-                      mode="sidebar"
-                      onClose={closeSpreadsheetArtifact}
-                      onFullscreen={showSpreadsheetFullscreen}
-                      onExitFullscreen={showSpreadsheetSidebar}
-                      refreshKey={artifactRefreshKey}
-                    />
-                  ) : spreadsheetArtifact?.kind === "webpage" ? (
-                    <WebArtifactViewer
-                      filePath={spreadsheetArtifact.path}
-                      workspacePath={workspace.path}
-                      mode="sidebar"
-                      onClose={closeSpreadsheetArtifact}
-                      onFullscreen={showSpreadsheetFullscreen}
-                      onExitFullscreen={showSpreadsheetSidebar}
-                      refreshKey={artifactRefreshKey}
-                    />
-                  ) : spreadsheetArtifact ? (
-                    <SpreadsheetArtifactViewer
-                      filePath={spreadsheetArtifact.path}
-                      workspacePath={workspace.path}
-                      mode="sidebar"
-                      onClose={closeSpreadsheetArtifact}
-                      onFullscreen={showSpreadsheetFullscreen}
-                      onExitFullscreen={showSpreadsheetSidebar}
-                    />
-                  ) : null}
-                </Suspense>
-              </div>
-            </>
-          ) : task?.agentConfig?.botConversation && !remoteTaskView && !effectiveRightCollapsed ? (
-            <BotDetailsRail
-              // One rail per bot: switching bots must not show the last bot's settings or
-              // let its late save land on the new one.
-              key={task.assignedAgentRoleId || task.id}
-              task={task}
-              conversationProjection={botConversationProjection}
-              onEdit={() => {
-                // The bot identity header owns the profile dialog; focus it
-                // through the same history action rather than duplicating the
-                // editor here.
-                const profileButton = document.querySelector<HTMLButtonElement>(
-                  ".bot-conversation-identity",
-                );
-                profileButton?.click();
-              }}
-              onOpenHistory={() => {
-                window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
-              }}
-              onClose={onCloseRightPanel}
-              onSelectTask={onSelectTask}
-            />
-          ) : !effectiveRightCollapsed && !remoteTaskView ? (
-            <Suspense fallback={<RightPanelFallback />}>
-              <RightPanel
-                task={rightPanelInput.task}
-                workspace={rightPanelInput.workspace}
-                events={rightPanelInput.events}
-                sharedTaskEventUi={rightPanelInput.sharedTaskEventUi}
-                hasActiveChildren={rightPanelInput.hasActiveChildren}
-                childTasks={rightPanelInput.childTasks}
-                childEvents={rightPanelInput.childEvents}
-                childUsageByTaskId={rightPanelInput.childUsageByTaskId}
+      <>
+        {browserWorkbenchDock}
+        <div
+          ref={splitLayoutRef}
+          className={`selected-workspace-view ${hasSpreadsheetSidebar ? "has-spreadsheet-sidebar" : ""} ${
+            isSpreadsheetResizing ? "is-resizing" : ""
+          }`}
+        >
+          <div className="selected-workspace-main-row">
+            <Suspense fallback={<TaskViewSkeleton />}>
+              <MainContent
+                headerPlacement="title-bar"
+                rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
+                task={task}
+                selectedTaskId={selectedTaskId}
+                workspace={workspace}
+                events={replayControls.replayEvents}
+                sharedTaskEventUi={replayControls.isReplayMode ? null : sharedTaskEventUi}
+                replayControls={replayControls}
+                botConversations={botConversations}
+                isLoadingBotConversations={isLoadingBotConversations}
+                conversationProjection={botConversationProjection}
+                draftValue={draftValue}
+                draftRevision={draftRevision}
+                onDraftValueChange={onDraftValueChange}
+                onDraftAccepted={onDraftAccepted}
+                draftSnapshot={draftSnapshot}
+                onDraftPatch={onDraftPatch}
+                onStageDraftAttachment={onStageDraftAttachment}
+                onResolveDraftAttachment={onResolveDraftAttachment}
+                onReleaseDraftAttachment={onReleaseDraftAttachment}
+                childTasks={remoteTaskView ? [] : childTasks}
+                childEvents={remoteTaskView ? [] : childEvents}
+                onSelectChildTask={onSelectChildTask}
+                onSelectBotConversation={onSelectBotConversation}
+                onNewBotConversation={onNewBotConversation}
                 onSelectTask={onSelectTask}
+                onSendMessage={onSendMessage}
+                onStartOnboarding={onStartOnboarding}
+                onStartFreshSession={onStartFreshSession}
+                onCreateTask={onCreateTask}
+                onAskInbox={onAskInbox}
+                onChangeWorkspace={onChangeWorkspace}
+                onSelectWorkspace={onSelectWorkspace}
+                onOpenSettings={onOpenSettings as Any}
+                onViewRoutine={onViewRoutine}
+                onStopTask={onStopTask}
+                onContinueWithoutCommandsForPausedTask={onContinueWithoutCommandsForPausedTask}
+                onWrapUpTask={onWrapUpTask}
+                inputRequest={activeInputRequest}
+                pendingInputRequests={pendingInputRequests}
+                onSubmitInputRequest={onSubmitInputRequest}
+                onDismissInputRequest={onDismissInputRequest}
+                onOpenBrowserView={canUseInteractiveBrowser ? onOpenBrowserView : undefined}
+                onViewTaskOutputs={onViewTaskOutputs}
+                onTasksChanged={onTasksChanged}
+                selectedModel={selectedModel}
+                selectedProvider={selectedProvider}
+                selectedReasoningEffort={selectedReasoningEffort}
+                availableModels={availableModels}
+                onModelChange={onModelChange}
+                availableProviders={availableProviders}
+                uiDensity={uiDensity}
+                homeResearchVaultEnabled={homeResearchVaultEnabled}
+                homeNextActionsEnabled={homeNextActionsEnabled}
+                rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                taskSwitchId={taskSwitchId}
+                hasMoreTimelineHistory={hasMoreTimelineHistory}
+                isLoadingTimelineHistory={isLoadingTimelineHistory}
+                timelineHistoryError={timelineHistoryError}
+                onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
+                onLoadTaskEventDetail={onLoadTaskEventDetail}
+                onReleaseTaskEventDetail={onReleaseTaskEventDetail}
+                remoteSession={
+                  remoteTaskView
+                    ? { deviceId: remoteTaskView.deviceId, deviceName: remoteTaskView.deviceName }
+                    : null
+                }
                 onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
                 onOpenDocumentArtifact={openDocumentArtifact}
                 onOpenPresentationArtifact={openPresentationArtifact}
                 onOpenWebArtifact={openWebArtifact}
-                rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
-                costReceiptEnabled={costReceiptEnabled}
-                highlightOutputPath={rightPanelInput.highlightOutputPath}
-                onHighlightConsumed={onHighlightConsumed}
+                onOpenBrowserWorkbenchSidebar={
+                  canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
+                    ? openEmptyBrowserWorkbenchSidebar
+                    : undefined
+                }
+                onOpenWebLinkInSidebar={
+                  canUseInteractiveBrowser && task && workspace?.path && !remoteTaskView
+                    ? openWebLinkInBrowserSidebar
+                    : undefined
+                }
+                onOpenSideChat={onOpenSideChat}
+                onOpenChildAgentSidebar={openSpawnedAgentSidebar}
               />
             </Suspense>
-          ) : null}
+            {sideChat && workspace?.path && !remoteTaskView ? (
+              <>
+                <ResizableDividerHandle
+                  className="spreadsheet-sidebar-resize-handle"
+                  role="separator"
+                  orientation="vertical"
+                  aria-label="Resize side conversation"
+                  aria-valuemin={SPREADSHEET_SIDEBAR_MIN_WIDTH}
+                  aria-valuenow={Math.round(spreadsheetSidebarWidth)}
+                  tabIndex={0}
+                  onPointerDown={handleSpreadsheetResizePointerDown}
+                  onKeyDown={handleSpreadsheetResizeKeyDown}
+                />
+                <div
+                  className="spreadsheet-resizable-sidebar"
+                  style={{ width: `${spreadsheetSidebarWidth}px` }}
+                >
+                  <Suspense fallback={<RightPanelFallback />}>
+                    <SideChatPanel
+                      parentTask={sideChat.parentTask}
+                      sideTask={sideChat.task}
+                      events={sideChat.events}
+                      loading={sideChat.loading}
+                      sending={sideChat.sending}
+                      onSendMessage={onSendSideChatMessage}
+                      draftValue={sideChatDraftValue}
+                      draftRevision={sideChatDraftRevision}
+                      draftSnapshot={sideChatDraftSnapshot}
+                      onDraftValueChange={onSideChatDraftValueChange}
+                      onDraftAccepted={onSideChatDraftAccepted}
+                      onClose={onCloseSideChat}
+                      onOpenSideTask={onOpenSideChatFullThread}
+                    />
+                  </Suspense>
+                </div>
+              </>
+            ) : (spreadsheetArtifact || visibleBrowserWorkbench || spawnedAgentSidebar) &&
+              workspace?.path &&
+              !remoteTaskView ? (
+              <>
+                <ResizableDividerHandle
+                  className="spreadsheet-sidebar-resize-handle"
+                  role="separator"
+                  orientation="vertical"
+                  aria-label="Resize workbench sidebar"
+                  aria-valuemin={sidebarWidthConstraints.minWidth}
+                  aria-valuenow={Math.round(spreadsheetSidebarWidth)}
+                  tabIndex={0}
+                  onPointerDown={handleSpreadsheetResizePointerDown}
+                  onKeyDown={handleSpreadsheetResizeKeyDown}
+                />
+                <div
+                  className="spreadsheet-resizable-sidebar"
+                  style={{ width: `${spreadsheetSidebarWidth}px` }}
+                >
+                  <Suspense fallback={<ArtifactSidebarFallback />}>
+                    {spawnedAgentSidebar && task ? (
+                      <SpawnedAgentSidebar
+                        parentTask={task}
+                        childTasks={childTasks}
+                        childEvents={childEvents}
+                        selectedTaskId={spawnedAgentSidebar.taskId}
+                        workspace={workspace}
+                        selectedModel={selectedModel}
+                        selectedProvider={selectedProvider}
+                        selectedReasoningEffort={selectedReasoningEffort}
+                        availableModels={availableModels}
+                        availableProviders={availableProviders}
+                        uiDensity={uiDensity}
+                        rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                        inputRequest={activeInputRequest}
+                        onSelectTask={selectSpawnedAgentSidebarTask}
+                        onClose={closeSpawnedAgentSidebar}
+                        onCancelTask={onCancelTaskById}
+                        onTasksChanged={onTasksChanged}
+                        onOpenSettings={onOpenSettings}
+                        onModelChange={onModelChange}
+                        onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+                        onOpenDocumentArtifact={openDocumentArtifact}
+                        onOpenPresentationArtifact={openPresentationArtifact}
+                        onOpenWebArtifact={openWebArtifact}
+                      />
+                    ) : visibleBrowserWorkbench && task ? (
+                      <div className="browser-workbench-slot" ref={setBrowserWorkbenchSlot} />
+                    ) : spreadsheetArtifact?.kind === "document" ? (
+                      <DocumentArtifactViewer
+                        filePath={spreadsheetArtifact.path}
+                        workspacePath={workspace.path}
+                        mode="sidebar"
+                        onClose={closeSpreadsheetArtifact}
+                        onFullscreen={showSpreadsheetFullscreen}
+                        onExitFullscreen={showSpreadsheetSidebar}
+                        refreshKey={artifactRefreshKey}
+                      />
+                    ) : spreadsheetArtifact?.kind === "presentation" ? (
+                      <PresentationArtifactViewer
+                        filePath={spreadsheetArtifact.path}
+                        workspacePath={workspace.path}
+                        mode="sidebar"
+                        onClose={closeSpreadsheetArtifact}
+                        onFullscreen={showSpreadsheetFullscreen}
+                        onExitFullscreen={showSpreadsheetSidebar}
+                        refreshKey={artifactRefreshKey}
+                      />
+                    ) : spreadsheetArtifact?.kind === "webpage" ? (
+                      <WebArtifactViewer
+                        filePath={spreadsheetArtifact.path}
+                        workspacePath={workspace.path}
+                        mode="sidebar"
+                        onClose={closeSpreadsheetArtifact}
+                        onFullscreen={showSpreadsheetFullscreen}
+                        onExitFullscreen={showSpreadsheetSidebar}
+                        refreshKey={artifactRefreshKey}
+                      />
+                    ) : spreadsheetArtifact ? (
+                      <SpreadsheetArtifactViewer
+                        filePath={spreadsheetArtifact.path}
+                        workspacePath={workspace.path}
+                        mode="sidebar"
+                        onClose={closeSpreadsheetArtifact}
+                        onFullscreen={showSpreadsheetFullscreen}
+                        onExitFullscreen={showSpreadsheetSidebar}
+                      />
+                    ) : null}
+                  </Suspense>
+                </div>
+              </>
+            ) : task?.agentConfig?.botConversation &&
+              !remoteTaskView &&
+              !effectiveRightCollapsed ? (
+              <BotDetailsRail
+                // One rail per bot: switching bots must not show the last bot's settings or
+                // let its late save land on the new one.
+                key={task.assignedAgentRoleId || task.id}
+                task={task}
+                conversationProjection={botConversationProjection}
+                onEdit={() => {
+                  // The bot identity header owns the profile dialog; focus it
+                  // through the same history action rather than duplicating the
+                  // editor here.
+                  const profileButton = document.querySelector<HTMLButtonElement>(
+                    ".bot-conversation-identity",
+                  );
+                  profileButton?.click();
+                }}
+                onOpenHistory={() => {
+                  window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
+                }}
+                onClose={onCloseRightPanel}
+                onSelectTask={onSelectTask}
+              />
+            ) : !effectiveRightCollapsed && !remoteTaskView ? (
+              <Suspense fallback={<RightPanelFallback />}>
+                <RightPanel
+                  task={rightPanelInput.task}
+                  workspace={rightPanelInput.workspace}
+                  events={rightPanelInput.events}
+                  sharedTaskEventUi={rightPanelInput.sharedTaskEventUi}
+                  hasActiveChildren={rightPanelInput.hasActiveChildren}
+                  childTasks={rightPanelInput.childTasks}
+                  childEvents={rightPanelInput.childEvents}
+                  childUsageByTaskId={rightPanelInput.childUsageByTaskId}
+                  onSelectTask={onSelectTask}
+                  onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
+                  onOpenDocumentArtifact={openDocumentArtifact}
+                  onOpenPresentationArtifact={openPresentationArtifact}
+                  onOpenWebArtifact={openWebArtifact}
+                  rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
+                  costReceiptEnabled={costReceiptEnabled}
+                  highlightOutputPath={rightPanelInput.highlightOutputPath}
+                  onHighlightConsumed={onHighlightConsumed}
+                />
+              </Suspense>
+            ) : null}
+          </div>
+          {!remoteTaskView && terminalTabsOpen && (
+            <Suspense fallback={null}>
+              <TerminalTabsDock
+                workspace={workspace}
+                taskId={task?.id ?? selectedTaskId ?? null}
+                onClose={onCloseTerminalTabs}
+              />
+            </Suspense>
+          )}
         </div>
-        {!remoteTaskView && terminalTabsOpen && (
-          <Suspense fallback={null}>
-            <TerminalTabsDock
-              workspace={workspace}
-              taskId={task?.id ?? selectedTaskId ?? null}
-              onClose={onCloseTerminalTabs}
-            />
-          </Suspense>
-        )}
-      </div>
+      </>
     );
   },
   (prev, next) =>

@@ -42,6 +42,7 @@ import {
 } from "./browser-host-sql";
 import { ComposerDraftStore } from "./composer-draft-repository";
 import { TaskLabelStore } from "./TaskLabelRepository";
+import { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";
 import { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
 
@@ -622,6 +623,41 @@ export const STORAGE_UNITS = {
     "listLiveAttachmentRefs",
     { readonly: true },
   ),
+  browserHistory_recordVisit: storeUnit(
+    (db: Database.Database) => new BrowserHistoryStore(db),
+    "recordVisit",
+    { readonly: false },
+  ),
+  browserHistory_updatePage: storeUnit(
+    (db: Database.Database) => new BrowserHistoryStore(db),
+    "updatePage",
+    { readonly: false },
+  ),
+  browserHistory_findById: storeUnit(
+    (db: Database.Database) => new BrowserHistoryStore(db),
+    "findById",
+    { readonly: true },
+  ),
+  browserHistory_search: storeUnit(
+    (db: Database.Database) => new BrowserHistoryStore(db),
+    "search",
+    {
+      readonly: true,
+    },
+  ),
+  browserHistory_list: storeUnit((db: Database.Database) => new BrowserHistoryStore(db), "list", {
+    readonly: true,
+  }),
+  browserHistory_remove: storeUnit(
+    (db: Database.Database) => new BrowserHistoryStore(db),
+    "remove",
+    {
+      readonly: false,
+    },
+  ),
+  browserHistory_clear: storeUnit((db: Database.Database) => new BrowserHistoryStore(db), "clear", {
+    readonly: false,
+  }),
   taskLabel_create: storeUnit((db: Database.Database) => new TaskLabelStore(db), "create", {
     readonly: false,
   }),

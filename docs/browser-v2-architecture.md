@@ -195,20 +195,22 @@ The Browser Workbench is the default visible surface for Browser V2. It should f
 
 Required visible controls:
 
-- multi-tab strip for user-visible workbench tabs
-- popup/new-window promotion into workbench tabs where possible
-- address bar with current URL, navigation status, reload/stop, back, and forward
-- security/profile indicator showing workspace browser context
+- tab strip with favicons, loading and audio state, pinned tabs, drag reorder, middle-click close and a tab menu; every tab keeps its own mounted webview
+- popups: `target=_blank` and plain `window.open` become workbench tabs; `window.open` with window features becomes a registered popup window on the same partition (OAuth)
+- address bar with history and open-tab suggestions, search fallback, security chip, zoom badge, loading bar, reload/stop, back and forward
+- browser shortcuts (Cmd+T/W/L/R/F, tab switching, zoom, Cmd+Shift+B) scoped to workbench focus, find in page, per-site zoom, gestures
+- native page context menu (links, images, selection, editing with spelling, Ask CoWork, annotate, Inspect Element in developer mode)
 - desktop/tablet/mobile viewport preset controls plus visible active-size state when `browser_emulate` controls the page
-- screenshot and annotation controls
-- snapshot overlay control showing what the agent can target
-- diagnostics drawer for Console, Network, Downloads, Storage, and Trace
-- download shelf or diagnostics entry with save-to-workspace behavior
-- permission prompts for sensitive browser capabilities
-- upload path flow restricted to workspace-readable files unless the user grants broader access
+- screenshot and annotation controls (element, dragged area, Adjust with live style preview)
+- snapshot overlay showing the refs of the agent's latest snapshot
+- diagnostics drawer for Console, Network, Downloads, Storage and Trace with real tab data
+- download shelf (progress, pause/resume/cancel, open with a warning for dangerous files, reveal)
+- site permission prompt bar (allow this time / always / never), blocked, failed and crashed page notices
+- "CoWork is using this tab" banner with take over / resume, and the sign-in hand-back banner
+- profile menu (clear browsing data, sign out of all sites, open in system browser, settings)
 - visible cursor overlay during agent actions
 
-The workbench can appear in the right sidebar or fullscreen. It must preserve the same browser session when moving between those modes.
+The workbench can appear in the right sidebar or fullscreen. It is mounted once and positioned over the sidebar, so moving between modes keeps pages loaded.
 
 ## Safety And Privacy
 

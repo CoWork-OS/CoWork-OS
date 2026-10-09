@@ -64,6 +64,7 @@ import {
   nativeImage,
   screen,
   safeStorage,
+  webContents,
   type BrowserWindowConstructorOptions,
 } from "electron";
 import mime from "mime-types";
@@ -189,7 +190,10 @@ import { MemoryWriter } from "./memory/MemoryWriter";
 import { MemoryWriteGate } from "./memory/MemoryWriteGate";
 import { createCommitmentExpiryService } from "./memory/memory-review-wiring";
 import { loadPolicies } from "./admin/policies";
-import { evaluateWorkspaceFilesystemAccess } from "./security/access-profile-paths";
+import {
+  assertWorkspaceFilesystemAccess,
+  evaluateWorkspaceFilesystemAccess,
+} from "./security/access-profile-paths";
 import {
   applyAccessProfileToWorkspace,
   resolveEffectiveAccessProfile,
@@ -243,6 +247,16 @@ import { setupQAHandlers } from "./ipc/qa-handlers";
 import { getBrowserWorkbenchService } from "./browser/browser-workbench-service";
 import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
 import { getBrowserSessionManager } from "./browser/browser-session-manager";
+import { attachBrowserGuest } from "./browser/browser-guest-attach";
+import { applyBrowserUserAgent } from "./browser/browser-user-agent";
+import { BrowserDownloadManager } from "./browser/browser-download-manager";
+import {
+  createBrowserHistoryRecorder,
+  registerBrowserPlatformIpc,
+} from "./browser/browser-platform-ipc";
+import { BrowserSettingsManager } from "./settings/browser-settings-manager";
+import { browserProfileKeyFromPartition } from "../shared/browser-profile";
+import { matchBrowserShortcut } from "../shared/browser-shortcuts";
 import { isAllowedWebviewUrl } from "./browser/webview-url-policy";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
 import { getActiveTempWorkspaceLeases } from "./utils/temp-workspace-lease";
@@ -614,10 +628,79 @@ async function ensureCoreAutomationProfiles(): Promise<void> {
   });
 }
 
+const BROWSER_WORKBENCH_PARTITION_PREFIX = "persist:cowork-browser-";
+/** Sessions of in-app browser partitions (-> partition), prepared before their first guest attaches. */
+const browserWorkbenchSessions = new WeakMap<object, string>();
+let browserDownloadManager: BrowserDownloadManager | null = null;
+
+function getBrowserDownloadManager(): BrowserDownloadManager {
+  if (!browserDownloadManager) {
+    browserDownloadManager = new BrowserDownloadManager({
+      service: getBrowserWorkbenchService(),
+      manager: getBrowserSessionManager(),
+      loadSettings: () => BrowserSettingsManager.loadSettings(),
+      resolveWorkspace: (taskId) => agentDaemon?.getEffectiveWorkspaceForTask(taskId) || null,
+      assertWorkspaceWrite: (workspace, relativePath) =>
+        assertWorkspaceFilesystemAccess(
+          { path: workspace.path, permissions: workspace.permissions },
+          relativePath,
+          "write",
+          "browser download",
+        ),
+      requestApproval: (taskId, description, details) =>
+        agentDaemon
+          ? agentDaemon.requestApproval(taskId, "browser", description, details, {
+              allowAutoApprove: false,
+            })
+          : Promise.resolve(false),
+      systemDownloadsDir: () => app.getPath("downloads"),
+      openPath: (filePath) => shell.openPath(filePath),
+      showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
+    });
+  }
+  return browserDownloadManager;
+}
+
+/**
+ * Network guards, user agent and site-permission handlers for an in-app browser
+ * partition. Runs in will-attach-webview, before the guest exists, so nothing
+ * on the partition can load or be granted anything first.
+ */
+function prepareBrowserWorkbenchPartition(partition: string): void {
+  const browserSession = session.fromPartition(partition);
+  getBrowserSessionManager().prepareSessionNetworkGuards(browserSession);
+  applyBrowserUserAgent(
+    browserSession,
+    BrowserSettingsManager.loadSettings().chromeCompatibleUserAgent,
+  );
+  getBrowserWorkbenchService().getPermissionManager().attach(browserSession, partition);
+  getBrowserDownloadManager().attach(browserSession);
+  browserWorkbenchSessions.set(browserSession, partition);
+}
+
 app.on("web-contents-created", (_event, contents) => {
   attachImageContextMenu(contents, clipboard);
   contents.on("did-attach-webview", (_event, guest) => {
     CanvasManager.getInstance().attachWebviewNetworkGuards(guest);
+    const browserPartition = browserWorkbenchSessions.get(guest.session);
+    if (browserPartition) {
+      const profileKey = browserProfileKeyFromPartition(browserPartition) || "default";
+      // Pages may open windows (allowpopups is kept for these partitions), so the
+      // handler must exist before the guest loads anything past about:blank.
+      attachBrowserGuest(guest, {
+        service: getBrowserWorkbenchService(),
+        manager: getBrowserSessionManager(),
+        BrowserWindow,
+        getParentWindow: () => mainWindow,
+        Menu,
+        writeClipboardText: (text) => {
+          void clipboard.writeText(text);
+        },
+        openExternal: (url) => void openExternalIfSafe(url),
+        recordHistory: createBrowserHistoryRecorder(() => dbManager.getDatabase(), profileKey),
+        isDeveloperMode: () => BrowserSettingsManager.loadSettings().developerMode,
+      });
+    }
   });
   contents.on("will-attach-webview", (event, webPreferences, params) => {
     delete (webPreferences as Record<string, unknown>).preload;
@@ -628,18 +711,27 @@ app.on("web-contents-created", (_event, contents) => {
     webPreferences.sandbox = true;
     webPreferences.webSecurity = true;
 
+    const partition = String(params?.partition || webPreferences.partition || "");
+    const isBrowserWorkbench = partition.startsWith(BROWSER_WORKBENCH_PARTITION_PREFIX);
     if (params) {
       delete (params as Record<string, unknown>).preload;
       delete (params as Record<string, unknown>).preloadURL;
-      delete (params as Record<string, unknown>).allowpopups;
+      // In-app browser guests route window.open through attachBrowserGuest; every
+      // other webview keeps popups disabled.
+      if (!isBrowserWorkbench) delete (params as Record<string, unknown>).allowpopups;
     }
 
     const targetUrl = typeof params?.src === "string" ? params.src : "";
-    const partition = String(params?.partition || webPreferences.partition || "");
-    if (partition.startsWith("persist:cowork-browser-")) {
-      getBrowserSessionManager().prepareSessionNetworkGuards(session.fromPartition(partition));
+    if (isBrowserWorkbench) {
+      try {
+        prepareBrowserWorkbenchPartition(partition);
+      } catch (error) {
+        logger.warn("Blocked browser webview: partition guards could not be installed", error);
+        event.preventDefault();
+        return;
+      }
     }
-    if (partition.startsWith("persist:cowork-browser-") && targetUrl !== "about:blank") {
+    if (isBrowserWorkbench && targetUrl !== "about:blank") {
       event.preventDefault();
       return;
     }
@@ -659,6 +751,63 @@ app.on("web-contents-created", (_event, contents) => {
     }
   });
 });
+
+/** True while keyboard focus is inside the browser workbench chrome (reported by the renderer). */
+let browserWorkbenchChromeFocused = false;
+
+/**
+ * App-window input for the browser workbench: while its chrome has focus, the
+ * browser shortcuts (Cmd+R, Cmd+W, Cmd+0 ...) run as browser commands instead of
+ * the app menu's reload/close/zoom. Trackpad swipes and mouse back/forward
+ * buttons go back and forward in the visible tab.
+ */
+function attachBrowserWorkbenchWindowInput(window: BrowserWindow): void {
+  // A reload, crash or app switch must never leave app shortcuts captured.
+  const releaseShortcuts = () => {
+    browserWorkbenchChromeFocused = false;
+  };
+  window.on("blur", releaseShortcuts);
+  window.webContents.on("did-start-navigation", (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) releaseShortcuts();
+  });
+  window.webContents.on("render-process-gone", releaseShortcuts);
+  window.webContents.on("before-input-event", (event, input) => {
+    if (!browserWorkbenchChromeFocused || input.type !== "keyDown") return;
+    const command = matchBrowserShortcut(
+      {
+        key: input.key,
+        code: input.code,
+        ctrl: input.control,
+        meta: input.meta,
+        shift: input.shift,
+        alt: input.alt,
+      },
+      process.platform,
+    );
+    if (!command) return;
+    event.preventDefault();
+    getBrowserWorkbenchService().sendShortcut(undefined, command);
+  });
+  window.on("swipe", (_event, direction) => {
+    if (direction === "left") getBrowserWorkbenchService().sendShortcut(undefined, "back", true);
+    if (direction === "right")
+      getBrowserWorkbenchService().sendShortcut(undefined, "forward", true);
+  });
+  window.on("app-command", (_event, command) => {
+    if (command === "browser-backward") {
+      getBrowserWorkbenchService().sendShortcut(undefined, "back", true);
+    } else if (command === "browser-forward") {
+      getBrowserWorkbenchService().sendShortcut(undefined, "forward", true);
+    }
+  });
+}
+
+/** Tab ids arrive from the renderer: accept short plain tokens only. */
+function readBrowserTabId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9._:-]{1,120}$/.test(trimmed) ? trimmed : undefined;
+}
 
 const submitHeartbeatSignalForAll = async (input: {
   text?: string;
@@ -1644,6 +1793,7 @@ if (isMacSafeStorageMigrationWorker) {
         mainWindow = null;
       });
       getBrowserWorkbenchService().setMainWindow(mainWindow);
+      attachBrowserWorkbenchWindowInput(mainWindow);
 
       mainWindow.on("unresponsive", () => {
         logger.warn("Main window became unresponsive");
@@ -4619,8 +4769,21 @@ if (isMacSafeStorageMigrationWorker) {
       return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false;
     });
 
-    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_REGISTER, async (_event, data: Any) => {
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_REGISTER, async (event, data: Any) => {
       if (!data || typeof data.taskId !== "string" || typeof data.webContentsId !== "number") {
+        throw new Error("Invalid browser workbench registration");
+      }
+      // Only a browser-partition <webview> hosted by the calling window can be
+      // registered; anything else (the app window itself, another guest) would
+      // hand its debugger to browser tools.
+      const guest = webContents.fromId(data.webContentsId);
+      if (
+        !guest ||
+        guest.isDestroyed() ||
+        guest.getType() !== "webview" ||
+        guest.hostWebContents?.id !== event.sender.id ||
+        !browserWorkbenchSessions.has(guest.session as object)
+      ) {
         throw new Error("Invalid browser workbench registration");
       }
       if (!agentDaemon) throw new Error("Agent daemon is not ready");
@@ -4646,6 +4809,8 @@ if (isMacSafeStorageMigrationWorker) {
       await getBrowserWorkbenchService().registerSession({
         taskId: data.taskId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        tabId: readBrowserTabId(data.tabId),
+        activate: data.activate === true,
         webContentsId: data.webContentsId,
         url: typeof data.url === "string" ? data.url : undefined,
         title: typeof data.title === "string" ? data.title : undefined,
@@ -4657,6 +4822,7 @@ if (isMacSafeStorageMigrationWorker) {
       getBrowserWorkbenchService().unregisterSession({
         taskId: data.taskId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        tabId: readBrowserTabId(data.tabId),
         webContentsId: typeof data.webContentsId === "number" ? data.webContentsId : undefined,
       });
       return { success: true };
@@ -4666,11 +4832,178 @@ if (isMacSafeStorageMigrationWorker) {
       getBrowserWorkbenchService().updateSessionStatus({
         taskId: data.taskId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        tabId: readBrowserTabId(data.tabId),
         webContentsId: typeof data.webContentsId === "number" ? data.webContentsId : undefined,
         url: typeof data.url === "string" ? data.url : undefined,
         title: typeof data.title === "string" ? data.title : undefined,
       });
       return { success: true };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_ACTIVATE, (_event, data: Any) => {
+      const tabId = readBrowserTabId(data?.tabId);
+      if (!data || typeof data.taskId !== "string" || !tabId) return { success: false };
+      const success = getBrowserWorkbenchService().activateTab({
+        taskId: data.taskId,
+        sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        tabId,
+      });
+      return { success };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_USER_NAVIGATE, async (_event, data: Any) => {
+      const sessionId = typeof data?.sessionId === "string" ? data.sessionId : "default";
+      const invalid = {
+        allowed: false,
+        url: "",
+        block: { reason: "policy", detail: "invalid_request" },
+      };
+      if (!data || typeof data.taskId !== "string" || typeof data.url !== "string") return invalid;
+      // Allowances are scoped to a real task's session. The first tab may still be
+      // registering when the user types, so the task (not the session) is checked.
+      if (
+        !getBrowserWorkbenchService().getSession(data.taskId, sessionId) &&
+        !(await agentDaemon?.getTaskById(data.taskId))
+      ) {
+        return invalid;
+      }
+      return getBrowserWorkbenchService().userNavigate({
+        taskId: data.taskId,
+        sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        url: data.url.slice(0, 8192),
+      });
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_RESPOND, (_event, data: Any) => {
+      const response = data?.response;
+      if (
+        !data ||
+        typeof data.requestId !== "string" ||
+        (response !== "allow-once" &&
+          response !== "allow-always" &&
+          response !== "block" &&
+          response !== "dismiss")
+      ) {
+        return { success: false };
+      }
+      return {
+        success: getBrowserWorkbenchService().respondToPermission(data.requestId, response),
+      };
+    });
+    registerBrowserPlatformIpc({
+      ipcMain,
+      getDatabase: () => dbManager.getDatabase(),
+      service: getBrowserWorkbenchService(),
+      downloads: getBrowserDownloadManager(),
+      sessionFromPartition: (partition) => session.fromPartition(partition),
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_INSPECT_AREA, async (_event, data: Any) => {
+      const rect = data?.rect;
+      if (
+        !data ||
+        typeof data.taskId !== "string" ||
+        !rect ||
+        !["x", "y", "width", "height"].every((key) => Number.isFinite(Number(rect[key])))
+      ) {
+        return { success: false, error: "Invalid area" };
+      }
+      const area = await getBrowserWorkbenchService().inspectArea({
+        taskId: data.taskId,
+        sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        rect,
+      });
+      return area ? { success: true, area } : { success: false, error: "Nothing to inspect" };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_STYLE_PREVIEW, async (_event, data: Any) => {
+      if (
+        !data ||
+        typeof data.taskId !== "string" ||
+        typeof data.selector !== "string" ||
+        (data.action !== "apply" && data.action !== "revert")
+      ) {
+        return { success: false, error: "Invalid style preview" };
+      }
+      const styles =
+        data.styles && typeof data.styles === "object" && !Array.isArray(data.styles)
+          ? (data.styles as Record<string, string>)
+          : undefined;
+      const result = await getBrowserWorkbenchService().previewStyle({
+        taskId: data.taskId,
+        sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
+        selector: data.selector,
+        action: data.action,
+        styles,
+        text: typeof data.text === "string" ? data.text : undefined,
+      });
+      return result || { success: false, error: "No browser tab" };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_FOCUS, (_event, data: Any) => {
+      browserWorkbenchChromeFocused = data?.focused === true;
+      return { success: true };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_DIAGNOSTICS_GET, async (_event, data: Any) => {
+      const kind = data?.kind;
+      if (
+        !data ||
+        typeof data.taskId !== "string" ||
+        !["console", "network", "downloads", "storage"].includes(kind)
+      ) {
+        return { success: false, error: "Invalid diagnostics request" };
+      }
+      const sessionId = typeof data.sessionId === "string" ? data.sessionId : "default";
+      const tabId = readBrowserTabId(data.tabId);
+      if (data.clear === true && (kind === "console" || kind === "network")) {
+        getBrowserSessionManager().clearTabDiagnostics({
+          taskId: data.taskId,
+          sessionId,
+          tabId,
+          kind,
+        });
+      }
+      try {
+        const result = await getBrowserSessionManager().getTabDiagnostics({
+          taskId: data.taskId,
+          sessionId,
+          tabId,
+          kind,
+        });
+        return result || { success: false, error: "No browser tab" };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_TRACE, async (_event, data: Any) => {
+      if (
+        !data ||
+        typeof data.taskId !== "string" ||
+        (data.action !== "start" && data.action !== "stop")
+      ) {
+        return { success: false, error: "Invalid trace request" };
+      }
+      const sessionId = typeof data.sessionId === "string" ? data.sessionId : "default";
+      const tabId = readBrowserTabId(data.tabId);
+      try {
+        const manager = getBrowserSessionManager();
+        const result =
+          data.action === "start"
+            ? await manager.traceStart(data.taskId, sessionId, tabId)
+            : await manager.traceStop(data.taskId, sessionId, tabId);
+        return result || { success: false, error: "No browser tab" };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_SNAPSHOT_GET, (_event, data: Any) => {
+      if (!data || typeof data.taskId !== "string") return null;
+      return getBrowserSessionManager().getSnapshotOverlay(
+        data.taskId,
+        typeof data.sessionId === "string" ? data.sessionId : "default",
+        readBrowserTabId(data.tabId),
+      );
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_LIST, (_event, data: Any) => {
+      if (!data || typeof data.taskId !== "string") return [];
+      return getBrowserWorkbenchService().listPendingPermissions(
+        data.taskId,
+        typeof data.sessionId === "string" ? data.sessionId : "default",
+      );
     });
     ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_SCREENSHOT, async (_event, data: Any) => {
       if (!data || typeof data.taskId !== "string" || typeof data.workspacePath !== "string") {

@@ -145,6 +145,10 @@ function browserToolDisplayName(toolName: string): string {
       return "Browser switch tab";
     case "browser_close_tab":
       return "Browser close tab";
+    case "browser_new_tab":
+      return "Browser new tab";
+    case "browser_history_search":
+      return "Browser history search";
     case "browser_back":
       return "Browser back";
     case "browser_forward":

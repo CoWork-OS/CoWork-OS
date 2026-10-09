@@ -8106,6 +8106,15 @@ function MainContentComponent({
           fingerprint: message.trim().replace(/\s+/g, " ").toLowerCase(),
           messageId,
         };
+        // @Browser opens the visible in-app browser for this task right away.
+        if (
+          selectedIntegrationMentions.some((mention) => mention.id === "builtin:browser-use") &&
+          task &&
+          !remoteSession &&
+          workspace?.path
+        ) {
+          onOpenBrowserWorkbenchSidebar?.();
+        }
         const submission = onSendMessage(
           message,
           imagePayload,

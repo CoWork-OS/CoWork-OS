@@ -2,22 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import {
   Activity,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Camera,
   ChevronDown,
-  ClipboardList,
-  Download,
   ExternalLink,
-  FileSpreadsheet,
-  FormInput,
   Maximize2,
   Mic,
   Minimize2,
   Monitor,
-  MousePointerClick,
   PencilLine,
   Plus,
-  Repeat,
+  RotateCw,
   ScanLine,
   Search,
   Smartphone,
@@ -40,9 +37,50 @@ import { hasHostMethod } from "../host/browser-capabilities";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
+import { type BrowserShortcutCommand, matchBrowserShortcut } from "../../shared/browser-shortcuts";
+import { BrowserTabNotice } from "./BrowserWorkbench/BrowserTabNotice";
+import {
+  type BrowserFindResult,
+  type BrowserTabHandle,
+  BrowserTabView,
+} from "./BrowserWorkbench/BrowserTabView";
+import { browserTabsStorageKey } from "./BrowserWorkbench/browser-tabs-model";
+import { stepZoomLevel } from "./BrowserWorkbench/browser-zoom";
+import { DiagnosticsDrawer } from "./BrowserWorkbench/DiagnosticsDrawer";
+import { FindBar, type FindBarHandle } from "./BrowserWorkbench/FindBar";
+import { NewTabPage } from "./BrowserWorkbench/NewTabPage";
+import { Omnibox, type OmniboxHandle } from "./BrowserWorkbench/Omnibox";
+import { buildSearchUrl } from "./BrowserWorkbench/omnibox-input";
+import { SnapshotOverlay } from "./BrowserWorkbench/SnapshotOverlay";
+import { TabStrip, type TabMenuCommand } from "./BrowserWorkbench/TabStrip";
+import {
+  type BrowserPermissionChoice,
+  type BrowserPermissionPromptRequest,
+  PermissionPrompt,
+} from "./BrowserWorkbench/PermissionPrompt";
+import { useBrowserTabs } from "./BrowserWorkbench/useBrowserTabs";
+import {
+  AgentDrivingBanner,
+  AgentDrivingShield,
+  SignInBanner,
+  useAgentDriving,
+} from "./BrowserWorkbench/AgentDrivingBanner";
+import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
+import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
+import { type AdjustChanges, describeAdjustChanges } from "./BrowserWorkbench/adjust-changes";
+import { ProfileMenu } from "./BrowserWorkbench/ProfileMenu";
+import { useBrowserSettings } from "../hooks/useBrowserSettings";
 import "./artifact-viewers.css";
 
 type BrowserWorkbenchMode = "sidebar" | "fullscreen";
+type BrowserWorkbenchContextActionPayload = {
+  tabId: string;
+  action:
+    | { kind: "search"; text: string }
+    | { kind: "ask"; text: string; url: string }
+    | { kind: "annotate"; x: number; y: number }
+    | { kind: "screenshot" };
+};
 type BrowserSettingsTab = Any;
 type BrowserAnnotationDraft = {
   dataUrl: string;
@@ -59,11 +97,6 @@ type BrowserCursorState = {
   pulse?: boolean;
   at: number;
 } | null;
-type BrowserWorkbenchTab = {
-  id: string;
-  url: string;
-  title: string;
-};
 type BrowserViewportOverride = {
   width: number;
   height: number;
@@ -90,6 +123,8 @@ type BrowserWorkbenchViewProps = {
   taskId: string;
   sessionId: string;
   initialUrl?: string;
+  /** Changes with each open request (agent, link, title bar), so the same URL can reopen. */
+  openRequestId?: string;
   workspaceId?: string;
   workspacePath?: string;
   mode: BrowserWorkbenchMode;
@@ -130,15 +165,6 @@ function normalizeUrl(rawUrl: string): string {
     return `http://${value}`;
   }
   return `https://${value}`;
-}
-
-function getDomain(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname || url;
-  } catch {
-    return url || "Browser";
-  }
 }
 
 function getExternalBrowserUrl(rawUrl: string): string | null {
@@ -223,101 +249,17 @@ function getPartition(workspaceId?: string): string {
   return `persist:cowork-browser-${safe || "default"}`;
 }
 
-type BrowserCapability = {
-  label: string;
-  hint: string;
-  prompt: string;
-  icon: LucideIcon;
-  accent: string;
-};
-
-const BROWSER_CAPABILITIES: BrowserCapability[] = [
-  {
-    label: "Research a topic",
-    hint: "Search, read across sources, summarize",
-    prompt:
-      "Use the in-app browser to research the latest news on a topic of my choosing. Open the top 5 results, read each page, and summarize the key takeaways with citations. Ask me what topic to research first.",
-    icon: Search,
-    accent: "#4f46e5",
-  },
-  {
-    label: "Extract data into a sheet",
-    hint: "Scrape tables and lists from any page",
-    prompt:
-      "Open a URL I'll give you in the in-app browser, then extract the main table or list of items into a spreadsheet in this workspace. Ask me for the URL and what fields to capture.",
-    icon: FileSpreadsheet,
-    accent: "#059669",
-  },
-  {
-    label: "Fill out a form",
-    hint: "Navigate, type, click, submit",
-    prompt:
-      "Open a form URL I'll provide in the in-app browser and help me fill it in step by step. Ask me which form and what values to enter, then walk through each field.",
-    icon: FormInput,
-    accent: "#0ea5e9",
-  },
-  {
-    label: "Compare across sites",
-    hint: "Visit several pages, build a comparison",
-    prompt:
-      "Browse a few sites I'll name and compare them on dimensions I care about (price, features, reviews). Use the in-app browser to visit each, then report back with a structured comparison.",
-    icon: ClipboardList,
-    accent: "#d97706",
-  },
-  {
-    label: "Capture annotated screenshots",
-    hint: "Visit a page, mark the highlights",
-    prompt:
-      "Open a URL I'll give you in the in-app browser, take a screenshot of the most important section, and save it to this workspace. Ask me what to highlight.",
-    icon: PencilLine,
-    accent: "#db2777",
-  },
-  {
-    label: "Click through a workflow",
-    hint: "Drive multi-step UIs end to end",
-    prompt:
-      "Walk through a multi-step web workflow I'll describe — clicking buttons, filling fields, and waiting for transitions — using the in-app browser. Confirm each step before moving on.",
-    icon: MousePointerClick,
-    accent: "#7c3aed",
-  },
-  {
-    label: "Test responsive layouts",
-    hint: "Check desktop, tablet, and mobile breakpoints",
-    prompt:
-      "Use the in-app browser to test my app at desktop, tablet, and mobile viewport sizes. Click through the main flow at each breakpoint, capture screenshots of any layout issues, and summarize what changed.",
-    icon: Monitor,
-    accent: "#2563eb",
-  },
-  {
-    label: "Watch a page for changes",
-    hint: "Re-check on a schedule",
-    prompt:
-      "Open a page in the in-app browser, capture its current state, and recheck it on a cadence I choose. Tell me when something material changes. Ask me for the URL and what to watch for.",
-    icon: Repeat,
-    accent: "#0891b2",
-  },
-  {
-    label: "Pull data behind a login",
-    hint: "Use the signed-in browser session",
-    prompt:
-      "Use the in-app browser (which keeps me logged in) to open a dashboard or service I'll name and pull out the metrics I care about. Ask me for the URL and which numbers to grab.",
-    icon: ScanLine,
-    accent: "#ea580c",
-  },
-];
-
 const VIEWPORT_PRESETS = [
   { label: "Desktop", width: 1440, height: 900, mobile: false, icon: Monitor },
   { label: "Tablet", width: 768, height: 1024, mobile: true, icon: Tablet },
   { label: "Mobile", width: 390, height: 844, mobile: true, icon: Smartphone },
 ] satisfies Array<BrowserViewportOverride & { icon: LucideIcon }>;
 
-const webviewPopupProps = { allowpopups: "true" } as Any;
-
 export function BrowserWorkbenchView({
   taskId,
   sessionId,
   initialUrl,
+  openRequestId,
   workspaceId,
   workspacePath,
   mode,
@@ -337,32 +279,64 @@ export function BrowserWorkbenchView({
   turnContext,
 }: BrowserWorkbenchViewProps) {
   const initialNavigationUrl = normalizeUrl(initialUrl || "");
-  const webviewRef = useRef<Any>(null);
-  const guardedKeyRef = useRef<string | null>(null);
-  const [guardedKey, setGuardedKey] = useState<string | null>(null);
+  const {
+    settings: browserSettings,
+    loaded: browserSettingsLoaded,
+    save: saveBrowserSettings,
+  } = useBrowserSettings();
+  const {
+    tabs,
+    activeTabId,
+    activeTab,
+    openTab,
+    closeTab,
+    activateTab,
+    updateTab,
+    reloadCrashedTab,
+    reopenClosedTab,
+    moveTab,
+    closeTabs,
+    togglePinTab,
+    canReopenClosed,
+    closedTabs,
+  } = useBrowserTabs(
+    browserTabsStorageKey(workspaceId, taskId, sessionId),
+    initialNavigationUrl,
+    // Settings load asynchronously; until then restore (the default).
+    !browserSettingsLoaded || browserSettings.restoreTabs,
+  );
+  const searchEngine = browserSettings.searchEngine;
+  const drivingState = useAgentDriving(taskId, sessionId);
+  const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  const [historyMatches, setHistoryMatches] = useState<Array<{ url: string; title: string }>>([]);
+  const [recentHistory, setRecentHistory] = useState<Array<{ url: string; title: string }>>([]);
+  const historyQueryRef = useRef(0);
+  const tabHandlesRef = useRef(new Map<string, BrowserTabHandle>());
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const annotationImageRef = useRef<HTMLImageElement | null>(null);
   const annotationCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const annotationDrawingRef = useRef(false);
   const lastAnnotationInspectAtRef = useRef(0);
   const liveAnnotationInspectRequestIdRef = useRef(0);
-  const webviewDomReadyRef = useRef(false);
-  const registeredWebContentsIdRef = useRef<number | null>(null);
-  const activeUrlRef = useRef(initialNavigationUrl);
-  const titleRef = useRef("");
+  const activeUrl = activeTab?.url || "";
+  const title = activeTab?.title || "";
+  const isLoading = activeTab?.loading === true;
+  const activeUrlRef = useRef(activeUrl);
+  const titleRef = useRef(title);
+  activeUrlRef.current = activeUrl;
+  titleRef.current = title;
   const onStatusChangeRef = useRef(onStatusChange);
-  const [urlText, setUrlText] = useState(initialNavigationUrl);
-  const [activeUrl, setActiveUrl] = useState(initialNavigationUrl);
-  const [title, setTitle] = useState("");
-  const [tabs, setTabs] = useState<BrowserWorkbenchTab[]>(() => [
-    {
-      id: "active",
-      url: initialNavigationUrl,
-      title: "",
-    },
-  ]);
-  const [activeTabId, setActiveTabId] = useState("active");
-  const [isLoading, setIsLoading] = useState(false);
+  // The address bar text is owned by the Omnibox; other code reads the current URL.
+  const urlText = activeUrl;
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const omniboxRef = useRef<OmniboxHandle | null>(null);
+  const findBarRef = useRef<FindBarHandle | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findResult, setFindResult] = useState<BrowserFindResult | null>(null);
+
+  const [permissionRequests, setPermissionRequests] = useState<BrowserPermissionPromptRequest[]>(
+    [],
+  );
   const [webviewSize, setWebviewSize] = useState<{ width: number; height: number } | null>(null);
   const [controlledViewport, setControlledViewport] = useState<BrowserViewportOverride | null>(
     null,
@@ -394,10 +368,6 @@ export function BrowserWorkbenchView({
   const [youtubeAskBusy, setYoutubeAskBusy] = useState(false);
   const [youtubeAskResult, setYoutubeAskResult] = useState<YouTubeAskState>(null);
   const partition = useMemo(() => getPartition(workspaceId), [workspaceId]);
-  const activeTab = useMemo(
-    () => tabs.find((tab) => tab.id === activeTabId) || tabs[0],
-    [activeTabId, tabs],
-  );
   const viewportSize = useMemo(
     () =>
       controlledViewport
@@ -405,17 +375,11 @@ export function BrowserWorkbenchView({
         : webviewSize,
     [controlledViewport, webviewSize],
   );
-  const displayTitle = title || getDomain(activeUrl) || "Browser";
-  const tabLabel = title || getDomain(activeUrl) || "about:blank";
   const fullscreenLabel =
     mode === "fullscreen" ? "Exit full screen" : "Open browser workbench in full screen";
-  const webviewKey = `${partition}:${activeTabId}`;
   const visibleWebviewSize =
-    activeUrl && viewportSize && viewportSize.width > 0 && viewportSize.height > 0
-      ? viewportSize
-      : null;
+    viewportSize && viewportSize.width > 0 && viewportSize.height > 0 ? viewportSize : null;
   const liveAnnotationOverlayTarget = liveAnnotationTarget || liveAnnotationHover;
-  const hasVisibleWebview = Boolean(visibleWebviewSize);
   const activeIsYouTube = Boolean(getYouTubeVideoId(activeUrl || urlText));
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
@@ -447,6 +411,9 @@ export function BrowserWorkbenchView({
         const nextHeight =
           measuredHeight > 360 ? measuredHeight : Math.max(measuredHeight, availableHeight);
         setWebviewSize((current) => {
+          // A collapsed surface (dock moving between sidebar and full view) keeps the
+          // last size: dropping to null would unmount every tab's webview.
+          if (current && (nextWidth <= 0 || nextHeight <= 0)) return current;
           if (current?.width === nextWidth && current.height === nextHeight) return current;
           return { width: nextWidth, height: nextHeight };
         });
@@ -464,304 +431,514 @@ export function BrowserWorkbenchView({
   }, []);
 
   useEffect(() => {
+    onStatusChangeRef.current?.({ url: activeUrl, title });
+  }, [activeUrl, title]);
+
+  // Tools act on the tab the user is looking at.
+  useEffect(() => {
+    void window.electronAPI.activateBrowserWorkbenchTab?.({
+      taskId,
+      sessionId,
+      tabId: activeTabId,
+    });
+  }, [activeTabId, sessionId, taskId]);
+
+  // An open request (agent, chat link, title bar) brings its URL into view: an
+  // existing tab already showing it, the blank active tab, or a new tab.
+  const handledOpenRequestRef = useRef<string | null>(null);
+  useEffect(() => {
+    const requestKey = `${openRequestId || ""}|${initialUrl || ""}`;
+    if (handledOpenRequestRef.current === requestKey) return;
+    const isFirstRequest = handledOpenRequestRef.current === null;
+    handledOpenRequestRef.current = requestKey;
     if (!initialUrl) return;
     const normalized = normalizeUrl(initialUrl);
     if (!normalized) {
       setToolbarNotice("Only http:// and https:// URLs are supported");
       return;
     }
-    setToolbarNotice("");
-    setUrlText(normalized);
-    setActiveUrl(normalized);
-    activeUrlRef.current = normalized;
-    setTabs((current) =>
-      current.map((tab, index) => (index === 0 ? { ...tab, url: normalized } : tab)),
-    );
-  }, [initialUrl]);
-
-  const getReadyWebContentsId = useCallback((webview: Any): number | undefined => {
-    if (!webviewDomReadyRef.current) return undefined;
-    if (!webview || typeof webview.getWebContentsId !== "function") return undefined;
-    try {
-      const webContentsId = webview.getWebContentsId();
-      return typeof webContentsId === "number" ? webContentsId : undefined;
-    } catch {
-      return undefined;
+    const existing = tabs.find((tab) => tab.url === normalized || tab.initialUrl === normalized);
+    if (existing) {
+      activateTab(existing.id);
+      return;
     }
-  }, []);
-
-  const notifyStatus = useCallback(() => {
-    const webview = webviewRef.current;
-    const webContentsId = getReadyWebContentsId(webview);
-    if (typeof webContentsId !== "number" || guardedKeyRef.current !== webviewKey) return;
-    const nextUrl = typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
-    const nextTitle =
-      typeof webview?.getTitle === "function" ? webview.getTitle() : titleRef.current;
-    void window.electronAPI.updateBrowserWorkbenchStatus?.({
-      taskId,
-      sessionId,
-      webContentsId,
-      url: nextUrl,
-      title: nextTitle,
-    });
-    onStatusChangeRef.current?.({ url: nextUrl, title: nextTitle });
-  }, [getReadyWebContentsId, sessionId, taskId, webviewKey]);
-
-  const registerSession = useCallback(async () => {
-    const webview = webviewRef.current;
-    const webContentsId = getReadyWebContentsId(webview);
-    if (typeof webContentsId !== "number") return;
-    registeredWebContentsIdRef.current = webContentsId;
-    const nextUrl = typeof webview?.getURL === "function" ? webview.getURL() : activeUrlRef.current;
-    const nextTitle =
-      typeof webview?.getTitle === "function" ? webview.getTitle() : titleRef.current;
-    if (!window.electronAPI.registerBrowserWorkbenchSession) return;
-    try {
-      await window.electronAPI.registerBrowserWorkbenchSession({
-        taskId,
-        sessionId,
-        webContentsId,
-        url: nextUrl,
-        title: nextTitle,
-      });
-      if (webviewRef.current !== webview) return;
-      guardedKeyRef.current = webviewKey;
-      setGuardedKey(webviewKey);
-    } catch {
-      setToolbarNotice("Browser network guards could not be installed.");
+    if (isFirstRequest && tabs.length === 1 && !tabs[0].url && !tabs[0].initialUrl) {
+      updateTab(tabs[0].id, { url: normalized, initialUrl: normalized });
+      return;
     }
-  }, [getReadyWebContentsId, sessionId, taskId, webviewKey]);
+    if (!activeTab.url && !activeTab.initialUrl) {
+      tabHandlesRef.current.get(activeTab.id)?.navigate(normalized);
+      return;
+    }
+    openTab({ url: normalized });
+    // Only a new request should open anything; tab changes must not replay it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUrl, openRequestId]);
 
-  const updateActiveTab = useCallback(
-    (patch: Partial<BrowserWorkbenchTab>) => {
-      setTabs((current) =>
-        current.map((tab) =>
-          tab.id === activeTabId
-            ? {
-                ...tab,
-                ...patch,
-              }
-            : tab,
-        ),
-      );
-    },
-    [activeTabId],
-  );
-
-  const openTab = useCallback((url = "") => {
-    const id = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const normalized = url ? normalizeUrl(url) : "";
-    setTabs((current) => [...current, { id, url: normalized, title: "" }]);
-    setActiveTabId(id);
-    setUrlText(normalized);
-    setActiveUrl(normalized);
-    activeUrlRef.current = normalized;
-    titleRef.current = "";
-    setTitle("");
+  const registerTabHandle = useCallback((tabId: string, handle: BrowserTabHandle | null) => {
+    if (handle) tabHandlesRef.current.set(tabId, handle);
+    else tabHandlesRef.current.delete(tabId);
   }, []);
 
-  const switchTab = useCallback((tab: BrowserWorkbenchTab) => {
-    setActiveTabId(tab.id);
-    setUrlText(tab.url);
-    setActiveUrl(tab.url);
-    setTitle(tab.title);
-    activeUrlRef.current = tab.url;
-    titleRef.current = tab.title;
-  }, []);
-
-  const closeTab = useCallback(
-    (tabId: string) => {
-      setTabs((current) => {
-        if (current.length <= 1) return current;
-        const next = current.filter((tab) => tab.id !== tabId);
-        if (tabId === activeTabId) {
-          const fallback = next[next.length - 1] || next[0];
-          if (fallback) {
-            setActiveTabId(fallback.id);
-            setUrlText(fallback.url);
-            setActiveUrl(fallback.url);
-            setTitle(fallback.title);
-            activeUrlRef.current = fallback.url;
-            titleRef.current = fallback.title;
-          }
-        }
-        return next;
-      });
-    },
-    [activeTabId],
-  );
-
-  const applyWebviewBounds = useCallback(
-    (size = visibleWebviewSize) => {
-      const webview = webviewRef.current;
-      if (!webview || !size || size.width <= 0 || size.height <= 0) return;
-      const width = String(size.width);
-      const height = String(size.height);
-      webview.style.width = `${width}px`;
-      webview.style.height = `${height}px`;
-      webview.setAttribute("width", width);
-      webview.setAttribute("height", height);
-      webview.setAttribute("autosize", "true");
-      webview.setAttribute("minwidth", width);
-      webview.setAttribute("maxwidth", width);
-      webview.setAttribute("minheight", height);
-      webview.setAttribute("maxheight", height);
-    },
-    [visibleWebviewSize],
-  );
-
-  useEffect(() => {
-    applyWebviewBounds();
-  }, [applyWebviewBounds]);
-
-  useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-    const handleNavigate = (event: Any) => {
-      const nextUrl = event?.url || webview.getURL?.() || "";
-      if (nextUrl === "about:blank" && guardedKeyRef.current !== webviewKey) return;
-      activeUrlRef.current = nextUrl;
-      setUrlText(nextUrl);
-      setActiveUrl(nextUrl);
-      updateActiveTab({ url: nextUrl });
-      notifyStatus();
-    };
-    const handleTitle = (event: Any) => {
-      const nextTitle = event?.title || webview.getTitle?.() || "";
-      titleRef.current = nextTitle;
-      setTitle(nextTitle);
-      updateActiveTab({ title: nextTitle });
-      notifyStatus();
-    };
-    const handleLoadingStart = () => setIsLoading(true);
-    const handleLoadingStop = () => {
-      setIsLoading(false);
-      notifyStatus();
-    };
-    const handleDomReady = () => {
-      webviewDomReadyRef.current = true;
-      applyWebviewBounds();
-      registerSession();
-    };
-    const handleNewWindow = (event: Any) => {
-      const nextUrl = event?.url || "";
-      event?.preventDefault?.();
-      if (nextUrl) openTab(nextUrl);
-    };
-    const handleRenderProcessGone = (event: Any) => {
-      const reason = String(event?.reason || event?.details?.reason || "unknown");
-      const webContentsId = registeredWebContentsIdRef.current;
-      if (typeof webContentsId === "number") {
-        void window.electronAPI.unregisterBrowserWorkbenchSession?.({
-          taskId,
-          sessionId,
-          webContentsId,
-        });
-      }
-      registeredWebContentsIdRef.current = null;
-      guardedKeyRef.current = null;
-      setGuardedKey(null);
-      webviewDomReadyRef.current = false;
-      activeUrlRef.current = "";
-      titleRef.current = "";
-      setIsLoading(false);
-      setActiveUrl("");
-      setTitle("");
-      updateActiveTab({ url: "", title: "" });
-      setToolbarNotice(
-        reason === "clean-exit" ? "Page closed" : "Page crashed — retry or enter another URL",
-      );
-      onStatusChangeRef.current?.({ url: "", title: "" });
-    };
-    webview.addEventListener("dom-ready", handleDomReady);
-    webview.addEventListener("did-navigate", handleNavigate);
-    webview.addEventListener("did-navigate-in-page", handleNavigate);
-    webview.addEventListener("page-title-updated", handleTitle);
-    webview.addEventListener("did-start-loading", handleLoadingStart);
-    webview.addEventListener("did-stop-loading", handleLoadingStop);
-    webview.addEventListener("new-window", handleNewWindow);
-    webview.addEventListener("render-process-gone", handleRenderProcessGone);
-    const readyFrame = window.requestAnimationFrame(() => {
-      if (webviewDomReadyRef.current) return;
+  /** User-chosen URLs go through the main process: local dev servers get allowed, blocks get explained. */
+  const checkUserNavigation = useCallback(
+    async (tabId: string, url: string): Promise<boolean> => {
+      const check = window.electronAPI.browserWorkbenchUserNavigate;
+      if (!check) return true;
       try {
-        if (
-          typeof webview.getWebContentsId === "function" &&
-          typeof webview.getWebContentsId() === "number"
-        ) {
-          handleDomReady();
-        }
+        const result = await check({ taskId, sessionId, tabId, url });
+        if (result.allowed) return true;
+        updateTab(tabId, {
+          url: result.url || url,
+          loading: false,
+          blocked: {
+            url: result.url || url,
+            reason: result.block?.reason || "policy",
+            detail: result.block?.detail,
+          },
+        });
+        return false;
       } catch {
-        // The webview may not be attached yet; the dom-ready listener will handle registration.
+        return true;
       }
+    },
+    [sessionId, taskId, updateTab],
+  );
+
+  const handleTabStatus = useCallback(
+    (tabId: string, status: { url: string; title: string }) => {
+      if (tabId !== activeTabId) return;
+      onStatusChangeRef.current?.(status);
+    },
+    [activeTabId],
+  );
+
+  const handleGuardFailed = useCallback((tabId: string) => {
+    if (tabId) setToolbarNotice("Browser network guards could not be installed.");
+  }, []);
+
+  // Main-process tab commands: tabs opened by pages and tools, tool tab switches and closes.
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchTabCommand?.((command) => {
+      if (command.taskId !== taskId || command.sessionId !== sessionId) return;
+      if (command.command === "open") {
+        openTab({
+          id: command.tabId,
+          url: command.url ? normalizeUrl(command.url) || command.url : "",
+          background: command.background === true,
+          openerTabId: command.openerTabId,
+          openedByAgent: true,
+        });
+      } else if (command.command === "activate") {
+        activateTab(command.tabId);
+      } else if (command.command === "close") {
+        closeTab(command.tabId);
+      }
+    });
+    return () => unsubscribe?.();
+  }, [activateTab, closeTab, openTab, sessionId, taskId]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchNavigationBlocked?.((event) => {
+      if (event.taskId !== taskId || event.sessionId !== sessionId) return;
+      updateTab(event.tabId, {
+        loading: false,
+        loadError: undefined,
+        blocked: { url: event.url, reason: event.reason, detail: event.detail },
+      });
+    });
+    return () => unsubscribe?.();
+  }, [sessionId, taskId, updateTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const addRequest = (prompt: BrowserPermissionPromptRequest) =>
+      setPermissionRequests((current) =>
+        current.some((request) => request.requestId === prompt.requestId)
+          ? current
+          : [...current, prompt],
+      );
+    void window.electronAPI
+      .listBrowserWorkbenchPermissionRequests?.({ taskId, sessionId })
+      .then((pending) => {
+        if (!cancelled) for (const prompt of pending || []) addRequest(prompt);
+      })
+      .catch(() => undefined);
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchPermissionRequest?.((prompt) => {
+      if (prompt.taskId !== taskId || prompt.sessionId !== sessionId) return;
+      addRequest(prompt);
     });
     return () => {
-      window.cancelAnimationFrame(readyFrame);
-      const webContentsId = registeredWebContentsIdRef.current;
-      if (typeof webContentsId === "number") {
-        void window.electronAPI.unregisterBrowserWorkbenchSession?.({
-          taskId,
-          sessionId,
-          webContentsId,
-        });
-      }
-      registeredWebContentsIdRef.current = null;
-      guardedKeyRef.current = null;
-      setGuardedKey(null);
-      webviewDomReadyRef.current = false;
-      webview.removeEventListener("dom-ready", handleDomReady);
-      webview.removeEventListener("did-navigate", handleNavigate);
-      webview.removeEventListener("did-navigate-in-page", handleNavigate);
-      webview.removeEventListener("page-title-updated", handleTitle);
-      webview.removeEventListener("did-start-loading", handleLoadingStart);
-      webview.removeEventListener("did-stop-loading", handleLoadingStop);
-      webview.removeEventListener("new-window", handleNewWindow);
-      webview.removeEventListener("render-process-gone", handleRenderProcessGone);
+      cancelled = true;
+      unsubscribe?.();
     };
-  }, [
-    applyWebviewBounds,
-    hasVisibleWebview,
-    notifyStatus,
-    openTab,
-    registerSession,
-    sessionId,
-    taskId,
-    updateActiveTab,
-    webviewKey,
-  ]);
+  }, [sessionId, taskId]);
+
+  const respondToPermission = useCallback((requestId: string, choice: BrowserPermissionChoice) => {
+    setPermissionRequests((current) =>
+      current.filter((request) => request.requestId !== requestId),
+    );
+    void window.electronAPI
+      .respondBrowserWorkbenchPermission?.({ requestId, response: choice })
+      .catch(() => undefined);
+  }, []);
 
   const navigate = useCallback(
     (nextUrl = urlText) => {
       const normalized = normalizeUrl(nextUrl);
       if (!normalized) {
-        setIsLoading(false);
         setToolbarNotice("Only http:// and https:// URLs are supported");
         return;
       }
       setToolbarNotice("");
-      activeUrlRef.current = normalized;
-      setUrlText(normalized);
-      setActiveUrl(normalized);
-      updateActiveTab({ url: normalized });
+      const handle = tabHandlesRef.current.get(activeTabId);
+      if (handle) {
+        if (!activeTab.url) updateTab(activeTabId, { url: normalized });
+        handle.navigate(normalized);
+      } else {
+        updateTab(activeTabId, { url: normalized, initialUrl: normalized });
+      }
     },
-    [updateActiveTab, urlText],
+    [activeTab.url, activeTabId, updateTab, urlText],
   );
 
-  const runWebviewCommand = useCallback((command: "goBack" | "goForward" | "reload") => {
-    const webview = webviewRef.current;
-    if (!webview || typeof webview[command] !== "function") return;
+  const runWebviewCommand = useCallback(
+    (command: "goBack" | "goForward" | "reload" | "stop") => {
+      tabHandlesRef.current.get(activeTabId)?.[command]();
+    },
+    [activeTabId],
+  );
+
+  const openNewTab = useCallback(
+    (url = "", afterTabId?: string) => {
+      openTab({ url, afterTabId });
+      // A blank tab starts in the address bar, like a browser.
+      if (!url) window.requestAnimationFrame(() => omniboxRef.current?.focusAndSelect());
+    },
+    [openTab],
+  );
+
+  const closeFind = useCallback(() => {
+    tabHandlesRef.current.get(activeTabId)?.stopFind();
+    setFindOpen(false);
+    setFindResult(null);
+  }, [activeTabId]);
+
+  // Find state belongs to one tab: switching tabs closes it.
+  useEffect(() => {
+    setFindOpen(false);
+    setFindResult(null);
+  }, [activeTabId]);
+
+  const handleFindResult = useCallback((tabId: string, result: BrowserFindResult) => {
+    setFindResult((current) =>
+      current?.activeMatchOrdinal === result.activeMatchOrdinal &&
+      current.matches === result.matches
+        ? current
+        : result,
+    );
+    void tabId;
+  }, []);
+
+  const handleTabMenuCommand = useCallback(
+    (tabId: string, command: TabMenuCommand) => {
+      const tab = tabs.find((candidate) => candidate.id === tabId);
+      if (!tab) return;
+      const index = tabs.indexOf(tab);
+      switch (command) {
+        case "new-tab-right":
+          openNewTab("", tabId);
+          break;
+        case "reload":
+          tabHandlesRef.current.get(tabId)?.reload();
+          break;
+        case "duplicate":
+          if (tab.url) openTab({ url: tab.url, afterTabId: tabId });
+          break;
+        case "toggle-pin":
+          togglePinTab(tabId);
+          break;
+        case "toggle-mute":
+          tabHandlesRef.current.get(tabId)?.setAudioMuted(!tab.muted);
+          break;
+        case "close":
+          closeTab(tabId);
+          break;
+        case "close-others":
+          closeTabs(
+            tabs
+              .filter((candidate) => candidate.id !== tabId && !candidate.pinned)
+              .map((candidate) => candidate.id),
+          );
+          break;
+        case "close-right":
+          closeTabs(
+            tabs
+              .slice(index + 1)
+              .filter((candidate) => !candidate.pinned)
+              .map((candidate) => candidate.id),
+          );
+          break;
+        case "reopen-closed":
+          reopenClosedTab();
+          break;
+      }
+    },
+    [closeTab, closeTabs, openNewTab, openTab, reopenClosedTab, tabs, togglePinTab],
+  );
+
+  const runShortcut = useCallback(
+    (command: BrowserShortcutCommand) => {
+      const handle = tabHandlesRef.current.get(activeTabId);
+      const selectIndex = (index: number) => {
+        const target = tabs[index];
+        if (target) activateTab(target.id);
+      };
+      const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+      switch (command) {
+        case "new-tab":
+          openNewTab();
+          break;
+        case "close-tab":
+          closeTab(activeTabId);
+          break;
+        case "reopen-tab":
+          reopenClosedTab();
+          break;
+        case "next-tab":
+          selectIndex((activeIndex + 1) % tabs.length);
+          break;
+        case "previous-tab":
+          selectIndex((activeIndex - 1 + tabs.length) % tabs.length);
+          break;
+        case "select-last-tab":
+          selectIndex(tabs.length - 1);
+          break;
+        case "focus-address":
+          omniboxRef.current?.focusAndSelect();
+          break;
+        case "reload":
+          handle?.reload();
+          break;
+        case "hard-reload":
+          handle?.hardReload();
+          break;
+        case "back":
+          handle?.goBack();
+          break;
+        case "forward":
+          handle?.goForward();
+          break;
+        case "find":
+          // Leave the address bar first so typing goes to the find field.
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          setFindOpen(true);
+          window.requestAnimationFrame(() => findBarRef.current?.focus());
+          break;
+        case "find-next":
+        case "find-previous":
+          if (findOpen) findBarRef.current?.findNext(command === "find-next");
+          else setFindOpen(true);
+          break;
+        case "zoom-in":
+          handle?.setZoomLevel(stepZoomLevel(activeTab.zoomLevel, 1));
+          break;
+        case "zoom-out":
+          handle?.setZoomLevel(stepZoomLevel(activeTab.zoomLevel, -1));
+          break;
+        case "zoom-reset":
+          handle?.setZoomLevel(0);
+          break;
+        case "toggle-full-view":
+          if (mode === "fullscreen") onExitFullscreen();
+          else onFullscreen();
+          break;
+        default: {
+          const digit = /^select-tab-(\d)$/.exec(command)?.[1];
+          if (digit) selectIndex(Number(digit) - 1);
+        }
+      }
+    },
+    [
+      activateTab,
+      activeTab.zoomLevel,
+      activeTabId,
+      closeTab,
+      findOpen,
+      mode,
+      onExitFullscreen,
+      onFullscreen,
+      openNewTab,
+      reopenClosedTab,
+      tabs,
+    ],
+  );
+
+  const runShortcutRef = useRef(runShortcut);
+  runShortcutRef.current = runShortcut;
+  const pointerInsideRef = useRef(false);
+
+  // Shortcuts come from the main process: pressed in a page of this workbench, or
+  // in the workbench chrome (main intercepts them there before the app menu).
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchShortcut?.((event) => {
+      if (event.taskId) {
+        if (event.taskId !== taskId || event.sessionId !== sessionId) return;
+      } else {
+        const section = sectionRef.current;
+        const focused = Boolean(section && section.contains(document.activeElement));
+        if (!focused && !(event.gesture && pointerInsideRef.current)) return;
+      }
+      runShortcutRef.current(event.command);
+    });
+    return () => unsubscribe?.();
+  }, [sessionId, taskId]);
+
+  // Fallback for chrome shortcuts the main process did not intercept (focus
+  // reported late, or input that bypasses before-input-event). When main does
+  // intercept, the key never reaches the renderer, so nothing runs twice.
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const platform = /mac/i.test(navigator.platform) ? "darwin" : "other";
+    const onKeyDown = (event: KeyboardEvent) => {
+      const command = matchBrowserShortcut(
+        {
+          key: event.key,
+          code: event.code,
+          ctrl: event.ctrlKey,
+          meta: event.metaKey,
+          shift: event.shiftKey,
+          alt: event.altKey,
+        },
+        platform,
+      );
+      if (!command) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runShortcutRef.current(command);
+    };
+    section.addEventListener("keydown", onKeyDown, true);
+    return () => section.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
+  // Tell the main process when keyboard focus is in the workbench chrome.
+  useEffect(() => {
+    const section = sectionRef.current;
+    const setFocus = window.electronAPI.setBrowserWorkbenchFocus;
+    if (!section || !setFocus) return;
+    let focused = false;
+    const update = () => {
+      const next = section.contains(document.activeElement);
+      if (next === focused) return;
+      focused = next;
+      void setFocus(next).catch(() => undefined);
+    };
+    const onFocusOut = () => window.setTimeout(update, 0);
+    section.addEventListener("focusin", update);
+    section.addEventListener("focusout", onFocusOut);
+    return () => {
+      section.removeEventListener("focusin", update);
+      section.removeEventListener("focusout", onFocusOut);
+      if (focused) void setFocus(false).catch(() => undefined);
+    };
+  }, []);
+
+  const omniboxSource = useMemo(
+    () => ({
+      tabs: tabs
+        .filter((tab) => tab.id !== activeTabId && tab.url)
+        .map((tab) => ({ id: tab.id, url: tab.url, title: tab.title })),
+      // History matches first, then recently closed tabs.
+      pages: [
+        ...historyMatches,
+        ...[...closedTabs].reverse().map((page) => ({ url: page.url, title: page.title })),
+      ],
+    }),
+    [activeTabId, closedTabs, historyMatches, tabs],
+  );
+
+  const handleOmniboxQuery = useCallback(
+    (text: string) => {
+      const query = text.trim();
+      const requestId = historyQueryRef.current + 1;
+      historyQueryRef.current = requestId;
+      if (!query || !workspaceId || !window.electronAPI.searchBrowserHistory) {
+        setHistoryMatches([]);
+        return;
+      }
+      window.setTimeout(() => {
+        if (historyQueryRef.current !== requestId) return;
+        void window.electronAPI
+          .searchBrowserHistory({ workspaceId, query, limit: 6 })
+          .then((entries) => {
+            if (historyQueryRef.current !== requestId) return;
+            setHistoryMatches(
+              (entries || []).map((entry) => ({ url: entry.url, title: entry.title })),
+            );
+          })
+          .catch(() => undefined);
+      }, 120);
+    },
+    [workspaceId],
+  );
+
+  // The new-tab page lists recent pages from history.
+  useEffect(() => {
+    if (activeUrl || !workspaceId || !window.electronAPI.listBrowserHistory) return;
+    let cancelled = false;
+    void window.electronAPI
+      .listBrowserHistory({ workspaceId, limit: 8 })
+      .then((entries) => {
+        if (!cancelled) {
+          setRecentHistory(
+            (entries || []).map((entry) => ({ url: entry.url, title: entry.title })),
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTabId, activeUrl, workspaceId]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchSignInRequired?.((event) => {
+      if (event.taskId !== taskId || event.sessionId !== sessionId) return;
+      if (event.tabId) activateTab(event.tabId);
+      setSignInUrl(event.url);
+    });
+    return () => unsubscribe?.();
+  }, [activateTab, sessionId, taskId]);
+
+  const copySnapshotRef = useCallback((ref: string) => {
+    void navigator.clipboard
+      ?.writeText(ref)
+      .then(() => setToolbarNotice(`Copied ${ref}`))
+      .catch(() => setToolbarNotice("Copy failed"));
+  }, []);
+
+  const retryActiveTab = useCallback(() => {
+    const failedUrl = activeTab.blocked?.url || activeTab.loadError?.url || activeTab.url;
+    if (failedUrl) tabHandlesRef.current.get(activeTabId)?.navigate(failedUrl);
+  }, [activeTab, activeTabId]);
+
+  const openUrlExternal = useCallback(async (url: string) => {
+    const externalUrl = getExternalBrowserUrl(url);
+    if (!externalUrl) {
+      setToolbarNotice("No external page");
+      return;
+    }
     try {
-      webview[command]();
-    } catch {
-      // The Electron webview throws if commands run during attach/navigation teardown.
+      await window.electronAPI.openExternal(externalUrl);
+      setToolbarNotice("Opened externally");
+    } catch (error) {
+      setToolbarNotice(error instanceof Error ? error.message : "Open failed");
     }
   }, []);
 
   const openCurrentPageExternal = useCallback(async () => {
-    const webview = webviewRef.current;
-    const currentUrl =
-      typeof webview?.getURL === "function"
-        ? webview.getURL()
-        : activeUrlRef.current || activeUrl || urlText;
+    const currentUrl = activeUrlRef.current || activeUrl || urlText;
     const externalUrl =
       getExternalBrowserUrl(currentUrl || "") ||
       getExternalBrowserUrl(activeUrl || "") ||
@@ -1146,7 +1323,82 @@ export function BrowserWorkbenchView({
     setLiveAnnotationHover(null);
     setLiveAnnotationText("");
     setLiveAnnotationError("");
+    setAdjustOpen(false);
+    setAdjustChanges(null);
+    adjustBeforePathRef.current = undefined;
   }, []);
+
+  // Annotate an area: drag on the annotation layer instead of clicking an element.
+  const annotationDragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const [annotationArea, setAnnotationArea] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustChanges, setAdjustChanges] = useState<AdjustChanges | null>(null);
+  const adjustBeforePathRef = useRef<string | undefined>(undefined);
+
+  const layerPoint = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  };
+
+  const finishAnnotationArea = useCallback(
+    async (area: { x: number; y: number; width: number; height: number }) => {
+      const result = await window.electronAPI
+        .inspectBrowserWorkbenchArea?.({ taskId, sessionId, rect: area })
+        .catch(() => null);
+      setAnnotationArea(null);
+      if (!result?.success || !result.area) {
+        setLiveAnnotationError("Nothing to annotate in that area.");
+        return;
+      }
+      const elements = result.area.elements || [];
+      setLiveAnnotationTarget(
+        buildBrowserAnnotationTarget({
+          rect: result.area.rect,
+          scroll: result.area.scroll,
+          tagName: "area",
+          selector: elements[0]?.selector,
+          textQuote: elements
+            .map((element) => element.textQuote)
+            .filter(Boolean)
+            .join(" · ")
+            .slice(0, 300),
+          elements: elements.map((element) => ({
+            selector: element.selector,
+            tagName: element.tagName,
+            role: element.role,
+            accessibleName: element.accessibleName,
+            textQuote: element.textQuote,
+          })),
+        }),
+      );
+      setLiveAnnotationHover(null);
+      setLiveAnnotationText("");
+      setLiveAnnotationError("");
+    },
+    [buildBrowserAnnotationTarget, sessionId, taskId],
+  );
+
+  const openAdjust = useCallback(async () => {
+    setAdjustOpen(true);
+    setAdjustChanges(null);
+    // A "before" screenshot, so CoWork sees the change it is asked to make.
+    if (workspacePath && window.electronAPI.captureBrowserWorkbenchScreenshot) {
+      const capture = await window.electronAPI
+        .captureBrowserWorkbenchScreenshot({
+          taskId,
+          sessionId,
+          workspacePath,
+          filename: `browser-adjust-before-${Date.now()}.png`,
+        })
+        .catch(() => null);
+      adjustBeforePathRef.current = capture?.success ? capture.fullPath || capture.path : undefined;
+    }
+  }, [sessionId, taskId, workspacePath]);
 
   const saveLiveBrowserAnnotation = useCallback(
     async (sendToAgent: boolean) => {
@@ -1163,7 +1415,21 @@ export function BrowserWorkbenchView({
       setLiveAnnotationError("");
       try {
         let screenshotPath: string | undefined;
-        if (workspacePath && window.electronAPI.captureBrowserWorkbenchScreenshot) {
+        const adjusted =
+          adjustOpen &&
+          adjustChanges &&
+          (Object.keys(adjustChanges.styles).length > 0 || adjustChanges.text);
+        let afterPath: string | undefined;
+        if (adjusted && workspacePath && window.electronAPI.captureBrowserWorkbenchScreenshot) {
+          const after = await window.electronAPI.captureBrowserWorkbenchScreenshot({
+            taskId,
+            sessionId,
+            workspacePath,
+            filename: `browser-adjust-after-${Date.now()}.png`,
+          });
+          afterPath = after?.success ? after.fullPath || after.path : undefined;
+          screenshotPath = adjustBeforePathRef.current;
+        } else if (workspacePath && window.electronAPI.captureBrowserWorkbenchScreenshot) {
           const capture = await window.electronAPI.captureBrowserWorkbenchScreenshot({
             taskId,
             sessionId,
@@ -1175,20 +1441,64 @@ export function BrowserWorkbenchView({
             screenshotPath = capture.fullPath || capture.path;
           }
         }
+        const changeList = adjusted && adjustChanges ? describeAdjustChanges(adjustChanges) : "";
+        const fullBody = changeList
+          ? `${body}\n\nRequested changes (previewed live):\n${changeList}${
+              afterPath
+                ? `\n\nBefore: ${screenshotPath || "(no screenshot)"}\nAfter: ${afterPath}`
+                : ""
+            }`
+          : body;
+        const stylePatch =
+          adjusted && adjustChanges
+            ? {
+                ...(adjustChanges.text ? { text: adjustChanges.text.to } : {}),
+                ...(adjustChanges.styles.color ? { color: adjustChanges.styles.color.to } : {}),
+                ...(adjustChanges.styles.backgroundColor
+                  ? { backgroundColor: adjustChanges.styles.backgroundColor.to }
+                  : {}),
+                ...(adjustChanges.styles.fontFamily
+                  ? { fontFamily: adjustChanges.styles.fontFamily.to }
+                  : {}),
+                ...(adjustChanges.styles.fontSize
+                  ? { fontSize: adjustChanges.styles.fontSize.to }
+                  : {}),
+                ...(adjustChanges.styles.fontWeight
+                  ? { fontWeight: adjustChanges.styles.fontWeight.to }
+                  : {}),
+                ...(adjustChanges.styles.lineHeight
+                  ? { lineHeight: adjustChanges.styles.lineHeight.to }
+                  : {}),
+                ...(adjustChanges.styles.margin ? { margin: adjustChanges.styles.margin.to } : {}),
+                ...(adjustChanges.styles.padding
+                  ? { padding: adjustChanges.styles.padding.to }
+                  : {}),
+                ...(adjustChanges.styles.textAlign
+                  ? { alignment: adjustChanges.styles.textAlign.to }
+                  : {}),
+                ...(adjustChanges.styles.borderRadius
+                  ? { borderRadius: adjustChanges.styles.borderRadius.to }
+                  : {}),
+                ...(afterPath ? { notes: `After screenshot: ${afterPath}` } : {}),
+              }
+            : undefined;
         const created = await window.electronAPI.createAnnotation({
           taskId,
           workspaceId,
           surfaceType: "browser",
           surfaceId: liveAnnotationTarget.url,
-          body,
+          body: fullBody,
           targetRef: liveAnnotationTarget,
           screenshotPath,
+          ...(stylePatch ? { stylePatch } : {}),
         });
         await loadBrowserAnnotations();
         cancelLiveAnnotationTarget();
         setToolbarNotice(sendToAgent ? "Annotation sent" : "Annotation saved");
         if (sendToAgent && onSendMessage) {
-          await onSendMessage(`Address annotation ${created.id}: ${body}`);
+          await onSendMessage(
+            `Address annotation ${created.id}: ${body}${changeList ? `\n${changeList}` : ""}`,
+          );
         }
       } catch (error) {
         setLiveAnnotationError(error instanceof Error ? error.message : "Annotation failed.");
@@ -1197,6 +1507,8 @@ export function BrowserWorkbenchView({
       }
     },
     [
+      adjustChanges,
+      adjustOpen,
       cancelLiveAnnotationTarget,
       liveAnnotationTarget,
       liveAnnotationText,
@@ -1260,6 +1572,45 @@ export function BrowserWorkbenchView({
     return () => window.clearTimeout(timer);
   }, [browserCursor]);
 
+  const contextActionRef = useRef<(event: BrowserWorkbenchContextActionPayload) => void>(() => {});
+  contextActionRef.current = (event) => {
+    const { action } = event;
+    if (action.kind === "search") {
+      openTab({ url: buildSearchUrl(action.text, searchEngine), afterTabId: event.tabId });
+    } else if (action.kind === "ask") {
+      const prompt = `About this text from ${action.url || "the page"}:\n\n> ${action.text
+        .split("\n")
+        .join("\n> ")}\n\n`;
+      if (mode === "fullscreen") {
+        setMessage((current) => (current ? `${current}\n\n${prompt}` : prompt));
+      } else if (onSendMessage) {
+        void onSendMessage(`${prompt}Explain this and tell me what matters here.`);
+      }
+    } else if (action.kind === "screenshot") {
+      void captureScreenshot("screenshot");
+    } else if (action.kind === "annotate") {
+      setLiveAnnotationMode(true);
+      void window.electronAPI
+        .inspectBrowserWorkbenchPoint?.({ taskId, sessionId, x: action.x, y: action.y })
+        .then((result) => {
+          if (!result?.success || !result.target) return;
+          setLiveAnnotationTarget(buildBrowserAnnotationTarget(result.target));
+          setLiveAnnotationHover(null);
+          setLiveAnnotationText("");
+          setLiveAnnotationError("");
+        })
+        .catch(() => undefined);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchContextAction?.((event) => {
+      if (event.taskId !== taskId || event.sessionId !== sessionId) return;
+      contextActionRef.current(event);
+    });
+    return () => unsubscribe?.();
+  }, [sessionId, taskId]);
+
   const handleSend = useCallback(async () => {
     const trimmed = message.trim();
     if (!trimmed || !onSendMessage || sending) return;
@@ -1319,55 +1670,36 @@ export function BrowserWorkbenchView({
 
   return (
     <section
+      ref={sectionRef}
+      onPointerEnter={() => {
+        pointerInsideRef.current = true;
+      }}
+      onPointerLeave={() => {
+        pointerInsideRef.current = false;
+      }}
       className={`browser-workbench browser-workbench-${mode}${
         !activeUrl ? " browser-workbench-newtab-mode" : ""
       }`}
     >
       <header className="browser-workbench-header">
-        <div className="browser-workbench-tabs">
-          <span className="browser-workbench-summary">Summary</span>
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={`browser-workbench-tab-shell ${tab.id === activeTabId ? "is-active" : ""}`}
-            >
-              <button
-                type="button"
-                className="browser-workbench-tab"
-                title={tab.title || tab.url || "New tab"}
-                onClick={() => switchTab(tab)}
-              >
-                <span className="browser-workbench-tab-icon" aria-hidden="true" />
-                <span className="browser-workbench-tab-label">
-                  {tab.id === activeTabId ? tabLabel : tab.title || getDomain(tab.url) || "New tab"}
-                </span>
-              </button>
-              {tabs.length > 1 && (
-                <button
-                  type="button"
-                  className="browser-workbench-tab-close"
-                  aria-label="Close tab"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    closeTab(tab.id);
-                  }}
-                >
-                  <X size={12} aria-hidden="true" />
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            type="button"
-            className="browser-workbench-tab-add"
-            title="New tab"
-            aria-label="New tab"
-            onClick={() => openTab()}
-          >
-            <Plus size={14} aria-hidden="true" />
-          </button>
-        </div>
+        <TabStrip
+          tabs={tabs}
+          activeTabId={activeTabId}
+          canReopenClosed={canReopenClosed}
+          onActivate={activateTab}
+          onClose={closeTab}
+          onNewTab={() => openNewTab()}
+          onMove={moveTab}
+          onMenuCommand={handleTabMenuCommand}
+        />
         <div className="browser-workbench-header-actions">
+          <ProfileMenu
+            workspaceId={workspaceId}
+            currentUrl={activeUrl}
+            onOpenExternal={(url) => void openUrlExternal(url)}
+            onOpenSettings={onOpenSettings ? () => onOpenSettings("browser") : undefined}
+            onNotice={setToolbarNotice}
+          />
           <button
             type="button"
             className="browser-workbench-icon-btn"
@@ -1397,54 +1729,55 @@ export function BrowserWorkbenchView({
           <button
             type="button"
             className="browser-workbench-nav-btn"
-            data-symbol="←"
             onClick={() => runWebviewCommand("goBack")}
+            disabled={!activeTab.canGoBack}
             title="Back"
+            aria-label="Back"
           >
-            <span className="browser-workbench-glyph" aria-hidden="true">
-              ←
-            </span>
+            <ArrowLeft size={16} strokeWidth={2.2} aria-hidden="true" />
           </button>
           <button
             type="button"
             className="browser-workbench-nav-btn"
-            data-symbol="→"
             onClick={() => runWebviewCommand("goForward")}
+            disabled={!activeTab.canGoForward}
             title="Forward"
+            aria-label="Forward"
           >
-            <span className="browser-workbench-glyph" aria-hidden="true">
-              →
-            </span>
+            <ArrowRight size={16} strokeWidth={2.2} aria-hidden="true" />
           </button>
           <button
             type="button"
             className="browser-workbench-nav-btn"
-            data-symbol="↻"
-            onClick={() => runWebviewCommand("reload")}
-            title="Reload"
+            onClick={() => runWebviewCommand(isLoading ? "stop" : "reload")}
+            title={isLoading ? "Stop" : "Reload"}
+            aria-label={isLoading ? "Stop" : "Reload"}
+            disabled={!activeUrl}
           >
-            <span
-              className={`browser-workbench-glyph ${isLoading ? "is-spinning" : ""}`}
-              aria-hidden="true"
-            >
-              ↻
-            </span>
+            {isLoading ? (
+              <X size={16} strokeWidth={2.2} aria-hidden="true" />
+            ) : (
+              <RotateCw size={15} strokeWidth={2.2} aria-hidden="true" />
+            )}
           </button>
         </div>
-        <form
-          className="browser-workbench-url-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            navigate();
-          }}
-        >
-          <input
-            value={urlText}
-            onChange={(event) => setUrlText(event.target.value)}
-            placeholder="Enter a URL"
-            aria-label="Browser URL"
-          />
-        </form>
+        <Omnibox
+          ref={omniboxRef}
+          url={activeUrl}
+          blocked={Boolean(activeTab.blocked)}
+          zoomLevel={activeTab.zoomLevel}
+          engine={searchEngine}
+          source={omniboxSource}
+          onNavigate={(url) => navigate(url)}
+          onSwitchTab={activateTab}
+          onUnsupported={(scheme) =>
+            setToolbarNotice(`"${scheme}:" addresses can't open in the in-app browser`)
+          }
+          onResetZoom={() => tabHandlesRef.current.get(activeTabId)?.setZoomLevel(0)}
+          onEngineChange={(engine) => void saveBrowserSettings({ searchEngine: engine })}
+          onQueryChange={handleOmniboxQuery}
+          onNotice={setToolbarNotice}
+        />
         <div className="browser-workbench-device-toolbar" aria-label="Viewport presets">
           {VIEWPORT_PRESETS.map((preset) => {
             const Icon = preset.icon;
@@ -1599,6 +1932,26 @@ export function BrowserWorkbenchView({
           </button>
         </div>
       </div>
+      {isLoading && <div className="browser-workbench-progress" aria-hidden="true" />}
+      <AgentDrivingBanner taskId={taskId} sessionId={sessionId} state={drivingState} />
+      {signInUrl && (
+        <SignInBanner
+          url={signInUrl}
+          onDismiss={() => setSignInUrl(null)}
+          onDone={() => {
+            setSignInUrl(null);
+            void onSendMessage?.("I've signed in. Please continue.");
+          }}
+        />
+      )}
+      {findOpen && (
+        <FindBar
+          ref={findBarRef}
+          result={findResult}
+          onFind={(text, options) => tabHandlesRef.current.get(activeTabId)?.find(text, options)}
+          onClose={closeFind}
+        />
+      )}
       {activeIsYouTube && youtubeAskOpen && (
         <div className="browser-workbench-youtube-ask">
           <form
@@ -1651,7 +2004,7 @@ export function BrowserWorkbenchView({
                   key={`${source.videoId}-${source.startMs}-${source.text.slice(0, 16)}`}
                   type="button"
                   className="browser-workbench-youtube-source"
-                  onClick={() => openTab(source.url)}
+                  onClick={() => openTab({ url: normalizeUrl(source.url) })}
                   title={source.url}
                 >
                   <span className="browser-workbench-youtube-source-time">
@@ -1686,61 +2039,159 @@ export function BrowserWorkbenchView({
       >
         {visibleWebviewSize ? (
           <div
-            className="browser-workbench-webview-frame"
-            style={{
-              width: `${visibleWebviewSize.width}px`,
-              height: `${visibleWebviewSize.height}px`,
-            }}
+            className={`browser-workbench-webview-frame ${controlledViewport ? "" : "is-fill"}`}
+            // A fixed viewport preset may scroll inside the surface. In automatic mode the
+            // frame fills the surface without sizing it, so it can never add the scrollbar
+            // that would shrink the surface and re-trigger measurement.
+            style={
+              controlledViewport
+                ? {
+                    width: `${visibleWebviewSize.width}px`,
+                    height: `${visibleWebviewSize.height}px`,
+                  }
+                : undefined
+            }
           >
-            <webview
-              key={webviewKey}
-              ref={webviewRef}
-              src={guardedKey === webviewKey ? activeUrl : "about:blank"}
-              className="browser-workbench-webview"
-              style={{
-                width: "100%",
-                height: "100%",
-              }}
-              width={visibleWebviewSize.width}
-              height={visibleWebviewSize.height}
-              autosize="true"
-              minwidth={visibleWebviewSize.width}
-              maxwidth={visibleWebviewSize.width}
-              minheight={visibleWebviewSize.height}
-              maxheight={visibleWebviewSize.height}
-              partition={partition}
-              {...webviewPopupProps}
-              webpreferences="contextIsolation=yes, nodeIntegration=no"
-            />
-            {browserAnnotations.map((annotation, index) => {
-              const target = annotation.targetRef as BrowserAnnotationTargetRef;
-              if (target.surfaceType !== "browser" || !target.rect) return null;
-              return (
-                <button
-                  key={annotation.id}
-                  type="button"
-                  className={`browser-live-annotation-pin status-${annotation.status}`}
-                  style={{
-                    left: `${clampNumber(target.rect.x + target.rect.width - 12, 2, visibleWebviewSize.width - 24)}px`,
-                    top: `${clampNumber(target.rect.y - 12, 2, visibleWebviewSize.height - 24)}px`,
-                  }}
-                  title={annotation.body}
-                  aria-label={`Annotation ${index + 1}: ${annotation.body}`}
+            {tabs.map((tab) =>
+              tab.discarded ? null : (
+                <BrowserTabView
+                  key={`${tab.id}:${tab.generation}`}
+                  tab={tab}
+                  active={tab.id === activeTabId}
+                  taskId={taskId}
+                  sessionId={sessionId}
+                  partition={partition}
+                  size={visibleWebviewSize}
+                  onUpdate={updateTab}
+                  onStatus={handleTabStatus}
+                  onGuardFailed={handleGuardFailed}
+                  registerHandle={registerTabHandle}
+                  checkUserNavigation={checkUserNavigation}
+                  onFindResult={handleFindResult}
                 >
-                  {index + 1}
-                </button>
-              );
-            })}
-            {liveAnnotationMode && (
+                  <BrowserTabNotice
+                    tab={tab}
+                    onRetry={retryActiveTab}
+                    onReloadCrashed={() => reloadCrashedTab(tab.id)}
+                    onGoBack={() => runWebviewCommand("goBack")}
+                    onOpenExternal={(url) => void openUrlExternal(url)}
+                    onOpenAccessSettings={
+                      onOpenSettings ? () => onOpenSettings("access") : undefined
+                    }
+                  />
+                </BrowserTabView>
+              ),
+            )}
+            {permissionRequests
+              .filter((request) => request.tabId === activeTabId)
+              .slice(0, 1)
+              .map((request) => (
+                <PermissionPrompt
+                  key={request.requestId}
+                  request={request}
+                  onRespond={respondToPermission}
+                />
+              ))}
+            {!activeUrl && !activeTab.blocked && (
+              <div className="browser-workbench-newtab-layer">
+                <NewTabPage
+                  onSendMessage={onSendMessage}
+                  onNotice={setToolbarNotice}
+                  openTabs={tabs.filter((tab) => tab.id !== activeTabId && tab.url)}
+                  recentlyClosed={[...closedTabs].reverse()}
+                  recentHistory={recentHistory}
+                  onSwitchTab={activateTab}
+                  onOpenUrl={(url) => navigate(url)}
+                />
+              </div>
+            )}
+            {drivingState.driving && !drivingState.pausedByUser && (
+              <AgentDrivingShield taskId={taskId} sessionId={sessionId} />
+            )}
+            {snapshotOverlay && activeUrl && (
+              <SnapshotOverlay
+                key={activeTabId}
+                taskId={taskId}
+                sessionId={sessionId}
+                tabId={activeTabId}
+                onCopyRef={copySnapshotRef}
+              />
+            )}
+            {activeUrl &&
+              browserAnnotations.map((annotation, index) => {
+                const target = annotation.targetRef as BrowserAnnotationTargetRef;
+                if (target.surfaceType !== "browser" || !target.rect) return null;
+                return (
+                  <button
+                    key={annotation.id}
+                    type="button"
+                    className={`browser-live-annotation-pin status-${annotation.status}`}
+                    style={{
+                      left: `${clampNumber(target.rect.x + target.rect.width - 12, 2, visibleWebviewSize.width - 24)}px`,
+                      top: `${clampNumber(target.rect.y - 12, 2, visibleWebviewSize.height - 24)}px`,
+                    }}
+                    title={annotation.body}
+                    aria-label={`Annotation ${index + 1}: ${annotation.body}`}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
+            {liveAnnotationMode && activeUrl && (
               <div
                 className="browser-live-annotation-layer"
                 onPointerMove={(event) => {
+                  const drag = annotationDragRef.current;
+                  if (drag && !liveAnnotationTarget) {
+                    const point = layerPoint(event);
+                    if (drag.moved || Math.hypot(point.x - drag.x, point.y - drag.y) > 6) {
+                      drag.moved = true;
+                      setLiveAnnotationHover(null);
+                      setAnnotationArea({
+                        x: Math.min(drag.x, point.x),
+                        y: Math.min(drag.y, point.y),
+                        width: Math.abs(point.x - drag.x),
+                        height: Math.abs(point.y - drag.y),
+                      });
+                      return;
+                    }
+                  }
                   void inspectLiveAnnotationPoint(event);
                 }}
                 onPointerDown={(event) => {
+                  if (liveAnnotationTarget || event.button !== 0) return;
+                  annotationDragRef.current = { ...layerPoint(event), moved: false };
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                }}
+                onPointerUp={(event) => {
+                  const drag = annotationDragRef.current;
+                  annotationDragRef.current = null;
+                  if (!drag) return;
+                  if (
+                    drag.moved &&
+                    annotationArea &&
+                    annotationArea.width > 6 &&
+                    annotationArea.height > 6
+                  ) {
+                    void finishAnnotationArea(annotationArea);
+                    return;
+                  }
+                  setAnnotationArea(null);
                   void selectLiveAnnotationTarget(event);
                 }}
               >
+                {annotationArea && (
+                  <div
+                    className="browser-live-annotation-box is-area"
+                    style={{
+                      left: `${annotationArea.x}px`,
+                      top: `${annotationArea.y}px`,
+                      width: `${annotationArea.width}px`,
+                      height: `${annotationArea.height}px`,
+                    }}
+                    aria-hidden="true"
+                  />
+                )}
                 {liveAnnotationOverlayTarget?.rect && (
                   <div
                     className={`browser-live-annotation-box ${
@@ -1795,11 +2246,64 @@ export function BrowserWorkbenchView({
                     onPointerDown={(event) => event.stopPropagation()}
                   >
                     <div className="browser-live-annotation-meta">
-                      <span>{liveAnnotationTarget.tagName || "element"}</span>
-                      {liveAnnotationTarget.selector && (
+                      <span>
+                        {liveAnnotationTarget.tagName === "area"
+                          ? `Area · ${liveAnnotationTarget.elements?.length || 0} elements`
+                          : liveAnnotationTarget.tagName || "element"}
+                      </span>
+                      {liveAnnotationTarget.selector && liveAnnotationTarget.tagName !== "area" && (
                         <code>{liveAnnotationTarget.selector}</code>
                       )}
+                      {liveAnnotationTarget.tagName !== "area" && liveAnnotationTarget.selector && (
+                        <button
+                          type="button"
+                          className={`browser-annotation-adjust-toggle ${adjustOpen ? "is-active" : ""}`}
+                          onClick={() => {
+                            if (adjustOpen) {
+                              setAdjustOpen(false);
+                              setAdjustChanges(null);
+                            } else {
+                              void openAdjust();
+                            }
+                          }}
+                        >
+                          Adjust
+                        </button>
+                      )}
                     </div>
+                    {adjustOpen && liveAnnotationTarget.selector && (
+                      <AdjustPanel
+                        taskId={taskId}
+                        sessionId={sessionId}
+                        selector={liveAnnotationTarget.selector}
+                        computedStyle={liveAnnotationTarget.computedStyle || {}}
+                        textQuote={liveAnnotationTarget.textQuote || ""}
+                        canEditText={Boolean(
+                          liveAnnotationTarget.textQuote &&
+                          liveAnnotationTarget.textQuote.length < 300 &&
+                          [
+                            "a",
+                            "button",
+                            "h1",
+                            "h2",
+                            "h3",
+                            "h4",
+                            "h5",
+                            "h6",
+                            "p",
+                            "span",
+                            "label",
+                            "li",
+                            "strong",
+                            "em",
+                            "small",
+                            "td",
+                            "th",
+                          ].includes(liveAnnotationTarget.tagName || ""),
+                        )}
+                        onChange={setAdjustChanges}
+                      />
+                    )}
                     <textarea
                       value={liveAnnotationText}
                       onChange={(event) => setLiveAnnotationText(event.target.value)}
@@ -1845,68 +2349,8 @@ export function BrowserWorkbenchView({
               </div>
             )}
           </div>
-        ) : activeUrl ? (
-          <div className="browser-workbench-empty">Preparing browser viewport...</div>
         ) : (
-          <div className="browser-workbench-newtab">
-            <div className="browser-workbench-newtab-inner">
-              <div className="browser-workbench-newtab-hero">
-                <span className="browser-workbench-newtab-eyebrow">In-app browser</span>
-                <h2 className="browser-workbench-newtab-title">Let CoWork OS drive this browser</h2>
-                <p className="browser-workbench-newtab-subtitle">
-                  CoWork OS can see this tab and use it on your behalf — searching, clicking,
-                  filling forms, and pulling data — while you watch. Pick an example to send to
-                  CoWork OS, or type a URL above to browse manually.
-                </p>
-              </div>
-              <div className="browser-workbench-newtab-grid">
-                {BROWSER_CAPABILITIES.map((capability) => {
-                  const Icon = capability.icon;
-                  const disabled = !onSendMessage;
-                  return (
-                    <button
-                      key={capability.label}
-                      type="button"
-                      className="browser-workbench-newtab-tile"
-                      onClick={() => {
-                        if (!onSendMessage) return;
-                        void onSendMessage(capability.prompt);
-                        setToolbarNotice(`Sent: ${capability.label}`);
-                      }}
-                      disabled={disabled}
-                      title={
-                        disabled
-                          ? "Open the workbench in fullscreen to send tasks to CoWork OS"
-                          : capability.prompt
-                      }
-                    >
-                      <span
-                        className="browser-workbench-newtab-tile-icon"
-                        style={{
-                          color: capability.accent,
-                          background: `${capability.accent}1f`,
-                        }}
-                      >
-                        <Icon size={18} strokeWidth={2.2} aria-hidden="true" />
-                      </span>
-                      <span className="browser-workbench-newtab-tile-text">
-                        <span className="browser-workbench-newtab-tile-label">
-                          {capability.label}
-                        </span>
-                        <span className="browser-workbench-newtab-tile-hint">
-                          {capability.hint}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="browser-workbench-newtab-footnote">
-                Tip: ask in your own words too — "log into &lt;site&gt; and grab today's report" or
-                "open this URL and click the third row" both work.
-              </p>
-            </div>
-          </div>
+          <div className="browser-workbench-empty">Preparing browser viewport...</div>
         )}
         {controlledViewport && activeUrl && (
           <div className="browser-workbench-viewport-badge" aria-hidden="true">
@@ -1926,36 +2370,16 @@ export function BrowserWorkbenchView({
             )}
           </div>
         )}
-        {snapshotOverlay && (
-          <div className="browser-workbench-snapshot-overlay" aria-hidden="true">
-            <div className="browser-workbench-snapshot-box box-primary">
-              <span>ref</span>
-            </div>
-            <div className="browser-workbench-snapshot-box box-secondary">
-              <span>ref</span>
-            </div>
-          </div>
-        )}
       </div>
+      <DownloadShelf taskId={taskId} sessionId={sessionId} />
       {diagnosticsOpen && (
-        <div className="browser-workbench-diagnostics">
-          <div className="browser-workbench-diagnostics-tabs">
-            <button type="button" className="is-active">
-              Console
-            </button>
-            <button type="button">Network</button>
-            <button type="button">
-              <Download size={13} aria-hidden="true" />
-              Downloads
-            </button>
-            <button type="button">Storage</button>
-            <button type="button">Trace</button>
-          </div>
-          <div className="browser-workbench-diagnostics-body">
-            <span>{displayTitle}</span>
-            <span>{activeUrl || "about:blank"}</span>
-          </div>
-        </div>
+        <DiagnosticsDrawer
+          key={activeTabId}
+          taskId={taskId}
+          sessionId={sessionId}
+          tabId={activeTabId}
+          onSendToAgent={onSendMessage ? (message) => void onSendMessage(message) : undefined}
+        />
       )}
       {annotationDraft && (
         <div

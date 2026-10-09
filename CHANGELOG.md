@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **In-app browser: real browser behavior**: the Browser Workbench now has real tabs that keep their pages (scroll, form input, history) when you switch, popups and `target=_blank` links that open properly (OAuth sign-in popups work), pages that stay loaded between the sidebar and full view, tabs restored when you reopen it, typed local dev server addresses that load, notices for blocked, failed and crashed pages, a Chrome-compatible user agent, and site permission prompts (camera, microphone, location and others are no longer granted silently).
+- **In-app browser controls**: an address bar that searches and suggests from history and open tabs, a tab strip with favicons, pinning, reordering and a tab menu, browser keyboard shortcuts, find in page, per-site zoom, a native right-click menu, trackpad gestures, a working diagnostics drawer and snapshot overlay, and a new-tab page with open tabs and recent pages.
+- **In-app browser platform**: a download shelf (your downloads go to Downloads, the workspace or a save dialog; CoWork's go to the workspace after your approval), "CoWork is using this tab" with take over and resume, sign-in hand-back, per-workspace browsing history, clearing browsing data, and a new **Settings > Browser** (search engine, downloads, restore tabs, history, site permissions, CoWork downloads and uploads, developer mode).
+- **CoWork in the browser**: `@Browser` opens the in-app browser for the task, CoWork follows popups and new tabs (`switchedToTab`, `activeTabClosed`) and can open, switch and close workbench tabs (`browser_new_tab`), searches your browsing history only with permission (`browser_history_search`), and annotations can cover a dragged area or carry live **Adjust** edits (text, font, spacing, colors) with before/after screenshots.
+- **Settings > Browser > Use the classic browser**: a fallback to the previous single-tab browser for this release.
+
+### Changed
+
+- **Developer mode for page scripts**: `browser_evaluate`, `browser_storage` and `browser_trace_start`/`browser_trace_stop` are offered to CoWork only with Settings > Browser > Developer mode on, and their first use on a site in a task asks for approval. File uploads by CoWork ask each time by default.
+
 - **macOS terminal installer**: `curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash` installs the released app without the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. Browsers attach the quarantine attribute that drives that dialog for the ad hoc signed build; `curl` does not. The installer verifies the ZIP's size and SHA-512 against the published updater metadata and the app bundle's code signature before copying it into Applications, re-runs as an updater, and refuses Intel Macs and older macOS versions with a pointer to npm. The macOS release smoke test now installs each build's ZIP through it. See [macOS Installation](docs/macos-installation.md).
 
 ### Removed

@@ -1007,6 +1007,10 @@ const SAFE_INTEGRATION_MENTION_TOOL_ALLOWLIST = new Set<string>([
   "browser_evaluate",
   "browser_wait",
   "browser_scroll",
+  "browser_tabs",
+  "browser_new_tab",
+  "browser_switch_tab",
+  "browser_close_tab",
 ]);
 
 const isLLMImageContent = (block: LLMContent): block is LLMImageContent => {

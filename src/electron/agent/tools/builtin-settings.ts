@@ -199,6 +199,8 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings["categories"]> 
   browser_tabs: "browser",
   browser_switch_tab: "browser",
   browser_close_tab: "browser",
+  browser_new_tab: "browser",
+  browser_history_search: "browser",
   browser_get_content: "browser",
   browser_click: "browser",
   browser_hover: "browser",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AlertCircle,
+  Bot,
   CheckCircle2,
   ChevronDown,
   CirclePause,
@@ -94,6 +95,22 @@ function shouldAnnounce(model: TaskStatusStripViewModel): boolean {
     model.state === "failed" ||
     model.state === "completed" ||
     model.activeStepOrdinal !== undefined
+  );
+}
+
+/** Strip action that jumps to the right panel's Sub Agents section once a run has agents. */
+export function SubAgentsStripButton({ count, onOpen }: { count: number; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      className="build-strip-preview"
+      onClick={onOpen}
+      title="Show the sub agents in the side panel"
+    >
+      <Bot size={12} aria-hidden="true" />
+      {count === 1 ? "Agent" : "Agents"}
+      <span className="build-strip-count">{count}</span>
+    </button>
   );
 }
 

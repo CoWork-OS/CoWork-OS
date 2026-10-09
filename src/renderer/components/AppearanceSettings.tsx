@@ -35,6 +35,8 @@ interface AppearanceSettingsProps {
   onHomeNextActionsEnabledChange: (enabled: boolean) => void;
   costReceiptEnabled: boolean;
   onCostReceiptEnabledChange: (enabled: boolean) => void;
+  subAgentStatsEnabled: boolean;
+  onSubAgentStatsEnabledChange: (enabled: boolean) => void;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
 }
@@ -60,6 +62,8 @@ export function AppearanceSettings({
   onHomeNextActionsEnabledChange,
   costReceiptEnabled,
   onCostReceiptEnabledChange,
+  subAgentStatsEnabled,
+  onSubAgentStatsEnabledChange,
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
@@ -452,6 +456,14 @@ export function AppearanceSettings({
             onChange={(event) => onCostReceiptEnabledChange(event.target.checked)}
           />
           <span>Show cost receipt</span>
+        </label>
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={subAgentStatsEnabled}
+            onChange={(event) => onSubAgentStatsEnabledChange(event.target.checked)}
+          />
+          <span>Show sub-agent stats</span>
         </label>
       </div>
 

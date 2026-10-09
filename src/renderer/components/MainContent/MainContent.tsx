@@ -501,7 +501,7 @@ import {
 import { FileChangeTitle } from "../timeline/FileChangeTitle";
 import { isFileEventCoveredByToolCall, summarizeFileChange } from "../timeline/file-change-row";
 import { buildActionBlockSummary } from "../timeline/ActionBlockSummary";
-import { TaskStatusStrip } from "../TaskStatusStrip";
+import { SubAgentsStripButton, TaskStatusStrip } from "../TaskStatusStrip";
 import { truncateLabel } from "../../utils/timeline-tool-labels";
 import {
   buildParallelGroupProjection,
@@ -649,6 +649,8 @@ interface MainContentProps {
   onDismissInputRequest?: (requestId: string) => void;
   onOpenBrowserView?: (url?: string) => void;
   onViewTaskOutputs?: (taskId: string, primaryOutputPath?: string) => void;
+  /** Opens the right panel scrolled to its Sub Agents section. */
+  onViewSubAgents?: () => void;
   onTasksChanged?: () => void | Promise<void>;
   onOpenSpreadsheetArtifact?: (path: string) => void;
   onOpenDocumentArtifact?: (path: string) => void;
@@ -3867,6 +3869,7 @@ function MainContentComponent({
   onDismissInputRequest,
   onOpenBrowserView,
   onViewTaskOutputs,
+  onViewSubAgents,
   onTasksChanged,
   onOpenSpreadsheetArtifact,
   onOpenDocumentArtifact,
@@ -5433,6 +5436,11 @@ function MainContentComponent({
 
   const isTaskFinished =
     task?.status === "completed" || task?.status === "failed" || task?.status === "cancelled";
+  // The live agent strip above the composer goes away once agents settle, so a
+  // finished run with sub agents gets a jump to the right panel's Sub Agents list.
+  const showSubAgentsStripButton = Boolean(
+    onViewSubAgents && isTaskFinished && childTasks.length > 0,
+  );
   const defaultTranscriptMode = getDefaultTranscriptMode({
     isTaskWorking,
     isReplayMode,
@@ -12243,15 +12251,19 @@ function MainContentComponent({
               markdownComponents={markdownComponents}
               leading={isBuildTaskView ? <BuildStripBadge /> : undefined}
               actions={
-                isBuildTaskView && (buildChangedPaths.size > 0 || buildPreviewPath) ? (
+                (isBuildTaskView && (buildChangedPaths.size > 0 || buildPreviewPath)) ||
+                showSubAgentsStripButton ? (
                   <>
-                    {buildChangedPaths.size > 0 && (
+                    {showSubAgentsStripButton && onViewSubAgents && (
+                      <SubAgentsStripButton count={childTasks.length} onOpen={onViewSubAgents} />
+                    )}
+                    {isBuildTaskView && buildChangedPaths.size > 0 && (
                       <BuildChangesButton
                         count={buildChangedPaths.size}
                         onOpen={() => setBuildChangesOpen(true)}
                       />
                     )}
-                    {buildPreviewPath && (
+                    {isBuildTaskView && buildPreviewPath && (
                       <BuildPreviewButton path={buildPreviewPath} onOpen={openWebArtifact} />
                     )}
                   </>

@@ -1,0 +1,364 @@
+{
+  "rerun3": [
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "Northstar"
+    },
+    {
+      "type": "paragraph",
+      "text": "Briefing do piloto de onboarding | Planeamento: 26–30 de outubro de 2026"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Visão geral"
+    },
+    {
+      "type": "paragraph",
+      "text": "O piloto Northstar destina-se a 8 profissionais de customer success e começa a 26 de outubro de 2026. Dois formadores conduzirão três sessões de 45 minutos ao longo da semana. O programa combina orientação, resposta a questões frequentes e prática com feedback. Para apoiar a acessibilidade, serão legendadas as duas gravações e disponibilizado um guia escrito em linguagem simples."
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Objetivos"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Apresentar o fluxo de boas-vindas ao cliente e alinhar a respetiva comunicação.",
+        "Preparar a equipa para responder a perguntas frequentes de clientes.",
+        "Criar oportunidades de prática e feedback para os participantes.",
+        "Apoiar diferentes necessidades de acesso com gravações legendadas e um guia em linguagem simples."
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Calendário"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "Data",
+          "Duração",
+          "Sessão",
+          "Conteúdo"
+        ],
+        [
+          "26 de outubro de 2026",
+          "45 min",
+          "1. Orientação e boas-vindas",
+          "Contexto do piloto e percurso de boas-vindas ao cliente."
+        ],
+        [
+          "28 de outubro de 2026",
+          "45 min",
+          "2. Perguntas frequentes",
+          "Tratamento de perguntas comuns de clientes."
+        ],
+        [
+          "30 de outubro de 2026",
+          "45 min",
+          "3. Prática e feedback",
+          "Exercícios práticos e feedback aos participantes."
+        ]
+      ]
+    },
+    {
+      "type": "page_break"
+    },
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "Plano de execução"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Responsabilidades"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "Tarefa",
+          "Responsável",
+          "Estado"
+        ],
+        [
+          "Conduzir as três sessões",
+          "Dois formadores",
+          "Identidades por confirmar"
+        ],
+        [
+          "Preparar o texto de boas-vindas",
+          "Marta",
+          "Atribuído"
+        ],
+        [
+          "Verificar as legendas",
+          "James",
+          "Atribuído"
+        ],
+        [
+          "Definir e validar as FAQ",
+          "Por designar",
+          "Em aberto"
+        ],
+        [
+          "Aprovar o email de lançamento",
+          "Por designar",
+          "Em aberto"
+        ],
+        [
+          "Disponibilizar o guia em linguagem simples",
+          "Por designar",
+          "Responsável por confirmar"
+        ],
+        [
+          "Produzir e legendar as duas gravações",
+          "Por designar; James verifica as legendas",
+          "Produção por confirmar"
+        ]
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Orçamento — propostas de afetação"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "Rubrica",
+          "Proposta de afetação"
+        ],
+        [
+          "Preparação e edição do guia escrito",
+          "100 €"
+        ],
+        [
+          "Legendas das duas gravações",
+          "150 €"
+        ],
+        [
+          "Materiais de apoio às sessões",
+          "100 €"
+        ],
+        [
+          "Total proposto",
+          "350 €"
+        ]
+      ]
+    },
+    {
+      "type": "paragraph",
+      "text": "Os valores são propostas de afetação, não despesas aprovadas. O total proposto respeita o limite máximo de 350 € para materiais."
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Riscos e acompanhamento"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Responsáveis por designar: a indefinição sobre FAQ, aprovação do email, guia e legendas pode atrasar a preparação; confirmar responsáveis antes da produção ou validação.",
+        "Acessibilidade incompleta: acompanhar a entrega do guia em linguagem simples e das duas gravações legendadas, incluindo a verificação por James.",
+        "Afetações por validar: a proposta atinge o limite máximo; qualquer alteração deve manter o total dentro de 350 €."
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Decisões em aberto"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Quem será responsável pelas FAQ?",
+        "Quem aprovará o email de lançamento?",
+        "Quem produzirá o guia em linguagem simples e as legendas das gravações?",
+        "Quem serão os dois formadores?"
+      ]
+    },
+    {
+      "type": "paragraph",
+      "text": "Documento de trabalho para planeamento do piloto. As afetações orçamentais são propostas e requerem validação."
+    }
+  ],
+  "rerun1": [
+    {
+      "type": "heading",
+      "level": 1,
+      "text": "Northstar — Brief do piloto de integração"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Página 1 — Enquadramento, objetivos e calendário"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Visão geral"
+    },
+    {
+      "type": "paragraph",
+      "text": "O piloto Northstar consiste numa formação de integração para 8 colaboradores de customer success, conduzida por 2 formadores. O programa começa a 26 de outubro de 2026 e inclui três sessões de 45 minutos, com foco no fluxo de boas-vindas, nas perguntas frequentes dos clientes e na prática com feedback."
+    },
+    {
+      "type": "paragraph",
+      "text": "Para apoiar a acessibilidade, as gravações das sessões serão legendadas e será disponibilizado um guia escrito em linguagem simples."
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Objetivos"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Apresentar a orientação inicial e o fluxo de boas-vindas ao cliente.",
+        "Preparar a equipa para responder a perguntas comuns dos clientes.",
+        "Permitir a prática dos conteúdos e recolher feedback.",
+        "Disponibilizar materiais acessíveis: gravações legendadas e um guia em linguagem simples."
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Calendário das sessões"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "Data",
+          "Duração",
+          "Tema"
+        ],
+        [
+          "26 de outubro de 2026",
+          "45 minutos",
+          "Orientação e fluxo de boas-vindas"
+        ],
+        [
+          "28 de outubro de 2026",
+          "45 minutos",
+          "Resposta a perguntas comuns dos clientes"
+        ],
+        [
+          "30 de outubro de 2026",
+          "45 minutos",
+          "Prática e feedback"
+        ]
+      ]
+    },
+    {
+      "type": "page_break"
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "text": "Página 2 — Responsabilidades, orçamento e decisões"
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Responsabilidades"
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "Tarefa",
+          "Responsável"
+        ],
+        [
+          "Texto de boas-vindas",
+          "Marta"
+        ],
+        [
+          "Verificação das legendas",
+          "James"
+        ],
+        [
+          "Responsável pelas FAQ",
+          "TBD"
+        ],
+        [
+          "Aprovação do email de lançamento",
+          "TBD"
+        ],
+        [
+          "Condução das sessões",
+          "2 formadores; nomes por confirmar"
+        ]
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Orçamento para materiais"
+    },
+    {
+      "type": "paragraph",
+      "text": "Limite máximo: €350. As seguintes verbas são afetações propostas, não despesas confirmadas."
+    },
+    {
+      "type": "table",
+      "rows": [
+        [
+          "Categoria",
+          "Afetação proposta"
+        ],
+        [
+          "Materiais de apoio e guia escrito",
+          "€150"
+        ],
+        [
+          "Legendas das gravações",
+          "€120"
+        ],
+        [
+          "Materiais para prática e feedback",
+          "€80"
+        ],
+        [
+          "Total proposto",
+          "€350"
+        ]
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Riscos e medidas de acompanhamento"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Acessibilidade incompleta: confirmar que ambas as gravações têm legendas e que o guia usa linguagem simples.",
+        "Responsabilidades por definir: a ausência de um responsável pelas FAQ e de um aprovador do email pode deixar essas tarefas sem validação atribuída.",
+        "Limite orçamental: manter as afetações dentro do máximo de €350; não estão previstas compras nesta etapa."
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "text": "Decisões em aberto"
+    },
+    {
+      "type": "list",
+      "items": [
+        "Designar a pessoa responsável pelas FAQ.",
+        "Designar quem aprova o email de lançamento.",
+        "Confirmar os nomes dos dois formadores."
+      ]
+    }
+  ]
+}

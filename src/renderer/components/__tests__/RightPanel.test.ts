@@ -78,6 +78,7 @@ describe("RightPanel checklist rendering", () => {
   it("renders collaborative sub-agent totals in the right panel", () => {
     const markup = renderToStaticMarkup(
       React.createElement(RightPanel, {
+        subAgentStatsEnabled: true,
         task: {
           id: "task-1",
           status: "completed",
@@ -153,6 +154,42 @@ describe("RightPanel checklist rendering", () => {
     expect(markup).toContain("Needs review");
   });
 
+  it("hides sub-agent stats unless the Appearance setting is on", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(RightPanel, {
+        task: {
+          id: "task-1",
+          status: "completed",
+          title: "Collaborative review",
+          prompt: "Prompt",
+          agentConfig: { collaborativeMode: true },
+        } as Any,
+        workspace: null,
+        events: [] as Any,
+        childTasks: [
+          {
+            id: "child-1",
+            parentTaskId: "task-1",
+            agentType: "sub",
+            status: "completed",
+            title: "Market research",
+            prompt: "Research",
+            createdAt: 1000,
+            updatedAt: 3000,
+            completedAt: 3000,
+          },
+        ] as Any,
+        childEvents: [] as Any,
+      }),
+    );
+
+    expect(markup).toContain("Sub Agents");
+    expect(markup).toContain("Market research");
+    expect(markup).not.toContain("background agents");
+    expect(markup).not.toContain("LLM calls");
+    expect(markup).not.toContain(" tok");
+  });
+
   it("uses cumulative child usage when the capped event list no longer has usage events", () => {
     const childTasks = [
       {
@@ -191,6 +228,7 @@ describe("RightPanel checklist rendering", () => {
           childTasks,
           childEvents: childEvents as Any,
           childUsageByTaskId: childUsageByTaskId as Any,
+          subAgentStatsEnabled: true,
         }),
       );
     // Only structural events survive the cap; the usage events were evicted.

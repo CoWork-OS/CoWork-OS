@@ -492,6 +492,29 @@ import {
   hasUnrecoveredToolFailureForAssistantOutput as hasUnrecoveredToolFailureForAssistantOutputUtil,
 } from "./executor-completion-utils";
 import {
+  MAX_VERIFICATION_REPAIR_PASSES,
+  MIN_TURNS_FOR_VERIFICATION_REPAIR,
+  SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
+  VERIFICATION_RECHECK_STEP_DESCRIPTION,
+  VERIFICATION_REPAIR_STEP_DESCRIPTION,
+  answerLinksOutput,
+  buildOfficeArtifactVerificationGuidance,
+  buildUnlinkedSourceCellsFinding,
+  buildVerificationRecheckStepContext,
+  buildVerificationRepairStepContext,
+  buildVerificationSeverityGuidance,
+  decideVerificationRepair,
+  extractVerificationFindings,
+  findUnlinkedSourcedTableCells,
+  isBlockingVerificationVerdict,
+  isVerificationRecheckStepDescription,
+  isVerificationRepairStepDescription,
+  mentionsOfficeArtifact,
+  requestsFileLinks,
+  requestsSourceLinks,
+  requestsSourcedResearchAnswer,
+} from "./executor-verification-repair-utils";
+import {
   CANONICAL_ARTIFACT_EXTENSION_REGEX,
   deriveStepContractMode,
   isArtifactPathLikeToken,
@@ -545,6 +568,7 @@ import {
   detectTestRequirement as detectTestRequirementUtil,
   extractNamedTestCommands as extractNamedTestCommandsUtil,
   isBuildCheckCommand as isBuildCheckCommandUtil,
+  isLatexPdfRequest as isLatexPdfRequestUtil,
   isTestCommand as isTestCommandUtil,
   promptIsWatchSkipRecommendationTask as promptIsWatchSkipRecommendationTaskUtil,
   promptRequestsDecision as promptRequestsDecisionUtil,
@@ -6732,6 +6756,9 @@ ${transcript}
   private planRevisionLimitLogged = false;
   private readonly maxPlanRevisions: number = 5;
   private planScaffoldRoot: string | null = null;
+  // Verification repair pass (one per task): findings by repair/re-check step id.
+  private verificationRepairPassesUsed = 0;
+  private verificationRepairFindingsByStepId: Map<string, string> = new Map();
 
   // Failed approach tracking to prevent retrying the same failed strategies
   private failedApproaches: Set<string> = new Set();
@@ -12959,6 +12986,25 @@ ${transcript}
       });
     }
 
+    // A research answer the user asked to be linked or sourced ends with a
+    // check of its links, so the verification repair pass can fix unlinked
+    // facts. Plans that already end with a check keep it.
+    const lastPlanStep = nextPlan.steps[nextPlan.steps.length - 1];
+    if (
+      this.task &&
+      nextPlan.steps.length > 0 &&
+      lastPlanStep &&
+      !this.isVerificationStep(lastPlanStep) &&
+      requestsSourcedResearchAnswer(`${this.task.title || ""}\n${this.getContractPrompt() || ""}`)
+    ) {
+      nextPlan.steps.push({
+        id: this.nextPlanStepId(nextPlan.steps),
+        description: SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
+        kind: "verification",
+        status: "pending",
+      });
+    }
+
     return nextPlan;
   }
 
@@ -14388,9 +14434,10 @@ ${transcript}
     if (!workspaceRoot) return summary;
     const inability =
       /\b(?:can['’]?t|cannot|could\s*n['’]?t|could\s+not|unable\s+to|not\s+able\s+to)\b/i;
-    const promptAsksForLink = /\b(?:link|download(?:able)?|attach(?:ment)?)\b/i.test(
-      `${this.task?.title || ""}\n${this.getContractPrompt() || ""}`,
-    );
+    const requestText = `${this.task?.title || ""}\n${this.getContractPrompt() || ""}`;
+    const promptAsksForLink =
+      /\b(?:link|download(?:able)?|attach(?:ment)?)\b/i.test(requestText) ||
+      requestsFileLinks(requestText);
     if (!inability.test(summary) && !promptAsksForLink) return summary;
     let outputSummary: TaskOutputSummary | undefined;
     try {
@@ -14434,7 +14481,15 @@ ${transcript}
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
-    const missingLinks = outputs.filter((relative) => !reconciled.includes(`](${relative})`));
+    // When the request names its files, those are the deliverables to link;
+    // other outputs (drafts, intermediate files) are left out.
+    const requestLower = requestText.toLowerCase();
+    const namedOutputs = outputs.filter((relative) =>
+      requestLower.includes(path.posix.basename(relative).toLowerCase()),
+    );
+    const missingLinks = (namedOutputs.length > 0 ? namedOutputs : outputs).filter(
+      (relative) => !answerLinksOutput(reconciled, relative),
+    );
     if ((!removedDenial && !promptAsksForLink) || missingLinks.length === 0) return reconciled;
     const links = missingLinks
       .map((relative) => `[${path.posix.basename(relative)}](${relative})`)
@@ -15757,6 +15812,180 @@ ${transcript}
     });
   }
 
+  private getVerificationRepairFindingsByStepId(): Map<string, string> {
+    if (!(this.verificationRepairFindingsByStepId instanceof Map)) {
+      this.verificationRepairFindingsByStepId = new Map();
+    }
+    return this.verificationRepairFindingsByStepId;
+  }
+
+  /**
+   * Findings a repair or re-check step works from. A resumed task no longer has
+   * the in-memory map, so fall back to the blocking verdict recorded on the
+   * failed verification step before it.
+   */
+  private getVerificationRepairFindingsForStep(step: PlanStep): string | undefined {
+    const recorded = this.getVerificationRepairFindingsByStepId().get(step.id);
+    if (recorded) return recorded;
+    if (
+      !isVerificationRepairStepDescription(step.description) &&
+      !isVerificationRecheckStepDescription(step.description)
+    ) {
+      return undefined;
+    }
+    const steps = this.plan?.steps || [];
+    const stepIndex = steps.findIndex((candidate) => candidate.id === step.id);
+    for (let index = stepIndex - 1; index >= 0; index -= 1) {
+      const candidate = steps[index];
+      if (candidate.status === "failed" && isBlockingVerificationVerdict(candidate.error)) {
+        return extractVerificationFindings(candidate.error) || undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /** Whether the task can still afford a repair step plus a re-check. */
+  private hasBudgetForVerificationRepair(stepLoopBudgetStopped: boolean): boolean {
+    if (stepLoopBudgetStopped) return false;
+    if (this.cancelled || this.wrapUpRequested || this.softDeadlineTriggered) return false;
+    const revisionsUsed = Number.isFinite(this.planRevisionCount) ? this.planRevisionCount : 0;
+    const maxRevisions = Number.isFinite(this.maxPlanRevisions) ? this.maxPlanRevisions : 5;
+    if (revisionsUsed >= maxRevisions) return false;
+    if (
+      this.budgetContractsEnabled &&
+      (Number(this.autoRecoveryStepsPlanned) || 0) >= this.budgetContract.maxAutoRecoverySteps
+    ) {
+      return false;
+    }
+    const remainingTurns = this.getRemainingTurnBudget();
+    return !(Number.isFinite(remainingTurns) && remainingTurns < MIN_TURNS_FOR_VERIFICATION_REPAIR);
+  }
+
+  /**
+   * A gap in the delivered answer that a deterministic check can see: a table
+   * in a sourced answer whose factual cells carry no link or citation. Empty
+   * unless the repair pass could still run for this final verification step.
+   */
+  private findDeterministicVerificationGap(step: PlanStep, stepLoopBudgetStopped: boolean): string {
+    if (!this.isVerificationStepForCompletion(step)) return "";
+    if (isVerificationRecheckStepDescription(step.description)) return "";
+    if ((Number(this.verificationRepairPassesUsed) || 0) >= MAX_VERIFICATION_REPAIR_PASSES) {
+      return "";
+    }
+    if (!requestsSourceLinks(`${this.task?.title || ""}\n${this.getContractPrompt() || ""}`)) {
+      return "";
+    }
+    const deliverable = String(this.lastNonVerificationOutput || this.lastAssistantOutput || "");
+    const unlinkedCells = findUnlinkedSourcedTableCells(deliverable);
+    if (unlinkedCells.length === 0) return "";
+    if (!this.hasBudgetForVerificationRepair(stepLoopBudgetStopped)) return "";
+    return buildUnlinkedSourceCellsFinding(unlinkedCells);
+  }
+
+  /**
+   * When the final verification step answers FAIL_BLOCKING with fixable
+   * findings, append one repair step and one re-check step through the plan
+   * revision path. The failed verification counts as recovered only once the
+   * repair step completes; the re-check then decides the outcome. At most one
+   * repair pass runs per task, and none runs for failures that need the user
+   * or outside access, or when the task is out of budget.
+   */
+  private maybeScheduleVerificationRepair(opts: {
+    step: PlanStep;
+    verdictText: string;
+    failureReason: string;
+    isFinalVerification: boolean;
+    stepLoopBudgetStopped: boolean;
+    inPlaceRetryCouldEdit: boolean;
+  }): boolean {
+    if (!this.plan) return false;
+    const { step } = opts;
+    const isFinalVerification =
+      opts.isFinalVerification && this.isVerificationStepForCompletion(step);
+    const decision = decideVerificationRepair({
+      verdictText: opts.verdictText,
+      failureReason: opts.failureReason,
+      isFinalVerification,
+      isRecheckStep: isVerificationRecheckStepDescription(step.description),
+      repairPassesUsed: Number(this.verificationRepairPassesUsed) || 0,
+      priorRepairAttemptInStep: opts.inPlaceRetryCouldEdit,
+      budgetAvailable: this.hasBudgetForVerificationRepair(opts.stepLoopBudgetStopped),
+    });
+    if (!decision.repair) {
+      if (
+        decision.reason !== "not_final_verification" &&
+        decision.reason !== "not_blocking_verdict"
+      ) {
+        this.emitEvent("log", {
+          metric: "verification_repair_skipped",
+          stepId: step.id,
+          reason: decision.reason,
+        });
+      }
+      return false;
+    }
+
+    const applied = this.requestPlanRevision(
+      [
+        { description: VERIFICATION_REPAIR_STEP_DESCRIPTION, kind: "recovery" },
+        { description: VERIFICATION_RECHECK_STEP_DESCRIPTION, kind: "verification" },
+      ],
+      `Recovery attempt: final verification reported blocking issues - ${decision.findings.slice(0, 280)}`,
+      false,
+    );
+    if (!applied) return false;
+
+    this.verificationRepairPassesUsed = (Number(this.verificationRepairPassesUsed) || 0) + 1;
+    this.autoRecoveryStepsPlanned = (Number(this.autoRecoveryStepsPlanned) || 0) + 1;
+    const findingsByStepId = this.getVerificationRepairFindingsByStepId();
+    for (const candidate of this.plan.steps) {
+      if (candidate.status !== "pending") continue;
+      if (
+        isVerificationRepairStepDescription(candidate.description) ||
+        isVerificationRecheckStepDescription(candidate.description)
+      ) {
+        findingsByStepId.set(candidate.id, decision.findings);
+      }
+    }
+    this.getSessionRuntime().markRecoveredFailureStep(step.id);
+    this.emitEvent("step_recovery_planned", {
+      stepId: step.id,
+      stepDescription: step.description,
+      reason: opts.failureReason,
+      recoveryClass: "verification_repair",
+      recovery_template_id: "verification_repair",
+    });
+    this.emitEvent("log", {
+      metric: "verification_repair_scheduled",
+      stepId: step.id,
+      findings: decision.findings,
+    });
+    return true;
+  }
+
+  /**
+   * Findings of failed final verification steps that answered FAIL_BLOCKING and
+   * were not recovered, by step id. These are requirements the delivered work
+   * still does not meet.
+   */
+  private getUnmetVerificationRequirements(): Array<{ stepId: string; finding: string }> {
+    const steps = this.plan?.steps || [];
+    const recovered = new Set(this.getResolvedRecoveredFailureStepIds());
+    return steps
+      .filter(
+        (step) =>
+          step.status === "failed" &&
+          !recovered.has(String(step.id || "").trim()) &&
+          this.isVerificationStepForCompletion(step) &&
+          isBlockingVerificationVerdict(step.error),
+      )
+      .map((step) => ({
+        stepId: String(step.id || "").trim(),
+        finding: extractVerificationFindings(step.error),
+      }))
+      .filter((entry) => entry.finding.length > 0);
+  }
+
   /**
    * Returns failed step IDs that can be safely waived at completion.
    * We only waive explicit verification failures (or heuristic fallback when kind is absent)
@@ -16072,6 +16301,13 @@ ${transcript}
       return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
     };
     const lines: string[] = [];
+    // A requirement the final check found unmet leads the notes, ahead of the
+    // generic stop reason, so the result does not read as a full success.
+    const unmetRequirements = this.getUnmetVerificationRequirements();
+    for (const unmet of unmetRequirements.slice(0, maxListedSteps)) {
+      lines.push(`- Unmet requirement: ${compact(unmet.finding, 400)}`);
+    }
+    const reportedUnmetStepIds = new Set(unmetRequirements.map((unmet) => unmet.stepId));
     const reason = compact(params.reason, 240);
     if (reason) lines.push(`- ${reason}`);
     const cause = compact(params.cause, 240);
@@ -16081,7 +16317,10 @@ ${transcript}
     const waived = new Set(params.waivedStepIds.map((stepId) => String(stepId || "").trim()));
     const recovered = new Set(this.getResolvedRecoveredFailureStepIds());
     const failedSteps = steps.filter(
-      (step) => step.status === "failed" && !recovered.has(String(step.id || "").trim()),
+      (step) =>
+        step.status === "failed" &&
+        !recovered.has(String(step.id || "").trim()) &&
+        !reportedUnmetStepIds.has(String(step.id || "").trim()),
     );
     for (const step of failedSteps.slice(0, maxListedSteps)) {
       const outcome = waived.has(String(step.id || "").trim()) ? "failed (waived)" : "failed";
@@ -16112,11 +16351,17 @@ ${transcript}
     return lines.length > 0 ? ["Completion notes:", ...lines].join("\n") : "";
   }
 
-  /** The summary the user sees, with completion notes and the file-mutation footer. */
+  /**
+   * The summary the user sees, with completion notes and the file-mutation footer.
+   * When the final check found a requirement unmet, the notes come first so the
+   * result does not open with the model's claim that the work is complete.
+   */
   private appendCompletionFooters(summary: string, completionNotes: string): string {
+    const notesFirst =
+      Boolean(completionNotes.trim()) && this.getUnmetVerificationRequirements().length > 0;
     return [
-      summary,
-      completionNotes,
+      notesFirst ? completionNotes : summary,
+      notesFirst ? summary : completionNotes,
       this.buildUnresolvedTestCommandNote(),
       this.fileMutationVerifier?.buildAdvisoryFooter(),
     ]
@@ -19622,8 +19867,14 @@ ${transcript}
       );
     }
 
+    // A verification repair step revises whatever the deliverable is, so it gets
+    // the write tools without a contract that demands one particular write.
+    const verificationRepairCanWrite =
+      isVerificationRepairStepDescription(step.description) &&
+      stepContract.contractReason !== "readonly_constraint_detected" &&
+      stepContract.contractReason !== "mutation_tools_restricted_by_role";
     const stepKind: "analysis" | "mutation_required" | "verification" =
-      stepContract.requiresMutation
+      stepContract.requiresMutation || verificationRepairCanWrite
         ? "mutation_required"
         : this.isVerificationStepForCompletion(step)
           ? "verification"
@@ -22172,12 +22423,7 @@ You are continuing a previous conversation. The context from the previous conver
     this.emitEvent("log", { message: "Analyzing task requirements..." });
 
     const prompt = this.getContractPrompt().toLowerCase();
-    const isLatexPdfTask =
-      /\b(latex|tex|tikz)\b/.test(prompt) ||
-      /\.tex\b/.test(prompt) ||
-      (/\b(write|create|generate|produce|draft|prepare)\b/.test(prompt) &&
-        /\b(paper|article|report|document)\b/.test(prompt) &&
-        /\bcompile(?:d)?\s+(?:pdf|document)|pdf\b/.test(prompt));
+    const isLatexPdfTask = isLatexPdfRequestUtil(prompt);
 
     // Exclusion patterns: code/development tasks should NOT trigger document hints
     const isCodeTask =
@@ -33035,6 +33281,24 @@ Return ONLY a JSON object:
               `- Then add a short checklist of missing evidence/actions using bullets.\n`
             : `- If everything checks out, respond with exactly: OK\n` +
               `- If something is wrong or missing, clearly state the problem and what needs to change.\n`);
+        const createdFilesForVerification = (
+          this.fileOperationTracker?.getCreatedFiles?.() || []
+        ).map((file) => String(file));
+        if (
+          mentionsOfficeArtifact([
+            step.description,
+            this.getExecutionTaskPrompt(),
+            ...createdFilesForVerification,
+          ])
+        ) {
+          stepContext += buildOfficeArtifactVerificationGuidance();
+        }
+        if (!this.isReadOnlyFactFindingVerificationStep(step)) {
+          stepContext += buildVerificationSeverityGuidance({
+            prompt: this.getExecutionTaskPrompt(),
+            createdFiles: createdFilesForVerification,
+          });
+        }
         if (inlineVerificationTargets.length > 0) {
           stepContext += `- Return checklist/report output inline in your response; do not require creating a new checklist file.\n`;
         } else if (existingOnlyWriteTargets.length > 0) {
@@ -33130,6 +33394,12 @@ Return ONLY a JSON object:
         stepContext += `\n\nVERIFICATION REWIND:\n${verificationRewindInstruction}`;
       }
       delete (step as Any).__verificationRewindInstruction;
+      const verificationRepairFindings = this.getVerificationRepairFindingsForStep(step);
+      if (verificationRepairFindings) {
+        stepContext += isVerificationRepairStepDescription(step.description)
+          ? buildVerificationRepairStepContext(verificationRepairFindings)
+          : buildVerificationRecheckStepContext(verificationRepairFindings);
+      }
       if (isVerifyStep) {
         stepContext += this.isReadOnlyFactFindingVerificationStep(step)
           ? "\n\nREAD-ONLY FACT-FINDING RESPONSE (REQUIRED): Perform the requested check and return a concise finding with the supporting evidence. A verified negative finding still completes the check; do not answer with only `OK`."
@@ -38766,6 +39036,26 @@ Return ONLY a JSON object:
       if (textChecklistEvaluation.applied) {
         this.emitVerificationTextChecklistEvaluated(step, textChecklistEvaluation);
       }
+      // A passing or warning final check can still miss a gap the answer shows
+      // on its face. Turn such a gap into a blocking finding only when the
+      // repair pass can still act on it.
+      const deterministicVerificationFinding =
+        !stepFailed &&
+        enforceVerificationOk &&
+        isLastStep &&
+        (this.isVerificationPassing(finalAssistantText) ||
+          parseVerificationProtocolOutcomeUtil(finalAssistantText) === "warn_non_blocking")
+          ? this.findDeterministicVerificationGap(step, Boolean(stepLoopBudgetStopReason))
+          : "";
+      if (deterministicVerificationFinding) {
+        stepFailed = true;
+        lastFailureReason = `Verification failed: FAIL_BLOCKING — ${deterministicVerificationFinding}`;
+        this.emitEvent("log", {
+          metric: "verification_deterministic_finding",
+          stepId: step.id,
+          finding: deterministicVerificationFinding,
+        });
+      }
       if (
         !stepFailed &&
         enforceVerificationOk &&
@@ -38813,6 +39103,7 @@ Return ONLY a JSON object:
         | null = null;
       if (
         stepFailed &&
+        !deterministicVerificationFinding &&
         this.verificationOutcomeV2Enabled &&
         this.isVerificationStepForCompletion(step)
       ) {
@@ -38990,6 +39281,17 @@ Return ONLY a JSON object:
         }
         const isNonBlockingVerificationFailure =
           this.getVerificationState().nonBlockingVerificationFailedStepIds.has(step.id);
+        const verificationRepairScheduled =
+          !isNonBlockingVerificationFailure &&
+          this.maybeScheduleVerificationRepair({
+            step,
+            verdictText: finalAssistantText,
+            failureReason: String(lastFailureReason || ""),
+            isFinalVerification: enforceVerificationOk && isLastStep,
+            stepLoopBudgetStopped: Boolean(stepLoopBudgetStopReason),
+            inPlaceRetryCouldEdit:
+              verificationRewindAlreadyAttempted && this.getEffectiveTaskDomain() === "code",
+          });
 
         const isRecoveryStep = this.isRecoveryPlanStep(step);
         const capabilityRecoveryRequested =
@@ -39029,6 +39331,7 @@ Return ONLY a JSON object:
         const recoveryState = runtime.getRecoveryState();
         const shouldHandleRecovery =
           !isNonBlockingVerificationFailure &&
+          !verificationRepairScheduled &&
           (!stepLoopBudgetStopReason || budgetStopWithProgress) &&
           (userRequestedRecovery || autoRecoveryRequested) &&
           recoveryClass !== "user_blocker" &&

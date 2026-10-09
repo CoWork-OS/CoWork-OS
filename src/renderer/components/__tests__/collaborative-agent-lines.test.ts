@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { AgentTeamRun, Task, TaskEvent } from "../../../shared/types";
-import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
+import { CollaborativeAgentLines, hasLiveAgentLine } from "../CollaborativeAgentLines";
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
@@ -51,11 +51,16 @@ function makeEvent(
   } as TaskEvent;
 }
 
+// The strip only renders while some agent is still active, so terminal-label
+// tests keep one running sibling next to the agent under test.
+const runningSibling = (): Task =>
+  makeTask({ id: "sibling", title: "Still running", status: "executing", createdAt: 9 });
+
 function renderLines(childTask: Task, childEvents: TaskEvent[]): string {
   return render(
     React.createElement(CollaborativeAgentLines, {
       collaborativeRun: makeRun(),
-      childTasks: [childTask],
+      childTasks: [childTask, runningSibling()],
       childEvents,
       onOpenAgent: () => undefined,
       mainTaskCompleted: true,
@@ -72,6 +77,7 @@ describe("CollaborativeAgentLines", () => {
           makeTask({ id: "lane", title: "Operations", status: "completed", createdAt: 1 }),
           makeTask({ id: "first", title: "Synthesis", status: "failed", createdAt: 2 }),
           makeTask({ id: "retry", title: "Synthesis", status: "completed", createdAt: 3 }),
+          runningSibling(),
         ],
         childEvents: [],
         onOpenAgent: () => undefined,
@@ -146,6 +152,7 @@ describe("CollaborativeAgentLines", () => {
             status: "failed",
             error: "Command failed",
           }),
+          runningSibling(),
         ],
         childEvents: [
           makeEvent(
@@ -166,6 +173,33 @@ describe("CollaborativeAgentLines", () => {
     expect(markup).toContain("Failed");
     expect(markup).not.toContain("failures need review");
     expect(markup).toContain("Wrap Up");
+  });
+
+  it("hides the strip once every agent has settled", () => {
+    const markup = render(
+      React.createElement(CollaborativeAgentLines, {
+        collaborativeRun: makeRun({ status: "completed" }),
+        childTasks: [
+          makeTask({ id: "done", status: "completed", completedAt: 1740841080000 }),
+          makeTask({ id: "broken", status: "failed", error: "Command failed" }),
+        ],
+        childEvents: [],
+        onOpenAgent: () => undefined,
+        mainTaskCompleted: true,
+      }),
+    );
+
+    expect(markup).toBe("");
+  });
+
+  it("stops counting a never-spawned team item as live once the main task finishes", () => {
+    const placeholder = { statusKind: "pending" as const, task: null };
+    const failed = { statusKind: "failed" as const, task: makeTask({ status: "failed" }) };
+    expect(hasLiveAgentLine([failed, placeholder], false)).toBe(true);
+    expect(hasLiveAgentLine([failed, placeholder], true)).toBe(false);
+    const queued = { statusKind: "pending" as const, task: makeTask({ status: "pending" }) };
+    expect(hasLiveAgentLine([failed, queued], true)).toBe(true);
+    expect(hasLiveAgentLine([{ statusKind: "running" as const, task: null }], true)).toBe(true);
   });
 
   it("renders ordinary delegated children without a collaborative run", () => {

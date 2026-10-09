@@ -5,6 +5,7 @@ import { AgentDaemon } from "../daemon";
 import { SpreadsheetBuilder } from "../skills/spreadsheet";
 import {
   DocumentBuilder,
+  parseMaxPages,
   resolveDocumentFilename,
   type ContentBlockInput,
 } from "../skills/document";
@@ -170,6 +171,8 @@ export class SkillTools {
     format?: "docx" | "pdf";
     content: ContentBlockInput[];
     pageNumbers?: boolean;
+    /** Page budget; the PDF layout is tightened to fit it. */
+    maxPages?: number;
   }): Promise<{
     success: boolean;
     path: string;
@@ -177,6 +180,12 @@ export class SkillTools {
     requestedBlocks?: number;
     droppedBlocks?: Array<{ index: number; type: string; reason: string }>;
     warnings?: string[];
+    /** Pages in the written PDF. */
+    pageCount?: number;
+    /** Whether the PDF is within maxPages; only when maxPages was given for a PDF. */
+    fittedToMaxPages?: boolean;
+    /** Why no page count is reported for a DOCX written with maxPages. */
+    pageCountNote?: string;
   }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
@@ -201,6 +210,7 @@ export class SkillTools {
 
     // The requested name is kept exactly; only a missing extension is added.
     const { filename, format } = resolveDocumentFilename(input.filename, input.format);
+    const maxPages = parseMaxPages(input.maxPages);
 
     const outputPath = await this.assertPathAllowed(
       path.join(this.workspace.path, filename),
@@ -210,6 +220,7 @@ export class SkillTools {
 
     const report = await this.documentBuilder.create(outputPath, format, input.content, {
       pageNumbers: input.pageNumbers === true,
+      maxPages,
     });
 
     // Count what was written, not what was sent: a block with nothing to
@@ -240,6 +251,18 @@ export class SkillTools {
       requestedBlocks: report.requestedBlocks,
       ...(report.droppedBlocks.length > 0 ? { droppedBlocks: report.droppedBlocks } : {}),
       ...(warnings.length > 0 ? { warnings } : {}),
+      ...(report.pageCount !== undefined ? { pageCount: report.pageCount } : {}),
+      ...(report.fittedToMaxPages !== undefined
+        ? { fittedToMaxPages: report.fittedToMaxPages }
+        : {}),
+      ...(maxPages !== undefined && format === "docx"
+        ? {
+            pageCountNote:
+              "DOCX page breaks are decided by the word processor that opens the file, so the page " +
+              "count was not measured and maxPages was not checked. When a PDF of the same content " +
+              "is also requested, its pageCount is the measured length.",
+          }
+        : {}),
     };
   }
 

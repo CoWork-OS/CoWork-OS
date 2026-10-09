@@ -379,6 +379,8 @@ interface SettingsProps {
   onHomeNextActionsEnabledChange: (enabled: boolean) => void;
   costReceiptEnabled: boolean;
   onCostReceiptEnabledChange: (enabled: boolean) => void;
+  subAgentStatsEnabled: boolean;
+  onSubAgentStatsEnabledChange: (enabled: boolean) => void;
   initialTab?: SettingsTab;
   /** Bumped to open the Memory tab's Review view (also when Settings is already open). */
   memoryReviewRequest?: number;
@@ -1353,6 +1355,8 @@ export function Settings({
   onHomeNextActionsEnabledChange,
   costReceiptEnabled,
   onCostReceiptEnabledChange,
+  subAgentStatsEnabled,
+  onSubAgentStatsEnabledChange,
   initialTab = "appearance",
   memoryReviewRequest = 0,
   focusAutomation,
@@ -9175,6 +9179,8 @@ export function Settings({
                   onHomeNextActionsEnabledChange={onHomeNextActionsEnabledChange}
                   costReceiptEnabled={costReceiptEnabled}
                   onCostReceiptEnabledChange={onCostReceiptEnabledChange}
+                  subAgentStatsEnabled={subAgentStatsEnabled}
+                  onSubAgentStatsEnabledChange={onSubAgentStatsEnabledChange}
                   onShowOnboarding={onShowOnboarding}
                   onboardingCompletedAt={onboardingCompletedAt}
                 />

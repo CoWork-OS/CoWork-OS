@@ -201,7 +201,10 @@ describe("DocumentParserTools", () => {
     expect(result.content).toContain("Formulas in Summary:");
     expect(result.content).toContain("- B3: =SUM(B2:B2) (saved result 150)");
     expect(result.content).toContain("Number formats in Summary:");
-    expect(result.content).toContain("- B2: €#,##0.00 (shown as €150.00)");
+    expect(result.content).toContain("- B2: €#,##0.00 (number 150, shown as €150.00)");
+    expect(result.content).toContain(
+      "- B3: €#,##0.00 (formula result number 150, shown as €150.00)",
+    );
     expect(result.content).toContain("Number formats in Notes: none (all cells use General)");
   });
 
@@ -233,6 +236,101 @@ describe("DocumentParserTools", () => {
 
     expect(result.content).toContain('- A2: DD/MM/YYYY (text "2026-10-05", not a date value)');
     expect(result.content).toContain("- C2: =B2*0 (saved result 0)");
+  });
+
+  it("reports stored types and built-in formats of a workbook with inline strings", async () => {
+    // The same parts a Python writer produced in a live task: inline-string cells,
+    // absolute relationship targets, and built-in numFmtIds 49 (@) and 9 (0%).
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file(
+      "[Content_Types].xml",
+      '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+        "</Types>",
+    );
+    zip.file(
+      "_rels/.rels",
+      '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="/xl/workbook.xml"/>' +
+        "</Relationships>",
+    );
+    zip.file(
+      "xl/workbook.xml",
+      '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        '<sheets><sheet name="Expenses" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    );
+    zip.file(
+      "xl/_rels/workbook.xml.rels",
+      '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet1.xml" Id="rId1"/>' +
+        '<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml" Id="rId2"/>' +
+        "</Relationships>",
+    );
+    zip.file(
+      "xl/styles.xml",
+      '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+        '<numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts>' +
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+        '<fills count="2"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+        '<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<xf numFmtId="7" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>',
+    );
+    zip.file(
+      "xl/worksheets/sheet1.xml",
+      '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+        '<row r="1"><c r="A1" t="inlineStr"><is><t>Invoice ID</t></is></c><c r="B1" t="inlineStr"><is><t>Date</t></is></c>' +
+        '<c r="C1" t="inlineStr"><is><t>VAT rate</t></is></c><c r="D1" t="inlineStr"><is><t>Net</t></is></c>' +
+        '<c r="E1" t="inlineStr"><is><t>VAT</t></is></c></row>' +
+        '<row r="2"><c r="A2" s="1" t="inlineStr"><is><t>00041</t></is></c><c r="B2" s="2" t="n"><v>46300</v></c>' +
+        '<c r="C2" s="3" t="n"><v>0.23</v></c><c r="D2" s="4" t="n"><v>120</v></c>' +
+        '<c r="E2" s="4"><f>D2*0</f><v>0</v></c></row>' +
+        "</sheetData></worksheet>",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "costs.xlsx"),
+      await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }),
+    );
+
+    const tools = new DocumentParserTools({
+      id: "ws-1",
+      name: "Test Workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: false,
+        shell: false,
+        allowedPaths: [],
+      },
+    } as Any);
+
+    const result = await tools.parseDocument({ path: "costs.xlsx", format: "structured" });
+
+    expect(result.content).toContain("| Invoice ID | Date | VAT rate | Net | VAT |");
+    // Dates print as the date Excel shows, not a local-time Date string; a zero
+    // formula result prints as 0, not as the formula text.
+    expect(result.content).toContain("| 00041 | 2026-10-05 | 0.23 | 120 | 0 |");
+    expect(result.content).toContain('- A2: @ (text "00041")');
+    expect(result.content).toContain("- B2: dd/mm/yyyy (date 2026-10-05, shown as 05/10/2026)");
+    expect(result.content).toContain("- C2: 0% (number 0.23, shown as 23%)");
+    expect(result.content).toContain(
+      '- D2: "$"#,##0.00_);("$"#,##0.00) [built-in format 7] (number 120, shown as $120.00)',
+    );
+    expect(result.content).toContain("- E2: =D2*0 (saved result 0)");
+    expect(result.content).not.toContain("GMT");
   });
 
   it("returns lossless continuation metadata for bounded document windows", async () => {

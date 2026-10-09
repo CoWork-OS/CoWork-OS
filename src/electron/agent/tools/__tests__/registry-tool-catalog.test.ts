@@ -814,6 +814,12 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(block.items.items.type).toBe("string");
     expect(block.rows.items.items.type).toBe("string");
     expect(createDocument!.input_schema.properties.pageNumbers.type).toBe("boolean");
+    // A requested page count becomes a measured page budget.
+    expect(createDocument!.input_schema.properties.maxPages).toMatchObject({
+      type: "integer",
+      minimum: 1,
+    });
+    expect(createDocument!.description).toMatch(/document of N pages.*set maxPages: N/);
     // The filename is the exact output name, extension included.
     expect(createDocument!.input_schema.properties.filename.description).toMatch(
       /exact output file name including the extension/i,

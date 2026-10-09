@@ -271,6 +271,22 @@ const glyphStateFor = (kind: AgentLineStatusKind): AgentGlyphState =>
         ? "failed"
         : "idle";
 
+/**
+ * Whether any agent is still working. A team item that never spawned stays "pending"
+ * forever, so it stops counting as live once the main task has finished.
+ */
+export function hasLiveAgentLine(
+  lines: ReadonlyArray<Pick<AgentLine, "statusKind" | "recovered" | "task">>,
+  mainTaskCompleted: boolean,
+): boolean {
+  return lines.some(
+    (line) =>
+      !line.recovered &&
+      (line.statusKind === "running" ||
+        (line.statusKind === "pending" && (Boolean(line.task) || !mainTaskCompleted))),
+  );
+}
+
 export function CollaborativeAgentLines({
   collaborativeRun,
   childTasks,
@@ -441,6 +457,10 @@ export function CollaborativeAgentLines({
     },
     { completed: 0, failed: 0, warning: 0, running: 0, pending: 0 },
   );
+
+  // Live strip only: once every agent has settled, the right panel's Sub Agents
+  // section is the record, so don't keep finished rows above the composer.
+  if (!hasLiveAgentLine(agentLines, mainTaskCompleted)) return null;
 
   return (
     <div className="collaborative-agent-lines">

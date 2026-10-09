@@ -12126,54 +12126,54 @@ function MainContentComponent({
           {!isBotConversation &&
             (hasNonConversationEvents || isTaskWorking || isTaskFinished) &&
             (!turnHeadersShown || Boolean(isTaskWorking && continuationStatusChip)) && (
-            <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
-              <div className="timeline-controls-status">
-                {turnHeadersShown ? null : canToggleCompletedTranscript ? (
-                  <button
-                    type="button"
-                    className="timeline-controls-label timeline-controls-label-button with-duration"
-                    onClick={toggleCompletedTranscriptMode}
-                    aria-expanded={transcriptMode !== "delivery"}
-                    title={
-                      transcriptMode === "delivery"
-                        ? "Show full timeline"
-                        : "Show only final output"
-                    }
-                  >
-                    <span>{workDurationLabel}</span>
-                    <span className="timeline-controls-label-chevron" aria-hidden="true">
-                      <ChevronRight size={14} strokeWidth={2} />
+              <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
+                <div className="timeline-controls-status">
+                  {turnHeadersShown ? null : canToggleCompletedTranscript ? (
+                    <button
+                      type="button"
+                      className="timeline-controls-label timeline-controls-label-button with-duration"
+                      onClick={toggleCompletedTranscriptMode}
+                      aria-expanded={transcriptMode !== "delivery"}
+                      title={
+                        transcriptMode === "delivery"
+                          ? "Show full timeline"
+                          : "Show only final output"
+                      }
+                    >
+                      <span>{workDurationLabel}</span>
+                      <span className="timeline-controls-label-chevron" aria-hidden="true">
+                        <ChevronRight size={14} strokeWidth={2} />
+                      </span>
+                    </button>
+                  ) : liveActivityHeaderVisible ? null : (
+                    <span
+                      className={`timeline-controls-label ${
+                        isTaskWorking || isTaskFinished ? "with-duration" : ""
+                      }`}
+                    >
+                      {workDurationLabel}
                     </span>
-                  </button>
-                ) : liveActivityHeaderVisible ? null : (
-                  <span
-                    className={`timeline-controls-label ${
-                      isTaskWorking || isTaskFinished ? "with-duration" : ""
-                    }`}
-                  >
-                    {workDurationLabel}
-                  </span>
-                )}
-                {isTaskWorking && continuationStatusChip && (
-                  <span className="header-continuation-chip" title="Adaptive continuation status">
-                    <span>{continuationStatusChip.window}</span>
-                    {continuationStatusChip.progress && (
-                      <span className="header-continuation-chip-sep">·</span>
-                    )}
-                    {continuationStatusChip.progress && (
-                      <span>{continuationStatusChip.progress}</span>
-                    )}
-                    {continuationStatusChip.loopRisk && (
-                      <span className="header-continuation-chip-sep">·</span>
-                    )}
-                    {continuationStatusChip.loopRisk && (
-                      <span>{continuationStatusChip.loopRisk}</span>
-                    )}
-                  </span>
-                )}
+                  )}
+                  {isTaskWorking && continuationStatusChip && (
+                    <span className="header-continuation-chip" title="Adaptive continuation status">
+                      <span>{continuationStatusChip.window}</span>
+                      {continuationStatusChip.progress && (
+                        <span className="header-continuation-chip-sep">·</span>
+                      )}
+                      {continuationStatusChip.progress && (
+                        <span>{continuationStatusChip.progress}</span>
+                      )}
+                      {continuationStatusChip.loopRisk && (
+                        <span className="header-continuation-chip-sep">·</span>
+                      )}
+                      {continuationStatusChip.loopRisk && (
+                        <span>{continuationStatusChip.loopRisk}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Replay controls bar — shown when replay mode is active */}
           {replayControls?.isReplayMode && replayControls.areControlsVisible && (

@@ -271,7 +271,8 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
       observations: 1,
       byType: [{ key: "person", count: 2 }],
     });
-    expect(JSON.stringify(report)).not.toMatch(/tabs|window seats|build log|Ada/i);
+    // Word boundaries: a random workspace id can contain "ada" (e.g. "...-adac-...").
+    expect(JSON.stringify(report)).not.toMatch(/\b(?:tabs|window seats|build log|Ada)\b/i);
 
     const empty = await service(db).sources(other);
     // Ties are ordered by key.

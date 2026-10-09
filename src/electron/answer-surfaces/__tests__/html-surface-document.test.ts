@@ -10,6 +10,7 @@ describe("prepareHtmlSurfaceDocument", () => {
     expect(bridge).toBeGreaterThan(-1);
     expect(bridge).toBeLessThan(doc.indexOf("spoofed"));
     expect(doc).toContain("cowork-autosize");
+    expect(doc).not.toContain('id="cowork-surface-kit"');
     expect(doc).not.toContain('id="cowork-rich-frame-design-language"');
   });
 
@@ -21,6 +22,10 @@ describe("prepareHtmlSurfaceDocument", () => {
     });
     expect(doc.startsWith('<style id="cowork-surface-autosize">')).toBe(true);
     expect(doc).toContain('id="cowork-rich-frame-design-language"');
+    // The kit runs before the bridge so the bridge can expose its helpers.
+    expect(doc.indexOf('id="cowork-surface-kit"')).toBeLessThan(
+      doc.indexOf('id="cowork-surface-bridge"'),
+    );
     expect(doc).toContain("color-scheme: dark");
   });
 });

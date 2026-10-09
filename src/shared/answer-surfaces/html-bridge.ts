@@ -193,9 +193,17 @@ export const HTML_SURFACE_BOOTSTRAP_SCRIPT = `(function () {
       scheduleMeasure();
     }
   });
+  // Design-kit helpers (icons, charts, formatting), when the kit was injected first.
+  var kit = window.__coworkKit || {};
+  try { delete window.__coworkKit; } catch (e) {}
   var api = Object.freeze({
     version: V,
     ready: ready,
+    icon: kit.icon,
+    renderIcons: kit.renderIcons,
+    chart: kit.chart,
+    format: kit.format,
+    tween: kit.tween,
     theme: function () { return theme; },
     state: Object.freeze({
       get: function () { return Object.assign({}, state); },

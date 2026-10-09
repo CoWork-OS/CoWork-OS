@@ -10,6 +10,7 @@ import {
   HTML_SURFACE_BOOTSTRAP_SCRIPT,
   HTML_SURFACE_MAX_HTML_CHARS,
 } from "../../shared/answer-surfaces/html-bridge";
+import { HTML_KIT_SCRIPT } from "../../shared/answer-surfaces/html-kit-script";
 import { applyRichFrameDesignLanguage } from "../../shared/rich-frame-design-language";
 import { validateInput } from "../utils/validation";
 
@@ -24,10 +25,10 @@ export const RegisterHtmlSurfaceSchema = z
 
 export type RegisterHtmlSurfaceRequest = z.infer<typeof RegisterHtmlSurfaceSchema>;
 
-const RUNTIME_TAGS = [
-  `<style id="cowork-surface-autosize">\n${HTML_SURFACE_AUTOSIZE_CSS}\n</style>`,
-  `<script id="cowork-surface-bridge">\n${HTML_SURFACE_BOOTSTRAP_SCRIPT}\n</script>`,
-].join("\n");
+const AUTOSIZE_TAG = `<style id="cowork-surface-autosize">\n${HTML_SURFACE_AUTOSIZE_CSS}\n</style>`;
+const BRIDGE_TAG = `<script id="cowork-surface-bridge">\n${HTML_SURFACE_BOOTSTRAP_SCRIPT}\n</script>`;
+/** Runs before the bridge, which exposes its helpers as cowork.chart, cowork.icon, … */
+const KIT_TAG = `<script id="cowork-surface-kit">\n${HTML_KIT_SCRIPT}\n</script>`;
 
 // Tag scans are bounded: an unbounded `[^>]*` over a 1 MB document with many unclosed
 // `<head` openings is quadratic and would stall the main process.
@@ -38,14 +39,15 @@ const RESOURCE_HINT =
   /<link\b[^>]{0,2000}\brel\s*=\s*["']?(?:dns-prefetch|preconnect|prefetch|prerender|modulepreload)\b[^>]{0,2000}>/gi;
 
 /** Puts the bridge first in <head>, so it is defined before any page script runs. */
-function injectRuntime(html: string): string {
+function injectRuntime(html: string, withKit: boolean): string {
+  const tags = [AUTOSIZE_TAG, ...(withKit ? [KIT_TAG] : []), BRIDGE_TAG].join("\n");
   if (HEAD_TAG.test(html)) {
-    return html.replace(HEAD_TAG, (match) => `${match}\n${RUNTIME_TAGS}`);
+    return html.replace(HEAD_TAG, (match) => `${match}\n${tags}`);
   }
   if (HTML_TAG.test(html)) {
-    return html.replace(HTML_TAG, (match) => `${match}\n<head>${RUNTIME_TAGS}</head>`);
+    return html.replace(HTML_TAG, (match) => `${match}\n<head>${tags}</head>`);
   }
-  return `${RUNTIME_TAGS}\n${html}`;
+  return `${tags}\n${html}`;
 }
 
 export function prepareHtmlSurfaceDocument(request: RegisterHtmlSurfaceRequest): string {
@@ -56,7 +58,7 @@ export function prepareHtmlSurfaceDocument(request: RegisterHtmlSurfaceRequest):
         hostBackground: request.hostBackground,
       })
     : html;
-  return injectRuntime(themed);
+  return injectRuntime(themed, request.designLanguage);
 }
 
 /** Validates a renderer request and returns the preview URL the frame loads. */

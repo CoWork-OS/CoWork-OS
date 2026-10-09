@@ -566,8 +566,6 @@ import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
 import { promoteObservationToMemoryFolder } from "../memory/repo/memory-repo-producers";
-import { SupermemoryService } from "../memory/SupermemoryService";
-import { SupermemoryRemoteRefRepository } from "../memory/SupermemoryRemoteRefRepository";
 import { MemoryWriteGate } from "../memory/MemoryWriteGate";
 import { UserProfileService } from "../memory/UserProfileService";
 import {
@@ -636,42 +634,7 @@ function buildPptxContentFromPreview(preview: PptxPresentationPreview): string {
 }
 
 const execFileAsync = promisify(execFile);
-const SupermemorySettingsInputSchema = z
-  .object({
-    enabled: z.boolean(),
-    apiKey: z.string().trim().max(500).optional(),
-    baseUrl: z
-      .string()
-      .trim()
-      .url()
-      .refine((value) => {
-        try {
-          const parsed = new URL(value);
-          return parsed.protocol === "https:" && parsed.hostname === "api.supermemory.ai";
-        } catch {
-          return false;
-        }
-      }, "Supermemory base URL must be https://api.supermemory.ai")
-      .optional(),
-    containerTagTemplate: z.string().trim().min(1).max(200).optional(),
-    includeProfileInPrompt: z.boolean().optional(),
-    mirrorMemoryWrites: z.boolean().optional(),
-    searchMode: z.enum(["hybrid", "memories"]).optional(),
-    rerank: z.boolean().optional(),
-    threshold: z.number().min(0).max(1).optional(),
-    customContainers: z
-      .array(
-        z
-          .object({
-            tag: z.string().trim().min(1).max(100),
-            description: z.string().trim().max(240).optional(),
-          })
-          .strict(),
-      )
-      .max(50)
-      .optional(),
-  })
-  .strict();
+
 const MemoryObservationStringArraySchema = z.array(z.string().trim().min(1).max(240)).max(12);
 const MemoryObservationPatchSchema = z
   .object({
@@ -13277,77 +13240,6 @@ function setupMemoryHandlers(
       }
     },
   );
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_GET_SETTINGS, async () => {
-    try {
-      return SupermemoryService.getSettingsView();
-    } catch (error) {
-      logger.error("[Supermemory] Failed to get settings:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_GET_STATUS, async () => {
-    try {
-      const mirroredCopies = await SupermemoryRemoteRefRepository.get()
-        ?.count()
-        .catch(() => undefined);
-      return {
-        ...SupermemoryService.getConfigStatus(),
-        ...(typeof mirroredCopies === "number" ? { mirroredCopies } : {}),
-      };
-    } catch (error) {
-      logger.error("[Supermemory] Failed to get status:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_SAVE_SETTINGS, async (_event, settings: Any) => {
-    checkRateLimit(IPC_CHANNELS.SUPERMEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-    try {
-      const validated = validateInput(
-        SupermemorySettingsInputSchema,
-        settings,
-        "supermemory settings",
-      );
-      SupermemoryService.saveSettings(validated);
-      return { success: true };
-    } catch (error) {
-      logger.error("[Supermemory] Failed to save settings:", error);
-      throw error;
-    }
-  });
-
-  // "Disconnect & purge" (SEC-17): delete the remote copies CoWork recorded, then disable.
-  // No payload; destructive and remote, so rate-limited like a settings save.
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE, async () => {
-    checkRateLimit(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE, RATE_LIMIT_CONFIGS.limited);
-    try {
-      return await SupermemoryService.disconnectAndPurge();
-    } catch (error) {
-      logger.error("[Supermemory] Disconnect and purge failed:", error);
-      return {
-        success: false,
-        disabled: false,
-        forgotten: 0,
-        failed: 0,
-        errors: [],
-        error: error instanceof Error ? error.message : "Disconnect and purge failed",
-      };
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_TEST_CONNECTION, async () => {
-    try {
-      return await SupermemoryService.testConnection();
-    } catch (error) {
-      logger.error("[Supermemory] Failed to test connection:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to reach Supermemory",
-      };
-    }
-  });
 
   // Search memories
   ipcMain.handle(IPC_CHANNELS.MEMORY_SEARCH, async (_, rawData: unknown) => {

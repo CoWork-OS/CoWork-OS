@@ -190,11 +190,6 @@
   gap: 10px;
 }
 
-/* Supermemory "Disconnect & purge" (SupermemoryDisconnectPurge.tsx). */
-.supermemory-purge-hint {
-  margin-left: 8px;
-}
-
 .memory-knowledge-file-path {
   margin: 0 8px;
   font-weight: 400;

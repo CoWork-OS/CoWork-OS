@@ -97,7 +97,7 @@ export interface MemoryFeaturesSettings {
   /** Keep legacy archive memory out of default prompt injection. */
   defaultArchiveInjectionEnabled?: boolean;
   /** Optional review mode for durable memory writes; normal no-prompt runs commit immediately. */
-  memoryWriteApprovalMode?: "off" | "curated_only" | "external_only" | "background_only" | "all";
+  memoryWriteApprovalMode?: "off" | "curated_only" | "background_only" | "all";
   /** Promote only explicit/high-signal facts into curated memory. */
   autoPromoteToCuratedMemoryEnabled?: boolean;
   /** Store structured sidecar metadata for archive memories. */
@@ -234,55 +234,6 @@ export interface MemoryObservationBackfillStatus {
   running: boolean;
   lastRunAt?: number;
   lastError?: string;
-}
-
-export type SupermemorySearchMode = "hybrid" | "memories";
-
-export interface SupermemoryCustomContainer {
-  tag: string;
-  description?: string;
-}
-
-export interface SupermemorySettings {
-  enabled: boolean;
-  apiKey?: string;
-  baseUrl?: string;
-  containerTagTemplate?: string;
-  includeProfileInPrompt?: boolean;
-  mirrorMemoryWrites?: boolean;
-  searchMode?: SupermemorySearchMode;
-  rerank?: boolean;
-  threshold?: number;
-  customContainers?: SupermemoryCustomContainer[];
-}
-
-export interface SupermemoryConfigStatus {
-  enabled: boolean;
-  apiKeyConfigured: boolean;
-  baseUrl: string;
-  containerTagTemplate: string;
-  includeProfileInPrompt: boolean;
-  mirrorMemoryWrites: boolean;
-  searchMode: SupermemorySearchMode;
-  rerank: boolean;
-  threshold: number;
-  customContainers: SupermemoryCustomContainer[];
-  circuitBreakerUntil?: number | null;
-  lastError?: string | null;
-  isConfigured: boolean;
-  /** Remote copies CoWork recorded (and can delete with "Disconnect & purge"). */
-  mirroredCopies?: number;
-}
-
-/** Result of Supermemory "Disconnect & purge" (SEC-17). */
-export interface SupermemoryDisconnectPurgeResult {
-  success: boolean;
-  /** The integration was disabled (only after every recorded copy was deleted). */
-  disabled: boolean;
-  forgotten: number;
-  failed: number;
-  errors: string[];
-  error?: string;
 }
 
 export type MemoryWakeUpLayerId = "L0" | "L1" | "L2" | "L3";
@@ -1882,9 +1833,7 @@ export const TOOL_GROUPS = {
     "browser_save_pdf",
     "browser_close",
     "open_url",
-    // External messaging integrations. Supermemory is reached through memory_recall /
-    // memory_remember / memory_forget with the external scope, which check the
-    // workspace's network permission themselves.
+    // External messaging integrations.
     "channel_fetch_discord_messages",
     "channel_download_discord_attachment",
     "email_imap_unread",
@@ -1953,7 +1902,7 @@ export type ToolGroupName = keyof typeof TOOL_GROUPS;
 
 /**
  * Tools that persist or erase long-term memory (local archive, curated memory,
- * Supermemory, knowledge graph). They do not touch workspace files, so they are
+ * knowledge graph). They do not touch workspace files, so they are
  * not in group:write, but they are still writes: read-only lanes (plan/analyze
  * modes, verifier/researcher workers) must deny them like any other mutation.
  * (SEC-12)
@@ -4400,9 +4349,7 @@ export type UnifiedRecallSourceType =
   | "screen_context"
   | "knowledge_graph"
   /** Conversation index hits other than user/assistant messages (tool output, summaries). */
-  | "conversation"
-  /** Supermemory, when connected and the workspace allows network access. */
-  | "supermemory";
+  | "conversation";
 
 export type ChronicleCaptureScope = "frontmost_display" | "all_displays";
 export type ChronicleTaskMode = "inherit" | "enabled" | "disabled";
@@ -9031,11 +8978,6 @@ export const IPC_CHANNELS = {
   MEMORY_WRITE_APPROVALS_APPROVE: "memoryWriteApprovals:approve",
   MEMORY_WRITE_APPROVALS_REJECT: "memoryWriteApprovals:reject",
   MEMORY_WRITE_APPROVALS_COUNT: "memoryWriteApprovals:count",
-  SUPERMEMORY_GET_SETTINGS: "supermemory:getSettings",
-  SUPERMEMORY_SAVE_SETTINGS: "supermemory:saveSettings",
-  SUPERMEMORY_TEST_CONNECTION: "supermemory:testConnection",
-  SUPERMEMORY_GET_STATUS: "supermemory:getStatus",
-  SUPERMEMORY_DISCONNECT_PURGE: "supermemory:disconnectAndPurge",
 
   // Migration Status (for showing one-time notifications after app rename)
   MIGRATION_GET_STATUS: "migration:getStatus",

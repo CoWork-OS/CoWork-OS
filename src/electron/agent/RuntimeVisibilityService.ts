@@ -8,7 +8,6 @@ import { DurableContextService } from "../memory/DurableContextService";
 import { extractFtsTerms, termCoverage, trimmedText } from "../database/fts-query";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { MemoryRecallService } from "../memory/MemoryRecall";
-import { SupermemoryService } from "../memory/SupermemoryService";
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import { ChronicleObservationRepository } from "../chronicle";
 import { LLMProviderFactory, type LLMSettings } from "./llm/provider-factory";
@@ -69,8 +68,6 @@ function sourceWeight(sourceType: UnifiedRecallSourceType): number {
       return 0.79;
     case "knowledge_graph":
       return 0.78;
-    case "supermemory":
-      return 0.6;
     default:
       return 0.7;
   }
@@ -91,7 +88,6 @@ const KNOWN_SOURCES = new Set<UnifiedRecallSourceType>([
   "memory",
   "screen_context",
   "knowledge_graph",
-  "supermemory",
 ]);
 
 type RecallCandidate = Omit<UnifiedRecallResult, "rank">;
@@ -259,8 +255,7 @@ export class RuntimeVisibilityService {
   /**
    * Mission Control recall (RECALL-4): one ranked list across the workspace's memory
    * items, memory archive, notes, knowledge graph, screen context, conversation index
-   * (verbatim messages: the former quotes lane), tasks, files, activity and, when
-   * connected and the workspace allows network access, Supermemory. Full-text lanes are
+   * (verbatim messages: the former quotes lane), tasks, files and activity. Full-text lanes are
    * trusted as returned (no whole-query substring filter on top of FTS); tasks and
    * activity are term-searched in SQL over all rows (not a recent window) and ranked by
    * query-term coverage. Lanes are fused by reciprocal rank. Browsing records no memory
@@ -649,40 +644,6 @@ export class RuntimeVisibilityService {
             sourceLabel: "Activity",
             metadata: { activityType: activity.activityType, actorType: activity.actorType },
           })),
-      ),
-    );
-
-    // Supermemory: only when connected and the workspace allows network access. The query
-    // leaves the device; nothing is stored locally.
-    const permissions = workspace?.permissions;
-    const externalAllowed =
-      permissions?.network === true &&
-      permissions.accessNetworkMode !== "disabled" &&
-      permissions.accessProfileUnavailable !== true;
-    lanes.push(
-      await lane(
-        externalAllowed && sourceAllowed("supermemory") && SupermemoryService.isConfigured(),
-        async () => {
-          const result = await MemoryRecallService.getDefault().recall({
-            text: normalizedQuery,
-            workspaceId,
-            lanes: ["external"],
-            surface: "memory_hub",
-            detail: "index",
-            limit: Math.min(candidateLimit, 25),
-            policy: { allowExternal: true, workspaceName: workspace?.name },
-          });
-          return result.hits.map((hit) => ({
-            sourceType: "supermemory" as const,
-            objectId: hit.ref,
-            workspaceId,
-            timestamp: hit.createdAt,
-            snippet: truncate(hit.snippet || hit.title, 260),
-            title: hit.title || "Supermemory",
-            sourceLabel: "Supermemory",
-            metadata: { relevanceScore: hit.relevance, ...hit.provenance },
-          }));
-        },
       ),
     );
 

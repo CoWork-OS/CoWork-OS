@@ -14,13 +14,7 @@ import type {
  * Lanes recall can fuse; `memory` is memory_items, `repo` the memory repo's markdown entries
  * (docs/memory-repo-phase1-design.md §6.3), the others are existing stores.
  */
-export type MemoryRecallLane =
-  | "memory"
-  | "repo"
-  | "archive"
-  | "conversations"
-  | "knowledge"
-  | "external";
+export type MemoryRecallLane = "memory" | "repo" | "archive" | "conversations" | "knowledge";
 
 /** Where a request comes from; drives privacy and channel rules in the injection policy. */
 export type MemorySurface =
@@ -53,24 +47,19 @@ export interface MemoryRecallQuery {
   detail?: "index" | "full";
   ids?: string[];
   limit?: number;
-  /** Access context for file-backed and external lanes (MemoryRecall.ts). */
+  /** Access context for file-backed lanes (MemoryRecall.ts). */
   policy?: MemoryRecallPolicy;
 }
 
 /**
  * What a recall caller may reach beyond the database. Lanes that need something not given
- * here are skipped: no workspace path → no markdown/topic files; `allowExternal` false →
- * no external provider.
+ * here are skipped: no workspace path → no markdown/topic files.
  */
 export interface MemoryRecallPolicy {
   /** Workspace root, for the markdown index and topic packs. */
   workspacePath?: string;
   /** Read guard of the caller's access profile; files it refuses are never read. */
   readGuard?: (absolutePath: string) => boolean;
-  /** External providers (Supermemory) may be queried: configured and network permitted. */
-  allowExternal?: boolean;
-  /** Workspace name, for the external provider's container. */
-  workspaceName?: string;
   /** Include `private` memory items (owner surfaces such as the Memory Hub only). */
   includePrivate?: boolean;
   /** Leave the active task out of the conversation lane (context_recall covers it). */

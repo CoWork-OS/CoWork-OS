@@ -62,8 +62,7 @@ export class ChronicleMemoryService {
     }
 
     const memoryContent = chronicleObservationToMemoryContent(observation);
-    // Screen-derived text stays local: capture as private so it is never
-    // mirrored to external memory providers (Supermemory).
+    // Screen-derived text stays local: capture as private.
     const memory = await MemoryService.capture(
       observation.workspaceId,
       observation.taskId,
@@ -74,8 +73,6 @@ export class ChronicleMemoryService {
         origin: "chronicle",
         signalFamily: "chronicle",
         priority: "normal",
-        // Screen text stays on the device (also enforced by `isPrivate`).
-        allowExternalMirror: false,
       },
     );
     if (!memory) {

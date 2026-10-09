@@ -120,7 +120,6 @@ describe("MemoryService capture privacy", () => {
     MemoryService.capture("ws-1", "task-1", "observation", content, false, {
       origin: origin as Any,
       skipMemoryWriteGate: true,
-      allowExternalMirror: false,
     });
 
   it("redacts secret values before storage and keeps the memory visible", async () => {
@@ -287,35 +286,5 @@ describe("MemoryService deletion consistency", () => {
     } finally {
       unsubscribe();
     }
-  });
-});
-
-describe("MemoryService Supermemory mirror (SEC-17)", () => {
-  it("mirrors into the workspace-name container and passes the local ref", async () => {
-    const { SupermemoryService } = await import("../SupermemoryService");
-    const mirror = vi.spyOn(SupermemoryService, "mirrorMemory").mockResolvedValue(undefined);
-    (MemoryService as Any).workspaceRepo = {
-      findById: vi.fn(async () => ({
-        id: "ws-1",
-        name: "Atlas",
-        permissions: { network: true, accessNetworkMode: "enabled" },
-      })),
-    };
-    const memory = await MemoryService.capture(
-      "ws-1",
-      "task-1",
-      "observation",
-      "Deploys go through staging first",
-      false,
-      { origin: "task" } as Any,
-    );
-    expect(memory).toBeTruthy();
-    await vi.waitFor(() => expect(mirror).toHaveBeenCalled());
-    expect(mirror).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspace: { id: "ws-1", name: "Atlas" },
-        localRef: `archive:${memory!.id}`,
-      }),
-    );
   });
 });

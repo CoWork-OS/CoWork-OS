@@ -151,9 +151,7 @@ const featureSettings = z
       .max(3)
       .optional(),
     memoryRepoDreamDailyTokenBudget: z.number().int().min(1).max(1_000_000).optional(),
-    memoryWriteApprovalMode: z
-      .enum(["off", "curated_only", "external_only", "background_only", "all"])
-      .optional(),
+    memoryWriteApprovalMode: z.enum(["off", "curated_only", "background_only", "all"]).optional(),
   })
   .strict();
 const observationScope = scope.extend({ memoryId: id }).strict();

@@ -241,7 +241,6 @@ export async function seedArchive(env: MemoryEvalEnv, spec: EvalArchiveSpec): Pr
     spec.private === true,
     {
       forceCapture: true,
-      allowExternalMirror: false,
       ...(spec.imported ? { origin: "import" as const } : {}),
     },
   );

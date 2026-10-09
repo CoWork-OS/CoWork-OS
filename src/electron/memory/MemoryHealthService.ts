@@ -25,8 +25,6 @@ const MIB = 1024 * 1024;
 
 export interface MemoryHealthDeps {
   port: Pick<MemoryStatementPort, "unit">;
-  /** Supermemory switch and whether it has credentials (never the credentials). */
-  getSupermemoryStatus: () => { enabled: boolean; connected: boolean };
   getChronicleEnabled: () => boolean;
   /**
    * The memory folder's status (memory repo, design §9). Service-only: the repo lives on
@@ -382,7 +380,6 @@ export class MemoryHealthService {
 
   async sources(workspaceId: string): Promise<MemorySourcesReport> {
     const counts = await this.deps.port.unit("memoryHealth_sources", { workspaceId });
-    const supermemory = this.deps.getSupermemoryStatus();
     return {
       generatedAt: this.now(),
       workspaceId,
@@ -404,11 +401,6 @@ export class MemoryHealthService {
       chronicle: {
         enabled: this.deps.getChronicleEnabled(),
         archiveRows: counts.archive.screenContext,
-      },
-      supermemory: {
-        enabled: supermemory.enabled,
-        connected: supermemory.connected,
-        remoteRefs: counts.supermemoryRemoteRefs,
       },
       knowledgeGraph: counts.knowledgeGraph,
     };

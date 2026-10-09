@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   capture: vi.fn(),
   evaluate: vi.fn(),
-  remember: vi.fn(),
   ingest: vi.fn(),
 }));
 
@@ -21,9 +20,6 @@ vi.mock("../../../memory/CuratedMemoryService", () => ({
 }));
 vi.mock("../../../memory/MemoryWriteGate", () => ({
   MemoryWriteGate: { evaluate: mocks.evaluate },
-}));
-vi.mock("../../../memory/SupermemoryService", () => ({
-  SupermemoryService: { remember: mocks.remember, isConfigured: () => true },
 }));
 vi.mock("../../../memory/MemoryWriter", () => ({
   MemoryWriter: { get: () => ({ ingest: mocks.ingest }) },
@@ -55,7 +51,6 @@ describe("explicit memory writes and <no-memory>", () => {
     vi.clearAllMocks();
     mocks.evaluate.mockResolvedValue({ allowed: true });
     mocks.capture.mockResolvedValue({ id: "mem-1" });
-    mocks.remember.mockResolvedValue({ containerTag: "tag", memoryIds: ["s-1"] });
     mocks.ingest.mockResolvedValue({
       status: "written",
       action: "inserted",
@@ -87,7 +82,6 @@ describe("explicit memory writes and <no-memory>", () => {
     });
     expect(result.success).toBe(false);
     expect(result.blocked).toBe(true);
-    expect(mocks.remember).not.toHaveBeenCalled();
   });
 
   it("blocks a write whose own content carries <no-memory>", async () => {

@@ -284,8 +284,7 @@ Durable memory writes can be approval-gated before commit. The Memory Hub settin
 
 - `off`: commit immediately
 - `curated_only`: stage curated hot-memory writes
-- `external_only`: stage Supermemory/external-provider writes
-- `background_only`: stage automatic capture, Dreaming, distillation, and external mirroring writes
+- `background_only`: stage automatic capture, Dreaming and distillation writes
 - `all`: stage every durable memory write
 
 Pending approvals are stored in `pending_memory_writes`. Because this table is in the normal SQLite database, CoWork blocks sensitive external-memory payloads before they are persisted to the queue. Approval replay claims a pending row as `applying` before sending it to the target memory service, so duplicate approve attempts do not replay the same write twice.

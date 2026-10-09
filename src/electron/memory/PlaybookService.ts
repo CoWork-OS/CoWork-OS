@@ -21,13 +21,7 @@ export type ErrorCategory =
   | "user_correction"
   | "unknown";
 
-export interface PlaybookCaptureOptions {
-  /**
-   * Kept for callers' compatibility. Playbook entries are no longer archive memories, so
-   * they are never mirrored to an external memory provider.
-   */
-  allowExternalMirror?: boolean;
-}
+export interface PlaybookCaptureOptions {}
 
 export type PlaybookCaptureResult =
   | {

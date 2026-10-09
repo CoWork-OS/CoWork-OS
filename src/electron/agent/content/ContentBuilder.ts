@@ -11,7 +11,6 @@ import type { ExecutionMode, TaskDomain } from "../../../shared/types";
 import {
   DESIGN_SYSTEM_MIN_TOKENS,
   DESIGN_SYSTEM_SECTION_TOKENS,
-  EXTERNAL_MEMORY_SECTION_TOKENS,
   MEMORY_CONTEXT_MIN_TOKENS,
   MEMORY_CONTEXT_SECTION_TOKENS,
   PROJECT_GUIDANCE_MIN_TOKENS,
@@ -41,8 +40,6 @@ export interface BuildExecutionPromptParams {
   designSystemContext?: string;
   /** Repo-root project instructions (AGENTS.md / CLAUDE.md) and docs map files. */
   projectGuidanceContext?: string;
-  /** External memory provider context (Supermemory). */
-  externalMemoryContext?: string;
   /** Transcript span hits from the query orchestrator. */
   transcriptContext?: string;
   awarenessSnapshot?: string;
@@ -153,13 +150,6 @@ function buildMemoryContextSections(params: BuildExecutionPromptParams): PromptS
       cacheScope: "turn",
       truncation: "fragment",
       minTokens: MEMORY_CONTEXT_MIN_TOKENS,
-    }),
-    makeSection("external_memory", params.externalMemoryContext, EXTERNAL_MEMORY_SECTION_TOKENS, {
-      required: false,
-      dropPriority: 6.5,
-      layerKind: "optional",
-      cacheScope: "turn",
-      truncation: "fragment",
     }),
     makeSection("transcript_context", params.transcriptContext, TRANSCRIPT_CONTEXT_SECTION_TOKENS, {
       required: false,

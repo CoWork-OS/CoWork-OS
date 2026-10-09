@@ -90,13 +90,6 @@ expansion) filters them as well. Private rows are never injected into prompts. T
 privacy-filter parameter, so the model cannot widen this, and Rebuild never loosens an existing
 privacy state.
 
-Supermemory mirroring remains additive and opt-in. Private, redacted, and suppressed local entries
-are not mirrored. Mirrored copies have no stored remote id, so later suppression, redaction or deletion
-does not reach Supermemory. The normal no-prompt runtime commits eligible mirror attempts immediately
-after the same privacy and sensitive-payload checks. A controlled run can opt into the review queue
-with `COWORK_MEMORY_WRITE_APPROVAL_MODE=external_only` or `background_only`; sensitive
-external-memory payloads are blocked before they can be stored in that queue.
-
 ## Access profile boundary
 
 Memory search, observation details, durable-context recall, and background

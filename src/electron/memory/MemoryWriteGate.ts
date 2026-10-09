@@ -16,14 +16,13 @@ import type {
 
 const logger = createLogger("MemoryWriteGate");
 
-export type MemoryWriteTarget = "archive" | "curated" | "external";
+export type MemoryWriteTarget = "archive" | "curated";
 export type MemoryWriteOrigin =
   | "agent_tool"
   | "auto_capture"
   | "background"
   | "dreaming"
   | "distill"
-  | "external_mirror"
   | "system";
 
 export type MemoryWriteDecision =
@@ -68,16 +67,6 @@ export class MemoryWriteGate {
     if (!this.initialized) {
       logger.warn("[MemoryWriteGate] Not initialized; allowing memory write.");
       return { allowed: true };
-    }
-    if (this.shouldBlock(request)) {
-      logger.warn(
-        `[MemoryWriteGate] Blocked sensitive external memory write target=${request.target} action=${request.action} origin=${request.origin}`,
-      );
-      return {
-        allowed: false,
-        blocked: true,
-        error: "External memory write contains sensitive content and was blocked.",
-      };
     }
     if (!this.shouldStage(request)) {
       return { allowed: true };
@@ -279,23 +268,16 @@ export class MemoryWriteGate {
         return true;
       case "curated_only":
         return request.target === "curated";
-      case "external_only":
-        return request.target === "external";
       case "background_only":
         return (
           request.origin === "auto_capture" ||
           request.origin === "background" ||
           request.origin === "dreaming" ||
-          request.origin === "distill" ||
-          request.origin === "external_mirror"
+          request.origin === "distill"
         );
       default:
         return false;
     }
-  }
-
-  private static shouldBlock(request: MemoryWriteRequest): boolean {
-    return request.target === "external" && this.containsSensitiveDisplayContent(request.payload);
   }
 
   private static async replay(
@@ -308,10 +290,6 @@ export class MemoryWriteGate {
     }
     if (pending.target === "curated") {
       await this.replayCurated(pending);
-      return;
-    }
-    if (pending.target === "external") {
-      await this.replayExternal(pending, effectiveWorkspace);
       return;
     }
     throw new Error(`Unsupported memory write target: ${pending.target}`);
@@ -339,7 +317,6 @@ export class MemoryWriteGate {
       {
         ...options,
         skipMemoryWriteGate: true,
-        allowExternalMirror: this.isExternalMemoryReplayAllowed(workspace),
       },
     );
     if (!memory) {
@@ -469,59 +446,6 @@ export class MemoryWriteGate {
     return kept;
   }
 
-  private static async replayExternal(
-    pending: PendingMemoryWrite,
-    effectiveWorkspace?: Workspace,
-  ): Promise<void> {
-    const { SupermemoryService } = await import("./SupermemoryService");
-    const payload = pending.payload;
-    const storedWorkspace =
-      effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId));
-    if (!this.isExternalMemoryReplayAllowed(storedWorkspace)) {
-      throw new Error(
-        "Approved external memory write was blocked because the workspace no longer permits automatic network access.",
-      );
-    }
-    const workspace = await this.getWorkspaceRef(pending.workspaceId);
-    if (pending.action === "remember") {
-      const content = this.asString(payload.content);
-      if (!content) throw new Error("Pending Supermemory remember payload is missing content.");
-      const result = await SupermemoryService.remember({
-        workspace,
-        content,
-        containerTag: this.asString(payload.containerTag),
-        metadata: this.asPlainObject(payload.metadata),
-        taskId: pending.taskId,
-        skipMemoryWriteGate: true,
-      });
-      if (result.staged) {
-        throw new Error("Approved Supermemory write was staged again unexpectedly.");
-      }
-      return;
-    }
-    if (pending.action === "mirror") {
-      const content = this.asString(payload.content);
-      const memoryType = this.asString(payload.memoryType);
-      if (!content || !memoryType) {
-        throw new Error("Pending Supermemory mirror payload is missing content or memory type.");
-      }
-      await SupermemoryService.mirrorMemory({
-        workspace,
-        taskId: pending.taskId,
-        memoryType,
-        content,
-        createdAt: typeof payload.createdAt === "number" ? payload.createdAt : pending.createdAt,
-        skipMemoryWriteGate: true,
-        // The archive row it copies, so deleting that row forgets the copy (SEC-17).
-        ...(this.asString(payload.localRef)?.startsWith("archive:")
-          ? { localRef: this.asString(payload.localRef) }
-          : {}),
-      });
-      return;
-    }
-    throw new Error(`Unsupported external memory action: ${pending.action}`);
-  }
-
   private static async getWorkspaceRef(workspaceId: string): Promise<{ id: string; name: string }> {
     try {
       if (this.db) {
@@ -545,21 +469,12 @@ export class MemoryWriteGate {
     }
   }
 
-  private static isExternalMemoryReplayAllowed(workspace: Workspace | undefined): boolean {
-    if (!workspace?.permissions) return true;
-    return (
-      workspace.permissions.network === true &&
-      workspace.permissions.accessProfileUnavailable !== true &&
-      workspace.permissions.accessNetworkMode !== "disabled" &&
-      workspace.permissions.accessNetworkMode !== "on-request"
-    );
-  }
-
   private static normalizeMode(value: unknown) {
     if (typeof value !== "string") return null;
     const normalized = value.trim();
+    // `external_only` staged writes to the retired Supermemory provider; it now means `off`.
+    if (normalized === "external_only") return "off";
     return normalized === "curated_only" ||
-      normalized === "external_only" ||
       normalized === "background_only" ||
       normalized === "all" ||
       normalized === "off"
@@ -581,7 +496,6 @@ export class MemoryWriteGate {
 
   private static estimateRisk(request: MemoryWriteRequest): number {
     let score = 0.2;
-    if (request.target === "external") score += 0.45;
     if (request.target === "curated") score += 0.25;
     if (request.origin !== "agent_tool") score += 0.2;
     return Math.min(1, score);

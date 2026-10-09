@@ -12,7 +12,6 @@
  *                    imports), the existing hybrid search with the Phase 0 visibility filter;
  *  - `conversations` the unified conversation index of earlier tasks;
  *  - `knowledge`     knowledge-graph entities and the `.cowork/` markdown index;
- *  - `external`      Supermemory, only when the caller's policy allows it.
  *
  * Every lane returns its own ranked list; lists are fused with weighted reciprocal-rank
  * fusion (scores of different lanes are never compared directly), duplicates across
@@ -63,14 +62,13 @@ import { hasReservedImportPrefix } from "./memory-visibility";
 import { MemoryService } from "./MemoryService";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { DurableContextService } from "./DurableContextService";
-import { SupermemoryService } from "./SupermemoryService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
 
 const logger = createLogger("MemoryRecall");
 
 /** Tool-level scopes; `memory` covers both fact lanes (items and archive). */
-export const MEMORY_RECALL_SCOPES = ["memory", "conversations", "knowledge", "external"] as const;
+export const MEMORY_RECALL_SCOPES = ["memory", "conversations", "knowledge"] as const;
 export type MemoryRecallScope = (typeof MEMORY_RECALL_SCOPES)[number];
 export const DEFAULT_MEMORY_RECALL_SCOPES: readonly MemoryRecallScope[] = [
   "memory",
@@ -98,7 +96,6 @@ export const MEMORY_RECALL_LANE_WEIGHTS: Readonly<Record<MemoryRecallLane, numbe
   archive: 0.8,
   conversations: 0.7,
   knowledge: 0.6,
-  external: 0.5,
 };
 const IMPORTED_ARCHIVE_FACTOR = 0.5;
 /** Lines of a memory repo file returned around an entry by `detail: "full"`. */
@@ -144,7 +141,6 @@ export function lanesForScopes(scopes: Iterable<string> | undefined): MemoryReca
   if (requested.has("memory")) lanes.push("memory", "repo", "archive");
   if (requested.has("conversations")) lanes.push("conversations");
   if (requested.has("knowledge")) lanes.push("knowledge");
-  if (requested.has("external")) lanes.push("external");
   return lanes;
 }
 
@@ -167,13 +163,6 @@ export interface ConversationRecallHit {
   snippet: string;
   timestamp: number;
   score: number;
-}
-
-export interface ExternalRecallHit {
-  id?: string;
-  text: string;
-  similarity?: number;
-  updatedAt?: string;
 }
 
 /**
@@ -227,12 +216,6 @@ export interface MemoryRecallDeps {
     readGuard?: (absolutePath: string) => boolean,
   ): Promise<MemorySearchResult[]>;
   readTextFile(absolutePath: string): Promise<string>;
-  searchExternal(args: {
-    workspace: { id: string; name: string };
-    query: string;
-    limit: number;
-  }): Promise<ExternalRecallHit[]>;
-  externalConfigured(): boolean;
   /** The memory repo, or null when it is off or not ready (the `repo` lane is skipped). */
   memoryRepo?(): MemoryRepoRecallSource | null;
   /** Team memory repos that apply to the workspace (empty when none or not readable). */
@@ -336,8 +319,6 @@ export function parseRecallRef(
       return rest ? { lane: "knowledge", kind: "kg", id: rest } : null;
     case "doc":
       return rest ? { lane: "knowledge", kind: "doc", id: rest } : null;
-    case "external":
-      return rest ? { lane: "external", kind: "external", id: rest } : null;
     case "repo": {
       const repoRef = parseMemoryRepoRef(ref);
       return repoRef
@@ -395,7 +376,7 @@ export class MemoryRecallService implements MemoryRecall {
 
   /** `query` plus the lanes that ran or failed and the refs that were not found. */
   async recall(request: MemoryRecallQuery): Promise<MemoryRecallResult> {
-    // Every lane can carry owner context, including ID expansion and external stores.
+    // Every lane can carry owner context, including ID expansion.
     // Channel callers must present trusted owner evidence before any backend is read.
     if (
       request.surface === "channel_group" ||
@@ -463,9 +444,6 @@ export class MemoryRecallService implements MemoryRecall {
   // ---------------------------------------------------------------------------
 
   private laneAvailable(lane: MemoryRecallLane, request: MemoryRecallQuery): boolean {
-    if (lane === "external") {
-      return request.policy?.allowExternal === true && this.deps.externalConfigured();
-    }
     if (lane === "repo") {
       const any =
         Boolean(this.deps.memoryRepo?.()) ||
@@ -494,8 +472,6 @@ export class MemoryRecallService implements MemoryRecall {
         return text && request.workspaceId ? this.conversationLane(request, text, limit) : [];
       case "knowledge":
         return text && request.workspaceId ? this.knowledgeLane(request, text, limit) : [];
-      case "external":
-        return text && request.workspaceId ? this.externalLane(request, text, limit) : [];
       default:
         return [];
     }
@@ -850,36 +826,6 @@ export class MemoryRecallService implements MemoryRecall {
       },
     };
   }
-
-  private async externalLane(
-    request: MemoryRecallQuery,
-    text: string,
-    limit: number,
-  ): Promise<LaneCandidate[]> {
-    const workspaceId = request.workspaceId as string;
-    const results = await this.deps.searchExternal({
-      workspace: { id: workspaceId, name: request.policy?.workspaceName || workspaceId },
-      query: text,
-      limit: Math.min(limit, 25),
-    });
-    return results.map((result, index) => ({
-      lane: "external" as const,
-      ref: result.id ? `external:${result.id}` : `external:#${index + 1}`,
-      title: titleOf(result.text),
-      content: result.text,
-      source: "document" as const,
-      createdAt: result.updatedAt ? Date.parse(result.updatedAt) || 0 : 0,
-      kind: "external",
-      provenance: {
-        provider: "supermemory",
-        ...(typeof result.similarity === "number" ? { similarity: result.similarity } : {}),
-      },
-    }));
-  }
-
-  // ---------------------------------------------------------------------------
-  // Fusion
-  // ---------------------------------------------------------------------------
 
   private fuse(
     lists: LaneCandidate[][],
@@ -1290,21 +1236,6 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
       const stat = await fs.stat(absolutePath);
       if (!stat.isFile() || stat.size > 2_000_000) return "";
       return fs.readFile(absolutePath, "utf8");
-    },
-    async searchExternal(args) {
-      const result = await SupermemoryService.search({
-        workspace: args.workspace,
-        query: args.query,
-        limit: args.limit,
-      });
-      return result.results;
-    },
-    externalConfigured() {
-      try {
-        return SupermemoryService.isConfigured();
-      } catch {
-        return false;
-      }
     },
     memoryRepo() {
       const service = MemoryRepoService.get();

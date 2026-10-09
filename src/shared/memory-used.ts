@@ -3,13 +3,13 @@
  * `memory_used` task event `{ surface, refs, source }` for every prompt surface of a turn
  * (chat turn, plan, step, follow-up) before the model call; the reply that follows used
  * those memories. Refs are `memory:<memory_items id>`, `archive:<memories id>`,
- * `external:<provider>` and `repo:<path>#L<line>` (a line of the memory folder,
+ * and `repo:<path>#L<line>` (a line of the memory folder,
  * docs/memory-repo-phase1-design.md §6.1).
  *
  * Attribution here is pure, so main (which reads the hidden events) and tests share it.
  */
 
-export type MemoryUsedLane = "memory" | "archive" | "external" | "repo";
+export type MemoryUsedLane = "memory" | "archive" | "repo";
 
 export interface MemoryUsedRef {
   ref: string;
@@ -79,7 +79,7 @@ export function parseMemoryUsedRef(ref: unknown): MemoryUsedRef | null {
   // A memory folder line: a relative markdown path and a 1-based line number.
   const repo = /^repo:([^#\r\n]+\.md)#L([1-9]\d*)$/i.exec(value);
   if (repo) return { ref: value, lane: "repo", id: `${repo[1]}#L${repo[2]}` };
-  const match = /^(memory|archive|external):(.+)$/.exec(value);
+  const match = /^(memory|archive):(.+)$/.exec(value);
   if (!match) return null;
   return { ref: value, lane: match[1] as MemoryUsedLane, id: match[2] };
 }
@@ -142,7 +142,7 @@ export function attributeMemoryUse(
 
 /** Count of refs per lane, for a compact label. */
 export function countMemoryUsedRefs(refs: string[]): Record<MemoryUsedLane, number> {
-  const counts: Record<MemoryUsedLane, number> = { memory: 0, archive: 0, external: 0, repo: 0 };
+  const counts: Record<MemoryUsedLane, number> = { memory: 0, archive: 0, repo: 0 };
   for (const ref of refs) {
     const parsed = parseMemoryUsedRef(ref);
     if (parsed) counts[parsed.lane] += 1;

@@ -156,9 +156,6 @@ hero:
       text: LLM Wiki
       link: /llm-wiki
     - theme: alt
-      text: Supermemory
-      link: /supermemory
-    - theme: alt
       text: Release Notes 0.5.60
       link: /release-notes-0.5.60
     - theme: alt
@@ -231,8 +228,6 @@ features:
     details: Interactive browser-use tasks open a visible right-sidebar browser by default, with shared agent/user page state, functional navigation controls, responsive viewport presets, screenshots, annotation, fullscreen follow-up context, and visible cursor movement during agent clicks, fills, reads, scrolls, and navigation.
   - title: Chronicle
     details: Opt-in desktop recent-screen context for vague on-screen references, configured in Settings > Tools, with local passive capture, `screen_context` recall, pause/resume, and Mission Control evidence.
-  - title: Optional Supermemory
-    details: Add Supermemory as an external memory lane with prompt-time profile injection, an external scope in the memory tools, optional mirroring of non-private local memory captures, and forget/purge of mirrored copies, while keeping CoWork's local memory system primary.
   - title: Runtime Orchestration
     details: SessionRuntime owns task-session state, session checklists, visible-tool render caching, prompt-cache state, resume snapshots, and task projection while the turn kernel handles each active turn; sectioned prompts, stable-prefix prompt caching, graph-backed delegation, typed worker roles, semantic batch summaries, and terminal-state-safe resume logic keep execution, verification, and follow-up work coherent.
   - title: Managed Agents

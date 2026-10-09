@@ -378,9 +378,6 @@
     "src/electron/memory/suggestions-sql.ts": {
       "prepare": 8
     },
-    "src/electron/memory/supermemory-remote-refs-sql.ts": {
-      "prepare": 8
-    },
     "src/electron/memory/transcript-sql.ts": {
       "prepare": 1
     },

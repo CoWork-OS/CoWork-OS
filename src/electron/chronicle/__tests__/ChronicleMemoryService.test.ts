@@ -61,13 +61,12 @@ describe("ChronicleMemoryService", () => {
     captureMock.mockReset();
   });
 
-  it("routes through the archive capture as private, unmirrored screen context", async () => {
+  it("routes through the archive capture as private screen context", async () => {
     captureMock.mockResolvedValue({ id: "memory-1" });
     const memory = await makeService().notePromotedObservation("/tmp/ws", makeObservation());
     expect(memory).toEqual({ id: "memory-1" });
     expect(captureMock.mock.calls[0]?.[5]).toMatchObject({
       origin: "chronicle",
-      allowExternalMirror: false,
     });
   });
 

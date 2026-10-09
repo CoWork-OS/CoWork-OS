@@ -17,7 +17,6 @@ import { removeLegacyHealthBridgeTempDirs } from "../utils/retired-feature-clean
 import { createLogger } from "../utils/logger";
 import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sql";
 import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
-import { ensureSupermemoryRemoteRefsSchema } from "../memory/supermemory-remote-refs-sql";
 import { ensureMemoryCurationSchema } from "../memory/memory-curation-log-sql";
 import { ensureKnowledgeGraphQualitySchema } from "../knowledge-graph/knowledge-graph-maintenance-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
@@ -332,7 +331,8 @@ export class DatabaseManager {
   }
 
   /**
-   * Settings of retired features (the X integration and the Infrastructure tools) are removed on
+   * Settings of retired features (the X integration, the Infrastructure tools and Supermemory,
+   * including its API key) are removed on
    * every startup, including after an older database is restored. The encrypted wallet keys of
    * the Infrastructure tools (`infra-wallet`, `conway-wallet`) are kept so they can still be
    * exported.
@@ -342,7 +342,7 @@ export class DatabaseManager {
     this.db.pragma("secure_delete = ON");
     try {
       const result = this.db
-        .prepare("DELETE FROM secure_settings WHERE category IN ('x', 'infra')")
+        .prepare("DELETE FROM secure_settings WHERE category IN ('x', 'infra', 'supermemory')")
         .run();
       if (result.changes > 0) {
         schemaLogger.info(`Retired ${result.changes} settings row(s) of removed features`);
@@ -8041,7 +8041,8 @@ export class DatabaseManager {
    * table-rebuild procedure: copy, drop, rename) when an older definition is found.
    */
   /**
-   * Retired features (Everyday Agent, the first-task beta and Discord supervisor mode) have
+   * Retired features (Everyday Agent, the first-task beta, Discord supervisor mode and the
+   * Supermemory provider) have
    * their tables dropped once on upgrade, children first so the drop never violates a foreign key.
    */
   private dropRetiredFeatureTables(): void {
@@ -8061,6 +8062,7 @@ export class DatabaseManager {
       DROP TABLE IF EXISTS first_task_setup;
       DROP TABLE IF EXISTS supervisor_exchange_messages;
       DROP TABLE IF EXISTS supervisor_exchanges;
+      DROP TABLE IF EXISTS supermemory_remote_refs;
     `);
   }
 
@@ -8299,12 +8301,6 @@ export class DatabaseManager {
       ensureMemoryItemsSchema(this.db);
     } catch (error) {
       schemaLogger.warn("[DatabaseManager] memory_items schema initialization failed:", error);
-    }
-    // SEC-17: remote ids of Supermemory copies, so local deletes can forget them remotely.
-    try {
-      ensureSupermemoryRemoteRefsSchema(this.db);
-    } catch (error) {
-      schemaLogger.warn("[DatabaseManager] Supermemory remote refs schema failed:", error);
     }
     // Phase 3: the memory curator's audit log and Dreaming columns (memory-curation-log-sql).
     try {

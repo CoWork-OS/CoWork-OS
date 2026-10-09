@@ -58,7 +58,6 @@ describeEval("memory eval: write hygiene", () => {
               capture.memoryType,
               capture.content,
               false,
-              { allowExternalMirror: false },
             );
           }
         }

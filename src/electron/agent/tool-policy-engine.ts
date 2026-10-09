@@ -680,7 +680,7 @@ function isMutatingTool(toolName: string): boolean {
   // monty_transform_file, batch_image_process, scratchpad_write), which let
   // them through applyModeGate in Plan mode.
   if (isCanonicalWriteToolName(toolName)) return true;
-  // Memory/KG/Supermemory writes persist state across tasks; plan and analyze
+  // Memory/KG writes persist state across tasks; plan and analyze
   // modes are read-only, so they must not save or erase memory. (SEC-12)
   if (isMemoryWriteToolName(toolName)) return true;
   if (ALWAYS_MUTATING.has(toolName)) return true;

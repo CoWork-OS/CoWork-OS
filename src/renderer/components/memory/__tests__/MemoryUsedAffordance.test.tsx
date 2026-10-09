@@ -176,7 +176,6 @@ describe("resolveMemoryUsedEntries", () => {
         "memory:missing",
         "archive:a-1",
         "archive:a-2",
-        "external:supermemory",
         "garbage",
       ],
       "ws-1",
@@ -191,7 +190,6 @@ describe("resolveMemoryUsedEntries", () => {
       ["memory:missing", "Memory", true],
       ["archive:a-1", "Task history", false],
       ["archive:a-2", "Task history", true],
-      ["external:supermemory", "Supermemory", false],
     ]);
     expect(entries[0]).toMatchObject({ itemId: "item-1", text: "Prefers concise answers" });
     expect(entries[4].text).toBe("Deploy went fine");

@@ -43,12 +43,11 @@ low-level writers (`insertCapturedMemory`, the `memory.capture` worker command,
 |---|---|---|
 | `memory_remember`, Memory Hub, awareness, adaptive style, `set_user_name` / `set_response_style`, mailbox, Dreaming promotions | `MemoryWriter` | §3, §4b, §5, §5b. |
 | Core memory candidates (`CoreMemoryDistiller`) | Facts → `MemoryWriter` as `inferred`; events → `MemoryService.capture` | Fact types: preference → `preference`, correction → `correction`, project_state → `project_fact`, pattern → `insight`, constraint → `rule`. An inferred `rule` is L0 on every turn, so a constraint is a fact only when the user accepted the candidate (not the hot-path auto-accept) or `autoPromoteToCuratedMemoryEnabled` is on; otherwise it is an archive event. Scope: `global` for a global core scope, else `workspace` (the candidate's workspace governs policy). `source_ref = { store: "core_candidate", id: <candidate id>, traceId, profileId, candidateType, scopeKind, scopeRef }`. Open loops, watch items and recurring-workflow hints are archive events (capture dedupe); their provenance is the candidate, marked `applied` with the archive row id (capture options carry no trace or candidate ids). `ignored_noise` is a runtime signal: never written. Lifecycle: written or reinforced → `applied`; dropped for good (no workspace, low salience, secret only, `<no-memory>`, outranked, runtime signal) → `skipped` with the reason; refused by settings (memory or capture off) → stays `accepted` and is retried. Without a running writer (CLI) facts fall back to the archive. The former curated promotion (`upsertDistilledEntry`) is no longer used by the distiller. |
-| Chronicle (`ChronicleMemoryService`) | `MemoryService.capture`, archive only | One private `screen_context` row per promoted observation (`allowExternalMirror: false`), the task's `<no-memory>` passed as `noMemory`. Screen text is third-party content and never becomes a `memory_items` fact; Dreaming does not auto-promote screen-captured evidence. |
-| Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. Imports are never mirrored to Supermemory. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a conversation imported only into another workspace (privately there) is imported again from its stored entries (type and distilled text, rows whose observation is suppressed or redacted excluded) without a new LLM call, through the same session; a failed distillation counts as an error, not as processed. |
-| Supermemory (`SupermemoryService`) | Remote only | Explicit remember (`memory_remember` scope `external`): `<no-memory>` refused, secrets redacted (secret-only refused), refused when workspace memory is off or privacy mode is `disabled` / `strict`; mirror writes copy archive rows that already passed `capture` and are non-private. Profile and search results are only cached per task for the prompt (third-party tag) and never stored locally, so a remote fact is never `user_stated` here. |
+| Chronicle (`ChronicleMemoryService`) | `MemoryService.capture`, archive only | One private `screen_context` row per promoted observation, the task's `<no-memory>` passed as `noMemory`. Screen text is third-party content and never becomes a `memory_items` fact; Dreaming does not auto-promote screen-captured evidence. |
+| Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a conversation imported only into another workspace (privately there) is imported again from its stored entries (type and distilled text, rows whose observation is suppressed or redacted excluded) without a new LLM call, through the same session; a failed distillation counts as an error, not as processed. |
 | Box Brain | `MemoryService.capture` / `replaceMemory` | Private source rows (`origin: import`, `forceCapture`). |
 | Task outcomes, corrections, feedback, errors (daemon, executor), `memory_remember` kinds `outcome` / `error` / `note`, approved archive writes | `MemoryService.capture` | Salience-gated upstream (`memory-capture-salience.ts`) and at capture. |
-| Compression batch digests | `MemoryService.capture` (§6a) | Digest of rows that passed capture, stored through `capture` (redaction, settings, dedupe, embedding, observation sidecar with capture reason `compression_digest`, storage cap). The write gate is skipped: every source row already passed it. Never mirrored to Supermemory. |
+| Compression batch digests | `MemoryService.capture` (§6a) | Digest of rows that passed capture, stored through `capture` (redaction, settings, dedupe, embedding, observation sidecar with capture reason `compression_digest`, storage cap). The write gate is skipped: every source row already passed it. |
 
 ## 2. `memory_items`
 
@@ -277,7 +276,7 @@ Where each layer lands:
 | Plan step | pinned `<cowork_user_profile>` block | `memory_context`, in the synthesizer's former hot-memory slot | kit slice without DESIGN.md, the generated USER.md / MEMORY.md blocks and the three shared-context files; playbook and summaries |
 | Follow-up | pinned block | system prompt `memory_context` | |
 | Planning, chat, companion | system prompt (`<cowork_hot_memory>`) | system prompt (`<cowork_relevant_memory>`) | |
-| All | | | awareness snapshot without `user_*` beliefs; Supermemory in its own `external_memory` section and `<cowork_external_memory>` tag, cached per task for 10 minutes |
+| All | | | awareness snapshot without `user_*` beliefs |
 
 `task.prompt` no longer carries relationship memory. Retrieval queries use the undecorated
 prompt (`rawPrompt`, with any strategy block stripped).
@@ -334,7 +333,7 @@ lane migration. PersonalityManager's user name and response style are mirrors of
   and Phase 0 visibility filter of `searchAsync`, without counting a listing as a reference),
   `conversations` (`DurableContextService.searchConversation`, the active task excluded by
   default), `knowledge` (KG `searchEntities` and the `.cowork` markdown index, read-only;
-  topic packs are retired and `topic:` refs are unknown), `external` (Supermemory; only when `policy.allowExternal` and configured).
+  topic packs are retired and `topic:` refs are unknown).
 - **One FTS builder.** The memory lane uses `database/fts-query.ts` (Unicode, prefix-aware,
   operator-safe: all terms, then any term), with a term-match fallback when FTS5 is missing.
   The markdown index, mailbox search and YouTube transcripts use its term extraction,
@@ -384,8 +383,7 @@ the user's search over one workspace in task detail. Lanes: memory items (this r
 (`searchForBriefingAsync`), workspace notes (the `.cowork` markdown index), the knowledge
 graph, Chronicle `screen_context`, the conversation index (user and assistant messages
 verbatim, which replaces the retired quotes lane, plus tool output and summaries), tasks,
-files those tasks touched, the activity feed and Supermemory (source `supermemory`, only
-when connected and the workspace has network access on; the query leaves the device,
+files those tasks touched and the activity feed.
 nothing is stored). Tasks and activity have no FTS index: they are term-searched in SQL
 over every row of the workspace (`TaskStore.searchByTerms`, `ActivityStore.search`: at
 least half the query terms, most matching terms first, then newest; 200 rows), then ranked
@@ -400,19 +398,13 @@ Agent tools (`agent/tools/memory-tools.ts`, audit §8.3): `memory_recall`, `memo
 (facts through `MemoryWriter` as `user_stated` only when the model sets `user_asked` and the
 user's latest message asks to remember, else `inferred`; `pin` only for `user_stated`;
 `outcome`/`error`/`note` to the archive; available in every plan step so the agent saves
-what it learns while it works, and its description says when to save), `memory_forget` (Memory Hub delete path for items, own archive rows, Supermemory ids;
+what it learns while it works, and its description says when to save), `memory_forget` (Memory Hub delete path for items, own archive rows;
 asks the user first through the permission engine as a `memory_delete` approval (classified as
 a delete; the dialog is titled "Forget a memory" and shows the memory and its source; channel
 approval messages leave the memory text out) — prompted in the default and dangerous-only
 modes, allowed by bypass modes or a saved rule — except for
-an item this task's agent inferred itself and that no other record merged into; Supermemory
-ids keep the pipeline's `external_service` approval),
+an item this task's agent inferred itself and that no other record merged into),
 `context_recall` (the active task only; earlier tasks are recalled through `memory_recall`).
-Supermemory is reached through the same tools: `memory_recall` scope `external`,
-`memory_remember` scope `external` (a memory stored only in Supermemory, through the memory
-write gate's `external` target; refused for third-party channel senders), and `memory_forget`
-with an `external:<id>` id or with `scope: "external"` and `match` text (Supermemory matches
-the text). All three take the `external_service` approval and need workspace network access.
 Routing guidance is one generated hint of about 90 tokens naming only visible tools
 (`memory-tool-routing.ts`).
 
@@ -422,9 +414,7 @@ Routing guidance is one generated hint of about 90 tokens naming only visible to
 `memory_curate`, `supermemory_remember`, `supermemory_forget`, `context_grep`,
 `context_describe`) were hidden aliases for one release and are now removed: they are not
 registered, not tool-semantics aliases and not listed in any policy group, allowlist or deny
-list, so a call to one fails as an unknown tool. `SupermemoryTools` and the agent's curated
-`memory_curate` path are gone; the old `containerTag` override of `supermemory_remember` has
-no replacement (writes use the workspace's container). `RETIRED_MEMORY_TOOL_NAMES` in
+list, so a call to one fails as an unknown tool. `RETIRED_MEMORY_TOOL_NAMES` in
 `shared/types.ts` lists the names for code that reads recorded task history: the conversation
 index backfill still skips their recorded output, and the timeline shows old calls with the
 generic tool label.
@@ -604,8 +594,7 @@ content or credentials.
   each split into this workspace, global and workspace-less contact items, with a plain-language
   explanation. "Show" opens "What CoWork knows" filtered to that source. Also the workspace's
   archive rows by type and by capture origin (private count), imports (archive rows and
-  `import` facts), Chronicle (on or off, `screen_context` rows), Supermemory (on, connected or
-  not, copies sent from the workspace) and knowledge graph entities, relationships,
+  `import` facts), Chronicle (on or off, `screen_context` rows) and knowledge graph entities, relationships,
   observations and entity types.
 - **Health** (the whole profile database, every workspace; the workspace only gates access):
   the checks of `npm run qa:memory-health` with PASS / WARN / SKIP (a missing table) / INFO and
@@ -795,19 +784,6 @@ reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
   the lease to the desktop, which therefore wins whenever both run. Between processes of the
   same runtime the first one keeps it. Each new owner's writers rebuild from the database, so
   tasks the non-owner ran reach the files when ownership changes, not live.
-- **Supermemory copies (SEC-17).** `supermemory_remote_refs` (`supermemory-remote-refs-sql.ts`)
-  maps each remote copy to its local record: `archive:<id>` for a mirrored archive row
-  (`/v3/documents`, document id), `external:<id>` for an explicit remote remember
-  (`/v4/memories`), with the container it went to. Mirror writes address the workspace
-  *name* for `{workspaceName}` templates, as reads do. After an archive delete, an inspector
-  suppression or redaction, a privacy change, a memory-item delete, `memory_forget` or a task
-  delete, a debounced orphan sweep (`SupermemoryService.scheduleOrphanSweep`) deletes copies
-  whose local record is gone or hidden; Clear All Memories deletes every copy recorded for the
-  workspace; "Disconnect & purge" in the Supermemory card deletes every recorded copy and
-  disables the integration only when all deletes succeeded. A 404 counts as forgotten; other
-  failures keep the mapping for the next sweep. 4xx answers (except 408 and 429) no longer count
-  toward the circuit breaker. Copies sent before the table existed have no remote id and stay
-  remote.
 
 ## 7a. The memory repo (Phase 1, opt-in)
 
@@ -879,8 +855,7 @@ are removed when their root task is deleted. See
 7. Done: every producer goes through the same hygiene (§1, "Producers and their write
    path"): core memory candidates (facts through `MemoryWriter`, events through `capture`),
    Chronicle (archive only, through `capture`), imports (the gated import API, imported facts
-   as `import` items) and Supermemory (explicit remembers redacted and policy-checked; reads
-   never stored locally). A source guard keeps new code from inserting into `memories` or
+   as `import` items). A source guard keeps new code from inserting into `memories` or
    `memory_items` outside the sanctioned modules. The approval-gated memory-write modes
    (`COWORK_MEMORY_WRITE_APPROVAL_MODE` `curated_only`, `background_only`, `all`) stage
    core-candidate facts as `remember` writes; an approved write keeps its `core_candidate`

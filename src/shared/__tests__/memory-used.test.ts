@@ -27,7 +27,7 @@ describe("memory used attribution", () => {
       used(2, "pinned_profile", ["memory:a", "memory:b"]),
       used(3, "step", ["memory:b", "archive:c"]),
       reply("r1", 4),
-      used(5, "step", ["external:supermemory"]),
+      used(5, "step", ["archive:d"]),
       reply("r2", 6, "task_completed"),
       reply("r3", 7),
     ]);
@@ -37,7 +37,7 @@ describe("memory used attribution", () => {
         refs: ["memory:a", "memory:b", "archive:c"],
         surfaces: ["pinned_profile", "step"],
       },
-      r2: { eventId: "r2", refs: ["external:supermemory"], surfaces: ["step"] },
+      r2: { eventId: "r2", refs: ["archive:d"], surfaces: ["step"] },
     });
     expect(result.replyEventIds).toEqual(["r1", "r2", "r3"]);
   });
@@ -73,7 +73,6 @@ describe("memory used attribution", () => {
     expect(countMemoryUsedRefs(["memory:a", "memory:b", "external:x", "bad"])).toEqual({
       memory: 2,
       archive: 0,
-      external: 1,
       repo: 0,
     });
   });
@@ -89,7 +88,7 @@ describe("memory used attribution", () => {
     expect(parseMemoryUsedRef("repo:notes.txt#L1")).toBeNull();
     expect(
       countMemoryUsedRefs(["repo:MEMORY.md#L3", "repo:me.md#L5", "memory:a", "repo:x#L1"]),
-    ).toEqual({ memory: 1, archive: 0, external: 0, repo: 2 });
+    ).toEqual({ memory: 1, archive: 0, repo: 2 });
   });
 
   it("attributes repo refs to the reply that follows", () => {

@@ -219,9 +219,6 @@ import type {
   UpdateManagedAgentRoutineRequest,
   ConvertAgentRoleToManagedAgentRequest,
   ConvertAutomationProfileToManagedAgentRequest,
-  SupermemoryConfigStatus,
-  SupermemoryDisconnectPurgeResult,
-  SupermemorySettings,
   WorkspaceKitInitRequest,
   WorkspaceKitProjectCreateRequest,
   WorkspaceKitStatus,
@@ -4495,13 +4492,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_REJECT, data),
   countMemoryWriteApprovals: (workspaceId?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_WRITE_APPROVALS_COUNT, workspaceId),
-  getSupermemorySettings: () => ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_GET_SETTINGS),
-  saveSupermemorySettings: (settings: SupermemorySettings) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_SAVE_SETTINGS, settings),
-  testSupermemoryConnection: () => ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_TEST_CONNECTION),
-  getSupermemoryStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_GET_STATUS),
-  disconnectAndPurgeSupermemory: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE),
 
   // Self-improvement loop APIs
   getImprovementSettings: () =>
@@ -8087,12 +8077,6 @@ export interface ElectronAPI {
     reason?: string;
   }) => Promise<MemoryWriteApprovalItem>;
   countMemoryWriteApprovals: (workspaceId?: string) => Promise<{ pending: number }>;
-  getSupermemorySettings: () => Promise<SupermemoryConfigStatus>;
-  saveSupermemorySettings: (settings: SupermemorySettings) => Promise<{ success: boolean }>;
-  testSupermemoryConnection: () => Promise<{ success: boolean; error?: string }>;
-  getSupermemoryStatus: () => Promise<SupermemoryConfigStatus>;
-  /** Delete the remote copies CoWork recorded, then disable Supermemory (SEC-17). */
-  disconnectAndPurgeSupermemory: () => Promise<SupermemoryDisconnectPurgeResult>;
 
   // Self-improvement loop
   getImprovementSettings: () => Promise<ImprovementLoopSettings>;

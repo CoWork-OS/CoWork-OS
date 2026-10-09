@@ -233,7 +233,6 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
   function service(db: Db) {
     return new MemoryHealthService({
       port: createMemoryStatementPort(db),
-      getSupermemoryStatus: () => ({ enabled: true, connected: false }),
       getChronicleEnabled: () => true,
       now: () => NOW,
     });
@@ -266,7 +265,6 @@ describe.skipIf(!nativeSqliteAvailable)("MemoryHealthService", () => {
     ]);
     expect(report.imports).toEqual({ archiveRows: 1, facts: 1 });
     expect(report.chronicle).toEqual({ enabled: true, archiveRows: 1 });
-    expect(report.supermemory).toEqual({ enabled: true, connected: false, remoteRefs: 0 });
     expect(report.knowledgeGraph).toEqual({
       entities: 2,
       edges: 1,
@@ -399,7 +397,6 @@ describe("memory folder health (service-only; not in qa:memory-health)", () => {
     const build = (status: () => Promise<typeof ready>) =>
       new MemoryHealthService({
         port: { unit: (async () => counts) as never },
-        getSupermemoryStatus: () => ({ enabled: false, connected: false }),
         getChronicleEnabled: () => false,
         getMemoryRepoStatus: status,
         now: () => NOW,
@@ -538,7 +535,6 @@ describe("memory folder dreaming health (service-only)", () => {
     const build = (status: typeof ready) =>
       new MemoryHealthService({
         port: { unit: (async () => counts) as never },
-        getSupermemoryStatus: () => ({ enabled: false, connected: false }),
         getChronicleEnabled: () => false,
         getMemoryRepoStatus: async () => status,
         getMemoryRepoDreams: async () => {
@@ -663,7 +659,6 @@ describe("memory folder sync and team memory health (service-only)", () => {
     };
     const report = await new MemoryHealthService({
       port: { unit: (async () => counts) as never },
-      getSupermemoryStatus: () => ({ enabled: false, connected: false }),
       getChronicleEnabled: () => false,
       getMemoryRepoStatus: async () => ({
         ...ready,

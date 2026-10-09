@@ -89,15 +89,15 @@ describeWithSqlite("MemoryRecall", () => {
         privacy: "private",
       });
       const search = vi.spyOn(deps, "searchItems");
-      for (const ids of [undefined, [`memory:${secret.id}`, "external:secret", "archive:secret"]]) {
+      for (const ids of [undefined, [`memory:${secret.id}`, "archive:secret"]]) {
         const result = await recall.recall(
           query({
             text: "secret",
             surface: "channel_private",
             gatewaySenderIsOwner: owner,
-            lanes: ["memory", "archive", "conversations", "knowledge", "external"],
+            lanes: ["memory", "archive", "conversations", "knowledge"],
             ids,
-            policy: { includePrivate: true, allowExternal: true },
+            policy: { includePrivate: true },
           }),
         );
         expect(result.hits).toEqual([]);
@@ -159,8 +159,6 @@ describeWithSqlite("MemoryRecall", () => {
       getKnowledgeEntity: vi.fn(async () => null),
       searchMarkdown: vi.fn(async () => []),
       readTextFile: vi.fn(async () => ""),
-      searchExternal: vi.fn(async () => []),
-      externalConfigured: () => true,
       laneEnabled: () => true,
       now: () => clock,
     };
@@ -428,18 +426,6 @@ describeWithSqlite("MemoryRecall", () => {
       );
     });
 
-    it("queries the external provider only when the policy allows it", async () => {
-      vi.mocked(deps.searchExternal).mockResolvedValue([{ id: "sm-1", text: "likes tea" }]);
-      const denied = await recall.recall(query({ text: "tea", lanes: ["external"] }));
-      expect(denied.lanes).toEqual([]);
-      expect(deps.searchExternal).not.toHaveBeenCalled();
-
-      const allowed = await recall.query(
-        query({ text: "tea", lanes: ["external"], policy: { allowExternal: true } }),
-      );
-      expect(allowed.map((hit) => hit.ref)).toEqual(["external:sm-1"]);
-    });
-
     it("reports a failed lane and still returns the others; fails when every lane fails", async () => {
       const fact = await remember({ content: "Use feature flags for risky changes" });
       vi.mocked(deps.searchArchive).mockRejectedValue(new Error("worker offline"));
@@ -571,7 +557,6 @@ describe("MemoryRecall helpers", () => {
       "conversations",
       "knowledge",
     ]);
-    expect(lanesForScopes(["external", "bogus"])).toEqual(["external"]);
     expect(lanesForScopes([])).toEqual(["memory", "repo", "archive", "conversations", "knowledge"]);
   });
 
@@ -659,8 +644,6 @@ describe("MemoryRecall repo lane", () => {
       getKnowledgeEntity: vi.fn(async () => null),
       searchMarkdown: vi.fn(async () => []),
       readTextFile: vi.fn(async () => ""),
-      searchExternal: vi.fn(async () => []),
-      externalConfigured: () => false,
       memoryRepo: () => (available ? source : null),
       teamMemoryRepos: (workspaceId) => (teams && workspaceId === "ws-1" ? teams : []),
       laneEnabled: () => true,

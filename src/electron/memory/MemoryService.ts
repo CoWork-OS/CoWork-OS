@@ -35,8 +35,6 @@ import {
   type MarkdownMemoryReadGuard,
 } from "./MarkdownMemoryIndexService";
 import { MemoryTierService } from "./MemoryTierService";
-import { SupermemoryService } from "./SupermemoryService";
-import { SupermemoryRemoteRefRepository } from "./SupermemoryRemoteRefRepository";
 import { MemoryWriter, memoryTextSalience } from "./MemoryWriter";
 import { writableMemoryRepo } from "./repo/memory-repo-producers";
 import { InFlightWork } from "../utils/in-flight-work";
@@ -118,8 +116,6 @@ export interface MemoryCaptureOptions {
    * archiving of task activity.
    */
   forceCapture?: boolean;
-  /** Permit the optional external-memory mirror for this capture. */
-  allowExternalMirror?: boolean;
   /** The caller knows the task or message opted out with `<no-memory>`: store nothing. */
   noMemory?: boolean;
 }
@@ -272,7 +268,6 @@ export class MemoryService {
   /** The memory domain's statement port (DB6). */
   private static sql?: MemoryStatementPort;
   private static workspaceRepo?: WorkspaceRepository;
-  private static unsubscribeMemoryItemChanges?: () => void;
   private static ftsWorker: import("../database/FtsWorkerClient").FtsWorkerClient | null = null;
   private static storageEstimateByWorkspace = new Map<
     string,
@@ -315,18 +310,9 @@ export class MemoryService {
     this.settingsRepo = new MemorySettingsRepository(db);
     this.markdownIndex = new MarkdownMemoryIndexService(db);
     MemoryObservationService.initialize(db);
-    // Remote ids of Supermemory copies (SEC-17), so deletes here can forget them there.
-    SupermemoryRemoteRefRepository.initialize(this.sql);
-    // Inspector edits (delete, redact, privacy changes) must not be served from cache, and
-    // a suppressed or redacted row's Supermemory copy is forgotten.
+    // Inspector edits (delete, redact, privacy changes) must not be served from cache.
     MemoryObservationService.onVisibilityChanged(() => {
       this.clearPromptRecallCache();
-      SupermemoryService.scheduleOrphanSweep();
-    });
-    // A deleted or archived memory item (Memory Hub, memory_forget) loses its copy too.
-    this.unsubscribeMemoryItemChanges?.();
-    this.unsubscribeMemoryItemChanges = MemoryWriter.onChange((change) => {
-      if (change.kind === "status") SupermemoryService.scheduleOrphanSweep();
     });
     this.initialized = true;
 
@@ -715,30 +701,6 @@ export class MemoryService {
       });
     } else {
       this.recordCompressionDiagnostic(workspaceId, compressionOrigin, "skipped");
-    }
-
-    if (
-      !finalIsPrivate &&
-      options?.allowExternalMirror !== false &&
-      (await this.isExternalMemoryMirrorAllowed(workspaceId))
-    ) {
-      // The workspace name, not its id: a `{workspaceName}` container template must address
-      // the container reads use (SEC-17).
-      void this.workspaceRefFor(workspaceId)
-        .then((workspace) =>
-          SupermemoryService.mirrorMemory({
-            workspace,
-            taskId,
-            memoryType: type,
-            content: truncatedContent,
-            createdAt: memory.createdAt,
-            origin: "external_mirror",
-            localRef: `archive:${memory.id}`,
-          }),
-        )
-        .catch((error) => {
-          logger.warn("[MemoryService] Failed to mirror memory to Supermemory:", error);
-        });
     }
 
     // Enforce per-workspace storage cap (best-effort).
@@ -1723,7 +1685,6 @@ export class MemoryService {
     const deleted = await this.memoryRepo.deleteByIds(workspaceId, [memoryId]);
     if (deleted <= 0) return false;
     await this.closeImportedFacts([memoryId], "deleted");
-    SupermemoryService.scheduleOrphanSweep();
 
     this.importedEmbeddings.delete(memoryId);
     this.memoryEmbeddingsByWorkspace.delete(workspaceId);
@@ -1786,7 +1747,6 @@ export class MemoryService {
       // ignore
     }
     const deleted = await this.memoryRepo.deleteImported(workspaceId);
-    if (deleted > 0) SupermemoryService.scheduleOrphanSweep();
     // Clear caches for this workspace (best-effort).
     for (const [memoryId, entry] of this.importedEmbeddings.entries()) {
       if (entry.workspaceId === workspaceId) {
@@ -2235,7 +2195,6 @@ export class MemoryService {
     this.embeddingBackfillInProgress.delete(workspaceId);
     this.clearCompressionStateForWorkspace(workspaceId);
     this.promptRecallCache.clear();
-    SupermemoryService.scheduleOrphanSweep();
   }
 
   static async deleteEntries(workspaceId: string, ids: string[]): Promise<number> {
@@ -2255,8 +2214,6 @@ export class MemoryService {
       // Facts imported with these rows go with them.
       await this.closeImportedFacts(uniqueIds, "deleted");
       this.promptRecallCache.clear();
-      // Their Supermemory copies go too (SEC-17).
-      SupermemoryService.scheduleOrphanSweep();
     }
     return deleted;
   }
@@ -3181,8 +3138,6 @@ export class MemoryService {
       // (or the user's approval) when it was captured, and the digest only restates those
       // rows. Staging it again would ask the user to approve a summary of approved rows.
       skipMemoryWriteGate: true,
-      // Some source rows may have been captured without the external mirror.
-      allowExternalMirror: false,
     });
   }
 
@@ -3457,38 +3412,6 @@ export class MemoryService {
   }
 
   /**
-   * Automatic mirrors must honor the persisted workspace profile even when a
-   * caller does not carry a task-local effective workspace into this service.
-   * Test-only/in-memory callers may not initialize a workspace repository; in
-   * that compatibility case the explicit caller option remains authoritative.
-   */
-  /** `{ id, name }` of a workspace for Supermemory container tags (name falls back to id). */
-  private static async workspaceRefFor(workspaceId: string): Promise<{ id: string; name: string }> {
-    try {
-      const workspace = await this.workspaceRepo?.findById(workspaceId);
-      return { id: workspaceId, name: workspace?.name || workspaceId };
-    } catch {
-      return { id: workspaceId, name: workspaceId };
-    }
-  }
-
-  private static async isExternalMemoryMirrorAllowed(workspaceId: string): Promise<boolean> {
-    if (!this.workspaceRepo) return true;
-    try {
-      const workspace = await this.workspaceRepo.findById(workspaceId);
-      if (!workspace?.permissions) return false;
-      return (
-        workspace.permissions.network === true &&
-        workspace.permissions.accessProfileUnavailable !== true &&
-        workspace.permissions.accessNetworkMode !== "disabled" &&
-        workspace.permissions.accessNetworkMode !== "on-request"
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Truncate text to specified length
    */
   private static truncate(text: string, maxLength: number): string {
@@ -3573,9 +3496,6 @@ export class MemoryService {
     this.compressionBudgetByWorkspace.clear();
     this.compressionDiagnosticsByWorkspace.clear();
     this.workspaceRepo = undefined;
-    this.unsubscribeMemoryItemChanges?.();
-    this.unsubscribeMemoryItemChanges = undefined;
-    SupermemoryRemoteRefRepository.setInstance(null);
     // Work that outlived drain() is abandoned; a later initialize starts with a fresh registry.
     this.inFlight = new InFlightWork();
     this.initialized = false;

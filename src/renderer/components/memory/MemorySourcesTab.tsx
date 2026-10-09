@@ -199,17 +199,6 @@ export function MemorySourcesView(props: MemorySourcesViewProps) {
                 {report.chronicle.enabled ? "On" : "Off"}, {report.chronicle.archiveRows} private
                 archive entries
               </dd>
-              <dt>Supermemory</dt>
-              <dd>
-                {report.supermemory.connected
-                  ? "Connected"
-                  : report.supermemory.enabled
-                    ? "On, not connected (no API key)"
-                    : "Not connected"}
-                {report.supermemory.remoteRefs > 0
-                  ? `, ${report.supermemory.remoteRefs} copies sent from this workspace`
-                  : ""}
-              </dd>
               <dt>Knowledge graph</dt>
               <dd>
                 {report.knowledgeGraph.entities} entities, {report.knowledgeGraph.edges}{" "}

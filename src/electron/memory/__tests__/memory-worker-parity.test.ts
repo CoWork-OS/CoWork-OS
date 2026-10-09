@@ -352,7 +352,6 @@ describe("memory domain on the host and in the database worker", () => {
     // Memory Hub Sources and Health (read units). The file size can differ by backend.
     const hubHealth = new MemoryHealthService({
       port: sql,
-      getSupermemoryStatus: () => ({ enabled: false, connected: false }),
       getChronicleEnabled: () => false,
     });
     result.memoryHub = {

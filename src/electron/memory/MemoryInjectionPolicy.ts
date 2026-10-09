@@ -1,7 +1,7 @@
 /**
  * MemoryInjectionPolicy (docs/memory-engine.md §4, audit §8.2): the one decision about which
  * memory may reach a prompt. Every injection site (pinned profile block, step/follow-up/
- * planning/chat prompts, awareness snapshot, external provider, shared kit context, project
+ * planning/chat prompts, awareness snapshot, shared kit context, project
  * guidance) asks this policy instead of re-deriving `retainMemory && gateway` on its own.
  *
  * `resolveMemoryInjection` is pure and synchronous; `DefaultMemoryInjectionPolicy` implements
@@ -22,7 +22,6 @@ import { containsNoMemoryDirective, taskDisablesMemoryCapture } from "./no-memor
  * - `l0`: identity, rules, pinned preferences, open commitments (memory_items, user-owned).
  * - `l1`: task-relevant memory (memory_items recall, archive recall, playbook, summaries,
  *   awareness snapshot).
- * - `external`: an external memory provider (Supermemory) profile/search block.
  * - `sharedContext`: the pinned `.cowork` PRIORITIES / CROSS_SIGNALS / MISTAKES block.
  * - `workspaceKit`: the `.cowork` kit slice of the memory section (USER.md, MEMORY.md, …).
  * - `projectGuidance`: repo-root AGENTS.md / CLAUDE.md and docs maps.
@@ -34,7 +33,6 @@ import { containsNoMemoryDirective, taskDisablesMemoryCapture } from "./no-memor
 export type MemoryLayer =
   | "l0"
   | "l1"
-  | "external"
   | "sharedContext"
   | "workspaceKit"
   | "projectGuidance"
@@ -44,7 +42,6 @@ export type MemoryLayer =
 export const MEMORY_LAYERS: readonly MemoryLayer[] = [
   "l0",
   "l1",
-  "external",
   "sharedContext",
   "workspaceKit",
   "projectGuidance",
@@ -74,8 +71,6 @@ export interface MemoryInjectionPolicyInput {
   noMemory?: boolean;
   /** Workspace read permission (file-backed layers only). */
   workspaceCanRead?: boolean;
-  /** The workspace may reach the network without approval (external providers). */
-  externalNetworkAllowed?: boolean;
   /** The memory folder setting (`memoryRepoEnabled`) is on and the repo service is ready. */
   memoryRepoEnabled?: boolean;
   /** The task belongs to a swarm (its parent chain's root has children or a team run). */
@@ -83,7 +78,7 @@ export interface MemoryInjectionPolicyInput {
 }
 
 export interface MemoryLayerDecision {
-  /** True when any memory layer (l0/l1/external) is allowed. */
+  /** True when any memory layer (l0/l1) is allowed. */
   memory: boolean;
   layers: Record<MemoryLayer, boolean>;
   /** Why a layer is off (first reason wins), for diagnostics and the "memory used" view. */
@@ -99,7 +94,6 @@ function allOff(): Record<MemoryLayer, boolean> {
   return {
     l0: false,
     l1: false,
-    external: false,
     sharedContext: false,
     workspaceKit: false,
     projectGuidance: false,
@@ -136,12 +130,9 @@ export function resolveMemoryInjection(input: MemoryInjectionPolicyInput): Memor
   else if (!retainMemory || isVerifier) memoryReason = "scope_mismatch";
   else if (!isPrivateGateway && !trustedShared) memoryReason = "group_channel";
   else if (memoryOff) memoryReason = "memory_off";
-  for (const layer of ["l0", "l1", "external"] as const) {
+  for (const layer of ["l0", "l1"] as const) {
     if (memoryReason) deny(layer, memoryReason);
     else layers[layer] = true;
-  }
-  if (layers.external && input.externalNetworkAllowed === false) {
-    deny("external", "read_only_denied");
   }
 
   // File-backed layers. The shared `.cowork` context follows the memory gate's channel
@@ -185,7 +176,7 @@ export function resolveMemoryInjection(input: MemoryInjectionPolicyInput): Memor
   else if (memoryOff) deny("swarm", "memory_off");
   else layers.swarm = true;
 
-  const memory = layers.l0 || layers.l1 || layers.external;
+  const memory = layers.l0 || layers.l1;
   return {
     memory,
     layers,

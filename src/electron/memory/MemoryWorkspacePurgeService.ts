@@ -18,7 +18,6 @@
  * unlinked rather than followed. These are app-owned files under `.cowork/`, removed on an
  * explicit user action, so they do not go through the agent access profile.
  *
- * Supermemory (remote) copies (SEC-17): every copy recorded for the workspace is deleted
  * remotely on a workspace clear; after a task delete, copies of the purged rows are
  * forgotten by the orphan sweep. Copies sent before remote ids were recorded cannot be
  * addressed and stay remote.
@@ -33,7 +32,6 @@ import { CuratedMemoryService } from "./CuratedMemoryService";
 import { stripCuratedKitBlocksOnce } from "./kit-block-strip";
 import { DurableContextService } from "./DurableContextService";
 import { MemoryService } from "./MemoryService";
-import { SupermemoryService } from "./SupermemoryService";
 import { TranscriptStore, type TranscriptDeletionResult } from "./TranscriptStore";
 import { purgeWorkspaceMemoryRowsOnHost, resolveWorkspacePathOnHost } from "./memory-purge-sql";
 
@@ -76,9 +74,6 @@ export interface MemoryTaskFilePurgeResult {
   chronicleObservations: number;
   errors: string[];
 }
-
-export const SUPERMEMORY_NOT_PURGED_NOTE =
-  "Copies sent to Supermemory before remote ids were recorded cannot be removed from it.";
 
 function emptyCounts(): MemoryWorkspacePurgeCounts {
   return {
@@ -168,8 +163,6 @@ export class MemoryWorkspacePurgeService {
     } catch {
       // Memory may not be initialized (CLI, tests); there is no cache to clear then.
     }
-    // Supermemory copies of the rows the task delete purged (SEC-17).
-    SupermemoryService.scheduleOrphanSweep();
     if (params.purgeDerivedMemory && SAFE_TASK_ID.test(params.taskId)) {
       try {
         await MemoryRepoService.get()?.purgeTask(params.taskId);
@@ -335,23 +328,7 @@ export class MemoryWorkspacePurgeService {
       // Memory may not be initialized; nothing cached then.
     }
 
-    const notes = [SUPERMEMORY_NOT_PURGED_NOTE];
-    try {
-      const remote = await SupermemoryService.forgetWorkspaceCopies(workspaceId);
-      if (remote.forgotten > 0) {
-        notes.push(
-          `Deleted ${remote.forgotten} Supermemory ${remote.forgotten === 1 ? "copy" : "copies"}.`,
-        );
-      }
-      if (remote.failed > 0) {
-        notes.push(
-          `${remote.failed} Supermemory ${remote.failed === 1 ? "copy" : "copies"} could not be deleted (Supermemory unreachable or disconnected); they are kept on record for "Disconnect & purge".`,
-        );
-      }
-    } catch (error) {
-      logger.warn(`Forgetting Supermemory copies for workspace ${workspaceId} failed:`, error);
-    }
-
+    const notes: string[] = [];
     const success = Object.keys(errors).length === 0;
     logger.info(`Cleared memory for workspace ${workspaceId}`, counts);
     return {

@@ -33,7 +33,6 @@ import {
   useMemoryRepoController,
 } from "./MemoryRepoCard";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsSwitch } from "./SettingsRow";
-import { SUPERMEMORY_METHODS, SupermemoryConnection } from "./SupermemoryConnection";
 import {
   useWorkspaceMemorySettings,
   type WorkspaceMemoryStats,
@@ -632,7 +631,6 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
       )}
 
       <SettingsSection id="connections" title="Connections" scope={allScope}>
-        {hasHostMethods(...SUPERMEMORY_METHODS) && <SupermemoryConnection onError={showError} />}
         <ChronicleConnectionRow onOpenSettingsTab={props.onOpenSettingsTab} />
       </SettingsSection>
 

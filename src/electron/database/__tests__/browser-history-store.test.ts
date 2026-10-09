@@ -142,4 +142,15 @@ describe("BrowserHistoryStore", () => {
     expect(count).toBe(MAX_BROWSER_HISTORY_ENTRIES);
     expect(history.findById("id-0")).toBeUndefined();
   });
+
+  it("lists the sites visited since a time", () => {
+    const { history } = store();
+    history.recordVisit({ profileKey: "p", url: "https://old.example/a", visitedAt: 10 });
+    history.recordVisit({ profileKey: "p", url: "https://new.example/a", visitedAt: 200 });
+    history.recordVisit({ profileKey: "p", url: "https://new.example/b", visitedAt: 300 });
+    history.recordVisit({ profileKey: "q", url: "https://other.example/", visitedAt: 300 });
+    expect(history.originsVisitedSince({ profileKey: "p", since: 100 })).toEqual([
+      "https://new.example",
+    ]);
+  });
 });

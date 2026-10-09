@@ -105,4 +105,21 @@ describe("browser page context menu", () => {
     );
     expect(labels(template)).not.toContain("Annotate This Element");
   });
+
+  it("saves an image to the workspace", () => {
+    const saveToWorkspace = vi.fn();
+    const d = deps({ saveToWorkspace });
+    const params = {
+      x: 1,
+      y: 2,
+      mediaType: "image",
+      hasImageContents: true,
+      srcURL: "https://cdn.example/a.png",
+    };
+    const template = buildBrowserContextMenuTemplate(params, d);
+    click(template, "Save Image to Workspace");
+    expect(saveToWorkspace).toHaveBeenCalledWith("https://cdn.example/a.png");
+    const blob = buildBrowserContextMenuTemplate({ ...params, srcURL: "blob:https://x/1" }, d);
+    expect(labels(blob)).not.toContain("Save Image to Workspace");
+  });
 });

@@ -25,6 +25,27 @@ import {
 
 export type AdminSandboxType = "macos" | "docker" | "none";
 export type AdminNetworkDefault = "allow" | "deny";
+/** "user" leaves Settings > Browser > Developer mode to the user; "on"/"off" lock it. */
+export type AdminBrowserDeveloperMode = "user" | "on" | "off";
+
+/** Site permission keys the in-app browser can be told to deny without asking. */
+export const ADMIN_BROWSER_SITE_PERMISSIONS = [
+  "camera",
+  "microphone",
+  "geolocation",
+  "notifications",
+  "clipboard-read",
+  "midi",
+  "midiSysex",
+  "hid",
+  "serial",
+  "usb",
+  "pointerLock",
+  "keyboardLock",
+  "openExternal",
+  "fileSystem",
+  "display-capture",
+] as const;
 
 /**
  * Admin policy configuration schema
@@ -60,6 +81,14 @@ export interface AdminPolicies {
     autoRoute: boolean;
     /** Provider origins (or host patterns) CoWork must never contact over PACT. */
     blockedProviders: string[];
+  };
+
+  /** In-app browser (Browser Workbench) */
+  browser?: {
+    /** Lock Settings > Browser > Developer mode (full DevTools access for CoWork). */
+    developerMode: AdminBrowserDeveloperMode;
+    /** Site permissions denied in the in-app browser without a prompt (see ADMIN_BROWSER_SITE_PERMISSIONS). */
+    blockedSitePermissions: string[];
   };
 
   /** Agent policies */
@@ -149,6 +178,10 @@ const DEFAULT_POLICIES: AdminPolicies = {
     autoRoute: true,
     blockedProviders: [],
   },
+  browser: {
+    developerMode: "user",
+    blockedSitePermissions: [],
+  },
   agents: {
     maxHeartbeatFrequencySec: 60,
     maxConcurrentAgents: 10,
@@ -227,6 +260,15 @@ function normalizePolicies(parsed: any): AdminPolicies {
       enabled: parsed.pact?.enabled !== false,
       autoRoute: parsed.pact?.autoRoute !== false,
       blockedProviders: normalizeStringList(parsed.pact?.blockedProviders),
+    },
+    browser: {
+      developerMode:
+        parsed.browser?.developerMode === "on" || parsed.browser?.developerMode === "off"
+          ? parsed.browser.developerMode
+          : "user",
+      blockedSitePermissions: normalizeStringList(parsed.browser?.blockedSitePermissions).filter(
+        (key) => (ADMIN_BROWSER_SITE_PERMISSIONS as readonly string[]).includes(key),
+      ),
     },
     agents: {
       maxHeartbeatFrequencySec: Math.max(60, parsed.agents?.maxHeartbeatFrequencySec || 60),
@@ -455,6 +497,10 @@ export function isConnectorBlocked(connectorId: string, policies?: AdminPolicies
   return p.connectors.blocked.some((blocked) => normalize(blocked) === target);
 }
 
+export function getBrowserPolicy(policies?: AdminPolicies): NonNullable<AdminPolicies["browser"]> {
+  return (policies || loadPolicies()).browser ?? DEFAULT_POLICIES.browser!;
+}
+
 export function getPactPolicy(policies?: AdminPolicies): AdminPolicies["pact"] {
   return (policies || loadPolicies()).pact ?? DEFAULT_POLICIES.pact;
 }
@@ -640,6 +686,28 @@ export function validatePolicies(policies: unknown): string | null {
         pact.blockedProviders.some((entry) => typeof entry !== "string"))
     ) {
       return "pact.blockedProviders must be an array of strings";
+    }
+  }
+
+  if (p.browser !== undefined) {
+    if (!p.browser || typeof p.browser !== "object") return "browser must be an object";
+    const browser = p.browser as Record<string, unknown>;
+    if (
+      browser.developerMode !== undefined &&
+      !["user", "on", "off"].includes(browser.developerMode as string)
+    ) {
+      return 'browser.developerMode must be "user", "on" or "off"';
+    }
+    if (
+      browser.blockedSitePermissions !== undefined &&
+      (!Array.isArray(browser.blockedSitePermissions) ||
+        browser.blockedSitePermissions.some(
+          (entry) =>
+            typeof entry !== "string" ||
+            !(ADMIN_BROWSER_SITE_PERMISSIONS as readonly string[]).includes(entry),
+        ))
+    ) {
+      return `browser.blockedSitePermissions may only contain: ${ADMIN_BROWSER_SITE_PERMISSIONS.join(", ")}`;
     }
   }
 

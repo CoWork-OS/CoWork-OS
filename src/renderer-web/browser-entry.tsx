@@ -5,6 +5,7 @@ import { installBrowserHostBridge } from "../renderer/host/browser-host-bridge";
 import { BrowserHostTransport, webEndpoint } from "./transport";
 import "../renderer/react-refresh-ignored-exports";
 import "../renderer/styles/index.css";
+import "../renderer/styles/browser-workbench.css";
 import "../renderer/components/right-panel.css";
 import "../renderer/styles/calm-theme.css";
 import "./browser-entry.css";

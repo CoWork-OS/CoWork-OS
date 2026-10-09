@@ -87,10 +87,12 @@ const PROMPTED_PERMISSIONS = new Set([
 ]);
 
 // Everything else is denied: idle-detection, background-sync, window-management,
-// storage-access, top-level-storage-access, speaker-selection, display-capture
-// (no source picker exists yet) and "unknown".
+// storage-access, top-level-storage-access, speaker-selection and "unknown".
 
 export function classifyBrowserPermission(permission: string): BrowserPermissionClass {
+  // Screen sharing asks in its own source picker (browser-screen-share.ts); nothing
+  // is shared until the user picks a screen or window there.
+  if (permission === "display-capture") return "allow";
   if (ALLOWED_PERMISSIONS.has(permission)) return "allow";
   if (PROMPTED_PERMISSIONS.has(permission)) return "prompt";
   return "deny";
@@ -100,6 +102,14 @@ export function classifyBrowserPermission(permission: string): BrowserPermission
 export function permissionKeysFor(permission: string, details?: Record<string, unknown>): string[] {
   if (permission !== "media") return [permission];
   const keys = new Set<string>();
+  // getDisplayMedia arrives as a "media" request with an empty mediaTypes list.
+  if (
+    Array.isArray(details?.mediaTypes) &&
+    details.mediaTypes.length === 0 &&
+    typeof details?.mediaType !== "string"
+  ) {
+    return ["display-capture"];
+  }
   const mediaTypes = Array.isArray(details?.mediaTypes) ? details.mediaTypes : [];
   for (const mediaType of mediaTypes) {
     if (mediaType === "video") keys.add("camera");
@@ -188,6 +198,7 @@ export class BrowserPermissionManager {
     details: Record<string, unknown>,
   ): boolean {
     const classification = classifyBrowserPermission(permission);
+    if (this.options.isForcedDeny?.(permission)) return false;
     if (classification === "allow") return true;
     if (classification === "deny") return false;
     const origin = permissionOrigin(requestingOrigin || details.requestingUrl);
@@ -209,6 +220,7 @@ export class BrowserPermissionManager {
     details: Record<string, unknown>,
   ): Promise<boolean> {
     const classification = classifyBrowserPermission(permission);
+    if (this.options.isForcedDeny?.(permission)) return false;
     if (classification === "allow") return true;
     if (classification === "deny") return false;
 
@@ -218,6 +230,8 @@ export class BrowserPermissionManager {
 
     const keys = permissionKeysFor(permission, details);
     if (keys.some((key) => this.options.isForcedDeny?.(key))) return false;
+    // Screen sharing asks in its own source picker; nothing is shared before a pick there.
+    if (keys.length === 1 && keys[0] === "display-capture") return true;
     if (keys.some((key) => this.getStored(partition, origin, key) === "block")) return false;
     if (
       keys.every(
@@ -317,6 +331,24 @@ export class BrowserPermissionManager {
     } catch (error) {
       console.warn("[BrowserPermissions] Failed to persist site permission reset:", error);
     }
+  }
+
+  /**
+   * Remember a decision the user made in the browser's site controls. Only
+   * prompted permissions can be set, and never "open external apps" (asked
+   * every time). Returns false when the permission or origin is not settable.
+   */
+  setSiteDecision(
+    partition: string,
+    rawOrigin: string,
+    permission: string,
+    decision: BrowserStoredPermission,
+  ): boolean {
+    const origin = permissionOrigin(rawOrigin);
+    if (!origin || permission === "openExternal" || permission === "media") return false;
+    if (classifyBrowserPermission(permission) !== "prompt") return false;
+    this.setStored(partition, origin, permission, decision);
+    return true;
   }
 
   getStored(partition: string, origin: string, permission: string): BrowserStoredPermission | null {

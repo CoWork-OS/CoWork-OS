@@ -70,6 +70,8 @@ export type BrowserContextMenuDeps = {
   openTab: (url: string, background: boolean) => void;
   openExternal: (url: string) => void;
   sendAction: (action: BrowserContextAction) => void;
+  /** Download an image into the task workspace's downloads folder. */
+  saveToWorkspace?: (url: string) => void;
   searchLabel?: string;
   /** Settings > Browser developer mode: adds Inspect Element. */
   developerMode?: boolean;
@@ -150,6 +152,11 @@ export function buildBrowserContextMenuTemplate(
         { label: "Copy Image Address", click: () => deps.writeText(src) },
         { label: "Open Image in New Tab", click: () => deps.openTab(src, false) },
       );
+    }
+    const saveTo = deps.saveToWorkspace;
+    if (saveTo && (isWebUrl(params.srcURL) || /^data:image\//i.test(params.srcURL || ""))) {
+      const src = params.srcURL as string;
+      image.push({ label: "Save Image to Workspace", click: () => saveTo(src) });
     }
     sections.push(image);
   }

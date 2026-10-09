@@ -21,6 +21,7 @@ import {
 } from "./browser-permissions";
 import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
 import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import { BrowserSettingsManager } from "../settings/browser-settings-manager";
 import {
   buildSelectOptionExpression,
   buildSelectorResolverExpression,
@@ -362,6 +363,9 @@ export class BrowserWorkbenchService {
         },
         sendPrompt: (prompt: BrowserPermissionPrompt) =>
           this.sendToRenderer(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_REQUEST, prompt),
+        // Admin policy (browser.blockedSitePermissions) beats any user decision.
+        isForcedDeny: (permission) =>
+          BrowserSettingsManager.loadPolicy().blockedSitePermissions.includes(permission),
       });
     }
     return this.permissionManager;

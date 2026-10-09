@@ -105,6 +105,19 @@ export function describePolicyRelaxations(current: AdminPolicies, next: AdminPol
       changes.push(`Unblock PACT providers: ${unblockedProviders.join(", ")}`);
     }
   }
+  const currentBrowser = current.browser;
+  const nextBrowser = next.browser;
+  if (currentBrowser && nextBrowser) {
+    if (currentBrowser.developerMode === "off" && nextBrowser.developerMode !== "off") {
+      changes.push("Allow in-app browser developer mode");
+    }
+    const unblockedPermissions = currentBrowser.blockedSitePermissions.filter(
+      (key) => !(nextBrowser.blockedSitePermissions || []).includes(key),
+    );
+    if (unblockedPermissions.length > 0) {
+      changes.push(`Unblock browser site permissions: ${unblockedPermissions.join(", ")}`);
+    }
+  }
   const unblockedPacks = current.packs.blocked.filter((id) => !next.packs.blocked.includes(id));
   if (unblockedPacks.length > 0) {
     changes.push(`Unblock plugin packs: ${unblockedPacks.join(", ")}`);

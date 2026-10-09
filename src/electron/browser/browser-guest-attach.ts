@@ -41,6 +41,8 @@ export interface BrowserGuestAttachDeps {
   ) => void;
   /** Developer mode (Settings > Browser) adds Inspect Element to the page menu. */
   isDeveloperMode?: () => boolean;
+  /** Save an image from a page into the task workspace (download manager). */
+  saveToWorkspace?: (guest: Any, url: string) => void;
   /** Asks "Leave site?" when a page wants to keep its unsaved changes. */
   unloadGuard?: BrowserUnloadGuard;
 }
@@ -149,6 +151,9 @@ function attachContextMenu(guest: Any, deps: BrowserGuestAttachDeps, isPopup: bo
       owner,
       contents: guest,
       writeText: (text) => deps.writeClipboardText?.(text),
+      saveToWorkspace: deps.saveToWorkspace
+        ? (url) => deps.saveToWorkspace?.(guest, url)
+        : undefined,
       openTab: (url, background) => {
         void deps.service
           .openTab({

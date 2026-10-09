@@ -82,19 +82,37 @@ export function registerBrowserPlatformIpc(deps: BrowserPlatformIpcDeps): void {
     return workspaceId ? browserProfileKey(workspaceId) : null;
   };
 
-  ipcMain.handle(IPC_CHANNELS.BROWSER_SETTINGS_GET, () => BrowserSettingsManager.loadSettings());
+  ipcMain.handle(IPC_CHANNELS.BROWSER_SETTINGS_GET, () =>
+    BrowserSettingsManager.loadSettingsState(),
+  );
   ipcMain.handle(IPC_CHANNELS.BROWSER_SETTINGS_SAVE, (_event, data: Any) => {
     if (!data || typeof data !== "object") return { success: false };
     // Only known keys with valid values survive normalization.
-    const merged = normalizeBrowserSettings({ ...BrowserSettingsManager.loadSettings(), ...data });
-    const settings: BrowserSettings = BrowserSettingsManager.saveSettings(merged);
-    return { success: true, settings };
+    const merged = normalizeBrowserSettings({
+      ...BrowserSettingsManager.loadStoredSettings(),
+      ...data,
+    });
+    BrowserSettingsManager.saveSettings(merged);
+    return { success: true, settings: BrowserSettingsManager.loadSettingsState() };
   });
 
   ipcMain.handle(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, (_event, data: Any) => {
     const workspaceId = readString(data?.workspaceId);
     if (!workspaceId) return [];
     return deps.service.getPermissionManager().listStored(browserPartitionFor(workspaceId));
+  });
+  ipcMain.handle(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_SET, (_event, data: Any) => {
+    const workspaceId = readString(data?.workspaceId);
+    const origin = readString(data?.origin, 2048);
+    const permission = readString(data?.permission, 64);
+    const decision =
+      data?.decision === "allow" || data?.decision === "block" ? data.decision : null;
+    if (!workspaceId || !origin || !permission || !decision) return { success: false };
+    return {
+      success: deps.service
+        .getPermissionManager()
+        .setSiteDecision(browserPartitionFor(workspaceId), origin, permission, decision),
+    };
   });
   ipcMain.handle(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_RESET, (_event, data: Any) => {
     const workspaceId = readString(data?.workspaceId);
@@ -158,31 +176,43 @@ export function registerBrowserPlatformIpc(deps: BrowserPlatformIpcDeps): void {
       : [];
     if (!workspaceId || types.length === 0) return { success: false };
     const browserSession = deps.sessionFromPartition(browserPartitionFor(workspaceId));
-    if (types.includes("cookies")) {
-      await browserSession.clearStorageData({ storages: ["cookies"] });
+    const profileKey = browserProfileKey(workspaceId);
+    const sinceInput = Number(data?.since);
+    const since = Number.isFinite(sinceInput) && sinceInput > 0 ? sinceInput : undefined;
+    // Chromium's storage APIs here have no time range. For a range, site data is
+    // cleared for the sites visited in it (from history, read before history is
+    // cleared); the HTTP cache can only be cleared as a whole.
+    let origins: string[] | undefined;
+    if (since !== undefined && (types.includes("cookies") || types.includes("storage"))) {
+      origins = await history().originsVisitedSince({ profileKey, since });
     }
-    if (types.includes("storage")) {
-      await browserSession.clearStorageData({
-        storages: [
-          "localstorage",
-          "indexdb",
-          "serviceworkers",
-          "cachestorage",
-          "websql",
-          "filesystem",
-          "shadercache",
-        ],
+    const siteTypes: string[] = [
+      ...(types.includes("cookies") ? ["cookies"] : []),
+      ...(types.includes("storage")
+        ? [
+            "localStorage",
+            "indexedDB",
+            "serviceWorkers",
+            "fileSystems",
+            "webSQL",
+            "backgroundFetch",
+          ]
+        : []),
+    ];
+    if (siteTypes.length > 0 && (origins === undefined || origins.length > 0)) {
+      await browserSession.clearData({
+        dataTypes: siteTypes,
+        ...(origins ? { origins } : {}),
       });
+      if (types.includes("storage") && !origins) {
+        await browserSession.clearStorageData({ storages: ["cachestorage", "shadercache"] });
+      }
     }
     if (types.includes("cache")) await browserSession.clearCache();
     if (types.includes("history")) {
-      const since = Number(data?.since);
-      await history().clear({
-        profileKey: browserProfileKey(workspaceId),
-        since: Number.isFinite(since) && since > 0 ? since : undefined,
-      });
+      await history().clear({ profileKey, since });
     }
-    return { success: true };
+    return { success: true, ...(origins ? { sites: origins.length } : {}) };
   });
 
   ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_DOWNLOAD_LIST, (_event, data: Any) => {

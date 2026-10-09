@@ -2370,11 +2370,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
       data,
     ) as Promise<BrowserWorkbenchSnapshotOverlay | null>,
   getBrowserSettings: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SETTINGS_GET) as Promise<BrowserSettings>,
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SETTINGS_GET) as Promise<BrowserSettingsState>,
   saveBrowserSettings: (settings: Partial<BrowserSettings>) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SETTINGS_SAVE, settings) as Promise<{
       success: boolean;
-      settings?: BrowserSettings;
+      settings?: BrowserSettingsState;
     }>,
   listBrowserSitePermissions: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, data) as Promise<
@@ -2386,6 +2386,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     permission?: string;
   }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_RESET, data) as Promise<{
+      success: boolean;
+    }>,
+  setBrowserSitePermission: (data: {
+    workspaceId: string;
+    origin: string;
+    permission: string;
+    decision: "allow" | "block";
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_SET, data) as Promise<{
       success: boolean;
     }>,
   searchBrowserHistory: (data: { workspaceId: string; query: string; limit?: number }) =>
@@ -2503,6 +2512,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
   },
+  onBrowserWorkbenchScreenShareRequest: (
+    callback: (prompt: BrowserWorkbenchScreenSharePrompt) => void,
+  ) => {
+    const handler = (_: Any, prompt: BrowserWorkbenchScreenSharePrompt) => callback(prompt);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_REQUEST, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_REQUEST, handler);
+  },
+  listBrowserWorkbenchScreenShareRequests: (data: { taskId: string; sessionId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_LIST, data) as Promise<
+      BrowserWorkbenchScreenSharePrompt[]
+    >,
+  respondBrowserWorkbenchScreenShare: (data: { requestId: string; sourceId: string | null }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_RESPOND, data) as Promise<{
+      success: boolean;
+    }>,
   onBrowserWorkbenchPageDialog: (callback: (event: BrowserWorkbenchPageDialogEvent) => void) => {
     const handler = (_: Any, event: BrowserWorkbenchPageDialogEvent) => callback(event);
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG, handler);
@@ -5760,6 +5785,16 @@ export interface BrowserWorkbenchTabCommand {
 
 export type BrowserWorkbenchBlockReason = "policy" | "local_preview" | "scheme";
 
+export interface BrowserWorkbenchScreenSharePrompt {
+  requestId: string;
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  origin: string;
+  sources: Array<{ id: string; name: string; kind: "screen" | "window"; thumbnail: string }>;
+  at: number;
+}
+
 export interface BrowserWorkbenchPageDialogEvent {
   taskId: string;
   sessionId: string;
@@ -5788,6 +5823,7 @@ export interface BrowserWorkbenchUserNavigateResult {
 }
 
 export type BrowserSettings = import("../shared/browser-settings").BrowserSettings;
+export type BrowserSettingsState = import("../shared/browser-settings").BrowserSettingsState;
 export type BrowserDataType = import("../shared/browser-settings").BrowserDataType;
 export type BrowserSitePermissionEntry =
   import("../shared/browser-settings").BrowserSitePermissionEntry;
@@ -6116,10 +6152,10 @@ export interface ElectronAPI {
     sessionId?: string;
     tabId?: string;
   }) => Promise<BrowserWorkbenchSnapshotOverlay | null>;
-  getBrowserSettings: () => Promise<BrowserSettings>;
+  getBrowserSettings: () => Promise<BrowserSettingsState>;
   saveBrowserSettings: (
     settings: Partial<BrowserSettings>,
-  ) => Promise<{ success: boolean; settings?: BrowserSettings }>;
+  ) => Promise<{ success: boolean; settings?: BrowserSettingsState }>;
   listBrowserSitePermissions: (data: {
     workspaceId: string;
   }) => Promise<BrowserSitePermissionEntry[]>;
@@ -6127,6 +6163,13 @@ export interface ElectronAPI {
     workspaceId: string;
     origin?: string;
     permission?: string;
+  }) => Promise<{ success: boolean }>;
+  /** Remember Allow or Block for a site (the browser's site controls). */
+  setBrowserSitePermission: (data: {
+    workspaceId: string;
+    origin: string;
+    permission: string;
+    decision: "allow" | "block";
   }) => Promise<{ success: boolean }>;
   searchBrowserHistory: (data: {
     workspaceId: string;
@@ -6228,6 +6271,19 @@ export interface ElectronAPI {
   onBrowserWorkbenchNavigationBlocked: (
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => () => void;
+  /** A page asks to share a screen or window: the picker's choices. */
+  onBrowserWorkbenchScreenShareRequest: (
+    callback: (prompt: BrowserWorkbenchScreenSharePrompt) => void,
+  ) => () => void;
+  listBrowserWorkbenchScreenShareRequests: (data: {
+    taskId: string;
+    sessionId?: string;
+  }) => Promise<BrowserWorkbenchScreenSharePrompt[]>;
+  /** sourceId null cancels. */
+  respondBrowserWorkbenchScreenShare: (data: {
+    requestId: string;
+    sourceId: string | null;
+  }) => Promise<{ success: boolean }>;
   /** A page's alert/confirm the workbench shows while CoWork's debugger owns page dialogs. */
   onBrowserWorkbenchPageDialog: (
     callback: (event: BrowserWorkbenchPageDialogEvent) => void,

@@ -180,4 +180,17 @@ describe("BrowserDownloadManager", () => {
     });
     await expect(downloads.act(id, "open", true)).resolves.toEqual({ success: true });
   });
+
+  it("saves an image to the workspace when the user asks from the page menu", () => {
+    const { downloads, start, service } = setup();
+    downloads.requestWorkspaceSave(7, "https://files.example/photo.png");
+    const { item } = start(fakeItem("https://files.example/photo.png", "photo.png"));
+    expect(item.setSavePath).toHaveBeenCalledWith(path.join("/ws", "downloads", "photo.png"));
+    expect(service.emitDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ agentInitiated: false, filename: "photo.png" }),
+    );
+    // Used once: the next download of the same URL follows the normal setting.
+    const next = start(fakeItem("https://files.example/photo.png", "photo.png"));
+    expect(next.item.setSavePath).toHaveBeenCalledWith("/Users/me/Downloads/photo.png");
+  });
 });

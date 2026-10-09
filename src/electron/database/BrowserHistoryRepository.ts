@@ -209,6 +209,22 @@ export class BrowserHistoryStore {
       .run(input.profileKey, ...ids).changes;
   }
 
+  /** Origins of the pages visited since a time (to clear their site data). */
+  originsVisitedSince(input: { profileKey: string; since: number }): string[] {
+    const rows = this.db
+      .prepare("SELECT url FROM browser_history WHERE profile_key = ? AND last_visit_at >= ?")
+      .all(input.profileKey, Number(input.since) || 0) as Array<{ url: string }>;
+    const origins = new Set<string>();
+    for (const row of rows) {
+      try {
+        origins.add(new URL(row.url).origin);
+      } catch {
+        // Stored URLs are valid http(s); skip anything else.
+      }
+    }
+    return Array.from(origins);
+  }
+
   /** Clear history, all of it or the pages visited since a time. */
   clear(input: { profileKey: string; since?: number }): number {
     const since = Number.isFinite(input.since) ? Number(input.since) : 0;

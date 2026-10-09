@@ -178,3 +178,37 @@ describe("browser permission decisions", () => {
     ).resolves.toBe(false);
   });
 });
+
+describe("site controls and admin blocks", () => {
+  it("lets the user allow or block a prompted permission for a site", async () => {
+    const { manager, request, prompts } = setup();
+    expect(
+      manager.setSiteDecision(PARTITION, "https://maps.example/x", "notifications", "allow"),
+    ).toBe(true);
+    await expect(request("notifications")).resolves.toBe(true);
+    expect(prompts).toEqual([]);
+    expect(
+      manager.setSiteDecision(PARTITION, "https://maps.example", "openExternal", "allow"),
+    ).toBe(false);
+    expect(manager.setSiteDecision(PARTITION, "https://maps.example", "fullscreen", "block")).toBe(
+      false,
+    );
+    expect(manager.setSiteDecision(PARTITION, "file:///etc", "camera", "allow")).toBe(false);
+  });
+
+  it("an admin block beats a stored allow, and covers screen sharing", async () => {
+    const { manager, request } = setup({ forcedDeny: ["notifications", "display-capture"] });
+    manager.setSiteDecision(PARTITION, "https://maps.example", "notifications", "allow");
+    await expect(request("notifications")).resolves.toBe(false);
+    await expect(request("display-capture")).resolves.toBe(false);
+    const open = setup();
+    await expect(open.request("display-capture")).resolves.toBe(true);
+    // getDisplayMedia arrives as "media" with no media types: it goes to the picker,
+    // even when the camera is blocked.
+    const camera = setup({ forcedDeny: ["camera"] });
+    await expect(camera.request("media", { mediaTypes: [] })).resolves.toBe(true);
+    await expect(camera.request("media", { mediaTypes: ["video"] })).resolves.toBe(false);
+    const noShare = setup({ forcedDeny: ["display-capture"] });
+    await expect(noShare.request("media", { mediaTypes: [] })).resolves.toBe(false);
+  });
+});

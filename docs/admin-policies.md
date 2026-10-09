@@ -75,6 +75,10 @@ network, and shell egress below that selection.
     "autoRoute": true,
     "blockedProviders": []
   },
+  "browser": {
+    "developerMode": "user",
+    "blockedSitePermissions": []
+  },
   "agents": {
     "maxHeartbeatFrequencySec": 60,
     "maxConcurrentAgents": 10
@@ -151,6 +155,18 @@ network, and shell egress below that selection.
 
 Allowing PACT, turning on auto-routing and unblocking providers count as policy relaxations and
 need confirmation in the desktop app.
+
+#### `browser`
+
+The in-app browser (Browser Workbench).
+
+| Field                    | Type       | Default  | Description |
+| ------------------------ | ---------- | -------- | ----------- |
+| `developerMode`          | `string`   | `"user"` | `"user"` leaves Settings > Browser > Developer mode to the user; `"off"` or `"on"` locks it. Developer mode gives CoWork page scripts, storage and traces (`browser_evaluate`, `browser_storage`, `browser_trace_*`) and adds Inspect Element. |
+| `blockedSitePermissions` | `string[]` | `[]`     | Site permissions pages are denied without a prompt, whatever the user chose before: `camera`, `microphone`, `geolocation`, `notifications`, `clipboard-read`, `midi`, `midiSysex`, `hid`, `serial`, `usb`, `pointerLock`, `keyboardLock`, `openExternal`, `fileSystem`, `display-capture` (screen sharing). |
+
+Settings > Browser shows a locked developer mode and lists blocked permissions. Unlocking developer
+mode from `"off"` and unblocking permissions count as policy relaxations.
 
 #### `agents`
 

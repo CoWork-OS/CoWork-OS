@@ -181,6 +181,13 @@ async function openWorkbench(taskTitle) {
   await main.getByLabel("Browser URL").waitFor({ timeout: 20000 });
 }
 
+// An organization policy for the in-app browser: developer mode locked off, camera blocked.
+await fs.mkdir(env.COWORK_USER_DATA_DIR, { recursive: true });
+await fs.writeFile(
+  path.join(env.COWORK_USER_DATA_DIR, "policies.json"),
+  JSON.stringify({ browser: { developerMode: "off", blockedSitePermissions: ["camera"] } }),
+);
+
 try {
   desktop = await electron.launch({ args: [root], cwd: root, env, timeout: 60000 });
   desktop
@@ -545,6 +552,79 @@ try {
     return { cardAfterDeny };
   });
 
+  await step(
+    "an admin policy locks developer mode and blocks the camera without a prompt",
+    async () => {
+      const settings = await main.evaluate(() => window.electronAPI.getBrowserSettings());
+      assert.equal(settings.policy?.developerModeLocked, true);
+      assert.equal(settings.developerMode, false);
+      assert.deepEqual(settings.policy?.blockedSitePermissions, ["camera"]);
+      await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+      const first = await guestFor("/page?n=1");
+      await inGuest(
+        first.id,
+        `navigator.mediaDevices.getUserMedia({ video: true }).then(() => { window.__camera = "ok"; }, (error) => { window.__camera = "err:" + error.name; }); 1`,
+      );
+      const camera = await waitFor(
+        async () => inGuest(first.id, "window.__camera"),
+        "the camera answer",
+      );
+      assert.match(camera, /^err:/);
+      assert.equal(await main.locator(".browser-workbench-permission").count(), 0, "no prompt");
+      return { camera };
+    },
+  );
+
+  await step("notifications can be allowed for a site from the profile menu", async () => {
+    const first = await guestFor("/page?n=1");
+    assert.equal(await inGuest(first.id, "Notification.permission"), "denied");
+    await main.getByRole("button", { name: "Browser profile" }).click();
+    await main.getByLabel(/Notifications from/).selectOption("allow");
+    await sleep(300);
+    await inGuest(first.id, "location.reload(); 1").catch(() => undefined);
+    const reloaded = await waitFor(async () => {
+      const guest = (await guests()).find((candidate) => candidate.url.endsWith("/page?n=1"));
+      if (!guest) return null;
+      const state = await inGuest(
+        guest.id,
+        "document.readyState + ':' + Notification.permission",
+      ).catch(() => null);
+      return state === "complete:granted" ? state : null;
+    }, "the site to see notifications as granted");
+    assert.equal(reloaded, "complete:granted");
+    await main.keyboard.press("Escape");
+  });
+
+  await step("a page asking to share the screen shows a source picker", async () => {
+    await desktop.evaluate(({ desktopCapturer }) => {
+      desktopCapturer.getSources = async () => [
+        { id: "screen:1:0", name: "QA Screen", thumbnail: { toDataURL: () => "" } },
+        { id: "window:2:0", name: "QA Window", thumbnail: { toDataURL: () => "" } },
+      ];
+    });
+    await main
+      .locator("body")
+      .click({ position: { x: 5, y: 5 } })
+      .catch(() => undefined);
+    await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+    const first = await guestFor("/page?n=1");
+    await inGuest(
+      first.id,
+      `navigator.mediaDevices.getDisplayMedia({ video: true }).then(() => { window.__share = "ok"; }, (error) => { window.__share = "err:" + error.name; }); 1`,
+    );
+    const picker = main.getByRole("dialog", { name: "Choose what to share" });
+    await picker.waitFor({ timeout: 8000 });
+    await picker.getByText("QA Screen").waitFor();
+    await main.screenshot({ path: path.join(outputDir, "screen-share.png") });
+    await picker.getByRole("button", { name: "Cancel" }).click();
+    const answer = await waitFor(
+      async () => inGuest(first.id, "window.__share"),
+      "the share answer",
+    );
+    // Electron rejects a cancelled pick with AbortError (Chrome uses NotAllowedError).
+    assert.match(answer, /^err:(NotAllowed|Abort)Error$/);
+  });
+
   await step("closing and reopening the workbench restores its tabs", async () => {
     await main.getByRole("button", { name: "Close browser workbench" }).click();
     await waitFor(async () => (await guests()).length === 0, "the webviews to close");
@@ -569,6 +649,14 @@ try {
         .catch(() => undefined);
     },
   );
+
+  await step("Cmd+Shift+B opens the browser from the task view", async () => {
+    await main.getByRole("button", { name: "Close browser workbench" }).click();
+    await waitFor(async () => (await guests()).length === 0, "the webviews to close");
+    await main.locator(".main-header-title").first().click();
+    await main.keyboard.press("Meta+Shift+B");
+    await main.getByLabel("Browser URL").waitFor({ timeout: 10000 });
+  });
 
   await main.screenshot({ path: path.join(outputDir, "final.png") });
 } finally {

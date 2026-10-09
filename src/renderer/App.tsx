@@ -5,6 +5,7 @@ import {
   hasHostMethod,
 } from "./host/browser-capabilities";
 import { StaleBrowserDecisionError } from "./host/browser-decision-bridge";
+import { matchBrowserShortcut } from "../shared/browser-shortcuts";
 import {
   memo,
   useState,
@@ -1186,6 +1187,42 @@ const SelectedTaskWorkspaceView = memo(
       },
       [canUseInteractiveBrowser, onRevealRightSidebar],
     );
+    // Cmd/Ctrl+Shift+B anywhere in the task view opens the browser, or switches
+    // it between sidebar and full view. Inside the browser its own handler runs.
+    const browserWorkbenchOpenRef = useRef(false);
+    browserWorkbenchOpenRef.current = Boolean(browserWorkbench);
+    useEffect(() => {
+      if (!task || !canUseInteractiveBrowser) return;
+      const platform = /mac/i.test(navigator.platform) ? "darwin" : "other";
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.defaultPrevented) return;
+        const command = matchBrowserShortcut(
+          {
+            key: event.key,
+            code: event.code,
+            ctrl: event.ctrlKey,
+            meta: event.metaKey,
+            shift: event.shiftKey,
+            alt: event.altKey,
+          },
+          platform,
+        );
+        if (command !== "toggle-full-view") return;
+        if ((event.target as HTMLElement | null)?.closest?.(".browser-workbench")) return;
+        event.preventDefault();
+        if (!browserWorkbenchOpenRef.current) {
+          openBrowserWorkbenchSidebar({});
+          return;
+        }
+        setBrowserWorkbench((current) =>
+          current
+            ? { ...current, mode: current.mode === "fullscreen" ? "sidebar" : "fullscreen" }
+            : current,
+        );
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [canUseInteractiveBrowser, openBrowserWorkbenchSidebar, task]);
     const { settings: browserSettings } = useBrowserSettings();
     const openWebLinkInBrowserSidebar = useCallback(
       (url: string) => {

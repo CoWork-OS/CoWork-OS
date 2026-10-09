@@ -4165,8 +4165,11 @@ export class TaskExecutor {
       return true;
     }
 
+    // A step that starts with work ("Draft a release checklist covering build
+    // validation, signing, ... with Apple-specific details treated as items to
+    // verify") produces content even when "verify" appears far into it.
     const hasWorkVerbBeforeVerification =
-      /^(?:gather|collect|research|find|compile|draft|write|create|generate|summarize|prepare|assemble|choose|decide|select|design|build|implement|update|edit|fix)\b[\s\S]{0,80}\b(?:verify|verification)\b/.test(
+      /^(?:gather|collect|research|find|compile|draft|write|create|generate|summarize|prepare|assemble|choose|decide|select|design|build|implement|update|edit|fix)\b[\s\S]*\b(?:verify|verification)\b/.test(
         desc,
       );
     if (hasWorkVerbBeforeVerification) return false;

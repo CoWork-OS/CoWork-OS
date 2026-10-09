@@ -1521,6 +1521,11 @@ image_generation_contract:
     });
 
     expect(executor.descriptionIndicatesVerification("Gather and verify core facts")).toBe(false);
+    expect(
+      executor.descriptionIndicatesVerification(
+        "Draft a compact release checklist covering build validation, signing and notarization, packaging, release notes, distribution preparation, and post-release monitoring, with any Apple-specific details treated as items to verify against current requirements.",
+      ),
+    ).toBe(false);
     expect(executor.descriptionIndicatesVerification("Verify: generated image file exists")).toBe(
       true,
     );

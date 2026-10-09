@@ -556,6 +556,8 @@ import {
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { setupAnswerSurfaceHandlers } from "./answer-surface-handlers";
+import { AnswerDataError, readAnswerDataTable } from "../answer-surfaces/answer-data";
+import { hasHiddenSegment } from "../../shared/answer-surfaces/data";
 import { answerImageNetworkContext } from "../answer-surfaces/network-context";
 import { configuredImageSearch } from "../answer-surfaces/web-image-search";
 import { AnswerImageService } from "../answer-surfaces/AnswerImageService";
@@ -11041,6 +11043,35 @@ export async function setupIpcHandlers(
       imageSearch: configuredImageSearch,
     }),
     store: AnswerSurfaceStateStore,
+    authorizeTaskView: (event, taskId) => {
+      authorizeTaskForEvent(event, taskId, "view");
+    },
+    // Answer data: exactly the named file in the task's own workspace (no fallbacks), after
+    // symlinks, outside hidden folders and the app's data folder, and allowed by the
+    // workspace's read policy, the same rules the agent's file tools follow.
+    loadDataSource: async (taskId, filePath, options) => {
+      const task = await taskRepo.findById(taskId);
+      const workspace = task ? await workspaceRepo.findById(task.workspaceId) : undefined;
+      if (!workspace?.path) throw new AnswerDataError("This task has no workspace folder");
+      const root = await fs.realpath(path.resolve(workspace.path));
+      const target = path.resolve(root, filePath);
+      const readPath = await fs.realpath(target).catch(() => {
+        throw new AnswerDataError(`File not found: ${filePath}`);
+      });
+      const relative = path.relative(root, readPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative) || hasHiddenSegment(relative)) {
+        throw new AnswerDataError("Data files must be in the workspace, outside hidden folders");
+      }
+      const userData = await fs.realpath(getUserDataDir()).catch(() => getUserDataDir());
+      const fromUserData = path.relative(userData, readPath);
+      if (!fromUserData.startsWith("..") && !path.isAbsolute(fromUserData)) {
+        throw new AnswerDataError("CoWork's own data cannot be used as answer data");
+      }
+      if (evaluateWorkspaceFilesystemAccess(workspace, readPath, "read").decision !== "allow") {
+        throw new AnswerDataError("This workspace's settings do not allow reading that file");
+      }
+      return readAnswerDataTable(readPath, relative, options);
+    },
   });
 
   // PACT business agents: the renderer never receives a sign-in link; main opens it in the

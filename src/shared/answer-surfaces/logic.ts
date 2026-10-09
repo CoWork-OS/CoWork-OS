@@ -20,6 +20,10 @@ export const MAX_LOGIC_TABLE_COLUMNS = 12;
 export const MAX_LOGIC_RESULT_CHARS = 128 * 1024;
 /** A run that takes longer is stopped and its worker restarted. */
 export const LOGIC_RUN_TIMEOUT_MS = 1000;
+/** With data sources, copying up to 20,000 rows into the worker needs more room. */
+export const LOGIC_DATA_RUN_TIMEOUT_MS = 3000;
+/** Data sources as JSON text (up to 200,000 cells). */
+export const MAX_LOGIC_DATA_JSON_CHARS = 24 * 1024 * 1024;
 /** Workers the runner keeps at once; the least recently used is stopped first. */
 export const MAX_LOGIC_WORKERS = 12;
 
@@ -145,6 +149,37 @@ export const MAX_CONCURRENT_LOGIC_RUNS = 3;
 /** Timeouts or crashes after which a surface's logic is switched off. */
 export const MAX_LOGIC_FAILURES = 3;
 
+/** Helpers the worker defines for data sources; tests use them to run examples too. */
+export const LOGIC_DATA_HELPERS = `// Helpers for data sources: compute(state, data) gets {columns, rows} per file.
+function records(table) {
+  if (!table || !table.columns || !table.rows) return [];
+  return table.rows.map(function (row) {
+    var record = {};
+    table.columns.forEach(function (name, index) { record[name] = row[index]; });
+    return record;
+  });
+}
+function column(table, name) {
+  var index = table && table.columns ? table.columns.indexOf(name) : -1;
+  return index < 0 ? [] : table.rows.map(function (row) { return row[index]; });
+}
+function sum(list) {
+  return (list || []).reduce(function (total, value) { return typeof value === "number" ? total + value : total; }, 0);
+}
+function mean(list) {
+  var numbers = (list || []).filter(function (value) { return typeof value === "number"; });
+  return numbers.length ? sum(numbers) / numbers.length : null;
+}
+function groupBy(list, key) {
+  var groups = {};
+  (list || []).forEach(function (item) {
+    var name = String(typeof key === "function" ? key(item) : item[key]);
+    (groups[name] = groups[name] || []).push(item);
+  });
+  return groups;
+}
+`;
+
 /*
  * Each run gets a fresh worker that is terminated as soon as it answers, so nothing the
  * code schedules (timers, promise chains) can outlive the run's time limit. Before the
@@ -155,12 +190,12 @@ export const MAX_LOGIC_FAILURES = 3;
 export const LOGIC_WORKER_PRELUDE = `"use strict";
 var __coworkPost = self.postMessage.bind(self);
 var __coworkOnce = false;
-["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "importScripts", "postMessage", "BroadcastChannel", "WebTransport"].forEach(function (name) {
+["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "importScripts", "postMessage", "BroadcastChannel", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"].forEach(function (name) {
   try {
     Object.defineProperty(self, name, { value: undefined, configurable: false, writable: false });
   } catch (e) {}
 });
-`;
+${LOGIC_DATA_HELPERS}`;
 
 /**
  * Runs after the model's code: answers one run with compute(state), as a JSON string so
@@ -173,7 +208,8 @@ export const LOGIC_WORKER_POSTLUDE = `
   var reply;
   try {
     if (typeof compute !== "function") throw new Error("Define function compute(state)");
-    var values = compute(Object.freeze(Object.assign({}, event.data.state)));
+    var data = typeof event.data.dataJson === "string" ? JSON.parse(event.data.dataJson) : {};
+    var values = compute(Object.freeze(Object.assign({}, event.data.state)), data);
     var json = JSON.stringify(values === undefined ? null : values);
     reply = json.length > ${MAX_LOGIC_RESULT_CHARS}
       ? { ok: false, message: "The result is too large" }
@@ -224,6 +260,7 @@ export const LOGIC_RUNNER_HTML = `<!doctype html>
   function start(id, entry) {
     var run = { seq: entry.pending.seq, worker: null, timer: null };
     var state = entry.pending.state;
+    var limit = entry.dataJson ? ${LOGIC_DATA_RUN_TIMEOUT_MS} : ${LOGIC_RUN_TIMEOUT_MS};
     entry.pending = null;
     entry.current = run;
     active += 1;
@@ -264,8 +301,9 @@ export const LOGIC_RUNNER_HTML = `<!doctype html>
       finish(entry, run);
       fail(id, entry, run.seq, "The calculation took too long and was stopped");
       if (entry.pending) schedule(id, entry);
-    }, ${LOGIC_RUN_TIMEOUT_MS});
-    run.worker.postMessage({ state: state });
+    }, limit);
+    // One string per run: copying text is cheap, and parsing happens in the worker.
+    run.worker.postMessage({ state: state, dataJson: entry.dataJson });
   }
   function pump() {
     while (active < ${MAX_CONCURRENT_LOGIC_RUNS} && queue.length) {
@@ -308,7 +346,8 @@ export const LOGIC_RUNNER_HTML = `<!doctype html>
     if (data.type === "load" && typeof data.code === "string" && data.code.length <= ${MAX_LOGIC_CODE_CHARS}) {
       drop(id);
       var url = URL.createObjectURL(new Blob([PRELUDE, data.code, POSTLUDE], { type: "text/javascript" }));
-      surfaces.set(id, { url: url, pending: null, current: null, failures: 0, disabled: null });
+      var dataJson = typeof data.dataJson === "string" && data.dataJson.length <= ${MAX_LOGIC_DATA_JSON_CHARS} ? data.dataJson : null;
+      surfaces.set(id, { url: url, dataJson: dataJson, pending: null, current: null, failures: 0, disabled: null });
       while (surfaces.size > ${MAX_LOGIC_WORKERS}) drop(surfaces.keys().next().value);
       return;
     }

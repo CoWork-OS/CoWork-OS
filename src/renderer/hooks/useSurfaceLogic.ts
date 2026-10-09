@@ -4,6 +4,7 @@ import {
   readLogicResultJson,
   type SurfaceLogicOutputs,
 } from "../../shared/answer-surfaces/logic";
+import type { AnswerDataTable } from "../../shared/answer-surfaces/data";
 import type { AnswerSurfaceSpec, AnswerSurfaceState } from "../../shared/answer-surfaces/schema";
 import { getSurfaceLogicChannel } from "../utils/surface-logic-runner";
 
@@ -27,8 +28,11 @@ let nextInstance = 0;
 export function useSurfaceLogic(
   spec: AnswerSurfaceSpec,
   state: AnswerSurfaceState,
+  /** Parsed data sources; null while they load (or failed), so the logic waits. */
+  tables?: Record<string, AnswerDataTable> | null,
 ): { outputs: SurfaceLogicOutputs; status: SurfaceLogicStatus; error?: string } {
   const logic = spec.logic;
+  const waitingForData = Boolean(spec.data) && !tables;
   const [outputs, setOutputs] = useState<SurfaceLogicOutputs>(EMPTY);
   const [status, setStatus] = useState<SurfaceLogicStatus>(logic ? "starting" : "none");
   const [error, setError] = useState<string | undefined>();
@@ -41,7 +45,7 @@ export function useSurfaceLogic(
   stateRef.current = state;
 
   useEffect(() => {
-    if (!logic) return;
+    if (!logic || waitingForData) return;
     let disposed = false;
     let cleanup = () => {};
     // One worker per mounted surface, even when the same answer is shown twice.
@@ -62,14 +66,14 @@ export function useSurfaceLogic(
           setError(undefined);
         } else if (message.message === LOGIC_NOT_LOADED_MESSAGE) {
           // The runner let this surface's worker go (too many open); load it again.
-          channel.load(id, logic.code, onMessage);
+          channel.load(id, logic.code, onMessage, spec.data ? (tables ?? undefined) : undefined);
           runRef.current?.(stateRef.current);
         } else {
           setStatus("error");
           setError(message.message);
         }
       };
-      channel.load(id, logic.code, onMessage);
+      channel.load(id, logic.code, onMessage, spec.data ? (tables ?? undefined) : undefined);
       runRef.current = (current) => {
         seqRef.current += 1;
         setStatus((previous) => (previous === "ready" ? previous : "running"));
@@ -84,8 +88,8 @@ export function useSurfaceLogic(
       if (timerRef.current) clearTimeout(timerRef.current);
       cleanup();
     };
-    // The worker is rebuilt only when the code changes; state changes are runs (below).
-  }, [logic]);
+    // The worker is rebuilt when the code or its data change; state changes are runs (below).
+  }, [logic, tables, waitingForData]);
 
   useEffect(() => {
     if (!logic || !runRef.current) return;

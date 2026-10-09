@@ -4568,6 +4568,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     designLanguage: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML, data),
   getAnswerSurfaceLogicRunner: () => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_LOGIC_RUNNER),
+  loadAnswerSurfaceData: (data: { taskId: string; sources: Record<string, string> }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA, data),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -8440,6 +8442,11 @@ export interface ElectronAPI {
   }) => Promise<{ url: string }>;
   /** Desktop only: the sandboxed page that runs answer-surface logic in workers. */
   getAnswerSurfaceLogicRunner?: () => Promise<{ url: string }>;
+  /** Desktop only: workspace data files a surface's logic computes from. */
+  loadAnswerSurfaceData?: (data: {
+    taskId: string;
+    sources: Record<string, string>;
+  }) => Promise<Record<string, import("../shared/answer-surfaces/data").AnswerDataResult>>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

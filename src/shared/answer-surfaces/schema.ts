@@ -6,6 +6,7 @@ import {
   expressionIdentifiers,
   isValidIdentifier,
 } from "./expression";
+import { AnswerSurfaceDataSchema, type AnswerSurfaceData } from "./data";
 import { AnswerSurfaceLogicSchema, type AnswerSurfaceLogic } from "./logic";
 import { normalizeSurfaceIcon } from "./icons";
 
@@ -289,6 +290,8 @@ export type AnswerSurfaceSpec = {
   root: AnswerSurfaceNode;
   /** Code that computes named outputs from the controls (see logic.ts). */
   logic?: AnswerSurfaceLogic;
+  /** Workspace files the logic computes from, by id (see data.ts). */
+  data?: AnswerSurfaceData;
 };
 export type AnswerSurfaceStateValue = number | string | boolean | string[];
 export type AnswerSurfaceState = Record<string, AnswerSurfaceStateValue>;
@@ -925,6 +928,16 @@ export function parseAnswerSurfaceSource(source: string): AnswerSurfaceParseResu
     logic = parsedLogic.data;
     raw = rest;
   }
+  let data: AnswerSurfaceData | undefined;
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && "data" in raw) {
+    const { data: rawData, ...rest } = raw as Record<string, unknown>;
+    const parsedData = AnswerSurfaceDataSchema.safeParse(rawData);
+    if (!parsedData.success) return { ok: false, error: `data: ${formatIssues(parsedData.error)}` };
+    // Rows reach the screen only through logic, so data without logic does nothing.
+    if (!logic) return { ok: false, error: "data: needs logic that computes from it" };
+    data = parsedData.data;
+    raw = rest;
+  }
   if (version > ANSWER_SURFACE_SCHEMA_VERSION) {
     return { ok: false, error: "This interactive answer needs a newer version of CoWork" };
   }
@@ -934,7 +947,12 @@ export function parseAnswerSurfaceSource(source: string): AnswerSurfaceParseResu
   if (problem) return { ok: false, error: problem };
   return {
     ok: true,
-    spec: logic ? { version, root: parsed.data, logic } : { version, root: parsed.data },
+    spec: {
+      version,
+      root: parsed.data,
+      ...(logic ? { logic } : {}),
+      ...(data ? { data } : {}),
+    },
   };
 }
 

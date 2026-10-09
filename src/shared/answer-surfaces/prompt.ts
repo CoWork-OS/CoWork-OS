@@ -261,6 +261,34 @@ export const ANSWER_SURFACE_EXAMPLES = {
       },
     ],
   },
+  sales: {
+    type: "card",
+    theme: "violet",
+    icon: "chart-bar",
+    eyebrow: "Sales",
+    title: "Revenue by region",
+    data: { sales: "uploads/sales.csv" },
+    logic: {
+      outputs: ["total", "regions", "revenue", "top", "orders"],
+      code: 'function compute(s, data) {\n  const byRegion = groupBy(records(data.sales), "Region");\n  const regions = Object.keys(byRegion).sort();\n  const revenue = regions.map((r) => sum(byRegion[r].map((row) => row.Revenue)));\n  const best = Math.max(...revenue);\n  return { total: sum(revenue), regions, revenue, top: regions[revenue.indexOf(best)] || "", orders: data.sales.rows.length };\n}',
+    },
+    children: [
+      {
+        type: "hero",
+        title: "Total revenue",
+        value: { expr: "total", decimals: 0, prefix: "$" },
+        caption: "{{orders}} orders · top region {{top}}",
+        icon: "trending-up",
+      },
+      {
+        type: "chart",
+        kind: "bar",
+        prefix: "$",
+        labels: { bind: "regions" },
+        series: [{ name: "Revenue", values: { bind: "revenue" } }],
+      },
+    ],
+  },
 } as const;
 
 const example = (value: unknown) => ["```cowork-ui", JSON.stringify(value), "```"].join("\n");
@@ -301,9 +329,11 @@ export const ANSWER_SURFACE_PROMPT = [
   '- Images: {"query": "roast leg of lamb with rosemary on a platter", "alt": "Roast lamb"}; the app finds a matching photo. Write a concrete visual description. For food, travel, places, outfits and products, photos make the answer: a 3-photo collage gallery near the top, a hero with style image, or a photo per media_list item. Never use images for abstract topics. Never invent image URLs; use "src" only for an https image URL a tool gave you.',
   "- Accuracy: use well-established ratios and real data. Do not invent prices, places, quotes or statistics; if key data is missing, give a useful partial answer with editable defaults or ask one focused question.",
   '- When the user later changes controls, their values come back to you as "Interactive answer state". Build on them.',
-  "Examples (a calculator, a chart story, a trip plan, a schedule with logic):",
+  '- Real data: when the user attached or the task produced a data file (CSV, TSV, XLSX or JSON), compute every number from it instead of typing values in. Add "data": {"sales": "uploads/sales.csv"} (the workspace-relative path you were given) beside "logic"; compute(state, data) gets data.sales = {columns, rows, totalRows, truncated} with numbers parsed, plus helpers records(table), column(table, name), sum(list), mean(list) and groupBy(list, key). The app reads the file and shows its name and row count under the answer. Use only columns you have actually seen.',
+  "Examples (a calculator, a chart story, a trip plan, a schedule with logic, a chart from a data file):",
   example(ANSWER_SURFACE_EXAMPLES.calculator),
   example(ANSWER_SURFACE_EXAMPLES.chart),
   example(ANSWER_SURFACE_EXAMPLES.plan),
   example(ANSWER_SURFACE_EXAMPLES.mortgage),
+  example(ANSWER_SURFACE_EXAMPLES.sales),
 ].join("\n");

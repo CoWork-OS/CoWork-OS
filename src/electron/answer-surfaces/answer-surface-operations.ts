@@ -21,6 +21,12 @@ import {
   HtmlSurfaceStateSchema,
   summarizeHtmlSurfaceState,
 } from "../../shared/answer-surfaces/html-bridge";
+import {
+  AnswerSurfaceDataSchema,
+  MAX_ANSWER_DATA_CELLS,
+  type AnswerDataResult,
+  type AnswerDataTable,
+} from "../../shared/answer-surfaces/data";
 import { rateLimiter } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
 
@@ -83,6 +89,10 @@ export const AnswerSurfaceResolveImagesSchema = z
   })
   .strict();
 
+export const AnswerSurfaceLoadDataSchema = z
+  .object({ taskId: TaskIdSchema, sources: AnswerSurfaceDataSchema })
+  .strict();
+
 export interface AnswerSurfaceIpcDeps {
   taskExists: (taskId: string) => Promise<boolean>;
   /** The network policy inputs for lookups made on a task's behalf. */
@@ -97,6 +107,15 @@ export interface AnswerSurfaceIpcDeps {
     get(taskId: string, keys: string[]): Promise<AnswerSurfaceStateRow[]>;
     save(taskId: string, key: string, state: unknown, summary: string): Promise<void>;
   };
+  /**
+   * Reads a workspace file of the task as a table. It must resolve the path inside that
+   * task's workspace; hosts without workspace file access leave it out.
+   */
+  loadDataSource?: (
+    taskId: string,
+    filePath: string,
+    options: { maxCells: number },
+  ) => Promise<AnswerDataTable>;
   /** Throws when the channel is over its rate limit. */
   checkRateLimit?: (channel: string) => void;
 }
@@ -139,6 +158,33 @@ export function createAnswerSurfaceIpcHandlers(
       }
       await deps.store.save(value.taskId, value.key, value.state, value.summary);
       return { ok: true };
+    },
+    [IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]: async (raw) => {
+      limit(IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA);
+      const value = validateInput(AnswerSurfaceLoadDataSchema, raw, "answer data request");
+      await requireTask(value.taskId);
+      const results: Record<string, AnswerDataResult> = {};
+      const entries = Object.entries(value.sources);
+      // One cell budget shared by the block's files.
+      const maxCells = Math.floor(MAX_ANSWER_DATA_CELLS / entries.length);
+      for (const [id, filePath] of entries) {
+        if (!deps.loadDataSource) {
+          results[id] = { file: filePath, error: "Data files are read in the desktop app" };
+          continue;
+        }
+        try {
+          results[id] = await deps.loadDataSource(value.taskId, filePath, { maxCells });
+        } catch (error) {
+          // Only messages written for the user are shown; raw errors can carry absolute
+          // paths or file contents (parser messages), so they become a generic message.
+          const safe = error instanceof Error && error.name === "AnswerDataError";
+          results[id] = {
+            file: filePath,
+            error: safe ? error.message.slice(0, 200) : "The file could not be read",
+          };
+        }
+      }
+      return results;
     },
     [IPC_CHANNELS.ANSWER_SURFACE_RESOLVE_IMAGES]: async (raw) => {
       limit(IPC_CHANNELS.ANSWER_SURFACE_RESOLVE_IMAGES);

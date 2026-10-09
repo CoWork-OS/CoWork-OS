@@ -2144,3 +2144,27 @@
 .answer-surface.as-logic-starting .as-values-row dd {
   opacity: 0.35;
 }
+
+/* The app-drawn source line under a data-backed answer. */
+.answer-surface .as-data-source {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 8px 2px 0;
+  color: var(--color-text-muted);
+  font-size: 0.8em;
+}
+
+.answer-surface .as-data-problem {
+  color: color-mix(in srgb, #dc2626 70%, var(--color-text-secondary));
+}
+
+.answer-surface .as-data-loading {
+  animation: as-fade 0.6s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-surface .as-data-loading {
+    animation: none;
+  }
+}

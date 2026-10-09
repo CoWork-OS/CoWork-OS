@@ -2,7 +2,7 @@
  * Interactive answer surface IPC: the control values a user set in an answer, and the
  * photos a surface asks for by description (see answer-surface-operations.ts).
  */
-import { ipcMain } from "electron";
+import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import {
   createAnswerSurfaceIpcHandlers,
@@ -13,13 +13,31 @@ import { LOGIC_RUNNER_HTML } from "../../shared/answer-surfaces/logic";
 import { createWebPreviewUrl } from "../media";
 import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 
-export function setupAnswerSurfaceHandlers(deps: AnswerSurfaceIpcDeps): void {
+export function setupAnswerSurfaceHandlers(
+  deps: AnswerSurfaceIpcDeps & {
+    /** Throws unless the caller may view the task (session membership). */
+    authorizeTaskView?: (event: IpcMainInvokeEvent, taskId: string) => void;
+  },
+): void {
   // Every surface in view reads its state once; saves are debounced control changes.
   rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_GET_STATE, RATE_LIMIT_CONFIGS.frequent);
   rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE, RATE_LIMIT_CONFIGS.frequent);
   rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_RESOLVE_IMAGES, RATE_LIMIT_CONFIGS.standard);
+  rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA, RATE_LIMIT_CONFIGS.standard);
   const handlers = createAnswerSurfaceIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
+    if (channel === IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA) {
+      // Reads workspace files: only the top-level app frame, for a task it may view.
+      ipcMain.handle(channel, (event, raw: unknown) => {
+        if (!event.senderFrame || event.senderFrame.parent !== null) {
+          throw new Error("Answer data is only available to the app window");
+        }
+        const taskId = (raw as { taskId?: unknown } | null)?.taskId;
+        if (typeof taskId === "string") deps.authorizeTaskView?.(event, taskId);
+        return handle(raw);
+      });
+      continue;
+    }
     ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));
   }
 

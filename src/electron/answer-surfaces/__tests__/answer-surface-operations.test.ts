@@ -45,6 +45,53 @@ describe("answer surface operations", () => {
     );
   });
 
+  it("loads data sources per file and reports failures without failing the rest", async () => {
+    const { handlers, deps } = setup();
+    const table = {
+      file: "uploads/a.csv",
+      columns: ["n"],
+      rows: [[1]],
+      totalRows: 1,
+      truncated: false,
+    };
+    const loadDataSource = vi.fn(async (_taskId: string, filePath: string) => {
+      if (filePath.includes("missing")) {
+        const error = new Error("File not found: uploads/missing.csv");
+        error.name = "AnswerDataError";
+        throw error;
+      }
+      if (filePath.includes("broken")) throw new Error("EACCES: open '/Users/me/broken.csv'");
+      return table;
+    });
+    const withData = createAnswerSurfaceIpcHandlers({ ...deps, loadDataSource });
+    await expect(
+      withData[IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]({
+        taskId: "task-1",
+        sources: { a: "uploads/a.csv", b: "uploads/missing.csv", c: "uploads/broken.csv" },
+      }),
+    ).resolves.toEqual({
+      a: table,
+      b: { file: "uploads/missing.csv", error: "File not found: uploads/missing.csv" },
+      c: { file: "uploads/broken.csv", error: "The file could not be read" },
+    });
+    expect(loadDataSource).toHaveBeenCalledWith("task-1", "uploads/a.csv", { maxCells: 66666 });
+    await expect(
+      handlers[IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]({
+        taskId: "task-1",
+        sources: { a: "uploads/a.csv" },
+      }),
+    ).resolves.toEqual({
+      a: { file: "uploads/a.csv", error: "Data files are read in the desktop app" },
+    });
+    await expect(
+      withData[IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]({
+        taskId: "task-1",
+        sources: { a: ".env.csv" },
+      }),
+    ).rejects.toThrow(/answer data request/);
+    expect(loadDataSource).toHaveBeenCalledTimes(3);
+  });
+
   it("rebuilds an HTML surface's summary from its state, ignoring the sent one", async () => {
     const { handlers, deps } = setup();
     await handlers[IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE]({

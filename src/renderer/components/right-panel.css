@@ -1605,8 +1605,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(10px);
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(6px);
 }
 
 .browser-use-approval-overlay {
@@ -1840,62 +1840,53 @@ button {
 }
 
 .session-approval-card {
-  width: 90%;
-  max-width: 400px;
+  width: 100%;
+  max-width: 460px;
   max-height: min(86vh, 820px);
   overflow: auto;
-  padding: 24px 22px 20px;
-  border-radius: 20px;
+  padding: 18px 18px 14px;
+  border-radius: 14px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-subtle);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 24px 48px -16px rgba(0, 0, 0, 0.45);
+  text-align: left;
 }
 
 .session-approval-card--command {
-  max-width: 680px;
+  max-width: 620px;
 }
 
 .theme-light .session-approval-card {
   background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2);
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px -16px rgba(15, 23, 42, 0.22);
 }
 
 .session-approval-card--computer-use {
-  max-width: 440px;
+  max-width: 460px;
 }
 
-.session-approval-icon-wrap {
+.session-approval-heading {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.session-approval-icon-wrap .session-approval-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  font-size: 22px;
-  line-height: 1;
-  background: rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  margin-bottom: 0;
-}
-
-.theme-dark .session-approval-icon-wrap .session-approval-icon {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border-subtle);
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .session-approval-icon {
-  font-size: 32px;
-  text-align: center;
-  margin-bottom: 10px;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  font-size: 13px;
   line-height: 1;
+  filter: grayscale(1);
 }
 
 .session-approval-body {
@@ -1903,64 +1894,43 @@ button {
 }
 
 .session-approval-title {
-  margin: 0 0 10px;
-  font-size: 17px;
-  font-weight: 700;
-  text-align: center;
-  color: var(--color-text-primary, #1a1a1a);
-  letter-spacing: -0.02em;
-}
-
-.theme-light .session-approval-title {
-  color: #1a1a1a;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text-primary);
 }
 
 .session-approval-prompt {
-  margin: 0 0 14px;
+  margin: 0 0 12px;
   font-size: 13px;
   line-height: 1.45;
-  text-align: center;
-  color: #757575;
-}
-
-.theme-dark .session-approval-prompt {
   color: var(--color-text-secondary);
+  text-wrap: pretty;
 }
 
 .session-approval-explanation {
-  margin: -4px 0 14px;
+  margin: -4px 0 12px;
   font-size: 12px;
   line-height: 1.45;
-  text-align: center;
   color: var(--color-text-secondary);
 }
 
 .session-approval-details {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 7px 14px;
-  margin: 4px 0 18px;
-  padding: 12px 14px;
-  font-size: 12px;
-  text-align: left;
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 12px;
-}
-
-.theme-dark .session-approval-details {
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border-subtle);
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .session-approval-details dt {
   margin: 0;
-  color: #757575;
-  font-weight: 500;
-}
-
-.theme-dark .session-approval-details dt {
   color: var(--color-text-muted);
+  font-weight: 400;
 }
 
 .session-approval-details dd {
@@ -1970,24 +1940,14 @@ button {
   word-break: break-word;
 }
 
-.theme-light .session-approval-details dd {
-  color: #1a1a1a;
-}
-
 .session-approval-code {
   display: inline-block;
   max-width: 100%;
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
   font-family: var(--font-mono);
-  font-size: 11px;
-  background: rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.theme-dark .session-approval-code {
-  background: var(--color-bg-secondary);
-  border-color: var(--color-border-subtle);
+  font-size: 11.5px;
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
 }
 
 .session-approval-code-scroll {
@@ -2003,13 +1963,14 @@ button {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
+  border-radius: 8px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .session-approval-preview-note {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 11px;
   line-height: 1.45;
   color: var(--color-text-muted);
@@ -2019,36 +1980,30 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 4px;
 }
 
 .session-approval-scope-label {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 12px;
   color: var(--color-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .session-approval-scope-tabs {
-  display: flex;
-  gap: 4px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 10px;
-  padding: 3px;
-  flex: 1;
-}
-
-.theme-dark .session-approval-scope-tabs {
-  background: var(--color-bg-secondary);
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
 }
 
 .session-approval-scope-tab {
-  flex: 1;
-  padding: 5px 8px;
+  padding: 3px 10px;
   border: none;
-  border-radius: 7px;
-  font-size: 11px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   background: transparent;
@@ -2060,154 +2015,131 @@ button {
 }
 
 .session-approval-scope-tab:hover:not(.session-approval-scope-tab--active) {
-  background: rgba(0, 0, 0, 0.05);
   color: var(--color-text-primary);
-}
-
-.theme-dark .session-approval-scope-tab:hover:not(.session-approval-scope-tab--active) {
-  background: var(--color-bg-tertiary);
 }
 
 .session-approval-scope-tab--active {
-  background: #ffffff;
-  color: #1a1a1a;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-}
-
-.theme-dark .session-approval-scope-tab--active {
   background: var(--color-bg-elevated);
   color: var(--color-text-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
-.session-approval-actions--scoped {
-  display: flex;
-  gap: 10px;
-}
-
-.session-approval-actions--scoped .session-approval-btn-deny,
-.session-approval-actions--scoped .session-approval-btn-allow {
-  flex: 1;
-  min-width: 0;
+.theme-light .session-approval-scope-tab--active {
+  background: #ffffff;
 }
 
 .session-approval-footer-hint {
-  margin: 0 0 16px;
-  font-size: 11px;
+  margin: 0;
+  font-size: 12px;
   line-height: 1.45;
   color: var(--color-text-muted);
 }
 
-.session-approval-footer-hint--center {
-  text-align: center;
-}
-
 .session-approval-kbd {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
   margin: 0 1px;
-  padding: 2px 7px;
-  font-family: var(--font-mono);
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-family: inherit;
   font-size: 10px;
-  font-weight: 600;
-  border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  background: rgba(0, 0, 0, 0.05);
-  color: var(--color-text-primary);
-}
-
-.theme-dark .session-approval-kbd {
-  border-color: var(--color-border-subtle);
-  background: var(--color-bg-secondary);
+  line-height: 1;
+  color: var(--color-text-secondary);
 }
 
 .session-approval-sentinel-warning {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
   background: rgba(234, 179, 8, 0.12);
-  border: 1px solid rgba(234, 179, 8, 0.35);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
   font-size: 12px;
+  line-height: 1.45;
   color: var(--color-text);
-  margin-bottom: 12px;
-  text-align: left;
 }
 
 .session-approval-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
   align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.session-approval-btn-deny,
+.session-approval-btn-allow,
+.session-approval-btn-danger-primary {
+  height: 30px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
 }
 
 .session-approval-btn-deny {
-  min-width: 88px;
-  padding: 10px 18px;
-  border: none;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  background: #e5e5e5;
-  color: #1a1a1a;
-  transition:
-    filter 0.15s ease,
-    transform 0.08s ease;
-}
-
-.theme-dark .session-approval-btn-deny {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
+  background: transparent;
+  color: var(--color-text-secondary);
 }
 
 .session-approval-btn-deny:hover {
-  filter: brightness(0.97);
-}
-
-.session-approval-btn-deny:active {
-  transform: scale(0.98);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .session-approval-btn-allow {
-  min-width: 168px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  color: #1a1a1a;
-  background: linear-gradient(90deg, #c09cff 0%, #a094ff 100%);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  transition:
-    filter 0.15s ease,
-    transform 0.08s ease;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
 }
 
-.session-approval-btn-allow:hover {
-  filter: brightness(1.05);
+.session-approval-btn-allow:hover,
+.session-approval-btn-danger-primary:hover {
+  opacity: 0.88;
 }
 
-.session-approval-btn-allow:active {
-  transform: scale(0.98);
+.session-approval-btn-deny:focus-visible,
+.session-approval-btn-allow:focus-visible,
+.session-approval-btn-danger-primary:focus-visible,
+.session-approval-scope-tab:focus-visible,
+.session-approval-approve-all-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline-offset: 2px;
 }
 
 .session-approval-approve-all-link {
-  display: block;
-  width: 100%;
-  margin-top: 14px;
-  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  margin: 0;
+  padding: 0 2px;
   border: none;
   background: none;
   font-size: 12px;
-  font-weight: 500;
   color: var(--color-text-muted);
-  text-decoration: underline;
-  text-underline-offset: 3px;
   cursor: pointer;
 }
 
+.session-approval-actions .session-approval-approve-all-link {
+  margin-right: auto;
+}
+
+.session-approval-card > .session-approval-approve-all-link {
+  margin-top: 4px;
+}
+
 .session-approval-approve-all-link:hover {
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
 }
 
 /* Approve-all warning: same card chrome, stacked above other session modals */
@@ -2216,31 +2148,8 @@ button {
 }
 
 .session-approval-btn-danger-primary {
-  min-width: 168px;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
+  background: #dc2626;
   color: #ffffff;
-  background: linear-gradient(90deg, #f87171 0%, #ef4444 100%);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  transition:
-    filter 0.15s ease,
-    transform 0.08s ease;
-}
-
-.session-approval-btn-danger-primary:hover {
-  filter: brightness(1.06);
-}
-
-.session-approval-btn-danger-primary:active {
-  transform: scale(0.98);
-}
-
-.session-approval-actions--warning {
-  margin-top: 4px;
 }
 
 .settings-tools-stack {

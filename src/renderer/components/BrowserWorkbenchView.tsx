@@ -60,6 +60,7 @@ import {
   type BrowserPermissionPromptRequest,
   PermissionPrompt,
 } from "./BrowserWorkbench/PermissionPrompt";
+import { type BrowserPageDialogRequest, PageDialog } from "./BrowserWorkbench/PageDialog";
 import { useBrowserTabs } from "./BrowserWorkbench/useBrowserTabs";
 import {
   AgentDrivingBanner,
@@ -626,6 +627,43 @@ export function BrowserWorkbenchView({
       unsubscribe?.();
     };
   }, [sessionId, taskId]);
+
+  // Page alert/confirm while CoWork's debugger owns the page's dialogs.
+  const [pageDialogs, setPageDialogs] = useState<BrowserPageDialogRequest[]>([]);
+  useEffect(() => {
+    setPageDialogs([]);
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchPageDialog?.((event) => {
+      if (event.taskId !== taskId || event.sessionId !== sessionId) return;
+      if (event.state === "closed") {
+        setPageDialogs((current) => current.filter((dialog) => dialog.dialogId !== event.dialogId));
+        return;
+      }
+      setPageDialogs((current) =>
+        current.some((dialog) => dialog.dialogId === event.dialogId)
+          ? current
+          : [...current, event],
+      );
+      // Like a browser, bring the tab that is waiting for an answer to the front.
+      activateTab(event.tabId);
+    });
+    return () => unsubscribe?.();
+  }, [activateTab, sessionId, taskId]);
+
+  const respondToPageDialog = useCallback(
+    (dialog: BrowserPageDialogRequest, accept: boolean) => {
+      setPageDialogs((current) => current.filter((entry) => entry.dialogId !== dialog.dialogId));
+      void window.electronAPI
+        .respondBrowserWorkbenchPageDialog?.({
+          taskId,
+          sessionId,
+          tabId: dialog.tabId,
+          dialogId: dialog.dialogId,
+          accept,
+        })
+        .catch(() => undefined);
+    },
+    [sessionId, taskId],
+  );
 
   const respondToPermission = useCallback((requestId: string, choice: BrowserPermissionChoice) => {
     setPermissionRequests((current) =>
@@ -2138,6 +2176,12 @@ export function BrowserWorkbenchView({
                 </BrowserTabView>
               ),
             )}
+            {pageDialogs
+              .filter((dialog) => dialog.tabId === activeTabId)
+              .slice(0, 1)
+              .map((dialog) => (
+                <PageDialog key={dialog.dialogId} dialog={dialog} onRespond={respondToPageDialog} />
+              ))}
             {permissionRequests
               .filter((request) => request.tabId === activeTabId)
               .slice(0, 1)

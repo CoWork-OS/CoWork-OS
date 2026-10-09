@@ -2503,6 +2503,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
   },
+  onBrowserWorkbenchPageDialog: (callback: (event: BrowserWorkbenchPageDialogEvent) => void) => {
+    const handler = (_: Any, event: BrowserWorkbenchPageDialogEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG, handler);
+  },
+  respondBrowserWorkbenchPageDialog: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+    dialogId: string;
+    accept: boolean;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG_RESPOND, data) as Promise<{
+      success: boolean;
+    }>,
   onBrowserWorkbenchNavigationBlocked: (
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => {
@@ -5739,6 +5754,17 @@ export interface BrowserWorkbenchTabCommand {
 
 export type BrowserWorkbenchBlockReason = "policy" | "local_preview" | "scheme";
 
+export interface BrowserWorkbenchPageDialogEvent {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  dialogId: string;
+  state: "open" | "closed";
+  type?: "alert" | "confirm";
+  message?: string;
+  origin?: string;
+}
+
 export interface BrowserWorkbenchNavigationBlockedEvent {
   taskId: string;
   sessionId: string;
@@ -6196,6 +6222,17 @@ export interface ElectronAPI {
   onBrowserWorkbenchNavigationBlocked: (
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => () => void;
+  /** A page's alert/confirm the workbench shows while CoWork's debugger owns page dialogs. */
+  onBrowserWorkbenchPageDialog: (
+    callback: (event: BrowserWorkbenchPageDialogEvent) => void,
+  ) => () => void;
+  respondBrowserWorkbenchPageDialog: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+    dialogId: string;
+    accept: boolean;
+  }) => Promise<{ success: boolean }>;
   onBrowserWorkbenchPermissionRequest: (
     callback: (prompt: BrowserWorkbenchPermissionPrompt) => void,
   ) => () => void;

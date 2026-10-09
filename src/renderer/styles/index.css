@@ -15466,6 +15466,62 @@ a,
   background: color-mix(in srgb, #0ea5e9 12%, var(--color-bg-elevated));
 }
 
+/* A page's alert/confirm shown over its tab. */
+.browser-workbench-page-dialog-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 48px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.browser-workbench-page-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(440px, calc(100% - 32px));
+  padding: 16px 18px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  font-size: 13px;
+}
+
+.browser-workbench-page-dialog-message {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.browser-workbench-page-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.browser-workbench-page-dialog-actions button {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 7px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.browser-workbench-page-dialog-actions button.is-primary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: #fff;
+}
+
 /* A pending CoWork approval answered over the tab (same decision as the chat dialog). */
 .browser-workbench-driving.browser-workbench-approval {
   background: color-mix(in srgb, #8b5cf6 13%, var(--color-bg-elevated));

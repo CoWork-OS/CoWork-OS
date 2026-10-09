@@ -25,8 +25,6 @@ import {
   type HeartbeatDispatchKind,
   type TaskStatus,
   type AwarenessSummary,
-  type AutonomyDecision,
-  type ChiefOfStaffWorldModel,
   type CreateAutomationRunOutcomeInput,
   type MemoryFeaturesSettings,
 } from "../../shared/types";
@@ -152,14 +150,7 @@ export interface HeartbeatServiceDeps {
   listWorkspaceContexts?: () => MaintenanceWorkspaceContext[];
   getMemoryFeaturesSettings?: () => MemoryFeaturesSettings;
   getAwarenessSummary?: (workspaceId?: string) => AwarenessSummary | null;
-  getAutonomyState?: (workspaceId?: string) => ChiefOfStaffWorldModel | null;
-  getAutonomyDecisions?: (workspaceId?: string) => AutonomyDecision[];
-  /**
-   * Pulse phase: AutonomyEngine (chief of staff) evaluation for the pulse workspace. Heartbeat
-   * is its only scheduler; the engine throttles repeat calls for the same workspace.
-   */
-  evaluateAutonomy?: (workspaceId: string) => Promise<boolean | void>;
-  /** Shared background dispatch budget (Heartbeat, AutonomyEngine, WI, Strategic Planner). */
+  /** Shared background dispatch budget (Heartbeat, WI, Strategic Planner). */
   dispatchBudget?: BackgroundDispatchBudgetAuthority;
   listActiveSuggestions?: (
     workspaceId: string,
@@ -954,19 +945,6 @@ export class HeartbeatService extends EventEmitter {
         maxDispatchesPerDay,
       };
 
-      // Observe phase: the chief-of-staff world model is evaluated here, at most once per pulse
-      // (and throttled per workspace across agents), instead of on its own 90 s timer.
-      const autonomyEvaluated = await this.maybeEvaluateAutonomy(workspaceId);
-      if (autonomyEvaluated && coreTrace) {
-        await this.deps.coreTraceService?.appendPhaseEvent(
-          coreTrace.id,
-          "decision",
-          "heartbeat.autonomy_evaluated",
-          "Heartbeat evaluated the chief-of-staff world model.",
-          { workspaceId },
-        );
-      }
-
       const reflectionRun = await this.maybeRunWorkflowReflection({
         agent,
         workspaceId,
@@ -1167,7 +1145,7 @@ export class HeartbeatService extends EventEmitter {
       }
 
       // Task creation also spends the shared per-workspace background budget, which
-      // AutonomyEngine, Workflow Intelligence and the Strategic Planner draw from too. Over
+      // Workflow Intelligence and the Strategic Planner draw from too. Over
       // budget, the dispatch becomes a suggestion. Manual pulses are recorded, never refused.
       let budgetTicket: string | undefined;
       let durableBudgetTicket: string | undefined;
@@ -1627,16 +1605,6 @@ export class HeartbeatService extends EventEmitter {
 
   private getDispatchBudget(): BackgroundDispatchBudgetAuthority {
     return this.deps.dispatchBudget || getBackgroundDispatchBudget();
-  }
-
-  private async maybeEvaluateAutonomy(workspaceId?: string): Promise<boolean> {
-    if (!this.deps.evaluateAutonomy || !workspaceId) return false;
-    try {
-      return (await this.deps.evaluateAutonomy(workspaceId)) === true;
-    } catch (error) {
-      console.warn("[HeartbeatService] Autonomy evaluation failed:", error);
-      return false;
-    }
   }
 
   private async maybeRunWorkflowReflection(params: {

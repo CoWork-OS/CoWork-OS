@@ -30,7 +30,7 @@ const METRIC_NAMES = [
   "task-switch.timeline_data_received_ms",
 ];
 const BACKGROUND_BEFORE_SIDEBAR_PATTERN =
-  /\b(mcp-auto-connect|connectEnabledChannels|MailboxService|mailbox.*sync|auto.?sync|HeartbeatService|SubconsciousLoopService|subconscious|ChannelGateway|WhatsApp|Discord|AppUpdater|update check|AutonomyEngine|AwarenessService)\b/i;
+  /\b(mcp-auto-connect|connectEnabledChannels|MailboxService|mailbox.*sync|auto.?sync|HeartbeatService|SubconsciousLoopService|subconscious|ChannelGateway|WhatsApp|Discord|AppUpdater|update check|AwarenessService)\b/i;
 
 const BUDGET_PROFILES = {
   prod: {

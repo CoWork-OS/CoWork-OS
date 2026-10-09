@@ -1,0 +1,13 @@
+# Learning-loop layers discontinuation
+
+**Decision:** Discontinue the chief-of-staff engine, standup reports and agent performance reviews as of 2026-10-09.
+
+CoWork's background learning loop had grown several layers that reasoned about the same task history in parallel: Heartbeat pulses, Dreaming, the memory Review queue and Suggestions, plus a chief-of-staff engine (`AutonomyEngine`) that derived its own world model (goals, projects, open loops, routines) from awareness beliefs and commitments, scored "pending interventions" per action policy, and could create tasks from them; Mission Control standup reports that summarized a workspace's completed, in-progress and blocked tasks; and agent performance reviews that rated an agent role's recent tasks and recommended an autonomy level. The three removed layers re-derived what Heartbeat, Suggestions and the daily briefing already surface, added a second policy surface (per-action-type levels under Settings > Memory > Proactive) beside the agent-level autonomy settings, and were rarely opened.
+
+This decision removes the chief-of-staff engine and its state (world model, decisions, actions, outcomes, action policies), the Heartbeat autonomy pulse phase, the chief-of-staff items in the daily briefing's "Needs Attention Today" section, the chief-of-staff and auto-evaluate switches and the policy grid, world model, pending interventions and recent actions in Settings > Memory, the `autonomy:*` IPC channels and shared types, the Mission Control **Standup** and **Reviews** header buttons with their viewers, the standup report and performance review services and SQL stores, and the `standup:*` and `review:*` IPC channels.
+
+**What stays:** Awareness (local signals, beliefs, private mode, the Awareness details panel), Heartbeat, Dreaming, the Review queue, Suggestions, the daily briefing (awareness digest, due-soon items), the shared background dispatch budget, agent-level autonomy settings, and the Chief of Staff briefing skill and agent template (a prompt, not the engine).
+
+**Upgrade data handling:** On first start of a release containing this change, CoWork OS deletes the `autonomy-chief-of-staff` settings row from the active profile database and drops the `standup_reports` and `agent_performance_reviews` tables. The same cleanup runs if an older database is later copied into the profile. Suggestions the engine already proposed stay in the suggestions list until they expire or are dismissed. Nothing else in the memory folder, `memory_items` or the archive is changed.
+
+Historical release notes describe what shipped at the time and are superseded by this decision for current product availability.

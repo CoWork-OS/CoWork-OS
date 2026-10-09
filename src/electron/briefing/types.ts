@@ -81,10 +81,6 @@ export interface DailyBriefingServiceDeps {
   getAwarenessSummary?: (workspaceId: string) => Any | Promise<Any | null>;
   /** Mailbox digest for inbox summary generation */
   getMailboxDigest?: (workspaceId: string) => Any | Promise<Any | null>;
-  /** Chief-of-staff world model */
-  getAutonomyState?: (workspaceId: string) => Any | Promise<Any | null>;
-  /** Pending chief-of-staff interventions */
-  getAutonomyDecisions?: (workspaceId: string) => Any[] | Promise<Any[]>;
   /** Best-effort suggestion refresh before briefing generation */
   refreshSuggestions?: (workspaceId: string) => Promise<void>;
   /** Deliver to channel */

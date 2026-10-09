@@ -68,7 +68,7 @@ copies commitments. Private (strict privacy) rows stay in `memory_items`.
 - `UserProfileService.getProfile()` becomes a read model over the folder (`me.md` and the entries
   of `MEMORY.md`), refreshed on every folder change: facts with their `kind` as category
   (`identity`, `preference`, `rule` → constraint, `insight`), plus the PersonalityManager name.
-  Its consumers (AutonomyEngine goals, proactive suggestions, renderer welcome text,
+  Its consumers (proactive suggestions, renderer welcome text,
   onboarding) keep their shape.
 - The memory read side no longer mirrors name and style from `memory_items`.
 - Memory Hub **What CoWork knows** shows the memory folder (files and entries, with edit,

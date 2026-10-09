@@ -11,9 +11,7 @@ import {
   setReportReaderClient,
   setStatementClient,
 } from "../../database/statements/statement-route";
-import { AgentPerformanceReviewService } from "../AgentPerformanceReviewService";
 import { reportsStatements } from "../reports-statement-port";
-import { StandupReportService } from "../StandupReportService";
 
 // The reports domain on both backends (async SQLite migration plan, DB6): same results
 // through the host connection and through the worker, with reads on the reporting reader.
@@ -131,23 +129,20 @@ describe("reports on the host and in the database worker", () => {
       tasks.create({ title, prompt: title, status, workspaceId: workspace.id });
     }
 
-    const standup = new StandupReportService(db);
-    const report = await standup.generateReport(workspace.id);
-    const again = await standup.generateReport(workspace.id);
-    const review = new AgentPerformanceReviewService(db);
+    const reports = reportsStatements(db);
     return {
       calls,
       result: stable(
         {
-          report,
-          sameReport: again.id === report.id,
-          latest: await standup.getLatest(workspace.id),
-          list: await standup.list({ workspaceId: workspace.id, limit: 5 }),
-          deleted: await standup.deleteOlderThan(workspace.id, 30),
-          reviews: await review.list(workspace.id),
-          earliest:
-            (await reportsStatements(db).unit("usage_getEarliestActivityMs", [workspace.id])) !==
-            null,
+          completed: await reports.unit("briefing_countTasks", [workspace.id, "completed"]),
+          executing: await reports.unit("briefing_countTasks", [workspace.id, "executing"]),
+          recentFailed: await reports.unit("briefing_countTasks", [
+            workspace.id,
+            "failed",
+            start - 60_000,
+          ]),
+          scheduled: await reports.unit("briefing_countScheduledTasks", [workspace.id]),
+          earliest: (await reports.unit("usage_getEarliestActivityMs", [workspace.id])) !== null,
         },
         start,
       ),
@@ -163,13 +158,15 @@ describe("reports on the host and in the database worker", () => {
     const worker = await runWorkload("worker");
 
     expect(host.calls).toEqual({ writer: 0, reader: 0 });
-    expect(worker.calls.writer).toBeGreaterThanOrEqual(3);
-    expect(worker.calls.reader).toBeGreaterThanOrEqual(4);
+    // Report units are all reads: none of them may queue ahead of writes.
+    expect(worker.calls.writer).toBe(0);
+    expect(worker.calls.reader).toBeGreaterThanOrEqual(5);
     expect(worker.result).toEqual(host.result);
     const result = host.result as Record<string, Any>;
-    expect(result.sameReport).toBe(true);
+    expect(result.completed).toBe(1);
+    expect(result.executing).toBe(1);
+    expect(result.recentFailed).toBe(1);
+    expect(result.scheduled).toBe(0);
     expect(result.earliest).toBe(true);
-    // Blocked tasks come from task status (the board columns are empty here).
-    expect(result.report.blockedTaskIds).toHaveLength(1);
   });
 });

@@ -132,8 +132,6 @@ import type {
   AgentBuilderPlanRequest,
   AgentWorkspaceMembership,
   AgentWorkspacePermissionSnapshot,
-  AgentPerformanceReview,
-  AgentReviewGenerateRequest,
   AgentTemplate,
   AppProfileSummary,
   AudioSummaryConfig,
@@ -1935,18 +1933,6 @@ interface SubscriptionEvent {
   taskId: string;
   agentRoleId: string;
   subscription?: TaskSubscription;
-}
-
-interface StandupReport {
-  id: string;
-  workspaceId: string;
-  reportDate: string;
-  completedTaskIds: string[];
-  inProgressTaskIds: string[];
-  blockedTaskIds: string[];
-  summary: string;
-  deliveredToChannel?: string;
-  createdAt: number;
 }
 
 // Task Board types (inlined for sandboxed preload)
@@ -4462,20 +4448,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_SNAPSHOT, workspaceId),
   listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_LIST_EVENTS, params),
-  getAutonomyConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_GET_CONFIG),
-  saveAutonomyConfig: (config: Any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, config),
-  getAutonomyState: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_GET_STATE, workspaceId),
-  listAutonomyDecisions: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_LIST_DECISIONS, workspaceId),
-  listAutonomyActions: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_LIST_ACTIONS, workspaceId),
-  updateAutonomyDecision: (id: string, patch: Any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_UPDATE_DECISION, { id, patch }),
-  triggerAutonomyEvaluation: (workspaceId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, workspaceId),
-
   // Memory Features APIs
   getMemoryFeaturesSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS),
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) =>
@@ -5107,24 +5079,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
   },
 
-  // Standup Reports
-  generateStandupReport: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_GENERATE, workspaceId),
-  getLatestStandupReport: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_GET_LATEST, workspaceId),
-  listStandupReports: (workspaceId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_LIST, workspaceId, limit),
-  deliverStandupReport: (reportId: string, channelType: string, channelId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.STANDUP_DELIVER, reportId, channelType, channelId),
-
-  // Agent Performance Reviews
-  generateAgentReview: (request: AgentReviewGenerateRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GENERATE, request),
-  getLatestAgentReview: (workspaceId: string, agentRoleId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_GET_LATEST, workspaceId, agentRoleId),
-  listAgentReviews: (query: { workspaceId: string; agentRoleId?: string; limit?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.REVIEW_LIST, query),
-  deleteAgentReview: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.REVIEW_DELETE, id),
   listEvalSuites: (options?: { windowDays?: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.EVAL_LIST_SUITES, options),
   runEvalSuite: (suiteId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_RUN_SUITE, suiteId),
@@ -5651,7 +5605,6 @@ export type {
   SubscriptionReason,
   TaskSubscription,
   SubscriptionEvent,
-  StandupReport,
   AgentAutonomyLevel,
 };
 
@@ -8050,14 +8003,6 @@ export interface ElectronAPI {
   getAwarenessSummary: (workspaceId?: string) => Promise<Any>;
   getAwarenessSnapshot: (workspaceId?: string) => Promise<Any>;
   listAwarenessEvents: (params?: { workspaceId?: string; limit?: number }) => Promise<Any[]>;
-  getAutonomyConfig: () => Promise<Any>;
-  saveAutonomyConfig: (config: Any) => Promise<Any>;
-  getAutonomyState: (workspaceId?: string) => Promise<Any>;
-  listAutonomyDecisions: (workspaceId?: string) => Promise<Any[]>;
-  listAutonomyActions: (workspaceId?: string) => Promise<Any[]>;
-  updateAutonomyDecision: (id: string, patch: Any) => Promise<Any | null>;
-  triggerAutonomyEvaluation: (workspaceId?: string) => Promise<Any>;
-
   // Memory Features (global toggles)
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
@@ -8688,23 +8633,6 @@ export interface ElectronAPI {
   getTaskSubscribers: (taskId: string) => Promise<TaskSubscription[]>;
   getAgentSubscriptions: (agentRoleId: string) => Promise<TaskSubscription[]>;
   onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => () => void;
-  // Mission Control - Standup Report APIs
-  generateStandupReport: (workspaceId: string) => Promise<StandupReport>;
-  getLatestStandupReport: (workspaceId: string) => Promise<StandupReport | undefined>;
-  listStandupReports: (workspaceId: string, limit?: number) => Promise<StandupReport[]>;
-  deliverStandupReport: (reportId: string, channelType: string, channelId: string) => Promise<void>;
-  // Mission Control - Agent Performance Reviews
-  generateAgentReview: (request: AgentReviewGenerateRequest) => Promise<AgentPerformanceReview>;
-  getLatestAgentReview: (
-    workspaceId: string,
-    agentRoleId: string,
-  ) => Promise<AgentPerformanceReview | undefined>;
-  listAgentReviews: (query: {
-    workspaceId: string;
-    agentRoleId?: string;
-    limit?: number;
-  }) => Promise<AgentPerformanceReview[]>;
-  deleteAgentReview: (id: string) => Promise<{ success: boolean }>;
   listEvalSuites: (options?: { windowDays?: number }) => Promise<{
     suites: Array<EvalSuite & { caseCount: number; latestRun?: Partial<EvalRun> }>;
     metrics: EvalBaselineMetrics;

@@ -103,7 +103,6 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Completion/Resume Coherence**: terminal task state is persisted before terminal events are emitted, and approval- or follow-up-driven resume paths re-check canonical persisted status before writing `executing`, preventing completed tasks from regressing to an in-progress row state.
 - **Artifact-First Output Visibility**: Artifact-only tasks are treated the same as file-created outputs across progress, timeline, and Files panel surfaces.
 - **Paired LaTeX/PDF Outputs**: Compiled LaTeX artifacts preserve the editable `.tex` source as the durable artifact and pair it with the generated PDF in one task workbench, including Summary, source, and PDF tabs.
-- **Performance Reviews**: Score and review agent-role outcomes with autonomy-level recommendations
 - **Vision**: Analyze workspace images via the active image-capable model/provider (OpenAI, Anthropic, Azure OpenAI, or Bedrock)
 - **Image Attachments**: Attach images to tasks and follow-ups for multimodal analysis
 - **Video Attachment Analysis**: Attach local MP4, MOV, or WebM videos to tasks and follow-ups. CoWork extracts visual evidence as still frames, shows those frames in the agentic timeline, and avoids unnecessary shell/glob probing for normal inspection requests.
@@ -811,7 +810,7 @@ Centralized agent orchestration and monitoring dashboard. Open **More > Mission 
 | **Feed & Details**       | Real-time activity feed with event type and agent filters, plus task detail view with comments and mentions                                                   |
 | **Core Harness**         | Runtime traces, failure clusters, evals, experiments, and learnings                                                                                           |
 
-**Header controls:** Agent Teams management, Performance Reviews, Standup Report generation, and workspace selector with live stats for Heartbeat agents, global runtime queue, board work, and pending mentions.
+**Header controls:** Agent Teams management and workspace selector with live stats for Heartbeat agents, global runtime queue, board work, and pending mentions.
 
 All panels update in real-time via event subscriptions — no manual refresh needed.
 

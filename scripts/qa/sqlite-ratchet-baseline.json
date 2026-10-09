@@ -396,14 +396,8 @@
     "src/electron/pact/pact-sql.ts": {
       "prepare": 61
     },
-    "src/electron/reports/agent-performance-review-sql.ts": {
-      "prepare": 8
-    },
     "src/electron/reports/daily-briefing-sql.ts": {
       "prepare": 2
-    },
-    "src/electron/reports/standup-report-sql.ts": {
-      "prepare": 9
     },
     "src/electron/reports/UsageInsightsProjector.ts": {
       "prepare": 32,

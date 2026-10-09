@@ -263,27 +263,6 @@ Use this together with [Managed Agents](managed-agents.md) when testing reusable
 
 ---
 
-## Performance Reviews
-
-Access from the **Reviews** button in the header.
-
-- **Select agent** and review period (1-90 days, default 7)
-- **Generate review**: Analyzes task completion rate, error rates, and autonomy effectiveness
-- **View history**: Browse previous reviews per agent
-- **Apply recommendation**: Auto-update an agent's autonomy level based on the review
-
----
-
-## Standup Reports
-
-Access from the **Standup** button in the header.
-
-- **Generate standup**: Auto-generate a summary of recent workspace activity
-- **View reports**: Browse up to 30 recent standup reports
-- **Metrics included**: Completed tasks, in-progress tasks, blocked tasks with titles and statuses
-
----
-
 ## Real-Time Updates
 
 Mission Control subscribes to live event streams — no manual refresh needed:
@@ -319,5 +298,3 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
 | Filter feed by agent                | Click an agent chip in the feed panel                                      |
 | Create a team                       | Header > Teams > create team                                               |
-| Generate a performance review       | Header > Reviews > select agent > Generate                                 |
-| Generate a standup report           | Header > Standup > Generate Standup Report                                 |

@@ -510,19 +510,6 @@
   border-top: none;
 }
 
-.memory-settings-policy-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
-}
-
-.memory-settings-policy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
 .memory-inspector-panel,
 .awareness-details-panel,
 .memory-repo-sync-view,

@@ -31,9 +31,6 @@ export const DESIGN_SYSTEM_MIN_TOKENS = 400;
 export const PROJECT_GUIDANCE_SECTION_TOKENS = 1000;
 export const PROJECT_GUIDANCE_MIN_TOKENS = 300;
 
-/** External memory provider (Supermemory) profile/search context. */
-export const EXTERNAL_MEMORY_SECTION_TOKENS = 400;
-
 /** Transcript span hits selected by the query orchestrator. */
 export const TRANSCRIPT_CONTEXT_SECTION_TOKENS = 400;
 

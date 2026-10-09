@@ -9,7 +9,6 @@ import { AsyncLocalStorage } from "async_hooks";
 import { serviceStatements } from "../database/service-statements";
 import { randomUUID } from "crypto";
 import { hasReservedImportPrefix, isAgentVisiblePrivacyState } from "../memory/memory-visibility";
-import { commitmentEntityKey, normalizeSuggestionEntityKey } from "../agent/SuggestionSink";
 import {
   Briefing,
   BriefingConfig,
@@ -339,27 +338,6 @@ export class DailyBriefingService {
     );
   }
 
-  private decisionScore(decision: Any): number {
-    const title = this.normalizeSemanticText(this.stripWorkspacePrefix(decision?.title || ""));
-    const detail = this.normalizeSemanticText(
-      this.stripWorkspacePrefix(decision?.description || ""),
-    );
-    let score = 0;
-    if (!title || this.isLowSignalText(title)) return -100;
-    if (detail && this.isLowSignalText(detail)) return -100;
-    if (this.isMetaActionText(title) || this.isMetaActionText(detail)) return -100;
-    if (decision?.priority === "high") score += 10;
-    if (
-      /\b(block|blocked|urgent|risk|deadline|security|follow up|review|finish|ship|fix)\b/i.test(
-        `${title} ${detail}`,
-      )
-    ) {
-      score += 6;
-    }
-    if (title.length <= 96) score += 2;
-    return score;
-  }
-
   private outcomeScore(task: Any): number {
     const title = this.normalizeSemanticText(task?.title || "");
     let score = 0;
@@ -373,18 +351,6 @@ export class DailyBriefingService {
     }
     if (task?.workspaceName) score += 1;
     if (title.length <= 90) score += 2;
-    return score;
-  }
-
-  private goalScore(goal: Any): number {
-    const title = this.normalizeSemanticText(goal?.title || "");
-    if (!title || this.isLowSignalText(title)) return -100;
-    if (this.isMetaActionText(title)) return -100;
-    let score = 0;
-    if (goal?.status === "blocked") score += 10;
-    if (goal?.status === "active") score += 3;
-    score += Math.round((goal?.confidence || 0) * 5);
-    if (title.length <= 110) score += 2;
     return score;
   }
 
@@ -746,8 +712,6 @@ export class DailyBriefingService {
   private async buildAwarenessDigest(workspaceId: string): Promise<BriefingSection> {
     try {
       const summary = await this.deps.getAwarenessSummary?.(workspaceId);
-      const autonomyState = await this.deps.getAutonomyState?.(workspaceId);
-      const autonomyDecisions = (await this.deps.getAutonomyDecisions?.(workspaceId)) || [];
       if (!summary) {
         return { type: "awareness_digest", title: "Awareness Digest", items: [], enabled: true };
       }
@@ -784,19 +748,6 @@ export class DailyBriefingService {
         });
       }
 
-      const usefulGoals = (autonomyState?.goals || [])
-        .map((goal: Any) => ({ ...goal, _score: this.goalScore(goal) }))
-        .filter((goal: Any) => goal._score > 0)
-        .sort((a: Any, b: Any) => b._score - a._score)
-        .slice(0, 2);
-      for (const goal of usefulGoals) {
-        items.push({
-          label: `${goal.status === "blocked" ? "Blocked goal" : "Active goal"}: ${this.normalizeSemanticText(goal.title)}`,
-          detail: `Status ${goal.status}, confidence ${Math.round((goal.confidence || 0) * 100)}%`,
-          status: goal.status === "blocked" ? "failed" : "info",
-        });
-      }
-
       const deduped = this.dedupeBriefingItems(
         items,
         (item) =>
@@ -808,48 +759,6 @@ export class DailyBriefingService {
           item.detail || (item.workspaceName ? `Workspaces: ${item.workspaceName}` : undefined),
         status: item.status,
       }));
-
-      // One entity, one surface: a decision about a commitment already listed as due soon, or
-      // already surfaced as a suggestion (SuggestionSink), is not repeated as "Decision needed".
-      const coveredEntityKeys = new Set<string>();
-      const coveredDecisionIds = new Set<string>();
-      for (const entry of summary.dueSoon?.slice(0, 3) || []) {
-        if (entry?.id && Array.isArray(entry.tags) && entry.tags.includes("commitment")) {
-          coveredEntityKeys.add(commitmentEntityKey(entry.id));
-        }
-      }
-      try {
-        for (const suggestion of (await this.deps.getActiveSuggestions(workspaceId)) || []) {
-          if (suggestion?.entityKey) {
-            coveredEntityKeys.add(normalizeSuggestionEntityKey(suggestion.entityKey, ""));
-          }
-          if (typeof suggestion?.sourceEntity === "string") {
-            coveredDecisionIds.add(suggestion.sourceEntity);
-          }
-        }
-      } catch {
-        // suggestions are optional here
-      }
-      const usefulDecisions = autonomyDecisions
-        .filter(
-          (decision: Any) =>
-            !coveredDecisionIds.has(decision.id) &&
-            !(
-              decision.entityKey &&
-              coveredEntityKeys.has(normalizeSuggestionEntityKey(decision.entityKey, ""))
-            ),
-        )
-        .map((decision: Any) => ({ ...decision, _score: this.decisionScore(decision) }))
-        .filter((decision: Any) => decision._score > 0)
-        .sort((a: Any, b: Any) => b._score - a._score)
-        .slice(0, 2);
-      for (const decision of usefulDecisions) {
-        deduped.push({
-          label: `Decision needed: ${this.normalizeSemanticText(decision.title)}`,
-          detail: this.normalizeSemanticText(decision.description),
-          status: decision.priority === "high" ? "pending" : "info",
-        });
-      }
 
       return {
         type: "awareness_digest",

@@ -51,8 +51,6 @@ const mockBuiltinSettings = {
   version: "1.0.0",
 };
 
-const supermemoryIsConfiguredMock = vi.fn(() => false);
-
 const isToolEnabledMock = vi.fn((toolName: string) => {
   const override = mockBuiltinSettings.toolOverrides[toolName];
   return override ? override.enabled : true;
@@ -129,12 +127,6 @@ vi.mock("../../../hooks/settings", () => ({
     })),
     enableHooks: vi.fn(),
     updateConfig: vi.fn(),
-  },
-}));
-
-vi.mock("../../../memory/SupermemoryService", () => ({
-  SupermemoryService: {
-    isConfigured: vi.fn(() => supermemoryIsConfiguredMock()),
   },
 }));
 
@@ -332,7 +324,6 @@ describe("ToolRegistry tool catalog versioning", () => {
       return override ? override.enabled : true;
     });
     getToolPriorityMock.mockReturnValue("normal");
-    supermemoryIsConfiguredMock.mockReturnValue(false);
   });
 
   it("invalidates cached tool definitions when the MCP catalog changes", () => {
@@ -602,20 +593,6 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(skill?.runtime?.approvalKind).toBe("none");
   });
 
-  it("keeps Supermemory tools hidden by default", () => {
-    const registry = new ToolRegistry(
-      createWorkspace(),
-      createDaemon(),
-      "task-supermemory-default-off",
-    );
-
-    const toolNames = registry.getTools().map((tool) => tool.name);
-    expect(toolNames).not.toContain("supermemory_profile");
-    expect(toolNames).not.toContain("supermemory_search");
-    expect(toolNames).not.toContain("supermemory_remember");
-    expect(toolNames).not.toContain("supermemory_forget");
-  });
-
   it("exposes x_search only when xAI credentials exist and the opt-in toggle is enabled", () => {
     vi.stubEnv("XAI_API_KEY", "xai-key");
     mockBuiltinSettings.toolOverrides = {
@@ -628,18 +605,12 @@ describe("ToolRegistry tool catalog versioning", () => {
   });
 
   it("offers the four memory tools and no longer registers the retired names", async () => {
-    supermemoryIsConfiguredMock.mockReturnValue(true);
-    const registry = new ToolRegistry(
-      createWorkspace(),
-      createDaemon(),
-      "task-supermemory-enabled",
-    );
+    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-memory-tools");
 
     const toolNames = registry.getTools().map((tool) => tool.name);
     for (const name of ["memory_recall", "memory_remember", "memory_forget", "context_recall"]) {
       expect(toolNames).toContain(name);
     }
-    // Supermemory is reached through the memory tools' external scope, not its own tools.
     expect(RETIRED_MEMORY_TOOL_NAMES).toHaveLength(16);
     for (const retired of RETIRED_MEMORY_TOOL_NAMES) {
       expect(toolNames).not.toContain(retired);
@@ -650,7 +621,7 @@ describe("ToolRegistry tool catalog versioning", () => {
     }
     expect(
       registry
-        .searchDeferredTools("supermemory search memories")
+        .searchDeferredTools("search memories")
         .matches.map((match: { name: string }) => match.name),
     ).toEqual(expect.not.arrayContaining([...RETIRED_MEMORY_TOOL_NAMES]));
   });
@@ -669,24 +640,6 @@ describe("ToolRegistry tool catalog versioning", () => {
       expect(allGroupNames).not.toContain(retired);
       expect(MEMORY_WRITE_TOOL_NAMES).not.toContain(retired);
     }
-  });
-
-  it("asks for external-service approval when memory tools reach Supermemory", () => {
-    const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-memory-approval");
-    const approval = (name: string, input?: Any) =>
-      (registry as Any).getApprovalTypeForTool(name, input);
-    expect(approval("memory_recall", { query: "x" })).toBeNull();
-    expect(approval("memory_recall", { query: "x", scopes: ["external"] })).toBe(
-      "external_service",
-    );
-    expect(approval("memory_forget", { id: "memory:1" })).toBeNull();
-    expect(approval("memory_forget", { id: "external:abc" })).toBe("external_service");
-    expect(approval("memory_forget", { match: "x", scope: "external" })).toBe("external_service");
-    expect(approval("memory_forget", { match: "x" })).toBeNull();
-    expect(approval("memory_remember", { content: "x", kind: "rule" })).toBeNull();
-    expect(approval("memory_remember", { content: "x", kind: "rule", scope: "external" })).toBe(
-      "external_service",
-    );
   });
 
   it("does not classify Skill as an external-service approval type", () => {

@@ -14,7 +14,7 @@ It extends CoWork's existing runtime instead of creating a separate memory syste
 
 - **Screen-aware disambiguation**: resolves vague references like `this`, `that`, `the failing one`, `right side`, `same doc`, or `on screen`
 - **Missing-context recovery**: helps the runtime find the active app, window, visible text, and source reference for tasks such as `sync the latest draft`
-- **Background memory generation**: promoted observations can generate linked `screen_context` memory entries in the background when Chronicle and workspace memory settings allow it. These entries are always private: they stay local and are never mirrored to Supermemory
+- **Background memory generation**: promoted observations can generate linked `screen_context` memory entries in the background when Chronicle and workspace memory settings allow it. These entries are always private and stay local
 - **Workflow/tool hints**: Chronicle-backed tasks can reinforce destination hints such as `google_doc`, `slack_dm`, `repo_file`, or `drive_folder`
 - **Per-task control**: new-task flows in the main composer and Devices panel can disable Chronicle for a specific task without turning the feature off globally
 - **Observation management**: promoted observations are visible and deletable from Memory settings
@@ -127,7 +127,7 @@ If OCR-backed matching is important, install local `tesseract`. The Chronicle se
 - passive capture does not call external model providers by itself
 - later image or vision analysis still follows the normal explicit screenshot / export approval path
 - only the single top, confident (≥ `0.5`) match of a `screen_context_resolve` call is copied into workspace state, and never for a `<no-memory>` task
-- Chronicle-derived memories are private and are never mirrored to Supermemory
+- Chronicle-derived memories are private
 - Chronicle is archive-only: a derived memory is one `screen_context` archive row written through `MemoryService.capture`, the hygiene every memory producer shares (`<no-memory>` in the text or for the task, the salience gate, workspace memory, auto-capture and privacy settings, secret redaction, excluded patterns, content-hash dedupe). Screen text is third-party content, so it never becomes a `memory_items` fact about the user, and Dreaming does not auto-promote screen-captured evidence
 - with **Respect workspace memory privacy and auto-capture settings** off, an observation can still be promoted into `.cowork/chronicle/`, but its derived memory row still follows the workspace memory settings
 - deleting an observation removes only its own screenshot inside `.cowork/chronicle/assets/`; deleting a task removes its observations, and **Clear All Memories** removes all of them

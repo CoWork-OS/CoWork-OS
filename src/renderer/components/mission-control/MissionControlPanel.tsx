@@ -1,6 +1,5 @@
 import { hasHostMethod } from "../../host/browser-capabilities";
 import "./mission-control.css";
-import { isTempWorkspaceId } from "../../../shared/types";
 import { useMissionControlData } from "./useMissionControlData";
 import { MCTopBar } from "./MCTopBar";
 import { MCOverviewTab } from "./MCOverviewTab";
@@ -11,9 +10,7 @@ import { MCIntelligenceTab } from "./MCIntelligenceTab";
 import { MCOpsTab } from "./MCOpsTab";
 import { MCDetailPanel } from "./MCDetailPanel";
 import { AgentRoleEditor } from "../AgentRoleEditor";
-import { StandupReportViewer } from "../StandupReportViewer";
 import { AgentTeamsPanel } from "../AgentTeamsPanel";
-import { AgentPerformanceReviewViewer } from "../AgentPerformanceReviewViewer";
 
 interface MissionControlPanelProps {
   onClose?: () => void;
@@ -39,20 +36,15 @@ export function MissionControlPanel({
     isCreatingAgent,
     agentError,
     handleSaveAgent,
-    standupOpen,
-    setStandupOpen,
     selectedWorkspace,
     teamsOpen,
     setTeamsOpen,
     agents,
     tasks,
     setDetailPanel,
-    reviewsOpen,
-    setReviewsOpen,
     agentContext,
     detailPanel,
   } = data;
-  const supportsWorkspaceReports = !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
 
   if (loading) {
     return (
@@ -104,20 +96,9 @@ export function MissionControlPanel({
       </div>
 
       {/* Modals */}
-      {standupOpen && supportsWorkspaceReports && selectedWorkspace && (
-        <div className="mc-v2-editor-overlay">
-          <div className="mc-v2-editor-modal mc-v2-standup-modal">
-            <StandupReportViewer
-              workspaceId={selectedWorkspace.id}
-              onClose={() => setStandupOpen(false)}
-            />
-          </div>
-        </div>
-      )}
-
       {teamsOpen && selectedWorkspace && (
         <div className="mc-v2-editor-overlay">
-          <div className="mc-v2-editor-modal mc-v2-standup-modal">
+          <div className="mc-v2-editor-modal mc-v2-wide-modal">
             <AgentTeamsPanel
               workspaceId={selectedWorkspace.id}
               agents={agents}
@@ -139,18 +120,6 @@ export function MissionControlPanel({
                 Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {reviewsOpen && supportsWorkspaceReports && selectedWorkspace && (
-        <div className="mc-v2-editor-overlay">
-          <div className="mc-v2-editor-modal mc-v2-standup-modal">
-            <AgentPerformanceReviewViewer
-              workspaceId={selectedWorkspace.id}
-              agents={agents}
-              onClose={() => setReviewsOpen(false)}
-            />
           </div>
         </div>
       )}

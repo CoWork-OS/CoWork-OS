@@ -33,7 +33,6 @@ describe("resolveMemoryInjection matrix", () => {
                 workspaceSettings: { enabled: true, privacyMode },
                 contextPackInjectionEnabled: true,
                 workspaceCanRead: true,
-                externalNetworkAllowed: true,
               });
 
   it.each(cases)("$label", (input) => {
@@ -48,7 +47,6 @@ describe("resolveMemoryInjection matrix", () => {
 
     expect(decision.layers.l0).toBe(memoryOn);
     expect(decision.layers.l1).toBe(memoryOn);
-    expect(decision.layers.external).toBe(memoryOn);
     expect(decision.memory).toBe(memoryOn);
     // Private items: only the user's own private conversation, never a sub-agent.
     expect(decision.allowPrivateItems).toBe(
@@ -87,12 +85,6 @@ describe("resolveMemoryInjection details", () => {
     const decision = resolveMemoryInjection({ retainMemory: true, workerRole: "verifier" });
     expect(decision.memory).toBe(false);
     expect(decision.layers.sharedContext).toBe(false);
-  });
-
-  it("turns the external provider off without network access only", () => {
-    const decision = resolveMemoryInjection({ externalNetworkAllowed: false });
-    expect(decision.layers.external).toBe(false);
-    expect(decision.layers.l0).toBe(true);
   });
 
   it("drops file layers without read access or the context pack", () => {

@@ -2040,7 +2040,6 @@ export class ToolRegistry {
     if (EXTERNAL_SERVICE_BOUNDARY_TOOLS.has(canonicalToolName)) {
       return "external_service";
     }
-    // The memory tools reach Supermemory only when asked to (scope or id).
     if (
       (canonicalToolName === "memory_recall" &&
         Array.isArray(input?.scopes) &&
@@ -2160,8 +2159,7 @@ export class ToolRegistry {
   private toolHandlesApprovalInternally(toolName: string, input?: Any): boolean {
     return (
       // memory_forget asks before deleting a local memory, except one this task's agent
-      // inferred itself (MemoryTools.confirmForget); Supermemory ids keep the
-      // external_service approval of the policy pipeline.
+      // inferred itself (MemoryTools.confirmForget).
       (toolName === "memory_forget" &&
         !(typeof input?.id === "string" && input.id.trim().startsWith("external:"))) ||
       toolName === "run_command" ||

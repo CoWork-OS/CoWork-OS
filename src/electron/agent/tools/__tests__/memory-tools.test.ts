@@ -17,9 +17,6 @@ const mocks = vi.hoisted(() => ({
   durableDescribe: vi.fn(),
   describeConversationHit: vi.fn(),
   searchConversation: vi.fn(),
-  supermemoryForget: vi.fn(),
-  supermemoryRemember: vi.fn(),
-  supermemoryConfigured: false,
   getSettings: vi.fn(),
 }));
 
@@ -41,13 +38,6 @@ vi.mock("../../../memory/DurableContextService", () => ({
     describe: mocks.durableDescribe,
     describeConversationHit: mocks.describeConversationHit,
     searchConversation: mocks.searchConversation,
-  },
-}));
-vi.mock("../../../memory/SupermemoryService", () => ({
-  SupermemoryService: {
-    isConfigured: () => mocks.supermemoryConfigured,
-    forget: mocks.supermemoryForget,
-    remember: mocks.supermemoryRemember,
   },
 }));
 vi.mock("../../../security/access-profile-paths", () => ({
@@ -135,7 +125,6 @@ describeWithSqlite("memory tools", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mocks.durableEnabled = false;
-    mocks.supermemoryConfigured = false;
     mocks.evaluate.mockResolvedValue({ allowed: true });
     mocks.capture.mockResolvedValue({ id: "arch-1" });
     mocks.getFullDetails.mockResolvedValue([]);
@@ -162,8 +151,6 @@ describeWithSqlite("memory tools", () => {
       getKnowledgeEntity: vi.fn(async () => null),
       searchMarkdown: vi.fn(async () => []),
       readTextFile: vi.fn(async () => ""),
-      searchExternal: vi.fn(async () => []),
-      externalConfigured: () => mocks.supermemoryConfigured,
       laneEnabled: () => true,
       now: () => Date.now(),
     };
@@ -239,24 +226,6 @@ describeWithSqlite("memory tools", () => {
       expect(empty.totalFound).toBe(0);
     });
 
-    it("explains that external memory is unavailable without network access", async () => {
-      mocks.supermemoryConfigured = true;
-      const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
-      const result = await tools.recall({ query: "tea", scopes: ["external"] });
-      expect(recallDeps.searchExternal).not.toHaveBeenCalled();
-      expect(result.unavailable).toMatchObject({ external: expect.stringContaining("network") });
-
-      const networked = new MemoryTools(
-        { ...workspace, permissions: { ...workspace.permissions, network: true } },
-        makeDaemon(),
-        "task-1",
-      );
-      await networked.recall({ query: "tea", scopes: ["external"] });
-      expect(recallDeps.searchExternal).toHaveBeenCalledWith(
-        expect.objectContaining({ workspace: { id: "ws-1", name: "Workspace One" } }),
-      );
-    });
-
     it("needs a query unless it lists saved facts", async () => {
       await seed("Pinned rule", { kind: "rule", pinned: true });
       const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
@@ -283,13 +252,11 @@ describeWithSqlite("memory tools", () => {
         expect(
           await tools.recall({
             query: "owner secret",
-            scopes: ["memory", "external", "conversations"],
+            scopes: ["memory", "conversations"],
           }),
         ).toMatchObject({ success: false, results: [], totalFound: 0 });
-        expect(await tools.forget({ id: "external:sm-1" })).toMatchObject({ success: false });
         expect(await tools.forget({ match: "owner secret" })).toMatchObject({ success: false });
         expect(recall).not.toHaveBeenCalled();
-        expect(mocks.supermemoryForget).not.toHaveBeenCalled();
         expect(daemon.requestApproval).not.toHaveBeenCalled();
         recall.mockRestore();
       },
@@ -343,16 +310,6 @@ describeWithSqlite("memory tools", () => {
         pinned: 0,
       });
       expect(rowsOf(db, "scope = 'global'")).toHaveLength(0);
-
-      // Nor do they reach the owner's external memory.
-      mocks.supermemoryConfigured = true;
-      const external = await new MemoryTools(
-        { ...workspace, permissions: { ...workspace.permissions, network: true } },
-        daemon,
-        "task-1",
-      ).remember({ content: "Name is Bob", kind: "identity", scope: "external" });
-      expect(external.success).toBe(false);
-      expect(mocks.supermemoryRemember).not.toHaveBeenCalled();
     });
 
     it("stores a fact as inferred unless the user explicitly asked", async () => {
@@ -702,110 +659,6 @@ describeWithSqlite("memory tools", () => {
       });
       expect(result.result).toMatchObject({ id: "dce_4", text: expect.stringContaining("8080") });
       expect((await tools.contextRecall({})).success).toBe(false);
-    });
-  });
-
-  describe("external scope (Supermemory)", () => {
-    const networked = { ...workspace, permissions: { ...workspace.permissions, network: true } };
-
-    it("remembers into Supermemory only with network access and a connection", async () => {
-      const offline = new MemoryTools(workspace, makeDaemon(), "task-1");
-      mocks.supermemoryConfigured = true;
-      expect(
-        (await offline.remember({ content: "Uses tabs", kind: "preference", scope: "external" }))
-          .success,
-      ).toBe(false);
-      mocks.supermemoryConfigured = false;
-      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
-      expect(
-        (await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }))
-          .success,
-      ).toBe(false);
-      expect(mocks.supermemoryRemember).not.toHaveBeenCalled();
-
-      mocks.supermemoryConfigured = true;
-      mocks.supermemoryRemember.mockResolvedValue({ containerTag: "tag", memoryIds: ["sm-7"] });
-      const result = await tools.remember({
-        content: "Uses tabs",
-        kind: "preference",
-        scope: "external",
-      });
-      expect(result).toEqual({ success: true, id: "external:sm-7", stored: "external" });
-      expect(mocks.supermemoryRemember).toHaveBeenCalledWith(
-        expect.objectContaining({
-          workspace: { id: "ws-1", name: "Workspace One" },
-          content: "Uses tabs",
-          origin: "agent_tool",
-          taskId: "task-1",
-        }),
-      );
-      // Nothing is written locally.
-      expect(rowsOf(db)).toHaveLength(0);
-      expect(mocks.capture).not.toHaveBeenCalled();
-    });
-
-    it("refuses external writes when workspace memory settings keep memory local", async () => {
-      mocks.supermemoryConfigured = true;
-      mocks.supermemoryRemember.mockResolvedValue({ containerTag: "tag", memoryIds: ["sm-1"] });
-      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
-      for (const settings of [
-        { enabled: false, privacyMode: "normal" },
-        { enabled: true, privacyMode: "disabled" },
-        { enabled: true, privacyMode: "strict" },
-      ]) {
-        mocks.getSettings.mockResolvedValueOnce(settings);
-        expect(
-          await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }),
-        ).toMatchObject({ success: false, reason: "memory_policy" });
-      }
-      mocks.getSettings.mockRejectedValueOnce(new Error("db closed"));
-      expect(
-        (await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }))
-          .success,
-      ).toBe(false);
-      expect(mocks.supermemoryRemember).not.toHaveBeenCalled();
-    });
-
-    it("reports a staged external write", async () => {
-      mocks.supermemoryConfigured = true;
-      mocks.supermemoryRemember.mockResolvedValue({
-        containerTag: "tag",
-        memoryIds: [],
-        staged: true,
-        pendingId: "p-1",
-      });
-      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
-      expect(
-        await tools.remember({ content: "Uses tabs", kind: "preference", scope: "external" }),
-      ).toMatchObject({ success: true, staged: true, pendingId: "p-1" });
-    });
-
-    it("forgets a Supermemory memory by id or by its text", async () => {
-      mocks.supermemoryConfigured = true;
-      mocks.supermemoryForget.mockResolvedValue({
-        containerTag: "tag",
-        id: "sm-1",
-        forgotten: true,
-      });
-      const tools = new MemoryTools(networked, makeDaemon(), "task-1");
-      expect(await tools.forget({ id: "external:sm-1" })).toEqual({
-        success: true,
-        forgotten: "external:sm-1",
-      });
-      expect(await tools.forget({ match: "Uses tabs", scope: "external" })).toEqual({
-        success: true,
-        forgotten: "external:sm-1",
-      });
-      expect(mocks.supermemoryForget).toHaveBeenLastCalledWith(
-        expect.objectContaining({ content: "Uses tabs" }),
-      );
-      mocks.supermemoryForget.mockResolvedValue({ containerTag: "tag", forgotten: false });
-      expect((await tools.forget({ match: "nothing", scope: "external" })).success).toBe(false);
-
-      const offline = new MemoryTools(workspace, makeDaemon(), "task-1");
-      mocks.supermemoryForget.mockClear();
-      expect((await offline.forget({ match: "Uses tabs", scope: "external" })).success).toBe(false);
-      expect(mocks.supermemoryForget).not.toHaveBeenCalled();
     });
   });
 

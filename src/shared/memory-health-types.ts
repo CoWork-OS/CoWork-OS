@@ -44,7 +44,6 @@ export interface MemorySourcesReport {
   };
   imports: { archiveRows: number; facts: number };
   chronicle: { enabled: boolean; archiveRows: number };
-  supermemory: { enabled: boolean; connected: boolean; remoteRefs: number };
   knowledgeGraph: {
     entities: number;
     edges: number;

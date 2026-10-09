@@ -331,7 +331,6 @@ describe("memory archive retention and capture hygiene", () => {
         const options = {
           forceCapture: true,
           skipMemoryWriteGate: true,
-          allowExternalMirror: false,
         };
         const first = await MemoryService.capture(
           workspace.id,

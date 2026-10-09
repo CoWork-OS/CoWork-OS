@@ -35,7 +35,6 @@ import type {
   Task,
   Workspace,
 } from "../../../shared/types";
-import { isTempWorkspaceId } from "../../../shared/types";
 import { TASK_EVENT_STATUS_MAP } from "../../../shared/task-event-status-map";
 import { useAgentContext } from "../../hooks/useAgentContext";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
@@ -345,9 +344,7 @@ export function useMissionControlData(
   const [postingComment, setPostingComment] = useState(false);
 
   // ── Modals ──
-  const [standupOpen, setStandupOpen] = useState(false);
   const [teamsOpen, setTeamsOpen] = useState(false);
-  const [reviewsOpen, setReviewsOpen] = useState(false);
 
   // ── Refs for stable subscriptions ──
   const tasksRef = useRef<Task[]>([]);
@@ -382,16 +379,9 @@ export function useMissionControlData(
     setCommentText("");
   }, [detailPanel]);
   useEffect(() => {
-    if (!selectedWorkspaceId) return;
     if (selectedWorkspaceId === ALL_WORKSPACES_ID) {
-      setStandupOpen(false);
       setTeamsOpen(false);
-      setReviewsOpen(false);
-      return;
     }
-    if (!isTempWorkspaceId(selectedWorkspaceId)) return;
-    setStandupOpen(false);
-    setReviewsOpen(false);
   }, [selectedWorkspaceId]);
   useEffect(() => {
     visibleWorkspaceIdsRef.current =
@@ -1749,12 +1739,8 @@ export function useMissionControlData(
     postingComment,
 
     // Modals
-    standupOpen,
-    setStandupOpen,
     teamsOpen,
     setTeamsOpen,
-    reviewsOpen,
-    setReviewsOpen,
 
     // Computed
     activeAgentsCount,

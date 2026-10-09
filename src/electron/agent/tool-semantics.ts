@@ -220,7 +220,7 @@ const MEMORY_WRITE_TOOL_NAME_SET: Set<string> = new Set(
 );
 
 /**
- * Memory, Supermemory and knowledge-graph writes. Not workspace file writes, so
+ * Memory and knowledge-graph writes. Not workspace file writes, so
  * kept out of isCanonicalWriteToolName (which feeds workspace-write checks), but
  * read-only lanes must still treat them as mutations. (SEC-12)
  */

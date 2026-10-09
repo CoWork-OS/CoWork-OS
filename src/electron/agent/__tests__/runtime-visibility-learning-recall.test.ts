@@ -5,7 +5,6 @@ import { KnowledgeGraphService } from "../../knowledge-graph/KnowledgeGraphServi
 import { ChronicleObservationRepository } from "../../chronicle";
 import { DurableContextService } from "../../memory/DurableContextService";
 import { MemoryRecallService } from "../../memory/MemoryRecall";
-import { SupermemoryService } from "../../memory/SupermemoryService";
 
 describe("RuntimeVisibilityService learning + recall", () => {
   afterEach(() => {
@@ -66,39 +65,24 @@ describe("RuntimeVisibilityService learning + recall", () => {
       lanes: request.lanes ?? [],
       laneErrors: {},
       missing: [],
-      hits: request.lanes?.includes("external")
-        ? [
-            {
-              lane: "external",
-              ref: "external:sm-1",
-              title: "Alpha in Supermemory",
-              snippet: "alpha rollout remote note",
-              score: 0.5,
-              laneRanks: { external: 1 },
-              source: "document",
-              createdAt: 100,
-              relevance: 1,
-            },
-          ]
-        : [
-            {
-              lane: "memory",
-              ref: "memory:item-1",
-              title: "Alpha rollout is staged",
-              snippet: "Alpha rollout is staged by region",
-              score: 0.9,
-              laneRanks: { memory: 1 },
-              source: "user_stated",
-              kind: "project_fact",
-              createdAt: 100,
-              relevance: 1,
-            },
-          ],
+      hits: [
+        {
+          lane: "memory",
+          ref: "memory:item-1",
+          title: "Alpha rollout is staged",
+          snippet: "Alpha rollout is staged by region",
+          score: 0.9,
+          laneRanks: { memory: 1 },
+          source: "user_stated",
+          kind: "project_fact",
+          createdAt: 100,
+          relevance: 1,
+        },
+      ],
     }));
     vi.spyOn(MemoryRecallService, "getDefault").mockReturnValue({
       recall,
     } as unknown as MemoryRecallService);
-    vi.spyOn(SupermemoryService, "isConfigured").mockReturnValue(true);
     vi.spyOn(MemoryService, "searchForBriefingAsync").mockResolvedValue([
       {
         id: "memory-1",
@@ -260,9 +244,7 @@ describe("RuntimeVisibilityService learning + recall", () => {
     });
 
     const sources = response.results.map((result) => result.sourceType);
-    // Memory items come from the engine's recall; Supermemory needs network access.
     expect(response.results.some((result) => result.objectId === "memory:item-1")).toBe(true);
-    expect(sources).not.toContain("supermemory");
     expect(sources).toEqual(
       expect.arrayContaining([
         "task",
@@ -382,38 +364,5 @@ describe("RuntimeVisibilityService learning + recall", () => {
     expect(response.results.map((result) => result.objectId)).toEqual(
       expect.arrayContaining(["task-old", "activity-old"]),
     );
-  });
-
-  it("adds a Supermemory lane only when connected and the workspace allows network access", async () => {
-    const { recall } = mockSources();
-    const workspace = {
-      id: "workspace-1",
-      name: "Alpha",
-      path: "/workspace",
-      permissions: { read: true, write: true, delete: false, network: true, shell: false },
-    };
-    const response = await RuntimeVisibilityService.collectUnifiedRecall(deps, {
-      workspaceId: "workspace-1",
-      workspace: workspace as Any,
-      query: "alpha rollout",
-      sourceTypes: ["supermemory"],
-    });
-    expect(response.results.map((result) => result.sourceType)).toEqual(["supermemory"]);
-    expect(recall).toHaveBeenCalledWith(
-      expect.objectContaining({
-        lanes: ["external"],
-        policy: expect.objectContaining({ allowExternal: true, workspaceName: "Alpha" }),
-      }),
-    );
-
-    recall.mockClear();
-    const offline = await RuntimeVisibilityService.collectUnifiedRecall(deps, {
-      workspaceId: "workspace-1",
-      workspace: { ...workspace, permissions: { ...workspace.permissions, network: false } } as Any,
-      query: "alpha rollout",
-      sourceTypes: ["supermemory"],
-    });
-    expect(offline.results).toEqual([]);
-    expect(recall).not.toHaveBeenCalled();
   });
 });

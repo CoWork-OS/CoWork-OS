@@ -308,7 +308,6 @@ describeWithSqlite("memory purge (SEC-15, LIFE-4)", () => {
     expect(result.counts.knowledgeGraph).toBeGreaterThanOrEqual(4);
     // Two files plus the span index row.
     expect(result.counts.transcripts).toBe(3);
-    expect(result.notes.join(" ")).toContain("Supermemory");
     expect(
       count("SELECT COUNT(*) AS n FROM kg_entities WHERE workspace_id = ?", workspace.id),
     ).toBe(0);

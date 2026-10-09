@@ -1,5 +1,4 @@
 import { ALL_WORKSPACES_ID } from "./useMissionControlData";
-import { isTempWorkspaceId } from "../../../shared/types";
 import type { MissionControlData, MCTab } from "./useMissionControlData";
 import { hasHostMethod, hasHostMethods } from "../../host/browser-capabilities";
 
@@ -24,14 +23,6 @@ const TEAM_PANEL_METHODS = [
   "updateTeamItem",
   "deleteTeamItem",
   "moveTeamItem",
-] as const;
-
-const STANDUP_REPORT_METHODS = ["listStandupReports", "generateStandupReport"] as const;
-const PERFORMANCE_REVIEW_METHODS = [
-  "listAgentReviews",
-  "getLatestAgentReview",
-  "generateAgentReview",
-  "updateAgentRole",
 ] as const;
 
 const CORE_HARNESS_METHODS = [
@@ -71,25 +62,18 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
     isRefreshing,
     handleManualRefresh,
     selectedWorkspace,
-    setStandupOpen,
     setTeamsOpen,
-    setReviewsOpen,
     activeTab,
     setActiveTab,
     selectedCompany,
     currentTime,
     agentContext,
   } = data;
-  const supportsWorkspaceReports = !!selectedWorkspace && !isTempWorkspaceId(selectedWorkspace.id);
   const supportsTeams = hasHostMethods(...TEAM_PANEL_METHODS);
-  const supportsStandupReports = hasHostMethods(...STANDUP_REPORT_METHODS);
-  const supportsPerformanceReviews = hasHostMethods(...PERFORMANCE_REVIEW_METHODS);
   const unavailableBrowserWorkflows =
     typeof window !== "undefined" && window.coworkBrowserHost === true
       ? [
           ...(!supportsTeams ? ["Team management"] : []),
-          ...(!supportsPerformanceReviews ? ["Performance reviews"] : []),
-          ...(!supportsStandupReports ? ["Standup reports"] : []),
           ...(!hasHostMethod("getCommandCenterSummary") ? ["Command center summaries"] : []),
           ...(!hasHostMethods("getPlannerConfig", "updatePlannerConfig")
             ? ["Planner settings"]
@@ -183,34 +167,6 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
             }
           >
             Teams
-          </button>
-          <button
-            className="mc-v2-icon-btn"
-            onClick={() => setReviewsOpen(true)}
-            disabled={!supportsWorkspaceReports || !supportsPerformanceReviews}
-            title={
-              !supportsWorkspaceReports
-                ? "Choose a non-temporary workspace before opening performance reviews."
-                : !supportsPerformanceReviews
-                  ? "Performance reviews are not available in this browser session yet."
-                  : undefined
-            }
-          >
-            Reviews
-          </button>
-          <button
-            className="mc-v2-icon-btn"
-            onClick={() => setStandupOpen(true)}
-            disabled={!supportsWorkspaceReports || !supportsStandupReports}
-            title={
-              !supportsWorkspaceReports
-                ? "Choose a non-temporary workspace before opening standup reports."
-                : !supportsStandupReports
-                  ? "Standup reports are not available in this browser session yet."
-                  : undefined
-            }
-          >
-            {agentContext.getUiCopy("mcStandupButton")}
           </button>
           <button className="mc-v2-icon-btn" onClick={onOpenAgents}>
             Agents Hub

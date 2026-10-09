@@ -70,8 +70,6 @@ const serviceMocks = vi.hoisted(() => ({
   capture: vi.fn(),
   curate: vi.fn(),
   upsertDistilledEntry: vi.fn(),
-  remember: vi.fn(),
-  mirrorMemory: vi.fn(),
 }));
 
 vi.mock("../../database/repository-facades", () => ({
@@ -104,13 +102,6 @@ vi.mock("../CuratedMemoryService", () => ({
   },
 }));
 
-vi.mock("../SupermemoryService", () => ({
-  SupermemoryService: {
-    remember: serviceMocks.remember,
-    mirrorMemory: serviceMocks.mirrorMemory,
-  },
-}));
-
 import { MemoryWriteGate } from "../MemoryWriteGate";
 import { MemoryWriter } from "../MemoryWriter";
 
@@ -130,11 +121,6 @@ describe("MemoryWriteGate", () => {
     serviceMocks.capture.mockReset().mockResolvedValue({ id: "memory-1" });
     serviceMocks.curate.mockReset().mockResolvedValue({ success: true });
     serviceMocks.upsertDistilledEntry.mockReset().mockResolvedValue({ id: "curated-1" });
-    serviceMocks.remember.mockReset().mockResolvedValue({
-      containerTag: "cowork:ws-1",
-      memoryIds: ["external-1"],
-    });
-    serviceMocks.mirrorMemory.mockReset().mockResolvedValue(undefined);
     MemoryWriteGate.initialize({ getDatabase: () => ({}) } as Any);
   });
 
@@ -160,35 +146,6 @@ describe("MemoryWriteGate", () => {
     });
     expect(display?.reason).toBe("password=[redacted]");
     expect((await MemoryWriteGate.findPending(record.id))?.summary).toContain("fake-secret-value");
-  });
-
-  it("uses the effective workspace policy for approved archive mirroring and blocks external replay", async () => {
-    const archive = repoMock.create({
-      ...baseRequest,
-      target: "archive",
-      payload: { type: "insight", content: "Disposable archive policy fact" },
-    });
-    const effectiveWorkspace = {
-      id: "ws-1",
-      path: "/tmp/qa",
-      permissions: { read: true, write: true, network: false },
-    } as Any;
-    await MemoryWriteGate.applyPending(archive.id, { workspaceId: "ws-1", effectiveWorkspace });
-    expect(serviceMocks.capture).toHaveBeenCalledWith(
-      "ws-1",
-      "task-1",
-      "insight",
-      "Disposable archive policy fact",
-      false,
-      expect.objectContaining({ allowExternalMirror: false }),
-    );
-    const external = repoMock.create({ ...baseRequest, target: "external", action: "remember" });
-    const result = await MemoryWriteGate.applyPending(external.id, {
-      workspaceId: "ws-1",
-      effectiveWorkspace,
-    });
-    expect(result.status).toBe("failed");
-    expect(serviceMocks.remember).not.toHaveBeenCalled();
   });
 
   it("allows writes when approval mode is off", async () => {
@@ -241,65 +198,6 @@ describe("MemoryWriteGate", () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]?.target).toBe("curated");
     expect(pending[0]?.proposedValue).toBe("Important project fact");
-  });
-
-  it("stages external writes when overridden by environment", async () => {
-    process.env.COWORK_MEMORY_WRITE_APPROVAL_MODE = "external_only";
-    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
-      contextPackInjectionEnabled: true,
-      heartbeatMaintenanceEnabled: true,
-      memoryWriteApprovalMode: "off",
-    });
-
-    const decision = await MemoryWriteGate.evaluate({
-      ...baseRequest,
-      target: "external",
-      action: "remember",
-    });
-
-    expect(decision.allowed).toBe(false);
-    expect((await MemoryWriteGate.listPending("ws-1"))[0]?.action).toBe("remember");
-  });
-
-  it("blocks sensitive external writes without storing pending payloads", async () => {
-    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
-      contextPackInjectionEnabled: true,
-      heartbeatMaintenanceEnabled: true,
-      memoryWriteApprovalMode: "off",
-    });
-
-    const decision = await MemoryWriteGate.evaluate({
-      ...baseRequest,
-      target: "external",
-      action: "remember",
-      payload: {
-        content: "Use api_key=sk-1234567890abcdef for testing",
-      },
-    });
-
-    expect(decision.allowed).toBe(false);
-    expect("blocked" in decision && decision.blocked).toBe(true);
-    expect(await MemoryWriteGate.listPending("ws-1")).toHaveLength(0);
-  });
-
-  it("blocks external writes holding secret shapes from the shared detector", async () => {
-    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
-      contextPackInjectionEnabled: true,
-      heartbeatMaintenanceEnabled: true,
-      memoryWriteApprovalMode: "off",
-    });
-    for (const content of [
-      "aws id AKIAABCDEFGHIJKLMNOP in config",
-      "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
-    ]) {
-      const decision = await MemoryWriteGate.evaluate({
-        ...baseRequest,
-        target: "external",
-        action: "remember",
-        payload: { content },
-      });
-      expect("blocked" in decision && decision.blocked).toBe(true);
-    }
   });
 
   it("redacts shared-detector secret shapes in pending display values", async () => {
@@ -522,39 +420,6 @@ describe("MemoryWriteGate", () => {
     });
     expect(serviceMocks.capture).not.toHaveBeenCalled();
     expect(serviceMocks.curate).not.toHaveBeenCalled();
-  });
-
-  it("applies external remember writes after approval", async () => {
-    process.env.COWORK_MEMORY_WRITE_APPROVAL_MODE = "external_only";
-    vi.spyOn(MemoryFeaturesManager, "loadSettings").mockReturnValue({
-      contextPackInjectionEnabled: true,
-      heartbeatMaintenanceEnabled: true,
-      memoryWriteApprovalMode: "off",
-    });
-
-    const decision = await MemoryWriteGate.evaluate({
-      ...baseRequest,
-      target: "external",
-      action: "remember",
-      payload: {
-        content: "External approved memory",
-        containerTag: "cowork:ws-1",
-        metadata: { source: "test" },
-      },
-    });
-    expect(decision.allowed).toBe(false);
-    if (decision.allowed || !("staged" in decision)) throw new Error("Expected staged decision");
-
-    await MemoryWriteGate.applyPending(decision.pendingId, { workspaceId: "ws-1" });
-
-    expect(serviceMocks.remember).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: "External approved memory",
-        containerTag: "cowork:ws-1",
-        taskId: "task-1",
-        skipMemoryWriteGate: true,
-      }),
-    );
   });
 
   it("applies distilled curated upserts after approval", async () => {

@@ -44,7 +44,6 @@ import type { Issue } from "../../shared/types";
 import { SubscriptionReason } from "../agents/TaskSubscriptionRepository";
 import { ActivityRepository } from "../activity/activity-repository-facades";
 
-import { StandupReportService } from "../reports/StandupReportService";
 import { HeartbeatService } from "../agents/HeartbeatService";
 import { rateLimiter } from "../utils/rate-limiter";
 import { validateInput, UUIDSchema } from "../utils/validation";
@@ -82,7 +81,6 @@ import {
   CoreMemoryCandidateReviewSchema,
   CoreMemoryDistillRunNowSchema,
   CoreTraceListRequestSchema,
-  StandupDeliveryRequestSchema,
   StringIdSchema,
 } from "../utils/validation";
 
@@ -224,7 +222,6 @@ export interface MissionControlDeps {
   db: Database.Database;
   agentRoleRepo: AgentRoleRepository;
   taskSubscriptionRepo: TaskSubscriptionRepository;
-  standupService: StandupReportService;
   heartbeatService: HeartbeatService;
   getPlannerService: () => StrategicPlannerService | null;
   getMainWindow: () => BrowserWindow | null;
@@ -245,7 +242,7 @@ export interface MissionControlDeps {
 export function setupMissionControlHandlers(deps: MissionControlDeps): void {
   mainWindowGetter = deps.getMainWindow;
 
-  const { db, agentRoleRepo, taskSubscriptionRepo, standupService, heartbeatService } = deps;
+  const { db, agentRoleRepo, taskSubscriptionRepo, heartbeatService } = deps;
   const core = new ControlPlaneCoreService(db);
   const automationProfileRepo = new AutomationProfileRepository(db);
   const heartbeatRunRepo = new HeartbeatRunRepository(db);
@@ -771,45 +768,6 @@ export function setupMissionControlHandlers(deps: MissionControlDeps): void {
     const validated = validateInput(UUIDSchema, agentRoleId, "agent role ID");
     return taskSubscriptionRepo.getSubscriptionsForAgent(validated);
   });
-
-  // ============ Standup Report Handlers ============
-
-  ipcMain.handle(IPC_CHANNELS.STANDUP_GENERATE, async (_, workspaceId: string) => {
-    checkRateLimit(IPC_CHANNELS.STANDUP_GENERATE);
-    const validated = validateInput(UUIDSchema, workspaceId, "workspace ID");
-    return standupService.generateReport(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.STANDUP_GET_LATEST, async (_, workspaceId: string) => {
-    const validated = validateInput(UUIDSchema, workspaceId, "workspace ID");
-    return standupService.getLatest(validated);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.STANDUP_LIST, async (_, workspaceId: string, limit?: number) => {
-    const validated = validateInput(UUIDSchema, workspaceId, "workspace ID");
-    return standupService.list({ workspaceId: validated, limit });
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.STANDUP_DELIVER,
-    async (_, reportId: string, channelType: string, channelId: string) => {
-      checkRateLimit(IPC_CHANNELS.STANDUP_DELIVER);
-      const delivery = validateInput(
-        StandupDeliveryRequestSchema,
-        { reportId, channelType, channelId },
-        "standup delivery request",
-      );
-      const report = await standupService.findById(delivery.reportId);
-      if (!report) {
-        throw new Error("Standup report not found");
-      }
-      await standupService.deliverReport(report, {
-        channelType: delivery.channelType,
-        channelId: delivery.channelId,
-      });
-      return { success: true };
-    },
-  );
 
   // ============ Company Ops / Planner ============
 

@@ -11,7 +11,7 @@
  *   `company:<id>`, else `unattributed`);
  * - task-completion history is not kept: it is episodic and lives in the archive.
  *
- * The open / due-soon lists are synchronous (Awareness, AutonomyEngine) and come from the
+ * The open / due-soon lists are synchronous (Awareness) and come from the
  * facts snapshot, which every write here refreshes before it returns.
  */
 import { createHash } from "crypto";

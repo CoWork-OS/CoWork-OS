@@ -1166,41 +1166,6 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     ]);
   });
 
-  it("evaluates the autonomy phase once per pulse for the pulse workspace", async () => {
-    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
-    const evaluateAutonomy = vi.fn(async () => true);
-    const service = createService({ evaluateAutonomy });
-
-    await service.triggerHeartbeat("agent-1");
-    expect(evaluateAutonomy).toHaveBeenCalledTimes(1);
-    expect(evaluateAutonomy).toHaveBeenCalledWith("workspace-1");
-
-    await service.triggerHeartbeat("agent-1");
-    expect(evaluateAutonomy).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not evaluate autonomy for deferred or out-of-hours pulses", async () => {
-    createAgent("agent-1", { heartbeatProfile: "dispatcher" });
-    const evaluateAutonomy = vi.fn(async () => true);
-    const service = createService({
-      evaluateAutonomy,
-      hasActiveForegroundTask: () => true,
-    });
-    await service.submitHeartbeatSignal({
-      agentRoleId: "agent-1",
-      workspaceId: "workspace-1",
-      signalFamily: "awareness_signal",
-      source: "hook",
-      fingerprint: "deferred-autonomy",
-      urgency: "medium",
-      confidence: 0.7,
-      reason: "Focus changed",
-    });
-    await service.start();
-    await vi.advanceTimersByTimeAsync(6_000);
-    expect(evaluateAutonomy).not.toHaveBeenCalled();
-  });
-
   it("suggests instead of creating a task when the shared workspace budget is spent", async () => {
     createAgent("agent-1", { heartbeatProfile: "dispatcher" });
     const dispatchBudget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 1 });
@@ -1313,7 +1278,7 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
   it("records heartbeat task dispatches in the shared budget, manual pulses included", async () => {
     createAgent("agent-1", { heartbeatProfile: "dispatcher" });
     const dispatchBudget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 1 });
-    dispatchBudget.tryConsume({ workspaceId: "workspace-1", source: "autonomy" });
+    dispatchBudget.tryConsume({ workspaceId: "workspace-1", source: "workflow_intelligence" });
     const service = createService({ dispatchBudget });
 
     // A manual pulse is user-initiated: it is never refused, but it is counted.
@@ -1321,7 +1286,7 @@ describe("HeartbeatService pulse scheduling and dispatch guards", () => {
     expect(result.taskCreated).toBe("task-1");
     expect(dispatchBudget.snapshot("workspace-1")).toMatchObject({
       dispatchesToday: 2,
-      bySource: { autonomy: 1, heartbeat: 1 },
+      bySource: { workflow_intelligence: 1, heartbeat: 1 },
     });
   });
 

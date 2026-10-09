@@ -144,7 +144,6 @@ function normalizeMemoryWriteApprovalMode(
 ): NonNullable<MemoryFeaturesSettings["memoryWriteApprovalMode"]> {
   switch (value) {
     case "curated_only":
-    case "external_only":
     case "background_only":
     case "all":
       return value;

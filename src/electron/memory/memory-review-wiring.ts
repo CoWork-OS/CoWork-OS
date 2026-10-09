@@ -10,7 +10,6 @@ import { MemoryCurationRepository } from "./MemoryCurationRepository";
 import { MemoryHealthService } from "./MemoryHealthService";
 import { MemoryReviewService } from "./MemoryReviewService";
 import { MemoryWriter } from "./MemoryWriter";
-import { SupermemoryService } from "./SupermemoryService";
 import { createMemoryStatementPort } from "./memory-statement-port";
 import { MemoryRepoService } from "./repo/MemoryRepoService";
 import { memoryRepoStatus } from "./repo/memory-repo-bootstrap";
@@ -41,10 +40,6 @@ export function createMemoryReviewService(db: Database.Database): MemoryReviewSe
 export function createMemoryHealthService(db: Database.Database): MemoryHealthService {
   return new MemoryHealthService({
     port: createMemoryStatementPort(db),
-    getSupermemoryStatus: () => {
-      const status = SupermemoryService.getConfigStatus();
-      return { enabled: status.enabled, connected: status.isConfigured };
-    },
     getChronicleEnabled: () => ChronicleSettingsManager.loadSettings().enabled === true,
     getMemoryRepoStatus: () => memoryRepoStatus(),
     getMemoryRepoDreams: () =>

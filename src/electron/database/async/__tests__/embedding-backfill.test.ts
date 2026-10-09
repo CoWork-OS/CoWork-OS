@@ -247,7 +247,7 @@ describe("embedding backfill writes", () => {
           "observation",
           "Deploy the worker after the release notes checklist passes review.",
           false,
-          { forceCapture: true, skipMemoryWriteGate: true, allowExternalMirror: false },
+          { forceCapture: true, skipMemoryWriteGate: true },
         );
         expect(memory).not.toBeNull();
         if (execute) {

@@ -62,7 +62,6 @@ export interface MemorySourcesCounts {
     imported: number;
     screenContext: number;
   };
-  supermemoryRemoteRefs: number;
   knowledgeGraph: {
     entities: number;
     edges: number;
@@ -109,7 +108,6 @@ export function collectMemorySources(
   const result: MemorySourcesCounts = {
     facts: { total: 0, bySource: [], byStore: [], imported: 0 },
     archive: { total: 0, private: 0, byType: [], byOrigin: [], imported: 0, screenContext: 0 },
-    supermemoryRemoteRefs: 0,
     knowledgeGraph: { entities: 0, edges: 0, observations: 0, byType: [] },
   };
 
@@ -152,14 +150,6 @@ export function collectMemorySources(
           workspaceId,
         )
       : [];
-  }
-
-  if (tableExists(db, "supermemory_remote_refs")) {
-    result.supermemoryRemoteRefs = count(
-      db,
-      "SELECT count(*) AS n FROM supermemory_remote_refs WHERE workspace_id = ?",
-      workspaceId,
-    );
   }
 
   if (tableExists(db, "kg_entities")) {

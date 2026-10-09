@@ -35,7 +35,6 @@ function sources(overrides: Partial<MemorySourcesReport> = {}): MemorySourcesRep
     },
     imports: { archiveRows: 3, facts: 2 },
     chronicle: { enabled: true, archiveRows: 1 },
-    supermemory: { enabled: true, connected: false, remoteRefs: 0 },
     knowledgeGraph: {
       entities: 4,
       edges: 2,
@@ -81,7 +80,6 @@ describe("MemorySourcesView", () => {
     expect(html).toContain("custom_store");
     expect(html).toContain("Screen context (Chronicle)");
     expect(html).toContain("3 archive entries, 2 facts");
-    expect(html).toContain("On, not connected (no API key)");
     expect(html).toContain("4 entities, 2 relationships, 1 observations");
     expect(html).toContain(">Refresh<");
   });

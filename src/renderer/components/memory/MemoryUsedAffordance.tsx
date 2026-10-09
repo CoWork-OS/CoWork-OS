@@ -38,7 +38,6 @@ const LANE_BADGES: Record<
   { label: string; tone: SourceTone }
 > = {
   archive: { label: "Task history", tone: "neutral" },
-  external: { label: "Supermemory", tone: "warning" },
   repo: { label: "Memory folder", tone: "success" },
 };
 
@@ -124,23 +123,15 @@ export async function resolveMemoryUsedEntries(
           ...(text ? {} : { unavailable: true }),
         };
       }
-      if (ref.lane === "repo") {
-        const line = repoLines.get(ref.ref);
-        const text = line?.text ? snippet(line.text) : "";
-        return {
-          ref: ref.ref,
-          lane: "repo",
-          text: text
-            ? `${text}${line?.by === "agent" ? " (saved by the agent)" : ""}`
-            : `${repoRefLabel(ref.id)} in your memory folder.`,
-          badge: LANE_BADGES.repo,
-        };
-      }
+      const line = repoLines.get(ref.ref);
+      const text = line?.text ? snippet(line.text) : "";
       return {
         ref: ref.ref,
-        lane: "external",
-        text: `Context from the external memory provider (${ref.id}).`,
-        badge: LANE_BADGES.external,
+        lane: "repo",
+        text: text
+          ? `${text}${line?.by === "agent" ? " (saved by the agent)" : ""}`
+          : `${repoRefLabel(ref.id)} in your memory folder.`,
+        badge: LANE_BADGES.repo,
       };
     }),
   );

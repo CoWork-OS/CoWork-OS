@@ -427,8 +427,6 @@ import {
   MAX_PERSONALITY_PREVIEW_BYTES,
   AwarenessConfigSchema,
   AwarenessUpdateBeliefSchema,
-  AutonomyConfigSchema,
-  AutonomyUpdateDecisionSchema,
   ProviderApiKeySchema,
   ProviderBaseUrlSchema,
 } from "../utils/validation";
@@ -477,7 +475,6 @@ import { assertYouTubeIngestionAccess, createYouTubeIngestionOptions } from "../
 
 import { getCustomSkillLoader } from "../agent/custom-skill-loader";
 import { getAwarenessService } from "../awareness/AwarenessService";
-import { getAutonomyEngine } from "../awareness/AutonomyEngine";
 import { CustomSkill, SkillsConfig } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
@@ -566,8 +563,6 @@ import { MemoryObservationService } from "../memory/MemoryObservationService";
 import { MemorySynthesizer } from "../memory/MemorySynthesizer";
 import { CuratedMemoryService } from "../memory/CuratedMemoryService";
 import { promoteObservationToMemoryFolder } from "../memory/repo/memory-repo-producers";
-import { SupermemoryService } from "../memory/SupermemoryService";
-import { SupermemoryRemoteRefRepository } from "../memory/SupermemoryRemoteRefRepository";
 import { MemoryWriteGate } from "../memory/MemoryWriteGate";
 import { UserProfileService } from "../memory/UserProfileService";
 import {
@@ -582,7 +577,6 @@ import { AdaptiveStyleEngine } from "../memory/AdaptiveStyleEngine";
 import type { MemorySettings } from "../database/repositories";
 import { VoiceSettingsManager } from "../voice/voice-settings-manager";
 import { getVoiceService } from "../voice/VoiceService";
-import { AgentPerformanceReviewService } from "../reports/AgentPerformanceReviewService";
 import { EvalService } from "../eval/eval-repository-facades";
 import {
   createUniqueScopedTempWorkspaceDirectorySync,
@@ -636,42 +630,7 @@ function buildPptxContentFromPreview(preview: PptxPresentationPreview): string {
 }
 
 const execFileAsync = promisify(execFile);
-const SupermemorySettingsInputSchema = z
-  .object({
-    enabled: z.boolean(),
-    apiKey: z.string().trim().max(500).optional(),
-    baseUrl: z
-      .string()
-      .trim()
-      .url()
-      .refine((value) => {
-        try {
-          const parsed = new URL(value);
-          return parsed.protocol === "https:" && parsed.hostname === "api.supermemory.ai";
-        } catch {
-          return false;
-        }
-      }, "Supermemory base URL must be https://api.supermemory.ai")
-      .optional(),
-    containerTagTemplate: z.string().trim().min(1).max(200).optional(),
-    includeProfileInPrompt: z.boolean().optional(),
-    mirrorMemoryWrites: z.boolean().optional(),
-    searchMode: z.enum(["hybrid", "memories"]).optional(),
-    rerank: z.boolean().optional(),
-    threshold: z.number().min(0).max(1).optional(),
-    customContainers: z
-      .array(
-        z
-          .object({
-            tag: z.string().trim().min(1).max(100),
-            description: z.string().trim().max(240).optional(),
-          })
-          .strict(),
-      )
-      .max(50)
-      .optional(),
-  })
-  .strict();
+
 const MemoryObservationStringArraySchema = z.array(z.string().trim().min(1).max(240)).max(12);
 const MemoryObservationPatchSchema = z
   .object({
@@ -1204,8 +1163,6 @@ rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_CREATE, RATE_LIMIT_CONFIGS.limited)
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_UPDATE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_DELETE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TEAM_ITEM_MOVE, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.REVIEW_GENERATE, RATE_LIMIT_CONFIGS.limited);
-rateLimiter.configure(IPC_CHANNELS.REVIEW_DELETE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.EVAL_RUN_SUITE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.WORK_SESSION_ROLLOUT_GET, RATE_LIMIT_CONFIGS.frequent);
@@ -1654,7 +1611,6 @@ export async function setupIpcHandlers(
   const teamRunRepo = new AgentTeamRunRepository(db);
   const teamItemRepo = new AgentTeamItemRepository(db);
   const teamThoughtRepo = new AgentTeamThoughtRepository(db);
-  const reviewService = new AgentPerformanceReviewService(db);
   const evalService = new EvalService(db);
   const taskLabelRepo = new TaskLabelRepository(db);
   const workingStateRepo = new WorkingStateRepository(db);
@@ -10196,43 +10152,6 @@ export async function setupIpcHandlers(
     return agentDaemon.ensureCollaborativeRunForParentTask(validated) || null;
   });
 
-  // Agent Performance Reviews (Mission Control)
-  ipcMain.handle(IPC_CHANNELS.REVIEW_GENERATE, async (_, request: Any) => {
-    checkRateLimit(IPC_CHANNELS.REVIEW_GENERATE);
-    const workspaceId = validateInput(UUIDSchema, request.workspaceId, "workspace ID");
-    const agentRoleId = validateInput(UUIDSchema, request.agentRoleId, "agent role ID");
-    if (!(await agentRoleRepo.findById(agentRoleId))) {
-      throw new Error("Agent role not found");
-    }
-    const periodDays = request.periodDays !== undefined ? Number(request.periodDays) : undefined;
-    return reviewService.generate({ workspaceId, agentRoleId, periodDays });
-  });
-
-  ipcMain.handle(
-    IPC_CHANNELS.REVIEW_GET_LATEST,
-    async (_, workspaceId: string, agentRoleId: string) => {
-      const validatedWorkspaceId = validateInput(UUIDSchema, workspaceId, "workspace ID");
-      const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-      return reviewService.getLatest(validatedWorkspaceId, validatedRoleId);
-    },
-  );
-
-  ipcMain.handle(IPC_CHANNELS.REVIEW_LIST, async (_, query: Any) => {
-    const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, "workspace ID");
-    const agentRoleId = query.agentRoleId
-      ? validateInput(UUIDSchema, query.agentRoleId, "agent role ID")
-      : undefined;
-    const limit = query.limit !== undefined ? Number(query.limit) : undefined;
-    return reviewService.list(validatedWorkspaceId, agentRoleId, limit);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.REVIEW_DELETE, async (_, id: string) => {
-    checkRateLimit(IPC_CHANNELS.REVIEW_DELETE);
-    const validated = validateInput(UUIDSchema, id, "review ID");
-    const success = await reviewService.delete(validated);
-    return { success };
-  });
-
   // Eval Suites / Runs (Reliability Flywheel)
   ipcMain.handle(IPC_CHANNELS.EVAL_LIST_SUITES, async (_, options?: { windowDays?: number }) => {
     const windowDays =
@@ -10670,97 +10589,6 @@ export async function setupIpcHandlers(
             beliefs: mergedBeliefs,
             wakeReasons: [...mergedWakeReasons],
           };
-        },
-        getAutonomyState: async (currentWorkspaceId) => {
-          if (!allMode) {
-            return getAutonomyEngine().getWorldModel(currentWorkspaceId);
-          }
-          const states = await Promise.all(
-            briefingWorkspaceIds.map(async (id) => ({
-              id,
-              state: getAutonomyEngine().getWorldModel(id),
-            })),
-          );
-          const mergedGoals: Any[] = [];
-          const mergedProjects: Any[] = [];
-          const mergedOpenLoops: Any[] = [];
-          const mergedRoutines: Any[] = [];
-          const mergedBeliefs: Any[] = [];
-          const mergedCurrentPriorities: string[] = [];
-          const mergedContinuityNotes: string[] = [];
-          for (const entry of states) {
-            const state = entry.state;
-            if (!state) continue;
-            const label = labelForWorkspace(entry.id);
-            mergedGoals.push(
-              ...(state.goals || []).map((goal: Any) => ({
-                ...goal,
-                title: `[${label}] ${goal.title}`,
-                workspaceId: entry.id,
-              })),
-            );
-            mergedProjects.push(
-              ...(state.projects || []).map((project: Any) => ({
-                ...project,
-                title: `[${label}] ${project.title}`,
-                workspaceId: entry.id,
-              })),
-            );
-            mergedOpenLoops.push(
-              ...(state.openLoops || []).map((loop: Any) => ({
-                ...loop,
-                title: `[${label}] ${loop.title}`,
-                workspaceId: entry.id,
-              })),
-            );
-            mergedRoutines.push(
-              ...(state.routines || []).map((routine: Any) => ({
-                ...routine,
-                title: `[${label}] ${routine.title}`,
-                workspaceId: entry.id,
-              })),
-            );
-            mergedBeliefs.push(...(state.beliefs || []));
-            mergedCurrentPriorities.push(
-              ...(state.currentPriorities || []).map(
-                (priority: string) => `[${label}] ${priority}`,
-              ),
-            );
-            mergedContinuityNotes.push(
-              ...(state.continuityNotes || []).map((note: string) => `[${label}] ${note}`),
-            );
-          }
-          return {
-            generatedAt: Date.now(),
-            workspaceId: ALL_WORKSPACES_ID,
-            currentFocus: "All workspaces",
-            goals: mergedGoals,
-            projects: mergedProjects,
-            openLoops: mergedOpenLoops,
-            routines: mergedRoutines,
-            beliefs: mergedBeliefs,
-            currentPriorities: mergedCurrentPriorities,
-            continuityNotes: mergedContinuityNotes,
-          };
-        },
-        getAutonomyDecisions: async (currentWorkspaceId) => {
-          if (!allMode) {
-            return getAutonomyEngine().listDecisions(currentWorkspaceId);
-          }
-          const decisions = await Promise.all(
-            briefingWorkspaceIds.map(async (id) => ({
-              id,
-              decisions: getAutonomyEngine().listDecisions(id),
-            })),
-          );
-          return decisions.flatMap((entry) =>
-            (entry.decisions || []).map((decision: Any) => ({
-              ...decision,
-              title: `[${labelForWorkspace(entry.id)}] ${decision.title}`,
-              description: `[${labelForWorkspace(entry.id)}] ${decision.description}`,
-              workspaceId: entry.id,
-            })),
-          );
         },
         log: (...args: unknown[]) => logger.info("[Briefing]", ...args),
       },
@@ -13112,9 +12940,6 @@ function setupMemoryHandlers(
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_UPDATE_BELIEF, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_DELETE_BELIEF, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.AUTONOMY_UPDATE_DECISION, RATE_LIMIT_CONFIGS.limited);
-  rateLimiter.configure(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, RATE_LIMIT_CONFIGS.standard);
 
   // Get memory settings for a workspace
   ipcMain.handle(IPC_CHANNELS.MEMORY_GET_SETTINGS, async (_, workspaceId: string) => {
@@ -13277,77 +13102,6 @@ function setupMemoryHandlers(
       }
     },
   );
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_GET_SETTINGS, async () => {
-    try {
-      return SupermemoryService.getSettingsView();
-    } catch (error) {
-      logger.error("[Supermemory] Failed to get settings:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_GET_STATUS, async () => {
-    try {
-      const mirroredCopies = await SupermemoryRemoteRefRepository.get()
-        ?.count()
-        .catch(() => undefined);
-      return {
-        ...SupermemoryService.getConfigStatus(),
-        ...(typeof mirroredCopies === "number" ? { mirroredCopies } : {}),
-      };
-    } catch (error) {
-      logger.error("[Supermemory] Failed to get status:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_SAVE_SETTINGS, async (_event, settings: Any) => {
-    checkRateLimit(IPC_CHANNELS.SUPERMEMORY_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
-    try {
-      const validated = validateInput(
-        SupermemorySettingsInputSchema,
-        settings,
-        "supermemory settings",
-      );
-      SupermemoryService.saveSettings(validated);
-      return { success: true };
-    } catch (error) {
-      logger.error("[Supermemory] Failed to save settings:", error);
-      throw error;
-    }
-  });
-
-  // "Disconnect & purge" (SEC-17): delete the remote copies CoWork recorded, then disable.
-  // No payload; destructive and remote, so rate-limited like a settings save.
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE, async () => {
-    checkRateLimit(IPC_CHANNELS.SUPERMEMORY_DISCONNECT_PURGE, RATE_LIMIT_CONFIGS.limited);
-    try {
-      return await SupermemoryService.disconnectAndPurge();
-    } catch (error) {
-      logger.error("[Supermemory] Disconnect and purge failed:", error);
-      return {
-        success: false,
-        disabled: false,
-        forgotten: 0,
-        failed: 0,
-        errors: [],
-        error: error instanceof Error ? error.message : "Disconnect and purge failed",
-      };
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SUPERMEMORY_TEST_CONNECTION, async () => {
-    try {
-      return await SupermemoryService.testConnection();
-    } catch (error) {
-      logger.error("[Supermemory] Failed to test connection:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to reach Supermemory",
-      };
-    }
-  });
 
   // Search memories
   ipcMain.handle(IPC_CHANNELS.MEMORY_SEARCH, async (_, rawData: unknown) => {
@@ -13809,78 +13563,6 @@ function setupMemoryHandlers(
       }
     },
   );
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_GET_CONFIG, async () => {
-    try {
-      return getAutonomyEngine().getConfig();
-    } catch (error) {
-      logger.error("[Autonomy] Failed to get config:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, async (_, config: unknown) => {
-    checkRateLimit(IPC_CHANNELS.AUTONOMY_SAVE_CONFIG, RATE_LIMIT_CONFIGS.limited);
-    try {
-      const validated = validateInput(AutonomyConfigSchema, config, "autonomy config");
-      return getAutonomyEngine().saveConfig(validated as Any);
-    } catch (error) {
-      logger.error("[Autonomy] Failed to save config:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_GET_STATE, async (_, workspaceId?: string) => {
-    try {
-      return getAutonomyEngine().getWorldModel(workspaceId);
-    } catch (error) {
-      logger.error("[Autonomy] Failed to get state:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_LIST_DECISIONS, async (_, workspaceId?: string) => {
-    try {
-      return getAutonomyEngine().listDecisions(workspaceId);
-    } catch (error) {
-      logger.error("[Autonomy] Failed to list decisions:", error);
-      return [];
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_LIST_ACTIONS, async (_, workspaceId?: string) => {
-    try {
-      return getAutonomyEngine().listActions(workspaceId);
-    } catch (error) {
-      logger.error("[Autonomy] Failed to list actions:", error);
-      return [];
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_UPDATE_DECISION, async (_, data: unknown) => {
-    checkRateLimit(IPC_CHANNELS.AUTONOMY_UPDATE_DECISION, RATE_LIMIT_CONFIGS.limited);
-    try {
-      const validated = validateInput(
-        AutonomyUpdateDecisionSchema,
-        data,
-        "autonomy update decision",
-      );
-      return getAutonomyEngine().updateDecision(validated.id, validated.patch || {});
-    } catch (error) {
-      logger.error("[Autonomy] Failed to update decision:", error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, async (_, workspaceId?: string) => {
-    checkRateLimit(IPC_CHANNELS.AUTONOMY_TRIGGER_EVALUATION, RATE_LIMIT_CONFIGS.standard);
-    try {
-      return await getAutonomyEngine().triggerEvaluation(workspaceId);
-    } catch (error) {
-      logger.error("[Autonomy] Failed to trigger evaluation:", error);
-      throw error;
-    }
-  });
 
   // ChatGPT Import handler
   let activeImportAbort: AbortController | null = null;

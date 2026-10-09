@@ -8,7 +8,7 @@ describe("resetUnreadableSettings", () => {
       "awareness-state": "decryption_failed",
       webaccess: "checksum_mismatch",
       "subconscious-migration-v1": "os_encryption_unavailable",
-      "autonomy-chief-of-staff": "success",
+      pulse: "success",
     };
     const repository = {
       checkHealth: vi.fn((category: SettingsCategory) => statuses[category] || "not_found"),
@@ -19,7 +19,7 @@ describe("resetUnreadableSettings", () => {
       "awareness-state",
       "webaccess",
       "subconscious-migration-v1",
-      "autonomy-chief-of-staff",
+      "pulse",
     ]);
 
     expect(result.resetCategories).toEqual(["webaccess"]);

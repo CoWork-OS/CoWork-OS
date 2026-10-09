@@ -168,7 +168,7 @@ Click any task card to see its full details:
 Task details now surface the new runtime visibility signals that used to live only in background services:
 
 - **What Cowork learned**: the completion card shows memory captured, playbook reinforcement, skill proposal state, evidence links, Chronicle-backed `screen_context` evidence when used, and the next action when a human review is needed
-- **Unified recall**: task detail search spans tasks, messages and the conversation index (verbatim user and assistant messages, tool output, summaries), files, workspace notes, memory items and archive memories, Chronicle `screen_context`, knowledge-graph context and, when Supermemory is connected and the workspace allows network access, Supermemory, from one surface. Tasks and activity are searched over every row of the workspace (not only recent ones) and ranked by how many query terms match; the lanes are fused by reciprocal rank. Searching records no memory use and starts no index sync; notes are read through the workspace's access profile. Details: [Memory Engine](memory-engine.md) §4b
+- **Unified recall**: task detail search spans tasks, messages and the conversation index (verbatim user and assistant messages, tool output, summaries), files, workspace notes, memory items and archive memories, Chronicle `screen_context`, knowledge-graph context, from one surface. Tasks and activity are searched over every row of the workspace (not only recent ones) and ranked by how many query terms match; the lanes are fused by reciprocal rank. Searching records no memory use and starts no index sync; notes are read through the workspace's access profile. Details: [Memory Engine](memory-engine.md) §4b
 - **Shell session status**: long-lived shell sessions show when cwd/env/alias state is being retained or reset, so operator workflows are easier to trust
 - **Model routing status**: the active provider/model, route reason, and fallback transitions are visible in the task UI and settings surfaces
 
@@ -263,27 +263,6 @@ Use this together with [Managed Agents](managed-agents.md) when testing reusable
 
 ---
 
-## Performance Reviews
-
-Access from the **Reviews** button in the header.
-
-- **Select agent** and review period (1-90 days, default 7)
-- **Generate review**: Analyzes task completion rate, error rates, and autonomy effectiveness
-- **View history**: Browse previous reviews per agent
-- **Apply recommendation**: Auto-update an agent's autonomy level based on the review
-
----
-
-## Standup Reports
-
-Access from the **Standup** button in the header.
-
-- **Generate standup**: Auto-generate a summary of recent workspace activity
-- **View reports**: Browse up to 30 recent standup reports
-- **Metrics included**: Completed tasks, in-progress tasks, blocked tasks with titles and statuses
-
----
-
 ## Real-Time Updates
 
 Mission Control subscribes to live event streams — no manual refresh needed:
@@ -319,5 +298,3 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
 | Filter feed by agent                | Click an agent chip in the feed panel                                      |
 | Create a team                       | Header > Teams > create team                                               |
-| Generate a performance review       | Header > Reviews > select agent > Generate                                 |
-| Generate a standup report           | Header > Standup > Generate Standup Report                                 |

@@ -174,7 +174,6 @@ describeWithSqlite("memory producers", () => {
     const capture = (content: string, options: Record<string, unknown> = {}) =>
       MemoryService.capture("ws-1", undefined, "observation", content, false, {
         skipMemoryWriteGate: true,
-        allowExternalMirror: false,
         ...options,
       });
 

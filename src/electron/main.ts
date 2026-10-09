@@ -94,7 +94,6 @@ import { NumbatService } from "./security/numbat";
 import { setupWorktreeHandlers } from "./ipc/worktree-handlers";
 import { ComparisonService } from "./git/ComparisonService";
 
-import { StandupReportService } from "./reports/StandupReportService";
 import { UsageInsightsProjector } from "./reports/UsageInsightsProjector";
 import { describeCronRunStatus } from "../shared/cron-outcomes";
 import { PulseService } from "./telemetry/pulse-service";
@@ -284,7 +283,6 @@ import {
 } from "./location/DesktopLocationService";
 import { AmbientMonitoringService } from "./monitoring/AmbientMonitoringService";
 import { AwarenessService } from "./awareness/AwarenessService";
-import { AutonomyEngine } from "./awareness/AutonomyEngine";
 import { SubconsciousLoopService } from "./subconscious/SubconsciousLoopService";
 import { ManagedSessionService } from "./managed/ManagedSessionService";
 import { WorkContextService } from "./workspaces/workspaces-repository-facades";
@@ -386,7 +384,6 @@ let ambientMonitoringService: AmbientMonitoringService | null = null;
 let mailboxForwardingService: MailboxForwardingService | null = null;
 let heartbeatService: HeartbeatService | null = null;
 let awarenessService: AwarenessService | null = null;
-let autonomyEngine: AutonomyEngine | null = null;
 let subconsciousLoopService: SubconsciousLoopService | null = null;
 // CrossSignal, Feedback and Lore: run only while this process owns the kit-writer lease.
 let kitWriterOwnership: KitWriterOwnership | null = null;
@@ -1064,7 +1061,6 @@ function logCron(level: "debug" | "info" | "warn" | "error", msg: string, data?:
 
 const RESETTABLE_SECURE_SETTINGS_CATEGORIES: SettingsCategory[] = [
   "subconscious-migration-v1",
-  "autonomy-chief-of-staff",
   "awareness-state",
   "webaccess",
   // PACT business grants and pending sign-ins can be re-consented; the runtime marks grants whose
@@ -3102,12 +3098,6 @@ if (isMacSafeStorageMigrationWorker) {
           getMemoryFeaturesSettings: () => MemoryFeaturesManager.loadSettings(),
           getAwarenessSummary: (workspaceId?: string) =>
             awarenessService?.getSummary(workspaceId) || null,
-          getAutonomyState: (workspaceId?: string) =>
-            autonomyEngine?.getWorldModel(workspaceId) || null,
-          getAutonomyDecisions: (workspaceId?: string) =>
-            autonomyEngine?.listDecisions(workspaceId) || [],
-          evaluateAutonomy: async (workspaceId: string) =>
-            (await autonomyEngine?.evaluate(workspaceId)) ?? false,
           listActiveSuggestions: (workspaceId: string) =>
             ProactiveSuggestionsService.listActive(workspaceId, {
               includeDeferred: true,
@@ -3156,58 +3146,8 @@ if (isMacSafeStorageMigrationWorker) {
           await submitHeartbeatSignalForAll({ text, mode, source: "hook" });
         });
 
-        autonomyEngine = AutonomyEngine.initialize({
-          getDefaultWorkspaceId: () => {
-            const fallbackTemp = workspaceRepo
-              .findAll()
-              .find((workspace) => workspace.isTemp || isTempWorkspaceId(workspace.id));
-            return resolveDefaultWorkspace()?.id ?? fallbackTemp?.id ?? TEMP_WORKSPACE_ID;
-          },
-          listWorkspaceIds: () =>
-            workspaceRepo
-              .findAll()
-              .filter((workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id))
-              .map((workspace) => workspace.id),
-          createTask: async (workspaceId, title, prompt, dispatchOptions) =>
-            agentDaemon.createTask({
-              title,
-              prompt,
-              workspaceId,
-              source: "hook",
-              agentConfig: {
-                allowUserInput: false,
-                backgroundDispatchTicket: dispatchOptions?.backgroundDispatchTicket,
-              },
-            }),
-          hasActiveManualTask: (workspaceId) =>
-            hasActiveForegroundTask(workspaceId) || hasActiveForegroundTask(),
-          recordActivity: ({ workspaceId, title, description, metadata }) => {
-            void activityRepo
-              .create({
-                workspaceId,
-                actorType: "system",
-                activityType: "info",
-                title,
-                description,
-                metadata,
-              })
-              .catch((error: unknown) => logger.warn("Failed to record activity:", error));
-          },
-          proposeSuggestion: ({ workspaceId, decision }) =>
-            ProactiveSuggestionsService.propose(
-              ProactiveSuggestionsService.autonomyDecisionProposal(workspaceId, decision),
-            ),
-          log: (...args: unknown[]) => logger.debug("[Autonomy]", ...args),
-        });
-        if (startupQuietMode) {
-          logger.info("AutonomyEngine initialized (quiet mode; not started)");
-        } else {
-          await autonomyEngine.start();
-          logger.info("AutonomyEngine initialized");
-        }
-
         // Initialize AwarenessService after Heartbeat so its debounced wakes reach the pulse.
-        // Awareness is a signal producer only: AutonomyEngine is evaluated by the pulse.
+        // Awareness is a signal producer only.
         try {
           awarenessService = AwarenessService.initialize({
             getDefaultWorkspaceId: () => {
@@ -3268,13 +3208,11 @@ if (isMacSafeStorageMigrationWorker) {
           const db = dbManager.getDatabase();
           const agentRoleRepo = new AgentRoleRepository(db);
           const taskSubscriptionRepo = new TaskSubscriptionRepository(db);
-          const standupService = new StandupReportService(db);
 
           setupMissionControlHandlers({
             db,
             agentRoleRepo,
             taskSubscriptionRepo,
-            standupService,
             heartbeatService,
             getPlannerService: () => strategicPlannerService,
             getMainWindow: () => mainWindow,
@@ -4017,10 +3955,6 @@ if (isMacSafeStorageMigrationWorker) {
               getMailboxServiceInstance()?.getMailboxDigest(workspaceId) || null,
             getAwarenessSummary: async (workspaceId) =>
               awarenessService?.getSummary(workspaceId) || null,
-            getAutonomyState: async (workspaceId) =>
-              autonomyEngine?.getWorldModel(workspaceId) || null,
-            getAutonomyDecisions: async (workspaceId) =>
-              autonomyEngine?.listDecisions(workspaceId) || [],
             deliverToChannel: async (params) => {
               await channelGateway.sendMessage?.(
                 params.channelType as Any,
@@ -4524,13 +4458,6 @@ if (isMacSafeStorageMigrationWorker) {
           run: async () => {
             await awarenessService?.stop();
             awarenessService = null;
-          },
-        },
-        {
-          name: "autonomy",
-          run: async () => {
-            await autonomyEngine?.stop();
-            autonomyEngine = null;
           },
         },
         {

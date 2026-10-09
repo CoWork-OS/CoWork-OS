@@ -762,8 +762,6 @@ export class MemorySynthesizer {
       curatedMemoryEnabled: settings.curatedMemoryEnabled !== false,
       contextPackInjectionEnabled: !!settings.contextPackInjectionEnabled,
       workspaceCanRead: workspaceCanRead !== false,
-      // External providers are a network call; the preview shows local memory only.
-      externalNetworkAllowed: false,
     });
 
     let layers: MemoryContextLayers = { l0: null, l1: null, source: "none" };

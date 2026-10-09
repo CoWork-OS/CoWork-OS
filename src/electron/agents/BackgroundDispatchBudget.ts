@@ -1,8 +1,8 @@
 /**
  * BackgroundDispatchBudget — the one budget/cooldown authority for background task creation.
  *
- * Heartbeat dispatch, AutonomyEngine (chief of staff), Workflow Intelligence auto-dispatch and
- * the Strategic Planner's scheduled runs all create tasks the user did not ask for. Each used to
+ * Heartbeat dispatch, Workflow Intelligence auto-dispatch and the Strategic Planner's scheduled
+ * runs all create tasks the user did not ask for. Each used to
  * keep its own budget, so together they could create several times the Heartbeat limit per day.
  * They now consume from one per-workspace daily budget (sized like Heartbeat's default
  * `maxDispatchesPerDay`) and share a per-entity cooldown, so two producers cannot both create a
@@ -14,11 +14,7 @@
  * implementation is retained for isolated tests; per-agent limits still apply on top.
  */
 
-export type BackgroundDispatchSource =
-  | "heartbeat"
-  | "autonomy"
-  | "workflow_intelligence"
-  | "strategic_planner";
+export type BackgroundDispatchSource = "heartbeat" | "workflow_intelligence" | "strategic_planner";
 
 /** Same as Heartbeat's default `maxDispatchesPerDay`. */
 export const DEFAULT_WORKSPACE_DISPATCHES_PER_DAY = 6;

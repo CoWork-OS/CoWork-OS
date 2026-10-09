@@ -126,7 +126,6 @@ export interface MemoryClearSummary {
 
 /** Host workflows the browser preview may not have yet, named in the tab's notice. */
 export const BROWSER_PENDING_FEATURES: ReadonlyArray<readonly [method: string, label: string]> = [
-  ["getSupermemoryStatus", "external memory setup"],
   ["getWorkspaceKitStatus", "workspace kit management"],
   ["getAwarenessConfig", "awareness"],
 ];

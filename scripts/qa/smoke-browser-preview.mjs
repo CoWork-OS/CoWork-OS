@@ -810,7 +810,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByRole("button", { name: /^Notifications(, \d+ unread)?$/ }).click();
 
     await openMoreItem("Mission Control");
-    for (const name of ["Teams", "Reviews", "Check-in"]) {
+    for (const name of ["Teams"]) {
       const button = page.getByRole("button", { name, exact: true });
       assert.equal(
         await button.isDisabled(),

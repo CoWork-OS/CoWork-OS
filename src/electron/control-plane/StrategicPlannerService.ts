@@ -76,7 +76,7 @@ interface StrategicPlannerServiceDeps {
   agentDaemon?: AgentDaemon;
   log?: (...args: unknown[]) => void;
   recordAutomationOutcome?: (outcome: CreateAutomationRunOutcomeInput) => Promise<unknown>;
-  /** Shared background dispatch budget (Heartbeat, AutonomyEngine, WI, Strategic Planner). */
+  /** Shared background dispatch budget (Heartbeat, WI, Strategic Planner). */
   dispatchBudget?: BackgroundDispatchBudgetAuthority;
 }
 
@@ -691,8 +691,8 @@ export class StrategicPlannerService {
       : plannerAgent;
     if (!dispatchAgent) return null;
 
-    // Scheduled planner runs create tasks from the shared background budget (with Heartbeat,
-    // AutonomyEngine and Workflow Intelligence). Over budget, the issue stays in the backlog
+    // Scheduled planner runs create tasks from the shared background budget (with Heartbeat
+    // and Workflow Intelligence). Over budget, the issue stays in the backlog
     // for a later run. Manual runs are recorded but never refused.
     const budget = this.deps.dispatchBudget || getBackgroundDispatchBudget();
     const grant = await budget.tryConsume({

@@ -2,12 +2,10 @@
  * The agent's memory tools (audit §8.3, docs/memory-engine.md):
  *
  *  - `memory_recall`   one recall over facts, the archive, earlier conversations, notes,
- *                      the knowledge graph and (when allowed) Supermemory (MemoryRecall);
+ *                      the knowledge graph (MemoryRecall);
  *  - `memory_remember` durable facts through MemoryWriter (`memory_items`); episodic
  *                      kinds (`outcome`, `error`, `note`) go to the archive; scope
- *                      `external` saves to Supermemory only;
  *  - `memory_forget`   a real delete of a memory item, an archive row of this workspace
- *                      or (scope `external` / `external:` ids) a Supermemory memory;
  *  - `context_recall`  the active task's earlier conversation after compaction.
  *
  * The 16 tools these replaced were hidden aliases for one release and have been retired
@@ -30,7 +28,6 @@ import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import { MemoryWriter, type MemoryWriteResult } from "../../memory/MemoryWriter";
 import { MemoryItemsHubService } from "../../memory/MemoryItemsHubService";
 import { DurableContextService } from "../../memory/DurableContextService";
-import { SupermemoryService } from "../../memory/SupermemoryService";
 import {
   DEFAULT_MEMORY_RECALL_SCOPES,
   MEMORY_RECALL_DEFAULT_LIMIT,
@@ -231,7 +228,6 @@ export interface MemoryRememberToolInput {
 export interface MemoryForgetToolInput {
   id?: string;
   match?: string;
-  /** `external`: forget the Supermemory memory whose text is `match`. */
   scope?: string;
   reason?: string;
 }
@@ -240,27 +236,6 @@ export interface ContextRecallToolInput {
   query?: string;
   id?: string;
   limit?: number;
-}
-
-const SUPERMEMORY_UNAVAILABLE = "Supermemory is not connected or network access is off.";
-
-/**
- * Why the workspace's memory settings refuse an external (Supermemory) write, or null when
- * they allow it. Unreadable settings refuse (fail closed).
- */
-async function externalMemoryWriteRefusal(workspaceId: string): Promise<string | null> {
-  try {
-    const settings = await MemoryService.getSettings(workspaceId);
-    if (!settings.enabled || settings.privacyMode === "disabled") {
-      return "Memory is turned off for this workspace; nothing was saved externally.";
-    }
-    if (settings.privacyMode === "strict") {
-      return "This workspace keeps memories private (strict privacy); external memory is not written.";
-    }
-    return null;
-  } catch {
-    return "Workspace memory settings could not be read; nothing was saved externally.";
-  }
 }
 
 export class MemoryTools {
@@ -292,8 +267,7 @@ export class MemoryTools {
             scopes: {
               type: "array",
               items: { type: "string", enum: [...MEMORY_RECALL_SCOPES] },
-              description:
-                "Default memory, conversations, knowledge. external = Supermemory, when connected.",
+              description: "Default memory, conversations, knowledge.",
             },
             kinds: {
               type: "array",
@@ -336,9 +310,9 @@ export class MemoryTools {
             },
             scope: {
               type: "string",
-              enum: ["workspace", "global", "task", "external"],
+              enum: ["workspace", "global", "task"],
               description:
-                "global: about the user, everywhere (default: identity, preference, correction); workspace: this project (default); task: this task; external: Supermemory only.",
+                "global: about the user, everywhere (default: identity, preference, correction); workspace: this project (default); task: this task.",
             },
             subject: {
               type: "string",
@@ -368,14 +342,9 @@ export class MemoryTools {
           properties: {
             id: {
               type: "string",
-              description: "Id from memory_recall (memory:, archive:, external:).",
+              description: "Id from memory_recall (memory:, archive:).",
             },
             match: { type: "string", description: "Text of the memory, when you have no id." },
-            scope: {
-              type: "string",
-              enum: ["external"],
-              description: "external: forget the Supermemory memory with this match text.",
-            },
             reason: { type: "string", description: "Why it should be forgotten." },
           },
           required: [],
@@ -427,9 +396,6 @@ export class MemoryTools {
     if (!query && ids.length === 0 && !scopes.includes("memory")) {
       return this.recallError(tool, "Provide a query (or ids to expand).");
     }
-    const externalRequested = scopes.includes("external");
-    const externalAllowed = externalRequested && this.externalAllowed();
-
     let result: MemoryRecallResult;
     try {
       result = await MemoryRecallService.getDefault().recall({
@@ -445,8 +411,6 @@ export class MemoryTools {
         policy: {
           workspacePath: this.workspace.path,
           readGuard: (candidatePath) => this.canReadWorkspacePath(candidatePath),
-          allowExternal: externalAllowed,
-          workspaceName: this.workspace.name,
           excludeActiveTaskConversation: true,
         },
       });
@@ -464,9 +428,6 @@ export class MemoryTools {
     }
 
     const unavailable: Record<string, string> = { ...result.laneErrors };
-    if (externalRequested && !externalAllowed) {
-      unavailable.external = "Supermemory is not connected or network access is off.";
-    }
     const results = result.hits.map((hit) => this.formatHit(hit, full));
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool,
@@ -540,7 +501,6 @@ export class MemoryTools {
     if (explicitMemoryWriteBlocked(this.daemon, this.taskId, content)) {
       return fail(NO_MEMORY_WRITE_ERROR, { blocked: true, reason: "no_memory_directive" });
     }
-    if (input?.scope === "external") return this.rememberExternal(content, kind);
 
     const archiveType = ARCHIVE_KINDS[kind];
     if (archiveType) return this.saveToArchive(tool, content, archiveType);
@@ -795,82 +755,6 @@ export class MemoryTools {
     };
   }
 
-  /**
-   * `memory_remember` with scope `external`: a memory that lives only in Supermemory (the
-   * retired `supermemory_remember`). The write goes through the memory write gate
-   * (target `external`), and its remote id is recorded so purges reach it.
-   */
-  private async rememberExternal(
-    content: string,
-    kind: MemoryRememberKind,
-  ): Promise<Record<string, unknown>> {
-    const tool = MEMORY_REMEMBER_TOOL;
-    const fail = (error: string, extra: Record<string, unknown> = {}) => {
-      this.daemon.logEvent(this.taskId, "tool_result", { tool, success: false, error, ...extra });
-      return { success: false, error, ...extra };
-    };
-    // SEC-16: a channel sender other than the workspace owner never writes to the owner's
-    // external memory.
-    if (this.thirdPartyGatewaySender()) {
-      return fail(
-        "This task came from someone other than the workspace owner; external memory is not changed for them.",
-      );
-    }
-    if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
-      return fail(SUPERMEMORY_UNAVAILABLE);
-    }
-    // Workspace memory settings: nothing leaves the device when memory is off, or when
-    // privacy mode is `disabled` or `strict` (strict makes every memory private).
-    const policyError = await externalMemoryWriteRefusal(this.workspace.id);
-    if (policyError) return fail(policyError, { reason: "memory_policy" });
-    try {
-      const result = await SupermemoryService.remember({
-        workspace: { id: this.workspace.id, name: this.workspace.name },
-        content,
-        metadata: {
-          source: "cowork_tool",
-          kind,
-          taskId: this.taskId,
-          workspaceId: this.workspace.id,
-        },
-        taskId: this.taskId,
-        origin: "agent_tool",
-      });
-      if (result.blocked) {
-        return fail(result.error || "The external memory write was blocked.", { blocked: true });
-      }
-      if (result.staged) {
-        this.daemon.logEvent(this.taskId, "tool_result", {
-          tool,
-          success: true,
-          staged: true,
-          pendingId: result.pendingId,
-        });
-        return {
-          success: true,
-          staged: true,
-          pendingId: result.pendingId,
-          message: "External memory write is pending user approval.",
-        };
-      }
-      const ids = result.memoryIds.map((id) => `external:${id}`);
-      this.daemon.logEvent(this.taskId, "tool_result", {
-        tool,
-        success: true,
-        stored: "external",
-        memoryIds: result.memoryIds,
-      });
-      return {
-        success: true,
-        ...(ids[0] ? { id: ids[0] } : {}),
-        ...(ids.length > 1 ? { ids } : {}),
-        stored: "external",
-      };
-    } catch (error) {
-      return fail(String(error instanceof Error ? error.message : error));
-    }
-  }
-
   private async saveToArchive(
     tool: string,
     content: string,
@@ -921,7 +805,6 @@ export class MemoryTools {
           skipMemoryWriteGate: true,
           // An explicit save is not auto-capture: the autoCapture setting does not block it.
           forceCapture: true,
-          allowExternalMirror: this.externalMirrorAllowed(),
         },
       );
       if (!memory) {
@@ -1014,39 +897,11 @@ export class MemoryTools {
               ? done(`archive:${parsed.id}`)
               : fail(`No memory "${id}" in this workspace.`);
           }
-          case "external": {
-            if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
-              return fail(SUPERMEMORY_UNAVAILABLE);
-            }
-            const result = await SupermemoryService.forget({
-              workspace: { id: this.workspace.id, name: this.workspace.name },
-              memoryId: parsed.id,
-              ...(input?.reason ? { reason: asString(input.reason, 300) } : {}),
-            });
-            return result.forgotten
-              ? done(`external:${parsed.id}`)
-              : fail(`Supermemory did not forget "${parsed.id}".`);
-          }
           case "kg":
             return fail("Knowledge-graph entities are removed with kg_delete_entity.");
           default:
             return fail("Conversation history and files cannot be forgotten with memory_forget.");
         }
-      }
-
-      if (input?.scope === "external") {
-        // Supermemory matches the text itself (the retired text-matched supermemory_forget).
-        if (!this.externalAllowed() || !SupermemoryService.isConfigured()) {
-          return fail(SUPERMEMORY_UNAVAILABLE);
-        }
-        const result = await SupermemoryService.forget({
-          workspace: { id: this.workspace.id, name: this.workspace.name },
-          content: match,
-          ...(input?.reason ? { reason: asString(input.reason, 300) } : {}),
-        });
-        return result.forgotten
-          ? done(result.id ? `external:${result.id}` : "external")
-          : fail("Supermemory found no memory with that text.");
       }
 
       const candidates = await this.forgetCandidates(match);
@@ -1402,21 +1257,5 @@ export class MemoryTools {
     } catch {
       return false;
     }
-  }
-
-  /** Supermemory may be queried: the workspace allows network access at all. */
-  private externalAllowed(): boolean {
-    const permissions = this.workspace.permissions;
-    return permissions?.network === true && permissions.accessNetworkMode !== "disabled";
-  }
-
-  /** Background mirroring of a save to Supermemory needs automatic network access. */
-  private externalMirrorAllowed(): boolean {
-    const permissions = this.workspace.permissions;
-    return (
-      permissions?.network === true &&
-      permissions.accessNetworkMode !== "disabled" &&
-      permissions.accessNetworkMode !== "on-request"
-    );
   }
 }

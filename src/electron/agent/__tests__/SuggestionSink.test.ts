@@ -57,12 +57,12 @@ describe("SuggestionSink", () => {
     const sink = new SuggestionSink(() => store);
     const entityKey = commitmentEntityKey("c-1");
 
-    const autonomy = await sink.propose({
+    const briefing = await sink.propose({
       workspaceId: "ws-1",
       entityKey,
       title: "Follow up on: send the contract",
       why: "Due soon",
-      source: "autonomy",
+      source: "briefing",
       evidence: ["c-1"],
       confidence: 0.8,
     });
@@ -84,13 +84,13 @@ describe("SuggestionSink", () => {
       confidence: 0.8,
     });
 
-    expect(autonomy).toMatchObject({ created: true, merged: false, entityKey });
+    expect(briefing).toMatchObject({ created: true, merged: false, entityKey });
     expect(awareness).toMatchObject({ created: false, merged: true });
     expect(heartbeat).toMatchObject({ created: false, merged: true });
     expect(rows).toHaveLength(1);
-    expect(rows[0].sources).toEqual(["autonomy", "awareness", "heartbeat"]);
+    expect(rows[0].sources).toEqual(["briefing", "awareness", "heartbeat"]);
     expect(rows[0].sourceSignals).toEqual(["c-1", "event-7"]);
-    expect(heartbeat.suggestion?.id).toBe(autonomy.suggestion?.id);
+    expect(heartbeat.suggestion?.id).toBe(briefing.suggestion?.id);
   });
 
   it("falls back to the normalized title, ignoring producer prefixes", async () => {
@@ -101,7 +101,7 @@ describe("SuggestionSink", () => {
       workspaceId: "ws-1",
       title: "Follow up on: Ship the launch checklist!",
       why: "a",
-      source: "autonomy",
+      source: "briefing",
       confidence: 0.7,
     });
     const second = await sink.propose({
@@ -159,7 +159,7 @@ describe("SuggestionSink", () => {
       entityKey: commitmentEntityKey("c-9"),
       title: "Follow up on: invoice",
       why: "Due",
-      source: "autonomy",
+      source: "briefing",
       confidence: 0.9,
     });
     expect(result).toMatchObject({ created: false, merged: false, suppressed: true });
@@ -170,20 +170,20 @@ describe("SuggestionSink", () => {
     const { store, rows } = createFakeStore();
     const sink = new SuggestionSink(() => store);
     const results = await Promise.all(
-      ["autonomy", "awareness", "workflow_intelligence"].map((source) =>
+      ["briefing", "awareness", "workflow_intelligence"].map((source) =>
         sink.propose({
           workspaceId: "ws-1",
           entityKey: "wi:target-1",
           title: "Workflow Intelligence: target",
           why: "x",
-          source: source as "autonomy",
+          source: source as "briefing",
           confidence: 0.7,
         }),
       ),
     );
     expect(results.filter((result) => result.created)).toHaveLength(1);
     expect(rows).toHaveLength(1);
-    expect(rows[0].sources).toEqual(["autonomy", "awareness", "workflow_intelligence"]);
+    expect(rows[0].sources).toEqual(["briefing", "awareness", "workflow_intelligence"]);
   });
 
   it("does not record a merge when the source and evidence are already known", async () => {

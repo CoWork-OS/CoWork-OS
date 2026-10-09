@@ -76,7 +76,6 @@ describe("memory prompt section budgets", () => {
       baseInstructionPrompt: "Base rules.",
       memoryContext,
       designSystemContext: "### Workspace Design System (DESIGN.md)\n- Use 8px spacing",
-      externalMemoryContext: "<cowork_user_profile>\nremote profile\n</cowork_user_profile>",
       projectGuidanceContext: "### Project Instructions (AGENTS.md)\n- Run tests",
       executionMode: "execute",
       taskDomain: "code",
@@ -88,12 +87,7 @@ describe("memory prompt section budgets", () => {
     expect(result.prompt).toContain(memoryContext);
     const keys = result.systemBlocks.map((block) => block.stableKey?.split(":")[0]);
     expect(keys).toEqual(
-      expect.arrayContaining([
-        "design_system",
-        "external_memory",
-        "project_guidance",
-        "memory_context",
-      ]),
+      expect.arrayContaining(["design_system", "project_guidance", "memory_context"]),
     );
   });
 

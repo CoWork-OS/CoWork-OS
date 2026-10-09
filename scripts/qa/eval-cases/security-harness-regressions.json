@@ -65,30 +65,6 @@
       }
     },
     {
-      "id": "bots-autonomy-dispatch-checkpoint-confirmed-fix",
-      "prompt": "Regression guard for Persist autonomy decisions before admission and refuse revoked policy or unavailable execution: replay the original failure class and verify the fix still holds.",
-      "assertions": {
-        "securityHarnessRule": "confirmed-fix",
-        "expectedNoSilentBypass": true,
-        "expectedFindingFingerprint": "bots-autonomy-dispatch-checkpoint",
-        "expectedPolicyGate": "production_policy",
-        "requiresProofArtifact": true,
-        "executableTest": "src/electron/awareness/__tests__/AutonomyEngine.test.ts"
-      }
-    },
-    {
-      "id": "bots-autonomy-state-merge-confirmed-fix",
-      "prompt": "Regression guard for Preserve current autonomy policy and scoped decisions during automatic outcome persistence: replay the original failure class and verify the fix still holds.",
-      "assertions": {
-        "securityHarnessRule": "confirmed-fix",
-        "expectedNoSilentBypass": true,
-        "expectedFindingFingerprint": "bots-autonomy-state-merge",
-        "expectedPolicyGate": "production_policy",
-        "requiresProofArtifact": true,
-        "executableTest": "src/electron/awareness/__tests__/AutonomyEngine.test.ts"
-      }
-    },
-    {
       "id": "bots-box-approved-byte-consumption-confirmed-fix",
       "prompt": "Regression guard for Bind Box upload bytes to trusted draft capture and recheck current authority at the POST boundary: replay the original failure class and verify the fix still holds.",
       "assertions": {

@@ -150,8 +150,6 @@ export type SettingsCategory =
   | "routine-workflow-secrets"
   | "acp-remote-agent-secrets"
   | "awareness-state"
-  | "autonomy-chief-of-staff"
-  | "supermemory"
   | "pulse"
   | "plugin-packs"
   | "meeting-artifacts"

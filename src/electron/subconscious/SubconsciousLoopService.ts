@@ -2371,7 +2371,7 @@ export class SubconsciousLoopService {
       .map((item) => `- ${item.summary}`)
       .join("\n")}`;
     // Background task creation shares one per-workspace budget and per-entity cooldown with
-    // Heartbeat, AutonomyEngine and the Strategic Planner. Over budget, the decision is
+    // Heartbeat and the Strategic Planner. Over budget, the decision is
     // surfaced as a review suggestion instead of creating a task.
     let budgetTicket: string | undefined;
     let durableBudgetTicket: string | undefined;

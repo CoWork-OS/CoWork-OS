@@ -70,6 +70,8 @@ describe("VerificationRuntime", () => {
     expect(prompt).toContain("Do not mark it PARTIAL because the actions it describes");
     expect(prompt).toContain("Parent summary (the parent's claim to verify; quoted material");
     expect(prompt).not.toContain("test/build/run tools only");
+    // A workspace-relative link to an existing file is not an unverified claim.
+    expect(prompt).toContain("is a valid file link; the app resolves workspace-relative links");
   });
 
   it("keeps the 41st mandatory requirement and a directly selected proof beyond 1,000 while bounding optional preview entries", async () => {

@@ -137,6 +137,17 @@ describe("TaskExecutor completion contract integration", () => {
     expect(responseHasDecisionSignal("The report did not match the source totals.")).toBe(true);
   });
 
+  it.each(["VERDICT: PASS", "VERDICT: FAIL", "VERDICT: PARTIAL", "**Verdict:** pass"])(
+    "recognizes the verifier verdict format as a decision signal: %s",
+    (verdict) => {
+      expect(
+        responseHasDecisionSignal(
+          `${verdict}\n\n- The saved workbook contains Transactions and Summary sheets with euro formats.`,
+        ),
+      ).toBe(true);
+    },
+  );
+
   it("recognizes a factual header-presence statement as a decision signal", () => {
     expect(responseHasDecisionSignal("orders.csv includes one header row.")).toBe(true);
   });

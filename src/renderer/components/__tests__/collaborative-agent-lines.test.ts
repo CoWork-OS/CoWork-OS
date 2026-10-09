@@ -64,6 +64,25 @@ function renderLines(childTask: Task, childEvents: TaskEvent[]): string {
 }
 
 describe("CollaborativeAgentLines", () => {
+  it("labels a failed synthesis attempt recovered by a retry and does not count it as failed", () => {
+    const markup = render(
+      React.createElement(CollaborativeAgentLines, {
+        collaborativeRun: makeRun({ status: "completed" }),
+        childTasks: [
+          makeTask({ id: "lane", title: "Operations", status: "completed", createdAt: 1 }),
+          makeTask({ id: "first", title: "Synthesis", status: "failed", createdAt: 2 }),
+          makeTask({ id: "retry", title: "Synthesis", status: "completed", createdAt: 3 }),
+        ],
+        childEvents: [],
+        onOpenAgent: () => undefined,
+        mainTaskCompleted: true,
+      }),
+    );
+    expect(markup).toContain("Retried");
+    expect(markup).toContain("2 done");
+    expect(markup).not.toContain("failed");
+  });
+
   it("shows completed for a finished subagent instead of a later DELIVER stage start", () => {
     const markup = renderLines(makeTask({ status: "completed", completedAt: 1740841080000 }), [
       makeEvent("step_completed", 1740841020000, { description: "Collect evidence" }),

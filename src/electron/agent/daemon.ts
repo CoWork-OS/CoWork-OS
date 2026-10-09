@@ -337,6 +337,7 @@ import {
 } from "../../shared/pact";
 import type { PactRuntime } from "../pact/runtime";
 import { createDaemonPactRuntime } from "../pact/daemon-host";
+import { SUPERSEDED_SYNTHESIS_ITEM_TITLE } from "../../shared/synthesis-agent-detection";
 
 export interface AgentDaemonOptions {
   startupRecovery?: boolean;
@@ -11688,6 +11689,10 @@ export class AgentDaemon extends EventEmitter {
     const itemRepo = new AgentTeamItemStore(this.dbManager.getDatabase());
     const existing = itemRepo.findById(node.teamItemId);
     if (!existing) return;
+    // A synthesis attempt already replaced by a retry keeps its failed status and
+    // retry note; the late node notification would overwrite them with the
+    // attempt's raw output. The orchestrator has already acted on it.
+    if (existing.title === SUPERSEDED_SYNTHESIS_ITEM_TITLE) return;
 
     const nextStatus =
       notification.status === "completed"

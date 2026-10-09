@@ -65,17 +65,32 @@ function loadSavedState(taskId: string, key: string): Promise<SavedState | null>
   });
 }
 
+/** Saved values for any surface (native or HTML), from the cache or one batched load. */
+export function loadSurfaceState(taskId: string, key: string): Promise<SavedState | null> {
+  const cached = savedStates.get(`${taskId}:${key}`);
+  return cached ? Promise.resolve(cached) : loadSavedState(taskId, key);
+}
+
+/** Saves a surface's values and the summary the next turn sees. */
+export function saveSurfaceState(
+  taskId: string,
+  key: string,
+  state: SavedState,
+  summary: string,
+): void {
+  cacheSaved(`${taskId}:${key}`, state);
+  void window.electronAPI?.saveAnswerSurfaceState?.({ taskId, key, state, summary })?.catch(() => {
+    // The value stays on screen; it is just not remembered after a restart.
+  });
+}
+
 function saveState(
   taskId: string,
   key: string,
   spec: AnswerSurfaceSpec,
   state: AnswerSurfaceState,
 ): void {
-  cacheSaved(`${taskId}:${key}`, state);
-  const summary = summarizeSurfaceChanges(spec, state).join("\n");
-  void window.electronAPI?.saveAnswerSurfaceState?.({ taskId, key, state, summary })?.catch(() => {
-    // The value stays on screen; it is just not remembered after a restart.
-  });
+  saveSurfaceState(taskId, key, state, summarizeSurfaceChanges(spec, state).join("\n"));
 }
 
 /**

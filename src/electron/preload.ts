@@ -4542,6 +4542,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE, data),
   resolveAnswerImages: (data: { taskId?: string; requests: AnswerImageRequest[] }) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_RESOLVE_IMAGES, data),
+  registerHtmlSurface: (data: {
+    html: string;
+    theme: "light" | "dark";
+    hostBackground?: string;
+    designLanguage: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML, data),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -8381,6 +8387,13 @@ export interface ElectronAPI {
     taskId?: string;
     requests: AnswerImageRequest[];
   }) => Promise<Array<AnswerImageResult | null>>;
+  /** Desktop only; absent in the browser host, where frames stay static. */
+  registerHtmlSurface?: (data: {
+    html: string;
+    theme: "light" | "dark";
+    hostBackground?: string;
+    designLanguage: boolean;
+  }) => Promise<{ url: string }>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

@@ -56,6 +56,11 @@ export function answerSurfaceKey(source: string, occurrence: number): string {
   return `s1-${hashString(source.trim())}-${occurrence}`;
 }
 
+/** The saved-state key of an inline HTML surface, from its document source. */
+export function htmlSurfaceKey(source: string, occurrence = 0): string {
+  return `h1-${hashString(source.trim())}-${occurrence}`;
+}
+
 /** Splits an assistant message into text and ```cowork-ui parts, in order. */
 export function splitAnswerSurfaceBlocks(message: string): AnswerTextPart[] {
   const lines = String(message || "").split("\n");

@@ -27,6 +27,14 @@ describe("web preview protocol", () => {
     expect(WEB_PREVIEW_CSP).not.toMatch(/https?:/);
   });
 
+  it("denies device, payment and clipboard access and sends no referrer", () => {
+    const response = resolveWebPreviewRequest(createWebPreviewUrl("<p>policy</p>"));
+    expect(response.headers.get("Permissions-Policy")).toContain("camera=()");
+    expect(response.headers.get("Permissions-Policy")).toContain("clipboard-write=()");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.get("X-DNS-Prefetch-Control")).toBe("off");
+  });
+
   it("rejects unknown tokens and malformed URLs", () => {
     expect(resolveWebPreviewRequest("cowork-preview://local/not-a-token").status).toBe(404);
     expect(resolveWebPreviewRequest("cowork-preview://local/").status).toBe(404);
@@ -56,6 +64,13 @@ describe("web preview token reuse", () => {
     } finally {
       clock.mockRestore();
     }
+  });
+  it("evicts the least recently reopened preview first", () => {
+    const kept = createWebPreviewUrl("<p>still on screen</p>");
+    for (let i = 0; i < 40; i++) createWebPreviewUrl(`lru-a-${i}`);
+    expect(createWebPreviewUrl("<p>still on screen</p>")).toBe(kept);
+    for (let i = 0; i < 40; i++) createWebPreviewUrl(`lru-b-${i}`);
+    expect(resolveWebPreviewRequest(kept).status).toBe(200);
   });
   it("returns the same URL for the same content", () => {
     const html = `<p>${Math.random()}</p>`;

@@ -305,7 +305,8 @@ const RICH_FRAME_DARK_COMPAT_CSS = `
 }
 `.trim();
 
-function buildRichFrameDesignCss(theme: RichFrameTheme, hostBackground?: string): string {
+/** The injected design CSS for a theme; frames swap it in place when the app theme changes. */
+export function buildRichFrameDesignCss(theme: RichFrameTheme, hostBackground?: string): string {
   const safeHostBackground = sanitizeCssColor(hostBackground, "transparent");
   return [
     theme === "dark" ? RICH_FRAME_DARK_TOKENS : RICH_FRAME_LIGHT_TOKENS,
@@ -334,7 +335,7 @@ export function applyRichFrameDesignLanguage(
 
   const theme = normalizeRichFrameTheme(options.theme);
   const styleTag = `<style id="${RICH_FRAME_DESIGN_STYLE_ID}">\n${buildRichFrameDesignCss(theme, options.hostBackground)}\n</style>`;
-  const themedHtml = html.replace(/<html\b([^>]*)>/i, (match, attrs: string) => {
+  const themedHtml = html.replace(/<html\b([^>]{0,2000})>/i, (match, attrs: string) => {
     if (/\bstyle\s*=/i.test(attrs)) return match;
     return `<html${attrs} style="color-scheme: ${theme};">`;
   });
@@ -343,12 +344,12 @@ export function applyRichFrameDesignLanguage(
   if (/<\/head>/i.test(htmlForInjection)) {
     return htmlForInjection.replace(/<\/head>/i, `${styleTag}\n</head>`);
   }
-  if (/<head\b[^>]*>/i.test(htmlForInjection)) {
-    return htmlForInjection.replace(/<head\b[^>]*>/i, (match) => `${match}\n${styleTag}`);
+  if (/<head\b[^>]{0,2000}>/i.test(htmlForInjection)) {
+    return htmlForInjection.replace(/<head\b[^>]{0,2000}>/i, (match) => `${match}\n${styleTag}`);
   }
-  if (/<html\b[^>]*>/i.test(htmlForInjection)) {
+  if (/<html\b[^>]{0,2000}>/i.test(htmlForInjection)) {
     return htmlForInjection.replace(
-      /<html\b[^>]*>/i,
+      /<html\b[^>]{0,2000}>/i,
       (match) => `${match}\n<head>${styleTag}</head>`,
     );
   }

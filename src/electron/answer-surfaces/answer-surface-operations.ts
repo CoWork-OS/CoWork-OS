@@ -17,6 +17,10 @@ import {
   MAX_ANSWER_SURFACE_SUMMARY_CHARS,
   type AnswerSurfaceStateRow,
 } from "./answer-surface-state-sql";
+import {
+  HtmlSurfaceStateSchema,
+  summarizeHtmlSurfaceState,
+} from "../../shared/answer-surfaces/html-bridge";
 import { rateLimiter } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
 
@@ -29,7 +33,8 @@ const SurfaceKeySchema = z
   .string()
   .min(1)
   .max(80)
-  .regex(/^s1-[a-z0-9]+-\d{1,3}$/);
+  // s1: native component surfaces; h1: inline HTML surfaces (see html-bridge.ts).
+  .regex(/^(?:s1|h1)-[a-z0-9]+-\d{1,3}$/);
 const StateValueSchema = z.union([
   z.number().finite(),
   z.string().max(200),
@@ -125,6 +130,13 @@ export function createAnswerSurfaceIpcHandlers(
       limit(IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE);
       const value = validateInput(AnswerSurfaceSaveStateSchema, raw, "answer surface state");
       await requireTask(value.taskId);
+      if (value.key.startsWith("h1-")) {
+        // An HTML surface's state is written by the page, not by our components: hold it
+        // to the stricter bridge schema and build its summary here, from the state alone.
+        const state = validateInput(HtmlSurfaceStateSchema, value.state, "HTML surface state");
+        await deps.store.save(value.taskId, value.key, state, summarizeHtmlSurfaceState(state));
+        return { ok: true };
+      }
       await deps.store.save(value.taskId, value.key, value.state, value.summary);
       return { ok: true };
     },

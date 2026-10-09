@@ -6720,6 +6720,63 @@ button.collab-timeline-thought-agent:hover {
   }
 }
 
+/*
+ * Bridged inline HTML surfaces size themselves: the frame reports its content height and
+ * the wrapper follows it. While the first height is pending the frame stays small and
+ * hidden, so a short card does not flash at the fixed fallback size. The doubled class
+ * outranks the fixed-height rules above, including the narrow-screen ones.
+ */
+.inline-html-preview.inline-html-preview-sizing .inline-html-frame-wrap,
+.inline-html-preview.inline-html-preview-autosized .inline-html-frame-wrap {
+  height: auto;
+  max-height: none;
+  aspect-ratio: auto;
+}
+
+.inline-html-preview.inline-html-preview-sizing .inline-html-frame {
+  min-height: 0;
+  height: 160px;
+  opacity: 0;
+}
+
+.inline-html-preview.inline-html-preview-autosized .inline-html-frame {
+  min-height: 0;
+  height: var(--inline-html-frame-auto-height);
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.inline-html-frame-pending {
+  min-height: 160px;
+}
+
+/* Fixed-height frames: the badge sits under the frame instead of overflowing the wrap. */
+.inline-html-preview-frame:not(.inline-html-preview-autosized):not(.inline-html-preview-sizing)
+  .inline-html-frame-wrap:has(> .inline-html-surface-badge) {
+  height: auto;
+  aspect-ratio: auto;
+}
+
+.inline-html-preview-frame:not(.inline-html-preview-autosized):not(.inline-html-preview-sizing)
+  .inline-html-frame-wrap:has(> .inline-html-surface-badge)
+  > .inline-html-frame {
+  min-height: 0;
+  height: var(--inline-html-frame-height);
+}
+
+.inline-html-surface-badge {
+  margin-top: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inline-html-preview.inline-html-preview-autosized .inline-html-frame {
+    transition: none;
+  }
+}
+
 /* Spreadsheet artifact cards */
 .spreadsheet-artifact-card {
   position: relative;

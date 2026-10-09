@@ -7329,6 +7329,145 @@ describe("TaskExecutor step loop control", () => {
       expect(stepContext).toContain("read them with parse_document");
       expect(stepContext).toContain("Do not unzip the file or parse its XML with a custom script");
     });
+
+    const northstarPrompt =
+      "Prepare a two-page client brief. Save both an editable Word document and a matching PDF: " +
+      "Northstar-brief.docx and Northstar-brief.pdf. Give me links to both files.";
+
+    it("treats a difference between the matching files as blocking and repairs both", async () => {
+      const mismatch =
+        "FAIL_BLOCKING — The DOCX lists the three budget allowances as «Por definir» while the PDF lists €150, €120 and €80.";
+      const executor = createBriefPlanExecutor([
+        textResponse(mismatch),
+        textResponse(
+          "Updated Northstar-brief.docx with the €150, €120 and €80 allowances and regenerated Northstar-brief.pdf from it. " +
+            "[Northstar-brief.docx](Northstar-brief.docx) · [Northstar-brief.pdf](Northstar-brief.pdf)",
+        ),
+        textResponse("OK"),
+      ]);
+      executor.task.prompt = northstarPrompt;
+
+      const stepContexts = await runPendingSteps(executor);
+
+      const steps = executor.plan.steps;
+      expect(stepContexts.get("2")).toContain(
+        "Any difference between them in facts, figures, names, dates, or sections is FAIL_BLOCKING, not a warning",
+      );
+      expect(stepContexts.get("2")).toContain(
+        "a requested file the answer does not link is FAIL_BLOCKING",
+      );
+      expect(steps).toHaveLength(4);
+      expect(steps[2]).toMatchObject({ kind: "recovery", status: "completed" });
+      expect(stepContexts.get(steps[2].id)).toContain("«Por definir»");
+      expect(stepContexts.get(steps[2].id)).toContain(
+        "regenerate every other copy from that corrected content",
+      );
+      expect(steps[3]).toMatchObject({ kind: "verification", status: "completed" });
+      expect(executor.verificationRepairPassesUsed).toBe(1);
+    });
+
+    it("adds the missing link to a requested file to the final answer once", () => {
+      const executor = createBriefPlanExecutor([]);
+      executor.task.prompt = northstarPrompt;
+      const answer =
+        "Criei o PDF do brief.\n\n" +
+        `[Transferir Northstar-brief.pdf](sandbox:${path.join(workspacePath, "Northstar-brief.pdf")})`;
+
+      const reconciled = executor.reconcileSummaryWithWorkspaceOutputs(answer);
+
+      expect(reconciled).toContain("Transferir Northstar-brief.pdf");
+      expect(reconciled).toContain("[Northstar-brief.docx](Northstar-brief.docx)");
+      expect(reconciled).not.toContain("[Northstar-brief.pdf](Northstar-brief.pdf)");
+      // A second pass over the reconciled answer adds nothing.
+      expect(executor.reconcileSummaryWithWorkspaceOutputs(reconciled)).toBe(reconciled);
+    });
+
+    describe("unlinked cells in a sourced comparison", () => {
+      const researchPrompt =
+        "Look up official documentation for Teams, Zoom and Google Meet transcript exports. " +
+        "Compare licensing and limitations, with links, in chat.";
+      const unlinkedAnswer = [
+        "| Platform | Transcript and export | Key limitations |",
+        "|---|---|---|",
+        "| **Microsoft Teams** | Download as .docx or .vtt after the meeting. [Microsoft](https://support.microsoft.com/teams-transcripts) | Transcripts are stored in the organizer's OneDrive for Business. |",
+        "| **Google Meet** | Saved to the organizer's Drive. [Google](https://support.google.com/meet/answer/12849897) | Transcription stops when everyone leaves and cannot be paused. |",
+      ].join("\n");
+      const linkedAnswer = unlinkedAnswer.replace(/ \|$/gm, " [1] |");
+
+      function createResearchPlanExecutor(responses: LLMResponse[]) {
+        const executor = createExecutorWithStubs(responses, {}) as Any;
+        executor.task.prompt = researchPrompt;
+        executor.lastNonVerificationOutput = unlinkedAnswer;
+        executor.plan = {
+          description: "Plan",
+          steps: [
+            {
+              id: "1",
+              description: "Write a concise, linked comparison of the three platforms in chat.",
+              kind: "primary",
+              status: "completed",
+            },
+            {
+              id: "2",
+              description:
+                "Verify the final answer covers every requested item and that each sourced fact in it carries a direct link to an official source fetched in this task.",
+              kind: "verification",
+              status: "pending",
+            },
+          ],
+        };
+        return executor;
+      }
+
+      it("schedules one repair when the check passes an answer with unlinked factual cells", async () => {
+        const executor = createResearchPlanExecutor([
+          textResponse("OK"),
+          textResponse(linkedAnswer),
+          textResponse("OK"),
+        ]);
+
+        const stepContexts = await runPendingSteps(executor);
+
+        const steps = executor.plan.steps;
+        expect(stepContexts.get("2")).toContain(
+          "A factual cell or bullet with neither is FAIL_BLOCKING",
+        );
+        expect(steps).toHaveLength(4);
+        expect(steps[1].status).toBe("failed");
+        expect(String(steps[1].error)).toContain("Microsoft Teams / Key limitations");
+        expect(String(steps[1].error)).toContain("Google Meet / Key limitations");
+        expect(stepContexts.get(steps[2].id)).toContain("Never invent, guess, or construct URLs");
+        expect(steps[2]).toMatchObject({ kind: "recovery", status: "completed" });
+        expect(steps[3]).toMatchObject({ kind: "verification", status: "completed" });
+        expect(executor.verificationRepairPassesUsed).toBe(1);
+        expect(executor.getResolvedRecoveredFailureStepIds()).toContain("2");
+      });
+
+      it("does not schedule a second repair when the repaired answer still has gaps", async () => {
+        const executor = createResearchPlanExecutor([
+          textResponse("OK"),
+          textResponse(unlinkedAnswer),
+          textResponse("OK"),
+        ]);
+
+        await runPendingSteps(executor);
+
+        expect(executor.plan.steps).toHaveLength(4);
+        expect(executor.plan.steps[3].status).toBe("completed");
+        expect(executor.verificationRepairPassesUsed).toBe(1);
+      });
+
+      it("leaves a fully linked answer alone", async () => {
+        const executor = createResearchPlanExecutor([textResponse("OK")]);
+        executor.lastNonVerificationOutput = linkedAnswer;
+
+        await runPendingSteps(executor);
+
+        expect(executor.plan.steps).toHaveLength(2);
+        expect(executor.plan.steps[1].status).toBe("completed");
+        expect(executor.verificationRepairPassesUsed ?? 0).toBe(0);
+      });
+    });
   });
 
   describe("verification rewind", () => {

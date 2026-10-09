@@ -40,12 +40,7 @@
     {
       "type": "table",
       "rows": [
-        [
-          "Data",
-          "Duração",
-          "Sessão",
-          "Conteúdo"
-        ],
+        ["Data", "Duração", "Sessão", "Conteúdo"],
         [
           "26 de outubro de 2026",
           "45 min",
@@ -82,41 +77,13 @@
     {
       "type": "table",
       "rows": [
-        [
-          "Tarefa",
-          "Responsável",
-          "Estado"
-        ],
-        [
-          "Conduzir as três sessões",
-          "Dois formadores",
-          "Identidades por confirmar"
-        ],
-        [
-          "Preparar o texto de boas-vindas",
-          "Marta",
-          "Atribuído"
-        ],
-        [
-          "Verificar as legendas",
-          "James",
-          "Atribuído"
-        ],
-        [
-          "Definir e validar as FAQ",
-          "Por designar",
-          "Em aberto"
-        ],
-        [
-          "Aprovar o email de lançamento",
-          "Por designar",
-          "Em aberto"
-        ],
-        [
-          "Disponibilizar o guia em linguagem simples",
-          "Por designar",
-          "Responsável por confirmar"
-        ],
+        ["Tarefa", "Responsável", "Estado"],
+        ["Conduzir as três sessões", "Dois formadores", "Identidades por confirmar"],
+        ["Preparar o texto de boas-vindas", "Marta", "Atribuído"],
+        ["Verificar as legendas", "James", "Atribuído"],
+        ["Definir e validar as FAQ", "Por designar", "Em aberto"],
+        ["Aprovar o email de lançamento", "Por designar", "Em aberto"],
+        ["Disponibilizar o guia em linguagem simples", "Por designar", "Responsável por confirmar"],
         [
           "Produzir e legendar as duas gravações",
           "Por designar; James verifica as legendas",
@@ -132,26 +99,11 @@
     {
       "type": "table",
       "rows": [
-        [
-          "Rubrica",
-          "Proposta de afetação"
-        ],
-        [
-          "Preparação e edição do guia escrito",
-          "100 €"
-        ],
-        [
-          "Legendas das duas gravações",
-          "150 €"
-        ],
-        [
-          "Materiais de apoio às sessões",
-          "100 €"
-        ],
-        [
-          "Total proposto",
-          "350 €"
-        ]
+        ["Rubrica", "Proposta de afetação"],
+        ["Preparação e edição do guia escrito", "100 €"],
+        ["Legendas das duas gravações", "150 €"],
+        ["Materiais de apoio às sessões", "100 €"],
+        ["Total proposto", "350 €"]
       ]
     },
     {
@@ -236,26 +188,10 @@
     {
       "type": "table",
       "rows": [
-        [
-          "Data",
-          "Duração",
-          "Tema"
-        ],
-        [
-          "26 de outubro de 2026",
-          "45 minutos",
-          "Orientação e fluxo de boas-vindas"
-        ],
-        [
-          "28 de outubro de 2026",
-          "45 minutos",
-          "Resposta a perguntas comuns dos clientes"
-        ],
-        [
-          "30 de outubro de 2026",
-          "45 minutos",
-          "Prática e feedback"
-        ]
+        ["Data", "Duração", "Tema"],
+        ["26 de outubro de 2026", "45 minutos", "Orientação e fluxo de boas-vindas"],
+        ["28 de outubro de 2026", "45 minutos", "Resposta a perguntas comuns dos clientes"],
+        ["30 de outubro de 2026", "45 minutos", "Prática e feedback"]
       ]
     },
     {
@@ -274,30 +210,12 @@
     {
       "type": "table",
       "rows": [
-        [
-          "Tarefa",
-          "Responsável"
-        ],
-        [
-          "Texto de boas-vindas",
-          "Marta"
-        ],
-        [
-          "Verificação das legendas",
-          "James"
-        ],
-        [
-          "Responsável pelas FAQ",
-          "TBD"
-        ],
-        [
-          "Aprovação do email de lançamento",
-          "TBD"
-        ],
-        [
-          "Condução das sessões",
-          "2 formadores; nomes por confirmar"
-        ]
+        ["Tarefa", "Responsável"],
+        ["Texto de boas-vindas", "Marta"],
+        ["Verificação das legendas", "James"],
+        ["Responsável pelas FAQ", "TBD"],
+        ["Aprovação do email de lançamento", "TBD"],
+        ["Condução das sessões", "2 formadores; nomes por confirmar"]
       ]
     },
     {
@@ -312,26 +230,11 @@
     {
       "type": "table",
       "rows": [
-        [
-          "Categoria",
-          "Afetação proposta"
-        ],
-        [
-          "Materiais de apoio e guia escrito",
-          "€150"
-        ],
-        [
-          "Legendas das gravações",
-          "€120"
-        ],
-        [
-          "Materiais para prática e feedback",
-          "€80"
-        ],
-        [
-          "Total proposto",
-          "€350"
-        ]
+        ["Categoria", "Afetação proposta"],
+        ["Materiais de apoio e guia escrito", "€150"],
+        ["Legendas das gravações", "€120"],
+        ["Materiais para prática e feedback", "€80"],
+        ["Total proposto", "€350"]
       ]
     },
     {

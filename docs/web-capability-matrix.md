@@ -51,19 +51,19 @@ The App has a wide hook and component graph. The browser adapter should expose o
 
 | Measurement | Count |
 | --- | ---: |
-| Renderer source files scanned (tests excluded) | 461 |
-| ElectronAPI members declared in preload type | 1030 |
-| Methods/properties exposed by contextBridge | 1051 |
-| Distinct direct window.electronAPI member names | 746 |
+| Renderer source files scanned (tests excluded) | 457 |
+| ElectronAPI members declared in preload type | 1025 |
+| Methods/properties exposed by contextBridge | 1046 |
+| Distinct direct window.electronAPI member names | 743 |
 | Direct renderer members with preview evidence | 67 |
 | Direct renderer members with a browser handler source; UI unverified | 225 |
-| Direct renderer members still unreviewed | 439 |
-| Direct member expressions | 1554 |
-| Direct member expressions used as calls | 1439 |
-| Direct bridge root expressions (including method receivers) | 1614 |
+| Direct renderer members still unreviewed | 436 |
+| Direct member expressions | 1550 |
+| Direct member expressions used as calls | 1435 |
+| Direct bridge root expressions (including method receivers) | 1610 |
 | Simple alias/destructuring declarations surfaced | 43 |
 | Direct member expressions inside effect callbacks | 301 |
-| Direct member expressions inside other functions/components | 1253 |
+| Direct member expressions inside other functions/components | 1249 |
 | Direct member expressions at module scope | 0 |
 | Directly used names not found in ElectronAPI interface | 17 |
 | Declared names not found in exposed object | 1 |
@@ -77,12 +77,12 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `acceptSessionInvite` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SessionMembersCard.tsx:95 |
 | `acknowledgeMention` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MentionList.tsx:139 |
-| `actOnSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:273 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/HomeDashboard.tsx:622; src/renderer/components/MainContent/MainContent.tsx:8193; src/renderer/components/SuggestionsPanel.tsx:181 |
+| `actOnSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:273 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/HomeDashboard.tsx:622; src/renderer/components/MainContent/MainContent.tsx:8170; src/renderer/components/SuggestionsPanel.tsx:181 |
 | `activateBotResponsibility` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/BotResponsibilityPanel.tsx:348,487 |
 | `activateRoutineWorkflowVersion` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3824 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:839 |
 | `addCronJob` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4196 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ScheduledTasksSettings.tsx:2071 |
 | `addGatewayChannel` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1339 | 16 | 16 | 0 | 16 | 0 | src/renderer/components/BlueBubblesSettings.tsx:129; src/renderer/components/DiscordSettings.tsx:84; src/renderer/components/EmailSettings.tsx:440; src/renderer/components/FeishuSettings.tsx:100; src/renderer/components/GoogleChatSettings.tsx:105; src/renderer/components/ImessageSettings.tsx:98; src/renderer/components/LineSettings.tsx:116; src/renderer/components/MatrixSettings.tsx:126; src/renderer/components/MattermostSettings.tsx:113; src/renderer/components/SignalSettings.tsx:102; src/renderer/components/SlackSettings.tsx:101; src/renderer/components/TeamsSettings.tsx:105; src/renderer/components/TelegramSettings.tsx:123; src/renderer/components/WeComSettings.tsx:101; src/renderer/components/WebhookChannelSettings.tsx:153; src/renderer/components/WhatsAppSettings.tsx:161 |
-| `addNotification` | Host handler source; UI unverified | src/host/services/browser-notification-methods.ts:128 | 2 | 2 | 2 | 0 | 0 | src/renderer/App.tsx:4480,4602 |
+| `addNotification` | Host handler source; UI unverified | src/host/services/browser-notification-methods.ts:128 | 2 | 2 | 2 | 0 | 0 | src/renderer/App.tsx:4479,4601 |
 | `addTaskLabel` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TaskBoard.tsx:203; src/renderer/components/mission-control/useMissionControlData.ts:1262 |
 | `addTeamMember` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:449 |
 | `addTrigger` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4351 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/EventTriggersPanel.tsx:396 |
@@ -99,26 +99,25 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `applyMailboxAction` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:312 | 11 | 11 | 0 | 11 | 0 | src/renderer/components/InboxAgentPanel.tsx:1133,1710,1717,1756,1873,1927,5130,5149,5494,6569,6699 |
 | `applyOnboardingProfile` | Unreviewed |  | 4 | 2 | 0 | 4 | 0 | src/renderer/hooks/useOnboardingFlow.ts:1780,1786,1790,1791 |
 | `applySpreadsheetPatches` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SpreadsheetArtifactViewer.tsx:786 |
-| `archiveTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:149 | 5 | 3 | 0 | 5 | 0 | src/renderer/App.tsx:6318; src/renderer/components/MainContent/MainContent.tsx:9507; src/renderer/components/Sidebar.tsx:1198,1201,2017 |
+| `archiveTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:149 | 5 | 3 | 0 | 5 | 0 | src/renderer/App.tsx:6309; src/renderer/components/MainContent/MainContent.tsx:9484; src/renderer/components/Sidebar.tsx:1192,1195,2011 |
 | `askMailbox` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:275 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:2187 |
 | `askYouTubeVideo` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:1295 |
 | `assignAgentRoleToTask` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TaskBoard.tsx:231; src/renderer/components/mission-control/useMissionControlData.ts:1205 |
 | `bindAgentMailWorkspacePod` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:190 |
 | `cancelChatGPTImport` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ChatGPTImportWizard.tsx:190 |
-| `cancelComparison` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ComparisonView.tsx:68 |
 | `cancelRoutineWorkflowRun` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4029 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:2089 |
-| `cancelTask` | Preview |  | 2 | 2 | 0 | 2 | 0 | src/renderer/App.tsx:6734,6770 |
+| `cancelTask` | Preview |  | 2 | 2 | 0 | 2 | 0 | src/renderer/App.tsx:6725,6761 |
 | `cancelTeamRun` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:575 |
 | `canvasClose` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CanvasPreview.tsx:522 |
 | `canvasExportHTML` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CanvasPreview.tsx:602 |
-| `canvasGetSession` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:6186 |
+| `canvasGetSession` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:6170 |
 | `canvasGetSessionDir` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CanvasPreview.tsx:664 |
-| `canvasListSessions` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:6167 |
+| `canvasListSessions` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:6151 |
 | `canvasOpenInBrowser` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CanvasPreview.tsx:627 |
 | `canvasShow` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CanvasPreview.tsx:513 |
 | `canvasSnapshot` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CanvasPreview.tsx:267 |
 | `captureBrowserWorkbenchScreenshot` | Unreviewed |  | 3 | 2 | 0 | 3 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:951,1166,1167 |
-| `checkForUpdates` | Native-only today |  | 3 | 2 | 2 | 1 | 0 | src/renderer/App.tsx:3516,3520; src/renderer/components/UpdateSettings.tsx:104 |
+| `checkForUpdates` | Native-only today |  | 3 | 2 | 2 | 1 | 0 | src/renderer/App.tsx:3515,3519; src/renderer/components/UpdateSettings.tsx:104 |
 | `checkHf` | Unreviewed |  | 2 | 2 | 1 | 1 | 0 | src/renderer/components/Settings.tsx:1887,3524 |
 | `checkPackUpdates` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/CustomizePanel.tsx:128 |
 | `checkTailscaleAvailability` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:87 |
@@ -130,12 +129,12 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `completeMention` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MentionList.tsx:148 |
 | `configureGmailHooks` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/HooksSettings.tsx:148 |
 | `confirmIdentityLink` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ContactIdentitySettings.tsx:513 |
-| `connectDevice` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1435 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/DevicesPanel.tsx:825,2158 |
+| `connectDevice` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1435 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/DevicesPanel.tsx:804,2115 |
 | `connectRemoteGateway` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1526 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:336 |
 | `connectSSHTunnel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:407 |
 | `connectTeamsMeetings` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TeamsMeetingSettings.tsx:128,177 |
-| `convertAgentRoleToManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1938 |
-| `convertAutomationProfileToManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1957 |
+| `convertAgentRoleToManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1937 |
+| `convertAutomationProfileToManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1956 |
 | `createActivity` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:1425 |
 | `createAgentMailDomain` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:257 |
 | `createAgentMailInbox` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:215 |
@@ -146,33 +145,32 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `createAnnotation` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:1158,1178 |
 | `createBotResponsibility` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BotResponsibilityPanel.tsx:282 |
 | `createChannelSpecialization` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ChannelSpecializationSettings.tsx:136 |
-| `createComparison` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ComparisonCreateModal.tsx:65 |
 | `createCustomSkill` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SkillsSettings.tsx:128 |
-| `createImageGenProfile` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1575 |
+| `createImageGenProfile` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1574 |
 | `createMailboxDraft` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MailComposeFrame.tsx:570 |
 | `createMailboxForward` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:457 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:2065 |
 | `createMailboxMissionControlHandoff` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:358 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:2157 |
 | `createMailboxRule` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:433 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:1961 |
 | `createMailboxSavedView` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:489 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:7440 |
 | `createMailboxSchedule` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:445 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:2080 |
-| `createManagedAgent` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2519 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1754 |
-| `createManagedAgentFromPlan` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3038 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1640 |
-| `createManagedAgentRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2608 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1797 |
-| `createManagedEnvironment` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2778 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1694 |
-| `createManagedSession` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2865 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1856,1903 |
+| `createManagedAgent` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2519 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1753 |
+| `createManagedAgentFromPlan` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3038 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1639 |
+| `createManagedAgentRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2608 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1796 |
+| `createManagedEnvironment` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2778 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1693 |
+| `createManagedSession` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2865 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1855,1902 |
 | `createMention` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MentionInput.tsx:99 |
 | `createProfile` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/ProfileSettings.tsx:28,33 |
 | `createRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3554 | 6 | 4 | 0 | 6 | 0 | src/renderer/components/AutomationStudioPanel.tsx:793; src/renderer/components/BotResponsibilityPanel.tsx:211,592,640; src/renderer/components/MainContent/TaskAutomationModal.tsx:123; src/renderer/components/RoutineSettingsPanel.tsx:680 |
 | `createSecureMcpTunnel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MCPSettings.tsx:343 |
 | `createSessionInvite` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SessionMembersCard.tsx:162 |
-| `createTask` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6122 |
+| `createTask` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6113 |
 | `createTaskLabel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TaskLabelManager.tsx:64 |
 | `createTeam` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:364 |
 | `createTeamItem` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:601 |
 | `createTeamRun` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:546 |
 | `createTerminalTab` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TerminalTabsDock.tsx:234 |
 | `createWebAccessPairingCode` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/WebAccessSettingsPanel.tsx:90 |
-| `createWorkspace` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:169 | 3 | 3 | 0 | 3 | 0 | src/renderer/App.tsx:5870; src/renderer/components/Sidebar.tsx:2876; src/renderer/components/WorkspaceSelector.tsx:43 |
+| `createWorkspace` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:169 | 3 | 3 | 0 | 3 | 0 | src/renderer/App.tsx:5869; src/renderer/components/Sidebar.tsx:2870; src/renderer/components/WorkspaceSelector.tsx:43 |
 | `createWorkspaceKitProject` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/WorkspaceKitPanel.tsx:104 |
 | `deleteActivity` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ActivityFeed.tsx:144 |
 | `deleteAgentMailDomain` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:282 |
@@ -190,12 +188,12 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `deleteMailboxForward` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:463 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:6394 |
 | `deleteMailboxRule` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:439 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:6392 |
 | `deleteMailboxSchedule` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:451 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:6396 |
-| `deleteManagedAgentRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2693 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1780 |
+| `deleteManagedAgentRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2693 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1779 |
 | `deleteMemoryObservation` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemoryInspectorPanel.tsx:213 |
-| `deleteNotification` | Preview | src/host/services/browser-notification-methods.ts:98 | 3 | 3 | 2 | 1 | 0 | src/renderer/App.tsx:4592,4630; src/renderer/components/NotificationPanel.tsx:290 |
+| `deleteNotification` | Preview | src/host/services/browser-notification-methods.ts:98 | 3 | 3 | 2 | 1 | 0 | src/renderer/App.tsx:4591,4629; src/renderer/components/NotificationPanel.tsx:290 |
 | `deletePulseRemoteData` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/PulseSettingsPanel.tsx:134,219 |
 | `deleteSecureMcpTunnel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MCPSettings.tsx:395 |
-| `deleteTask` | Unreviewed |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:6316 |
+| `deleteTask` | Unreviewed |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:6307 |
 | `deleteTaskLabel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TaskLabelManager.tsx:96 |
 | `deleteTeam` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:430 |
 | `deleteTeamItem` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:651 |
@@ -203,17 +201,17 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `deleteWorkspacePermissionRule` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PermissionSettingsPanel.tsx:382 |
 | `denyProtectedCredentialRequest` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SessionDashboardCard.tsx:325 |
 | `detectHardware` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3582 |
-| `deviceAssignTask` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8360 |
+| `deviceAssignTask` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8349 |
 | `deviceListFiles` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1650 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/RemoteFilePicker.tsx:46 |
-| `deviceListRemoteWorkspaces` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1617 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DevicesPanel.tsx:807 |
-| `deviceListTasks` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1582 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DevicesPanel.tsx:650 |
-| `deviceProxyRequest` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1573 | 11 | 11 | 0 | 11 | 0 | src/renderer/App.tsx:5160,5266,6539,6544,6559,6675,6728; src/renderer/components/DevicesPanel.tsx:2760,2764,2793,2818 |
+| `deviceListRemoteWorkspaces` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1617 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DevicesPanel.tsx:786 |
+| `deviceListTasks` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1582 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DevicesPanel.tsx:633 |
+| `deviceProxyRequest` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1573 | 11 | 11 | 0 | 11 | 0 | src/renderer/App.tsx:5159,5265,6530,6535,6550,6666,6719; src/renderer/components/DevicesPanel.tsx:2717,2721,2750,2775 |
 | `disableControlPlane` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:159 |
 | `disableExtension` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:72 |
 | `disableGatewayChannel` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1455 | 16 | 16 | 0 | 16 | 0 | src/renderer/components/BlueBubblesSettings.tsx:173; src/renderer/components/DiscordSettings.tsx:126; src/renderer/components/EmailSettings.tsx:606; src/renderer/components/FeishuSettings.tsx:142; src/renderer/components/GoogleChatSettings.tsx:149; src/renderer/components/ImessageSettings.tsx:145; src/renderer/components/LineSettings.tsx:155; src/renderer/components/MatrixSettings.tsx:167; src/renderer/components/MattermostSettings.tsx:152; src/renderer/components/SignalSettings.tsx:151; src/renderer/components/SlackSettings.tsx:143; src/renderer/components/TeamsSettings.tsx:148; src/renderer/components/TelegramSettings.tsx:166; src/renderer/components/WeComSettings.tsx:145; src/renderer/components/WebhookChannelSettings.tsx:369; src/renderer/components/WhatsAppSettings.tsx:205 |
 | `disableHooks` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/HooksSettings.tsx:98 |
 | `discardMailboxDraft` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MailComposeFrame.tsx:318 |
-| `disconnectDevice` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1452 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/DevicesPanel.tsx:840,862 |
+| `disconnectDevice` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1452 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/DevicesPanel.tsx:819,841 |
 | `disconnectPactGrant` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PactSettings.tsx:374 |
 | `disconnectRemoteGateway` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1558 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ControlPlaneSettings.tsx:272,362 |
 | `disconnectSSHTunnel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:433 |
@@ -221,12 +219,12 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `discoverAtomicChatModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1479 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3381 |
 | `discoverExtensions` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:106 |
 | `dismissMention` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MentionList.tsx:157 |
-| `dismissMigrationNotification` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/App.tsx:3483 |
+| `dismissMigrationNotification` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/App.tsx:3482 |
 | `dismissSubconsciousTarget` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SubconsciousSettingsPanel.tsx:227 |
-| `dismissSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:238 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/HomeDashboard.tsx:597; src/renderer/components/MainContent/MainContent.tsx:8913; src/renderer/components/SuggestionsPanel.tsx:154 |
+| `dismissSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:238 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/HomeDashboard.tsx:597; src/renderer/components/MainContent/MainContent.tsx:8890; src/renderer/components/SuggestionsPanel.tsx:154 |
 | `downloadMeetingRecording` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TeamsMeetingSettings.tsx:312 |
 | `downloadUpdate` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/UpdateSettings.tsx:119 |
-| `editSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:258 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:8183 |
+| `editSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:258 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:8160 |
 | `enableControlPlane` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:161 |
 | `enableExtension` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:55 |
 | `enableGatewayChannel` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1429 | 16 | 16 | 0 | 16 | 0 | src/renderer/components/BlueBubblesSettings.tsx:175; src/renderer/components/DiscordSettings.tsx:128; src/renderer/components/EmailSettings.tsx:608; src/renderer/components/FeishuSettings.tsx:144; src/renderer/components/GoogleChatSettings.tsx:151; src/renderer/components/ImessageSettings.tsx:147; src/renderer/components/LineSettings.tsx:157; src/renderer/components/MatrixSettings.tsx:169; src/renderer/components/MattermostSettings.tsx:154; src/renderer/components/SignalSettings.tsx:153; src/renderer/components/SlackSettings.tsx:145; src/renderer/components/TeamsSettings.tsx:150; src/renderer/components/TelegramSettings.tsx:168; src/renderer/components/WeComSettings.tsx:147; src/renderer/components/WebhookChannelSettings.tsx:370; src/renderer/components/WhatsAppSettings.tsx:207 |
@@ -237,35 +235,35 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `extractMailboxAttachmentText` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:427 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:5245 |
 | `extractMailboxCommitments` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:260 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/InboxAgentPanel.tsx:2106,2128,5482 |
 | `findImportedMemories` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemorySourcesLists.tsx:242 |
-| `findTeamRunByRootTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:275 | 2 | 2 | 1 | 1 | 0 | src/renderer/App.tsx:6755; src/renderer/components/MainContent/MainContent.tsx:4699 |
+| `findTeamRunByRootTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:275 | 2 | 2 | 1 | 1 | 0 | src/renderer/App.tsx:6746; src/renderer/components/MainContent/MainContent.tsx:4683 |
 | `flushPulse` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PulseSettingsPanel.tsx:90 |
-| `forkTaskSession` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2211 | 5 | 4 | 0 | 5 | 0 | src/renderer/App.tsx:6363; src/renderer/components/MainContent/MainContent.tsx:9533,9578; src/renderer/components/SessionProgressCard.tsx:74,78 |
+| `forkTaskSession` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2211 | 5 | 4 | 0 | 5 | 0 | src/renderer/App.tsx:6354; src/renderer/components/MainContent/MainContent.tsx:9510,9555; src/renderer/components/SessionProgressCard.tsx:74,78 |
 | `fulfillProtectedCredentialRequest` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SessionDashboardCard.tsx:304 |
 | `generateDailyBriefing` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BriefingPanel.tsx:135 |
 | `generateGatewayPairing` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1569 | 15 | 15 | 0 | 15 | 0 | src/renderer/components/BlueBubblesSettings.tsx:245; src/renderer/components/DiscordSettings.tsx:177; src/renderer/components/FeishuSettings.tsx:185; src/renderer/components/GoogleChatSettings.tsx:201; src/renderer/components/ImessageSettings.tsx:210; src/renderer/components/LineSettings.tsx:207; src/renderer/components/MatrixSettings.tsx:219; src/renderer/components/MattermostSettings.tsx:204; src/renderer/components/SignalSettings.tsx:231; src/renderer/components/SlackSettings.tsx:219; src/renderer/components/TeamsSettings.tsx:200; src/renderer/components/TelegramSettings.tsx:218; src/renderer/components/WeComSettings.tsx:188; src/renderer/components/WebhookChannelSettings.tsx:250; src/renderer/components/WhatsAppSettings.tsx:346 |
 | `generateMailboxDraft` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:397 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:1577 |
-| `generateManagedAgentPlan` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3008 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1621 |
+| `generateManagedAgentPlan` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3008 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1620 |
 | `generateRoutineWorkflow` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3785 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:656 |
 | `getActiveContext` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/ContextPanel.tsx:22; src/renderer/components/RightPanel.tsx:1769 |
-| `getAdminPolicies` | Preview | src/host/services/browser-settings-methods.ts:831 | 2 | 1 | 1 | 1 | 0 | src/renderer/components/AdminPoliciesPanel.tsx:173; src/renderer/components/MainContent/MainContent.tsx:6323 |
+| `getAdminPolicies` | Preview | src/host/services/browser-settings-methods.ts:831 | 2 | 1 | 1 | 1 | 0 | src/renderer/components/AdminPoliciesPanel.tsx:173; src/renderer/components/MainContent/MainContent.tsx:6307 |
 | `getAgentMailSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:93 |
 | `getAgentMailStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:94 |
 | `getAgentMailWorkspaceBinding` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:114 |
-| `getAgentRole` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3394 | 6 | 6 | 3 | 3 | 0 | src/renderer/App.tsx:7083,7606; src/renderer/components/AgentWorkingStatePanel.tsx:69; src/renderer/components/BotDetailsRail.tsx:162; src/renderer/components/BotProfileDialog.tsx:34; src/renderer/components/MainContent/MainContent.tsx:4616 |
-| `getAgentRoles` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3367 | 14 | 12 | 4 | 10 | 0 | src/renderer/components/AgentSquadSettings.tsx:29; src/renderer/components/AgentsHubPanel.tsx:1161; src/renderer/components/BotsHome.tsx:145,150; src/renderer/components/ChannelSpecializationSettings.tsx:58; src/renderer/components/InboxAgentPanel.tsx:844; src/renderer/components/MainContent/MainContent.tsx:6079; src/renderer/components/MentionInput.tsx:47; src/renderer/components/MentionList.tsx:64; src/renderer/components/ResearchChannelsSettings.tsx:37; src/renderer/components/Sidebar.tsx:1235,1239; src/renderer/components/TaskBoard.tsx:61; src/renderer/components/mission-control/useMissionControlData.ts:640 |
+| `getAgentRole` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3394 | 6 | 6 | 3 | 3 | 0 | src/renderer/App.tsx:7074,7597; src/renderer/components/AgentWorkingStatePanel.tsx:69; src/renderer/components/BotDetailsRail.tsx:162; src/renderer/components/BotProfileDialog.tsx:34; src/renderer/components/MainContent/MainContent.tsx:4612 |
+| `getAgentRoles` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3367 | 14 | 12 | 4 | 10 | 0 | src/renderer/components/AgentSquadSettings.tsx:29; src/renderer/components/AgentsHubPanel.tsx:1160; src/renderer/components/BotsHome.tsx:145,150; src/renderer/components/ChannelSpecializationSettings.tsx:58; src/renderer/components/InboxAgentPanel.tsx:844; src/renderer/components/MainContent/MainContent.tsx:6063; src/renderer/components/MentionInput.tsx:47; src/renderer/components/MentionList.tsx:64; src/renderer/components/ResearchChannelsSettings.tsx:37; src/renderer/components/Sidebar.tsx:1229,1233; src/renderer/components/TaskBoard.tsx:61; src/renderer/components/mission-control/useMissionControlData.ts:640 |
 | `getAllHeartbeatStatus` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3504 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:642,1165 |
 | `getAnswerSurfaceState` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/hooks/useAnswerSurfaceState.ts:43 |
 | `getAnthropicModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1104 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/Settings.tsx:2340,2596 |
-| `getAppVersion` | Unreviewed |  | 3 | 3 | 1 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:5895; src/renderer/components/UpdateSettings.tsx:90; src/renderer/components/WorkspaceSelector.tsx:20 |
-| `getAppearanceRuntimeInfo` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/App.tsx:3152,3272 |
-| `getAppearanceSettings` | Preview |  | 6 | 5 | 3 | 3 | 0 | src/renderer/App.tsx:3320,3403,3410; src/renderer/components/MainContent/MainContent.tsx:5903; src/renderer/hooks/useAgentContext.ts:65; src/renderer/hooks/useOnboardingFlow.ts:1680 |
+| `getAppVersion` | Unreviewed |  | 3 | 3 | 1 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:5879; src/renderer/components/UpdateSettings.tsx:90; src/renderer/components/WorkspaceSelector.tsx:20 |
+| `getAppearanceRuntimeInfo` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/App.tsx:3151,3271 |
+| `getAppearanceSettings` | Preview |  | 6 | 5 | 3 | 3 | 0 | src/renderer/App.tsx:3319,3402,3409; src/renderer/components/MainContent/MainContent.tsx:5887; src/renderer/hooks/useAgentContext.ts:65; src/renderer/hooks/useOnboardingFlow.ts:1680 |
 | `getApprovalDraftPreview` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/components/GenericApprovalDialog.tsx:208,211 |
 | `getAwarenessConfig` | Preview | src/host/services/browser-awareness-methods.ts:80 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/memory/MemorySettingsTab.tsx:420 |
 | `getAwarenessSummary` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/AwarenessDetailsPanel.tsx:109 |
 | `getBedrockModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1137 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3757 |
 | `getBotFutureControl` | Unreviewed |  | 1 | 0 | 0 | 1 | 0 | src/renderer/components/BotWorkDialog.tsx:166 |
-| `getBotNotificationPolicy` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3399 | 3 | 3 | 2 | 1 | 0 | src/renderer/App.tsx:2921; src/renderer/components/BotDetailsRail.tsx:163; src/renderer/components/BotNotificationPanel.tsx:82 |
-| `getBotNotificationRoute` | Unreviewed |  | 3 | 2 | 2 | 1 | 0 | src/renderer/App.tsx:4572,4574; src/renderer/components/BotNotificationPanel.tsx:44 |
+| `getBotNotificationPolicy` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3399 | 3 | 3 | 2 | 1 | 0 | src/renderer/App.tsx:2920; src/renderer/components/BotDetailsRail.tsx:163; src/renderer/components/BotNotificationPanel.tsx:82 |
+| `getBotNotificationRoute` | Unreviewed |  | 3 | 2 | 2 | 1 | 0 | src/renderer/App.tsx:4571,4573; src/renderer/components/BotNotificationPanel.tsx:44 |
 | `getBotWorkControl` | Unreviewed |  | 1 | 0 | 0 | 1 | 0 | src/renderer/components/BotWorkDialog.tsx:162 |
 | `getBotWorkResult` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/BotWorkResultCard.tsx:32,35 |
 | `getBoxBrainStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BoxSettings.tsx:107 |
@@ -276,10 +274,9 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getChronicleSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ChronicleSettings.tsx:91 |
 | `getChronicleStatus` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ChronicleSettings.tsx:92,129 |
 | `getCommandCenterSummary` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:493 |
-| `getComparison` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ComparisonView.tsx:43 |
 | `getComputerUseStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ComputerUseSettings.tsx:74 |
 | `getContactIdentityCoverageStats` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ContactIdentitySettings.tsx:64 |
-| `getControlPlaneSettings` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1364 | 5 | 5 | 0 | 5 | 0 | src/renderer/components/ControlPlaneSettings.tsx:85; src/renderer/components/DevicesPanel.tsx:471,855,2062,2138 |
+| `getControlPlaneSettings` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1364 | 5 | 5 | 0 | 5 | 0 | src/renderer/components/ControlPlaneSettings.tsx:85; src/renderer/components/DevicesPanel.tsx:454,834,2019,2095 |
 | `getControlPlaneStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:86 |
 | `getControlPlaneToken` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:204 |
 | `getCronJob` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4188 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:603 |
@@ -288,14 +285,14 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getCurrentWorkingState` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentWorkingStatePanel.tsx:77 |
 | `getCustomSkillSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SkillsSettings.tsx:29 |
 | `getDeepSeekModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1335 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3280 |
-| `getDeviceSummary` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1424 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DevicesPanel.tsx:442 |
+| `getDeviceSummary` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1424 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DevicesPanel.tsx:425 |
 | `getDropboxSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DropboxSettings.tsx:30 |
 | `getDropboxStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DropboxSettings.tsx:61 |
-| `getDueSoonCommitments` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4978 |
+| `getDueSoonCommitments` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4962 |
 | `getElevenLabsVoices` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/VoiceSettings.tsx:131 |
 | `getExtensions` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:30 |
 | `getGatewayChannelHealth` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1491 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/WebhookChannelSettings.tsx:82 |
-| `getGatewayChannels` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1266; src/host/services/browser-navigation-methods.ts:3079 | 19 | 19 | 2 | 17 | 0 | src/renderer/components/AgentsHubPanel.tsx:1156; src/renderer/components/BlueBubblesSettings.tsx:55; src/renderer/components/DevicesPanel.tsx:585; src/renderer/components/DiscordSettings.tsx:34; src/renderer/components/EmailSettings.tsx:362; src/renderer/components/FeishuSettings.tsx:47; src/renderer/components/GoogleChatSettings.tsx:52; src/renderer/components/ImessageSettings.tsx:41; src/renderer/components/LineSettings.tsx:50; src/renderer/components/MatrixSettings.tsx:52; src/renderer/components/MattermostSettings.tsx:50; src/renderer/components/ScheduledTasksSettings.tsx:1949; src/renderer/components/SignalSettings.tsx:42; src/renderer/components/SlackSettings.tsx:41; src/renderer/components/TeamsSettings.tsx:52; src/renderer/components/TelegramSettings.tsx:54; src/renderer/components/WeComSettings.tsx:48; src/renderer/components/WebhookChannelSettings.tsx:92; src/renderer/components/WhatsAppSettings.tsx:44 |
+| `getGatewayChannels` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1266; src/host/services/browser-navigation-methods.ts:3079 | 19 | 19 | 2 | 17 | 0 | src/renderer/components/AgentsHubPanel.tsx:1155; src/renderer/components/BlueBubblesSettings.tsx:55; src/renderer/components/DevicesPanel.tsx:568; src/renderer/components/DiscordSettings.tsx:34; src/renderer/components/EmailSettings.tsx:362; src/renderer/components/FeishuSettings.tsx:47; src/renderer/components/GoogleChatSettings.tsx:52; src/renderer/components/ImessageSettings.tsx:41; src/renderer/components/LineSettings.tsx:50; src/renderer/components/MatrixSettings.tsx:52; src/renderer/components/MattermostSettings.tsx:50; src/renderer/components/ScheduledTasksSettings.tsx:1949; src/renderer/components/SignalSettings.tsx:42; src/renderer/components/SlackSettings.tsx:41; src/renderer/components/TeamsSettings.tsx:52; src/renderer/components/TelegramSettings.tsx:54; src/renderer/components/WeComSettings.tsx:48; src/renderer/components/WebhookChannelSettings.tsx:92; src/renderer/components/WhatsAppSettings.tsx:44 |
 | `getGatewayChats` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3113 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/ChannelSpecializationSettings.tsx:56; src/renderer/components/ScheduledTasksSettings.tsx:1968 |
 | `getGatewayUsers` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1508 | 16 | 16 | 1 | 15 | 0 | src/renderer/components/BlueBubblesSettings.tsx:78; src/renderer/components/DiscordSettings.tsx:44; src/renderer/components/FeishuSettings.tsx:62; src/renderer/components/GoogleChatSettings.tsx:62; src/renderer/components/ImessageSettings.tsx:64; src/renderer/components/LineSettings.tsx:67; src/renderer/components/MatrixSettings.tsx:72; src/renderer/components/MattermostSettings.tsx:67; src/renderer/components/SignalSettings.tsx:67; src/renderer/components/SlackSettings.tsx:86,230; src/renderer/components/TeamsSettings.tsx:62; src/renderer/components/TelegramSettings.tsx:80; src/renderer/components/WeComSettings.tsx:63; src/renderer/components/WebhookChannelSettings.tsx:105; src/renderer/components/WhatsAppSettings.tsx:63 |
 | `getGeminiModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1192 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3160 |
@@ -305,19 +302,19 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getGoogleWorkspaceStatus` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/GoogleWorkspaceSettings.tsx:212,318 |
 | `getGroqModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1283 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3240 |
 | `getGuardrailDefaults` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:793 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/GuardrailSettings.tsx:49 |
-| `getGuardrailSettings` | Preview | src/host/services/browser-settings-methods.ts:788 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/GuardrailSettings.tsx:26; src/renderer/components/MainContent/MainContent.tsx:5932 |
+| `getGuardrailSettings` | Preview | src/host/services/browser-settings-methods.ts:788 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/GuardrailSettings.tsx:26; src/renderer/components/MainContent/MainContent.tsx:5916 |
 | `getHooksSettings` | Unreviewed |  | 4 | 4 | 0 | 4 | 0 | src/renderer/components/AutomationStudioPanel.tsx:249,542; src/renderer/components/HooksSettings.tsx:39; src/renderer/components/RoutineSettingsPanel.tsx:392 |
 | `getHooksStatus` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/HooksSettings.tsx:59; src/renderer/components/RoutineSettingsPanel.tsx:391 |
 | `getHubSources` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/FileHub.tsx:118 |
 | `getImportedMemoryStats` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemorySourcesLists.tsx:227 |
 | `getInputRequestDraftReview` | Unreviewed |  | 1 | 0 | 1 | 0 | 0 | src/renderer/components/ApprovalDraftReview.tsx:166 |
 | `getKimiModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1361 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3301 |
-| `getLLMConfigStatus` | Preview | src/host/services/browser-settings-methods.ts:885 | 4 | 3 | 1 | 3 | 0 | src/renderer/App.tsx:3362,3364; src/renderer/components/RightPanel.tsx:2195; src/renderer/components/Settings.tsx:2683 |
+| `getLLMConfigStatus` | Preview | src/host/services/browser-settings-methods.ts:885 | 4 | 3 | 1 | 3 | 0 | src/renderer/App.tsx:3361,3363; src/renderer/components/RightPanel.tsx:2192; src/renderer/components/Settings.tsx:2683 |
 | `getLLMModels` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/ChatGPTImportWizard.tsx:95 |
 | `getLLMRoutingStatus` | Preview | src/host/services/browser-settings-methods.ts:1700 | 3 | 2 | 0 | 3 | 0 | src/renderer/components/Settings.tsx:2696,2698,8783 |
-| `getLLMSettings` | Preview | src/host/services/browser-settings-methods.ts:890 | 6 | 5 | 2 | 4 | 0 | src/renderer/App.tsx:6100,6101; src/renderer/components/ChatGPTImportWizard.tsx:90; src/renderer/components/Settings.tsx:1642,2694; src/renderer/hooks/useOnboardingFlow.ts:1142 |
+| `getLLMSettings` | Preview | src/host/services/browser-settings-methods.ts:890 | 6 | 5 | 2 | 4 | 0 | src/renderer/App.tsx:6091,6092; src/renderer/components/ChatGPTImportWizard.tsx:90; src/renderer/components/Settings.tsx:1642,2694; src/renderer/hooks/useOnboardingFlow.ts:1142 |
 | `getLatestBriefing` | Unreviewed |  | 2 | 2 | 1 | 1 | 0 | src/renderer/components/BriefingPanel.tsx:115; src/renderer/components/calm/CalmBriefingCard.tsx:85 |
-| `getLlmWikiVaultSummary` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4916 |
+| `getLlmWikiVaultSummary` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4900 |
 | `getLocalAIServerLog` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3616 |
 | `getLocalAIServerStatus` | Unreviewed |  | 4 | 4 | 1 | 3 | 0 | src/renderer/components/Settings.tsx:1891,3527,3615,3646 |
 | `getMailboxClientState` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:204 | 3 | 3 | 1 | 2 | 0 | src/renderer/components/InboxAgentPanel.tsx:835; src/renderer/components/MailComposeFrame.tsx:185,571 |
@@ -328,12 +325,12 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getMailboxSyncStatus` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:203 | 6 | 5 | 3 | 3 | 0 | src/renderer/components/BotResponsibilityPanel.tsx:136,137; src/renderer/components/InboxAgentPanel.tsx:834,1227,1590; src/renderer/components/RoutineSettingsPanel.tsx:402 |
 | `getMailboxThread` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:206 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/InboxAgentPanel.tsx:935,1546 |
 | `getMailboxTodayDigest` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:210 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:853 |
-| `getManagedAgent` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2498 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1166,1808 |
-| `getManagedAgentInsights` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2716 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1179,1303 |
-| `getManagedAgentRuntimeToolCatalog` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2508 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1272 |
-| `getManagedAgentSlackDeploymentHealth` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1321 |
-| `getManagedSession` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2854 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1376 |
-| `getManagedSessionWorkpaper` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2952 | 3 | 3 | 2 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1360,1378,1872 |
+| `getManagedAgent` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2498 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1165,1807 |
+| `getManagedAgentInsights` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2716 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1178,1302 |
+| `getManagedAgentRuntimeToolCatalog` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2508 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1271 |
+| `getManagedAgentSlackDeploymentHealth` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1320 |
+| `getManagedSession` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2854 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1375 |
+| `getManagedSessionWorkpaper` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2952 | 3 | 3 | 2 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1359,1377,1871 |
 | `getMcpEventsStatus` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4304 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/EventTriggersPanel.tsx:304 |
 | `getMemoryFeaturesSettings` | Unreviewed |  | 5 | 4 | 0 | 5 | 0 | src/renderer/components/MemoryHubSettings.tsx:90,135,142; src/renderer/hooks/useOnboardingFlow.ts:1719,1722 |
 | `getMemoryLayerPreview` | Preview |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/memory/WakeUpLayersPreview.tsx:60 |
@@ -343,10 +340,10 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getMemoryRepoDreams` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MemoryHubSettings.tsx:64 |
 | `getMemorySettings` | Preview |  | 4 | 3 | 0 | 4 | 0 | src/renderer/components/memory/useWorkspaceMemorySettings.ts:64,96; src/renderer/hooks/useOnboardingFlow.ts:1735,1751 |
 | `getMemoryStats` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/useWorkspaceMemorySettings.ts:66 |
-| `getMigrationStatus` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:3448,3456 |
+| `getMigrationStatus` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:3447,3455 |
 | `getMissionControlItemEvidence` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:133 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:545 |
-| `getMyAgentWorkspacePermissions` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1342,1446 |
-| `getNativeFrameMode` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3251 |
+| `getMyAgentWorkspacePermissions` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1341,1445 |
+| `getNativeFrameMode` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3250 |
 | `getNotionSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/NotionSettings.tsx:29 |
 | `getNotionStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/NotionSettings.tsx:60 |
 | `getOllamaModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1172 | 4 | 4 | 0 | 4 | 0 | src/renderer/components/OnboardingModal.tsx:483; src/renderer/components/Settings.tsx:3140; src/renderer/hooks/useOnboardingFlow.ts:669,1376 |
@@ -354,7 +351,7 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getOneDriveStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/OneDriveSettings.tsx:61 |
 | `getOpenAICompatibleModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1410 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3350 |
 | `getOpenAIModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1260 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3220 |
-| `getOpenCommitments` | Preview | src/host/services/browser-settings-methods.ts:841 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4368,4979 |
+| `getOpenCommitments` | Preview | src/host/services/browser-settings-methods.ts:841 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4366,4963 |
 | `getOpenRouterImageModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1243 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3201 |
 | `getOpenRouterModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1215 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3179 |
 | `getPackRegistryCategories` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/PluginStore.tsx:79 |
@@ -362,8 +359,8 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getPactSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PactSettings.tsx:58 |
 | `getPactSignIn` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/MainContent/PactAuthorizationCard.tsx:60,62 |
 | `getPactStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PactSettings.tsx:59 |
-| `getPermissionRuntimeInfo` | Preview | src/host/services/browser-settings-methods.ts:827 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:6337; src/renderer/components/calm/BuildAccessPicker.tsx:70 |
-| `getPermissionSettings` | Preview | src/host/services/browser-navigation-methods.ts:3077; src/host/services/browser-settings-methods.ts:1653 | 6 | 6 | 4 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1159; src/renderer/components/DevicesPanel.tsx:394; src/renderer/components/MainContent/MainContent.tsx:6312; src/renderer/components/PermissionSettingsPanel.tsx:258; src/renderer/components/ScheduledTasksSettings.tsx:1931; src/renderer/components/calm/BuildAccessPicker.tsx:64 |
+| `getPermissionRuntimeInfo` | Preview | src/host/services/browser-settings-methods.ts:827 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:6321; src/renderer/components/calm/BuildAccessPicker.tsx:70 |
+| `getPermissionSettings` | Preview | src/host/services/browser-navigation-methods.ts:3077; src/host/services/browser-settings-methods.ts:1653 | 6 | 6 | 4 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1158; src/renderer/components/DevicesPanel.tsx:388; src/renderer/components/MainContent/MainContent.tsx:6296; src/renderer/components/PermissionSettingsPanel.tsx:258; src/renderer/components/ScheduledTasksSettings.tsx:1931; src/renderer/components/calm/BuildAccessPicker.tsx:64 |
 | `getPersonaDefinitions` | Preview | src/host/services/browser-settings-methods.ts:1747 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PersonalitySettings.tsx:70 |
 | `getPersonalityConfigV2` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1711 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/PersonalitySettings.tsx:69; src/renderer/components/personality/PersonalityAdvancedTab.tsx:59 |
 | `getPersonalityPreview` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/personality/PersonalityAdvancedTab.tsx:28 |
@@ -372,13 +369,13 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getPiModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1387 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3322 |
 | `getPiProviders` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1405 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3338 |
 | `getPlannerConfig` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:444 |
-| `getPlatform` | Native-only today |  | 7 | 6 | 1 | 6 | 0 | src/renderer/App.tsx:3249,3267; src/renderer/components/ComputerUseSettings.tsx:72; src/renderer/components/Settings.tsx:1468; src/renderer/components/TraySettings.tsx:9,10; src/renderer/components/sidebar/SidebarRail.tsx:90 |
-| `getProviderModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:904 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/MainContent/ModelDropdown.tsx:324; src/renderer/components/MultiLlmSelectionPanel.tsx:41; src/renderer/components/Settings.tsx:2353 |
+| `getPlatform` | Native-only today |  | 7 | 6 | 1 | 6 | 0 | src/renderer/App.tsx:3248,3266; src/renderer/components/ComputerUseSettings.tsx:72; src/renderer/components/Settings.tsx:1468; src/renderer/components/TraySettings.tsx:9,10; src/renderer/components/sidebar/SidebarRail.tsx:90 |
+| `getProviderModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:904 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/MainContent/ModelDropdown.tsx:324; src/renderer/components/Settings.tsx:2353 |
 | `getPulseSettings` | Unreviewed |  | 2 | 1 | 1 | 1 | 0 | src/renderer/components/PulseConsentPrompt.tsx:30; src/renderer/components/PulseSettingsPanel.tsx:61 |
 | `getQueueSettings` | Host handler source; UI unverified | src/host/services/browser-queue-methods.ts:48 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/QueueSettings.tsx:24,43 |
-| `getQueueStatus` | Preview | src/host/services/browser-planning-methods.ts:142 | 4 | 2 | 4 | 0 | 0 | src/renderer/App.tsx:3494,3498; src/renderer/components/mission-control/useMissionControlData.ts:802,808 |
+| `getQueueStatus` | Preview | src/host/services/browser-planning-methods.ts:142 | 4 | 2 | 4 | 0 | 0 | src/renderer/App.tsx:3493,3497; src/renderer/components/mission-control/useMissionControlData.ts:802,808 |
 | `getRecentHubFiles` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/FileHub.tsx:120 |
-| `getRecentMemories` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4982 |
+| `getRecentMemories` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4966 |
 | `getRelationshipStats` | Preview | src/host/services/browser-settings-methods.ts:1707 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PersonalitySettings.tsx:72 |
 | `getRemoteGatewayStatus` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1472 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:88 |
 | `getRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3519 | 4 | 4 | 1 | 3 | 0 | src/renderer/components/AutomationStudioPanel.tsx:342,562,591,597 |
@@ -388,7 +385,7 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getSecureMcpTunnelAudit` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MCPSettings.tsx:261 |
 | `getSecureMcpTunnelSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MCPSettings.tsx:259 |
 | `getSecureMcpTunnelStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MCPSettings.tsx:260 |
-| `getSessionAutoApprove` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:4021,4023 |
+| `getSessionAutoApprove` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:4020,4022 |
 | `getSessionMembers` | Unreviewed |  | 5 | 5 | 2 | 3 | 0 | src/renderer/components/SessionDashboardCard.tsx:105; src/renderer/components/SessionMembersCard.tsx:47,101,167,195 |
 | `getSessionProgress` | Unreviewed |  | 4 | 3 | 3 | 1 | 0 | src/renderer/components/SessionDashboardCard.tsx:103; src/renderer/components/SessionProgressCard.tsx:31,35,64 |
 | `getSharePointSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SharePointSettings.tsx:29 |
@@ -398,25 +395,25 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getSubconsciousBrain` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SubconsciousSettingsPanel.tsx:132 |
 | `getSubconsciousSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SubconsciousSettingsPanel.tsx:131 |
 | `getSubconsciousTargetDetail` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SubconsciousSettingsPanel.tsx:156 |
-| `getTask` | Preview |  | 23 | 16 | 11 | 12 | 0 | src/renderer/App.tsx:3172,3174,3949,3966,5381,5766,5774,6147,6233,6267,6300,6331,7112,7455,7474,7502,7505,7584; src/renderer/components/DocumentEditorModal.tsx:109,127,138; src/renderer/components/mission-control/MCIssueDetail.tsx:71; src/renderer/components/mission-control/useMissionControlData.ts:1024 |
-| `getTaskCostEstimate` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/RightPanel.tsx:2197 |
-| `getTaskEventDetail` | Preview |  | 2 | 1 | 0 | 2 | 0 | src/renderer/App.tsx:5143,5167 |
-| `getTaskEvents` | Preview |  | 10 | 5 | 4 | 6 | 0 | src/renderer/App.tsx:2790,2840,3184,3195,4965,5012,5470,5476,6268,6374 |
+| `getTask` | Preview |  | 23 | 16 | 11 | 12 | 0 | src/renderer/App.tsx:3171,3173,3948,3965,5380,5765,5773,6138,6224,6258,6291,6322,7103,7446,7465,7493,7496,7575; src/renderer/components/DocumentEditorModal.tsx:109,127,138; src/renderer/components/mission-control/MCIssueDetail.tsx:71; src/renderer/components/mission-control/useMissionControlData.ts:1024 |
+| `getTaskCostEstimate` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/RightPanel.tsx:2194 |
+| `getTaskEventDetail` | Preview |  | 2 | 1 | 0 | 2 | 0 | src/renderer/App.tsx:5142,5166 |
+| `getTaskEvents` | Preview |  | 10 | 5 | 4 | 6 | 0 | src/renderer/App.tsx:2789,2839,3183,3194,4964,5011,5469,5475,6259,6365 |
 | `getTaskLearningProgress` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/mission-control/MCTaskDetail.tsx:107,110 |
-| `getTaskTimelinePage` | Preview |  | 8 | 3 | 3 | 5 | 0 | src/renderer/App.tsx:3184,3186,3187,4965,5003,5004,5234,5280 |
+| `getTaskTimelinePage` | Preview |  | 8 | 3 | 3 | 5 | 0 | src/renderer/App.tsx:3183,3185,3186,4964,5002,5003,5233,5279 |
 | `getTaskTraceRun` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TaskTraceDebuggerPanel.tsx:209 |
 | `getTeamsMeetingSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TeamsMeetingSettings.tsx:36 |
 | `getTeamsMeetingStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TeamsMeetingSettings.tsx:37 |
-| `getTempWorkspace` | Planned for browser work |  | 12 | 9 | 5 | 7 | 0 | src/renderer/App.tsx:3653,3658,3677,3691,6207,6793,6853; src/renderer/components/MainContent/MainContent.tsx:6661; src/renderer/components/MemoryHubSettings.tsx:92; src/renderer/components/mission-control/useMissionControlData.ts:405; src/renderer/hooks/useOnboardingFlow.ts:1734,1740 |
-| `getTraySettings` | Unreviewed |  | 2 | 2 | 1 | 1 | 0 | src/renderer/App.tsx:4472; src/renderer/components/TraySettings.tsx:43 |
+| `getTempWorkspace` | Planned for browser work |  | 12 | 9 | 5 | 7 | 0 | src/renderer/App.tsx:3652,3657,3676,3690,6198,6784,6844; src/renderer/components/MainContent/MainContent.tsx:6645; src/renderer/components/MemoryHubSettings.tsx:92; src/renderer/components/mission-control/useMissionControlData.ts:405; src/renderer/hooks/useOnboardingFlow.ts:1734,1740 |
+| `getTraySettings` | Unreviewed |  | 2 | 2 | 1 | 1 | 0 | src/renderer/App.tsx:4471; src/renderer/components/TraySettings.tsx:43 |
 | `getTriggerHistory` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4440 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/EventTriggersPanel.tsx:472 |
 | `getTunnelStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:41 |
 | `getUnreadNotificationCount` | Preview | src/host/services/browser-notification-methods.ts:60 | 3 | 3 | 3 | 0 | 0 | src/renderer/components/NotificationPanel.tsx:196,221,224 |
-| `getUsageInsights` | Preview | src/host/services/browser-report-methods.ts:49 | 4 | 4 | 2 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:4339; src/renderer/components/UsageInsightsPanel.tsx:358,387,486 |
+| `getUsageInsights` | Preview | src/host/services/browser-report-methods.ts:49 | 4 | 4 | 2 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:4337; src/renderer/components/UsageInsightsPanel.tsx:358,387,486 |
 | `getUsageInsightsEarliest` | Preview | src/host/services/browser-report-methods.ts:74 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/UsageInsightsPanel.tsx:425 |
-| `getUserProfile` | Preview | src/host/services/browser-settings-methods.ts:836 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4311,4980 |
+| `getUserProfile` | Preview | src/host/services/browser-settings-methods.ts:836 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:4309,4964 |
 | `getVoiceCapabilities` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/VoiceSettings.tsx:112 |
-| `getVoiceSettings` | Planned for browser work |  | 4 | 4 | 2 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:5949; src/renderer/components/VoiceSettings.tsx:111; src/renderer/hooks/useVoiceInput.ts:209; src/renderer/hooks/useVoiceTalkMode.ts:75 |
+| `getVoiceSettings` | Planned for browser work |  | 4 | 4 | 2 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:5933; src/renderer/components/VoiceSettings.tsx:111; src/renderer/hooks/useVoiceInput.ts:209; src/renderer/hooks/useVoiceTalkMode.ts:75 |
 | `getVoiceState` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/VoiceIndicator.tsx:40,231 |
 | `getWebAccessSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/WebAccessSettingsPanel.tsx:48 |
 | `getWebAccessStatus` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/WebAccessSettingsPanel.tsx:58 |
@@ -427,8 +424,8 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `getWorktreeSettings` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/WorktreeSettings.tsx:25 |
 | `getXAIModels` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1309 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3260 |
 | `importChatGPT` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ChatGPTImportWizard.tsx:162 |
-| `importDataToWorkspace` | Unreviewed |  | 3 | 3 | 0 | 3 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:894; src/renderer/components/MainContent/MainContent.tsx:7549; src/renderer/components/MainContent/attachments.ts:179 |
-| `importFilesToWorkspace` | Unreviewed |  | 7 | 7 | 0 | 7 | 0 | src/renderer/components/AgentsHubPanel.tsx:1519; src/renderer/components/DocumentArtifactViewer.tsx:490; src/renderer/components/MainContent/MainContent.tsx:7541; src/renderer/components/MainContent/attachments.ts:171; src/renderer/components/PresentationArtifactViewer.tsx:310; src/renderer/components/SpreadsheetArtifactViewer.tsx:882; src/renderer/components/WebArtifactViewer.tsx:263 |
+| `importDataToWorkspace` | Unreviewed |  | 3 | 3 | 0 | 3 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:894; src/renderer/components/MainContent/MainContent.tsx:7533; src/renderer/components/MainContent/attachments.ts:179 |
+| `importFilesToWorkspace` | Unreviewed |  | 7 | 7 | 0 | 7 | 0 | src/renderer/components/AgentsHubPanel.tsx:1518; src/renderer/components/DocumentArtifactViewer.tsx:490; src/renderer/components/MainContent/MainContent.tsx:7525; src/renderer/components/MainContent/attachments.ts:171; src/renderer/components/PresentationArtifactViewer.tsx:310; src/renderer/components/SpreadsheetArtifactViewer.tsx:882; src/renderer/components/WebArtifactViewer.tsx:263 |
 | `importMemoryFromText` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PromptMemoryImportWizard.tsx:100 |
 | `importPersonalityProfile` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/personality/PersonalityAdvancedTab.tsx:58 |
 | `importProfile` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/ProfileSettings.tsx:79,89 |
@@ -443,18 +440,18 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `installUpdate` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/UpdateSettings.tsx:128 |
 | `killCommand` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/CommandOutput.tsx:139,150 |
 | `linkIdentityHandle` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ContactIdentitySettings.tsx:123,284 |
-| `listActivities` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:147 | 4 | 4 | 1 | 3 | 0 | src/renderer/components/ActivityFeed.tsx:76; src/renderer/components/MainContent/MainContent.tsx:4322; src/renderer/components/mission-control/useMissionControlData.ts:654,690 |
+| `listActivities` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:147 | 4 | 4 | 1 | 3 | 0 | src/renderer/components/ActivityFeed.tsx:76; src/renderer/components/MainContent/MainContent.tsx:4320; src/renderer/components/mission-control/useMissionControlData.ts:654,690 |
 | `listAgentMailDomains` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:116 |
 | `listAgentMailInboxApiKeys` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:143 |
 | `listAgentMailInboxes` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:115 |
 | `listAgentMailListEntries` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:134 |
 | `listAgentMailPods` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:95 |
-| `listAgentTemplates` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2969 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1152 |
+| `listAgentTemplates` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2969 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1151 |
 | `listAnnotations` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:991 |
 | `listArtifacts` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/SessionDashboardCard.tsx:104 |
-| `listAutomationProfiles` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3500 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1162 |
+| `listAutomationProfiles` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3500 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1161 |
 | `listAwarenessBeliefs` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/AwarenessDetailsPanel.tsx:108 |
-| `listBotConversations` | Planned for browser work | src/host/services/browser-core-methods.ts:214 | 2 | 2 | 0 | 2 | 0 | src/renderer/App.tsx:7145,7595 |
+| `listBotConversations` | Planned for browser work | src/host/services/browser-core-methods.ts:214 | 2 | 2 | 0 | 2 | 0 | src/renderer/App.tsx:7136,7586 |
 | `listBotNotificationReceipts` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BotNotificationPanel.tsx:45 |
 | `listBotResponsibilities` | Unreviewed |  | 2 | 1 | 1 | 1 | 0 | src/renderer/components/BotResponsibilityPanel.tsx:77,114 |
 | `listBotResponsibilityEngines` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/BotResponsibilityPanel.tsx:115 |
@@ -477,9 +474,9 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `listCustomSkills` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SkillsSettings.tsx:28 |
 | `listHubFiles` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/FileHub.tsx:103 |
 | `listIdentityCandidates` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ContactIdentitySettings.tsx:65 |
-| `listImageGenProfiles` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3198 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1157 |
-| `listInputRequests` | Preview |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:4037,4039 |
-| `listIntegrationMentionOptions` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3094 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:6086 |
+| `listImageGenProfiles` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3198 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1156 |
+| `listInputRequests` | Preview |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:4036,4038 |
+| `listIntegrationMentionOptions` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3094 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:6070 |
 | `listIssueComments` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:100 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:620 |
 | `listLocalPreviewTemplates` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/SessionDashboardCard.tsx:136 |
 | `listLocalPreviews` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/SessionDashboardCard.tsx:137 |
@@ -487,22 +484,22 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `listMailboxMissionControlHandoffs` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:355 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:942 |
 | `listMailboxSnippets` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:220 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:828 |
 | `listMailboxThreads` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:205 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:896 |
-| `listManagedAgentAuditEntries` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2727 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1312 |
-| `listManagedAgentRoutines` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2598 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1172,1809 |
-| `listManagedAgents` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2484 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1150 |
-| `listManagedDevices` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1384 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/DevicesPanel.tsx:470,2061 |
-| `listManagedEnvironments` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2745 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1158,1810 |
-| `listManagedSessionEvents` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2924 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1377,1871 |
-| `listManagedSessions` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2834 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1151 |
+| `listManagedAgentAuditEntries` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2727 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/AgentsHubPanel.tsx:1311 |
+| `listManagedAgentRoutines` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2598 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1171,1808 |
+| `listManagedAgents` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2484 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1149 |
+| `listManagedDevices` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1384 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/DevicesPanel.tsx:453,2018 |
+| `listManagedEnvironments` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2745 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentsHubPanel.tsx:1157,1809 |
+| `listManagedSessionEvents` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2924 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1376,1870 |
+| `listManagedSessions` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2834 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1150 |
 | `listMcpEvents` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4299 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/EventTriggersPanel.tsx:287 |
 | `listMeetingArtifacts` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TeamsMeetingSettings.tsx:38 |
 | `listMentions` | Unreviewed |  | 4 | 4 | 1 | 3 | 0 | src/renderer/components/MentionBadge.tsx:23; src/renderer/components/MentionList.tsx:86; src/renderer/components/mission-control/useMissionControlData.ts:659,691 |
 | `listMissionControlItems` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:110 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:526,913 |
-| `listNotifications` | Preview | src/host/services/browser-notification-methods.ts:54 | 4 | 4 | 4 | 0 | 0 | src/renderer/App.tsx:4584,4624; src/renderer/components/MainContent/MainContent.tsx:4986; src/renderer/components/NotificationPanel.tsx:194 |
+| `listNotifications` | Preview | src/host/services/browser-notification-methods.ts:54 | 4 | 4 | 4 | 0 | 0 | src/renderer/App.tsx:4583,4623; src/renderer/components/MainContent/MainContent.tsx:4970; src/renderer/components/NotificationPanel.tsx:194 |
 | `listPactBusinesses` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PactSettings.tsx:61 |
 | `listPactGrants` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PactSettings.tsx:60 |
 | `listPlannerRuns` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:447 |
-| `listPluginPacks` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3221 | 6 | 6 | 4 | 2 | 0 | src/renderer/components/AddToolsPanel.tsx:174; src/renderer/components/AgentsHubPanel.tsx:1154; src/renderer/components/CustomizePanel.tsx:81; src/renderer/components/MainContent/MainContent.tsx:4350,6027; src/renderer/components/UsageInsightsPanel.tsx:454 |
+| `listPluginPacks` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3221 | 6 | 6 | 4 | 2 | 0 | src/renderer/components/AddToolsPanel.tsx:174; src/renderer/components/AgentsHubPanel.tsx:1153; src/renderer/components/CustomizePanel.tsx:81; src/renderer/components/MainContent/MainContent.tsx:4348,6011; src/renderer/components/UsageInsightsPanel.tsx:454 |
 | `listProfiles` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:93 | 3 | 2 | 0 | 3 | 0 | src/renderer/components/AutomationStudioPanel.tsx:220; src/renderer/components/ProfileSettings.tsx:13,15 |
 | `listProtectedCredentialRequests` | Unreviewed |  | 2 | 2 | 1 | 1 | 0 | src/renderer/components/SessionDashboardCard.tsx:189,209 |
 | `listQuarantinedImports` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3268 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/CustomizePanel.tsx:82; src/renderer/components/SkillHubBrowser.tsx:183 |
@@ -513,23 +510,23 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `listRoutineWorkflowVersions` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3814 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:806 |
 | `listRoutines` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3516 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AutomationStudioPanel.tsx:215; src/renderer/components/RoutineSettingsPanel.tsx:385 |
 | `listRunEvents` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:106 | 1 | 1 | 1 | 0 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:893 |
-| `listSidebarTasks` | Preview |  | 2 | 0 | 0 | 2 | 0 | src/renderer/App.tsx:5557,5685 |
-| `listSkills` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:187; src/host/services/browser-navigation-methods.ts:3214 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1153 |
+| `listSidebarTasks` | Preview |  | 2 | 0 | 0 | 2 | 0 | src/renderer/App.tsx:5556,5684 |
+| `listSkills` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:187; src/host/services/browser-navigation-methods.ts:3214 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1152 |
 | `listSubconsciousTargets` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SubconsciousSettingsPanel.tsx:133 |
-| `listSuggestions` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:201 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:4965; src/renderer/components/SuggestionsPanel.tsx:130 |
-| `listSuggestionsForWorkspaces` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:206 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:4968; src/renderer/components/SuggestionsPanel.tsx:109 |
+| `listSuggestions` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:201 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:4949; src/renderer/components/SuggestionsPanel.tsx:130 |
+| `listSuggestionsForWorkspaces` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:206 | 2 | 2 | 1 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:4952; src/renderer/components/SuggestionsPanel.tsx:109 |
 | `listTaskLabels` | Unreviewed |  | 5 | 5 | 0 | 5 | 0 | src/renderer/components/TaskBoard.tsx:60,346; src/renderer/components/TaskLabelManager.tsx:44; src/renderer/components/mission-control/useMissionControlData.ts:670,697 |
-| `listTaskSkills` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:178 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:6026 |
+| `listTaskSkills` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:178 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:6010 |
 | `listTaskTraceRuns` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TaskTraceDebuggerPanel.tsx:179 |
-| `listTasks` | Preview |  | 6 | 3 | 0 | 6 | 0 | src/renderer/App.tsx:5557,5685; src/renderer/components/TaskBoard.tsx:59; src/renderer/components/mission-control/useMissionControlData.ts:644,771,773 |
-| `listTeamItems` | Unreviewed |  | 3 | 3 | 2 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:187; src/renderer/components/CollaborativeAgentLines.tsx:299; src/renderer/components/CollaborativeSummaryPanel.tsx:74 |
+| `listTasks` | Preview |  | 6 | 3 | 0 | 6 | 0 | src/renderer/App.tsx:5556,5684; src/renderer/components/TaskBoard.tsx:59; src/renderer/components/mission-control/useMissionControlData.ts:644,771,773 |
+| `listTeamItems` | Unreviewed |  | 3 | 3 | 2 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:187; src/renderer/components/CollaborativeAgentLines.tsx:296; src/renderer/components/CollaborativeSummaryPanel.tsx:74 |
 | `listTeamMembers` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:169 |
 | `listTeamRuns` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:170 |
 | `listTeamThoughts` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/CollaborativeSummaryPanel.tsx:81 |
 | `listTeams` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3435 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:151 |
 | `listTerminalTabs` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TerminalTabsDock.tsx:98 |
 | `listTriggers` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4321 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/EventTriggersPanel.tsx:268 |
-| `listWorkspaces` | Preview | src/host/services/browser-navigation-methods.ts:2970 | 27 | 24 | 4 | 23 | 0 | src/renderer/App.tsx:3637,5864,7699; src/renderer/components/AgentMailSettings.tsx:96; src/renderer/components/AgentsHubPanel.tsx:1155,1811; src/renderer/components/AutomationStudioPanel.tsx:216; src/renderer/components/BotWorkDialog.tsx:195,196; src/renderer/components/BoxSettings.tsx:67; src/renderer/components/BriefingPanel.tsx:86; src/renderer/components/ChannelSpecializationSettings.tsx:57; src/renderer/components/MainContent/MainContent.tsx:4959,6620; src/renderer/components/MemoryHubSettings.tsx:91; src/renderer/components/RoutineSettingsPanel.tsx:387; src/renderer/components/ScheduledTasksSettings.tsx:913; src/renderer/components/Sidebar.tsx:962,964; src/renderer/components/SuggestionsPanel.tsx:57; src/renderer/components/TaskTraceDebuggerPanel.tsx:159; src/renderer/components/UsageInsightsPanel.tsx:331; src/renderer/components/WorkspaceSelector.tsx:29; src/renderer/components/calm/BuildPanel.tsx:150; src/renderer/components/mission-control/useMissionControlData.ts:402; src/renderer/hooks/useOnboardingFlow.ts:1733,1739 |
+| `listWorkspaces` | Preview | src/host/services/browser-navigation-methods.ts:2970 | 27 | 24 | 4 | 23 | 0 | src/renderer/App.tsx:3636,5863,7690; src/renderer/components/AgentMailSettings.tsx:96; src/renderer/components/AgentsHubPanel.tsx:1154,1810; src/renderer/components/AutomationStudioPanel.tsx:216; src/renderer/components/BotWorkDialog.tsx:195,196; src/renderer/components/BoxSettings.tsx:67; src/renderer/components/BriefingPanel.tsx:86; src/renderer/components/ChannelSpecializationSettings.tsx:57; src/renderer/components/MainContent/MainContent.tsx:4943,6604; src/renderer/components/MemoryHubSettings.tsx:91; src/renderer/components/RoutineSettingsPanel.tsx:387; src/renderer/components/ScheduledTasksSettings.tsx:913; src/renderer/components/Sidebar.tsx:956,958; src/renderer/components/SuggestionsPanel.tsx:57; src/renderer/components/TaskTraceDebuggerPanel.tsx:159; src/renderer/components/UsageInsightsPanel.tsx:331; src/renderer/components/WorkspaceSelector.tsx:29; src/renderer/components/calm/BuildPanel.tsx:150; src/renderer/components/mission-control/useMissionControlData.ts:402; src/renderer/hooks/useOnboardingFlow.ts:1733,1739 |
 | `logRendererPerf` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/utils/renderer-perf.ts:228 |
 | `markActivityRead` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ActivityFeed.tsx:128 |
 | `markAllActivitiesRead` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ActivityFeed.tsx:152 |
@@ -539,39 +536,39 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `moveTeamItem` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AgentTeamsPanel.tsx:670,675 |
 | `onActivityEvent` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/ActivityFeed.tsx:93; src/renderer/components/mission-control/useMissionControlData.ts:966 |
 | `onBrowserWorkbenchCursor` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:1219 |
-| `onBrowserWorkbenchOpenRequest` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:4008,4009 |
+| `onBrowserWorkbenchOpenRequest` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:4007,4008 |
 | `onBrowserWorkbenchViewport` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:1236 |
-| `onCanvasEvent` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/CanvasPreview.tsx:399; src/renderer/components/MainContent/MainContent.tsx:6179 |
+| `onCanvasEvent` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/CanvasPreview.tsx:399; src/renderer/components/MainContent/MainContent.tsx:6163 |
 | `onChatGPTImportProgress` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ChatGPTImportWizard.tsx:148 |
 | `onComputerUseEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/ComputerUseSettings.tsx:91 |
 | `onCronEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/ScheduledTasksSettings.tsx:987 |
 | `onGatewayUsersUpdated` | Unreviewed |  | 15 | 15 | 15 | 0 | 0 | src/renderer/components/BlueBubblesSettings.tsx:104; src/renderer/components/DiscordSettings.tsx:59; src/renderer/components/FeishuSettings.tsx:87; src/renderer/components/GoogleChatSettings.tsx:88; src/renderer/components/ImessageSettings.tsx:83; src/renderer/components/LineSettings.tsx:93; src/renderer/components/MatrixSettings.tsx:98; src/renderer/components/MattermostSettings.tsx:93; src/renderer/components/SignalSettings.tsx:82; src/renderer/components/SlackSettings.tsx:69; src/renderer/components/TeamsSettings.tsx:88; src/renderer/components/TelegramSettings.tsx:106; src/renderer/components/WeComSettings.tsx:88; src/renderer/components/WebhookChannelSettings.tsx:125; src/renderer/components/WhatsAppSettings.tsx:122 |
 | `onHeartbeatEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:932 |
 | `onLLMRoutingEvent` | Preview |  | 2 | 1 | 2 | 0 | 0 | src/renderer/components/Settings.tsx:1876,1877 |
-| `onLLMSettingsChanged` | Unreviewed |  | 1 | 0 | 1 | 0 | 0 | src/renderer/App.tsx:2993 |
+| `onLLMSettingsChanged` | Unreviewed |  | 1 | 0 | 1 | 0 | 0 | src/renderer/App.tsx:2992 |
 | `onMCPStatusChange` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/ConnectorsSettings.tsx:967; src/renderer/components/MCPSettings.tsx:233 |
 | `onMailboxAskEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/InboxAgentPanel.tsx:1346 |
 | `onMailboxEvent` | Preview |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/InboxAgentPanel.tsx:1324 |
 | `onMeetingArtifactsChanged` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/TeamsMeetingSettings.tsx:53 |
 | `onMentionEvent` | Unreviewed |  | 3 | 3 | 3 | 0 | 0 | src/renderer/components/MentionBadge.tsx:33; src/renderer/components/MentionList.tsx:108; src/renderer/components/mission-control/useMissionControlData.ts:1002 |
-| `onNavigateToBotConversation` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:7681,7682 |
-| `onNavigateToTask` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:7671,7673 |
+| `onNavigateToBotConversation` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:7672,7673 |
+| `onNavigateToTask` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:7662,7664 |
 | `onNotificationEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/NotificationPanel.tsx:208 |
 | `onPersonalitySettingsChanged` | Preview |  | 3 | 2 | 3 | 0 | 0 | src/renderer/components/PersonalitySettings.tsx:53,54; src/renderer/hooks/useAgentContext.ts:96 |
-| `onQueueUpdate` | Preview |  | 3 | 2 | 3 | 0 | 0 | src/renderer/App.tsx:3494,3507; src/renderer/components/mission-control/useMissionControlData.ts:823 |
-| `onRemoteGatewayEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/DevicesPanel.tsx:505 |
+| `onQueueUpdate` | Preview |  | 3 | 2 | 3 | 0 | 0 | src/renderer/App.tsx:3493,3506; src/renderer/components/mission-control/useMissionControlData.ts:823 |
+| `onRemoteGatewayEvent` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/DevicesPanel.tsx:488 |
 | `onSecureMcpTunnelStatusChange` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/MCPSettings.tsx:238 |
 | `onTaskBoardEvent` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/TaskBoard.tsx:88; src/renderer/components/mission-control/useMissionControlData.ts:1053 |
-| `onTaskEvent` | Preview |  | 12 | 9 | 12 | 0 | 0 | src/renderer/App.tsx:4063,4064,4111,4116; src/renderer/components/BotWorkDialog.tsx:282; src/renderer/components/BotsHome.tsx:189; src/renderer/components/DocumentEditorModal.tsx:101,102; src/renderer/components/TaskBoard.tsx:126; src/renderer/components/TaskTraceDebuggerPanel.tsx:274; src/renderer/components/mission-control/useMissionControlData.ts:1017; src/renderer/hooks/useVoiceTalkMode.ts:141 |
+| `onTaskEvent` | Preview |  | 12 | 9 | 12 | 0 | 0 | src/renderer/App.tsx:4062,4063,4110,4115; src/renderer/components/BotWorkDialog.tsx:282; src/renderer/components/BotsHome.tsx:189; src/renderer/components/DocumentEditorModal.tsx:101,102; src/renderer/components/TaskBoard.tsx:126; src/renderer/components/TaskTraceDebuggerPanel.tsx:274; src/renderer/components/mission-control/useMissionControlData.ts:1017; src/renderer/hooks/useVoiceTalkMode.ts:141 |
 | `onTaskLearningEvent` | Unreviewed |  | 2 | 1 | 2 | 0 | 0 | src/renderer/components/mission-control/MCTaskDetail.tsx:157,159 |
-| `onTeamRunEvent` | Unreviewed |  | 4 | 4 | 4 | 0 | 0 | src/renderer/components/AgentTeamsPanel.tsx:242; src/renderer/components/CollaborativeAgentLines.tsx:310; src/renderer/components/CollaborativeSummaryPanel.tsx:96; src/renderer/components/MainContent/MainContent.tsx:4693 |
-| `onTeamThoughtEvent` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/CollaborativeAgentLines.tsx:333; src/renderer/components/CollaborativeSummaryPanel.tsx:88 |
+| `onTeamRunEvent` | Unreviewed |  | 4 | 4 | 4 | 0 | 0 | src/renderer/components/AgentTeamsPanel.tsx:242; src/renderer/components/CollaborativeAgentLines.tsx:307; src/renderer/components/CollaborativeSummaryPanel.tsx:96; src/renderer/components/MainContent/MainContent.tsx:4677 |
+| `onTeamThoughtEvent` | Unreviewed |  | 2 | 2 | 2 | 0 | 0 | src/renderer/components/CollaborativeAgentLines.tsx:330; src/renderer/components/CollaborativeSummaryPanel.tsx:88 |
 | `onTerminalTabOutput` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/TerminalTabsDock.tsx:345 |
-| `onTrayOpenAbout` | Native-only today |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:3392,3393 |
+| `onTrayOpenAbout` | Native-only today |  | 2 | 1 | 2 | 0 | 0 | src/renderer/App.tsx:3391,3392 |
 | `onUpdateDownloaded` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/UpdateSettings.tsx:70 |
 | `onUpdateError` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/UpdateSettings.tsx:75 |
 | `onUpdateProgress` | Unreviewed |  | 1 | 1 | 1 | 0 | 0 | src/renderer/components/UpdateSettings.tsx:62 |
-| `onVoiceEvent` | Planned for browser work |  | 5 | 5 | 5 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:5958; src/renderer/components/VoiceIndicator.tsx:33,225; src/renderer/components/VoiceSettings.tsx:90; src/renderer/hooks/useVoiceTalkMode.ts:122 |
+| `onVoiceEvent` | Planned for browser work |  | 5 | 5 | 5 | 0 | 0 | src/renderer/components/MainContent/MainContent.tsx:5942; src/renderer/components/VoiceIndicator.tsx:33,225; src/renderer/components/VoiceSettings.tsx:90; src/renderer/hooks/useVoiceTalkMode.ts:122 |
 | `openComputerUseAccessibilitySettings` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ChronicleSettings.tsx:225; src/renderer/components/ComputerUseSettings.tsx:99 |
 | `openComputerUseScreenRecordingSettings` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ChronicleSettings.tsx:209; src/renderer/components/ComputerUseSettings.tsx:107 |
 | `openCustomSkillsFolder` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/SkillHubBrowser.tsx:493; src/renderer/components/SkillsSettings.tsx:53 |
@@ -596,8 +593,8 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `previewMailboxMissionControlHandoff` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:352 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:941 |
 | `previewMailboxSavedViewSimilar` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:475 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:7414 |
 | `promoteMemoryObservation` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemoryInspectorPanel.tsx:228 |
-| `publishManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1973 |
-| `putComposerDraftAttachment` | Preview |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:2548 |
+| `publishManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1972 |
+| `putComposerDraftAttachment` | Preview |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:2547 |
 | `queryUnifiedRecall` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/mission-control/MCTaskDetail.tsx:122,132 |
 | `readFileForViewer` | Unreviewed |  | 20 | 19 | 19 | 1 | 0 | src/renderer/components/DocumentArtifactViewer.tsx:348; src/renderer/components/FileViewer.tsx:286; src/renderer/components/HomeDashboard.tsx:349; src/renderer/components/InlineDocumentPreview.tsx:114; src/renderer/components/InlineHtmlPreview.tsx:254; src/renderer/components/InlineImagePreview.tsx:47; src/renderer/components/InlinePresentationPreview.tsx:57; src/renderer/components/InlineSpreadsheetPreview.tsx:61; src/renderer/components/InlineVideoPreview.tsx:56,96; src/renderer/components/LatexArtifactWorkbench.tsx:49,77; src/renderer/components/MainContent/attachments.ts:56; src/renderer/components/MarkdownImagePreview.tsx:71; src/renderer/components/PresentationArtifactViewer.tsx:179,217; src/renderer/components/SessionDashboardCard.tsx:156,160; src/renderer/components/SpreadsheetArtifactViewer.tsx:340; src/renderer/components/WebArtifactViewer.tsx:177 |
 | `rebuildMemoryObservationMetadata` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemoryInspectorPanel.tsx:248 |
@@ -615,7 +612,7 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `regenerateRoutineApiToken` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/RoutineSettingsPanel.tsx:737 |
 | `registerBrowserWorkbenchSession` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:518,520 |
 | `rejectIdentityLink` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ContactIdentitySettings.tsx:524 |
-| `releaseComposerDraftAttachment` | Preview |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:2582 |
+| `releaseComposerDraftAttachment` | Preview |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:2581 |
 | `reloadCustomSkills` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SkillsSettings.tsx:44 |
 | `reloadExtension` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:89 |
 | `removeCronJob` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4237 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ScheduledTasksSettings.tsx:1014 |
@@ -626,8 +623,8 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `removeTaskLabel` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TaskBoard.tsx:217; src/renderer/components/mission-control/useMissionControlData.ts:1277 |
 | `removeTeamMember` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:478 |
 | `removeTrigger` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4428 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/EventTriggersPanel.tsx:448 |
-| `renameTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:124 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:9482; src/renderer/components/Sidebar.tsx:1973 |
-| `reopenBotConversation` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3464 | 3 | 2 | 0 | 3 | 0 | src/renderer/App.tsx:7116,7237,7246 |
+| `renameTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:124 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:9459; src/renderer/components/Sidebar.tsx:1967 |
+| `reopenBotConversation` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3464 | 3 | 2 | 0 | 3 | 0 | src/renderer/App.tsx:7107,7228,7237 |
 | `reorderTeamMembers` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:525 |
 | `replyViaChannel` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:506 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:1789 |
 | `researchMailboxContact` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:267 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/InboxAgentPanel.tsx:2116,2129 |
@@ -638,14 +635,14 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `resizeTerminalTab` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TerminalTabsDock.tsx:163 |
 | `resolveAnswerImages` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/hooks/useAnswerImages.ts:31 |
 | `resolveBrowserWorkbenchAnnotationTargets` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/BrowserWorkbenchView.tsx:1005,1018 |
-| `resolveComposerDraftAttachment` | Preview |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:2605 |
+| `resolveComposerDraftAttachment` | Preview |  | 1 | 0 | 0 | 1 | 0 | src/renderer/App.tsx:2604 |
 | `resolveMailboxSendOutcome` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/InboxAgentPanel.tsx:3604,3629 |
-| `respondToApproval` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3785 |
-| `respondToInputRequest` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3859 |
+| `respondToApproval` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3784 |
+| `respondToInputRequest` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3858 |
 | `respondToRoutineWorkflowApproval` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3976 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:918 |
 | `restartLocalPreview` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SessionDashboardCard.tsx:276 |
 | `restoreWorkingState` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/WorkingStateHistory.tsx:85 |
-| `resumeTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:261 | 3 | 3 | 1 | 2 | 0 | src/renderer/App.tsx:4536; src/renderer/components/SessionProgressCard.tsx:63; src/renderer/components/SpawnedAgentSidebar.tsx:164 |
+| `resumeTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:261 | 3 | 3 | 1 | 2 | 0 | src/renderer/App.tsx:4535; src/renderer/components/SessionProgressCard.tsx:63; src/renderer/components/SpawnedAgentSidebar.tsx:164 |
 | `resumeTeamRun` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:571 |
 | `retryAutomationOutcomeNotification` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:503 |
 | `retryBotNotification` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BotNotificationPanel.tsx:138 |
@@ -664,12 +661,12 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `runSubconsciousNow` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SubconsciousSettingsPanel.tsx:196 |
 | `saveAgentMailSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:165 |
 | `saveAnswerSurfaceState` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/hooks/useAnswerSurfaceState.ts:76 |
-| `saveAppearanceSettings` | Preview |  | 18 | 16 | 0 | 18 | 0 | src/renderer/App.tsx:3294,3308,6905,6916,6927,6937,6950,6957,6964,6971,6978,6985; src/renderer/components/MainContent/MainContent.tsx:5876; src/renderer/components/Onboarding/Onboarding.tsx:664,665; src/renderer/hooks/useOnboardingFlow.ts:1681; src/renderer/i18n/index.ts:15,16 |
+| `saveAppearanceSettings` | Preview |  | 18 | 16 | 0 | 18 | 0 | src/renderer/App.tsx:3293,3307,6896,6907,6918,6928,6941,6948,6955,6962,6969,6976; src/renderer/components/MainContent/MainContent.tsx:5860; src/renderer/components/Onboarding/Onboarding.tsx:664,665; src/renderer/hooks/useOnboardingFlow.ts:1681; src/renderer/i18n/index.ts:15,16 |
 | `saveAwarenessConfig` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemorySettingsTab.tsx:457 |
 | `saveBoxSettings` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/BoxSettings.tsx:94,201 |
 | `saveBuiltinToolsSettings` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:774 | 10 | 10 | 0 | 10 | 0 | src/renderer/components/BuiltinToolsSettings.tsx:205,234,261,281,310,330,353,378,404; src/renderer/components/PermissionSettingsPanel.tsx:313 |
 | `saveChronicleSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ChronicleSettings.tsx:127 |
-| `saveControlPlaneSettings` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1368 | 5 | 5 | 1 | 4 | 0 | src/renderer/components/ControlPlaneSettings.tsx:232,265; src/renderer/components/DevicesPanel.tsx:527,863,2149 |
+| `saveControlPlaneSettings` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1368 | 5 | 5 | 1 | 4 | 0 | src/renderer/components/ControlPlaneSettings.tsx:232,265; src/renderer/components/DevicesPanel.tsx:510,842,2106 |
 | `saveDropboxSettings` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DropboxSettings.tsx:48 |
 | `saveGoogleWorkspaceSettings` | Unreviewed |  | 4 | 4 | 0 | 4 | 0 | src/renderer/components/GoogleWorkspaceSettings.tsx:155,162,199,286 |
 | `saveGuardrailSettings` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:798 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/GuardrailSettings.tsx:39 |
@@ -702,27 +699,27 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `searchPackRegistry` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3307 | 2 | 2 | 2 | 0 | 0 | src/renderer/components/AddToolsPanel.tsx:268; src/renderer/components/PluginStore.tsx:96 |
 | `searchSkillRegistry` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3273 | 3 | 3 | 2 | 1 | 0 | src/renderer/components/AddToolsPanel.tsx:270; src/renderer/components/SkillHubBrowser.tsx:256,334 |
 | `seedDefaultAgentRoles` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentSquadSettings.tsx:147 |
-| `selectFiles` | Unreviewed |  | 10 | 10 | 0 | 10 | 0 | src/renderer/components/AgentsHubPanel.tsx:1515,1574; src/renderer/components/ChatGPTImportWizard.tsx:121; src/renderer/components/DevicesPanel.tsx:785; src/renderer/components/DocumentArtifactViewer.tsx:465; src/renderer/components/MainContent/MainContent.tsx:7322; src/renderer/components/PresentationArtifactViewer.tsx:285; src/renderer/components/SpreadsheetArtifactViewer.tsx:857; src/renderer/components/WebArtifactViewer.tsx:238; src/renderer/components/calm/BuildPanel.tsx:186 |
-| `selectFolder` | Native-only today |  | 7 | 5 | 0 | 7 | 0 | src/renderer/App.tsx:5860; src/renderer/components/MCPSettings.tsx:596; src/renderer/components/ProfileSettings.tsx:59,64,79,84; src/renderer/components/WorkspaceSelector.tsx:38 |
-| `selectWorkspace` | Preview |  | 3 | 2 | 3 | 0 | 0 | src/renderer/App.tsx:3628,3677,3687 |
+| `selectFiles` | Unreviewed |  | 10 | 10 | 0 | 10 | 0 | src/renderer/components/AgentsHubPanel.tsx:1514,1573; src/renderer/components/ChatGPTImportWizard.tsx:121; src/renderer/components/DevicesPanel.tsx:764; src/renderer/components/DocumentArtifactViewer.tsx:465; src/renderer/components/MainContent/MainContent.tsx:7306; src/renderer/components/PresentationArtifactViewer.tsx:285; src/renderer/components/SpreadsheetArtifactViewer.tsx:857; src/renderer/components/WebArtifactViewer.tsx:238; src/renderer/components/calm/BuildPanel.tsx:186 |
+| `selectFolder` | Native-only today |  | 7 | 5 | 0 | 7 | 0 | src/renderer/App.tsx:5859; src/renderer/components/MCPSettings.tsx:596; src/renderer/components/ProfileSettings.tsx:59,64,79,84; src/renderer/components/WorkspaceSelector.tsx:38 |
+| `selectWorkspace` | Preview |  | 3 | 2 | 3 | 0 | 0 | src/renderer/App.tsx:3627,3676,3686 |
 | `sendGatewayTestMessage` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3135 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ScheduledTasksSettings.tsx:2692 |
 | `sendMailboxDraft` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MailComposeFrame.tsx:305 |
-| `sendMessage` | Preview |  | 3 | 3 | 0 | 3 | 0 | src/renderer/App.tsx:6263,6687; src/renderer/components/SpawnedAgentSidebar.tsx:225 |
+| `sendMessage` | Preview |  | 3 | 3 | 0 | 3 | 0 | src/renderer/App.tsx:6254,6678; src/renderer/components/SpawnedAgentSidebar.tsx:225 |
 | `sendStdin` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CommandOutput.tsx:126 |
-| `sendStepFeedback` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:330 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:5440 |
+| `sendStepFeedback` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:330 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:5424 |
 | `setBotResponsibilityFutureRuns` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/BotResponsibilityPanel.tsx:327,503 |
 | `setExternalSkillDirectories` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/SkillsSettings.tsx:61,75 |
 | `setImportedMemoryPromptRecallIgnored` | Preview |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/memory/MemorySourcesLists.tsx:261 |
-| `setLLMModel` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1064 | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6880 |
+| `setLLMModel` | Host handler source; UI unverified | src/host/services/browser-settings-methods.ts:1064 | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6871 |
 | `setPactSignerCredential` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/PactSettings.tsx:248 |
 | `setPulseEnabled` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/PulseConsentPrompt.tsx:48; src/renderer/components/PulseSettingsPanel.tsx:143 |
-| `setSessionAutoApprove` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3881 |
+| `setSessionAutoApprove` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:3880 |
 | `setTailscaleMode` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:252 |
 | `setTaskDueDate` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:188 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TaskBoard.tsx:173; src/renderer/components/mission-control/useMissionControlData.ts:1231 |
 | `setTaskEstimate` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:194 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TaskBoard.tsx:186; src/renderer/components/mission-control/useMissionControlData.ts:1245 |
 | `setTaskPriority` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:182 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/TaskBoard.tsx:158; src/renderer/components/mission-control/useMissionControlData.ts:1220 |
-| `showInFinder` | Native-only today |  | 16 | 15 | 0 | 16 | 0 | src/renderer/components/CanvasPreview.tsx:666; src/renderer/components/DocumentArtifactCard.tsx:106; src/renderer/components/DocumentArtifactViewer.tsx:427; src/renderer/components/FileViewer.tsx:392; src/renderer/components/LatexArtifactWorkbench.tsx:119; src/renderer/components/MainContent/timeline-event-rendering.tsx:143,1567; src/renderer/components/PresentationArtifactCard.tsx:95; src/renderer/components/PresentationArtifactViewer.tsx:279; src/renderer/components/RightPanel.tsx:797; src/renderer/components/Sidebar.tsx:1181,1183; src/renderer/components/SpreadsheetArtifactCard.tsx:103; src/renderer/components/WebArtifactCard.tsx:86; src/renderer/components/WebArtifactViewer.tsx:232; src/renderer/components/markdown-components.tsx:588 |
-| `snoozeSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:247 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/HomeDashboard.tsx:610; src/renderer/components/MainContent/MainContent.tsx:8931; src/renderer/components/SuggestionsPanel.tsx:166 |
+| `showInFinder` | Native-only today |  | 16 | 15 | 0 | 16 | 0 | src/renderer/components/CanvasPreview.tsx:666; src/renderer/components/DocumentArtifactCard.tsx:106; src/renderer/components/DocumentArtifactViewer.tsx:427; src/renderer/components/FileViewer.tsx:392; src/renderer/components/LatexArtifactWorkbench.tsx:119; src/renderer/components/MainContent/timeline-event-rendering.tsx:143,1567; src/renderer/components/PresentationArtifactCard.tsx:95; src/renderer/components/PresentationArtifactViewer.tsx:279; src/renderer/components/RightPanel.tsx:797; src/renderer/components/Sidebar.tsx:1175,1177; src/renderer/components/SpreadsheetArtifactCard.tsx:103; src/renderer/components/WebArtifactCard.tsx:86; src/renderer/components/WebArtifactViewer.tsx:232; src/renderer/components/markdown-components.tsx:588 |
+| `snoozeSuggestion` | Host handler source; UI unverified | src/host/services/browser-planning-methods.ts:247 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/HomeDashboard.tsx:610; src/renderer/components/MainContent/MainContent.tsx:8908; src/renderer/components/SuggestionsPanel.tsx:166 |
 | `startConnectorOAuth` | Unreviewed |  | 7 | 7 | 0 | 7 | 0 | src/renderer/components/BoxSettings.tsx:186; src/renderer/components/ConnectorSetupModal.tsx:163,190,218,242,270; src/renderer/components/EmailSettings.tsx:519 |
 | `startControlPlane` | Unreviewed |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ControlPlaneSettings.tsx:177,239 |
 | `startDocumentEditTask` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/DocumentEditorModal.tsx:191 |
@@ -740,9 +737,9 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `stopSecureMcpTunnel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MCPSettings.tsx:383 |
 | `stopTerminalTab` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TerminalTabsDock.tsx:251 |
 | `stopTunnel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ExtensionsSettings.tsx:140 |
-| `submitMessageFeedback` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:350 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:5412 |
+| `submitMessageFeedback` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:350 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MainContent/MainContent.tsx:5396 |
 | `summarizeMailboxThread` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:259 | 3 | 3 | 0 | 3 | 0 | src/renderer/components/InboxAgentPanel.tsx:2104,2125,4765 |
-| `suspendManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1978 |
+| `suspendManagedAgent` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1977 |
 | `switchProfile` | Unreviewed |  | 2 | 1 | 0 | 2 | 0 | src/renderer/components/ProfileSettings.tsx:45,50 |
 | `syncBoxBrainNow` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/BoxSettings.tsx:123 |
 | `syncMailbox` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:247 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/InboxAgentPanel.tsx:1597,1634 |
@@ -759,15 +756,15 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `testNotionConnection` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/NotionSettings.tsx:73 |
 | `testOneDriveConnection` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/OneDriveSettings.tsx:74 |
 | `testOpenAIVoiceConnection` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/VoiceSettings.tsx:307 |
-| `testRemoteGatewayConnection` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1506 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ControlPlaneSettings.tsx:305; src/renderer/components/DevicesPanel.tsx:2188 |
+| `testRemoteGatewayConnection` | Host handler source; UI unverified | src/host/services/browser-device-methods.ts:1506 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/ControlPlaneSettings.tsx:305; src/renderer/components/DevicesPanel.tsx:2145 |
 | `testRoutineWorkflow` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3844 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:858 |
 | `testSSHTunnelConnection` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ControlPlaneSettings.tsx:376 |
 | `testSearchProvider` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SearchSettings.tsx:105 |
 | `testSharePointConnection` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SharePointSettings.tsx:73 |
 | `togglePluginPack` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3224 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CustomizePanel.tsx:170 |
 | `togglePluginPackSkill` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3239 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/CustomizePanel.tsx:185 |
-| `toggleTaskPin` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:136 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:9463; src/renderer/components/Sidebar.tsx:1986 |
-| `touchWorkspace` | Preview | src/host/services/browser-core-methods.ts:110 | 4 | 2 | 4 | 0 | 0 | src/renderer/App.tsx:3709,3711,3718,3721 |
+| `toggleTaskPin` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:136 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/MainContent/MainContent.tsx:9440; src/renderer/components/Sidebar.tsx:1980 |
+| `touchWorkspace` | Preview | src/host/services/browser-core-methods.ts:110 | 4 | 2 | 4 | 0 | 0 | src/renderer/App.tsx:3708,3710,3717,3720 |
 | `triggerHeartbeat` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:1356 |
 | `uninstallSkill` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1201 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SkillHubBrowser.tsx:472 |
 | `unlinkIdentityHandle` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/ContactIdentitySettings.tsx:539 |
@@ -788,9 +785,9 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `updateMailboxCommitmentDetails` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:374 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:1200 |
 | `updateMailboxCommitmentState` | Host handler source; UI unverified | src/host/services/browser-mailbox-methods.ts:391 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/InboxAgentPanel.tsx:1745 |
 | `updateMailboxDraft` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/MailComposeFrame.tsx:254 |
-| `updateManagedAgent` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2540 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1737 |
-| `updateManagedAgentRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2646 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1792 |
-| `updateManagedEnvironment` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2797 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1690 |
+| `updateManagedAgent` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2540 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1736 |
+| `updateManagedAgentRoutine` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2646 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1791 |
+| `updateManagedEnvironment` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:2797 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentsHubPanel.tsx:1689 |
 | `updateMemoryObservation` | Preview |  | 2 | 2 | 0 | 2 | 0 | src/renderer/components/memory/MemoryInspectorPanel.tsx:169,181 |
 | `updatePactSettings` | Unreviewed |  | 5 | 5 | 0 | 5 | 0 | src/renderer/components/PactSettings.tsx:129,144,239,285,320 |
 | `updatePlannerConfig` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/mission-control/useMissionControlData.ts:1379 |
@@ -798,7 +795,7 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `updateSessionMember` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SessionMembersCard.tsx:190 |
 | `updateSpreadsheetFile` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/SpreadsheetArtifactViewer.tsx:834 |
 | `updateTaskLabel` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/TaskLabelManager.tsx:79 |
-| `updateTaskWorkspace` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:240 | 2 | 1 | 0 | 2 | 0 | src/renderer/App.tsx:5821,5823 |
+| `updateTaskWorkspace` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:240 | 2 | 1 | 0 | 2 | 0 | src/renderer/App.tsx:5820,5822 |
 | `updateTeam` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:405 |
 | `updateTeamItem` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:622 |
 | `updateTeamMember` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentTeamsPanel.tsx:492 |
@@ -809,15 +806,15 @@ The scan counts syntactic `window.electronAPI.member` and literal bracket-member
 | `upsertRoutineWorkflowSecret` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:4045 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AutomationStudioPanel.tsx:956 |
 | `validateRoutineWorkflow` | Host handler source; UI unverified | src/host/services/browser-navigation-methods.ts:3769 | 2 | 2 | 0 | 2 | 0 | src/renderer/components/AutomationStudioPanel.tsx:776,831 |
 | `verifyAgentMailDomain` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/AgentMailSettings.tsx:270 |
-| `voiceSpeak` | Unreviewed |  | 4 | 4 | 1 | 3 | 0 | src/renderer/components/MainContent/MainContent.tsx:6017; src/renderer/components/MainContent/message-ui.tsx:449; src/renderer/components/VoiceSettings.tsx:344; src/renderer/hooks/useVoiceTalkMode.ts:168 |
+| `voiceSpeak` | Unreviewed |  | 4 | 4 | 1 | 3 | 0 | src/renderer/components/MainContent/MainContent.tsx:6001; src/renderer/components/MainContent/message-ui.tsx:449; src/renderer/components/VoiceSettings.tsx:344; src/renderer/hooks/useVoiceTalkMode.ts:168 |
 | `voiceStopSpeaking` | Unreviewed |  | 3 | 3 | 0 | 3 | 0 | src/renderer/components/VoiceSettings.tsx:356,362; src/renderer/hooks/useVoiceTalkMode.ts:172 |
 | `voiceTranscribe` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/hooks/useVoiceInput.ts:493 |
 | `whatsAppLogout` | Host handler source; UI unverified | src/host/services/browser-integration-methods.ts:1633 | 1 | 1 | 0 | 1 | 0 | src/renderer/components/WhatsAppSettings.tsx:255 |
-| `windowClose` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8193 |
-| `windowMaximize` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8183 |
-| `windowMinimize` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8173 |
-| `wrapUpTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:290 | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6759 |
-| `wrapUpTeamRun` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:305 | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6757 |
+| `windowClose` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8184 |
+| `windowMaximize` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8174 |
+| `windowMinimize` | Native-only today |  | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:8164 |
+| `wrapUpTask` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:290 | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6750 |
+| `wrapUpTeamRun` | Host handler source; UI unverified | src/host/services/browser-core-methods.ts:305 | 1 | 1 | 0 | 1 | 0 | src/renderer/App.tsx:6748 |
 | `writeTerminalTabInput` | Unreviewed |  | 2 | 2 | 1 | 1 | 0 | src/renderer/components/TerminalTabsDock.tsx:78,331 |
 | `xaiOAuthLogout` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3737 |
 | `xaiOAuthStart` | Unreviewed |  | 1 | 1 | 0 | 1 | 0 | src/renderer/components/Settings.tsx:3699 |
@@ -828,21 +825,21 @@ These rows show syntactic bridge captures found by this pass. They list declarat
 
 | Kind | Bridge member | Local name | Location |
 | --- | --- | --- | --- |
-| method value | `putComposerDraftAttachment` | `put` | src/renderer/App.tsx:2548 |
-| method value | `releaseComposerDraftAttachment` | `release` | src/renderer/App.tsx:2582 |
-| method value | `resolveComposerDraftAttachment` | `resolve` | src/renderer/App.tsx:2605 |
-| method value | `getTaskEvents` | `getTaskEvents` | src/renderer/App.tsx:2790 |
-| method value | `getTaskEvents` | `getTaskEvents` | src/renderer/App.tsx:2840 |
-| method value | `onLLMSettingsChanged` | `onLLMSettingsChanged` | src/renderer/App.tsx:2993 |
-| method value | `getTaskTimelinePage` | `timelinePage` | src/renderer/App.tsx:3186 |
-| method value | `getTaskTimelinePage` | `timelinePage` | src/renderer/App.tsx:5003 |
-| method value | `listSidebarTasks` | `listSidebarTasks` | src/renderer/App.tsx:5557 |
-| method value | `listTasks` | `listSidebarTasks` | src/renderer/App.tsx:5557 |
-| object alias | `electronAPI` | `api` | src/renderer/App.tsx:5630 |
-| method value | `listSidebarTasks` | `listSidebarTasks` | src/renderer/App.tsx:5685 |
-| method value | `listTasks` | `listSidebarTasks` | src/renderer/App.tsx:5685 |
-| method value | `deleteTask` | `cleanup` | src/renderer/App.tsx:6316 |
-| method value | `archiveTask` | `cleanup` | src/renderer/App.tsx:6318 |
+| method value | `putComposerDraftAttachment` | `put` | src/renderer/App.tsx:2547 |
+| method value | `releaseComposerDraftAttachment` | `release` | src/renderer/App.tsx:2581 |
+| method value | `resolveComposerDraftAttachment` | `resolve` | src/renderer/App.tsx:2604 |
+| method value | `getTaskEvents` | `getTaskEvents` | src/renderer/App.tsx:2789 |
+| method value | `getTaskEvents` | `getTaskEvents` | src/renderer/App.tsx:2839 |
+| method value | `onLLMSettingsChanged` | `onLLMSettingsChanged` | src/renderer/App.tsx:2992 |
+| method value | `getTaskTimelinePage` | `timelinePage` | src/renderer/App.tsx:3185 |
+| method value | `getTaskTimelinePage` | `timelinePage` | src/renderer/App.tsx:5002 |
+| method value | `listSidebarTasks` | `listSidebarTasks` | src/renderer/App.tsx:5556 |
+| method value | `listTasks` | `listSidebarTasks` | src/renderer/App.tsx:5556 |
+| object alias | `electronAPI` | `api` | src/renderer/App.tsx:5629 |
+| method value | `listSidebarTasks` | `listSidebarTasks` | src/renderer/App.tsx:5684 |
+| method value | `listTasks` | `listSidebarTasks` | src/renderer/App.tsx:5684 |
+| method value | `deleteTask` | `cleanup` | src/renderer/App.tsx:6307 |
+| method value | `archiveTask` | `cleanup` | src/renderer/App.tsx:6309 |
 | method value | `getInputRequestDraftReview` | `readReview` | src/renderer/components/ApprovalDraftReview.tsx:166 |
 | object alias | `electronAPI` | `eventTriggerApi` | src/renderer/components/AutomationStudioPanel.tsx:241 |
 | object alias | `electronAPI` | `eventTriggerApi` | src/renderer/components/AutomationStudioPanel.tsx:392 |
@@ -856,7 +853,7 @@ These rows show syntactic bridge captures found by this pass. They list declarat
 | object alias | `electronAPI` | `api` | src/renderer/components/FileHub.tsx:304 |
 | object alias | `electronAPI` | `electronApi` | src/renderer/components/HomeDashboard.tsx:545 |
 | object alias | `electronAPI` | `api` | src/renderer/components/MainContent/BotEarlierConversations.tsx:107 |
-| method value | `getAdminPolicies` | `getAdminPolicies` | src/renderer/components/MainContent/MainContent.tsx:6323 |
+| method value | `getAdminPolicies` | `getAdminPolicies` | src/renderer/components/MainContent/MainContent.tsx:6307 |
 | method value | `openSystemSettings` | `maybeOpenSystemSettings` | src/renderer/components/Onboarding/Onboarding.tsx:773 |
 | object alias | `electronAPI` | `api` | src/renderer/components/PlaywrightQAPanel.tsx:147 |
 | object alias | `electronAPI` | `api` | src/renderer/components/PlaywrightQAPanel.tsx:203 |
@@ -865,7 +862,7 @@ These rows show syntactic bridge captures found by this pass. They list declarat
 | method value | `getPulseSettings` | `getPulseSettings` | src/renderer/components/PulseConsentPrompt.tsx:30 |
 | object alias | `electronAPI` | `ipcAPI` | src/renderer/components/ScrapingSettings.tsx:3 |
 | object alias | `electronAPI` | `browserAuth` | src/renderer/components/Settings.tsx:1615 |
-| object alias | `electronAPI` | `api` | src/renderer/components/Sidebar.tsx:1025 |
+| object alias | `electronAPI` | `api` | src/renderer/components/Sidebar.tsx:1019 |
 | object alias | `electronAPI` | `eventApi` | src/renderer/components/WhatsAppSettings.tsx:94 |
 | object alias | `electronAPI` | `api` | src/renderer/hooks/useInboxUnreadCount.ts:10 |
 | object alias | `electronAPI` | `api` | src/renderer/hooks/useInboxUnreadCount.ts:26 |
@@ -874,11 +871,11 @@ These rows show syntactic bridge captures found by this pass. They list declarat
 
 ## Unreviewed direct renderer members
 
-There are 439 directly reached member names that remain unreviewed. Their names, access/call counts, and exact source locations are the rows marked Unreviewed in the inventory above.
+There are 436 directly reached member names that remain unreviewed. Their names, access/call counts, and exact source locations are the rows marked Unreviewed in the inventory above.
 
 ## Preload type/runtime surface gaps
 
-Declared but not directly referenced by renderer source (301; not proof of dead code): `acceptMemoryRepoDream`, `acknowledgePactEvidence`, `addHookMapping`, `addMCPServer`, `addMailboxDraftAttachment`, `addMemoryItem`, `addSubscription`, `addWorkContextMember`, `agentSecurityBuildCase`, `agentSecurityHookStatus`, `agentSecurityListDecisions`, `agentSecurityPrune`, `agentSecurityVerifyCase`, `approveMemoryWriteApproval`, `archiveManagedAgent`, `archiveManagedEnvironment`, `attachAutomationProfileToAgentRole`, `cancelManagedSession`, `cancelPactAuthorization`, `canvasCheckpointDelete`, `canvasCheckpointList`, `canvasCheckpointRestore`, `canvasCheckpointSave`, `canvasCreate`, `canvasEval`, `canvasExportToFolder`, `canvasGetContent`, `canvasHide`, `canvasOpenUrl`, `canvasPush`, `checkLocalPreviewHealth`, `checkMCPUpdates`, `checkPackPolicy`, `checkSkillUpdates`, `cleanupWorktree`, `clearComposerDraft`, `clearGlobalMemoryItems`, `clearImprovementOwnerEnrollment`, `clearQueue`, `closeShellSession`, `compactMemoryRepoHistory`, `connectMCPServer`, `continueTask`, `correctManagedSessionRequirement`, `countMemoryWriteApprovals`, `createAutomationProfile`, `createDefaultContextPolicies`, `createEvalCaseFromTask`, `createGoal`, `createIssue`, `createMailboxSavedViewReviewSchedule`, `createPactDeviceKey`, `createProject`, `createProtectedCredentialRequest`, `createWorkContext`, `deleteAutomationProfile`, `deleteContextPolicies`, `deleteImageGenProfile`, `deleteMailboxSavedView`, `deleteMailboxSnippet`, `deleteMemoryItem`, `deleteRelationshipMemory`, `detachAutomationProfileFromAgentRole`, `deviceGetProfiles`, `deviceUpdateProfile`, `disconnectMCPServer`, `discoverPactBusiness`, `dismissAnnotation`, `dismissImprovementCandidate`, `dreamMemoryRepoNow`, `enqueueRoutineWorkflowEvent`, `evaluateWorkSessionReplay`, `exportTasksJson`, `fetchMCPRegistry`, `generateBriefing`, `generateManagedSessionAudioSummary`, `getAgentSubscriptions`, `getAutomationProfile`, `getAwarenessSnapshot`, `getChannelPreferenceSummary`, `getCompany`, `getComparisonResult`, `getComposerDraft`, `getContactIdentity`, `getContextPolicy`, `getContextPolicyForChat`, `getCoreTrace`, `getCronWebhookStatus`, `getCustomSkill`, `getDefaultAgentRoles`, `getEligibleSkills`, `getEvalCase`, `getEvalRun`, `getExtension`, `getExtensionConfig`, `getGoal`, `getHeartbeatConfig`, `getHeartbeatStatus`, `getImportSecurityReport`, `getImprovementEligibility`, `getImprovementSettings`, `getIssue`, `getLocalPreview`, `getMCPAllTools`, `getMCPHostStatus`, `getMCPServerStatus`, `getMCPServerTools`, `getMCPSettings`, `getMCPStatus`, `getMailboxRelationshipTimeline`, `getManagedEnvironment`, `getMeetingArtifact`, `getMemoryDetails`, `getMemoryHealth`, `getMemoryItem`, `getMemoryItemWhy`, `getMemoryRepoDreamDiff`, `getMemoryRepoEntries`, `getMemoryRepoStatus`, `getMemoryReview`, `getMemorySources`, `getMemoryTimeline`, `getMemoryUsedForTask`, `getMemoryWriteApproval`, `getMissionControlBrief`, `getPackRegistryDetails`, `getPactAuthorization`, `getPactConversation`, `getPactReceipt`, `getPersonalityDefinitions`, `getPluginPack`, `getProject`, `getSearchSettings`, `getSemanticTimeline`, `getShellSessionInfo`, `getSkill`, `getSkillDetails`, `getSpreadsheetViewport`, `getTailscaleStatus`, `getTaskSubscribers`, `getWorkContext`, `getWorkSessionProjection`, `getWorkSessionRollout`, `getWorkingState`, `getWorktreeDiff`, `getWorktreeInfo`, `grantGatewayAccess`, `importMemoryRepoFolder`, `ingestYouTubeVideo`, `installMCPServer`, `isToolAllowedInContext`, `keepMemoryRepoEntry`, `listAgentWorkspaceMemberships`, `listAwarenessEvents`, `listBotMessages`, `listComparisons`, `listCoreMemoryCandidates`, `listCoreMemoryDistillRuns`, `listCoreTraces`, `listCoreTracesForAutomationProfile`, `listDocumentVersions`, `listEvalSuites`, `listGuidelineSkills`, `listHeartbeatRunsForAutomationProfile`, `listImprovementCampaigns`, `listImprovementCandidates`, `listMailboxEvents`, `listMailboxSavedViews`, `listManagedSkills`, `listMemoryItems`, `listMemoryWriteApprovals`, `listPactAuthorizations`, `listPactConversations`, `listProtectedCredentials`, `listRecurringApprovalRules`, `listRelationshipMemory`, `listRoutineWorkflowEventSamples`, `listRoutineWorkflowEvents`, `listShellSessions`, `listSubconsciousRuns`, `listSubconsciousRunsForAutomationProfile`, `listSubscriptions`, `listThreadMailboxAutomations`, `listWorkContexts`, `listWorkSessionLeases`, `listWorkSessionMetrics`, `listWorkingStatesForTask`, `listWorktrees`, `listYouTubeVideos`, `mergeWorktree`, `onControlPlaneEvent`, `onGatewayMessage`, `onHooksEvent`, `onQAEvent`, `onSSHTunnelEvent`, `onShellSessionEvent`, `onSubscriptionEvent`, `onTrayCheckUpdates`, `onTrayNewTask`, `onTrayOpenSettings`, `onTraySelectWorkspace`, `onWhatsAppConnected`, `onWhatsAppQRCode`, `onWhatsAppStatus`, `openMemoryRepoFile`, `openMemoryRepoFolder`, `pinMemoryRepoEntry`, `previewArtifact`, `pruneTempWorkspaces`, `qaGetRun`, `qaGetRuns`, `qaStartRun`, `qaStopRun`, `queryChronicleRecentContext`, `readMemoryRepoLines`, `refreshImprovementCandidates`, `rejectMemoryRepoDream`, `rejectMemoryWriteApproval`, `rekeyComposerDraft`, `removeHookMapping`, `removeMCPServer`, `removeMailboxDraftAttachment`, `removeMemoryRepoEntry`, `removeSubscription`, `resetImprovementHistory`, `resetPersonalitySettings`, `resetShellSession`, `resolveAnnotation`, `resolveChannelSpecialization`, `resolveMailboxContactIdentity`, `resumeManagedSession`, `retryImprovementCampaign`, `retryRoutineWorkflowRun`, `retrySubconsciousRun`, `reviewCoreEvalCase`, `reviewCoreExperiment`, `reviewCoreFailureCluster`, `reviewCoreMemoryCandidate`, `reviewImprovementCampaign`, `reviewSubconsciousRun`, `revokeProtectedCredential`, `revokeRecurringApprovalRule`, `runCoreExperiment`, `runCoreMemoryDistillNow`, `runEvalSuite`, `runNextImprovementExperiment`, `runTerminalTabCommand`, `saveImprovementOwnerEnrollment`, `saveImprovementSettings`, `saveMCPSettings`, `saveSSHTunnelConfig`, `scheduleMailboxSend`, `scrapingGetSettings`, `scrapingGetStatus`, `scrapingReset`, `scrapingSaveSettings`, `searchMCPRegistry`, `searchMemories`, `searchSessions`, `searchYouTubeSegments`, `sendManagedSessionUserMessage`, `sendPactMessage`, `setActivePersona`, `setActivePersonality`, `setExtensionConfig`, `setMemoryItemPinned`, `startMCPHost`, `startPactAuthorization`, `stopMCPHost`, `syncMemoryRepoNow`, `testMCPServer`, `undoMailboxAction`, `undoMemoryChange`, `undoMemoryRepoDream`, `uninstallMCPServer`, `uninstallPluginPack`, `updateAgentWorkspaceMembership`, `updateAllSkills`, `updateAnnotation`, `updateAutomationProfile`, `updateGoal`, `updateHeartbeatConfig`, `updateImageGenProfile`, `updateIssue`, `updateMCPServer`, `updateMCPServerFromRegistry`, `updateMailboxClientSettings`, `updateMailboxForward`, `updateMailboxRule`, `updateMailboxSchedule`, `updateMemoryItem`, `updateMemoryRepoEntry`, `updateProject`, `updateRelationshipMemory`, `updateSecureMcpTunnel`, `updateSkillFromRegistry`, `updateWorkContext`, `updateWorkSessionRollout`, `updateWorkspacePermissions`, `upsertComposerDraft`, `windowIsMaximized`.
+Declared but not directly referenced by renderer source (299; not proof of dead code): `acceptMemoryRepoDream`, `acknowledgePactEvidence`, `addHookMapping`, `addMCPServer`, `addMailboxDraftAttachment`, `addMemoryItem`, `addSubscription`, `addWorkContextMember`, `agentSecurityBuildCase`, `agentSecurityHookStatus`, `agentSecurityListDecisions`, `agentSecurityPrune`, `agentSecurityVerifyCase`, `approveMemoryWriteApproval`, `archiveManagedAgent`, `archiveManagedEnvironment`, `attachAutomationProfileToAgentRole`, `cancelManagedSession`, `cancelPactAuthorization`, `canvasCheckpointDelete`, `canvasCheckpointList`, `canvasCheckpointRestore`, `canvasCheckpointSave`, `canvasCreate`, `canvasEval`, `canvasExportToFolder`, `canvasGetContent`, `canvasHide`, `canvasOpenUrl`, `canvasPush`, `checkLocalPreviewHealth`, `checkMCPUpdates`, `checkPackPolicy`, `checkSkillUpdates`, `cleanupWorktree`, `clearComposerDraft`, `clearGlobalMemoryItems`, `clearImprovementOwnerEnrollment`, `clearQueue`, `closeShellSession`, `compactMemoryRepoHistory`, `connectMCPServer`, `continueTask`, `correctManagedSessionRequirement`, `countMemoryWriteApprovals`, `createAutomationProfile`, `createDefaultContextPolicies`, `createEvalCaseFromTask`, `createGoal`, `createIssue`, `createMailboxSavedViewReviewSchedule`, `createPactDeviceKey`, `createProject`, `createProtectedCredentialRequest`, `createWorkContext`, `deleteAutomationProfile`, `deleteContextPolicies`, `deleteImageGenProfile`, `deleteMailboxSavedView`, `deleteMailboxSnippet`, `deleteMemoryItem`, `deleteRelationshipMemory`, `detachAutomationProfileFromAgentRole`, `deviceGetProfiles`, `deviceUpdateProfile`, `disconnectMCPServer`, `discoverPactBusiness`, `dismissAnnotation`, `dismissImprovementCandidate`, `dreamMemoryRepoNow`, `enqueueRoutineWorkflowEvent`, `evaluateWorkSessionReplay`, `exportTasksJson`, `fetchMCPRegistry`, `generateBriefing`, `generateManagedSessionAudioSummary`, `getAgentSubscriptions`, `getAutomationProfile`, `getAwarenessSnapshot`, `getChannelPreferenceSummary`, `getCompany`, `getComposerDraft`, `getContactIdentity`, `getContextPolicy`, `getContextPolicyForChat`, `getCoreTrace`, `getCronWebhookStatus`, `getCustomSkill`, `getDefaultAgentRoles`, `getEligibleSkills`, `getEvalCase`, `getEvalRun`, `getExtension`, `getExtensionConfig`, `getGoal`, `getHeartbeatConfig`, `getHeartbeatStatus`, `getImportSecurityReport`, `getImprovementEligibility`, `getImprovementSettings`, `getIssue`, `getLocalPreview`, `getMCPAllTools`, `getMCPHostStatus`, `getMCPServerStatus`, `getMCPServerTools`, `getMCPSettings`, `getMCPStatus`, `getMailboxRelationshipTimeline`, `getManagedEnvironment`, `getMeetingArtifact`, `getMemoryDetails`, `getMemoryHealth`, `getMemoryItem`, `getMemoryItemWhy`, `getMemoryRepoDreamDiff`, `getMemoryRepoEntries`, `getMemoryRepoStatus`, `getMemoryReview`, `getMemorySources`, `getMemoryTimeline`, `getMemoryUsedForTask`, `getMemoryWriteApproval`, `getMissionControlBrief`, `getPackRegistryDetails`, `getPactAuthorization`, `getPactConversation`, `getPactReceipt`, `getPersonalityDefinitions`, `getPluginPack`, `getProject`, `getSearchSettings`, `getSemanticTimeline`, `getShellSessionInfo`, `getSkill`, `getSkillDetails`, `getSpreadsheetViewport`, `getTailscaleStatus`, `getTaskSubscribers`, `getWorkContext`, `getWorkSessionProjection`, `getWorkSessionRollout`, `getWorkingState`, `getWorktreeDiff`, `getWorktreeInfo`, `grantGatewayAccess`, `importMemoryRepoFolder`, `ingestYouTubeVideo`, `installMCPServer`, `isToolAllowedInContext`, `keepMemoryRepoEntry`, `listAgentWorkspaceMemberships`, `listAwarenessEvents`, `listBotMessages`, `listCoreMemoryCandidates`, `listCoreMemoryDistillRuns`, `listCoreTraces`, `listCoreTracesForAutomationProfile`, `listDocumentVersions`, `listEvalSuites`, `listGuidelineSkills`, `listHeartbeatRunsForAutomationProfile`, `listImprovementCampaigns`, `listImprovementCandidates`, `listMailboxEvents`, `listMailboxSavedViews`, `listManagedSkills`, `listMemoryItems`, `listMemoryWriteApprovals`, `listPactAuthorizations`, `listPactConversations`, `listProtectedCredentials`, `listRecurringApprovalRules`, `listRelationshipMemory`, `listRoutineWorkflowEventSamples`, `listRoutineWorkflowEvents`, `listShellSessions`, `listSubconsciousRuns`, `listSubconsciousRunsForAutomationProfile`, `listSubscriptions`, `listThreadMailboxAutomations`, `listWorkContexts`, `listWorkSessionLeases`, `listWorkSessionMetrics`, `listWorkingStatesForTask`, `listWorktrees`, `listYouTubeVideos`, `mergeWorktree`, `onControlPlaneEvent`, `onGatewayMessage`, `onHooksEvent`, `onQAEvent`, `onSSHTunnelEvent`, `onShellSessionEvent`, `onSubscriptionEvent`, `onTrayCheckUpdates`, `onTrayNewTask`, `onTrayOpenSettings`, `onTraySelectWorkspace`, `onWhatsAppConnected`, `onWhatsAppQRCode`, `onWhatsAppStatus`, `openMemoryRepoFile`, `openMemoryRepoFolder`, `pinMemoryRepoEntry`, `previewArtifact`, `pruneTempWorkspaces`, `qaGetRun`, `qaGetRuns`, `qaStartRun`, `qaStopRun`, `queryChronicleRecentContext`, `readMemoryRepoLines`, `refreshImprovementCandidates`, `rejectMemoryRepoDream`, `rejectMemoryWriteApproval`, `rekeyComposerDraft`, `removeHookMapping`, `removeMCPServer`, `removeMailboxDraftAttachment`, `removeMemoryRepoEntry`, `removeSubscription`, `resetImprovementHistory`, `resetPersonalitySettings`, `resetShellSession`, `resolveAnnotation`, `resolveChannelSpecialization`, `resolveMailboxContactIdentity`, `resumeManagedSession`, `retryImprovementCampaign`, `retryRoutineWorkflowRun`, `retrySubconsciousRun`, `reviewCoreEvalCase`, `reviewCoreExperiment`, `reviewCoreFailureCluster`, `reviewCoreMemoryCandidate`, `reviewImprovementCampaign`, `reviewSubconsciousRun`, `revokeProtectedCredential`, `revokeRecurringApprovalRule`, `runCoreExperiment`, `runCoreMemoryDistillNow`, `runEvalSuite`, `runNextImprovementExperiment`, `runTerminalTabCommand`, `saveImprovementOwnerEnrollment`, `saveImprovementSettings`, `saveMCPSettings`, `saveSSHTunnelConfig`, `scheduleMailboxSend`, `scrapingGetSettings`, `scrapingGetStatus`, `scrapingReset`, `scrapingSaveSettings`, `searchMCPRegistry`, `searchMemories`, `searchSessions`, `searchYouTubeSegments`, `sendManagedSessionUserMessage`, `sendPactMessage`, `setActivePersona`, `setActivePersonality`, `setExtensionConfig`, `setMemoryItemPinned`, `startMCPHost`, `startPactAuthorization`, `stopMCPHost`, `syncMemoryRepoNow`, `testMCPServer`, `undoMailboxAction`, `undoMemoryChange`, `undoMemoryRepoDream`, `uninstallMCPServer`, `uninstallPluginPack`, `updateAgentWorkspaceMembership`, `updateAllSkills`, `updateAnnotation`, `updateAutomationProfile`, `updateGoal`, `updateHeartbeatConfig`, `updateImageGenProfile`, `updateIssue`, `updateMCPServer`, `updateMCPServerFromRegistry`, `updateMailboxClientSettings`, `updateMailboxForward`, `updateMailboxRule`, `updateMailboxSchedule`, `updateMemoryItem`, `updateMemoryRepoEntry`, `updateProject`, `updateRelationshipMemory`, `updateSecureMcpTunnel`, `updateSkillFromRegistry`, `updateWorkContext`, `updateWorkSessionRollout`, `updateWorkspacePermissions`, `upsertComposerDraft`, `windowIsMaximized`.
 
 Directly reached but absent from the ElectronAPI interface (17): `addTrigger`, `createWebAccessPairingCode`, `getHubSources`, `getMcpEventsStatus`, `getRecentHubFiles`, `getSkillInstallProgress`, `getTriggerHistory`, `getWebAccessSettings`, `getWebAccessStatus`, `listHubFiles`, `listMcpEvents`, `listTriggers`, `onLLMSettingsChanged`, `removeTrigger`, `saveWebAccessSettings`, `searchHubFiles`, `updateTrigger`.
 

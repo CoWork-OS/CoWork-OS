@@ -17,13 +17,9 @@ import type {
   AgentThought,
   LlmProfile,
   UpdateAgentTeamItemRequest,
-  MultiLlmParticipant,
   WorkerRoleKind,
 } from "../../shared/types";
-import {
-  IPC_CHANNELS,
-  MULTI_LLM_PROVIDER_DISPLAY as _MULTI_LLM_PROVIDER_DISPLAY,
-} from "../../shared/types";
+import { IPC_CHANNELS } from "../../shared/types";
 import {
   resolveModelPreferenceToModelKey,
   resolvePersonalityPreference,
@@ -428,46 +424,11 @@ export class AgentTeamOrchestrator {
         .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt);
       if (candidates.length === 0) return;
 
-      // Resolve multi-LLM participants from root task config
-      const multiLlmParticipants: MultiLlmParticipant[] | undefined =
-        run.multiLlmMode && rootTask.agentConfig?.multiLlmConfig?.participants
-          ? rootTask.agentConfig.multiLlmConfig.participants
-          : undefined;
-
       const toSpawn = candidates;
       const useProfileRouting = this.shouldUseProfileRouting(rootTask);
       const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
       const graphNodes: OrchestrationGraphNodeInput[] = [];
       for (const item of toSpawn) {
-        if (run.multiLlmMode && multiLlmParticipants) {
-          const participantIndex = refreshedItems
-            .filter((candidate) => candidate.title !== SYNTHESIS_ITEM_TITLE)
-            .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt - b.createdAt)
-            .findIndex((candidate) => candidate.id === item.id);
-          const participant =
-            participantIndex >= 0 ? multiLlmParticipants[participantIndex] : undefined;
-          if (!participant) continue;
-          graphNodes.push({
-            key: item.id,
-            title: `${participant.displayName} Analysis`,
-            prompt: this.buildMultiLlmItemPrompt(participant, rootTask),
-            kind: "team_work_item" as const,
-            dispatchTarget: "native_child_task" as const,
-            parentTaskId: rootTask.id,
-            teamRunId: run.id,
-            teamItemId: item.id,
-            agentConfig: {
-              retainMemory: false,
-              bypassQueue: false,
-              providerType: participant.providerType,
-              modelKey: participant.modelKey,
-              llmProfile: "cheap",
-            },
-            metadata: { depth },
-          });
-          continue;
-        }
-
         const assignedRoleId = item.ownerAgentRoleId || team.leadAgentRoleId;
         const agentConfig: AgentConfig = {
           retainMemory: false,
@@ -570,7 +531,6 @@ export class AgentTeamOrchestrator {
             metadata: {
               teamRunId: run.id,
               collaborativeMode: run.collaborativeMode,
-              multiLlmMode: run.multiLlmMode,
             },
             nodes: graphNodes,
           });
@@ -1049,13 +1009,11 @@ export class AgentTeamOrchestrator {
 
     // Build synthesis prompt with all member thoughts
     const synthesisPrompt = appendUserUpdatesToPrompt(
-      run.multiLlmMode
-        ? this.buildMultiLlmSynthesisPrompt(rootTask, thoughts, items)
-        : this.buildSynthesisPrompt(team.name, rootTask, thoughts, items),
+      this.buildSynthesisPrompt(team.name, rootTask, thoughts, items),
       await this.listRootUserUpdates(rootTask.id),
     );
 
-    // Spawn a synthesis task assigned to the leader (or judge in multi-LLM mode)
+    // Spawn a synthesis task assigned to the leader
     const depth = (typeof rootTask.depth === "number" ? rootTask.depth : 0) + 1;
     const agentConfig: AgentConfig = {
       retainMemory: false,
@@ -1066,19 +1024,12 @@ export class AgentTeamOrchestrator {
       maxTurns: 3,
     };
 
-    if (run.multiLlmMode && rootTask.agentConfig?.multiLlmConfig) {
-      // Use judge's provider/model for synthesis
-      agentConfig.providerType = rootTask.agentConfig.multiLlmConfig.judgeProviderType;
-      agentConfig.modelKey = rootTask.agentConfig.multiLlmConfig.judgeModelKey;
-      agentConfig.llmProfile = "strong";
-    } else {
-      if (!useProfileRouting) {
-        const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);
-        if (modelKey) agentConfig.modelKey = modelKey;
-      }
-      const personalityId = resolvePersonalityPreference(team.defaultPersonality);
-      if (personalityId) agentConfig.personalityId = personalityId;
+    if (!useProfileRouting) {
+      const modelKey = resolveModelPreferenceToModelKey(team.defaultModelPreference);
+      if (modelKey) agentConfig.modelKey = modelKey;
     }
+    const personalityId = resolvePersonalityPreference(team.defaultPersonality);
+    if (personalityId) agentConfig.personalityId = personalityId;
 
     const synthesisItem = await this.itemRepo.create({
       teamRunId: run.id,
@@ -1333,87 +1284,6 @@ export class AgentTeamOrchestrator {
     parts.push("3. Credit specific team members for their key contributions.");
     parts.push("");
     parts.push("Respond directly with your synthesized answer. Do NOT use any tools.");
-
-    return parts.join("\n");
-  }
-
-  /**
-   * Build prompt for a multi-LLM participant. Each LLM gets the same task
-   * with a simple instruction to analyze it from their perspective.
-   */
-  private buildMultiLlmItemPrompt(participant: MultiLlmParticipant, rootTask: Task): string {
-    const parts: string[] = [];
-    parts.push("Analyze the following task thoroughly and provide your best response.");
-    if (participant.seatLabel) {
-      parts.push(`Seat: ${participant.seatLabel}`);
-    }
-    if (participant.roleInstruction) {
-      parts.push(`Role guidance: ${participant.roleInstruction}`);
-    }
-    if (participant.isIdeaProposer) {
-      parts.push("Special instruction: you are the rotating idea proposer for this run.");
-      parts.push("You must introduce at least one concrete new growth idea worth debating.");
-    } else {
-      parts.push(
-        "Special instruction: challenge weak ideas, refine strong ones, and push toward action.",
-      );
-    }
-    parts.push("");
-    parts.push("TASK:");
-    parts.push(`Title: ${rootTask.title}`);
-    parts.push(rootTask.prompt);
-    parts.push("");
-    parts.push("Provide a thorough, well-structured analysis and response.");
-    parts.push("Your output will be compared with other AI models and synthesized by a judge.");
-    return parts.join("\n");
-  }
-
-  /**
-   * Build the synthesis prompt for the judge in multi-LLM mode.
-   * Groups outputs by LLM provider/model.
-   */
-  private buildMultiLlmSynthesisPrompt(
-    rootTask: Task,
-    thoughts: AgentThought[],
-    _items: AgentTeamItem[],
-  ): string {
-    const parts: string[] = [];
-    parts.push("You are the JUDGE in a multi-LLM comparison.");
-    parts.push("Multiple AI models have independently analyzed the same task.");
-    parts.push("Your job is to synthesize their outputs into the best possible final answer.");
-    parts.push("");
-    parts.push("IMPORTANT INSTRUCTIONS:");
-    parts.push("- ALL model outputs are provided IN FULL below. Do NOT read external files.");
-    parts.push(
-      "- Do NOT attempt to use any tools or read any files. Everything you need is in this prompt.",
-    );
-    parts.push("- Respond directly with your synthesized analysis as text.");
-    parts.push("");
-    parts.push("ORIGINAL REQUEST:");
-    parts.push(`Title: ${rootTask.title}`);
-    parts.push(rootTask.prompt);
-    parts.push("");
-
-    if (thoughts.length > 0) {
-      parts.push("=== MODEL OUTPUTS (COMPLETE) ===");
-      parts.push("");
-      parts.push(groupAndCompactThoughts(thoughts, MAX_SYNTHESIS_PROMPT_CHARS));
-      parts.push("");
-      parts.push("=== END OF MODEL OUTPUTS ===");
-      parts.push("");
-    }
-
-    parts.push("YOUR TASK:");
-    parts.push(
-      "Produce your synthesis in a SINGLE response. Do NOT create sub-tasks or use planning tools.",
-    );
-    parts.push("Using ONLY the model outputs provided above:");
-    parts.push(
-      "1. Compare and evaluate each model's response for accuracy, completeness, and quality.",
-    );
-    parts.push("2. Identify the strongest elements from each response.");
-    parts.push("3. Synthesize the best comprehensive answer combining the strongest elements.");
-    parts.push("4. Note any disagreements between models and explain which view is more accurate.");
 
     return parts.join("\n");
   }

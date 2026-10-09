@@ -2169,10 +2169,7 @@ function RightPanelComponent({
     [childTasks, childEvents],
   );
   const showCollaborativeAgentsSection = Boolean(
-    collaborativeAgentTotals &&
-    (childTasks.length > 0 ||
-      task?.agentConfig?.collaborativeMode ||
-      task?.agentConfig?.multiLlmMode),
+    collaborativeAgentTotals && (childTasks.length > 0 || task?.agentConfig?.collaborativeMode),
   );
   const taskCostSummary = useMemo(() => getTaskCostSummary(events), [events]);
   const [taskCostEstimate, setTaskCostEstimate] = useState<TaskCostEstimate | null>(null);

@@ -4935,75 +4935,6 @@ export async function setupIpcHandlers(
       return task;
     }
 
-    // Multi-LLM mode: send same task to multiple LLM providers in parallel
-    if (normalizedAgentConfig?.multiLlmMode && normalizedAgentConfig?.multiLlmConfig) {
-      await taskRepo.update(task.id, { status: "executing" });
-      task.status = "executing";
-      task.updatedAt = Date.now();
-      emitTaskStatusEvent(task.id, "executing");
-
-      void (async () => {
-        try {
-          const config = normalizedAgentConfig.multiLlmConfig!;
-          const participants = config.participants;
-
-          // Use the first default agent role as sentinel for FK references
-          const allRoles = await agentRoleRepo.findAll(false);
-          const sentinelRoleId = allRoles.length > 0 ? allRoles[0].id : "multi-llm-system";
-
-          // Create ephemeral team
-          const team = await teamRepo.create({
-            workspaceId,
-            name: `MultiLLM-${Date.now()}`,
-            description: `Multi-LLM comparison for: ${title}`,
-            leadAgentRoleId: sentinelRoleId,
-            maxParallelAgents: participants.length,
-          });
-
-          // Create multi-LLM run
-          const run = await teamRunRepo.create({
-            teamId: team.id,
-            rootTaskId: task.id,
-            status: "running",
-            collaborativeMode: true,
-            multiLlmMode: true,
-          });
-
-          // One item per LLM participant
-          for (let i = 0; i < participants.length; i++) {
-            const p = participants[i];
-            await teamItemRepo.create({
-              teamRunId: run.id,
-              title: `${p.displayName}`,
-              description: prompt,
-              ownerAgentRoleId: sentinelRoleId,
-              status: "todo",
-              sortOrder: (i + 1) * 10,
-            });
-          }
-
-          // Emit for UI — triggers the thoughts panel
-          emitTeamEvent({
-            type: "team_run_created",
-            timestamp: Date.now(),
-            run,
-          });
-
-          // Kick off orchestrator
-          void teamOrchestrator.tickRun(run.id, "multi_llm_start");
-        } catch (error: Any) {
-          logger.error("[TASK_CREATE] Multi-LLM setup failed:", error);
-          try {
-            await agentDaemon.startTask(task, validatedImages);
-          } catch (startError: Any) {
-            agentDaemon.failTask(task.id, startError.message || "Failed to start task");
-          }
-        }
-      })();
-
-      return task;
-    }
-
     // Bot conversations are created as dormant chat identities. The first
     // user message starts the executor, so opening a bot never creates an
     // unsolicited assistant reply or an execution-step timeline.
@@ -5809,9 +5740,9 @@ export async function setupIpcHandlers(
     const maxEvents = 600;
     const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
 
-    // Include child task file events for collaborative/multi-LLM roots
+    // Include child task file events for collaborative roots
     const task = await taskRepo.findById(taskId);
-    if (task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode) {
+    if (task?.agentConfig?.collaborativeMode) {
       const childTasks = await taskRepo.findByParent(taskId);
       if (childTasks.length > 0) {
         const childIds = childTasks.map((c) => c.id);
@@ -5852,10 +5783,9 @@ export async function setupIpcHandlers(
     const startedAt = Date.now();
     const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
     const task = taskId ? await taskRepo.findById(taskId) : undefined;
-    const childTaskIds =
-      task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode
-        ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
-        : [];
+    const childTaskIds = task?.agentConfig?.collaborativeMode
+      ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
+      : [];
     const page = taskEventRepo.findTimelinePage({
       taskId,
       cursor: request?.cursor ?? null,
@@ -5904,10 +5834,9 @@ export async function setupIpcHandlers(
       const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
       const eventId = typeof request?.eventId === "string" ? request.eventId.trim() : "";
       const task = taskId ? await taskRepo.findById(taskId) : undefined;
-      const childTaskIds =
-        task?.agentConfig?.collaborativeMode || task?.agentConfig?.multiLlmMode
-          ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
-          : [];
+      const childTaskIds = task?.agentConfig?.collaborativeMode
+        ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
+        : [];
       const result = taskEventRepo.findEventDetailById(eventId, {
         taskId,
         ...(childTaskIds.length > 0
@@ -7497,7 +7426,7 @@ export async function setupIpcHandlers(
     return RuntimeVisibilityService.buildRoutingState(LLMProviderFactory.loadSettings());
   });
 
-  // Get models available for a specific provider type (for multi-LLM selection)
+  // Get models available for a specific provider type (for model pickers)
   ipcMain.handle(IPC_CHANNELS.LLM_GET_PROVIDER_MODELS, async (_, providerType: string) => {
     const settings = LLMProviderFactory.loadSettings();
     const modifiedSettings = {

@@ -49,8 +49,6 @@ type SafeAgentConfig = Pick<
   | "multitaskMode"
   | "multitaskLaneCount"
   | "multitaskAssignmentMode"
-  | "multiLlmMode"
-  | "multiLlmConfig"
   | "researchWorkflow"
   | "qualityPasses"
 >;
@@ -286,8 +284,6 @@ const BrowserTaskOptionsSchema = AgentConfigSchema.pick({
   multitaskMode: true,
   multitaskLaneCount: true,
   multitaskAssignmentMode: true,
-  multiLlmMode: true,
-  multiLlmConfig: true,
   researchWorkflow: true,
   qualityPasses: true,
 }).strict();
@@ -317,8 +313,6 @@ function parseSafeAgentConfig(value: unknown): SafeAgentConfig {
     "multitaskMode",
     "multitaskLaneCount",
     "multitaskAssignmentMode",
-    "multiLlmMode",
-    "multiLlmConfig",
     "researchWorkflow",
     "qualityPasses",
   ]);

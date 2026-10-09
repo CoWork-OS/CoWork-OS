@@ -153,7 +153,7 @@ describe("WorkSession Phase 5 replay and rollout", () => {
     expect(evaluateIsolatedReplay([make("orchestration_run_completed")]).replayStatus).toBe(
       "completed",
     );
-    expect(evaluateIsolatedReplay([make("pipeline_failed")]).replayStatus).toBe("failed");
+    expect(evaluateIsolatedReplay([make("orchestration_run_failed")]).replayStatus).toBe("failed");
     expect(evaluateIsolatedReplay([make("turn.completed")]).replayStatus).toBe("completed");
   });
 

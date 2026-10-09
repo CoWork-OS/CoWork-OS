@@ -563,7 +563,7 @@ export class IntentRouter {
     add(
       "execution",
       0, // don't add score, just detect
-      "workflow-pipeline",
+      "multi-phase-workflow",
       hasWorkflowConnectives && uniqueActionVerbs >= 3,
     );
 

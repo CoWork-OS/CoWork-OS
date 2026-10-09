@@ -50,7 +50,6 @@ export interface OrchestrationGraphNodeInput {
   agentConfig?: AgentConfig;
   teamRunId?: string;
   teamItemId?: string;
-  workflowPhaseId?: string;
   acpTaskId?: string;
   metadata?: Record<string, unknown>;
 }
@@ -206,12 +205,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
     const nodeIdByKey = new Map<string, string>();
     const nodes = input.nodes.map((node, index) => {
       const id = node.id ?? uuidv4();
-      const key =
-        node.key ||
-        node.teamItemId ||
-        node.workflowPhaseId ||
-        node.acpTaskId ||
-        `node-${index + 1}`;
+      const key = node.key || node.teamItemId || node.acpTaskId || `node-${index + 1}`;
       nodeIdByKey.set(key, id);
       return {
         id,
@@ -229,7 +223,6 @@ export class OrchestrationGraphEngine extends EventEmitter {
         agentConfig: node.agentConfig,
         teamRunId: node.teamRunId,
         teamItemId: node.teamItemId,
-        workflowPhaseId: node.workflowPhaseId,
         acpTaskId: node.acpTaskId,
         metadata: node.metadata,
       };
@@ -280,7 +273,6 @@ export class OrchestrationGraphEngine extends EventEmitter {
       const key =
         node.key ||
         node.teamItemId ||
-        node.workflowPhaseId ||
         node.acpTaskId ||
         `node-${existing.nodes.length + index + 1}`;
       nodeIdByKey.set(key, id);
@@ -300,7 +292,6 @@ export class OrchestrationGraphEngine extends EventEmitter {
         agentConfig: node.agentConfig,
         teamRunId: node.teamRunId,
         teamItemId: node.teamItemId,
-        workflowPhaseId: node.workflowPhaseId,
         acpTaskId: node.acpTaskId,
         metadata: node.metadata,
       };

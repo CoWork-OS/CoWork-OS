@@ -777,7 +777,6 @@ function buildTeamTemplateFromRoleNames(
     memberAgentRoleIds: members.map((role) => role.id),
     maxParallelAgents: Math.max(1, Math.min(4, members.length || 1)),
     collaborativeMode: true,
-    multiLlmMode: false,
   };
 }
 

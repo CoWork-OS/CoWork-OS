@@ -89,9 +89,6 @@ Messaging channels share unified operations, plus per-channel, per-chat, and per
 - **Agent Teams**: Multi-agent collaboration with shared checklists, graph-backed coordinated runs, and team management UI
 - **Collaborative Mode**: Auto-create ephemeral teams where multiple agents work on the same task, sharing thoughts in real-time through the delegated orchestration graph
 - **Multitask Command**: `/multitask [N] <task>` starts a collaborative run from one prompt, auto-splits it into bounded lane-specific child tasks, respects the global queue limit, and synthesizes the lane outputs. See [Multitask Command](multitask.md).
-- **Multi-LLM Mode**: Send the same task to multiple LLM providers/models simultaneously, with a judge agent synthesizing the best result
-- **Workflow Pipeline**: Optional phase-based execution path where decomposed steps run as child tasks with per-phase LLM overrides or capability-based auto-selection
-- **Agent Comparison Mode**: Compare agent or model outputs side by side
 - **External Agent Orchestration**: Discover ACP agents, target local or remote assignees from orchestration tools, and invoke A2A-compatible remote endpoints behind the normal approval/policy layer; orchestration now flows through the shared graph engine and graph-backed task state
 - **ACP Lifecycle Hardening**: ACP task state is persisted locally, survives restarts, supports remote cancel, and enforces scoped task/inbox access for non-operator clients
 - **Sub-Task Navigation**: Open a delegated sub-task, inspect its timeline, then jump back to the parent task from the main content view
@@ -219,7 +216,7 @@ CoWork OS now includes a dedicated Devices tab for running and observing work ac
 
 - **Local + remote device inventory**: track the current machine alongside saved remote devices in one view
 - **Connection-aware remote cards**: direct, SSH-tunneled, and Tailscale-backed devices expose connection state, last-seen time, active runs, storage summary, app summary, and attention state
-- **Remote task dispatch**: start a task on a selected remote device with an access profile, execution mode, or multi-LLM options
+- **Remote task dispatch**: start a task on a selected remote device with an access profile or execution mode
 - **Remote file picker**: browse remote workspaces and attach files directly from the target machine before dispatching a task
 - **Remote task feed**: filter tasks for the selected device, all devices, or attention states, then open those tasks in a remote session view
 - **Device overlays**: inspect apps, storage, resource signals, alerts, and observer history without leaving the Devices surface
@@ -388,7 +385,6 @@ The task creation UI also includes higher-level toggles that change how tasks ar
 | **Check-ins**         | Opts a fresh task into legacy clarification pauses. Keep this off for Codex/Claude Code-style execution that chooses safe defaults and stops only for hard blockers.                                                         |
 | **Collaborative**     | Auto-creates an ephemeral team of agents that analyze the task from multiple perspectives, then a leader synthesizes the results. Phases: dispatch → think → synthesize → complete.                                          |
 | **Multitask command** | Type `/multitask [N] <task>` to create a fresh collaborative run that splits the prompt into lane-specific child tasks before synthesis. Defaults to 4 lanes, bounded to 2-8.                                                |
-| **Multi-LLM**         | Sends the same task to multiple LLM providers/models in parallel. A designated judge model synthesizes the best result. Requires 2+ providers configured.                                                                    |
 | **Think With Me**     | Socratic brainstorming mode — agent asks follow-up questions and explores trade-offs without executing tools. Read-only tools only.                                                                                          |
 
 > **Note:** Autonomous mode shows a confirmation dialog before enabling. It is
@@ -786,7 +782,6 @@ Define per-role personality and operating guidelines in `.cowork/agents/<role-id
 | **Run Tracking**           | Track team runs with status, progress, and history                                            |
 | **Collaborative Mode**     | Ephemeral teams with real-time thought sharing                                                |
 | **Multitask Command**      | One-shot ephemeral team runs with auto-planned independent lanes from `/multitask [N] <task>` |
-| **Multi-LLM Mode**         | Dispatch same task to multiple providers with judge-based synthesis                           |
 | **Collaborative Thoughts** | Real-time thought panel shows agent reasoning as it happens                                   |
 
 Configure in **Mission Control** > **Teams**.
@@ -949,21 +944,7 @@ Notes persist to `.cowork/scratchpad-{taskId}.json` for crash recovery. The scra
 
 ---
 
-## Workflow Pipeline & Deep Work Mode
-
-### Workflow Pipeline
-
-Multi-phase task execution for complex workflows. The Workflow Decomposer detects multi-step prompts (using connectives like "then", "after that", "next", "finally") and splits them into sequential phases.
-
-| Feature                  | Description                                                                  |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| **Auto-detection**       | Regex-based decomposition of multi-phase prompts                             |
-| **5 phase types**        | research, create, deliver, analyze, general                                  |
-| **Sequential execution** | Each phase creates a child task; output pipes into the next phase            |
-| **LLM fallback**         | Complex prompts that resist regex decomposition use LLM-powered splitting    |
-| **Pipeline events**      | `pipeline_started`, `phase_started`, `phase_completed`, `pipeline_completed` |
-
-### Deep Work Mode
+## Deep Work Mode
 
 Extended execution mode for complex tasks that need sustained focus:
 

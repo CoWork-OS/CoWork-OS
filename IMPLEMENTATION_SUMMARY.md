@@ -598,7 +598,6 @@ npm run type-check       # Check TypeScript types
 | Personality System        | Production | Customizable agent behavior, personas, response styles                 |
 | Citation Engine           | Production | Auto-tracks web sources with deduplication and inline references       |
 | Scratchpad Tools          | Production | Session-scoped note-taking for agents during long tasks                |
-| Workflow Pipeline         | Production | Multi-phase task decomposition and sequential execution                |
 | Deep Work Mode            | Production | Extended execution with progress journaling                            |
 | Document Generation Tools | Production | PDF, PPTX, XLSX generation as agent tools                              |
 | Event Triggers            | Production | Condition-based automation (cron, webhook, channel)                    |

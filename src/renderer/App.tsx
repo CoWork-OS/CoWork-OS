@@ -107,7 +107,6 @@ import {
   ApprovalResponseAction,
   isTempWorkspaceId,
   ImageAttachment,
-  MultiLlmConfig,
   QuotedAssistantMessage,
   ExecutionMode,
   TaskDomain,
@@ -5943,8 +5942,6 @@ export function App() {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       collaborativeMode?: boolean;
-      multiLlmMode?: boolean;
-      multiLlmConfig?: MultiLlmConfig;
       multitaskMode?: boolean;
       multitaskLaneCount?: number;
       multitaskAssignmentMode?: "auto_split";
@@ -5990,10 +5987,8 @@ export function App() {
     const requestedCollaborative =
       options?.collaborativeMode === true || spawnIntent || isMultitaskCommand;
     const requestedAutonomous = options?.autonomousMode === true;
-    const requestedMultiLlm = options?.multiLlmMode === true;
-    const autonomousMode = requestedAutonomous && !requestedCollaborative && !requestedMultiLlm;
-    const collaborativeMode = requestedCollaborative && !requestedMultiLlm;
-    const multiLlmMode = requestedMultiLlm;
+    const autonomousMode = requestedAutonomous && !requestedCollaborative;
+    const collaborativeMode = requestedCollaborative;
 
     if (requestedAutonomous && requestedCollaborative) {
       addToast({
@@ -6049,7 +6044,6 @@ export function App() {
       collaborativeMode ||
       isMultitaskCommand ||
       options?.multitaskMode ||
-      multiLlmMode ||
       verificationAgent ||
       executionMode ||
       taskDomain ||
@@ -6078,9 +6072,6 @@ export function App() {
                     options?.multitaskAssignmentMode ||
                     "auto_split",
                 }
-              : {}),
-            ...(multiLlmMode
-              ? { multiLlmMode: true, multiLlmConfig: options?.multiLlmConfig }
               : {}),
             ...(verificationAgent ? { verificationAgent: true } : {}),
             ...(executionMode ? { executionMode } : {}),
@@ -8343,8 +8334,6 @@ export function App() {
                         ? {
                             autonomousMode: options.autonomousMode,
                             collaborativeMode: options.collaborativeMode,
-                            multiLlmMode: options.multiLlmMode,
-                            multiLlmConfig: options.multiLlmConfig,
                             executionMode: options.executionMode,
                             agentConfig: { interactionMode: options.interactionMode },
                             taskDomain: options.taskDomain,
@@ -8372,10 +8361,6 @@ export function App() {
                                 humanInputPolicy: "none" as const,
                               }),
                               ...(options.collaborativeMode && { collaborativeMode: true }),
-                              ...(options.multiLlmMode && {
-                                multiLlmMode: true,
-                                multiLlmConfig: options.multiLlmConfig,
-                              }),
                               ...(options.executionMode && {
                                 executionMode: options.executionMode,
                               }),
@@ -8421,7 +8406,6 @@ export function App() {
                     );
                     setCurrentView("settings");
                   }}
-                  availableProviders={availableProviders}
                 />
               ) : currentView === "inboxAgent" ? (
                 <InboxAgentPanel

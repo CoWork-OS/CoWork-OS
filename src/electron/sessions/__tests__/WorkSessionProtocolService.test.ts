@@ -151,10 +151,10 @@ describeWithSqlite("WorkSessionProtocolService", () => {
     ).toThrow(StaleWorkSessionTurnError);
   });
 
-  it("persists pipeline failure events as terminal failures", () => {
+  it("persists orchestration run failure events as terminal failures", () => {
     const task = createTask();
-    const event = addEvent(task.id, "pipeline-failed", "pipeline_failed", {
-      reason: "A workflow phase failed",
+    const event = addEvent(task.id, "orchestration-failed", "orchestration_run_failed", {
+      reason: "A delegated run failed",
     });
     const result = service.recordTaskEvent(task.id, event)!;
     expect(result.turn.status).toBe("failed");

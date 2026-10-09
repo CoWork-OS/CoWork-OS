@@ -94,10 +94,8 @@ button:focus-visible,
 
   --session-mode-autonomous: 245, 158, 11;
   --session-mode-collab: 139, 92, 246;
-  --session-mode-multi-llm: 236, 72, 153;
   --session-mode-scheduled: 14, 165, 233;
   --session-mode-think: 168, 85, 247;
-  --session-mode-comparison: 20, 184, 166;
 
   /* Opaque dropdown background (Devices panel) */
   --dp-dropdown-bg: #1a1d23;
@@ -3760,20 +3758,12 @@ a,
   border-left-color: rgb(var(--session-mode-collab));
 }
 
-.cli-task-item.session-mode-multi-llm {
-  border-left-color: rgb(var(--session-mode-multi-llm));
-}
-
 .cli-task-item.session-mode-scheduled {
   border-left-color: rgb(var(--session-mode-scheduled));
 }
 
 .cli-task-item.session-mode-think {
   border-left-color: rgb(var(--session-mode-think));
-}
-
-.cli-task-item.session-mode-comparison {
-  border-left-color: rgb(var(--session-mode-comparison));
 }
 
 /* Keep mode color visible even when selected */
@@ -3785,20 +3775,12 @@ a,
   border-left-color: rgb(var(--session-mode-collab));
 }
 
-.cli-task-item.task-item-selected.session-mode-multi-llm {
-  border-left-color: rgb(var(--session-mode-multi-llm));
-}
-
 .cli-task-item.task-item-selected.session-mode-scheduled {
   border-left-color: rgb(var(--session-mode-scheduled));
 }
 
 .cli-task-item.task-item-selected.session-mode-think {
   border-left-color: rgb(var(--session-mode-think));
-}
-
-.cli-task-item.task-item-selected.session-mode-comparison {
-  border-left-color: rgb(var(--session-mode-comparison));
 }
 
 /* CLI Rename Input */
@@ -7676,103 +7658,6 @@ a,
 
 .goal-mode-switch-track.on .goal-mode-switch-thumb {
   left: 14px;
-}
-
-/* ==================== MULTI-LLM SELECTION PANEL ==================== */
-.multi-llm-selection-panel {
-  margin-top: 10px;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-}
-
-.multi-llm-header {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-  margin-bottom: 10px;
-}
-
-.multi-llm-providers {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.multi-llm-provider-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.multi-llm-provider-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--color-text);
-  min-width: 150px;
-}
-
-.multi-llm-provider-label input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  cursor: pointer;
-  accent-color: var(--color-accent);
-}
-
-.multi-llm-model-select {
-  flex: 1;
-  max-width: 260px;
-  padding: 4px 8px;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  font-size: 12px;
-}
-
-.multi-llm-model-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.multi-llm-judge {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--color-text-muted);
-}
-
-.multi-llm-judge label {
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.multi-llm-judge-select {
-  flex: 1;
-  max-width: 300px;
-  padding: 4px 8px;
-  background: var(--color-bg-input);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  font-size: 12px;
-}
-
-.multi-llm-judge-select:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.multi-llm-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--color-text-muted);
 }
 
 /* ==================== APPEARANCE SETTINGS ==================== */

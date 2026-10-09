@@ -198,7 +198,7 @@
       "prepare": 3
     },
     "src/electron/database/repositories.ts": {
-      "prepare": 270,
+      "prepare": 262,
       "runtimeImport": 1
     },
     "src/electron/database/schema.ts": {

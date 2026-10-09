@@ -51,7 +51,6 @@ import {
   type TaskFollowUpInput,
   type TaskStopReason,
 } from "../../shared/types";
-import { resolveModelPreferenceToModelKey } from "../../shared/agent-preferences";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { CONTEXT_COMPACTION_RECENT_USER_MESSAGE_MAX_TOKENS } from "../../shared/context-compaction";
@@ -251,7 +250,7 @@ import {
 } from "./strategy/TaskStrategyService";
 import { asksAboutProjectBehavior, referencesOwnWorkspace } from "./strategy/code-signals";
 import { CitationTracker } from "./citation/CitationTracker";
-import { WorkflowDecomposer, workflowPhaseTypeToCapability } from "./strategy/WorkflowDecomposer";
+import { WorkflowDecomposer } from "./strategy/WorkflowDecomposer";
 import {
   scorePlanStepIntentAlignment,
   scoreStepIntentContainment,
@@ -29817,7 +29816,7 @@ You are continuing a previous conversation. The context from the previous conver
         await this.emitPreflightFraming();
       }
 
-      // Workflow decomposition: detect multi-phase sequential pipelines
+      // Workflow decomposition: detect multi-phase sequential prompts
       try {
         const workflowRoute = IntentRouter.route(this.task.title || "", this.getContractPrompt());
         if (workflowRoute.intent === "workflow" || workflowRoute.intent === "deep_work") {
@@ -29837,84 +29836,6 @@ You are continuing a previous conversation. The context from the previous conver
               phaseCount: phases.length,
               phases: phases.map((p) => ({ type: p.phaseType, prompt: p.prompt.slice(0, 100) })),
             });
-            if (this.task.agentConfig?.useWorkflowPipeline === true && !this.task.parentTaskId) {
-              const currentDepth = this.task.depth ?? 0;
-              const workflowSnapshot = await this.daemon.createOrchestrationGraphRun({
-                rootTaskId: this.task.id,
-                workspaceId: this.task.workspaceId,
-                kind: "workflow",
-                maxParallel: 1,
-                metadata: { createdBy: "workflow_pipeline" },
-                nodes: phases.map((phase, index) => ({
-                  key: phase.id,
-                  title: phase.title,
-                  prompt: phase.prompt,
-                  kind: "workflow_phase",
-                  dispatchTarget: "native_child_task",
-                  parentTaskId: this.task.id,
-                  workflowPhaseId: phase.id,
-                  agentConfig: {
-                    autonomousMode: true,
-                    allowUserInput: false,
-                    conversationMode: "task",
-                    ...(phase.llmOverride?.providerType
-                      ? { providerType: phase.llmOverride.providerType }
-                      : {}),
-                    ...(phase.llmOverride?.modelKey
-                      ? { modelKey: phase.llmOverride.modelKey }
-                      : phase.llmOverride?.modelPreference
-                        ? {
-                            modelKey: resolveModelPreferenceToModelKey(
-                              phase.llmOverride.modelPreference,
-                            ),
-                          }
-                        : {}),
-                    ...(phase.llmOverride?.llmProfile
-                      ? { llmProfile: phase.llmOverride.llmProfile }
-                      : {}),
-                    ...(phase.autoSelectModel !== false
-                      ? { capabilityHint: workflowPhaseTypeToCapability(phase.phaseType) }
-                      : {}),
-                    useWorkflowPipeline: false,
-                    workflowPhaseId: phase.id,
-                    workflowPhaseType: phase.phaseType,
-                  },
-                  metadata: { depth: currentDepth + 1 },
-                })),
-                edges: phases.slice(1).map((phase, index) => ({
-                  fromNodeKey: phases[index].id,
-                  toNodeKey: phase.id,
-                })),
-              });
-
-              for (const node of workflowSnapshot.nodes) {
-                const handle = node.publicHandle || node.taskId || node.id;
-                const result = await this.daemon.waitForDelegatedNode(this.task.id, handle, 300);
-                if (!result.success) {
-                  throw new Error(result.error || result.message || "Workflow pipeline failed");
-                }
-              }
-
-              const completedWorkflow = await this.daemon.getOrchestrationGraphSnapshot(
-                workflowSnapshot.run.id,
-              );
-              if (completedWorkflow?.run.status === "completed") {
-                const summary = completedWorkflow.nodes
-                  .map((phase) =>
-                    [
-                      `## ${phase.title}`,
-                      phase.output || phase.summary || "_No output captured._",
-                    ].join("\n"),
-                  )
-                  .join("\n\n");
-                this.finalizeTaskBestEffort(
-                  summary,
-                  "Workflow pipeline completed via orchestration graph.",
-                );
-                return;
-              }
-              throw new Error("Workflow pipeline failed");
-            }
             // Add decomposition guidance without overwriting the original task.
             const phaseList = phases
               .map((p, i) => `  Phase ${i + 1} (${p.phaseType}): ${p.prompt.slice(0, 120)}`)

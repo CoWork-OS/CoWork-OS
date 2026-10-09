@@ -18,7 +18,6 @@ export class AgentTeamRunStore {
    */
   create(request: CreateAgentTeamRunRequest): AgentTeamRun {
     const now = Date.now();
-    const isCollabOrMultiLlm = request.collaborativeMode || request.multiLlmMode;
     const run: AgentTeamRun = {
       id: uuidv4(),
       teamId: request.teamId,
@@ -28,16 +27,15 @@ export class AgentTeamRunStore {
       completedAt: undefined,
       error: undefined,
       summary: undefined,
-      phase: isCollabOrMultiLlm ? "dispatch" : undefined,
+      phase: request.collaborativeMode ? "dispatch" : undefined,
       collaborativeMode: request.collaborativeMode ?? false,
-      multiLlmMode: request.multiLlmMode ?? false,
     };
 
     const stmt = this.db.prepare(`
       INSERT INTO agent_team_runs (
         id, team_id, root_task_id, status, started_at, completed_at, error, summary,
-        phase, collaborative_mode, multi_llm_mode
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        phase, collaborative_mode
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -51,7 +49,6 @@ export class AgentTeamRunStore {
       null,
       run.phase || null,
       run.collaborativeMode ? 1 : 0,
-      run.multiLlmMode ? 1 : 0,
     );
 
     return run;
@@ -194,7 +191,6 @@ export class AgentTeamRunStore {
       summary: row.summary || undefined,
       phase: (row.phase as AgentTeamRunPhase) || undefined,
       collaborativeMode: row.collaborative_mode === 1,
-      multiLlmMode: row.multi_llm_mode === 1,
     };
   }
 }

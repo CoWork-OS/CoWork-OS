@@ -61,23 +61,6 @@ const PROFILES: ModelCapabilityProfile[] = [
 ];
 
 export class ModelCapabilityRegistry {
-  static selectForWorkflowPhaseType(
-    phaseType: string,
-  ): "cheaper" | "smarter" | "sonnet" | undefined {
-    switch (phaseType) {
-      case "research":
-      case "analyze":
-        return "sonnet";
-      case "create":
-        return "sonnet";
-      case "deliver":
-        return "cheaper";
-      case "general":
-      default:
-        return undefined;
-    }
-  }
-
   /**
    * Select the cheapest model that satisfies the required capability.
    * Falls back to "smarter" if no profile can handle the capability.

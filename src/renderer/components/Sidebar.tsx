@@ -131,10 +131,8 @@ export type SessionMode =
   | "autonomous"
   | "collab"
   | "multitask"
-  | "multi-llm"
   | "scheduled"
   | "think"
-  | "comparison"
   | "video";
 
 const SESSION_MODE_META: Record<SessionMode, { label: string; shortLabel: string; color: string }> =
@@ -143,10 +141,8 @@ const SESSION_MODE_META: Record<SessionMode, { label: string; shortLabel: string
     autonomous: { label: "Autonomous", shortLabel: "AUTO", color: "autonomous" },
     collab: { label: "Collaborative", shortLabel: "COLLAB", color: "collab" },
     multitask: { label: "Multitask", shortLabel: "MULTI", color: "collab" },
-    "multi-llm": { label: "Multi-LLM", shortLabel: "MULTI", color: "multi-llm" },
     scheduled: { label: "Scheduled", shortLabel: "SCHED", color: "scheduled" },
     think: { label: "Think", shortLabel: "THINK", color: "think" },
-    comparison: { label: "Comparison", shortLabel: "CMP", color: "comparison" },
     video: { label: "Video", shortLabel: "VID", color: "video" },
   };
 
@@ -156,10 +152,8 @@ export function getSessionMode(task: Task): SessionMode {
     return "video";
   if (task.agentConfig?.multitaskMode) return "multitask";
   if (task.agentConfig?.collaborativeMode) return "collab";
-  if (task.agentConfig?.multiLlmMode) return "multi-llm";
   if (task.agentConfig?.autonomousMode) return "autonomous";
   if (task.agentConfig?.conversationMode === "think") return "think";
-  if (task.comparisonSessionId) return "comparison";
   if (task.source === "cron" || task.title?.startsWith("Scheduled:")) return "scheduled";
   return "standard";
 }

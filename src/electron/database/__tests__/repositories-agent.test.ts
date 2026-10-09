@@ -52,7 +52,6 @@ class MockTaskRepository {
     "worktreePath",
     "worktreeBranch",
     "worktreeStatus",
-    "comparisonSessionId",
   ]);
 
   private static readonly JSON_FIELDS = new Set(["successCriteria", "agentConfig"]);
@@ -181,7 +180,6 @@ class MockTaskRepository {
       worktreePath: stored.worktreePath || undefined,
       worktreeBranch: stored.worktreeBranch || undefined,
       worktreeStatus: stored.worktreeStatus || undefined,
-      comparisonSessionId: stored.comparisonSessionId || undefined,
       terminalStatus: stored.terminalStatus || undefined,
       failureClass: stored.failureClass || undefined,
     });

@@ -11,7 +11,7 @@
 import { IntentRoute } from "./IntentRouter";
 import type { LLMProvider } from "../llm/types";
 import { recordLlmCallError, recordLlmCallSuccess } from "../llm/usage-telemetry";
-import type { LLMProviderType, LlmProfile, ModelCapability } from "../../../shared/types";
+import type { LLMProviderType, LlmProfile } from "../../../shared/types";
 
 export type WorkflowPhaseType = "research" | "create" | "deliver" | "analyze" | "general";
 
@@ -70,22 +70,6 @@ const PHASE_TYPE_PATTERNS: Array<[RegExp, WorkflowPhase["phaseType"]]> = [
   [/\b(send|email|deliver|share|publish|post|notify|message|forward)\b/i, "deliver"],
   [/\b(analyze|compare|evaluate|assess|review|summarize|audit|benchmark)\b/i, "analyze"],
 ];
-
-export function workflowPhaseTypeToCapability(
-  phaseType: WorkflowPhaseType,
-): ModelCapability | undefined {
-  switch (phaseType) {
-    case "research":
-    case "analyze":
-      return "research";
-    case "create":
-      return "code";
-    case "deliver":
-      return "fast";
-    default:
-      return undefined;
-  }
-}
 
 export class WorkflowDecomposer {
   /**

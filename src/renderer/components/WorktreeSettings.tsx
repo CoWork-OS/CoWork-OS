@@ -152,18 +152,6 @@ export function WorktreeSettings() {
         </div>
       </div>
 
-      <div className="settings-section">
-        <h2>Agent Comparison Mode</h2>
-        <p className="settings-description">
-          Run the same prompt on multiple agents or LLM providers simultaneously and compare their
-          results side-by-side. Each agent works in its own isolated worktree branch.
-        </p>
-        <p className="settings-description" style={{ opacity: 0.7 }}>
-          To start a comparison, use the comparison button when creating a new task. Worktree
-          isolation must be enabled for comparison mode to create separate branches.
-        </p>
-      </div>
-
       {saved && <div className="settings-save-indicator">Settings saved</div>}
       {saveError && <div className="settings-save-indicator error">{saveError}</div>}
     </div>

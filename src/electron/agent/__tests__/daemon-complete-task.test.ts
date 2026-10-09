@@ -78,7 +78,6 @@ function createDaemonLike() {
       }),
       commitTaskChanges: vi.fn(),
     },
-    comparisonService: null,
     workspaceRepo: {
       findById: vi.fn(),
     },
@@ -1555,8 +1554,6 @@ describe("AgentDaemon.completeTask", () => {
 
   it("does not run completion-only side effects for explicit failed terminal outcomes", async () => {
     const daemonLike = createDaemonLike();
-    const onTaskCompleted = vi.fn().mockResolvedValue(undefined);
-    daemonLike.comparisonService = { onTaskCompleted };
     daemonLike.taskRepo.findById.mockReturnValue({
       id: "task-1",
       title: "Task 1",
@@ -1567,7 +1564,6 @@ describe("AgentDaemon.completeTask", () => {
       agentType: "main",
       worktreeStatus: "active",
       worktreePath: "/tmp/task-1",
-      comparisonSessionId: "comparison-1",
       agentConfig: {
         reviewPolicy: "strict",
         entropySweepPolicy: "strict",
@@ -1618,7 +1614,6 @@ describe("AgentDaemon.completeTask", () => {
     expect(daemonLike.runPostCompletionVerification).not.toHaveBeenCalled();
     expect(daemonLike.runPostTaskEntropySweep).not.toHaveBeenCalled();
     expect(daemonLike.worktreeManager.commitTaskChanges).not.toHaveBeenCalled();
-    expect(onTaskCompleted).not.toHaveBeenCalled();
     expect(PersonalityManager.recordTaskCompleted).not.toHaveBeenCalled();
     expect(daemonLike.logEvent).not.toHaveBeenCalledWith(
       "task-1",

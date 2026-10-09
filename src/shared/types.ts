@@ -716,9 +716,6 @@ export type EventType =
   | "worktree_merged" // Successfully merged to base branch
   | "worktree_conflict" // Merge conflict detected
   | "worktree_cleaned" // Worktree removed after completion
-  // Comparison mode events
-  | "comparison_started" // Comparison session started
-  | "comparison_completed" // Comparison session completed
   // Collaborative Thoughts events (team multi-agent thinking)
   | "agent_thought" // Agent sharing analysis/reasoning with team
   | "synthesis_started" // Leader beginning synthesis of team thoughts
@@ -730,11 +727,6 @@ export type EventType =
   | "citations_collected" // Web research citations gathered
   // Workflow decomposition events
   | "workflow_detected" // Multi-phase workflow identified
-  | "workflow_phase_started" // Pipeline phase started
-  | "workflow_phase_completed" // Pipeline phase completed
-  | "workflow_phase_failed" // Pipeline phase failed
-  | "pipeline_completed" // Full workflow pipeline completed
-  | "pipeline_failed" // Full workflow pipeline failed
   | "step_intent_scored" // Heuristic alignment of plan steps vs task intent
   // Document generation events
   | "artifact_created" // Document/file artifact generated
@@ -808,7 +800,6 @@ export type OrchestrationGraphNodeStatus =
 
 export type OrchestrationGraphNodeKind =
   | "child_task"
-  | "workflow_phase"
   | "team_work_item"
   | "synthesis"
   | "verification"
@@ -824,7 +815,7 @@ export interface OrchestrationGraphRun {
   id: string;
   rootTaskId: string;
   workspaceId: string;
-  kind: "delegation" | "workflow" | "team" | "acp";
+  kind: "delegation" | "team" | "acp";
   status: OrchestrationGraphRunStatus;
   maxParallel: number;
   metadata?: Record<string, unknown>;
@@ -859,7 +850,6 @@ export interface OrchestrationGraphNode {
   semanticSummary?: string;
   teamRunId?: string;
   teamItemId?: string;
-  workflowPhaseId?: string;
   acpTaskId?: string;
   metadata?: Record<string, unknown>;
   createdAt: number;
@@ -2344,10 +2334,6 @@ export interface AgentConfig {
   multitaskLaneCount?: number;
   /** How /multitask assigns work to lanes */
   multitaskAssignmentMode?: "auto_split";
-  /** Send the same task to multiple LLMs and have a judge synthesize results */
-  multiLlmMode?: boolean;
-  /** Configuration for multi-LLM mode: which providers/models to use and which is the judge */
-  multiLlmConfig?: MultiLlmConfig;
   /** Spawn an independent verification agent after task completion to audit deliverables */
   verificationAgent?: boolean;
   /**
@@ -2413,12 +2399,6 @@ export interface AgentConfig {
    * When set (and modelKey is absent), selects a model suited for the given capability.
    */
   capabilityHint?: ModelCapability;
-  /** Execute decomposed workflows as sequential child tasks instead of prompt-only guidance. */
-  useWorkflowPipeline?: boolean;
-  /** Internal metadata for workflow child tasks. */
-  workflowPhaseId?: string;
-  /** Internal metadata for workflow child tasks. */
-  workflowPhaseType?: string;
   /** Optional external runtime for delegated coding-agent tasks. */
   externalRuntime?: ExternalRuntimeConfig;
   /**
@@ -2457,25 +2437,6 @@ export type MemoryTier = "short" | "medium" | "long";
 
 /** Risk classification for human-in-the-loop confirmation gates */
 export type ConfirmationRisk = "low" | "medium" | "high";
-
-/** Specification for one LLM participant in a multi-LLM run */
-export interface MultiLlmParticipant {
-  providerType: LLMProviderType;
-  modelKey: string;
-  displayName: string;
-  isJudge: boolean;
-  seatLabel?: string;
-  roleInstruction?: string;
-  isIdeaProposer?: boolean;
-}
-
-/** Config for multi-LLM mode: participants and judge designation */
-export interface MultiLlmConfig {
-  participants: MultiLlmParticipant[];
-  judgeProviderType: LLMProviderType;
-  judgeModelKey: string;
-  maxParallelParticipants?: number;
-}
 
 /**
  * Optional per-phase model overrides for the research critique workflow.
@@ -2546,8 +2507,6 @@ export interface Task {
   worktreePath?: string; // Absolute path to the worktree directory
   worktreeBranch?: string; // Branch name created for this task's worktree
   worktreeStatus?: WorktreeStatus; // Current worktree lifecycle state
-  // Comparison mode fields
-  comparisonSessionId?: string; // If this task is part of a comparison session
   // Session lineage fields
   sessionId?: string; // Stable lineage/session identifier shared across continued tasks
   /** True when the task's shared session metadata is archived. */
@@ -3138,48 +3097,6 @@ export interface ImprovementCampaign {
   startedAt?: number;
   completedAt?: number;
   promotedAt?: number;
-}
-
-// ============ Agent Comparison Types ============
-
-export interface ComparisonSession {
-  id: string;
-  title: string;
-  prompt: string; // The shared prompt given to all agents
-  workspaceId: string;
-  status: ComparisonSessionStatus;
-  taskIds: string[]; // Array of task IDs (one per agent variant)
-  createdAt: number;
-  completedAt?: number;
-  comparisonResult?: ComparisonResult;
-}
-
-export type ComparisonSessionStatus =
-  | "running"
-  | "completed" // All agents finished
-  | "partial" // Some agents finished, some failed/cancelled
-  | "cancelled";
-
-export interface ComparisonResult {
-  taskResults: Array<{
-    taskId: string;
-    label: string;
-    status: string;
-    branchName?: string;
-    filesChanged: number;
-    linesAdded: number;
-    linesRemoved: number;
-    duration: number; // ms
-    tokenCost?: number;
-    summary?: string;
-  }>;
-  diffSummary?: string; // AI-generated summary comparing the approaches
-}
-
-export interface ComparisonAgentSpec {
-  label?: string; // e.g., "Agent A", "Opus variant"
-  agentConfig?: AgentConfig; // Model, personality, etc.
-  assignedAgentRoleId?: string;
 }
 
 export type VisualAttachmentMimeType =
@@ -5924,7 +5841,6 @@ export interface AgentTeamRun {
   summary?: string;
   phase?: AgentTeamRunPhase;
   collaborativeMode?: boolean;
-  multiLlmMode?: boolean;
 }
 
 export interface CreateAgentTeamRunRequest {
@@ -5933,7 +5849,6 @@ export interface CreateAgentTeamRunRequest {
   status?: AgentTeamRunStatus;
   startedAt?: number;
   collaborativeMode?: boolean;
-  multiLlmMode?: boolean;
 }
 
 export type AgentTeamItemStatus = "todo" | "in_progress" | "blocked" | "done" | "failed";
@@ -6238,7 +6153,6 @@ export interface ManagedAgentTeamTemplate {
   memberAgentRoleIds?: string[];
   maxParallelAgents?: number;
   collaborativeMode?: boolean;
-  multiLlmMode?: boolean;
 }
 
 export interface ManagedAgentRuntimeDefaults {
@@ -8812,12 +8726,6 @@ export const IPC_CHANNELS = {
   WORKTREE_GET_SETTINGS: "worktree:getSettings",
   WORKTREE_SAVE_SETTINGS: "worktree:saveSettings",
 
-  // Agent Comparison mode
-  COMPARISON_CREATE: "comparison:create",
-  COMPARISON_GET: "comparison:get",
-  COMPARISON_LIST: "comparison:list",
-  COMPARISON_CANCEL: "comparison:cancel",
-  COMPARISON_GET_RESULT: "comparison:getResult",
   // Usage Insights
   USAGE_INSIGHTS_GET: "usageInsights:get",
   USAGE_INSIGHTS_EARLIEST: "usageInsights:earliest",
@@ -9000,11 +8908,8 @@ export const LLM_PROVIDER_TYPES = [
 
 export type LLMProviderType = (typeof LLM_PROVIDER_TYPES)[number];
 
-/** Display names for LLM providers (used in multi-LLM mode UI) */
-export const MULTI_LLM_PROVIDER_DISPLAY: Record<
-  string,
-  { name: string; icon: string; color: string }
-> = {
+/** Display names, icons and colors for LLM providers. */
+export const LLM_PROVIDER_DISPLAY: Record<string, { name: string; icon: string; color: string }> = {
   anthropic: { name: "Claude", icon: "\u{1F9E0}", color: "#d97706" },
   bedrock: { name: "Bedrock", icon: "\u{2601}\uFE0F", color: "#ff9900" },
   ollama: { name: "Ollama", icon: "\u{1F999}", color: "#0ea5e9" },

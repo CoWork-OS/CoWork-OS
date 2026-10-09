@@ -55,7 +55,6 @@ import {
   ImageAttachment,
   AgentConfig,
   AgentTeamRun,
-  MultiLlmConfig,
   StepFeedbackAction,
   ExecutionMode,
   TaskDomain,
@@ -127,7 +126,6 @@ import {
 } from "../../utils/agent-lifecycle-rows";
 import { CliAgentFrame } from "../CliAgentFrame";
 import { isCliAgentChildTask, resolveCliAgentType } from "../../../shared/cli-agent-detection";
-import { MultiLlmSelectionPanel } from "../MultiLlmSelectionPanel";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { AutoMailComposeFrame, MailComposeFrame } from "../MailComposeFrame";
 import { MemoryUsedAffordance } from "../memory/MemoryUsedAffordance";
@@ -2255,7 +2253,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               }
 
               if (item.kind === "dispatched-agents") {
-                // Only collaborative and multi-LLM runs keep a single team-run surface; other
+                // Only collaborative runs keep a single team-run surface; other
                 // sub-agents render as agent-lifecycle rows.
                 if (isConversationOnlySurface || !collaborativeRun) return null;
                 return (
@@ -4414,7 +4412,6 @@ function MainContentComponent({
   const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
   const [clarifyingCheckinsEnabled, setClarifyingCheckinsEnabled] = useState(false);
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
-  const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
   const [chronicleEnabledForTask, setChronicleEnabledForTask] = useState(true);
   const [modeDrafts, setModeDrafts] = useState<Record<string, InteractionModeSelection>>({});
   const modeDraftKey = selectedTaskId ?? "new";
@@ -4583,7 +4580,6 @@ function MainContentComponent({
   }, [task]);
   const modeSuggestionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [taskDomain, setTaskDomain] = useState<TaskDomain>("auto");
-  const [multiLlmConfig, setMultiLlmConfig] = useState<MultiLlmConfig | null>(null);
   const [verificationAgentEnabled, setVerificationAgentEnabled] = useState(false);
   const isChatTask =
     executionMode === "chat" ||
@@ -4635,24 +4631,12 @@ function MainContentComponent({
     if (enabled) {
       setClarifyingCheckinsEnabled(false);
       setCollaborativeModeEnabled(false);
-      setMultiLlmModeEnabled(false);
     }
   }, []);
   const setCollaborativeModeSelection = useCallback((enabled: boolean) => {
     setCollaborativeModeEnabled(enabled);
     if (enabled) {
       setAutonomousModeEnabled(false);
-      setMultiLlmModeEnabled(false);
-    }
-  }, []);
-  const setMultiLlmModeSelection = useCallback((enabled: boolean) => {
-    setMultiLlmModeEnabled(enabled);
-    if (enabled) {
-      setAutonomousModeEnabled(false);
-      setCollaborativeModeEnabled(false);
-    }
-    if (!enabled) {
-      setMultiLlmConfig(null);
     }
   }, []);
   // Collaborative team run detection for current task
@@ -7953,7 +7937,6 @@ function MainContentComponent({
         setAutonomousModeEnabled(false);
         setClarifyingCheckinsEnabled(false);
         setCollaborativeModeEnabled(false);
-        setMultiLlmModeEnabled(false);
         setChronicleEnabledForTask(true);
         setPermissionAccessMode(
           resolveNewTaskAccessProfileId({
@@ -7964,7 +7947,6 @@ function MainContentComponent({
             ),
           }),
         );
-        setMultiLlmConfig(null);
         setVerificationAgentEnabled(false);
         return;
       }
@@ -8080,14 +8062,11 @@ function MainContentComponent({
           ...createIntegrationMentionOptions,
           ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
         };
-        const baseOptions: CreateTaskOptions =
-          multiLlmModeEnabled && multiLlmConfig
-            ? { ...modeOptions, multiLlmMode: true, multiLlmConfig }
-            : collaborativeModeEnabled
-              ? { ...modeOptions, collaborativeMode: true }
-              : autonomousModeEnabled
-                ? { ...modeOptions, autonomousMode: true }
-                : modeOptions;
+        const baseOptions: CreateTaskOptions = collaborativeModeEnabled
+          ? { ...modeOptions, collaborativeMode: true }
+          : autonomousModeEnabled
+            ? { ...modeOptions, autonomousMode: true }
+            : modeOptions;
         const options: CreateTaskOptions = {
           ...baseOptions,
           generateTitle: true,
@@ -8106,7 +8085,6 @@ function MainContentComponent({
         // Reset task mode state
         setAutonomousModeEnabled(false);
         setCollaborativeModeEnabled(false);
-        setMultiLlmModeEnabled(false);
         setChronicleEnabledForTask(true);
         setPermissionAccessMode(
           resolveNewTaskAccessProfileId({
@@ -8117,7 +8095,6 @@ function MainContentComponent({
             ),
           }),
         );
-        setMultiLlmConfig(null);
         setVerificationAgentEnabled(false);
       } else {
         // Task is selected (even if not in current list) - send follow-up message
@@ -10694,36 +10671,6 @@ function MainContentComponent({
                                 </span>
                               </button>
                             </div>
-                            {availableProviders.filter((p) => p.configured).length >= 2 && (
-                              <div className="overflow-menu-item" role="none">
-                                <button
-                                  className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
-                                  style={{ margin: 0 }}
-                                  onClick={() => {
-                                    setOverflowSubmenu(null);
-                                    setMultiLlmModeSelection(!multiLlmModeEnabled);
-                                  }}
-                                  data-tooltip="Sends task to multiple AI models"
-                                  role="menuitemcheckbox"
-                                  aria-checked={multiLlmModeEnabled}
-                                  data-overflow-menu-item
-                                >
-                                  <span className="goal-mode-toggle-switch-content">
-                                    <span className="goal-mode-toggle-text">
-                                      <span className="goal-mode-label">Multi-LLM</span>
-                                    </span>
-                                    <span
-                                      className={`goal-mode-switch-track ${
-                                        multiLlmModeEnabled ? "on" : ""
-                                      }`}
-                                      aria-hidden="true"
-                                    >
-                                      <span className="goal-mode-switch-thumb" />
-                                    </span>
-                                  </span>
-                                </button>
-                              </div>
-                            )}
                             {renderWelcomeTaskDomainRow()}
                             <div className="overflow-menu-item" role="none">
                               <button
@@ -11022,12 +10969,6 @@ function MainContentComponent({
                   )}
                 </div>
               </div>
-              {multiLlmModeEnabled && (
-                <MultiLlmSelectionPanel
-                  availableProviders={availableProviders}
-                  onConfigChange={setMultiLlmConfig}
-                />
-              )}
             </div>
             {(uiDensity === "focused" || isCalm) && (
               <div className="input-status-text welcome-input-status">

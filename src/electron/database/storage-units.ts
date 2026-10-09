@@ -16,7 +16,6 @@ import {
   ChannelSpecializationStore,
   ChannelStore,
   ChannelUserStore,
-  ComparisonSessionStore,
   DeliveryTrackingStore,
   InputRequestStore,
   LLMModelStore,
@@ -589,36 +588,6 @@ export const STORAGE_UNITS = {
   worktreeInfo_delete: storeUnit((db: Database.Database) => new WorktreeInfoStore(db), "delete", {
     readonly: false,
   }),
-  comparisonSession_create: storeUnit(
-    (db: Database.Database) => new ComparisonSessionStore(db),
-    "create",
-    { readonly: false },
-  ),
-  comparisonSession_findById: storeUnit(
-    (db: Database.Database) => new ComparisonSessionStore(db),
-    "findById",
-    { readonly: false },
-  ),
-  comparisonSession_findByWorkspaceId: storeUnit(
-    (db: Database.Database) => new ComparisonSessionStore(db),
-    "findByWorkspaceId",
-    { readonly: false },
-  ),
-  comparisonSession_update: storeUnit(
-    (db: Database.Database) => new ComparisonSessionStore(db),
-    "update",
-    { readonly: false },
-  ),
-  comparisonSession_delete: storeUnit(
-    (db: Database.Database) => new ComparisonSessionStore(db),
-    "delete",
-    { readonly: false },
-  ),
-  comparisonSession_syncTaskIdsFromTasks: storeUnit(
-    (db: Database.Database) => new ComparisonSessionStore(db),
-    "syncTaskIdsFromTasks",
-    { readonly: false },
-  ),
   composerDraft_get: storeUnit((db: Database.Database) => new ComposerDraftStore(db), "get", {
     readonly: true,
   }),

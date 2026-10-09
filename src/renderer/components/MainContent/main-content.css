@@ -4247,7 +4247,7 @@ button.agent-lifecycle-item:hover .agent-lifecycle-item-open {
   color: var(--color-warning, #d97706);
 }
 
-/* --- Collaborative / multi-LLM run --------------------------------------
+/* --- Collaborative run --------------------------------------------------
    Same transcript voice: plan as prose, glyph lines for agents starting and
    ending, each agent's thoughts under its glyph, then the synthesis. */
 .collaborative-summary-panel {

@@ -19,7 +19,6 @@ import type {
   ChannelSpecializationStore,
   ChannelStore,
   ChannelUserStore,
-  ComparisonSessionStore,
   DeliveryTrackingStore,
   InputRequestStore,
   LLMModelStore,
@@ -403,23 +402,6 @@ export const WorktreeInfoRepository = repositoryFacade<
   WorktreeInfoStore,
   (typeof WORKTREEINFO_METHODS)[number]
 >("worktreeInfo_", WORKTREEINFO_METHODS);
-
-const COMPARISONSESSION_METHODS = [
-  "create",
-  "findById",
-  "findByWorkspaceId",
-  "update",
-  "delete",
-  "syncTaskIdsFromTasks",
-] as const;
-export type ComparisonSessionRepository = AsyncStore<
-  ComparisonSessionStore,
-  (typeof COMPARISONSESSION_METHODS)[number]
->;
-export const ComparisonSessionRepository = repositoryFacade<
-  ComparisonSessionStore,
-  (typeof COMPARISONSESSION_METHODS)[number]
->("comparisonSession_", COMPARISONSESSION_METHODS);
 
 const COMPOSERDRAFT_METHODS = [
   "get",

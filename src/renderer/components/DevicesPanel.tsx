@@ -37,7 +37,6 @@ import type {
   ExecutionMode,
   ManagedDevice,
   ManagedDeviceSummary,
-  MultiLlmConfig,
   RemoteGatewayConfig,
   RemoteGatewayStatus,
   SavedRemoteGatewayDevice,
@@ -67,8 +66,6 @@ export interface DeviceTaskOptions {
   shellAccess?: boolean;
   autonomousMode?: boolean;
   collaborativeMode?: boolean;
-  multiLlmMode?: boolean;
-  multiLlmConfig?: MultiLlmConfig;
   executionMode?: ExecutionMode;
   taskDomain?: TaskDomain;
   chronicleMode?: "inherit" | "enabled" | "disabled";
@@ -84,7 +81,6 @@ interface DevicesPanelProps {
   onCreateTaskHere?: (prompt: string, options?: DeviceTaskOptions) => Promise<void>;
   workspace?: Workspace | null;
   onOpenSettings?: (tab?: string) => void;
-  availableProviders?: { configured: boolean }[];
 }
 
 type TaskFilter = "selected" | "all" | "attention";
@@ -335,7 +331,6 @@ export function DevicesPanel({
   onCreateTaskHere,
   workspace,
   onOpenSettings,
-  availableProviders = [],
 }: DevicesPanelProps) {
   const overviewRef = useRef<HTMLDivElement | null>(null);
   const tasksRef = useRef<HTMLDivElement | null>(null);
@@ -364,7 +359,6 @@ export function DevicesPanel({
   const [accessProfiles, setAccessProfiles] = useState<AccessProfileDefinition[]>([]);
   const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
   const [collaborativeModeEnabled, setCollaborativeModeEnabled] = useState(false);
-  const [multiLlmModeEnabled, setMultiLlmModeEnabled] = useState(false);
   const [chronicleEnabledForTask, setChronicleEnabledForTask] = useState(true);
   const [interactionMode, setInteractionMode] = useState<InteractionModeSelection>({
     mode: "smart",
@@ -415,25 +409,14 @@ export function DevicesPanel({
     setAutonomousModeEnabled(enabled);
     if (enabled) {
       setCollaborativeModeEnabled(false);
-      setMultiLlmModeEnabled(false);
     }
   }, []);
   const setCollaborativeModeSelection = useCallback((enabled: boolean) => {
     setCollaborativeModeEnabled(enabled);
     if (enabled) {
       setAutonomousModeEnabled(false);
-      setMultiLlmModeEnabled(false);
     }
   }, []);
-  const setMultiLlmModeSelection = useCallback((enabled: boolean) => {
-    setMultiLlmModeEnabled(enabled);
-    if (enabled) {
-      setAutonomousModeEnabled(false);
-      setCollaborativeModeEnabled(false);
-    }
-  }, []);
-
-  const showMultiLlmOption = availableProviders.filter((p) => p.configured).length >= 2;
 
   const loadSummaries = useCallback(async (managedDevices: ManagedDevice[]) => {
     const results = await Promise.all(
@@ -706,9 +689,7 @@ export function DevicesPanel({
       chronicleMode: chronicleEnabledForTask ? "inherit" : "disabled",
     };
     if (accessProfileId) opts.accessProfileId = accessProfileId;
-    if (multiLlmModeEnabled) {
-      opts.multiLlmMode = true;
-    } else if (collaborativeModeEnabled) {
+    if (collaborativeModeEnabled) {
       opts.collaborativeMode = true;
     } else if (autonomousModeEnabled) {
       opts.autonomousMode = true;
@@ -720,7 +701,6 @@ export function DevicesPanel({
     collaborativeModeEnabled,
     interactionMode,
     executionMode,
-    multiLlmModeEnabled,
     accessProfileId,
     taskDomain,
   ]);
@@ -756,7 +736,6 @@ export function DevicesPanel({
       setAccessProfileId(defaultAccessProfileId);
       setAutonomousModeEnabled(false);
       setCollaborativeModeEnabled(false);
-      setMultiLlmModeEnabled(false);
       await loadDevices();
       await loadTaskFeed();
     } catch (error) {
@@ -1135,28 +1114,6 @@ export function DevicesPanel({
                     </span>
                   </button>
                 </div>
-                {showMultiLlmOption && (
-                  <div className="overflow-menu-item" role="none">
-                    <button
-                      className="goal-mode-toggle goal-mode-toggle-switch-row"
-                      onClick={() => setMultiLlmModeSelection(!multiLlmModeEnabled)}
-                      role="menuitemcheckbox"
-                      aria-checked={multiLlmModeEnabled}
-                    >
-                      <span className="goal-mode-toggle-switch-content">
-                        <span className="goal-mode-toggle-text">
-                          <span className="goal-mode-label">Multi-LLM</span>
-                        </span>
-                        <span
-                          className={`goal-mode-switch-track ${multiLlmModeEnabled ? "on" : ""}`}
-                          aria-hidden="true"
-                        >
-                          <span className="goal-mode-switch-thumb" />
-                        </span>
-                      </span>
-                    </button>
-                  </div>
-                )}
                 <div className="overflow-menu-item" role="none">
                   <button
                     className="goal-mode-toggle goal-mode-toggle-switch-row"

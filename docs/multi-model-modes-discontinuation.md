@@ -1,0 +1,17 @@
+# Multi-model modes discontinuation
+
+**Decision:** Discontinue Agent Comparison mode, Multi-LLM judge mode and the Workflow Pipeline as of 2026-10-09.
+
+CoWork OS had four ways to put more than one model or agent on a task: collaborative team runs with sub-agent orchestration, Mixture of Agents presets, Multi-LLM judge mode and Agent Comparison sessions, plus a Workflow Pipeline that turned a decomposed multi-phase prompt into a chain of child tasks. The last three overlapped with the first two: Multi-LLM mode was a collaborative run whose lanes were pinned to different providers with a judge model writing the synthesis; Comparison mode ran the same prompt in parallel worktree branches and produced a side-by-side result that no screen in the current app opened any more; the Workflow Pipeline was an opt-in flag with no UI that re-ran the orchestration graph for phases the executor already handles as sequential guidance. Each carried its own config surface, event types, settings copy and database objects.
+
+This decision removes:
+
+- **Agent Comparison mode**: the comparison service and session store, the `comparison:*` IPC channels and preload bindings, the comparison request schemas, the comparison task event types, the `comparisonSessionId` task field and sidebar badge, the orphaned comparison modal and view, and the Agent Comparison section of the Worktree settings page.
+- **Multi-LLM judge mode**: the Multi-LLM toggle and model selection panel in the composer and the Devices panel, the `multiLlmMode` and `multiLlmConfig` task options and their validation, the multi-LLM lanes and judge synthesis in the team orchestrator, the daemon and task-create paths that built a multi-LLM run, the `multi_llm_mode` team-run flag, the managed-agent team template flag, the browser-host task fields, the Multi-LLM sidebar badge and stylesheet rules. The provider display map stays as `LLM_PROVIDER_DISPLAY` because provider names are still shown elsewhere.
+- **Workflow Pipeline**: the `useWorkflowPipeline` task option and the executor branch that spawned one child task per phase through the orchestration graph, the `WorkflowPipeline` class, the unused pipeline view, the `workflow_phase_*` and `pipeline_*` task event types, the `workflow_phase` graph node kind and `workflow` run kind, and the phase-to-capability helper.
+
+**What stays:** collaborative mode and `/multitask`, agent teams and the orchestration graph, Mixture of Agents presets, per-task model and profile routing, the Workflow Decomposer (multi-phase prompts are still detected and injected as sequential guidance, with the `workflow_detected` event), deep work mode, and the per-provider model lists used by model pickers.
+
+**Upgrade data handling:** On first start of a release containing this change, CoWork OS drops the `comparison_sessions` table together with its task triggers and index. The `tasks.comparison_session_id`, `agent_team_runs.multi_llm_mode` and `orchestration_graph_nodes.workflow_phase_id` columns are no longer created or written; existing databases keep them as unused nullable columns, because rewriting the `tasks` table on upgrade is not worth the risk. Tasks that were created in Multi-LLM mode keep their history; their runs now read as collaborative runs. Historical `comparison_*`, `workflow_phase_*` and `pipeline_*` events render as generic timeline steps.
+
+Historical release notes describe what shipped at the time and are superseded by this decision for current product availability.

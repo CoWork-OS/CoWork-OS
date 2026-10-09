@@ -123,7 +123,7 @@ Release is called from:
 | ---------------------------- | ------- |
 | `MAX_SYNTHESIS_PROMPT_CHARS` | 100,000 |
 
-`groupAndCompactThoughts()` groups agent thoughts by agent name and applies proportional per-agent truncation when total content exceeds the budget. Applied in both synthesis prompt builders (`buildSynthesisPrompt`, `buildMultiLlmSynthesisPrompt`).
+`groupAndCompactThoughts()` groups agent thoughts by agent name and applies proportional per-agent truncation when total content exceeds the budget. Applied in the synthesis prompt builder (`buildSynthesisPrompt`).
 
 ### Synthesis Step Bounds
 

@@ -8,7 +8,7 @@ const defaultRoute: IntentRoute = {
   confidence: 0.9,
   conversationMode: "task",
   answerFirst: false,
-  signals: ["workflow-pipeline"],
+  signals: ["multi-phase-workflow"],
   complexity: "high",
   domain: "general",
 };

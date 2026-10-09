@@ -107,7 +107,11 @@ import {
 import { ToolRegistry } from "./tools/registry";
 import { ToolBatchExecutor } from "./runtime/tool-batch-executor";
 import { ToolScheduler, type ToolScheduleCallReport } from "./runtime/ToolScheduler";
-import { ToolExecutionCoordinator } from "./runtime/ToolExecutionCoordinator";
+import {
+  ToolExecutionCoordinator,
+  type CoordinatedToolExecutionResult,
+} from "./runtime/ToolExecutionCoordinator";
+import { buildToolResultEnvelope } from "./runtime/tool-result-envelope";
 import { StreamingToolExecutor } from "./runtime/StreamingToolExecutor";
 import { DeferredToolCatalog } from "./runtime/DeferredToolCatalog";
 import { ToolSearchService } from "./runtime/ToolSearchService";
@@ -349,6 +353,12 @@ import {
 } from "./executor-helpers";
 import { FileMutationVerifier } from "./file-mutation-verifier";
 import { resolveDocumentOutputs } from "./skills/document";
+import {
+  MATCHING_DOCUMENT_FORMATS_PLAN_HINT,
+  MatchingDocumentFormatsGuard,
+  requestsMatchingDocumentFormats,
+  type MatchingDocumentDecision,
+} from "./executor-matching-documents-guard";
 import { CsvArithmeticVerifier } from "./csv-arithmetic-verifier";
 import { CsvReportEvidenceVerifier } from "./data-evidence-verifier";
 import { ExecutorEventEmitter } from "./executor-event-emitter";
@@ -1076,6 +1086,9 @@ export class TaskExecutor {
   private fileMutationVerifier: FileMutationVerifier;
   private csvArithmeticVerifier?: CsvArithmeticVerifier;
   private csvReportEvidenceVerifier?: CsvReportEvidenceVerifier;
+  /** Keeps matching DOCX/PDF outputs on one create_document call; lazily created. */
+  private matchingDocumentGuard?: MatchingDocumentFormatsGuard;
+  private matchingDocumentDecisions?: WeakMap<object, MatchingDocumentDecision>;
   private activeBasePromptRoutingBlocks?: Set<BasePromptRoutingBlock>;
   private workspaceGitInfo?: { isRepo: boolean; branch?: string; detachedHead?: boolean };
   private lastWebFetchFailure: {
@@ -3141,7 +3154,9 @@ export class TaskExecutor {
         return null;
       }
 
-      const fileOpCheck = this.checkFileOperation(content.name, content.input, batchCreatedPaths);
+      const fileOpCheck = this.checkFileOperation(content.name, content.input, batchCreatedPaths, {
+        preview: true,
+      });
       if (fileOpCheck.blocked) {
         return null;
       }
@@ -11488,6 +11503,16 @@ ${transcript}
     input: unknown,
     toolTimeoutMs: number,
   ): Promise<Awaited<ReturnType<ToolExecutionCoordinator["executeTool"]>>> {
+    return this.applyMatchingDocumentDecision(toolName, input, () =>
+      this.runToolWithHeartbeat(toolName, input, toolTimeoutMs),
+    );
+  }
+
+  private async runToolWithHeartbeat(
+    toolName: string,
+    input: unknown,
+    toolTimeoutMs: number,
+  ): Promise<Awaited<ReturnType<ToolExecutionCoordinator["executeTool"]>>> {
     const schedulerSpec = this.getSchedulerSpecForTool(toolName, input as Any);
     if (
       this.streamingToolExecutor &&
@@ -11571,11 +11596,27 @@ ${transcript}
     toolName: string,
     input: Any,
     batchCreatedPaths?: Set<string>,
+    options?: { preview?: boolean },
   ): { blocked: boolean; reason?: string; suggestion?: string; cachedResult?: string } {
     // Calls are prepared before any of them runs, so a mutation scheduled earlier in this
     // batch must drop cached reads of its targets now; a later read of the same file then
     // runs for real after the mutation instead of being answered with pre-mutation content.
     this.invalidateReadCacheForTool(toolName, input);
+
+    // Matching DOCX/PDF files must come from one create_document call with formats.
+    if (toolName === "create_document") {
+      const preview = options?.preview === true;
+      const decision = this.evaluateMatchingDocumentFormats(input, preview);
+      if (decision.action === "block") {
+        return { blocked: true, reason: decision.reason, suggestion: decision.suggestion };
+      }
+      if (preview && (decision.action !== "allow" || decision.warning)) {
+        // A previewed batch runs one call at a time instead, where the decision is applied.
+        return { blocked: true, reason: "create_document needs the matching-files check." };
+      }
+      // Nothing is written for a file already written by the earlier formats call.
+      if (decision.action === "already_written") return { blocked: false };
+    }
 
     // Check for redundant file reads
     if (toolName === "read_file" && input?.path) {
@@ -11691,6 +11732,108 @@ ${transcript}
     }
   }
 
+  private getMatchingDocumentGuard(): MatchingDocumentFormatsGuard {
+    this.matchingDocumentGuard ??= new MatchingDocumentFormatsGuard(this.workspace?.path);
+    return this.matchingDocumentGuard;
+  }
+
+  /** Decisions for create_document calls about to run, keyed by the call's input. */
+  private getMatchingDocumentDecisions(): WeakMap<object, MatchingDocumentDecision> {
+    this.matchingDocumentDecisions ??= new WeakMap();
+    return this.matchingDocumentDecisions;
+  }
+
+  /**
+   * Whether a create_document call that writes one format may run when the
+   * request asks for matching files (see MatchingDocumentFormatsGuard).
+   */
+  private evaluateMatchingDocumentFormats(input: Any, preview: boolean): MatchingDocumentDecision {
+    const workspacePath = this.workspace?.path;
+    if (!workspacePath || !input || typeof input !== "object") return { action: "allow" };
+    const createdFiles = new Set(
+      (this.fileOperationTracker?.getCreatedFiles?.() || []).map((file) =>
+        path.resolve(workspacePath, file),
+      ),
+    );
+    const decision = this.getMatchingDocumentGuard().evaluate({
+      input,
+      prompt: this.getContractPrompt(),
+      fileExists: (filename) => fs.existsSync(path.resolve(workspacePath, filename)),
+      createdEarlierInTask: (filename) => createdFiles.has(path.resolve(workspacePath, filename)),
+      preview,
+    });
+    if (preview) return decision;
+    const decisions = this.getMatchingDocumentDecisions();
+    if (decision.action === "allow" && !decision.warning) {
+      decisions.delete(input);
+      return decision;
+    }
+    decisions.set(input, decision);
+    if (decision.action === "block") {
+      logger.info(`${this.logTag} Redirecting single-format create_document to formats`);
+    } else if (decision.action === "allow" && decision.warning) {
+      logger.warn(`${this.logTag} Allowing single-format create_document after repeated blocks`);
+      this.emitEvent("tool_warning", { tool: "create_document", warning: decision.warning });
+    }
+    return decision;
+  }
+
+  /**
+   * Apply a pre-execution create_document decision: a file already written by
+   * the earlier formats call is reported without being rewritten, and a call let
+   * through after repeated blocks carries its warning in the result.
+   */
+  private applyMatchingDocumentDecision(
+    toolName: string,
+    input: unknown,
+    execute: () => Promise<CoordinatedToolExecutionResult>,
+  ): Promise<CoordinatedToolExecutionResult> {
+    const decision =
+      toolName === "create_document" && input && typeof input === "object"
+        ? this.matchingDocumentDecisions?.get(input)
+        : undefined;
+    if (!decision || decision.action === "block") return execute();
+    this.matchingDocumentDecisions?.delete(input as object);
+    const withResult = (
+      result: Record<string, unknown>,
+      base?: CoordinatedToolExecutionResult,
+    ): CoordinatedToolExecutionResult => {
+      const envelope = buildToolResultEnvelope({
+        toolUseId: base?.envelope?.toolUseId || `${toolName}:${Date.now()}`,
+        toolName,
+        status: "success",
+        result,
+        ...(base?.policyTrace ? { policyTrace: base.policyTrace } : {}),
+      });
+      return {
+        result,
+        durationMs: base?.durationMs ?? 0,
+        resultJson: envelope.modelPayload,
+        envelope,
+        ...(base?.policyTrace ? { policyTrace: base.policyTrace } : {}),
+      };
+    };
+    if (decision.action === "already_written") {
+      return Promise.resolve(withResult(decision.result));
+    }
+    const warning = decision.warning;
+    return execute().then((coordinated) => {
+      const result = coordinated.result;
+      if (
+        !warning ||
+        coordinated.error ||
+        !result ||
+        typeof result !== "object" ||
+        Array.isArray(result) ||
+        result.success === false
+      ) {
+        return coordinated;
+      }
+      const warnings = Array.isArray(result.warnings) ? [...result.warnings, warning] : [warning];
+      return withResult({ ...result, warnings }, coordinated);
+    });
+  }
+
   /** The files a creation call will write, normalized for the per-batch duplicate guard. */
   private getBatchCreatedPathReservations(toolName: string, input: Any): string[] {
     const fileCreationTools = new Set(["write_file", "copy_file", "generate_video"]);
@@ -11766,6 +11909,26 @@ ${transcript}
 
     // A mutation attempt (even a failed one) or a command makes cached reads unreliable.
     this.invalidateReadCacheForTool(toolName, input, result);
+
+    // Remember which files one create_document call wrote from the same content; a file
+    // changed any other way (or by a failed attempt) no longer counts as written with them.
+    if (toolName === "create_document" && toolSucceeded) {
+      this.getMatchingDocumentGuard().recordCreateDocument(input, result);
+    } else if (
+      this.matchingDocumentGuard &&
+      (isFileMutationToolNameUtil(canonicalizeToolNameUtil(toolName)) ||
+        this.isFileMutationTool(canonicalizeToolNameUtil(toolName)))
+    ) {
+      const targets = collectMutationTargetPathsUtil(input, result);
+      if (toolName === "create_document") {
+        try {
+          targets.push(...resolveDocumentOutputs(input).map((output) => output.filename));
+        } catch {
+          // Invalid input wrote nothing beyond the names already collected.
+        }
+      }
+      this.matchingDocumentGuard.forget(targets);
+    }
 
     // Record directory listings
     if (toolName === "list_directory" && input?.path) {
@@ -22581,6 +22744,11 @@ You are continuing a previous conversation. The context from the previous conver
 3. create_document parameters: filename, format ('docx' or 'pdf'), content (array of blocks)
    generate_document parameters: filename plus markdown or sections
 4. Content blocks: { type: 'heading'|'paragraph'|'code', text: '...', level?: 1-6 }, { type: 'list', items: ['...'] }, { type: 'table', rows: [['Header', ...], ['Cell', ...]] }`;
+      }
+
+      // Plans otherwise split matching files into "create the DOCX" and "export the PDF".
+      if (!isLatexPdfTask && requestsMatchingDocumentFormats(this.getContractPrompt())) {
+        additionalContext += `${additionalContext ? "\n\n" : ""}${MATCHING_DOCUMENT_FORMATS_PLAN_HINT}`;
       }
 
       // Log the analysis result

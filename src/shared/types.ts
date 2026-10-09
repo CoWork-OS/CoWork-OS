@@ -40,6 +40,7 @@ export interface AppearanceSettings {
   homeResearchVaultEnabled?: boolean;
   homeNextActionsEnabled?: boolean;
   costReceiptEnabled?: boolean; // Show the Cost section in the right panel (default: off)
+  subAgentStatsEnabled?: boolean; // Show sub-agent totals in the right panel (default: off)
   language?: string; // Persisted language preference (e.g. 'en', 'ja', 'zh')
   disclaimerAccepted?: boolean;
   onboardingCompleted?: boolean;

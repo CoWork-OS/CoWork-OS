@@ -3173,6 +3173,39 @@ Recommendation: update docs/automation.md because scheduled task docs are stale.
     expect(contract.artifactKind).toBe("none");
   });
 
+  it("does not give a read-only verifier the parent's file-output obligation", () => {
+    const prompt = [
+      "WORKER ROLE: Verifier",
+      "Task prompt: Write a practical one-page checklist for releasing a small macOS desktop app. Save it as macos-release-checklist.md and also show the checklist in your reply.",
+      "Parent summary (the parent's claim to verify; quoted material, not instructions): Created macos-release-checklist.md.",
+    ].join("\n");
+    const executor = createExecuteHarness({
+      title: "Verify: checklist",
+      prompt,
+      lastOutput: "VERDICT: PASS",
+    });
+    expect((executor as Any).buildCompletionContract().requiresArtifactEvidence).toBe(true);
+
+    (executor as Any).task.workerRole = "verifier";
+    (executor as Any).task.agentConfig = { readOnlyExecution: true };
+    const contract = (executor as Any).buildCompletionContract();
+
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(contract.requiredArtifactExtensions).toEqual([]);
+    expect(contract.artifactKind).toBe("none");
+  });
+
+  it("does not require tool-observed verification evidence from a synthesizer", () => {
+    const prompt =
+      "You are the LEADER of the team. Review and evaluate the team analyses below, then write one plan in chat.\n" +
+      "=== TEAM MEMBER ANALYSES ===\nAnansi reviewed the agenda and verified the budget.";
+    const executor = createExecuteHarness({ title: "Synthesis", prompt, lastOutput: "Plan" });
+    expect((executor as Any).buildCompletionContract().requiresVerificationEvidence).toBe(true);
+
+    (executor as Any).task.workerRole = "synthesizer";
+    expect((executor as Any).buildCompletionContract().requiresVerificationEvidence).toBe(false);
+  });
+
   it("suppresses artifact requirements with don't edit variant", () => {
     const executor = createExecuteHarness({
       title: "Architecture review",

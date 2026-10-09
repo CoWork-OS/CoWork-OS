@@ -15257,13 +15257,41 @@ ${transcript}
   }
 
   private buildCompletionContract(): CompletionContract {
-    return buildCompletionContractUtil({
+    const contract = buildCompletionContractUtil({
       taskTitle: this.task.title,
       taskPrompt: this.getContractPrompt(),
       requiresDirectAnswer: this.promptRequiresDirectAnswer(),
       requiresDecisionSignal: this.promptRequestsDecision(),
       isWatchSkipRecommendationTask: this.promptIsWatchSkipRecommendationTask(),
     });
+    return this.scopeCompletionContractToWorkerRole(contract);
+  }
+
+  /**
+   * Worker-role children receive the parent's request and work as quoted
+   * material in their wrapper prompt. Obligations inferred from that text
+   * belong to the parent, not to the child:
+   * - a read-only child (verifier, researcher) cannot write the parent's
+   *   requested file, so it carries no artifact obligation;
+   * - a synthesizer works from the team analyses supplied in its prompt, so
+   *   it cannot owe tool-observed verification evidence.
+   */
+  private scopeCompletionContractToWorkerRole(contract: CompletionContract): CompletionContract {
+    const workerRole = resolveWorkerRoleKind(this.task?.workerRole);
+    const readOnly = this.task?.agentConfig?.readOnlyExecution === true;
+    if (!readOnly && workerRole !== "synthesizer") return contract;
+    return {
+      ...contract,
+      ...(readOnly
+        ? {
+            requiresArtifactEvidence: false,
+            requiredArtifactExtensions: [],
+            artifactKind: "none" as const,
+            requiredSuccessfulTools: [],
+          }
+        : {}),
+      ...(workerRole === "synthesizer" ? { requiresVerificationEvidence: false } : {}),
+    };
   }
 
   private isBuildHealthVerificationTask(): boolean {

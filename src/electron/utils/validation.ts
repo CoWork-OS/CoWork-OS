@@ -22,6 +22,7 @@ import {
   TaskStatus,
 } from "../../shared/types";
 import { SUBCONSCIOUS_TARGET_KINDS } from "../../shared/subconscious";
+import { CHANNEL_TYPES } from "../../shared/gateway-channel-types";
 import { validateGatewayOwnerIds } from "../../shared/gateway-owner-ids";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../shared/guardrail-defaults";
 import { assertSafeLoomMailboxFolder, isSecureOrLocalLoomUrl } from "./loom";
@@ -3006,6 +3007,98 @@ export const HookMappingSchema = z.object({
   thinking: z.string().max(50).optional(),
   timeoutSeconds: z.number().int().min(1).max(3600).optional(),
 });
+
+// ============ Cron (Scheduled Tasks) Schemas ============
+
+const MAX_CRON_ID_LENGTH = 200;
+const MAX_CRON_DESCRIPTION_LENGTH = 10_000;
+const MAX_CRON_EVERY_MS = 365 * 24 * 60 * 60 * 1000;
+const MAX_CRON_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+export const CronJobIdSchema = z.string().min(1).max(MAX_CRON_ID_LENGTH);
+const CronTimestampMsSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+// Cron expression and timezone semantics are checked by CronService, which
+// returns a structured error the scheduled-task editor already displays.
+export const CronScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("at"), atMs: CronTimestampMsSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("every"),
+      everyMs: z.number().int().min(1000).max(MAX_CRON_EVERY_MS),
+      anchorMs: CronTimestampMsSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("cron"),
+      expr: z.string().trim().min(1).max(120),
+      tz: z.string().trim().max(100).optional(),
+    })
+    .strict(),
+]);
+
+const CronDeliveryConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    channelType: z.enum(CHANNEL_TYPES).optional(),
+    channelDbId: z.string().min(1).max(MAX_CRON_ID_LENGTH).optional(),
+    channelId: z.string().max(512).optional(),
+    deliverOnSuccess: z.boolean().optional(),
+    deliverOnError: z.boolean().optional(),
+    summaryOnly: z.boolean().optional(),
+    deliverOnlyIfResult: z.boolean().optional(),
+  })
+  .strict();
+
+const CronThreadAutomationSchema = z
+  .object({
+    sourceTaskId: z.string().min(1).max(MAX_CRON_ID_LENGTH).optional(),
+    sourceTaskTitle: z.string().max(2048).optional(),
+    sourceLink: z.string().max(2048).optional(),
+    wakeObjective: z.string().max(20_000).optional(),
+    includeContextBrief: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * Renderer-supplied scheduled-task definition. Runtime `state`, `taskAgentConfig`
+ * and `chatContext` are main-process-owned and are rejected rather than accepted
+ * from the web context, matching the browser host's cron field allowlist.
+ */
+export const CronJobCreateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(MAX_TITLE_LENGTH),
+    description: z.string().max(MAX_CRON_DESCRIPTION_LENGTH).optional(),
+    enabled: z.boolean(),
+    accessProfileId: AccessProfileIdSchema.optional(),
+    shellAccess: z.boolean().optional(),
+    allowUserInput: z.boolean().optional(),
+    deleteAfterRun: z.boolean().optional(),
+    schedule: CronScheduleSchema,
+    workspaceId: WorkspaceIdSchema,
+    taskPrompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
+    taskTitle: z.string().max(MAX_TITLE_LENGTH).optional(),
+    assignedAgentRoleId: z.string().min(1).max(MAX_CRON_ID_LENGTH).optional(),
+    runMode: z.enum(["new_task", "thread_follow_up", "workflow"]).optional(),
+    targetTaskId: z.string().min(1).max(MAX_CRON_ID_LENGTH).optional(),
+    workflowRoutineId: z.string().min(1).max(MAX_CRON_ID_LENGTH).optional(),
+    threadAutomation: CronThreadAutomationSchema.optional(),
+    timeoutMs: z.number().int().min(1000).max(MAX_CRON_TIMEOUT_MS).optional(),
+    modelKey: z.string().min(1).max(200).optional(),
+    maxHistoryEntries: z.number().int().min(1).max(500).optional(),
+    delivery: CronDeliveryConfigSchema.optional(),
+  })
+  .strict();
+
+export const CronJobPatchSchema = CronJobCreateSchema.partial().strict();
+
+export const CronListOptionsSchema = z
+  .object({ includeDisabled: z.boolean().optional() })
+  .strict()
+  .optional();
+
+export const CronRunModeSchema = z.enum(["due", "force"]).optional();
 
 // ============ Validation Helper ============
 

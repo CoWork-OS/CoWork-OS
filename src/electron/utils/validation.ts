@@ -178,7 +178,7 @@ export const InteractionModeSchema = z.discriminatedUnion("mode", [
   z
     .object({
       mode: z.literal("smart"),
-      executionOverride: z.enum(["execute", "plan", "analyze", "debug", "verified"]).optional(),
+      executionOverride: z.literal("plan").optional(),
     })
     .strict(),
   z.object({ mode: z.literal("chat") }).strict(),

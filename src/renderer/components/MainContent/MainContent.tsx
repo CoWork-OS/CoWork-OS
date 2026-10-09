@@ -4426,7 +4426,9 @@ function MainContentComponent({
     selectedInteractionMode ??
     (task?.agentConfig?.executionMode === "chat"
       ? { mode: "chat" }
-      : { mode: "smart", executionOverride: task?.agentConfig?.executionMode });
+      : task?.agentConfig?.executionMode === "plan"
+        ? { mode: "smart", executionOverride: "plan" }
+        : { mode: "smart" });
   const executionMode: ExecutionMode =
     displayedInteractionMode.mode === "chat"
       ? "chat"
@@ -4434,10 +4436,6 @@ function MainContentComponent({
   const setInteractionMode = (selection: InteractionModeSelection) => {
     setModeDrafts((previous) => ({ ...previous, [modeDraftKey]: selection }));
   };
-  const setExecutionMode = (mode: ExecutionMode) =>
-    setInteractionMode(
-      mode === "chat" ? { mode: "chat" } : { mode: "smart", executionOverride: mode },
-    );
   useEffect(() => {
     const accepted = getInteractionModeSelection(task?.agentConfig);
     setModeDrafts((previous) => {
@@ -8632,7 +8630,7 @@ function MainContentComponent({
       if (suggestion.mode === "collaborative") {
         setCollaborativeModeSelection(true);
       } else {
-        setExecutionMode(suggestion.mode as ExecutionMode);
+        setInteractionMode({ mode: "smart", executionOverride: "plan" });
       }
       setModeSuggestions((prev) => prev.filter((s) => s.mode !== suggestion.mode));
     },

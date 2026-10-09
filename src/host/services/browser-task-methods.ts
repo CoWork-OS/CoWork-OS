@@ -417,16 +417,8 @@ function isExecutionMode(value: unknown): value is NonNullable<AgentConfig["exec
   );
 }
 
-function isExecutionModeOverride(
-  value: unknown,
-): value is "execute" | "plan" | "analyze" | "debug" | "verified" {
-  return (
-    value === "execute" ||
-    value === "plan" ||
-    value === "analyze" ||
-    value === "debug" ||
-    value === "verified"
-  );
+function isExecutionModeOverride(value: unknown): value is "plan" {
+  return value === "plan";
 }
 
 function isTaskDomain(value: unknown): value is NonNullable<AgentConfig["taskDomain"]> {

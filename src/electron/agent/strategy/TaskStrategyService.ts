@@ -341,7 +341,7 @@ export class TaskStrategyService {
     if (existingExecutionMode === "verified") {
       preflightRequired = true;
     }
-    // Keep explicit non-execute overrides (plan/analyze/verified), but do not let a
+    // Keep explicit non-execute modes (a pinned Plan, a strategy-chosen analyze/verified), but do not let a
     // stale default `execute` force non-execution intents into full task mode.
     const executionMode =
       existingExecutionMode &&

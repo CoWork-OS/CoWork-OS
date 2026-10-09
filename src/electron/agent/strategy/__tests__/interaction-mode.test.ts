@@ -100,18 +100,33 @@ describe("interactive mode contract", () => {
       accessProfileId: "read_only",
     });
   });
-  it.each(["plan", "analyze", "debug", "verified", "execute"] as const)(
-    "preserves the explicit %s override",
-    (executionOverride) => {
+  it("preserves the explicit Plan override", () => {
+    expect(
+      resolveInteractionMode(
+        undefined,
+        { mode: "smart", executionOverride: "plan" },
+        "Explain this approach",
+      ).executionMode,
+    ).toBe("plan");
+  });
+  it("folds saved analyze, debug, verified and execute overrides back to Do", () => {
+    for (const legacy of ["analyze", "debug", "verified", "execute"]) {
       expect(
-        resolveInteractionMode(
-          undefined,
-          { mode: "smart", executionOverride },
-          "Explain this approach",
-        ).executionMode,
-      ).toBe(executionOverride);
-    },
-  );
+        getInteractionModeSelection({
+          interactionMode: { mode: "smart", executionOverride: legacy as "plan" },
+        }),
+      ).toEqual({ mode: "smart" });
+      expect(
+        getInteractionModeSelection({
+          executionMode: legacy as "plan",
+          executionModeSource: "user",
+        }),
+      ).toEqual({ mode: "smart" });
+    }
+    expect(
+      InteractionModeSchema.safeParse({ mode: "smart", executionOverride: "verified" }).success,
+    ).toBe(false);
+  });
   it("does not infer permission to rewrite ambiguous legacy modes", () => {
     expect(getInteractionModeSelection({ executionMode: "plan" })).toBeUndefined();
     expect(

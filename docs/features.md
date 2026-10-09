@@ -355,25 +355,16 @@ Reliability is built as a continuous loop: capture failures -> replay determinis
 
 See [Reliability Flywheel](reliability-flywheel.md) for architecture, schema, scripts, IPC endpoints, CI workflows, and operational commands.
 
-### Work Choice and Runtime Overrides
+### Work Choice
 
-The composer presents two work choices. **Ask** handles conversation and supplied content without external actions. **Do** lets CoWork select a task strategy. In the current runtime contract, Ask maps to the `chat` interaction value and Do maps to `smart`. **Advanced…** exposes the execution overrides below; these are runtime options beneath Do, not additional first-level work choices.
-
-| Advanced override | Runtime behavior                                                                                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Execute**       | Full task execution path with tools, planning, and artifacts.                                                                                                |
-| **Plan**          | Structured planning path; can pause for `request_user_input` when structured human input is enabled and is intended for non-mutating planning/coordination. |
-| **Analyze**       | Read-only analysis path that stays evidence-focused and blocks mutating tools.                                                                               |
-| **Debug**         | Focused debugging path for diagnosis and repair.                                                                                                              |
-| **Verified**      | Execute-like path that adds external verification checks after steps before completion.                                                                      |
+The composer presents three work choices. **Ask** handles conversation and supplied content without external actions. **Do** lets CoWork select a task strategy: full execution, read-only analysis, a verification gate after risky steps, or an evidence-first debugging loop, depending on the request. **Plan** pins a structured planning path that uses no mutating tools and can pause for `request_user_input` when structured human input is enabled. In the runtime contract, Ask maps to the `chat` interaction value, Do to `smart`, and Plan to `smart` with the `plan` override.
 
 Runtime behavior is separate from [access profiles](access-profiles.md). The
-work choice selects conversation or task handling; an advanced override pins a
-runtime strategy; the profile selects the sandbox, approvals, reviewer,
-command-tool, filesystem, network, and domain boundary. A choice or orchestration
-control cannot widen the selected profile.
+work choice selects conversation, task handling or planning; the profile selects
+the sandbox, approvals, reviewer, command-tool, filesystem, network, and domain
+boundary. A choice or orchestration control cannot widen the selected profile.
 
-> **Note:** Verified is useful when execution should include an explicit verification gate. Plan can request structured user input; it does not bypass approvals.
+> **Note:** Plan can request structured user input; it does not bypass approvals.
 
 ### Task Toggles
 

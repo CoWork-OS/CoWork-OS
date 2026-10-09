@@ -19,39 +19,10 @@ describe("detectModeSuggestions", () => {
     expect(result[0].confidence).toBeGreaterThanOrEqual(0.3);
   });
 
-  it("detects analyze mode for analysis keywords", () => {
-    const result = detectModeSuggestions("Analyze the performance of the API endpoints");
-    expect(result.length).toBeGreaterThan(0);
-    expect(result[0].mode).toBe("analyze");
-  });
-
-  it("detects verified mode for production/deploy keywords", () => {
-    const result = detectModeSuggestions("Deploy this to production carefully");
-    expect(result.length).toBeGreaterThan(0);
-    expect(result[0].mode).toBe("verified");
-    expect(result[0].confidence).toBeGreaterThanOrEqual(0.44);
-  });
-
   it("detects collaborative mode for team keywords", () => {
     const result = detectModeSuggestions("Let the team brainstorm different perspectives on this");
     expect(result.length).toBeGreaterThan(0);
     expect(result[0].mode).toBe("collaborative");
-  });
-
-  it("detects execute mode for implementation keywords", () => {
-    const result = detectModeSuggestions("Build a login page and implement authentication");
-    expect(result.length).toBeGreaterThan(0);
-    expect(result[0].mode).toBe("execute");
-  });
-
-  it("returns multiple suggestions for mixed prompts", () => {
-    const result = detectModeSuggestions("Plan and implement the user auth system", {
-      maxResults: 3,
-    });
-    expect(result.length).toBe(2);
-    const modes = result.map((s) => s.mode);
-    expect(modes).toContain("plan");
-    expect(modes).toContain("execute");
   });
 
   it("respects excludeModes option", () => {
@@ -62,11 +33,28 @@ describe("detectModeSuggestions", () => {
     expect(modes).not.toContain("plan");
   });
 
+  it("returns multiple suggestions for mixed prompts", () => {
+    const result = detectModeSuggestions("Plan the architecture with the team in parallel", {
+      maxResults: 3,
+    });
+    const modes = result.map((s) => s.mode);
+    expect(modes).toContain("plan");
+    expect(modes).toContain("collaborative");
+  });
+
   it("respects maxResults option", () => {
-    const result = detectModeSuggestions("Plan and build and review and deploy carefully", {
+    const result = detectModeSuggestions("Plan the architecture with the team in parallel", {
       maxResults: 1,
     });
     expect(result.length).toBe(1);
+  });
+
+  it("never suggests the folded runtime strategies", () => {
+    const modes = detectModeSuggestions(
+      "Analyze and review this bug, reproduce the crash, then deploy to production carefully",
+      { maxResults: 5, threshold: 0.1 },
+    ).map((s) => s.mode);
+    expect(modes.every((mode) => mode === "plan" || mode === "collaborative")).toBe(true);
   });
 
   it("respects threshold option", () => {
@@ -95,13 +83,5 @@ describe("detectModeSuggestions", () => {
     const planSuggestion = result.find((s) => s.mode === "plan");
     expect(planSuggestion).toBeDefined();
     expect(planSuggestion!.confidence).toBeLessThanOrEqual(1.0);
-  });
-
-  it("detects debug mode for bug / reproduction keywords", () => {
-    const result = detectModeSuggestions(
-      "Intermittent bug with stack trace — help me find root cause and reproduce",
-    );
-    expect(result.length).toBeGreaterThan(0);
-    expect(result.map((s) => s.mode)).toContain("debug");
   });
 });

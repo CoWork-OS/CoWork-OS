@@ -1,12 +1,13 @@
 /**
  * Mode Suggestion Detection
  *
- * Analyzes user prompt text in real-time and suggests relevant execution modes
- * based on keyword matching with confidence scoring. Pure module — no React/DOM.
+ * Analyzes user prompt text in real-time and suggests Plan or a collaborative run based
+ * on keyword matching with confidence scoring. Pure module — no React/DOM. Analysis,
+ * verification and debugging are strategies the runtime picks under Do, not suggestions.
  */
 
 export interface ModeSuggestion {
-  mode: "plan" | "analyze" | "verified" | "execute" | "debug" | "collaborative";
+  mode: "plan" | "collaborative";
   label: string;
   description: string;
   confidence: number;
@@ -36,37 +37,6 @@ const MODE_CONFIGS: ModeConfig[] = [
     ],
   },
   {
-    mode: "analyze",
-    label: "Analyze Mode",
-    description: "Read-only analysis mode",
-    patterns: [
-      /\banalyz[ei]\b/i,
-      /\banalyse\b/i,
-      /\binvestigat/i,
-      /\bexamine\b/i,
-      /\breview\b/i,
-      /\baudit\b/i,
-      /\binspect\b/i,
-      /\bunderstand\b/i,
-      /\bexplain\b/i,
-      /\blook into\b/i,
-    ],
-  },
-  {
-    mode: "verified",
-    label: "Verified Mode",
-    description: "Execute with verification after each step",
-    patterns: [
-      /\bdeploy\b/i,
-      /\bproduction\b/i,
-      /\bcritical\b/i,
-      /\bcareful\b/i,
-      /\bverif[yi]/i,
-      /\bsafe\b/i,
-      /\bsensitive\b/i,
-    ],
-  },
-  {
     mode: "collaborative",
     label: "Collab Mode",
     description: "Multi-agent team collaboration",
@@ -77,40 +47,6 @@ const MODE_CONFIGS: ModeConfig[] = [
       /\bdifferent perspectives\b/i,
       /\bbrainstorm\b/i,
       /\bparallel\b/i,
-    ],
-  },
-  {
-    mode: "execute",
-    label: "Execute Mode",
-    description: "Full tool execution allowed",
-    patterns: [
-      /\bbuild\b/i,
-      /\bimplement\b/i,
-      /\bcreate\b/i,
-      /\bfix\b/i,
-      /\bwrite code\b/i,
-      /\brefactor\b/i,
-      /\bmigrat/i,
-      /\bset up\b/i,
-      /\binstall\b/i,
-    ],
-  },
-  {
-    mode: "debug",
-    label: "Debug Mode",
-    description: "Hypotheses, runtime evidence, targeted fix",
-    patterns: [
-      /\bbug\b/i,
-      /\bbugs\b/i,
-      /\bstack trace\b/i,
-      /\breproduc/i,
-      /\brac(e|ing) condition\b/i,
-      /\bintermittent\b/i,
-      /\broot cause\b/i,
-      /\bregression\b/i,
-      /\bflaky\b/i,
-      /\bthrows?\b/i,
-      /\bcrash(es|ed|ing)?\b/i,
     ],
   },
 ];
@@ -136,7 +72,7 @@ export interface DetectOptions {
 }
 
 /**
- * Detects which execution modes are most relevant for the given prompt text.
+ * Detects which work modes are most relevant for the given prompt text.
  * Returns suggestions sorted by confidence, filtered by threshold.
  */
 export function detectModeSuggestions(text: string, options?: DetectOptions): ModeSuggestion[] {

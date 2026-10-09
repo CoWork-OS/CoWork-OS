@@ -552,13 +552,7 @@ function parseInteractionMode(value: unknown): InteractionModeSelection {
 function isExecutionOverride(
   value: unknown,
 ): value is NonNullable<Extract<InteractionModeSelection, { mode: "smart" }>["executionOverride"]> {
-  return (
-    value === "execute" ||
-    value === "plan" ||
-    value === "analyze" ||
-    value === "debug" ||
-    value === "verified"
-  );
+  return value === "plan";
 }
 
 function parseAccessProfileId(value: unknown): AccessProfileId {

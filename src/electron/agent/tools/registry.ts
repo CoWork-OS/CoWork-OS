@@ -4284,7 +4284,7 @@ File Operations:
 Skills:
 - create_spreadsheet: Create Excel spreadsheets with data and formulas
 - generate_spreadsheet: Generate XLSX spreadsheets from structured sheets
-- create_document: Create Word/PDF (only when user explicitly requests DOCX or PDF — otherwise use write_file with .md)
+- create_document: Create Word/PDF (only when user explicitly requests DOCX or PDF — otherwise use write_file with .md); for a DOCX and a matching PDF, one call with formats: ["docx","pdf"]
 - generate_document: Generate PDF documents from markdown/sections
 - compile_latex: Compile a workspace .tex file into PDF using a system LaTeX engine
 - edit_document: Edit/append content to existing DOCX files
@@ -7624,7 +7624,8 @@ ${skillDescriptions}`;
         name: "create_document",
         description:
           "Create a Word document (.docx) or PDF. Only use when the user EXPLICITLY requests Word/DOCX/PDF format. For all other documents, prefer writing Markdown (.md) files with write_file. " +
-          'One call writes one file; for both a DOCX and a PDF, call it once per format with each file\'s full name (e.g. "Northstar-brief.docx" and "Northstar-brief.pdf"). ' +
+          'When the user wants the same document in several formats (an editable Word file and a matching PDF), make ONE create_document call with formats: ["docx","pdf"] so both come from the same content. Do not convert DOCX to PDF with shell tools. ' +
+          'With formats, filename is the shared base name (e.g. "Northstar-brief" writes "Northstar-brief.docx" and "Northstar-brief.pdf"); use filenames only when the files need different names. The result lists every written file in files. ' +
           'When the user asks for content on a specific page ("Page 2: ..."), insert a page_break block where that page starts. When the user asks for page numbers, set pageNumbers: true. ' +
           "When the user asks for a document of N pages (e.g. 'a two-page brief'), set maxPages: N. " +
           "A PDF that runs longer is laid out again with tighter spacing, type and margins until it fits; the result reports pageCount and fittedToMaxPages, and if it still does not fit, a warning gives the actual page count and the content must be shortened. " +
@@ -7635,12 +7636,26 @@ ${skillDescriptions}`;
             filename: {
               type: "string",
               description:
-                'Exact output file name including the extension, e.g. "Northstar-brief.pdf". When the user names the file, pass that name unchanged; never add suffixes such as "-pdf". A name without an extension gets the format\'s extension appended.',
+                'Exact output file name including the extension, e.g. "Northstar-brief.pdf". When the user names the file, pass that name unchanged; never add suffixes such as "-pdf". A name without an extension gets the format\'s extension appended. With formats, the shared base name (an extension of .docx or .pdf is replaced by each format\'s).',
             },
             format: {
               type: "string",
               enum: ["docx", "pdf"],
-              description: "Output format; must match the filename's extension",
+              description:
+                "Output format for a single file; must match the filename's extension. Leave it out when using formats.",
+            },
+            formats: {
+              type: "array",
+              items: { type: "string", enum: ["docx", "pdf"] },
+              minItems: 1,
+              description:
+                'Write the same content in every listed format, e.g. ["docx", "pdf"] for an editable Word file and a matching PDF. Each file is "<filename without extension>.<format>" unless filenames is given.',
+            },
+            filenames: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Optional, with formats: one exact file name per entry of formats, in the same order, when the files need different names.",
             },
             pageNumbers: {
               type: "boolean",
@@ -7684,7 +7699,7 @@ ${skillDescriptions}`;
               },
             },
           },
-          required: ["filename", "format", "content"],
+          required: ["filename", "content"],
         },
       },
       {

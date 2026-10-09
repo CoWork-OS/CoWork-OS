@@ -1016,6 +1016,14 @@ export class PermissionEngine {
           addMany(input.paths, "read");
           addMany(input.patterns, "read");
         }
+        // create_document with formats may name each output file separately.
+        if (toolName === "create_document") {
+          const filenames = input.filenames;
+          if (Array.isArray(filenames)) addMany(filenames, "write");
+          else if (filenames && typeof filenames === "object") {
+            addMany(Object.values(filenames as Record<string, unknown>), "write");
+          }
+        }
         if (FILESYSTEM_WRITE_TOOLS.has(toolName)) {
           add(
             firstString(

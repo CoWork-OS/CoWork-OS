@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as mammoth from "mammoth";
 import type { Workspace } from "../../../../shared/types";
+import { parsePdfBuffer } from "../../../utils/pdf-parser";
 import { SkillTools } from "../skill-tools";
 
 // Render decks with pptxgenjs; the artifact-tool runtime is machine-specific.
@@ -200,5 +202,156 @@ describe("SkillTools document results", () => {
     expect(fs.existsSync(path.join(workspace.path, "review.pptx"))).toBe(true);
     expect(result.slideCount).toBe(3);
     expect(result.warnings?.join("\n")).toMatch(/Slide 2 "Agenda" needed 2 slides/);
+  });
+
+  describe("create_document with formats", () => {
+    const briefContent = [
+      { type: "heading", text: "Briefing Northstar", level: 1 },
+      { type: "paragraph", text: "Piloto de onboarding com início a 26 de outubro de 2026." },
+      {
+        type: "table",
+        rows: [
+          ["Sessão", "Data"],
+          ["Orientação", "26 out"],
+          ["Perguntas comuns", "28 out"],
+        ],
+      },
+      { type: "page_break" },
+      { type: "heading", text: "Verbas propostas", level: 1 },
+      {
+        type: "table",
+        rows: [
+          ["Rubrica", "Verba proposta"],
+          ["Materiais impressos", "€100"],
+          ["Legendagem", "€150"],
+          ["Reserva", "€100"],
+        ],
+      },
+      { type: "list", items: ["Marta: textos de boas-vindas", "James: verificação de legendas"] },
+    ];
+
+    it("writes a DOCX and a PDF with the same text from one call", async () => {
+      const workspace = makeWorkspace();
+      const daemon = { logEvent: vi.fn() } as Any;
+      const tools = new SkillTools(workspace, daemon, "task-1");
+
+      const result = await tools.createDocument({
+        filename: "Northstar-brief",
+        formats: ["docx", "pdf"],
+        content: briefContent,
+        pageNumbers: true,
+        maxPages: 2,
+      });
+
+      expect(result.path).toBe("Northstar-brief.docx");
+      expect(result.files).toEqual([
+        { path: "Northstar-brief.docx", format: "docx" },
+        { path: "Northstar-brief.pdf", format: "pdf", pageCount: 2, fittedToMaxPages: true },
+      ]);
+      expect(result).toMatchObject({ success: true, pageCount: 2, fittedToMaxPages: true });
+      expect(result.pageCountNote).toMatch(/PDF written from the same content/);
+      expect(fs.readdirSync(workspace.path).sort()).toEqual([
+        "Northstar-brief.docx",
+        "Northstar-brief.pdf",
+      ]);
+      for (const [file, format] of [
+        ["Northstar-brief.docx", "docx"],
+        ["Northstar-brief.pdf", "pdf"],
+      ]) {
+        expect(daemon.logEvent).toHaveBeenCalledWith(
+          "task-1",
+          "file_created",
+          expect.objectContaining({ path: file, format, type: "document" }),
+        );
+      }
+
+      const docxText = (
+        await mammoth.extractRawText({ path: path.join(workspace.path, "Northstar-brief.docx") })
+      ).value;
+      const pdf = await parsePdfBuffer(
+        fs.readFileSync(path.join(workspace.path, "Northstar-brief.pdf")),
+      );
+      expect(pdf.numpages).toBe(2);
+      const amounts = (text: string) =>
+        text.match(/€\s?\d+/g)?.map((value) => value.replace(/\s/g, ""));
+      expect(amounts(docxText)).toEqual(["€100", "€150", "€100"]);
+      expect(amounts(pdf.text)).toEqual(amounts(docxText));
+      const normalize = (text: string) => text.replace(/\s+/g, " ");
+      for (const phrase of [
+        "Briefing Northstar",
+        "Verbas propostas",
+        "26 de outubro de 2026",
+        "Marta: textos de boas-vindas",
+        "James: verificação de legendas",
+      ]) {
+        expect(normalize(docxText)).toContain(phrase);
+        expect(normalize(pdf.text)).toContain(phrase);
+      }
+    });
+
+    it("names the files from filenames, or replaces a .docx/.pdf extension on filename", async () => {
+      const workspace = makeWorkspace();
+      const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+      const content = [{ type: "paragraph", text: "Body." }];
+
+      const derived = await tools.createDocument({
+        filename: "brief.pdf",
+        formats: ["pdf", "docx"],
+        content,
+      });
+      expect(derived.files.map((file) => file.path)).toEqual(["brief.pdf", "brief.docx"]);
+
+      const named = await tools.createDocument({
+        filename: "ignored",
+        formats: ["docx", "pdf"],
+        filenames: ["Editable brief.docx", "Print brief"],
+        content,
+      });
+      expect(named.files.map((file) => file.path)).toEqual([
+        "Editable brief.docx",
+        "Print brief.pdf",
+      ]);
+
+      const mapped = await tools.createDocument({
+        filename: "ignored",
+        formats: ["docx", "pdf"],
+        filenames: { pdf: "map.pdf", docx: "map.docx" },
+        content,
+      });
+      expect(mapped.files.map((file) => file.path)).toEqual(["map.docx", "map.pdf"]);
+    });
+
+    it("rejects formats it cannot write before writing anything", async () => {
+      const workspace = makeWorkspace();
+      const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+      const content = [{ type: "paragraph", text: "Body." }];
+
+      await expect(
+        tools.createDocument({ filename: "x", formats: ["docx", "odt"] as Any, content }),
+      ).rejects.toThrow(/Unsupported document format/);
+      await expect(tools.createDocument({ filename: "x", formats: [], content })).rejects.toThrow(
+        /non-empty array/,
+      );
+      await expect(
+        tools.createDocument({ filename: "x", format: "pdf", formats: ["docx"], content }),
+      ).rejects.toThrow(/List every format/);
+      await expect(
+        tools.createDocument({
+          filename: "x",
+          formats: ["docx", "pdf"],
+          filenames: ["only-one.docx"],
+          content,
+        }),
+      ).rejects.toThrow(/one name per format/);
+      await expect(
+        tools.createDocument({
+          filename: "x",
+          formats: ["docx", "pdf"],
+          filenames: ["a.docx", "a.docx"],
+          content,
+        }),
+      ).rejects.toThrow(/ends in .docx but format is "pdf"/);
+      expect(fs.readdirSync(workspace.path)).toEqual([]);
+    });
   });
 });

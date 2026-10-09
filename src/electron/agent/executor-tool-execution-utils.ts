@@ -1222,8 +1222,9 @@ export function getToolInputValidationError(toolName: string, input: Any): strin
   if (canonicalToolName === "create_document") {
     if (!input?.filename) return "create_document requires a filename";
     // create_document requires format; generate_document is valid with markdown/sections.
-    if (toolName === "create_document" && !input?.format) {
-      return "create_document requires a format (docx or pdf)";
+    const hasFormatsList = Array.isArray(input?.formats) && input.formats.length > 0;
+    if (toolName === "create_document" && !input?.format && !hasFormatsList) {
+      return "create_document requires a format (docx or pdf) or a formats list";
     }
     if (toolName === "create_document" && !input?.content)
       return "create_document requires content";

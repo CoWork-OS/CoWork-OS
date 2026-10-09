@@ -138,7 +138,7 @@ function normalizeBlock(raw: unknown): RenderBlock | { type: string; reason: str
 }
 
 const DOCUMENT_FORMATS = ["docx", "pdf"] as const;
-type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
+export type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
 
 /**
  * The file name create_document writes. A name that already ends in the
@@ -173,6 +173,101 @@ export function resolveDocumentFilename(
     );
   }
   return { filename: nameFormat ? name : `${name}.${resolved}`, format: resolved };
+}
+
+function parseDocumentFormat(value: unknown, label: string): DocumentFormat {
+  const requested = typeof value === "string" ? value.trim().toLowerCase().replace(/^\./, "") : "";
+  const format = DOCUMENT_FORMATS.find((candidate) => candidate === requested);
+  if (!format) {
+    throw new Error(
+      `Unsupported document format ${JSON.stringify(value)} in "${label}". Use "docx" or "pdf".`,
+    );
+  }
+  return format;
+}
+
+/**
+ * The files one create_document call writes. Without `formats` this is the
+ * single file resolveDocumentFilename names. With `formats` every listed
+ * format is written from the same content: `filenames` (an array in the
+ * order of `formats`, or a map from format to name) names each file;
+ * otherwise each file is `<base>.<ext>`, where the base is `filename`
+ * without a .docx or .pdf extension.
+ */
+export function resolveDocumentOutputs(input: {
+  filename: unknown;
+  format?: unknown;
+  formats?: unknown;
+  filenames?: unknown;
+}): Array<{ filename: string; format: DocumentFormat }> {
+  if (input.formats === undefined || input.formats === null) {
+    return [resolveDocumentFilename(input.filename, input.format)];
+  }
+  if (!Array.isArray(input.formats) || input.formats.length === 0) {
+    throw new Error('"formats" must be a non-empty array such as ["docx", "pdf"].');
+  }
+  const formats: DocumentFormat[] = [];
+  for (const value of input.formats) {
+    const format = parseDocumentFormat(value, "formats");
+    if (!formats.includes(format)) formats.push(format);
+  }
+  if (input.format !== undefined && input.format !== null && input.format !== "") {
+    const format = parseDocumentFormat(input.format, "format");
+    if (!formats.includes(format)) {
+      throw new Error(
+        `"format" is "${format}" but "formats" is ${JSON.stringify(formats)}. List every format in "formats".`,
+      );
+    }
+  }
+
+  const named = input.filenames;
+  let outputs: Array<{ filename: string; format: DocumentFormat }>;
+  if (named !== undefined && named !== null) {
+    if (Array.isArray(named)) {
+      if (named.length !== formats.length) {
+        throw new Error(
+          `"filenames" has ${named.length} name(s) but "formats" has ${formats.length}; give one name per format, in the same order.`,
+        );
+      }
+      outputs = formats.map((format, index) => resolveDocumentFilename(named[index], format));
+    } else if (typeof named === "object") {
+      const byFormat = new Map<string, unknown>();
+      for (const [key, value] of Object.entries(named as Record<string, unknown>)) {
+        byFormat.set(parseDocumentFormat(key, "filenames"), value);
+      }
+      outputs = formats.map((format) => {
+        if (!byFormat.has(format)) {
+          throw new Error(`"filenames" has no name for the "${format}" file.`);
+        }
+        return resolveDocumentFilename(byFormat.get(format), format);
+      });
+    } else {
+      throw new Error(
+        '"filenames" must be an array of names in the order of "formats" or a map such as {"docx": "brief.docx", "pdf": "brief.pdf"}.',
+      );
+    }
+  } else {
+    const name = typeof input.filename === "string" ? input.filename.trim() : "";
+    if (!name) throw new Error('Missing required "filename", for example "report".');
+    const extension = path.extname(name).slice(1).toLowerCase();
+    const base = DOCUMENT_FORMATS.some((candidate) => candidate === extension)
+      ? name.slice(0, -(extension.length + 1))
+      : name;
+    if (!base.trim()) throw new Error(`Filename "${name}" has no name before its extension.`);
+    outputs = formats.map((format) => ({ filename: `${base}.${format}`, format }));
+  }
+
+  const seen = new Set<string>();
+  for (const output of outputs) {
+    const key = output.filename.toLowerCase();
+    if (seen.has(key)) {
+      throw new Error(
+        `Two of the requested formats would both be written to "${output.filename}".`,
+      );
+    }
+    seen.add(key);
+  }
+  return outputs;
 }
 
 export interface DocumentOptions {

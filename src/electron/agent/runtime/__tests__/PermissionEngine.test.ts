@@ -1012,6 +1012,22 @@ describe("PermissionEngine", () => {
         toolInput: { path: "../outside.txt" },
       },
       { toolName: "create_document", toolInput: { filename: "../outside.docx" } },
+      {
+        toolName: "create_document",
+        toolInput: {
+          filename: "brief",
+          formats: ["docx", "pdf"],
+          filenames: ["brief.docx", "../outside.pdf"],
+        },
+      },
+      {
+        toolName: "create_document",
+        toolInput: {
+          filename: "brief",
+          formats: ["docx", "pdf"],
+          filenames: { docx: "brief.docx", pdf: "../outside.pdf" },
+        },
+      },
     ]) {
       const result = evaluate({
         workspace: scopedWorkspace,

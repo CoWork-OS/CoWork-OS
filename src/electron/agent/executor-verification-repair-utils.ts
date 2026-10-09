@@ -234,6 +234,27 @@ export function requestsFileLinks(prompt: string): boolean {
   return FILE_LINKS_REQUEST_PATTERN.test(String(prompt || ""));
 }
 
+/** True when the request asks for links to two or more files it names ("a.docx and a.pdf"). */
+export function requestsLinksToSeveralNamedFiles(prompt: string): boolean {
+  const text = String(prompt || "");
+  if (!requestsFileLinks(text)) return false;
+  const names = new Set<string>();
+  for (const match of text.matchAll(PAIRED_OUTPUT_FILE_PATTERN)) names.add(match[0].toLowerCase());
+  return names.size >= 2;
+}
+
+/**
+ * Requests whose plan must end with a check of the delivered files: outputs
+ * that must match each other, or links to several named files.
+ */
+export function requestsFinalOutputsCheck(prompt: string): boolean {
+  return requestsMatchingOutputs(prompt) || requestsLinksToSeveralNamedFiles(prompt);
+}
+
+/** Final check added to matching-output and multi-file plans that have none. */
+export const MATCHING_OUTPUTS_VERIFICATION_STEP_DESCRIPTION =
+  "Verify that every requested file exists, that files meant to match carry the same content (facts, figures, names, dates and sections), and that the final answer links each requested file.";
+
 const SOURCE_LINKS_REQUEST_PATTERN = new RegExp(
   [
     String.raw`\b(?:with|include|including|add|give|provide|show|list|plus)\s+(?:(?:me|direct|official|source|working|relevant|the|their|all|clickable|inline|supporting)\s+){0,3}(?:links?|urls?|sources?|citations?|references?)\b`,
@@ -264,6 +285,278 @@ export function requestsSourceLinks(prompt: string): boolean {
 export function requestsSourcedResearchAnswer(prompt: string): boolean {
   const text = String(prompt || "");
   return requestsSourceLinks(text) && RESEARCH_REQUEST_PATTERN.test(text);
+}
+
+// Leading verbs of a check step in Portuguese, Spanish, French, German,
+// Italian and Dutch (infinitive and common imperative forms). English is
+// handled by the executor's own rules. Forms that are also English words
+// ("revise", "control") are left out.
+const LOCALIZED_CHECK_VERBS = [
+  // Portuguese
+  "verificar",
+  "verifique",
+  "verifica",
+  "confirmar",
+  "confirme",
+  "confirma",
+  "validar",
+  "valide",
+  "valida",
+  "rever",
+  "reveja",
+  "revê",
+  "conferir",
+  "confira",
+  "checar",
+  // Spanish
+  "comprobar",
+  "compruebe",
+  "comprueba",
+  "revisar",
+  "revisa",
+  "revisen",
+  "chequear",
+  // French
+  "vérifier",
+  "vérifiez",
+  "vérifie",
+  "contrôler",
+  "contrôlez",
+  "contrôle",
+  "valider",
+  "validez",
+  "confirmer",
+  "confirmez",
+  "relire",
+  "relisez",
+  // German
+  "überprüfen",
+  "überprüfe",
+  "prüfen",
+  "prüfe",
+  "verifizieren",
+  "verifiziere",
+  "kontrollieren",
+  "kontrolliere",
+  "validieren",
+  "bestätigen",
+  // Italian
+  "verificare",
+  "verificate",
+  "controllare",
+  "controlla",
+  "controllate",
+  "convalidare",
+  "validare",
+  "confermare",
+  "conferma",
+  // Dutch
+  "controleren",
+  "controleer",
+  "verifiëren",
+  "verifieer",
+  "valideren",
+  "valideer",
+  "nakijken",
+  "bevestigen",
+];
+
+// Verbs that make a step produce or change output: a check that goes on to
+// create or fix something is work, not a checkpoint. Forms that are also
+// common nouns ("ajuste", "sistema") are left out.
+const LOCALIZED_WORK_VERBS = [
+  // Portuguese
+  "criar",
+  "crie",
+  "gerar",
+  "gere",
+  "escrever",
+  "escreva",
+  "guardar",
+  "guarde",
+  "salvar",
+  "salve",
+  "exportar",
+  "exporte",
+  "corrigir",
+  "corrija",
+  "ajustar",
+  "atualizar",
+  "atualize",
+  "editar",
+  "edite",
+  "substituir",
+  "substitua",
+  "refazer",
+  "refaça",
+  "regenerar",
+  "reescrever",
+  // Spanish
+  "crear",
+  "generar",
+  "genere",
+  "escribir",
+  "escriba",
+  "guardar",
+  "exportar",
+  "corregir",
+  "corrija",
+  "arreglar",
+  "arregle",
+  "actualizar",
+  "actualice",
+  "reemplazar",
+  "rehacer",
+  // French
+  "créer",
+  "créez",
+  "générer",
+  "générez",
+  "écrire",
+  "écrivez",
+  "enregistrer",
+  "enregistrez",
+  "exporter",
+  "exportez",
+  "corriger",
+  "corrigez",
+  "ajuster",
+  "ajustez",
+  "modifier",
+  "modifiez",
+  "remplacer",
+  "refaire",
+  "régénérer",
+  "mettre à jour",
+  // German
+  "erstellen",
+  "erstelle",
+  "erzeugen",
+  "erzeuge",
+  "generieren",
+  "schreiben",
+  "schreibe",
+  "speichern",
+  "speichere",
+  "exportieren",
+  "exportiere",
+  "korrigieren",
+  "korrigiere",
+  "beheben",
+  "behebe",
+  "anpassen",
+  "aktualisieren",
+  "aktualisiere",
+  "ersetzen",
+  "überarbeiten",
+  // Italian
+  "creare",
+  "crea",
+  "generare",
+  "genera",
+  "scrivere",
+  "scrivi",
+  "salvare",
+  "salva",
+  "esportare",
+  "esporta",
+  "correggere",
+  "correggi",
+  "sistemare",
+  "aggiornare",
+  "aggiorna",
+  "modificare",
+  "modifica",
+  "sostituire",
+  "rifare",
+  "rigenerare",
+  // Dutch
+  "maken",
+  "maak",
+  "aanmaken",
+  "genereren",
+  "genereer",
+  "schrijven",
+  "schrijf",
+  "opslaan",
+  "exporteren",
+  "exporteer",
+  "corrigeren",
+  "corrigeer",
+  "herstellen",
+  "aanpassen",
+  "bijwerken",
+  "vervangen",
+  "vervang",
+];
+
+// Words that put the next verb in imperative position: "e criar", "y luego
+// corregir", "puis exporter", "und dann speichern", "e poi creare", "en maken".
+const LOCALIZED_CONNECTORS = [
+  "e",
+  "y",
+  "et",
+  "und",
+  "ed",
+  "en",
+  "ou",
+  "oder",
+  "of",
+  "depois",
+  "luego",
+  "después",
+  "puis",
+  "ensuite",
+  "dann",
+  "danach",
+  "poi",
+  "quindi",
+  "dan",
+  "vervolgens",
+  "então",
+  "entonces",
+  "também",
+  "también",
+  "aussi",
+  "auch",
+  "anche",
+  "ook",
+];
+
+function alternation(words: string[]): string {
+  return words
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+"))
+    .join("|");
+}
+
+const LOCALIZED_CHECK_START_PATTERN = new RegExp(
+  `^(?:${alternation(LOCALIZED_CHECK_VERBS)})(?![\\p{L}\\p{N}])`,
+  "u",
+);
+
+// Up to four words may sit between the connector and the verb, which covers
+// verb-final German ("und dann den Bericht erstellen") and "e depois criar".
+const LOCALIZED_WORK_AFTER_CONNECTOR_PATTERN = new RegExp(
+  `(?:[,;:]|(?<![\\p{L}\\p{N}])(?:${alternation(LOCALIZED_CONNECTORS)}))\\s+` +
+    `(?:[\\p{L}\\p{N}'’-]+\\s+){0,4}` +
+    `(?:${alternation(LOCALIZED_WORK_VERBS)})(?![\\p{L}\\p{N}])`,
+  "u",
+);
+
+/**
+ * True when a plan step written in Portuguese, Spanish, French, German,
+ * Italian or Dutch is a check of existing output: it starts with a check verb
+ * ("Verificar que ambos os ficheiros existem...", "Überprüfen, ob ...") and
+ * does not go on to create or fix anything ("Verificar ... e corrigir ...").
+ * The executor applies it to the final step of a plan.
+ */
+export function isLocalizedCheckStepDescription(description: unknown): boolean {
+  const desc = String(description || "")
+    .trim()
+    .replace(/^[*_`#>\s]+/, "")
+    .toLowerCase();
+  if (!desc || !LOCALIZED_CHECK_START_PATTERN.test(desc)) return false;
+  return !LOCALIZED_WORK_AFTER_CONNECTOR_PATTERN.test(desc);
 }
 
 /** Final check added to sourced research plans that have none. */

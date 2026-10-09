@@ -28,11 +28,16 @@ import {
   formatSurfaceValue,
   interpolateText,
   numericSurfaceValue,
+  resolveSurfaceLabels,
   resolveSurfaceNumber,
+  resolveSurfaceRows,
+  resolveSurfaceValues,
+  type SurfaceData,
   type SurfaceScope,
 } from "../../../shared/answer-surfaces/runtime";
 import { answerImageCredit } from "../../../shared/answer-surfaces/images";
 import { useAnswerSurfaceState } from "../../hooks/useAnswerSurfaceState";
+import { useSurfaceLogic } from "../../hooks/useSurfaceLogic";
 import { useTweenedNumber } from "../../hooks/useTweenedNumber";
 import { SurfaceIcon } from "./AnswerSurfaceIcon";
 import {
@@ -49,6 +54,8 @@ const LazyAnswerSurfaceChart = lazy(() =>
 type SurfaceContext = {
   state: AnswerSurfaceState;
   scope: SurfaceScope;
+  /** Lists and tables from the surface's logic, for `{"bind": …}`. */
+  data: SurfaceData;
   setValue: (id: string, value: AnswerSurfaceStateValue) => void;
   images: Map<string, AnswerImageStatus>;
 };
@@ -142,7 +149,11 @@ function AnswerSurfaceView({
   persist: boolean;
 }) {
   const [state, setValue] = useAnswerSurfaceState(spec, { taskId, surfaceKey, persist });
-  const scope = useMemo(() => buildSurfaceScope(spec, state), [spec, state]);
+  const logic = useSurfaceLogic(spec, state);
+  const scope = useMemo(
+    () => buildSurfaceScope(spec, state, logic.outputs.scope),
+    [spec, state, logic.outputs.scope],
+  );
   const imageRefs = useMemo(() => collectImageRefs(spec), [spec]);
   const images = useAnswerImages(imageRefs, taskId);
   const [entering] = useState(() => {
@@ -151,13 +162,22 @@ function AnswerSurfaceView({
     revealedSurfaces.add(revealKey);
     return true;
   });
-  const context: SurfaceContext = { state, scope, setValue, images };
+  const context: SurfaceContext = { state, scope, data: logic.outputs.data, setValue, images };
   return (
     <div
-      className={`answer-surface as-theme-accent${entering ? " as-enter" : ""}`}
+      className={`answer-surface as-theme-accent${entering ? " as-enter" : ""}${logic.status === "starting" ? " as-logic-starting" : ""}`}
       data-surface-key={surfaceKey}
+      data-logic-status={logic.status === "none" ? undefined : logic.status}
     >
       <SurfaceNode node={spec.root} context={context} />
+      {logic.status === "error" && (
+        <p className="as-notice" role="status">
+          This answer's calculation stopped: {logic.error}
+        </p>
+      )}
+      {logic.status === "unavailable" && (
+        <p className="as-notice">Some values in this answer are calculated in the desktop app.</p>
+      )}
     </div>
   );
 }
@@ -347,7 +367,8 @@ function SurfaceNode({
           </dl>
         </div>
       );
-    case "table":
+    case "table": {
+      const rows = resolveSurfaceRows(node.rows, context.data);
       return (
         <div className="as-table-wrap">
           <table className="as-table">
@@ -358,9 +379,7 @@ function SurfaceNode({
                   <th
                     key={index}
                     scope="col"
-                    className={
-                      index > 0 && isNumericColumn(node.rows, index) ? "as-num" : undefined
-                    }
+                    className={index > 0 && isNumericColumn(rows, index) ? "as-num" : undefined}
                   >
                     {column}
                   </th>
@@ -368,15 +387,13 @@ function SurfaceNode({
               </tr>
             </thead>
             <tbody>
-              {node.rows.map((row, rowIndex) => (
+              {rows.map((row, rowIndex) => (
                 <tr key={rowIndex}>
                   {node.columns.map((_column, cellIndex) => (
                     <td
                       key={cellIndex}
                       className={
-                        cellIndex > 0 && isNumericColumn(node.rows, cellIndex)
-                          ? "as-num"
-                          : undefined
+                        cellIndex > 0 && isNumericColumn(rows, cellIndex) ? "as-num" : undefined
                       }
                     >
                       {row[cellIndex] === undefined
@@ -390,13 +407,15 @@ function SurfaceNode({
           </table>
         </div>
       );
+    }
     case "checklist":
       return <SurfaceChecklist node={node} context={context} />;
     case "chart": {
-      const data = node.labels.map((label, index) => {
+      const values = node.series.map((series) => resolveSurfaceValues(series.values, context.data));
+      const data = resolveSurfaceLabels(node.labels, context.data).map((label, index) => {
         const point: Record<string, string | number | null> = { label };
-        for (const series of node.series) {
-          const value = series.values[index];
+        for (const [seriesIndex, series] of node.series.entries()) {
+          const value = values[seriesIndex][index];
           point[series.name] =
             value === undefined ? null : numericSurfaceValue(value, context.scope);
         }

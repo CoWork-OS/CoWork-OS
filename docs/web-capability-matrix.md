@@ -53,7 +53,7 @@ The App has a wide hook and component graph. The browser adapter should expose o
 | --- | ---: |
 | Renderer source files scanned (tests excluded) | 436 |
 | ElectronAPI members declared in preload type | 1020 |
-| Methods/properties exposed by contextBridge | 1041 |
+| Methods/properties exposed by contextBridge | 1040 |
 | Distinct direct window.electronAPI member names | 733 |
 | Direct renderer members with preview evidence | 67 |
 | Direct renderer members with a browser handler source; UI unverified | 225 |
@@ -67,7 +67,7 @@ The App has a wide hook and component graph. The browser adapter should expose o
 | Direct member expressions at module scope | 0 |
 | Directly used names not found in ElectronAPI interface | 17 |
 | Declared names not found in exposed object | 1 |
-| Exposed names not found in interface | 22 |
+| Exposed names not found in interface | 21 |
 
 The scan counts syntactic `window.electronAPI.member` and literal bracket-member expressions in renderer source while excluding tests. Calls are the subset whose member expression is the call target. Alias declarations are reported separately and are not included in direct member totals. The browser-handler source pass follows `createBrowser*Definitions` factories imported and invoked by `browser-host-application.ts`, then recognizes typed definition-object keys, assignments, literal `add(...)` registrations, and returned handler objects. It is syntactic evidence only; conditional factory branches, runtime capabilities, and successful UI flows still need separate verification. The simple alias resolver is name-based within each file, so same-name shadowing can over-report an alias declaration. Dynamic reflection, values returned by helpers, destructured-variable use counts, and arbitrary aliases are outside this pass.
 
@@ -866,7 +866,7 @@ Directly reached but absent from the ElectronAPI interface (17): `addTrigger`, `
 
 Declared by the interface but absent from the exposed object (1): `getPactSignIn`.
 
-Exposed but absent from the interface (22): `addTrigger`, `createWebAccessPairingCode`, `getBriefingConfig`, `getCitationsForTask`, `getHubSources`, `getMcpEventsStatus`, `getRecentHubFiles`, `getTriggerHistory`, `getWebAccessSettings`, `getWebAccessStatus`, `listHubFiles`, `listMcpEvents`, `listTriggers`, `onTrayQuickTask`, `quickInputClose`, `quickInputSubmit`, `removeTrigger`, `saveBriefingConfig`, `saveWebAccessSettings`, `searchHubFiles`, `syncDefaultAgentRoles`, `updateTrigger`.
+Exposed but absent from the interface (21): `addTrigger`, `createWebAccessPairingCode`, `getBriefingConfig`, `getHubSources`, `getMcpEventsStatus`, `getRecentHubFiles`, `getTriggerHistory`, `getWebAccessSettings`, `getWebAccessStatus`, `listHubFiles`, `listMcpEvents`, `listTriggers`, `onTrayQuickTask`, `quickInputClose`, `quickInputSubmit`, `removeTrigger`, `saveBriefingConfig`, `saveWebAccessSettings`, `searchHubFiles`, `syncDefaultAgentRoles`, `updateTrigger`.
 
 ## Scope and remaining review gaps
 

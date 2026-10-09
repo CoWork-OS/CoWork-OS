@@ -6,6 +6,7 @@ import {
   expressionIdentifiers,
   isValidIdentifier,
 } from "./expression";
+import { AnswerSurfaceLogicSchema, type AnswerSurfaceLogic } from "./logic";
 import { normalizeSurfaceIcon } from "./icons";
 
 /**
@@ -59,9 +60,29 @@ export type AnswerSurfaceImageRef = {
 export type AnswerSurfaceValue =
   | number
   | string
-  | { expr?: string; value?: number | string; decimals?: number; unit?: string; prefix?: string };
+  | {
+      expr?: string;
+      value?: number | string;
+      decimals?: number;
+      unit?: string;
+      prefix?: string;
+      /** Set by the app for text from surface logic: shown as-is, never interpolated. */
+      literal?: boolean;
+    };
 
 export type AnswerSurfaceChoice = { label: string; value: string | number };
+
+/** A list or table produced by the surface's logic, by output name. */
+export type AnswerSurfaceBind = { bind: string };
+
+export function isSurfaceBind(value: unknown): value is AnswerSurfaceBind {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "bind" in (value as object)
+  );
+}
 
 export type AnswerSurfaceDirection = "up" | "down" | "flat";
 
@@ -182,7 +203,12 @@ export type AnswerSurfaceNode =
       title?: string;
       items: Array<{ label: string; value: AnswerSurfaceValue; note?: string }>;
     }
-  | { type: "table"; caption?: string; columns: string[]; rows: AnswerSurfaceValue[][] }
+  | {
+      type: "table";
+      caption?: string;
+      columns: string[];
+      rows: AnswerSurfaceValue[][] | AnswerSurfaceBind;
+    }
   | {
       type: "checklist";
       id: string;
@@ -199,10 +225,10 @@ export type AnswerSurfaceNode =
       stacked?: boolean;
       horizontal?: boolean;
       height?: "sm" | "md" | "lg";
-      labels: string[];
+      labels: string[] | AnswerSurfaceBind;
       series: Array<{
         name: string;
-        values: AnswerSurfaceValue[];
+        values: AnswerSurfaceValue[] | AnswerSurfaceBind;
         style?: "solid" | "muted" | "dashed";
         tone?: AnswerSurfaceTone;
       }>;
@@ -258,7 +284,12 @@ export type AnswerSurfaceNode =
   | { type: "divider" };
 
 export type AnswerSurfaceNodeType = AnswerSurfaceNode["type"];
-export type AnswerSurfaceSpec = { version: number; root: AnswerSurfaceNode };
+export type AnswerSurfaceSpec = {
+  version: number;
+  root: AnswerSurfaceNode;
+  /** Code that computes named outputs from the controls (see logic.ts). */
+  logic?: AnswerSurfaceLogic;
+};
 export type AnswerSurfaceStateValue = number | string | boolean | string[];
 export type AnswerSurfaceState = Record<string, AnswerSurfaceStateValue>;
 
@@ -315,6 +346,10 @@ const valueSchema: z.ZodType<AnswerSurfaceValue> = z.union([
     prefix: z.string().trim().max(8).optional(),
   }),
 ]);
+
+const bindSchema = z
+  .object({ bind: z.string().trim().refine(isValidIdentifier, "must be a simple identifier") })
+  .strict();
 
 const computedSchema = z
   .record(controlId, z.string().trim().min(1).max(MAX_EXPRESSION_LENGTH))
@@ -502,7 +537,7 @@ const nodeSchema: z.ZodType<AnswerSurfaceNode> = z.lazy(() =>
       type: z.literal("table"),
       caption: optionalLabel(200),
       columns: z.array(label(80)).min(1).max(8),
-      rows: z.array(z.array(valueSchema).max(8)).min(1).max(40),
+      rows: z.union([z.array(z.array(valueSchema).max(8)).min(1).max(40), bindSchema]),
     }),
     z.object({
       type: z.literal("checklist"),
@@ -540,12 +575,12 @@ const nodeSchema: z.ZodType<AnswerSurfaceNode> = z.lazy(() =>
       stacked: z.boolean().optional(),
       horizontal: z.boolean().optional(),
       height: lenient(z.enum(["sm", "md", "lg"])),
-      labels: z.array(label(60)).min(1).max(40),
+      labels: z.union([z.array(label(60)).min(1).max(40), bindSchema]),
       series: z
         .array(
           z.object({
             name: label(60),
-            values: z.array(valueSchema).min(1).max(40),
+            values: z.union([z.array(valueSchema).min(1).max(40), bindSchema]),
             style: lenient(z.enum(["solid", "muted", "dashed"])),
             tone,
           }),
@@ -695,10 +730,14 @@ function formatIssues(error: z.ZodError): string {
 }
 
 /** Checks the rules a schema cannot express: size, ids, formulas and control bounds. */
-function validateSemantics(root: AnswerSurfaceNode): string | null {
+function validateSemantics(
+  root: AnswerSurfaceNode,
+  outputs: readonly string[] = [],
+): string | null {
   let nodes = 0;
   let tooDeep = false;
-  const controls = new Set<string>();
+  const controls = new Set<string>(outputs);
+  const binds: string[] = [];
   const expressions: string[] = [];
   let problem: string | null = null;
 
@@ -772,10 +811,15 @@ function validateSemantics(root: AnswerSurfaceNode): string | null {
         }
         break;
       case "table":
-        for (const row of node.rows) row.forEach(collectValue);
+        if (isSurfaceBind(node.rows)) binds.push(node.rows.bind);
+        else for (const row of node.rows) row.forEach(collectValue);
         break;
       case "chart":
-        for (const series of node.series) series.values.forEach(collectValue);
+        if (isSurfaceBind(node.labels)) binds.push(node.labels.bind);
+        for (const series of node.series) {
+          if (isSurfaceBind(series.values)) binds.push(series.values.bind);
+          else series.values.forEach(collectValue);
+        }
         break;
       case "tiles":
         if (node.id) declare(node.id);
@@ -823,6 +867,9 @@ function validateSemantics(root: AnswerSurfaceNode): string | null {
     }
   });
 
+  for (const name of binds) {
+    if (!outputs.includes(name)) return `"${name}" is bound but is not one of the logic outputs`;
+  }
   if (nodes > MAX_SURFACE_NODES) return `Too many components (${nodes})`;
   if (tooDeep) return "Components are nested too deeply";
   if (problem) return problem;
@@ -868,14 +915,27 @@ export function parseAnswerSurfaceSource(source: string): AnswerSurfaceParseResu
       raw = { type: "stack", theme: rootTheme, children: [rest] };
     }
   }
+  // Logic sits beside the components it feeds, on the block's outer object.
+  let logic: AnswerSurfaceLogic | undefined;
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && "logic" in raw) {
+    const { logic: rawLogic, ...rest } = raw as Record<string, unknown>;
+    const parsedLogic = AnswerSurfaceLogicSchema.safeParse(rawLogic);
+    if (!parsedLogic.success)
+      return { ok: false, error: `logic: ${formatIssues(parsedLogic.error)}` };
+    logic = parsedLogic.data;
+    raw = rest;
+  }
   if (version > ANSWER_SURFACE_SCHEMA_VERSION) {
     return { ok: false, error: "This interactive answer needs a newer version of CoWork" };
   }
   const parsed = nodeSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: formatIssues(parsed.error) };
-  const problem = validateSemantics(parsed.data);
+  const problem = validateSemantics(parsed.data, logic?.outputs);
   if (problem) return { ok: false, error: problem };
-  return { ok: true, spec: { version, root: parsed.data } };
+  return {
+    ok: true,
+    spec: logic ? { version, root: parsed.data, logic } : { version, root: parsed.data },
+  };
 }
 
 /** The value each control starts with, before any saved state is applied. */

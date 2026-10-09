@@ -4592,6 +4592,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     hostBackground?: string;
     designLanguage: boolean;
   }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML, data),
+  getAnswerSurfaceLogicRunner: () => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_LOGIC_RUNNER),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -5517,10 +5518,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_EDIT, workspaceId, suggestionId, editedPrompt),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
-
-  // Citation Engine
-  getCitationsForTask: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CITATION_GET_FOR_TASK, taskId),
 
   // Event Triggers
   listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
@@ -8497,6 +8494,8 @@ export interface ElectronAPI {
     hostBackground?: string;
     designLanguage: boolean;
   }) => Promise<{ url: string }>;
+  /** Desktop only: the sandboxed page that runs answer-surface logic in workers. */
+  getAnswerSurfaceLogicRunner?: () => Promise<{ url: string }>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

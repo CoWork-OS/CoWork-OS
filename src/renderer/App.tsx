@@ -1138,6 +1138,15 @@ const SelectedTaskWorkspaceView = memo(
     const closeSpawnedAgentSidebar = useCallback(() => {
       setSpawnedAgentSidebar(null);
     }, []);
+    // The Sub Agents section lives in the right panel, which only mounts when no other side
+    // panel is open. Close those so the request lands now, not when they are closed later.
+    const viewSubAgents = useCallback(() => {
+      setSpreadsheetArtifact(null);
+      setBrowserWorkbench(null);
+      setSpawnedAgentSidebar(null);
+      if (sideChat) onCloseSideChat();
+      onViewSubAgents();
+    }, [onCloseSideChat, onViewSubAgents, sideChat]);
     const selectSpawnedAgentSidebarTask = useCallback((taskId: string) => {
       setSpawnedAgentSidebar({ taskId });
     }, []);
@@ -1785,7 +1794,7 @@ const SelectedTaskWorkspaceView = memo(
                 onDismissInputRequest={onDismissInputRequest}
                 onOpenBrowserView={canUseInteractiveBrowser ? onOpenBrowserView : undefined}
                 onViewTaskOutputs={onViewTaskOutputs}
-                onViewSubAgents={onViewSubAgents}
+                onViewSubAgents={viewSubAgents}
                 onTasksChanged={onTasksChanged}
                 selectedModel={selectedModel}
                 selectedProvider={selectedProvider}
@@ -5631,12 +5640,15 @@ export function App() {
       return;
     }
     if (!window.electronAPI?.getTaskEvents) return;
+    // A load still running for a previous parent must not overwrite the new parent's events.
+    let cancelled = false;
 
     const loadChildHistoricalEvents = async () => {
       try {
         const allEvents: TaskEvent[] = [];
         for (const child of childTasks) {
           const evts = await window.electronAPI.getTaskEvents(child.id);
+          if (cancelled) return;
           allEvents.push(...evts);
         }
         allEvents.sort((a, b) => a.timestamp - b.timestamp);
@@ -5649,7 +5661,7 @@ export function App() {
           capTaskEvents(mergeUniqueTaskEvents([], allEvents), MAX_RENDERER_CHILD_EVENTS),
         );
       } catch (error) {
-        console.error("Failed to load child task events:", error);
+        if (!cancelled) console.error("Failed to load child task events:", error);
       }
     };
 
@@ -5678,6 +5690,7 @@ export function App() {
     }
 
     return () => {
+      cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
     };
     // Re-load when child tasks change (new children appear)

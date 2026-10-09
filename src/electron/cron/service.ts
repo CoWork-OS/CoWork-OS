@@ -36,6 +36,11 @@ import {
 } from "./outcome-counts";
 import { computeNextRunAtMs, validateCronExpression, validateCronTimeZone } from "./schedule";
 import { CronWebhookServer } from "./webhook";
+import {
+  getRetiredCronJobReason,
+  getRetiredDeliveryReason,
+  isRetiredDeliveryChannelType,
+} from "./retired-jobs";
 import { createLogger } from "../utils/logger";
 
 const cronLogger = createLogger("CronService");
@@ -525,6 +530,12 @@ export class CronService {
 
       const job = store.jobs[index];
       const wasEnabled = job.enabled;
+      const retiredReason = getRetiredCronJobReason({
+        taskPrompt: patch.taskPrompt ?? job.taskPrompt,
+      });
+      if (retiredReason && (patch.enabled ?? job.enabled)) {
+        return { ok: false, error: retiredReason };
+      }
       let proposedSchedule = patch.schedule ?? job.schedule;
       const scheduleWillBeActivated =
         patch.schedule !== undefined || (!wasEnabled && patch.enabled === true);
@@ -647,6 +658,11 @@ export class CronService {
 
       if (!job.enabled && mode !== "force") {
         return { ok: true, ran: false, reason: "disabled" };
+      }
+
+      const retiredReason = getRetiredCronJobReason(job);
+      if (retiredReason) {
+        return { ok: false, error: retiredReason };
       }
 
       if (this.state.runningJobIds.has(job.id)) {
@@ -920,9 +936,52 @@ export class CronService {
     return true;
   }
 
+  /**
+   * Scheduled tasks that delivered to a discontinued channel (Twitch, X) keep
+   * running, but their delivery is turned off so every run does not fail to send.
+   * Queued sends to those channels are dropped. Idempotent across restarts.
+   */
+  private detachRetiredDeliveries(nowMs: number): void {
+    const { log } = this.getContext();
+    const store = this.ensureStore();
+
+    for (const job of store.jobs) {
+      const channelType = job.delivery?.channelType;
+      if (!job.delivery || !channelType || !isRetiredDeliveryChannelType(channelType)) continue;
+      // Clear the target so re-enabling delivery asks for a supported channel.
+      const delivery = { ...job.delivery, enabled: false };
+      delete delivery.channelType;
+      delete delivery.channelDbId;
+      delete delivery.channelId;
+      job.delivery = delivery;
+      job.updatedAtMs = nowMs;
+      job.state.lastError = getRetiredDeliveryReason(channelType);
+      log.warn(`Turned off delivery for cron job "${job.name}": ${channelType} was discontinued`);
+    }
+
+    const outbox = store.outbox ?? [];
+    const kept = outbox.filter((entry) => !isRetiredDeliveryChannelType(entry.channelType));
+    if (kept.length === outbox.length) return;
+    for (const entry of outbox) {
+      if (entry.state !== "queued" || !isRetiredDeliveryChannelType(entry.channelType)) continue;
+      const job = store.jobs.find((candidate) => candidate.id === entry.jobId);
+      const history = job?.state.runHistory?.find((h) => h.runAtMs === entry.runAtMs);
+      if (history) {
+        history.deliveryStatus = "skipped";
+        history.deliverableStatus = "none";
+        history.deliveryError = getRetiredDeliveryReason(entry.channelType);
+      }
+    }
+    store.outbox = kept;
+    log.info(
+      `Dropped ${outbox.length - kept.length} cron outbox entries for discontinued channels`,
+    );
+  }
+
   private async reconcileLoadedJobs(nowMs: number): Promise<void> {
     const { log } = this.getContext();
     const store = this.ensureStore();
+    this.detachRetiredDeliveries(nowMs);
 
     for (const job of [...store.jobs]) {
       if (await this.reconcilePersistedTaskOutcome(job, nowMs)) continue;
@@ -981,6 +1040,15 @@ export class CronService {
           },
           job.maxHistoryEntries ?? this.state.deps.maxHistoryEntries,
         );
+      }
+
+      const retiredReason = job.enabled ? getRetiredCronJobReason(job) : null;
+      if (retiredReason) {
+        job.enabled = false;
+        job.updatedAtMs = nowMs;
+        job.state.lastStatus = "needs_user_action";
+        job.state.lastError = retiredReason;
+        log.warn(`Disabled cron job "${job.name}": ${retiredReason}`);
       }
 
       if (!job.enabled) {

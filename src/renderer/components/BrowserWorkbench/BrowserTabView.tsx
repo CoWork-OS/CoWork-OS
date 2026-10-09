@@ -36,8 +36,11 @@ type BrowserTabViewProps = {
   onStatus?: (tabId: string, status: { url: string; title: string }) => void;
   onGuardFailed?: (tabId: string) => void;
   registerHandle: (tabId: string, handle: BrowserTabHandle | null) => void;
-  /** Ask the main process whether a URL the user chose may load (and allow local dev servers). */
-  checkUserNavigation: (tabId: string, url: string) => Promise<boolean>;
+  /**
+   * Ask the main process whether a URL the user chose may load (and allow local
+   * dev servers). A block is shown on the tab only while `isCurrent` holds.
+   */
+  checkUserNavigation: (tabId: string, url: string, isCurrent?: () => boolean) => Promise<boolean>;
   onFindResult?: (tabId: string, result: BrowserFindResult) => void;
   children?: ReactNode;
 };
@@ -81,6 +84,8 @@ export function BrowserTabView({
   const registeredWebContentsIdRef = useRef<number | null>(null);
   const guardedRef = useRef(false);
   const pendingUrlRef = useRef<string>("");
+  /** Bumped by every navigation request, so a slower, older one never overrides it. */
+  const navigationSeqRef = useRef(0);
   const activeRef = useRef(active);
   const tabRef = useRef(tab);
   const [srcUrl, setSrcUrl] = useState<string | null>(null);
@@ -104,8 +109,11 @@ export function BrowserTabView({
   const loadUrl = useCallback(
     async (url: string, fromUser: boolean) => {
       if (!url || url === "about:blank") return;
+      const seq = ++navigationSeqRef.current;
+      const isCurrent = () => navigationSeqRef.current === seq;
       onUpdate(tab.id, { blocked: undefined, loadError: undefined, crashed: undefined });
-      if (fromUser && !(await checkUserNavigation(tab.id, url))) return;
+      if (fromUser && !(await checkUserNavigation(tab.id, url, isCurrent))) return;
+      if (!isCurrent()) return;
       if (!guardedRef.current) {
         pendingUrlRef.current = url;
         return;
@@ -149,10 +157,43 @@ export function BrowserTabView({
     [],
   );
 
+  const updateHistory = useCallback(() => {
+    const webview = webviewRef.current;
+    try {
+      onUpdate(tab.id, {
+        canGoBack: Boolean(webview?.canGoBack?.()),
+        canGoForward: Boolean(webview?.canGoForward?.()),
+      });
+    } catch {
+      // History is unavailable while the guest attaches.
+    }
+  }, [onUpdate, tab.id]);
+
+  /** The http(s) page the webview has loaded, if any (a blocked navigation never replaces it). */
+  const getLoadedPageUrl = useCallback((): string => {
+    if (!guardedRef.current) return "";
+    try {
+      const url = String(webviewRef.current?.getURL?.() || "");
+      return /^https?:\/\//i.test(url) ? url : "";
+    } catch {
+      return "";
+    }
+  }, []);
+
   useEffect(() => {
     registerHandle(tab.id, {
       navigate: (url) => void loadUrl(url, true),
-      goBack: () => runCommand("goBack"),
+      goBack: () => {
+        // A blocked navigation added no history entry: Back returns to the page
+        // still loaded under the notice instead of skipping past it.
+        const loadedUrl = tabRef.current.blocked ? getLoadedPageUrl() : "";
+        if (loadedUrl) {
+          onUpdate(tab.id, { url: loadedUrl, blocked: undefined });
+          updateHistory();
+          return;
+        }
+        runCommand("goBack");
+      },
       goForward: () => runCommand("goForward"),
       reload: () => runCommand("reload"),
       stop: () => runCommand("stop"),
@@ -192,7 +233,17 @@ export function BrowserTabView({
       },
     });
     return () => registerHandle(tab.id, null);
-  }, [applyZoom, getWebContentsId, loadUrl, onUpdate, registerHandle, runCommand, tab.id]);
+  }, [
+    applyZoom,
+    getLoadedPageUrl,
+    getWebContentsId,
+    loadUrl,
+    onUpdate,
+    registerHandle,
+    runCommand,
+    tab.id,
+    updateHistory,
+  ]);
 
   const reportStatus = useCallback(() => {
     const webview = webviewRef.current;
@@ -211,18 +262,6 @@ export function BrowserTabView({
     });
     onStatus?.(tab.id, { url, title });
   }, [getWebContentsId, onStatus, sessionId, tab.id, taskId]);
-
-  const updateHistory = useCallback(() => {
-    const webview = webviewRef.current;
-    try {
-      onUpdate(tab.id, {
-        canGoBack: Boolean(webview?.canGoBack?.()),
-        canGoForward: Boolean(webview?.canGoForward?.()),
-      });
-    } catch {
-      // History is unavailable while the guest attaches.
-    }
-  }, [onUpdate, tab.id]);
 
   useEffect(() => {
     const webview = webviewRef.current;
@@ -250,18 +289,28 @@ export function BrowserTabView({
       }
       if (webviewRef.current !== webview) return;
       guardedRef.current = true;
-      const target = pendingUrlRef.current || tabRef.current.initialUrl;
+      const pendingUrl = pendingUrlRef.current;
       pendingUrlRef.current = "";
+      // A URL chosen while the page registered was checked already and wins.
+      if (pendingUrl) {
+        setSrcUrl(pendingUrl);
+        return;
+      }
+      // A navigation still being checked now loads by itself once allowed.
+      const seq = navigationSeqRef.current;
+      if (seq > 0) return;
+      const isCurrent = () => navigationSeqRef.current === seq;
+      const target = tabRef.current.initialUrl;
       if (!target) {
         setSrcUrl("about:blank");
         return;
       }
       // Agent and page-opened tabs were checked by the main process already.
-      if (!tabRef.current.openedByAgent && !(await checkUserNavigation(tab.id, target))) {
-        setSrcUrl("about:blank");
-        return;
-      }
-      setSrcUrl(target);
+      const allowed =
+        tabRef.current.openedByAgent || (await checkUserNavigation(tab.id, target, isCurrent));
+      // The user navigated while the initial URL was checked: keep their page.
+      if (!isCurrent()) return;
+      setSrcUrl(allowed ? target : "about:blank");
     };
 
     const handleDomReady = () => {
@@ -411,6 +460,12 @@ export function BrowserTabView({
     // Registration is per mounted webview; tab fields are read through tabRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, sessionId, tab.id]);
+
+  // Back is available from a block whenever a page is still loaded under it.
+  const blockedUrl = tab.blocked?.url;
+  useEffect(() => {
+    if (blockedUrl && getLoadedPageUrl()) onUpdate(tab.id, { canGoBack: true });
+  }, [blockedUrl, getLoadedPageUrl, onUpdate, tab.id]);
 
   useEffect(() => {
     const webview = webviewRef.current;

@@ -18,6 +18,10 @@
   user-select: none;
 }
 
+.image-lightbox:focus {
+  outline: none;
+}
+
 @keyframes image-lightbox-fade {
   from {
     opacity: 0;

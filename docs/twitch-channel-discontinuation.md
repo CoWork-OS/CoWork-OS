@@ -6,6 +6,6 @@ The Twitch adapter connected CoWork OS to Twitch IRC chat over WebSocket. Live-s
 
 This decision removes the Twitch adapter and client, the **Settings > More Channels > Twitch** page, the `addTwitchChannel` gateway, IPC and browser-host paths, the Twitch channel persona, the connector-inventory row and the Twitch channel guide.
 
-**Upgrade data handling:** An existing Twitch channel row in the gateway database is no longer loaded or connected. Remove it from **Settings > Channels** if it is still listed; its OAuth token is stored only in that row and leaves with it. Revoke the token in your Twitch account settings if you no longer use the bot.
+**Upgrade data handling:** On first start of a release containing this change, CoWork OS deletes any leftover Twitch channel from the gateway database: its configuration and stored OAuth token, its pairings and sessions, and its channel message log. Tasks that Twitch chat created are ordinary tasks and stay in your task history. A scheduled task that delivered its results to Twitch keeps running on its schedule with delivery turned off, and shows a note saying why; choose another channel to receive its results. CoWork OS can no longer revoke the bot's token, so revoke it yourself on twitch.tv under **Settings > Connections** (or the Twitch developer console if you registered your own app).
 
 Historical release notes describe what shipped at the time and are superseded by this decision for current product availability.

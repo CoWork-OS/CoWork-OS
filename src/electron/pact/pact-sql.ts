@@ -1246,9 +1246,12 @@ export class PactStore {
         "SELECT COUNT(*) AS n FROM pact_authorization_requests WHERE principal_id = ? AND state = 'pending'",
       )
       .get(principalId) as { n: number };
+    // Grants are marked expired only when next used; a lapsed one is not connected.
     const grants = this.db
-      .prepare("SELECT COUNT(*) AS n FROM pact_grants WHERE principal_id = ? AND state = 'active'")
-      .get(principalId) as { n: number };
+      .prepare(
+        "SELECT COUNT(*) AS n FROM pact_grants WHERE principal_id = ? AND state = 'active' AND (grant_expires_at IS NULL OR grant_expires_at > ?)",
+      )
+      .get(principalId, this.now()) as { n: number };
     return { pendingAuthorizations: Number(pending.n), activeGrants: Number(grants.n) };
   }
 }

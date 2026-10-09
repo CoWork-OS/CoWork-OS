@@ -33,6 +33,25 @@ const ZOOM_STEP = 1.25;
 
 const clampScale = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Index of the element Tab should move to so focus stays inside the dialog, or null when the
+ * browser's default order already does. `currentIndex` is -1 when focus is outside the list.
+ */
+export function resolveFocusTrapIndex(
+  count: number,
+  currentIndex: number,
+  backwards: boolean,
+): number | null {
+  if (count === 0) return null;
+  if (currentIndex < 0) return backwards ? count - 1 : 0;
+  if (backwards && currentIndex === 0) return count - 1;
+  if (!backwards && currentIndex === count - 1) return 0;
+  return null;
+}
+
 /**
  * Full-viewport image viewer: dimmed, blurred backdrop with the image floating
  * borderless in the middle. Supports wheel/pinch zoom toward the cursor,
@@ -48,6 +67,7 @@ export function ImageLightbox({
   onShowInFinder,
   onOpenExternal,
 }: ImageLightboxProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; origin: Offset; moved: boolean } | null>(
@@ -79,6 +99,16 @@ export function ImageLightbox({
   useEffect(() => {
     return () => {
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  // Move focus into the dialog while it is open and hand it back to the opener on close.
+  useEffect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    rootRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     };
   }, []);
 
@@ -119,7 +149,28 @@ export function ImageLightbox({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const root = rootRef.current;
+        if (!root) return;
+        const focusables = Array.from(
+          root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter((element) => element.getClientRects().length > 0);
+        if (focusables.length === 0) {
+          event.preventDefault();
+          root.focus({ preventScroll: true });
+          return;
+        }
+        const active = document.activeElement as HTMLElement | null;
+        const next = resolveFocusTrapIndex(
+          focusables.length,
+          active ? focusables.indexOf(active) : -1,
+          event.shiftKey,
+        );
+        if (next !== null) {
+          event.preventDefault();
+          focusables[next].focus();
+        }
+      } else if (event.key === "Escape") {
         event.preventDefault();
         onClose();
       } else if (event.key === "+" || event.key === "=") {
@@ -215,11 +266,17 @@ export function ImageLightbox({
 
   return createPortal(
     <div
+      ref={rootRef}
       className="image-lightbox"
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      onClick={onClose}
+      tabIndex={-1}
+      onClick={(event) => {
+        // The portal still bubbles through the React tree, e.g. to a markdown link around the image.
+        event.stopPropagation();
+        onClose();
+      }}
     >
       <div className="image-lightbox-topbar" onClick={(event) => event.stopPropagation()}>
         <div className="image-lightbox-title">

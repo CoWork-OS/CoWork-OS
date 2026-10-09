@@ -11,6 +11,24 @@ export type BrowserPermissionPromptRequest = {
 
 export type BrowserPermissionChoice = "allow-once" | "allow-always" | "block" | "dismiss";
 
+/** How often open prompts are checked against the main process while any are shown. */
+export const PERMISSION_PROMPT_SYNC_MS = 5_000;
+
+/**
+ * Prompts still worth showing: the ones the main process is still waiting on
+ * (it drops them on its timeout or when the page's process goes away), minus
+ * those already answered here and those of tabs that no longer exist.
+ */
+export function livePermissionRequests<T extends BrowserPermissionPromptRequest>(
+  pending: readonly T[],
+  answeredRequestIds: ReadonlySet<string>,
+  tabIds: ReadonlySet<string>,
+): T[] {
+  return pending.filter(
+    (request) => !answeredRequestIds.has(request.requestId) && tabIds.has(request.tabId),
+  );
+}
+
 const PERMISSION_LABELS: Record<string, string> = {
   camera: "use your camera",
   microphone: "use your microphone",

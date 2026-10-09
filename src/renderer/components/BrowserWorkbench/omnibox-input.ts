@@ -51,11 +51,55 @@ export type OmniboxIntent =
   | { kind: "unsupported"; scheme: string }
   | { kind: "empty" };
 
-const LOCAL_HOST_PATTERN = /^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d{1,5})?(\/.*)?$/i;
-const IPV4_PATTERN = /^(\d{1,3})(\.\d{1,3}){3}(:\d{1,5})?(\/.*)?$/;
+const LOCAL_HOST_PATTERN = /^(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?([/?#].*)?$/i;
+// A bare IPv6 loopback has no room for a port; the URL needs it in brackets.
+const BARE_IPV6_LOOPBACK_PATTERN = /^::1([/?#].*)?$/;
+const IPV4_PATTERN = /^(\d{1,3})(\.\d{1,3}){3}(:\d{1,5})?([/?#].*)?$/;
 // host.tld[:port][/...] with a letter-only TLD of 2+ chars (or an IDN in punycode).
 const HOSTNAME_PATTERN =
   /^(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:[\p{L}]{2,63}|xn--[a-z0-9-]{2,59})\.?(:\d{1,5})?([/?#].*)?$/iu;
+// File extensions that are not top-level domains: "package.json" is a search, not a site.
+const FILE_EXTENSION_SUFFIXES = new Set([
+  "cjs",
+  "conf",
+  "csv",
+  "css",
+  "dmg",
+  "docx",
+  "exe",
+  "gif",
+  "htm",
+  "html",
+  "ini",
+  "jpeg",
+  "jpg",
+  "js",
+  "json",
+  "jsx",
+  "lock",
+  "log",
+  "mjs",
+  "pdf",
+  "png",
+  "pptx",
+  "scss",
+  "svg",
+  "toml",
+  "ts",
+  "tsx",
+  "txt",
+  "webp",
+  "xlsx",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+function hasFileExtensionSuffix(input: string): boolean {
+  const host = input.split(/[:/?#]/)[0].replace(/\.$/, "");
+  const suffix = host.slice(host.lastIndexOf(".") + 1).toLowerCase();
+  return FILE_EXTENSION_SUFFIXES.has(suffix);
+}
 
 /**
  * Parse address bar text. URL-looking input navigates (adding http:// for
@@ -85,17 +129,21 @@ export function parseOmniboxInput(
 
   if (!/\s/.test(input)) {
     if (LOCAL_HOST_PATTERN.test(input)) return { kind: "url", url: safeHref(`http://${input}`) };
+    const bareLoopback = BARE_IPV6_LOOPBACK_PATTERN.exec(input);
+    if (bareLoopback) return { kind: "url", url: safeHref(`http://[::1]${bareLoopback[1] || ""}`) };
     const ipv4 = IPV4_PATTERN.exec(input);
     if (
       ipv4 &&
       input
-        .split(/[:/]/)[0]
+        .split(/[:/?#]/)[0]
         .split(".")
         .every((part) => Number(part) <= 255)
     ) {
       return { kind: "url", url: safeHref(`http://${input}`) };
     }
-    if (HOSTNAME_PATTERN.test(input)) return { kind: "url", url: safeHref(`https://${input}`) };
+    if (HOSTNAME_PATTERN.test(input) && !hasFileExtensionSuffix(input)) {
+      return { kind: "url", url: safeHref(`https://${input}`) };
+    }
   }
   return { kind: "search", query: input, url: buildSearchUrl(input, engine) };
 }

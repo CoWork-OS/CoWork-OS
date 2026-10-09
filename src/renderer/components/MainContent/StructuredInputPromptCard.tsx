@@ -36,6 +36,12 @@ interface StructuredInputPromptCardProps {
   onDismiss: () => void;
 }
 
+/** True when a key event comes from inside an open modal dialog, which owns its own keys. */
+export function keyEventFromModalDialog(target: EventTarget | null): boolean {
+  const element = target as Element | null;
+  return typeof element?.closest === "function" && element.closest('[aria-modal="true"]') !== null;
+}
+
 export function StructuredInputPromptCard({
   request,
   onSubmit,
@@ -189,6 +195,8 @@ export function StructuredInputPromptCard({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!questions.length || !activeQuestion) return;
+      // A modal on top (e.g. the image lightbox) handles Esc and the other shortcuts itself.
+      if (keyEventFromModalDialog(event.target)) return;
 
       if (event.key === "Escape") {
         event.preventDefault();

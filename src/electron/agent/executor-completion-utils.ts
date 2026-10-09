@@ -758,7 +758,7 @@ export function responseHasDecisionSignal(text: string): boolean {
     /\bworth(?:\s+it)?\b/.test(normalized) ||
     /\bnot worth\b/.test(normalized) ||
     /\bskip\b/.test(normalized) ||
-    /\b(?:result|verdict|status)\s*:\s*\*{0,2}`?(?:green|degraded|broken|passed|failed)`?\*{0,2}\b/.test(
+    /\b(?:result|verdict|status)\s*:\s*\*{0,2}\s*`?(?:green|degraded|broken|passed|failed|pass|fail|partial)`?\*{0,2}\b/.test(
       normalized,
     ) ||
     /\bfinal\s+build-health\s+verdict\b/.test(normalized)

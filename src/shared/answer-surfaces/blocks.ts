@@ -9,6 +9,9 @@ import {
 } from "./schema";
 import {
   buildSurfaceScope,
+  resolveSurfaceLabels,
+  resolveSurfaceRows,
+  resolveSurfaceValues,
   formatControlValue,
   formatSurfaceValue,
   interpolateText,
@@ -189,7 +192,10 @@ function plainLines(
     case "table": {
       const header = `| ${node.columns.join(" | ")} |`;
       const divider = `| ${node.columns.map(() => "---").join(" | ")} |`;
-      const rows = node.rows.map(
+      // Plain text has no logic run, so bound rows are left out rather than shown blank.
+      const tableRows = resolveSurfaceRows(node.rows, {});
+      if (tableRows.length === 0) return node.caption ? [text(node.caption)] : [];
+      const rows = tableRows.map(
         (row) =>
           `| ${node.columns.map((_column, index) => (row[index] === undefined ? "" : formatSurfaceValue(row[index], scope))).join(" | ")} |`,
       );
@@ -204,10 +210,11 @@ function plainLines(
       return node.title ? [`**${node.title}**`, ...lines] : lines;
     }
     case "chart": {
-      const lines = node.labels.map((labelText, index) => {
+      const labels = resolveSurfaceLabels(node.labels, {});
+      const lines = labels.map((labelText, index) => {
         const values = node.series
           .map((series) => {
-            const value = series.values[index];
+            const value = resolveSurfaceValues(series.values, {})[index];
             const formatted = value === undefined ? "—" : formatSurfaceValue(value, scope);
             return node.series.length > 1 ? `${series.name} ${formatted}` : formatted;
           })

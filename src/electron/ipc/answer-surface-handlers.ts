@@ -9,6 +9,7 @@ import {
   type AnswerSurfaceIpcDeps,
 } from "../answer-surfaces/answer-surface-operations";
 import { registerHtmlSurface } from "../answer-surfaces/html-surface-document";
+import { LOGIC_RUNNER_HTML } from "../../shared/answer-surfaces/logic";
 import { createWebPreviewUrl } from "../media";
 import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 
@@ -27,12 +28,25 @@ export function setupAnswerSurfaceHandlers(deps: AnswerSurfaceIpcDeps): void {
   rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML, RATE_LIMIT_CONFIGS.frequent);
   ipcMain.handle(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML, (event, raw: unknown) => {
     // Only the app's own top-level renderer registers surfaces, never a framed page.
-    if (event.senderFrame && event.senderFrame.parent !== null) {
+    if (!event.senderFrame || event.senderFrame.parent !== null) {
       throw new Error("HTML surfaces can only be registered by the app window");
     }
     if (!rateLimiter.check(IPC_CHANNELS.ANSWER_SURFACE_REGISTER_HTML)) {
       throw new Error("Rate limit exceeded. Try again shortly.");
     }
     return registerHtmlSurface(raw, createWebPreviewUrl);
+  });
+
+  // The runner page for surface logic is fixed app code (no renderer input); the model's
+  // code reaches it only over postMessage and runs in workers inside that sandbox.
+  rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_LOGIC_RUNNER, RATE_LIMIT_CONFIGS.frequent);
+  ipcMain.handle(IPC_CHANNELS.ANSWER_SURFACE_LOGIC_RUNNER, (event) => {
+    if (!event.senderFrame || event.senderFrame.parent !== null) {
+      throw new Error("The logic runner is only available to the app window");
+    }
+    if (!rateLimiter.check(IPC_CHANNELS.ANSWER_SURFACE_LOGIC_RUNNER)) {
+      throw new Error("Rate limit exceeded. Try again shortly.");
+    }
+    return { url: createWebPreviewUrl(LOGIC_RUNNER_HTML) };
   });
 }

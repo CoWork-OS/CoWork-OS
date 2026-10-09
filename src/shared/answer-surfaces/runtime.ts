@@ -1,16 +1,68 @@
 import { evaluateExpression, type ExpressionValue } from "./expression";
+import type { LogicCell, SurfaceLogicOutputs } from "./logic";
 import {
   initialSurfaceState,
   interpolationExpressions,
   isContainerNode,
+  isSurfaceBind,
   replaceInterpolations,
   walkSurface,
+  type AnswerSurfaceBind,
   type AnswerSurfaceSpec,
   type AnswerSurfaceState,
   type AnswerSurfaceValue,
 } from "./schema";
 
 export type SurfaceScope = Record<string, ExpressionValue>;
+/** Lists and tables from the surface's logic, by output name. */
+export type SurfaceData = SurfaceLogicOutputs["data"];
+
+/** A logic cell for display. Strings come back literal: `{{…}}` inside is not a formula. */
+function cellValue(cell: LogicCell | undefined): AnswerSurfaceValue | undefined {
+  if (cell === null || cell === undefined) return undefined;
+  if (typeof cell === "number") return cell;
+  return { value: typeof cell === "boolean" ? (cell ? "Yes" : "No") : cell, literal: true };
+}
+
+function cellText(cell: LogicCell | LogicCell[] | undefined): string {
+  if (cell === null || cell === undefined || Array.isArray(cell)) return "";
+  return typeof cell === "boolean" ? (cell ? "Yes" : "No") : String(cell);
+}
+
+function boundList(data: SurfaceData, name: string): Array<LogicCell | LogicCell[]> {
+  return Object.prototype.hasOwnProperty.call(data, name) ? data[name] : [];
+}
+
+/** Chart labels, from the block or from a bound logic output. */
+export function resolveSurfaceLabels(
+  labels: string[] | AnswerSurfaceBind,
+  data: SurfaceData,
+): string[] {
+  if (!isSurfaceBind(labels)) return labels;
+  return boundList(data, labels.bind).map(cellText);
+}
+
+/** A series' values; gaps (null) stay undefined so charts leave them out. */
+export function resolveSurfaceValues(
+  values: AnswerSurfaceValue[] | AnswerSurfaceBind,
+  data: SurfaceData,
+): Array<AnswerSurfaceValue | undefined> {
+  if (!isSurfaceBind(values)) return values;
+  return boundList(data, values.bind).map((cell) =>
+    Array.isArray(cell) ? undefined : cellValue(cell),
+  );
+}
+
+/** Table rows; a bound output must be a list of rows. */
+export function resolveSurfaceRows(
+  rows: AnswerSurfaceValue[][] | AnswerSurfaceBind,
+  data: SurfaceData,
+): AnswerSurfaceValue[][] {
+  if (!isSurfaceBind(rows)) return rows;
+  return boundList(data, rows.bind)
+    .filter((row): row is LogicCell[] => Array.isArray(row))
+    .map((row) => row.map((cell) => cellValue(cell) ?? ""));
+}
 
 /**
  * The values formulas can read: every control's current value, a checklist's count of
@@ -20,10 +72,15 @@ export type SurfaceScope = Record<string, ExpressionValue>;
 export function buildSurfaceScope(
   spec: AnswerSurfaceSpec,
   state: AnswerSurfaceState,
+  logicScope: SurfaceScope = {},
 ): SurfaceScope {
   const scope: SurfaceScope = {};
   for (const [id, value] of Object.entries(state)) {
     scope[id] = Array.isArray(value) ? value.length : value;
+  }
+  // Logic outputs come after the controls they are computed from, before `computed`.
+  for (const name of spec.logic?.outputs ?? []) {
+    if (Object.prototype.hasOwnProperty.call(logicScope, name)) scope[name] = logicScope[name];
   }
   walkSurface(spec.root, (node) => {
     if (!isContainerNode(node)) return;
@@ -75,7 +132,9 @@ export function formatSurfaceValue(value: AnswerSurfaceValue, scope: SurfaceScop
   if (raw === null) return "—";
   const text =
     typeof raw === "string"
-      ? interpolateText(raw, scope)
+      ? value.literal
+        ? raw
+        : interpolateText(raw, scope)
       : formatExpressionValue(raw, value.decimals);
   return joinUnit(text, value.unit, value.prefix);
 }
@@ -156,8 +215,11 @@ export function formatChartNumber(
  * typo'd function, a NaN). The renderer shows "—" for these, so tests and evals use this
  * to catch answers whose headline number would be blank.
  */
-export function lintAnswerSurface(spec: AnswerSurfaceSpec): string[] {
-  const scope = buildSurfaceScope(spec, initialSurfaceState(spec));
+export function lintAnswerSurface(
+  spec: AnswerSurfaceSpec,
+  logicScope: SurfaceScope = {},
+): string[] {
+  const scope = buildSurfaceScope(spec, initialSurfaceState(spec), logicScope);
   const problems: string[] = [];
   const check = (value: AnswerSurfaceValue | undefined) => {
     if (value === undefined) return;
@@ -188,10 +250,12 @@ export function lintAnswerSurface(spec: AnswerSurfaceSpec): string[] {
         for (const item of node.items) check(item.value);
         break;
       case "table":
-        for (const row of node.rows) row.forEach(check);
+        if (!isSurfaceBind(node.rows)) for (const row of node.rows) row.forEach(check);
         break;
       case "chart":
-        for (const series of node.series) series.values.forEach(check);
+        for (const series of node.series) {
+          if (!isSurfaceBind(series.values)) series.values.forEach(check);
+        }
         break;
       default:
         break;

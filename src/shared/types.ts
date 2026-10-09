@@ -8611,6 +8611,7 @@ export const IPC_CHANNELS = {
   ANSWER_SURFACE_SAVE_STATE: "answerSurfaces:saveState",
   ANSWER_SURFACE_RESOLVE_IMAGES: "answerSurfaces:resolveImages",
   ANSWER_SURFACE_REGISTER_HTML: "answerSurfaces:registerHtml",
+  ANSWER_SURFACE_LOGIC_RUNNER: "answerSurfaces:logicRunner",
 
   // Memory folder: the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
   MEMORY_REPO_STATUS: "memoryRepo:status",

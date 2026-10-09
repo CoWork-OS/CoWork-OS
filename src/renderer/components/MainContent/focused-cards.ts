@@ -1,31 +1,9 @@
-import type { ExecutionMode, TaskDomain } from "../../../shared/types";
-import {
-  MessageCircle,
-  Play,
-  ListTodo,
-  Search,
-  Bug,
-  ShieldCheck,
-  Sparkles,
-  Code,
-  BookOpen,
-  Settings,
-  PenLine,
-  LayoutGrid,
-  Film,
-} from "lucide-react";
+import type { TaskDomain } from "../../../shared/types";
+import { Sparkles, Code, BookOpen, Settings, PenLine, LayoutGrid, Film } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { FocusedCard } from "./main-content-types";
 import { LLM_WIKI_GUI_PROMPT, LLM_WIKI_EXPLORE_GUI_PROMPT } from "../../../shared/starter-missions";
 
-export const EXECUTION_MODE_ORDER: ExecutionMode[] = [
-  "chat",
-  "execute",
-  "plan",
-  "analyze",
-  "debug",
-  "verified",
-];
 export const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "auto",
   "code",
@@ -35,22 +13,6 @@ export const TASK_DOMAIN_ORDER: TaskDomain[] = [
   "general",
   "media",
 ];
-export const EXECUTION_MODE_LABEL: Record<ExecutionMode, string> = {
-  chat: "Chat",
-  execute: "Execute",
-  plan: "Plan",
-  analyze: "Analyze",
-  debug: "Debug",
-  verified: "Verified",
-};
-export const EXECUTION_MODE_HINT: Record<ExecutionMode, string> = {
-  chat: "Direct chat, no tools",
-  execute: "Full task execution with tools",
-  plan: "Planning mode, no mutating tools",
-  analyze: "Read-only analysis mode",
-  debug: "Evidence-first debugging: instrument, reproduce, fix, clean up",
-  verified: "Execute with verification after each step",
-};
 export const TASK_DOMAIN_LABEL: Record<TaskDomain, string> = {
   auto: "Auto",
   code: "Code",
@@ -68,14 +30,6 @@ export const TASK_DOMAIN_HINT: Record<TaskDomain, string> = {
   writing: "Optimized for writing and editing output",
   general: "Balanced behavior for mixed tasks",
   media: "Video generation mode — uses video tools strongly",
-};
-export const EXECUTION_MODE_ICON: Record<ExecutionMode, LucideIcon> = {
-  chat: MessageCircle,
-  execute: Play,
-  plan: ListTodo,
-  analyze: Search,
-  debug: Bug,
-  verified: ShieldCheck,
 };
 export const TASK_DOMAIN_ICON: Record<TaskDomain, LucideIcon> = {
   auto: Sparkles,

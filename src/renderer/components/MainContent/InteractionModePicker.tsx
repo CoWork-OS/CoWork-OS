@@ -1,14 +1,9 @@
-import { useState } from "react";
-import { MessageCircle, Sparkles } from "lucide-react";
+import { ListTodo, MessageCircle, Sparkles } from "lucide-react";
 import type { InteractionModeSelection } from "../../../shared/interaction-mode";
-import { EXECUTION_MODE_LABEL, EXECUTION_MODE_HINT, EXECUTION_MODE_ORDER } from "./focused-cards";
 
 export function interactionModeLabel(selection: InteractionModeSelection): string {
-  return selection.mode === "chat"
-    ? "Ask"
-    : selection.executionOverride
-      ? `Do · ${EXECUTION_MODE_LABEL[selection.executionOverride]}`
-      : "Do";
+  if (selection.mode === "chat") return "Ask";
+  return selection.executionOverride === "plan" ? "Plan" : "Do";
 }
 
 export function InteractionModePicker({
@@ -22,8 +17,10 @@ export function InteractionModePicker({
   open: boolean;
   onToggle: () => void;
 }) {
-  const [advanced, setAdvanced] = useState(false);
-  const Icon = selection.mode === "chat" ? MessageCircle : Sparkles;
+  const isDo = selection.mode === "smart" && !selection.executionOverride;
+  const isPlan = selection.mode === "smart" && selection.executionOverride === "plan";
+  const isAsk = selection.mode === "chat";
+  const Icon = isAsk ? MessageCircle : isPlan ? ListTodo : Sparkles;
   return (
     <>
       <button
@@ -42,8 +39,8 @@ export function InteractionModePicker({
           <button
             type="button"
             role="menuitemradio"
-            aria-checked={selection.mode === "smart" && !selection.executionOverride}
-            className={`input-status-mode-option ${selection.mode === "smart" && !selection.executionOverride ? "active" : ""}`}
+            aria-checked={isDo}
+            className={`input-status-mode-option ${isDo ? "active" : ""}`}
             title="Work on the task using the tools allowed by your access and approval settings"
             onClick={() => onChange({ mode: "smart" })}
           >
@@ -53,8 +50,8 @@ export function InteractionModePicker({
           <button
             type="button"
             role="menuitemradio"
-            aria-checked={selection.mode === "chat"}
-            className={`input-status-mode-option ${selection.mode === "chat" ? "active" : ""}`}
+            aria-checked={isAsk}
+            className={`input-status-mode-option ${isAsk ? "active" : ""}`}
             title="Discuss or draft using your conversation and supplied content; no external actions"
             onClick={() => onChange({ mode: "chat" })}
           >
@@ -63,27 +60,15 @@ export function InteractionModePicker({
           </button>
           <button
             type="button"
-            role="menuitem"
-            className="input-status-mode-option"
-            aria-expanded={advanced}
-            onClick={() => setAdvanced(!advanced)}
+            role="menuitemradio"
+            aria-checked={isPlan}
+            className={`input-status-mode-option ${isPlan ? "active" : ""}`}
+            title="Plan the work without mutating tools; can ask structured questions before anything runs"
+            onClick={() => onChange({ mode: "smart", executionOverride: "plan" })}
           >
-            Advanced…
+            <ListTodo size={14} aria-hidden />
+            Plan
           </button>
-          {advanced &&
-            EXECUTION_MODE_ORDER.filter((value) => value !== "chat").map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="menuitemradio"
-                title={EXECUTION_MODE_HINT[value]}
-                aria-checked={selection.mode === "smart" && selection.executionOverride === value}
-                className={`input-status-mode-option ${selection.mode === "smart" && selection.executionOverride === value ? "active" : ""}`}
-                onClick={() => onChange({ mode: "smart", executionOverride: value })}
-              >
-                {EXECUTION_MODE_LABEL[value]}
-              </button>
-            ))}
         </div>
       )}
     </>

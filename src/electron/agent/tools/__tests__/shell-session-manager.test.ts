@@ -87,6 +87,67 @@ describe("shell-session-manager", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32")(
+    "keeps the replacement shell when a stopped shell exits late",
+    async () => {
+      await mkdir(testUserDataDir, { recursive: true });
+      const manager = ShellSessionManager.getInstance();
+      const taskId = randomUUID(),
+        workspaceId = randomUUID();
+      const sessions = (
+        manager as unknown as {
+          sessions: Map<string, { info: { taskId: string }; process: unknown }>;
+        }
+      ).sessions;
+      const currentProcess = () =>
+        Array.from(sessions.values()).find((session) => session.info.taskId === taskId)?.process as
+          | import("node:child_process").ChildProcess
+          | null
+          | undefined;
+      let stoppedShell: import("node:child_process").ChildProcess | null | undefined;
+      try {
+        await expect(
+          manager.runCommand({
+            taskId,
+            workspaceId,
+            workspacePath: testUserDataDir,
+            command: "echo never-sent",
+            timeoutMs: 10000,
+            beforeExecute: vi
+              .fn()
+              .mockResolvedValueOnce(undefined)
+              .mockImplementationOnce(async () => {
+                stoppedShell = currentProcess();
+                throw new Error("responsibility revoked");
+              }),
+          }),
+        ).rejects.toThrow("responsibility revoked");
+        expect(stoppedShell).toBeTruthy();
+
+        let checks = 0;
+        const result = await manager.runCommand({
+          taskId,
+          workspaceId,
+          workspacePath: testUserDataDir,
+          command: "echo replacement-ran",
+          timeoutMs: 10000,
+          beforeExecute: async () => {
+            // The second check runs after the replacement shell is spawned and
+            // before the command is sent: deliver the stopped shell's exit here.
+            if (++checks === 2) stoppedShell!.emit("exit", null, "SIGTERM");
+          },
+        });
+
+        expect(result.usedPersistentSession).toBe(true);
+        expect(result.stdout).toBe("replacement-ran");
+      } finally {
+        const session = manager.getSessionInfo(taskId, workspaceId);
+        if (session) await manager.stopSessionById(session.id);
+        await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    },
+  );
+
   it("lets agent commands run past five minutes up to the run_command maximum", () => {
     expect(_testUtils.resolveCommandTimeoutMs("task", 20 * 60 * 1000)).toBe(20 * 60 * 1000);
     expect(_testUtils.resolveCommandTimeoutMs("task", 2 * 60 * 60 * 1000)).toBe(30 * 60 * 1000);

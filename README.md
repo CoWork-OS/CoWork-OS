@@ -27,6 +27,7 @@
 <p align="center">
   <a href="docs/getting-started.md">Getting Started</a> &middot;
   <a href="docs/composer-mentions.md">Composer Mentions</a> &middot;
+  <a href="docs/composer-predictions.md">Composer Predictions</a> &middot;
   <a href="docs/message-box-shortcuts.md">Message Box Shortcuts</a> &middot;
   <a href="docs/side-chat.md">Side Chat</a> &middot;
   <a href="docs/ask-inbox-architecture.md">Ask Inbox</a> &middot;
@@ -203,6 +204,10 @@ Generated 2026-10-09T10:29:59.024Z. These are public GitHub/npm adoption signals
 </p>
 
 ## Features
+
+### Composer predictions
+
+The empty composer can suggest your next message after a response. Press **Tab** to accept, then edit and send. Enable or disable predictions under **Settings → Appearance → Composer**; a first-use sidebar tooltip links to the setting. Prediction generation uses your selected LLM provider and consumes tokens, including suggestions you dismiss. [Composer Predictions](docs/composer-predictions.md)
 
 ### Calm interface
 

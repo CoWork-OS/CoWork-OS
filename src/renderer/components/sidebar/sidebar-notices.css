@@ -119,3 +119,35 @@
 .sidebar-notice-dismiss:hover {
   color: var(--color-text-primary);
 }
+
+.sidebar-notice-tip {
+  position: fixed;
+  z-index: 1200;
+  width: min(320px, calc(100vw - 24px));
+  padding: 18px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 14px;
+  background: var(--color-bg-elevated);
+  background: rgb(from var(--color-bg-elevated) r g b);
+  color: var(--color-text-primary);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-notice-tip h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.sidebar-notice-tip p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.sidebar-notice-tip-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

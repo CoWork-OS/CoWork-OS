@@ -1,3 +1,5 @@
+import { useComposerPrediction } from "../../hooks/useComposerPredictions";
+import { predictionRevision } from "../../../shared/composer-predictions";
 import { useFullAccessConfirmation } from "../FullAccessConfirmationDialog";
 import { createPortal } from "react-dom";
 import { BrowserProfileNotice } from "./BrowserProfileNotice";
@@ -5327,6 +5329,22 @@ function MainContentComponent({
   const isTaskWorking = useMemo(
     () => isTaskActivelyWorking(task, events, hasActiveChildren),
     [task, events, hasActiveChildren],
+  );
+
+  const composerPredictionRevision = useMemo(() => predictionRevision(rawEvents), [rawEvents]);
+  const composerPrediction = useComposerPrediction(
+    task?.id,
+    composerPredictionRevision,
+    task?.status === "completed" &&
+      !isTaskWorking &&
+      !isReplayMode &&
+      !inputValue &&
+      pendingAttachments.length === 0 &&
+      !quotedAssistantMessage &&
+      !isPreparingMessage &&
+      !isUploadingAttachments &&
+      voiceInput.state === "idle" &&
+      !talkMode.isActive,
   );
 
   // Reset wrappingUp state when task stops working or task changes
@@ -12655,7 +12673,12 @@ function MainContentComponent({
                 value={inputValue}
                 mentions={integrationMentionSpans}
                 ariaLabel="Message"
-                onChange={handleInputChange}
+                prediction={composerPrediction.prediction}
+                onDismissPrediction={composerPrediction.dismiss}
+                onChange={(...args) => {
+                  composerPrediction.dismiss();
+                  handleInputChange(...args);
+                }}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onCursorChange={handleInputCursorChange}

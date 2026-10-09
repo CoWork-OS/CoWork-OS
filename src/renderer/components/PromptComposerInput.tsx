@@ -32,6 +32,8 @@ export type PromptComposerInputHandle = {
 };
 
 type PromptComposerInputProps = {
+  prediction?: string;
+  onDismissPrediction?: () => void;
   value: string;
   mentions: IntegrationMentionSpan[];
   className: string;
@@ -530,6 +532,8 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
   function PromptComposerInput(
     {
       value,
+      prediction,
+      onDismissPrediction,
       mentions,
       className,
       placeholder,
@@ -627,7 +631,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       if (!pending) return;
       pendingSelectionRef.current = null;
       applySelection(pending.start, pending.end);
-    }, [applySelection, onContentPresenceChange, parts, resize, value.length]);
+    }, [applySelection, onContentPresenceChange, parts, prediction, resize, value.length]);
 
     // Runs after every commit: once the parent has rendered, its props are the
     // source of truth again and the DOM selection reflects the last edit.
@@ -822,6 +826,27 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       // A new key press ends the window in which the previous key's native
       // input could still arrive.
       pendingKeyboardEchoRef.current = null;
+      if (
+        !value &&
+        prediction &&
+        !event.nativeEvent.isComposing &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        if (event.key === "Tab") {
+          event.preventDefault();
+          applyTextReplacement(0, 0, prediction);
+          onDismissPrediction?.();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onDismissPrediction?.();
+          return;
+        }
+      }
       onKeyDown(event);
       if (event.defaultPrevented) return;
       if (event.nativeEvent.isComposing) return;
@@ -917,7 +942,15 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         role="textbox"
         aria-multiline="true"
         aria-label={ariaLabel}
-        data-placeholder={placeholder || ""}
+        data-placeholder={
+          !value && prediction ? `${prediction}  ⇥ Tab to accept` : placeholder || ""
+        }
+        data-has-prediction={!value && !!prediction ? "true" : undefined}
+        aria-description={
+          !value && prediction
+            ? `Suggested next message: ${prediction}. Press Tab to accept or Escape to dismiss.`
+            : undefined
+        }
         onInput={() => emitDomChange(false)}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}

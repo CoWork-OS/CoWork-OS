@@ -1,3 +1,7 @@
+import {
+  COMPOSER_PREDICTION_CHANNEL,
+  COMPOSER_PREDICTION_CANCEL_CHANNEL,
+} from "../shared/composer-predictions";
 import type { ApprovalRequest } from "../shared/types";
 import type {
   ApprovalDraftPreview,
@@ -2919,6 +2923,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openSystemSettings: (target: "microphone" | "dictation") =>
     ipcRenderer.invoke(IPC_CHANNELS.SYSTEM_OPEN_SETTINGS, target),
 
+  getComposerPrediction: (
+    request: import("../shared/composer-predictions").ComposerPredictionRequest,
+  ) =>
+    ipcRenderer.invoke(COMPOSER_PREDICTION_CHANNEL, request) as Promise<
+      import("../shared/composer-predictions").ComposerPrediction | null
+    >,
+  cancelComposerPrediction: (requestId: string) =>
+    ipcRenderer.invoke(COMPOSER_PREDICTION_CANCEL_CHANNEL, requestId) as Promise<void>,
   // Task APIs
   createTask: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, data),
   getTask: (id: string) => invokeTaskIpcWithRendererTiming(IPC_CHANNELS.TASK_GET, id),
@@ -6563,6 +6575,10 @@ export interface ElectronAPI {
     request: import("../shared/bot-messages").BotMessagePageRequest,
   ) => Promise<import("../shared/bot-messages").BotMessagePage>;
   reopenBotConversation: (request: BotConversationReopenRequest) => Promise<Task>;
+  getComposerPrediction?: (
+    request: import("../shared/composer-predictions").ComposerPredictionRequest,
+  ) => Promise<import("../shared/composer-predictions").ComposerPrediction | null>;
+  cancelComposerPrediction?: (requestId: string) => Promise<void>;
   getComposerDraft?: (request: ComposerDraftGetRequest) => Promise<ComposerDraft | null>;
   upsertComposerDraft?: (draft: ComposerDraft) => Promise<{
     accepted: boolean;

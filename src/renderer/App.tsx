@@ -3482,8 +3482,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const handler = () => {
-      setSettingsTab("llm");
+    const handler = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
+      setSettingsTab(tab === "appearance" ? "appearance" : "llm");
       setCurrentView("settings");
     };
     window.addEventListener("open-settings", handler as EventListener);

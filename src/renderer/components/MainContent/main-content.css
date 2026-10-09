@@ -174,6 +174,11 @@
   text-align: left;
 }
 
+.main-header-task-menu-item .main-header-task-menu-check {
+  margin-left: auto;
+  color: var(--color-text-primary, #e5e7eb);
+}
+
 .main-header-task-menu-item:hover,
 .main-header-task-menu-item:focus-visible {
   background: var(--color-bg-hover, rgba(255, 255, 255, 0.05));
@@ -4972,117 +4977,6 @@ button.collab-timeline-thought-agent:hover {
 
 .timeline-controls-label-button[aria-expanded="true"] .timeline-controls-label-chevron svg {
   transform: rotate(90deg);
-}
-
-.timeline-controls-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.timeline-controls .verbose-switch-label,
-.timeline-controls .replay-entry-btn {
-  color: var(--color-text-muted);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-}
-
-.timeline-controls .goal-mode-switch-track {
-  width: 26px;
-  height: 16px;
-}
-
-.timeline-controls .goal-mode-switch-thumb {
-  width: 10px;
-  height: 10px;
-}
-
-.timeline-controls .goal-mode-switch-track.on .goal-mode-switch-thumb {
-  left: 12px;
-}
-
-.timeline-controls .replay-entry-btn svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* Verbose on/off toggle switch */
-.verbose-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: none;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  padding: 0;
-  margin: 0;
-  min-width: 0;
-  line-height: 1;
-  justify-content: flex-start;
-  overflow: visible;
-  cursor: pointer;
-  user-select: none;
-  color: var(--text-secondary);
-}
-
-.verbose-switch:focus-visible .goal-mode-switch-track {
-  outline: 2px solid var(--accent-color);
-  outline-offset: 2px;
-}
-
-.verbose-switch-label {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.verbose-switch:hover .verbose-switch-label {
-  color: var(--text-primary);
-}
-
-.verbose-switch .goal-mode-toggle-switch-content {
-  width: auto;
-  justify-content: flex-start;
-}
-
-/* Verbose toggle button (code previews etc.) */
-.verbose-toggle-btn {
-  display: flex;
-  align-items: center;
-  padding: 4px 10px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.verbose-toggle-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--border-color-strong);
-}
-
-.verbose-toggle-btn.active {
-  background: var(--accent-color);
-  color: var(--bg-primary);
-  border-color: var(--accent-color);
-}
-
-.verbose-toggle-btn.active:hover {
-  background: var(--accent-color-hover);
-  border-color: var(--accent-color-hover);
 }
 
 .timeline-events {

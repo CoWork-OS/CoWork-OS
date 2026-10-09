@@ -196,6 +196,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardCopy,
+  Code,
   Copy,
   Ellipsis,
   FileText,
@@ -204,12 +205,14 @@ import {
   Globe,
   History,
   Link as LinkIcon,
+  ListTree,
   Loader2,
   MessageCircle,
   Mic,
   Pencil,
   Pin,
   PinOff,
+  Play,
   Plus,
   Square,
   ShieldAlert,
@@ -11868,6 +11871,87 @@ function MainContentComponent({
                         {taskHeaderRoutineUnavailableReason}
                       </div>
                     )}
+                    {!isBotConversation && (
+                      <>
+                        <div className="main-header-task-menu-divider" role="separator" />
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitemcheckbox"
+                          aria-checked={verboseSteps}
+                          data-task-header-menu-option
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            toggleVerboseSteps();
+                          }}
+                        >
+                          <ListTree size={17} aria-hidden="true" />
+                          <span>Verbose timeline</span>
+                          {verboseSteps && (
+                            <CheckIcon
+                              className="main-header-task-menu-check"
+                              size={14}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="main-header-task-menu-item"
+                          role="menuitemcheckbox"
+                          aria-checked={codePreviewsExpanded}
+                          data-task-header-menu-option
+                          onClick={() => {
+                            closeTaskHeaderMenu();
+                            toggleCodePreviews();
+                          }}
+                        >
+                          <Code size={17} aria-hidden="true" />
+                          <span>Expand code previews</span>
+                          {codePreviewsExpanded && (
+                            <CheckIcon
+                              className="main-header-task-menu-check"
+                              size={14}
+                              aria-hidden="true"
+                            />
+                          )}
+                        </button>
+                        {replayControls &&
+                          !replayControls.isReplayMode &&
+                          (task.status === "completed" ||
+                            task.status === "failed" ||
+                            task.status === "cancelled") && (
+                            <button
+                              type="button"
+                              className="main-header-task-menu-item"
+                              role="menuitem"
+                              data-task-header-menu-option
+                              onClick={() => {
+                                closeTaskHeaderMenu();
+                                replayControls.startReplay();
+                              }}
+                            >
+                              <Play size={17} aria-hidden="true" />
+                              <span>Replay session</span>
+                            </button>
+                          )}
+                        {replayControls?.isReplayMode && !replayControls.areControlsVisible && (
+                          <button
+                            type="button"
+                            className="main-header-task-menu-item"
+                            role="menuitem"
+                            data-task-header-menu-option
+                            onClick={() => {
+                              closeTaskHeaderMenu();
+                              replayControls.showControls();
+                            }}
+                          >
+                            <SlidersHorizontal size={17} aria-hidden="true" />
+                            <span>Show replay controls</span>
+                          </button>
+                        )}
+                      </>
+                    )}
                     {hasTaskOutputs(taskOutputSummary) && onViewTaskOutputs && (
                       <button
                         type="button"
@@ -12039,126 +12123,57 @@ function MainContentComponent({
           )}
 
           {/* Timeline controls - show right after original prompt */}
-          {!isBotConversation && (hasNonConversationEvents || isTaskWorking || isTaskFinished) && (
-            <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
-              <div className="timeline-controls-status">
-                {turnHeadersShown ? null : canToggleCompletedTranscript ? (
-                  <button
-                    type="button"
-                    className="timeline-controls-label timeline-controls-label-button with-duration"
-                    onClick={toggleCompletedTranscriptMode}
-                    aria-expanded={transcriptMode !== "delivery"}
-                    title={
-                      transcriptMode === "delivery"
-                        ? "Show full timeline"
-                        : "Show only final output"
-                    }
-                  >
-                    <span>{workDurationLabel}</span>
-                    <span className="timeline-controls-label-chevron" aria-hidden="true">
-                      <ChevronRight size={14} strokeWidth={2} />
-                    </span>
-                  </button>
-                ) : liveActivityHeaderVisible ? null : (
-                  <span
-                    className={`timeline-controls-label ${
-                      isTaskWorking || isTaskFinished ? "with-duration" : ""
-                    }`}
-                  >
-                    {workDurationLabel}
-                  </span>
-                )}
-                {isTaskWorking && continuationStatusChip && (
-                  <span className="header-continuation-chip" title="Adaptive continuation status">
-                    <span>{continuationStatusChip.window}</span>
-                    {continuationStatusChip.progress && (
-                      <span className="header-continuation-chip-sep">·</span>
-                    )}
-                    {continuationStatusChip.progress && (
-                      <span>{continuationStatusChip.progress}</span>
-                    )}
-                    {continuationStatusChip.loopRisk && (
-                      <span className="header-continuation-chip-sep">·</span>
-                    )}
-                    {continuationStatusChip.loopRisk && (
-                      <span>{continuationStatusChip.loopRisk}</span>
-                    )}
-                  </span>
-                )}
-              </div>
-              <div className="timeline-controls-actions">
-                <button
-                  type="button"
-                  className="verbose-switch"
-                  role="switch"
-                  aria-checked={verboseSteps}
-                  aria-label={`Verbose mode ${verboseSteps ? "on" : "off"}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleVerboseSteps();
-                  }}
-                  title={`Verbose mode ${verboseSteps ? "on" : "off"} (click to toggle)`}
-                >
-                  <span className="goal-mode-toggle-switch-content">
-                    <span className="goal-mode-toggle-text">
-                      <span className="verbose-switch-label">Verbose</span>
-                    </span>
-                    <span
-                      className={`goal-mode-switch-track ${verboseSteps ? "on" : ""}`}
-                      aria-hidden="true"
-                    >
-                      <span className="goal-mode-switch-thumb" />
-                    </span>
-                  </span>
-                </button>
-                <button
-                  className={`verbose-toggle-btn ${codePreviewsExpanded ? "active" : ""}`}
-                  onClick={toggleCodePreviews}
-                  title={
-                    codePreviewsExpanded
-                      ? "Collapse code previews by default"
-                      : "Expand code previews by default"
-                  }
-                >
-                  {codePreviewsExpanded ? "Code: Open" : "Code: Collapsed"}
-                </button>
-                {replayControls &&
-                  !replayControls.isReplayMode &&
-                  (task?.status === "completed" ||
-                    task?.status === "failed" ||
-                    task?.status === "cancelled") && (
+          {!isBotConversation &&
+            (hasNonConversationEvents || isTaskWorking || isTaskFinished) &&
+            (!turnHeadersShown || Boolean(isTaskWorking && continuationStatusChip)) && (
+              <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
+                <div className="timeline-controls-status">
+                  {turnHeadersShown ? null : canToggleCompletedTranscript ? (
                     <button
-                      className="replay-entry-btn"
-                      onClick={replayControls.startReplay}
-                      title="Replay this session step by step"
+                      type="button"
+                      className="timeline-controls-label timeline-controls-label-button with-duration"
+                      onClick={toggleCompletedTranscriptMode}
+                      aria-expanded={transcriptMode !== "delivery"}
+                      title={
+                        transcriptMode === "delivery"
+                          ? "Show full timeline"
+                          : "Show only final output"
+                      }
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                      Replay
+                      <span>{workDurationLabel}</span>
+                      <span className="timeline-controls-label-chevron" aria-hidden="true">
+                        <ChevronRight size={14} strokeWidth={2} />
+                      </span>
                     </button>
+                  ) : liveActivityHeaderVisible ? null : (
+                    <span
+                      className={`timeline-controls-label ${
+                        isTaskWorking || isTaskFinished ? "with-duration" : ""
+                      }`}
+                    >
+                      {workDurationLabel}
+                    </span>
                   )}
-                {replayControls?.isReplayMode && !replayControls.areControlsVisible && (
-                  <button
-                    className="replay-entry-btn"
-                    onClick={replayControls.showControls}
-                    title="Show replay controls"
-                  >
-                    <SlidersHorizontal aria-hidden="true" />
-                    Replay controls
-                  </button>
-                )}
+                  {isTaskWorking && continuationStatusChip && (
+                    <span className="header-continuation-chip" title="Adaptive continuation status">
+                      <span>{continuationStatusChip.window}</span>
+                      {continuationStatusChip.progress && (
+                        <span className="header-continuation-chip-sep">·</span>
+                      )}
+                      {continuationStatusChip.progress && (
+                        <span>{continuationStatusChip.progress}</span>
+                      )}
+                      {continuationStatusChip.loopRisk && (
+                        <span className="header-continuation-chip-sep">·</span>
+                      )}
+                      {continuationStatusChip.loopRisk && (
+                        <span>{continuationStatusChip.loopRisk}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Replay controls bar — shown when replay mode is active */}
           {replayControls?.isReplayMode && replayControls.areControlsVisible && (

@@ -1990,25 +1990,33 @@ html.visual-calm .task-automation-template-card:hover {
 
 /* Agent questions shown in the chat. */
 html.visual-calm .input-request-card {
-  background:
-    radial-gradient(70% 90% at 100% 0%, var(--calm-sky-2), transparent 65%), var(--calm-surface);
-  border-color: var(--calm-border);
-  box-shadow: var(--calm-shadow-soft);
-}
-
-html.visual-calm .input-request-header {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-}
-
-html.visual-calm .input-request-option {
   background: var(--calm-surface);
   border-color: var(--calm-border);
+  box-shadow: var(--calm-shadow-pop);
 }
 
-html.visual-calm .input-request-option:hover {
+html.visual-calm .input-request-option:hover:not(:disabled) {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .input-request-option.selected,
+html.visual-calm .input-request-option.selected:hover:not(:disabled) {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .input-request-option-index,
+html.visual-calm .input-request-keys kbd {
   border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .input-request-option.selected .input-request-option-index {
+  background: var(--calm-ink);
+  border-color: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .input-request-actions {
+  border-top-color: var(--calm-border);
 }
 
 html.visual-calm .input-request-submit {

@@ -307,6 +307,9 @@ export function StructuredInputPromptCard({
     return null;
   }
 
+  const optionShortcutCount = Math.min(4, getActiveOptionCount());
+  const isLastQuestion = activeQuestionIndex >= questions.length - 1;
+
   return (
     <div
       className="input-request-composer-shell"
@@ -316,19 +319,38 @@ export function StructuredInputPromptCard({
       <div className="input-request-card input-request-card-inline">
         <div className="input-request-progress">
           <span className="input-request-header">{activeQuestion.header || "Question"}</span>
-          <span className="input-request-progress-index">
-            {Math.min(activeQuestionIndex + 1, questions.length)} / {questions.length}
-          </span>
+          {questions.length > 1 && (
+            <span
+              className="input-request-steps"
+              aria-label={`Question ${activeQuestionIndex + 1} of ${questions.length}`}
+            >
+              {questions.map((question, index) => (
+                <span
+                  key={question.id || index}
+                  className={`input-request-step${index === activeQuestionIndex ? " active" : ""}${
+                    index < activeQuestionIndex ? " done" : ""
+                  }`}
+                />
+              ))}
+            </span>
+          )}
         </div>
         <InlineApprovalDraftReview
           request={request}
           onResponsibilityActionReviewStateChange={onResponsibilityActionReviewStateChange}
         />
         <div className="input-request-title">{activeQuestion.question}</div>
-        <div className="input-request-options">
+        <div
+          className="input-request-options"
+          role="radiogroup"
+          aria-label={activeQuestion.question}
+        >
           {visibleOptions.map(({ option, optionIndex }, displayIndex) => (
             <button
               key={`${activeQuestion.id}-option-${optionIndex}`}
+              type="button"
+              role="radio"
+              aria-checked={activeSelected === optionIndex}
               className={`input-request-option ${activeSelected === optionIndex ? "selected" : ""}`}
               disabled={responsibilityActionReviewOptionDisabled(
                 activeQuestion,
@@ -339,70 +361,84 @@ export function StructuredInputPromptCard({
                 updateSelection(activeQuestion.id, optionIndex);
               }}
             >
-              <span className="input-request-option-index">{displayIndex + 1}.</span>
+              <span className="input-request-option-index" aria-hidden="true">
+                {displayIndex + 1}
+              </span>
               <span className="input-request-option-copy">
                 <span className="input-request-option-label">{option.label}</span>
-                <span className="input-request-option-description">{option.description}</span>
+                {option.description && (
+                  <span className="input-request-option-description">{option.description}</span>
+                )}
               </span>
             </button>
           ))}
           {!activeIsResponsibilityReview && (
             <button
+              type="button"
+              role="radio"
+              aria-checked={activeOtherSelected}
               className={`input-request-option ${activeOtherSelected ? "selected" : ""}`}
               onClick={() => {
                 updateSelection(activeQuestion.id, activeOptions.length);
               }}
             >
-              <span className="input-request-option-index">{activeOptions.length + 1}.</span>
+              <span className="input-request-option-index" aria-hidden="true">
+                {visibleOptions.length + 1}
+              </span>
               <span className="input-request-option-copy">
                 <span className="input-request-option-label">Other</span>
                 <span className="input-request-option-description">Type a custom response</span>
               </span>
             </button>
           )}
-        </div>
-        {activeOtherSelected && (
-          <textarea
-            className="input-request-other"
-            placeholder="Tell CoWork what to do differently..."
-            value={otherTextByQuestion[activeQuestion.id] || ""}
-            onChange={(event) =>
-              setOtherTextByQuestion((prev) => ({
-                ...prev,
-                [activeQuestion.id]: event.target.value,
-              }))
-            }
-          />
-        )}
-        <div className="input-request-hint">
-          Use 1-4 to choose, Enter to continue, Esc to dismiss.
+          {activeOtherSelected && (
+            <textarea
+              className="input-request-other"
+              placeholder="Type your answer…"
+              aria-label="Your answer"
+              rows={2}
+              autoFocus
+              value={otherTextByQuestion[activeQuestion.id] || ""}
+              onChange={(event) =>
+                setOtherTextByQuestion((prev) => ({
+                  ...prev,
+                  [activeQuestion.id]: event.target.value,
+                }))
+              }
+            />
+          )}
         </div>
         <div className="input-request-actions">
-          <button className="input-request-dismiss" onClick={onDismiss}>
+          <span className="input-request-keys" aria-hidden="true">
+            <kbd>1–{optionShortcutCount}</kbd> choose
+            <kbd>↵</kbd> {isLastQuestion ? "submit" : "next"}
+            <kbd>esc</kbd> dismiss
+          </span>
+          <button type="button" className="input-request-dismiss" onClick={onDismiss}>
             Dismiss
           </button>
-          <button
-            className="input-request-dismiss"
-            onClick={goToPreviousQuestion}
-            disabled={activeQuestionIndex === 0}
-          >
-            Back
-          </button>
-          {activeQuestionIndex < questions.length - 1 ? (
-            <button
-              className="input-request-submit"
-              onClick={goToNextQuestion}
-              disabled={!currentQuestionAnswered}
-            >
-              Next
+          {activeQuestionIndex > 0 && (
+            <button type="button" className="input-request-dismiss" onClick={goToPreviousQuestion}>
+              Back
             </button>
-          ) : (
+          )}
+          {isLastQuestion ? (
             <button
+              type="button"
               className="input-request-submit"
               onClick={submitIfAllowed}
               disabled={!canSubmit}
             >
               Submit
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="input-request-submit"
+              onClick={goToNextQuestion}
+              disabled={!currentQuestionAnswered}
+            >
+              Next
             </button>
           )}
         </div>

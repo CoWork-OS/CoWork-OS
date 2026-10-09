@@ -37,11 +37,16 @@ describe("hardening", () => {
     expect(doc).toContain('rel="stylesheet"');
   });
 
-  it("handles a megabyte of unclosed tags quickly", () => {
-    const html = "<head ".repeat(166_000);
-    const started = Date.now();
+  it.each([
+    ["unclosed head openings", "<head ".repeat(166_000)],
+    ["unclosed link openings", "<link ".repeat(166_000)],
+    ["many short tags", "<link rel=preconnect>".repeat(47_000)],
+    ["tags closing far away", `${"<html <head <link ".repeat(50_000)}>`],
+  ])("handles a megabyte of %s in linear time", (_label, html) => {
+    const started = performance.now();
     prepareHtmlSurfaceDocument({ html, theme: "dark", designLanguage: true });
-    expect(Date.now() - started).toBeLessThan(2000);
+    // Linear work on 1 MB takes milliseconds; the old regexes took seconds on CI.
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });
 

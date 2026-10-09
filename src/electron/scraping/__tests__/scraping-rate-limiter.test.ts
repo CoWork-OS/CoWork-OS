@@ -15,18 +15,26 @@ describe("scraping rate limiter", () => {
 
   it("queues requests per host while allowing different hosts independently", async () => {
     resetScrapingRateLimiterForTests();
-    const sleep = vi.fn().mockResolvedValue(undefined);
-    const settings = { enabled: true, requestsPerMinute: 30 };
+    // The wait is computed from Date.now(); freeze it so a millisecond passing
+    // between the two same-host requests cannot turn 2000 into 1999.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-09T08:00:00.000Z"));
+    try {
+      const sleep = vi.fn().mockResolvedValue(undefined);
+      const settings = { enabled: true, requestsPerMinute: 30 };
 
-    await Promise.all([
-      waitForScrapingSlot("https://example.com/one", settings, sleep),
-      waitForScrapingSlot("https://example.com/two", settings, sleep),
-      waitForScrapingSlot("https://other.example/two", settings, sleep),
-    ]);
+      await Promise.all([
+        waitForScrapingSlot("https://example.com/one", settings, sleep),
+        waitForScrapingSlot("https://example.com/two", settings, sleep),
+        waitForScrapingSlot("https://other.example/two", settings, sleep),
+      ]);
 
-    expect(sleep).toHaveBeenCalledTimes(1);
-    expect(sleep).toHaveBeenCalledWith(2000);
-    resetScrapingRateLimiterForTests();
+      expect(sleep).toHaveBeenCalledTimes(1);
+      expect(sleep).toHaveBeenCalledWith(2000);
+    } finally {
+      vi.useRealTimers();
+      resetScrapingRateLimiterForTests();
+    }
   });
 
   it("does not delay when rate limiting is disabled", async () => {

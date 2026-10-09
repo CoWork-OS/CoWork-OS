@@ -1,4 +1,5 @@
 import { HTML_KIT_CSS } from "./answer-surfaces/html-kit";
+import { asciiLowerCase, findOpeningTag, insertAfterTag } from "./html-tags";
 
 const RICH_FRAME_EXAMPLE = [
   '<html data-theme="ocean"><body><div class="cw-card cw-card-gradient cw-stack">',
@@ -333,23 +334,21 @@ export function applyRichFrameDesignLanguage(
 
   const theme = normalizeRichFrameTheme(options.theme);
   const styleTag = `<style id="${RICH_FRAME_DESIGN_STYLE_ID}">\n${buildRichFrameDesignCss(theme, options.hostBackground)}\n</style>`;
-  const themedHtml = html.replace(/<html\b([^>]{0,2000})>/i, (match, attrs: string) => {
-    if (/\bstyle\s*=/i.test(attrs)) return match;
-    return `<html${attrs} style="color-scheme: ${theme};">`;
-  });
-  const htmlForInjection = themedHtml === html ? html : themedHtml;
+  // Linear scans (html-tags.ts): this runs in main on up to a megabyte of model HTML.
+  let htmlForInjection = html;
+  const htmlTag = findOpeningTag(html, "html");
+  if (htmlTag && !/\bstyle\s*=/i.test(htmlTag.text)) {
+    const themedTag = `${htmlTag.text.slice(0, -1)} style="color-scheme: ${theme};">`;
+    htmlForInjection = `${html.slice(0, htmlTag.start)}${themedTag}${html.slice(htmlTag.end)}`;
+  }
 
-  if (/<\/head>/i.test(htmlForInjection)) {
-    return htmlForInjection.replace(/<\/head>/i, `${styleTag}\n</head>`);
+  const headClose = asciiLowerCase(htmlForInjection).indexOf("</head>");
+  if (headClose !== -1) {
+    return `${htmlForInjection.slice(0, headClose)}${styleTag}\n${htmlForInjection.slice(headClose)}`;
   }
-  if (/<head\b[^>]{0,2000}>/i.test(htmlForInjection)) {
-    return htmlForInjection.replace(/<head\b[^>]{0,2000}>/i, (match) => `${match}\n${styleTag}`);
-  }
-  if (/<html\b[^>]{0,2000}>/i.test(htmlForInjection)) {
-    return htmlForInjection.replace(
-      /<html\b[^>]{0,2000}>/i,
-      (match) => `${match}\n<head>${styleTag}</head>`,
-    );
-  }
-  return `${styleTag}\n${htmlForInjection}`;
+  return (
+    insertAfterTag(htmlForInjection, "head", `\n${styleTag}`) ??
+    insertAfterTag(htmlForInjection, "html", `\n<head>${styleTag}</head>`) ??
+    `${styleTag}\n${htmlForInjection}`
+  );
 }

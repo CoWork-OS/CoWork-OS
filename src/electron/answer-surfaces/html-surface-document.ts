@@ -11,6 +11,7 @@ import {
   HTML_SURFACE_MAX_HTML_CHARS,
 } from "../../shared/answer-surfaces/html-bridge";
 import { HTML_KIT_SCRIPT } from "../../shared/answer-surfaces/html-kit-script";
+import { findOpeningTags, insertAfterTag } from "../../shared/html-tags";
 import { applyRichFrameDesignLanguage } from "../../shared/rich-frame-design-language";
 import { validateInput } from "../utils/validation";
 
@@ -30,28 +31,38 @@ const BRIDGE_TAG = `<script id="cowork-surface-bridge">\n${HTML_SURFACE_BOOTSTRA
 /** Runs before the bridge, which exposes its helpers as cowork.chart, cowork.icon, … */
 const KIT_TAG = `<script id="cowork-surface-kit">\n${HTML_KIT_SCRIPT}\n</script>`;
 
-// Tag scans are bounded: an unbounded `[^>]*` over a 1 MB document with many unclosed
-// `<head` openings is quadratic and would stall the main process.
-const HEAD_TAG = /<head\b[^>]{0,2000}>/i;
-const HTML_TAG = /<html\b[^>]{0,2000}>/i;
 /** Resource hints are not covered by the CSP and could leak data through DNS lookups. */
-const RESOURCE_HINT =
-  /<link\b[^>]{0,2000}\brel\s*=\s*["']?(?:dns-prefetch|preconnect|prefetch|prerender|modulepreload)\b[^>]{0,2000}>/gi;
+const RESOURCE_HINT_REL =
+  /\brel\s*=\s*["']?(?:dns-prefetch|preconnect|prefetch|prerender|modulepreload)\b/i;
+
+/*
+ * Tag work uses the linear scanner in html-tags.ts: regexes over a 1 MB document with
+ * many unclosed `<head` or `<link` openings take quadratic time and stall main.
+ */
+function stripResourceHints(html: string): string {
+  const hints = findOpeningTags(html, "link").filter((tag) => RESOURCE_HINT_REL.test(tag.text));
+  if (hints.length === 0) return html;
+  let result = "";
+  let from = 0;
+  for (const hint of hints) {
+    result += html.slice(from, hint.start);
+    from = hint.end;
+  }
+  return result + html.slice(from);
+}
 
 /** Puts the bridge first in <head>, so it is defined before any page script runs. */
 function injectRuntime(html: string, withKit: boolean): string {
   const tags = [AUTOSIZE_TAG, ...(withKit ? [KIT_TAG] : []), BRIDGE_TAG].join("\n");
-  if (HEAD_TAG.test(html)) {
-    return html.replace(HEAD_TAG, (match) => `${match}\n${tags}`);
-  }
-  if (HTML_TAG.test(html)) {
-    return html.replace(HTML_TAG, (match) => `${match}\n<head>${tags}</head>`);
-  }
-  return `${tags}\n${html}`;
+  return (
+    insertAfterTag(html, "head", `\n${tags}`) ??
+    insertAfterTag(html, "html", `\n<head>${tags}</head>`) ??
+    `${tags}\n${html}`
+  );
 }
 
 export function prepareHtmlSurfaceDocument(request: RegisterHtmlSurfaceRequest): string {
-  const html = request.html.replace(RESOURCE_HINT, "");
+  const html = stripResourceHints(request.html);
   const themed = request.designLanguage
     ? applyRichFrameDesignLanguage(html, {
         theme: request.theme,

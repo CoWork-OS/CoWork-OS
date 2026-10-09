@@ -1525,6 +1525,28 @@ const MUTATION_TARGET_INPUT_KEYS = [
   "output_path",
 ];
 
+/**
+ * Every output path a tool result reports: `path`, `outputPaths`, and the
+ * `path` of each entry in `files` (create_document with several formats).
+ */
+export function collectReportedOutputPaths(result: unknown): string[] {
+  const paths = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) paths.add(value.trim());
+  };
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    add(record.path);
+    if (Array.isArray(record.outputPaths)) record.outputPaths.forEach(add);
+    if (Array.isArray(record.files)) {
+      for (const file of record.files) {
+        if (file && typeof file === "object") add((file as Record<string, unknown>).path);
+      }
+    }
+  }
+  return Array.from(paths);
+}
+
 /** Every file path a file-mutating tool call names, in its input or its reported result. */
 export function collectMutationTargetPaths(input: unknown, result?: unknown): string[] {
   const paths = new Set<string>();
@@ -1534,11 +1556,7 @@ export function collectMutationTargetPaths(input: unknown, result?: unknown): st
   if (input && typeof input === "object") {
     for (const key of MUTATION_TARGET_INPUT_KEYS) add((input as Record<string, unknown>)[key]);
   }
-  if (result && typeof result === "object") {
-    const record = result as Record<string, unknown>;
-    add(record.path);
-    if (Array.isArray(record.outputPaths)) record.outputPaths.forEach(add);
-  }
+  collectReportedOutputPaths(result).forEach(add);
   return Array.from(paths);
 }
 

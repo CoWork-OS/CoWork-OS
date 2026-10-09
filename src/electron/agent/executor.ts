@@ -340,6 +340,7 @@ import {
   ToolFailureTracker,
   FileOperationTracker,
   collectMutationTargetPaths as collectMutationTargetPathsUtil,
+  collectReportedOutputPaths as collectReportedOutputPathsUtil,
   hashToolInput as hashToolInputUtil,
   toolMayChangeFilesImplicitly as toolMayChangeFilesImplicitlyUtil,
   withTimeout,
@@ -347,6 +348,7 @@ import {
   sleep,
 } from "./executor-helpers";
 import { FileMutationVerifier } from "./file-mutation-verifier";
+import { resolveDocumentOutputs } from "./skills/document";
 import { CsvArithmeticVerifier } from "./csv-arithmetic-verifier";
 import { CsvReportEvidenceVerifier } from "./data-evidence-verifier";
 import { ExecutorEventEmitter } from "./executor-event-emitter";
@@ -495,6 +497,9 @@ import {
   MAX_VERIFICATION_REPAIR_PASSES,
   MIN_TURNS_FOR_VERIFICATION_REPAIR,
   SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
+  MATCHING_OUTPUTS_VERIFICATION_STEP_DESCRIPTION,
+  isLocalizedCheckStepDescription,
+  requestsFinalOutputsCheck,
   VERIFICATION_RECHECK_STEP_DESCRIPTION,
   VERIFICATION_REPAIR_STEP_DESCRIPTION,
   answerLinksOutput,
@@ -4264,6 +4269,25 @@ export class TaskExecutor {
     return desc.includes("verify:") || desc.includes("verification") || desc.includes("verify ");
   }
 
+  /**
+   * Whether a plan step is a verification checkpoint. English descriptions
+   * follow descriptionIndicatesVerification at any position. A check written
+   * in another language ("Verificar que ambos os ficheiros existem...") counts
+   * when it is the plan's final step, or when it was already classified as
+   * verification, so steps appended after it later do not demote it.
+   */
+  private planStepIndicatesVerification(
+    description: string,
+    opts: { isFinalStep: boolean; kind?: PlanStep["kind"] | string },
+  ): boolean {
+    if (this.descriptionIndicatesVerification(description)) return true;
+    if (opts.kind === "recovery") return false;
+    return (
+      (opts.isFinalStep || opts.kind === "verification") &&
+      isLocalizedCheckStepDescription(description)
+    );
+  }
+
   private normalizeScaffoldRootPath(rawPath: string): string {
     return String(rawPath || "")
       .trim()
@@ -5219,7 +5243,10 @@ export class TaskExecutor {
           "Confirm concrete output constraints (format, exact limits, filename) and execute the required tool actions.";
       }
 
-      const normalizedKind: PlanStep["kind"] = this.descriptionIndicatesVerification(description)
+      const normalizedKind: PlanStep["kind"] = this.planStepIndicatesVerification(description, {
+        isFinalStep: index === steps.length - 1,
+        kind: step?.kind,
+      })
         ? "verification"
         : step?.kind === "recovery" || step?.kind === "primary"
           ? step.kind
@@ -11588,17 +11615,18 @@ ${transcript}
     const fileCreationTools = new Set(["write_file", "copy_file", "generate_video"]);
     if (fileCreationTools.has(toolName) || isArtifactGenerationToolNameUtil(toolName)) {
       const filename = input?.filename || input?.path || input?.destPath || input?.destination;
-      const normalizedFilename = this.getBatchCreatedPathReservation(toolName, input);
-      if (filename && normalizedFilename) {
-        if (batchCreatedPaths?.has(normalizedFilename)) {
+      const reservations = this.getBatchCreatedPathReservations(toolName, input);
+      if (filename && reservations.length > 0) {
+        const reserved = reservations.find((reservation) => batchCreatedPaths?.has(reservation));
+        if (reserved) {
           return {
             blocked: true,
-            reason: `File "${filename}" is already scheduled for creation in this tool batch`,
+            reason: `File "${reservations.length > 1 ? reserved : filename}" is already scheduled for creation in this tool batch`,
             suggestion:
               "Create the file once and then edit or refine that file in the same response instead of emitting a second creation call.",
           };
         }
-        batchCreatedPaths?.add(normalizedFilename);
+        for (const reservation of reservations) batchCreatedPaths?.add(reservation);
 
         // Guard: don't write tiny HTML placeholders right after a failed fetch
         if (
@@ -11659,21 +11687,32 @@ ${transcript}
     }
   }
 
-  private getBatchCreatedPathReservation(toolName: string, input: Any): string | null {
+  /** The files a creation call will write, normalized for the per-batch duplicate guard. */
+  private getBatchCreatedPathReservations(toolName: string, input: Any): string[] {
     const fileCreationTools = new Set(["write_file", "copy_file", "generate_video"]);
     if (!(fileCreationTools.has(toolName) || isArtifactGenerationToolNameUtil(toolName))) {
-      return null;
+      return [];
     }
     const filename = input?.filename || input?.path || input?.destPath || input?.destination;
-    if (!filename) return null;
-    let reservation = String(filename).toLowerCase().replace(/\\/g, "/");
+    if (!filename) return [];
+    const normalize = (value: string) => value.toLowerCase().replace(/\\/g, "/");
+    // One create_document call with formats writes one file per format.
+    if (toolName === "create_document" && Array.isArray(input?.formats)) {
+      try {
+        return resolveDocumentOutputs(input).map((output) => normalize(output.filename));
+      } catch {
+        // The tool reports the invalid input; reserve the name as given.
+        return [normalize(String(filename))];
+      }
+    }
+    let reservation = normalize(String(filename));
     // create_document appends the format extension when the filename has none, so a
     // DOCX/PDF pair sharing one base name are two distinct files.
     const format = typeof input?.format === "string" ? input.format.trim().toLowerCase() : "";
     if (toolName === "create_document" && format && !reservation.endsWith(`.${format}`)) {
       reservation = `${reservation}.${format}`;
     }
-    return reservation;
+    return [reservation];
   }
 
   private releaseBatchCreatedPathReservation(
@@ -11681,9 +11720,9 @@ ${transcript}
     toolName: string,
     input: Any,
   ): void {
-    const reservation = this.getBatchCreatedPathReservation(toolName, input);
-    if (!reservation) return;
-    batchCreatedPaths?.delete(reservation);
+    for (const reservation of this.getBatchCreatedPathReservations(toolName, input)) {
+      batchCreatedPaths?.delete(reservation);
+    }
   }
 
   /**
@@ -11761,6 +11800,10 @@ ${transcript}
         input?.file_path;
       if (filename) {
         this.fileOperationTracker.recordFileCreation(filename);
+      }
+      // A call that writes several files (create_document with formats) lists them all.
+      for (const outputPath of collectReportedOutputPathsUtil(result)) {
+        if (outputPath !== filename) this.fileOperationTracker.recordFileCreation(outputPath);
       }
     }
 
@@ -13001,6 +13044,25 @@ ${transcript}
       });
     }
 
+    // Files that must match each other (a DOCX and its PDF), or several
+    // named files the user wants linked, end with a check of those files so
+    // the matching-output severity rules and the repair pass apply. A plan
+    // whose final step is already a check, in any language, keeps it.
+    const finalPlanStep = nextPlan.steps[nextPlan.steps.length - 1];
+    if (
+      this.task &&
+      finalPlanStep &&
+      !this.isVerificationStep(finalPlanStep) &&
+      requestsFinalOutputsCheck(`${this.task.title || ""}\n${this.getContractPrompt() || ""}`)
+    ) {
+      nextPlan.steps.push({
+        id: this.nextPlanStepId(nextPlan.steps),
+        description: MATCHING_OUTPUTS_VERIFICATION_STEP_DESCRIPTION,
+        kind: "verification",
+        status: "pending",
+      });
+    }
+
     return nextPlan;
   }
 
@@ -14055,7 +14117,9 @@ ${transcript}
         }
       }
 
-      if (toolName === "create_document" && !input.format) {
+      // A formats list names every format to write; a single default would conflict with it.
+      const hasFormatsList = Array.isArray(input.formats) && input.formats.length > 0;
+      if (toolName === "create_document" && !input.format && !hasFormatsList) {
         const ext = input.filename ? path.extname(String(input.filename)).toLowerCase() : "";
         if (ext === ".pdf") {
           input.format = "pdf";
@@ -17095,7 +17159,8 @@ ${transcript}
       normalizedExtension === ".pdf" ||
       normalizedExtension === ".docx" ||
       normalizedFormat === "pdf" ||
-      normalizedFormat === "docx";
+      normalizedFormat === "docx" ||
+      (Array.isArray(input?.formats) && input.formats.length > 0);
     const shellDisallowed = this.taskExplicitlyDisallowsShellCommands();
 
     switch (canonicalToolName) {
@@ -32108,8 +32173,9 @@ Return ONLY a JSON object:
     let repeatedArtifactContractFailureStreak = 0;
     while (index < this.plan.steps.length) {
       const step = this.plan.steps[index];
-      const normalizedKind: PlanStep["kind"] = this.descriptionIndicatesVerification(
+      const normalizedKind: PlanStep["kind"] = this.planStepIndicatesVerification(
         step.description,
+        { isFinalStep: index === this.plan.steps.length - 1, kind: step.kind },
       )
         ? "verification"
         : step.kind === "recovery"

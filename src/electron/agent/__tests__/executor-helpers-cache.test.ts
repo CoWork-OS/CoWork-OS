@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   FileOperationTracker,
   ToolCallDeduplicator,
@@ -236,6 +239,66 @@ describe("FileOperationTracker cache invalidation", () => {
     expect(check({ filename: "Northstar-brief.pdf", format: "pdf" }).blocked).toBe(true);
   });
 
+  it("reserves every file of a create_document call with formats", () => {
+    const fakeThis: Any = Object.create(TaskExecutor.prototype);
+    fakeThis.fileOperationTracker = new FileOperationTracker();
+    fakeThis.logTag = "[Executor:test]";
+
+    const batchCreatedPaths = new Set<string>();
+    const check = (input: Any) =>
+      (TaskExecutor as Any).prototype.checkFileOperation.call(
+        fakeThis,
+        "create_document",
+        input,
+        batchCreatedPaths,
+      );
+    const pair = { filename: "Northstar-brief.docx", formats: ["docx", "pdf"] };
+
+    expect(check(pair).blocked).toBe(false);
+    expect(Array.from(batchCreatedPaths).sort()).toEqual([
+      "northstar-brief.docx",
+      "northstar-brief.pdf",
+    ]);
+    const second = check({ filename: "Northstar-brief.pdf", format: "pdf" });
+    expect(second.blocked).toBe(true);
+    expect(second.reason).toContain("Northstar-brief.pdf");
+
+    (TaskExecutor as Any).prototype.releaseBatchCreatedPathReservation.call(
+      fakeThis,
+      batchCreatedPaths,
+      "create_document",
+      pair,
+    );
+    expect(batchCreatedPaths.size).toBe(0);
+  });
+
+  it("records every file a create_document call with formats wrote as created", () => {
+    const fakeThis: Any = Object.create(TaskExecutor.prototype);
+    fakeThis.fileOperationTracker = new FileOperationTracker();
+    fakeThis.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+    fakeThis.workspace = { path: "/workspace" };
+    fakeThis.logTag = "[Executor:test]";
+
+    (TaskExecutor as Any).prototype.recordFileOperation.call(
+      fakeThis,
+      "create_document",
+      { filename: "Northstar-brief", formats: ["docx", "pdf"] },
+      {
+        success: true,
+        path: "Northstar-brief.docx",
+        files: [
+          { path: "Northstar-brief.docx", format: "docx" },
+          { path: "Northstar-brief.pdf", format: "pdf", pageCount: 2 },
+        ],
+      },
+    );
+
+    expect(fakeThis.fileOperationTracker.getCreatedFiles().sort()).toEqual([
+      "Northstar-brief.docx",
+      "Northstar-brief.pdf",
+    ]);
+  });
+
   it("releases a failed batch file reservation so the same path can be retried", () => {
     const fakeThis: Any = Object.create(TaskExecutor.prototype);
     fakeThis.fileOperationTracker = new FileOperationTracker();
@@ -265,6 +328,48 @@ describe("FileOperationTracker cache invalidation", () => {
 
     expect(first.blocked).toBe(false);
     expect(retry.blocked).toBe(false);
+  });
+});
+
+describe("TaskExecutor output links for a create_document call with formats", () => {
+  it("links both files of one call when the answer omits them", () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-formats-links-"));
+    try {
+      fs.writeFileSync(path.join(workspacePath, "Northstar-brief.docx"), "docx");
+      fs.writeFileSync(path.join(workspacePath, "Northstar-brief.pdf"), "pdf");
+      const fakeThis: Any = Object.create(TaskExecutor.prototype);
+      fakeThis.fileOperationTracker = new FileOperationTracker();
+      fakeThis.toolCallDeduplicator = new ToolCallDeduplicator(3, 120_000, 4);
+      fakeThis.workspace = { path: workspacePath };
+      fakeThis.logTag = "[Executor:test]";
+      fakeThis.task = { id: "task-1", title: "Northstar brief", prompt: "" };
+      fakeThis.getContractPrompt = () =>
+        "Save Northstar-brief.docx and Northstar-brief.pdf. Give me links to both files.";
+      fakeThis.daemon = { getTaskEvents: () => [] };
+
+      (TaskExecutor as Any).prototype.recordFileOperation.call(
+        fakeThis,
+        "create_document",
+        { filename: "Northstar-brief", formats: ["docx", "pdf"] },
+        {
+          success: true,
+          path: "Northstar-brief.docx",
+          files: [
+            { path: "Northstar-brief.docx", format: "docx" },
+            { path: "Northstar-brief.pdf", format: "pdf" },
+          ],
+        },
+      );
+      const answer = (TaskExecutor as Any).prototype.reconcileOutputAvailabilityClaims.call(
+        fakeThis,
+        "The brief is ready.",
+      );
+
+      expect(answer).toContain("[Northstar-brief.docx](Northstar-brief.docx)");
+      expect(answer).toContain("[Northstar-brief.pdf](Northstar-brief.pdf)");
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
   });
 });
 

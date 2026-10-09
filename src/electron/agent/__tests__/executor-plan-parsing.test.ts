@@ -201,6 +201,116 @@ describe("TaskExecutor plan parsing", () => {
     expect(again.steps).toHaveLength(4);
   });
 
+  describe("matching-file requests", () => {
+    // Live task 03c4b609: an English brief, planned in Portuguese.
+    const northstarPrompt =
+      "Prepare a polished two-page client brief in Portuguese (Portugal) for the Northstar onboarding pilot. " +
+      "Save both an editable Word document and a matching PDF: Northstar-brief.docx and Northstar-brief.pdf.\n\n" +
+      "Facts: 8 customer-success staff; start 26 October 2026; two trainers; three 45-minute sessions on 26, 28 and 30 October; " +
+      "€350 maximum materials spend. Page 1: title, concise overview, goals, and a schedule table. Page 2: responsibilities, " +
+      "budget allowances totaling at most €350, risks, and open decisions. Give me links to both files.";
+    const northstarPlanSteps = [
+      "Procurar no espaço de trabalho um documento de origem do brief ou materiais do piloto; se existir, inspecionar o conteúdo e a estrutura antes de o adaptar.",
+      "Se não houver documento de origem, usar os factos fornecidos para preparar o brief, assinalando como TBD o responsável pela FAQ e quem aprova o email de lançamento.",
+      "Criar Northstar-brief.docx com título, visão geral, objetivos e tabela de calendário na página 1; incluir responsabilidades, verbas propostas até €350, riscos e decisões em aberto na página 2.",
+      "Exportar Northstar-brief.pdf a partir do documento Word, preservando o conteúdo e a paginação de duas páginas.",
+      "Verificar que ambos os ficheiros existem e são válidos, que o PDF tem duas páginas e que os documentos incluem as datas, valores, responsáveis, decisões em aberto, acentos, símbolo € e numeração de páginas esperados.",
+    ].map((description, index) => ({
+      id: String(index + 1),
+      description,
+      kind: "primary",
+      status: "pending",
+    }));
+
+    function createMatchingExecutor(prompt: string): Any {
+      const executor = createPlanExecutor({ content: [] });
+      executor.task.title = "Northstar brief";
+      executor.task.prompt = prompt;
+      executor.task.rawPrompt = prompt;
+      executor.getContractPrompt = vi.fn().mockReturnValue(prompt);
+      executor.getEffectiveTaskPathRootPolicy = vi.fn().mockReturnValue("disabled");
+      executor.taskPinnedRootSource = "unset";
+      return executor;
+    }
+
+    it("recognises the Portuguese final check of the live plan as verification", () => {
+      const executor = createMatchingExecutor(northstarPrompt);
+
+      const sanitized = executor.sanitizePlan({
+        description: "Preparar um brief de cliente",
+        steps: northstarPlanSteps,
+      });
+
+      expect(sanitized.steps.map((step: Any) => step.kind)).toEqual([
+        "primary",
+        "primary",
+        "primary",
+        "primary",
+        "verification",
+      ]);
+      expect(sanitized.steps[4].description).toBe(northstarPlanSteps[4].description);
+      expect((executor as Any).isVerificationStep(sanitized.steps[4])).toBe(true);
+      expect((executor as Any).isReadOnlyFactFindingVerificationStep(sanitized.steps[4])).toBe(
+        false,
+      );
+    });
+
+    it("only treats a Portuguese check as verification when it is the final step", () => {
+      const executor = createMatchingExecutor("Escreve um resumo em notas.md.");
+      const check = northstarPlanSteps[4];
+
+      const sanitized = executor.sanitizePlan({
+        description: "Plano",
+        steps: [check, { ...northstarPlanSteps[2], id: "2" }],
+      });
+
+      expect(sanitized.steps.map((step: Any) => step.kind)).toEqual(["primary", "primary"]);
+    });
+
+    it("adds a final file check when the plan ends with creation work", () => {
+      const executor = createMatchingExecutor(northstarPrompt);
+
+      const result = executor.ensureRequiredPlanSteps({
+        description: "Northstar",
+        steps: northstarPlanSteps.slice(0, 4),
+      });
+
+      expect(result.steps).toHaveLength(5);
+      expect(result.steps[4]).toMatchObject({ id: "5", kind: "verification", status: "pending" });
+      expect(result.steps[4].description).toContain("carry the same content");
+      expect((executor as Any).descriptionIndicatesVerification(result.steps[4].description)).toBe(
+        true,
+      );
+
+      const again = executor.ensureRequiredPlanSteps(result);
+      expect(again.steps).toHaveLength(5);
+    });
+
+    it("does not add a second check after the plan's own Portuguese check", () => {
+      const executor = createMatchingExecutor(northstarPrompt);
+
+      const sanitized = executor.sanitizePlan({
+        description: "Preparar um brief de cliente",
+        steps: northstarPlanSteps,
+      });
+
+      expect(sanitized.steps).toHaveLength(5);
+    });
+
+    it("adds no file check to a single-file request", () => {
+      const executor = createMatchingExecutor(
+        "Create a two-page brief as Northstar-brief.docx and give me a link to the file.",
+      );
+
+      const result = executor.ensureRequiredPlanSteps({
+        description: "Northstar",
+        steps: [northstarPlanSteps[2]],
+      });
+
+      expect(result.steps).toHaveLength(1);
+    });
+  });
+
   it("does not add a verification step to a plain chat question", () => {
     const executor = createPlanExecutor({ content: [] });
     for (const prompt of [

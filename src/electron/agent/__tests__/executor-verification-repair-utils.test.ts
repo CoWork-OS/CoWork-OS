@@ -8,8 +8,11 @@ import {
   extractVerificationFindings,
   findUnlinkedSourcedTableCells,
   isBlockingVerificationVerdict,
+  isLocalizedCheckStepDescription,
   mentionsOfficeArtifact,
   requestsFileLinks,
+  requestsFinalOutputsCheck,
+  requestsLinksToSeveralNamedFiles,
   requestsMatchingOutputs,
   requestsSourceLinks,
   requestsSourcedResearchAnswer,
@@ -256,5 +259,77 @@ describe("answerLinksOutput", () => {
     expect(answerLinksOutput(answer, "Northstar-brief.docx")).toBe(false);
     expect(answerLinksOutput("[Brief](Northstar-brief.docx)", "Northstar-brief.docx")).toBe(true);
     expect(answerLinksOutput("Saved Northstar-brief.docx.", "Northstar-brief.docx")).toBe(false);
+  });
+});
+
+describe("isLocalizedCheckStepDescription", () => {
+  it("recognises check steps in common languages", () => {
+    for (const description of [
+      "Verificar que ambos os ficheiros existem e são válidos, que o PDF tem duas páginas e que os documentos incluem as datas, valores, responsáveis, decisões em aberto, acentos, símbolo € e numeração de páginas esperados.",
+      "Confirmar que os dois ficheiros têm os mesmos valores.",
+      "Validar o PDF contra o documento Word.",
+      "Rever os dois documentos e confirmar que coincidem.",
+      "Comprobar que ambos archivos existen y tienen el mismo contenido.",
+      "Revisar que el PDF tenga dos páginas.",
+      "Vérifier que les deux fichiers existent et sont identiques.",
+      "Contrôler la pagination du PDF.",
+      "Überprüfen, ob beide Dateien vorhanden sind.",
+      "Prüfen, ob das PDF zwei Seiten hat.",
+      "Verificare che entrambi i file esistano e coincidano.",
+      "Controllare le cifre nel PDF.",
+      "Controleren of beide bestanden bestaan.",
+      "Verifiëren dat de PDF twee pagina's heeft.",
+      "**Verificar** que os ficheiros foram guardados e exportados.",
+    ]) {
+      expect(isLocalizedCheckStepDescription(description), description).toBe(true);
+    }
+  });
+
+  it("leaves creation, mixed and English steps alone", () => {
+    for (const description of [
+      "Criar Northstar-brief.docx com título e visão geral.",
+      "Exportar Northstar-brief.pdf a partir do documento Word.",
+      "Verificar o rascunho e corrigir os valores errados.",
+      "Verificar os dados e depois criar o PDF.",
+      "Comprobar los totales y luego generar el informe.",
+      "Vérifier les montants puis exporter le PDF.",
+      "Prüfen, ob Daten fehlen, und dann den Bericht erstellen.",
+      "Verificare i dati e poi creare il documento.",
+      "Controleer de cijfers en maak het rapport.",
+      "Revise the draft for tone.",
+      "Verify both files exist.",
+      "Verificação final",
+    ]) {
+      expect(isLocalizedCheckStepDescription(description), description).toBe(false);
+    }
+  });
+});
+
+describe("requestsFinalOutputsCheck", () => {
+  it("covers matching outputs and links to several named files", () => {
+    expect(
+      requestsFinalOutputsCheck(
+        "Save both an editable Word document and a matching PDF: Northstar-brief.docx and Northstar-brief.pdf. Give me links to both files.",
+      ),
+    ).toBe(true);
+    expect(
+      requestsLinksToSeveralNamedFiles(
+        "Create budget.xlsx and summary.docx, and give me links to both files.",
+      ),
+    ).toBe(true);
+    expect(
+      requestsFinalOutputsCheck(
+        "Create budget.xlsx and summary.docx, and give me links to both files.",
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for a single file or no link request", () => {
+    expect(
+      requestsFinalOutputsCheck(
+        "Create a two-page brief as Northstar-brief.docx and give me a link to the file.",
+      ),
+    ).toBe(false);
+    expect(requestsLinksToSeveralNamedFiles("Create budget.xlsx and summary.docx.")).toBe(false);
   });
 });

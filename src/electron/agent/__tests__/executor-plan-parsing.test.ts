@@ -155,6 +155,76 @@ describe("TaskExecutor plan parsing", () => {
     expect(result.steps[1].description).toContain("final Excel workbook");
   });
 
+  it("ends a linked research comparison plan with a verification step", () => {
+    const prompt =
+      "Look up official documentation for Teams, Zoom and Google Meet transcript exports. Compare licensing and limitations, with links, in chat.";
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = prompt;
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+
+    const result = (executor as Any).ensureRequiredPlanSteps({
+      description: "Compare transcript exports",
+      steps: [
+        {
+          id: "1",
+          description:
+            "Identify the official documentation pages for transcript export and licensing.",
+          kind: "primary",
+          status: "pending",
+        },
+        {
+          id: "2",
+          description:
+            "Extract each platform's export options, eligibility requirements, and documented limitations, preserving links to official sources.",
+          kind: "primary",
+          status: "pending",
+        },
+        {
+          id: "3",
+          description:
+            "Write a concise, linked comparison of the three platforms in chat, noting any differences in terminology or availability.",
+          kind: "primary",
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(result.steps).toHaveLength(4);
+    expect(result.steps[3]).toMatchObject({ id: "4", kind: "verification", status: "pending" });
+    expect(result.steps[3].description).toContain("direct link to an official source");
+    expect((executor as Any).isVerificationStep(result.steps[3])).toBe(true);
+    expect((executor as Any).isReadOnlyFactFindingVerificationStep(result.steps[3])).toBe(false);
+
+    // A plan that already ends with a check keeps it as the only one.
+    const again = (executor as Any).ensureRequiredPlanSteps(result);
+    expect(again.steps).toHaveLength(4);
+  });
+
+  it("does not add a verification step to a plain chat question", () => {
+    const executor = createPlanExecutor({ content: [] });
+    for (const prompt of [
+      "Explain how Teams meeting transcripts work.",
+      "Compare Teams and Zoom for a small team.",
+    ]) {
+      executor.task.title = prompt;
+      executor.task.prompt = prompt;
+      executor.task.rawPrompt = prompt;
+      const result = (executor as Any).ensureRequiredPlanSteps({
+        description: "Answer",
+        steps: [
+          {
+            id: "1",
+            description: "Answer the question in chat.",
+            kind: "primary",
+            status: "pending",
+          },
+        ],
+      });
+      expect(result.steps).toHaveLength(1);
+    }
+  });
+
   it("uses a deterministic dependency-ordered plan for Turkish manuscript analysis", async () => {
     const executor = createPlanExecutor({ content: [] });
     executor.task.title = "Yapay_Zeka_Yan_Koltukta_Baski_Hazir_v7_word_pass4";

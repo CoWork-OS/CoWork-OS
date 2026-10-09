@@ -492,18 +492,27 @@ import {
   hasUnrecoveredToolFailureForAssistantOutput as hasUnrecoveredToolFailureForAssistantOutputUtil,
 } from "./executor-completion-utils";
 import {
+  MAX_VERIFICATION_REPAIR_PASSES,
   MIN_TURNS_FOR_VERIFICATION_REPAIR,
+  SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
   VERIFICATION_RECHECK_STEP_DESCRIPTION,
   VERIFICATION_REPAIR_STEP_DESCRIPTION,
+  answerLinksOutput,
   buildOfficeArtifactVerificationGuidance,
+  buildUnlinkedSourceCellsFinding,
   buildVerificationRecheckStepContext,
   buildVerificationRepairStepContext,
+  buildVerificationSeverityGuidance,
   decideVerificationRepair,
   extractVerificationFindings,
+  findUnlinkedSourcedTableCells,
   isBlockingVerificationVerdict,
   isVerificationRecheckStepDescription,
   isVerificationRepairStepDescription,
   mentionsOfficeArtifact,
+  requestsFileLinks,
+  requestsSourceLinks,
+  requestsSourcedResearchAnswer,
 } from "./executor-verification-repair-utils";
 import {
   CANONICAL_ARTIFACT_EXTENSION_REGEX,
@@ -12972,6 +12981,25 @@ ${transcript}
       });
     }
 
+    // A research answer the user asked to be linked or sourced ends with a
+    // check of its links, so the verification repair pass can fix unlinked
+    // facts. Plans that already end with a check keep it.
+    const lastPlanStep = nextPlan.steps[nextPlan.steps.length - 1];
+    if (
+      this.task &&
+      nextPlan.steps.length > 0 &&
+      lastPlanStep &&
+      !this.isVerificationStep(lastPlanStep) &&
+      requestsSourcedResearchAnswer(`${this.task.title || ""}\n${this.getContractPrompt() || ""}`)
+    ) {
+      nextPlan.steps.push({
+        id: this.nextPlanStepId(nextPlan.steps),
+        description: SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
+        kind: "verification",
+        status: "pending",
+      });
+    }
+
     return nextPlan;
   }
 
@@ -14401,9 +14429,10 @@ ${transcript}
     if (!workspaceRoot) return summary;
     const inability =
       /\b(?:can['’]?t|cannot|could\s*n['’]?t|could\s+not|unable\s+to|not\s+able\s+to)\b/i;
-    const promptAsksForLink = /\b(?:link|download(?:able)?|attach(?:ment)?)\b/i.test(
-      `${this.task?.title || ""}\n${this.getContractPrompt() || ""}`,
-    );
+    const requestText = `${this.task?.title || ""}\n${this.getContractPrompt() || ""}`;
+    const promptAsksForLink =
+      /\b(?:link|download(?:able)?|attach(?:ment)?)\b/i.test(requestText) ||
+      requestsFileLinks(requestText);
     if (!inability.test(summary) && !promptAsksForLink) return summary;
     let outputSummary: TaskOutputSummary | undefined;
     try {
@@ -14447,7 +14476,15 @@ ${transcript}
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
-    const missingLinks = outputs.filter((relative) => !reconciled.includes(`](${relative})`));
+    // When the request names its files, those are the deliverables to link;
+    // other outputs (drafts, intermediate files) are left out.
+    const requestLower = requestText.toLowerCase();
+    const namedOutputs = outputs.filter((relative) =>
+      requestLower.includes(path.posix.basename(relative).toLowerCase()),
+    );
+    const missingLinks = (namedOutputs.length > 0 ? namedOutputs : outputs).filter(
+      (relative) => !answerLinksOutput(reconciled, relative),
+    );
     if ((!removedDenial && !promptAsksForLink) || missingLinks.length === 0) return reconciled;
     const links = missingLinks
       .map((relative) => `[${path.posix.basename(relative)}](${relative})`)
@@ -15817,6 +15854,27 @@ ${transcript}
     }
     const remainingTurns = this.getRemainingTurnBudget();
     return !(Number.isFinite(remainingTurns) && remainingTurns < MIN_TURNS_FOR_VERIFICATION_REPAIR);
+  }
+
+  /**
+   * A gap in the delivered answer that a deterministic check can see: a table
+   * in a sourced answer whose factual cells carry no link or citation. Empty
+   * unless the repair pass could still run for this final verification step.
+   */
+  private findDeterministicVerificationGap(step: PlanStep, stepLoopBudgetStopped: boolean): string {
+    if (!this.isVerificationStepForCompletion(step)) return "";
+    if (isVerificationRecheckStepDescription(step.description)) return "";
+    if ((Number(this.verificationRepairPassesUsed) || 0) >= MAX_VERIFICATION_REPAIR_PASSES) {
+      return "";
+    }
+    if (!requestsSourceLinks(`${this.task?.title || ""}\n${this.getContractPrompt() || ""}`)) {
+      return "";
+    }
+    const deliverable = String(this.lastNonVerificationOutput || this.lastAssistantOutput || "");
+    const unlinkedCells = findUnlinkedSourcedTableCells(deliverable);
+    if (unlinkedCells.length === 0) return "";
+    if (!this.hasBudgetForVerificationRepair(stepLoopBudgetStopped)) return "";
+    return buildUnlinkedSourceCellsFinding(unlinkedCells);
   }
 
   /**
@@ -33223,14 +33281,23 @@ Return ONLY a JSON object:
               `- Then add a short checklist of missing evidence/actions using bullets.\n`
             : `- If everything checks out, respond with exactly: OK\n` +
               `- If something is wrong or missing, clearly state the problem and what needs to change.\n`);
+        const createdFilesForVerification = (
+          this.fileOperationTracker?.getCreatedFiles?.() || []
+        ).map((file) => String(file));
         if (
           mentionsOfficeArtifact([
             step.description,
             this.getExecutionTaskPrompt(),
-            ...(this.fileOperationTracker?.getCreatedFiles?.() || []).map((file) => String(file)),
+            ...createdFilesForVerification,
           ])
         ) {
           stepContext += buildOfficeArtifactVerificationGuidance();
+        }
+        if (!this.isReadOnlyFactFindingVerificationStep(step)) {
+          stepContext += buildVerificationSeverityGuidance({
+            prompt: this.getExecutionTaskPrompt(),
+            createdFiles: createdFilesForVerification,
+          });
         }
         if (inlineVerificationTargets.length > 0) {
           stepContext += `- Return checklist/report output inline in your response; do not require creating a new checklist file.\n`;
@@ -38969,6 +39036,26 @@ Return ONLY a JSON object:
       if (textChecklistEvaluation.applied) {
         this.emitVerificationTextChecklistEvaluated(step, textChecklistEvaluation);
       }
+      // A passing or warning final check can still miss a gap the answer shows
+      // on its face. Turn such a gap into a blocking finding only when the
+      // repair pass can still act on it.
+      const deterministicVerificationFinding =
+        !stepFailed &&
+        enforceVerificationOk &&
+        isLastStep &&
+        (this.isVerificationPassing(finalAssistantText) ||
+          parseVerificationProtocolOutcomeUtil(finalAssistantText) === "warn_non_blocking")
+          ? this.findDeterministicVerificationGap(step, Boolean(stepLoopBudgetStopReason))
+          : "";
+      if (deterministicVerificationFinding) {
+        stepFailed = true;
+        lastFailureReason = `Verification failed: FAIL_BLOCKING — ${deterministicVerificationFinding}`;
+        this.emitEvent("log", {
+          metric: "verification_deterministic_finding",
+          stepId: step.id,
+          finding: deterministicVerificationFinding,
+        });
+      }
       if (
         !stepFailed &&
         enforceVerificationOk &&
@@ -39016,6 +39103,7 @@ Return ONLY a JSON object:
         | null = null;
       if (
         stepFailed &&
+        !deterministicVerificationFinding &&
         this.verificationOutcomeV2Enabled &&
         this.isVerificationStepForCompletion(step)
       ) {

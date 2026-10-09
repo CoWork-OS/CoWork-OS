@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  answerLinksOutput,
+  buildUnlinkedSourceCellsFinding,
+  buildVerificationRepairStepContext,
+  buildVerificationSeverityGuidance,
   decideVerificationRepair,
   extractVerificationFindings,
+  findUnlinkedSourcedTableCells,
   isBlockingVerificationVerdict,
   mentionsOfficeArtifact,
+  requestsFileLinks,
+  requestsMatchingOutputs,
+  requestsSourceLinks,
+  requestsSourcedResearchAnswer,
 } from "../executor-verification-repair-utils";
 
 const base = {
@@ -109,5 +118,143 @@ describe("verification verdict helpers", () => {
     expect(mentionsOfficeArtifact(["Create Northstar-pilot-costs.xlsx"])).toBe(true);
     expect(mentionsOfficeArtifact(["Save a matching PDF"])).toBe(true);
     expect(mentionsOfficeArtifact(["Write notes.md", undefined])).toBe(false);
+  });
+});
+
+const NORTHSTAR_PROMPT =
+  "Prepare a polished two-page client brief in Portuguese (Portugal) for the Northstar onboarding pilot. " +
+  "Save both an editable Word document and a matching PDF: Northstar-brief.docx and Northstar-brief.pdf. " +
+  "Label budget figures as proposed allowances. Give me links to both files.";
+
+const TRANSCRIPTS_PROMPT =
+  "Look up official documentation for Teams, Zoom and Google Meet transcript exports. " +
+  "Compare licensing and limitations, with links, in chat.";
+
+// The comparison table from a live answer whose Teams and Google Meet
+// limitation cells carried no source link.
+const TRANSCRIPT_COMPARISON_TABLE = [
+  "| Platform | Transcript and export | Availability and access | Key limitations |",
+  "|---|---|---|---|",
+  "| **Microsoft Teams** | A **meeting transcript** can be downloaded after the meeting as **.docx** or **.vtt** from Chat → Recap → Transcript. [Microsoft: Start, stop, and download live transcripts](https://support.microsoft.com/en-us/teams/meetings/start-stop-and-download-live-transcripts-in-microsoft-teams-meetings) | Organizers and co-organizers can download by default. Other participants’ access depends on organization settings and organizer permissions. [Microsoft: Edit or delete a meeting transcript](https://support.microsoft.com/en-us/teams/meetings/edit-or-delete-a-meeting-transcript-in-microsoft-teams) | Transcripts are stored in the organizer’s OneDrive for Business. Cross-tenant participants may see the live transcript but not the post-meeting one; anonymous and dial-in attendees cannot view it. Admin policies can also affect access. |",
+  "| **Zoom** | Zoom documents a transcript associated with a **cloud recording** and provides instructions for downloading it. [Download a conversation recording and transcript](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0057886) | Its documentation covers enabling audio transcription for cloud recordings and managing recording access: [Enable or disable audio transcription](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0065911) · [Manage and share cloud recordings](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0067567) | The pages returned only a loading shell, so export formats, plan eligibility, and detailed download restrictions could not be verified. |",
+  "| **Google Meet** | A **transcript** is saved to the organizer’s Google Drive, in the Google Meet folder and a meeting-specific subfolder. The help page describes access through email or the Calendar event but does not specify a file format. [Google: Use Transcripts with Meet](https://support.google.com/meet/answer/12849897?hl=en&co=GENIE.Platform%3DDesktop) | Listed Workspace plans include Business Standard/Plus, Enterprise Starter/Standard/Plus, Teaching and Learning Upgrade, Education Plus, and Workspace Individual. [Google: Premium Meet features](https://support.google.com/meet/answer/10459644?hl=en) | Transcription captures spoken words, not chat; chat requires a meeting recording. Transcription stops when everyone leaves, cannot be paused, and restarting creates a separate file. Storage must be available in both the organization’s and host’s Drive. |",
+].join("\n");
+
+describe("verification severity guidance", () => {
+  it("makes a content difference between matching outputs and a missing file link blocking", () => {
+    const guidance = buildVerificationSeverityGuidance({ prompt: NORTHSTAR_PROMPT });
+    expect(guidance).toContain("Use WARN_NON_BLOCKING only for optional or cosmetic issues");
+    expect(guidance).toContain(
+      "Any difference between them in facts, figures, names, dates, or sections is FAIL_BLOCKING, not a warning",
+    );
+    expect(guidance).toContain("a requested file the answer does not link is FAIL_BLOCKING");
+    expect(guidance).not.toContain("Sourced facts");
+  });
+
+  it("makes an unlinked factual cell blocking when the user asked for links", () => {
+    const guidance = buildVerificationSeverityGuidance({ prompt: TRANSCRIPTS_PROMPT });
+    expect(guidance).toContain("A factual cell or bullet with neither is FAIL_BLOCKING");
+    expect(guidance).toContain("must name the page that was checked");
+    expect(guidance).not.toContain("Matching outputs");
+    expect(guidance).not.toContain("Requested links");
+  });
+
+  it("keeps only the general severity rule for a plain request", () => {
+    const guidance = buildVerificationSeverityGuidance({
+      prompt: "Write a short summary of the attached meeting notes.",
+    });
+    expect(guidance.trim().split("\n")).toHaveLength(1);
+  });
+
+  it("detects requests for matching outputs, file links, and sourced answers", () => {
+    expect(requestsMatchingOutputs(NORTHSTAR_PROMPT)).toBe(true);
+    expect(requestsMatchingOutputs("Export the report as a PDF version of report.docx.")).toBe(
+      true,
+    );
+    expect(
+      requestsMatchingOutputs("Write the summary.", ["/ws/summary.docx", "/ws/summary.pdf"]),
+    ).toBe(true);
+    expect(requestsMatchingOutputs("Create budget.xlsx and a separate memo.pdf.")).toBe(false);
+    expect(requestsMatchingOutputs("Fix the pattern matching bug in parser.ts.")).toBe(false);
+
+    expect(requestsFileLinks(NORTHSTAR_PROMPT)).toBe(true);
+    expect(requestsFileLinks(TRANSCRIPTS_PROMPT)).toBe(false);
+
+    expect(requestsSourceLinks(TRANSCRIPTS_PROMPT)).toBe(true);
+    expect(requestsSourceLinks(NORTHSTAR_PROMPT)).toBe(false);
+    expect(requestsSourcedResearchAnswer(TRANSCRIPTS_PROMPT)).toBe(true);
+    expect(requestsSourcedResearchAnswer("Compare React and Vue for a small dashboard.")).toBe(
+      false,
+    );
+    expect(requestsSourcedResearchAnswer("What is the capital of Portugal?")).toBe(false);
+    expect(requestsSourcedResearchAnswer(NORTHSTAR_PROMPT)).toBe(false);
+  });
+});
+
+describe("findUnlinkedSourcedTableCells", () => {
+  it("flags the factual cells without a link in the live comparison answer", () => {
+    const answer = `Here is the comparison.\n\n${TRANSCRIPT_COMPARISON_TABLE}\n**Terminology:** ...`;
+    expect(findUnlinkedSourcedTableCells(answer)).toEqual([
+      { row: "Microsoft Teams", column: "Key limitations" },
+      { row: "Google Meet", column: "Key limitations" },
+    ]);
+  });
+
+  it("passes the same table once every factual cell is linked or cited", () => {
+    const linked = TRANSCRIPT_COMPARISON_TABLE.split("\n")
+      .map((line) =>
+        line.startsWith("| **Microsoft Teams**") || line.startsWith("| **Google Meet**")
+          ? line.replace(/ \|\s*$/, " [1] |")
+          : line,
+      )
+      .join("\n");
+    expect(findUnlinkedSourcedTableCells(linked)).toEqual([]);
+  });
+
+  it("accepts a linked source column and ignores tables that cite nothing", () => {
+    const withSourceColumn = [
+      "| Platform | Limits | Source |",
+      "|---|---|---|",
+      "| Teams | Transcripts are stored in the organizer's OneDrive. | [Docs](https://example.com/teams) |",
+    ].join("\n");
+    expect(findUnlinkedSourcedTableCells(withSourceColumn)).toEqual([]);
+
+    const unsourced = [
+      "| Platform | Limits |",
+      "|---|---|",
+      "| Teams | Transcripts are stored in the organizer's OneDrive. |",
+    ].join("\n");
+    expect(findUnlinkedSourcedTableCells(unsourced)).toEqual([]);
+  });
+
+  it("names the cells in a finding the repair pass can act on", () => {
+    const finding = buildUnlinkedSourceCellsFinding([
+      { row: "Microsoft Teams", column: "Key limitations" },
+    ]);
+    expect(finding).toContain("Microsoft Teams / Key limitations");
+    expect(
+      decideVerificationRepair({ ...base, verdictText: `FAIL_BLOCKING — ${finding}` }),
+    ).toEqual({ repair: true, findings: finding });
+  });
+});
+
+describe("verification repair step guidance", () => {
+  it("regenerates every matching copy, links every requested file, and forbids invented URLs", () => {
+    const context = buildVerificationRepairStepContext("The DOCX lists the allowances as TBD.");
+    expect(context).toContain("regenerate every other copy from that corrected content");
+    expect(context).toContain("Link every file the user asked for");
+    expect(context).toContain("Never invent, guess, or construct URLs");
+    expect(context).toContain("reword it as not documented");
+  });
+});
+
+describe("answerLinksOutput", () => {
+  it("matches relative and absolute sandbox links to a workspace output", () => {
+    const answer =
+      "[Transferir Northstar-brief.pdf](sandbox:/var/folders/ts/T/ui-session/Northstar-brief.pdf)";
+    expect(answerLinksOutput(answer, "Northstar-brief.pdf")).toBe(true);
+    expect(answerLinksOutput(answer, "Northstar-brief.docx")).toBe(false);
+    expect(answerLinksOutput("[Brief](Northstar-brief.docx)", "Northstar-brief.docx")).toBe(true);
+    expect(answerLinksOutput("Saved Northstar-brief.docx.", "Northstar-brief.docx")).toBe(false);
   });
 });

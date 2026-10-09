@@ -265,7 +265,7 @@ features:
   - title: Profiles & Portability
     details: Separate CoWork profiles isolate app data, credentials, channels, and sessions, with export/import flows for moving or cloning a setup safely.
   - title: Agent Teams
-    details: Multi-agent collaboration with shared checklists, collaborative mode, multi-LLM synthesis, and performance reviews.
+    details: Multi-agent collaboration with shared checklists, collaborative mode, and multi-LLM synthesis.
   - title: Enterprise Connectors
     details: An extensible MCP connector catalog including Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Rhino, Blender, ComfyUI, and more, with connector notifications available to automations and configured connector mentions available from the composer.
   - title: Secure MCP Tunnels

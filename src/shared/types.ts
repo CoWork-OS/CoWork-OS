@@ -426,161 +426,6 @@ export type AwarenessWakeReason =
   | "idle_window"
   | "due_soon";
 
-export type GoalStateStatus = "observed" | "active" | "blocked" | "completed" | "stale";
-
-export interface GoalState {
-  id: string;
-  workspaceId?: string;
-  title: string;
-  status: GoalStateStatus;
-  confidence: number;
-  source: AwarenessSource | "profile" | "relationship";
-  evidenceRefs: string[];
-  lastSeenAt: number;
-  dueAt?: number;
-}
-
-export interface ProjectState {
-  id: string;
-  workspaceId?: string;
-  name: string;
-  confidence: number;
-  source: AwarenessSource | "belief";
-  evidenceRefs: string[];
-  lastActiveAt: number;
-  recentFiles: string[];
-}
-
-export interface OpenLoopState {
-  id: string;
-  workspaceId?: string;
-  title: string;
-  status: "open" | "in_progress" | "done" | "stale";
-  confidence: number;
-  source: AwarenessSource | "relationship";
-  evidenceRefs: string[];
-  dueAt?: number;
-  lastUpdatedAt: number;
-}
-
-export interface RoutineState {
-  id: string;
-  workspaceId?: string;
-  title: string;
-  description: string;
-  confidence: number;
-  source: AwarenessSource | "belief";
-  evidenceRefs: string[];
-  trigger: string;
-  suggestedActionType: ChiefOfStaffActionType;
-  cooldownMinutes: number;
-  lastObservedAt: number;
-  lastExecutedAt?: number;
-  paused?: boolean;
-}
-
-export interface FocusSessionState {
-  id: string;
-  workspaceId?: string;
-  focusLabel: string;
-  activeApp?: string;
-  activeWindowTitle?: string;
-  activeProject?: string;
-  mode: "deep_work" | "research" | "planning" | "meeting" | "mixed";
-  startedAt: number;
-  lastActiveAt: number;
-}
-
-export type AutonomyPolicyLevel =
-  | "observe_only"
-  | "suggest_only"
-  | "execute_local"
-  | "execute_with_approval"
-  | "never";
-
-export type ChiefOfStaffActionType =
-  | "prepare_briefing"
-  | "create_task"
-  | "schedule_follow_up"
-  | "draft_message"
-  | "draft_agenda"
-  | "organize_work_session"
-  | "nudge_user"
-  | "execute_local_action";
-
-export interface ActionPolicy {
-  actionType: ChiefOfStaffActionType;
-  level: AutonomyPolicyLevel;
-  allowExternalSideEffects: boolean;
-  cooldownMinutes: number;
-}
-
-export interface AutonomyDecision {
-  id: string;
-  workspaceId?: string;
-  title: string;
-  description: string;
-  actionType: ChiefOfStaffActionType;
-  policyLevel: AutonomyPolicyLevel;
-  priority: CompanyPriority;
-  status: "pending" | "suggested" | "executed" | "dismissed" | "done";
-  /** Incremented by explicit status edits; absent legacy revisions are zero. */
-  statusRevision?: number;
-  reason: string;
-  evidenceRefs: string[];
-  fingerprint: string;
-  createdAt: number;
-  updatedAt: number;
-  cooldownUntil?: number;
-  suggestedTaskTitle?: string;
-  suggestedPrompt?: string;
-  /** Set when decision is from a routine; used for cooldown tracking */
-  routineId?: string;
-  /** Normalized entity (e.g. `commitment:<id>`) shared with the suggestion sink and briefing. */
-  entityKey?: string;
-}
-
-export interface AutonomyAction {
-  id: string;
-  decisionId?: string;
-  workspaceId?: string;
-  actionType: ChiefOfStaffActionType;
-  status: "queued" | "success" | "failed" | "skipped";
-  summary: string;
-  createdAt: number;
-  metadata?: Record<string, unknown>;
-}
-
-export interface AutonomyOutcome {
-  id: string;
-  actionId: string;
-  decisionId?: string;
-  workspaceId?: string;
-  outcome: "accepted" | "ignored" | "reversed" | "succeeded" | "failed";
-  summary: string;
-  createdAt: number;
-}
-
-export interface ChiefOfStaffWorldModel {
-  generatedAt: number;
-  workspaceId?: string;
-  focusSession?: FocusSessionState;
-  goals: GoalState[];
-  projects: ProjectState[];
-  openLoops: OpenLoopState[];
-  routines: RoutineState[];
-  beliefs: AwarenessBelief[];
-  currentPriorities: string[];
-  continuityNotes: string[];
-}
-
-export interface AutonomyConfig {
-  enabled: boolean;
-  autoEvaluate: boolean;
-  maxPendingDecisions: number;
-  actionPolicies: Record<ChiefOfStaffActionType, ActionPolicy>;
-}
-
 export type UserFactCategory =
   | "identity"
   | "preference"
@@ -5355,30 +5200,6 @@ export interface HeartbeatActiveHours {
   weekdays?: number[];
 }
 
-// ============ Agent Performance Reviews (Mission Control) ============
-
-export type AgentReviewRating = 1 | 2 | 3 | 4 | 5;
-
-export interface AgentPerformanceReview {
-  id: string;
-  workspaceId: string;
-  agentRoleId: string;
-  periodStart: number; // epoch ms
-  periodEnd: number; // epoch ms
-  rating: AgentReviewRating;
-  summary: string;
-  metrics?: Record<string, number>;
-  recommendedAutonomyLevel?: AgentAutonomyLevel;
-  recommendationRationale?: string;
-  createdAt: number;
-}
-
-export interface AgentReviewGenerateRequest {
-  workspaceId: string;
-  agentRoleId: string;
-  periodDays?: number; // default: 7
-}
-
 /**
  * Tool restriction configuration for an agent role
  */
@@ -7419,21 +7240,6 @@ export interface TaskSubscription {
   subscribedAt: number;
 }
 
-/**
- * Daily standup report aggregating task status
- */
-export interface StandupReport {
-  id: string;
-  workspaceId: string;
-  reportDate: string; // YYYY-MM-DD format
-  completedTaskIds: string[];
-  inProgressTaskIds: string[];
-  blockedTaskIds: string[];
-  summary: string;
-  deliveredToChannel?: string; // channel:id format
-  createdAt: number;
-}
-
 export type CronSchedule =
   | { kind: "at"; atMs: number }
   | { kind: "every"; everyMs: number; anchorMs?: number }
@@ -8129,12 +7935,6 @@ export const IPC_CHANNELS = {
   SUBSCRIPTION_GET_FOR_AGENT: "subscription:getForAgent",
   SUBSCRIPTION_EVENT: "subscription:event",
 
-  // Mission Control - Standup Reports
-  STANDUP_GENERATE: "standup:generate",
-  STANDUP_GET_LATEST: "standup:getLatest",
-  STANDUP_LIST: "standup:list",
-  STANDUP_DELIVER: "standup:deliver",
-
   // Mission Control - Company Ops / Planner
   MC_COMPANY_LIST: "missionControl:companyList",
   MC_COMPANY_GET: "missionControl:companyGet",
@@ -8160,11 +7960,7 @@ export const IPC_CHANNELS = {
   MC_PLANNER_LIST_RUNS: "missionControl:plannerListRuns",
   MC_AUTOMATION_OUTCOME_RETRY: "missionControl:automationOutcomeRetry",
 
-  // Mission Control - Agent Performance Reviews
-  REVIEW_GENERATE: "review:generate",
-  REVIEW_GET_LATEST: "review:getLatest",
-  REVIEW_LIST: "review:list",
-  REVIEW_DELETE: "review:delete",
+  // Eval Suites / Runs (Reliability Flywheel)
   EVAL_LIST_SUITES: "eval:listSuites",
   EVAL_RUN_SUITE: "eval:runSuite",
   EVAL_GET_RUN: "eval:getRun",
@@ -8961,13 +8757,6 @@ export const IPC_CHANNELS = {
   AWARENESS_GET_SUMMARY: "awareness:getSummary",
   AWARENESS_GET_SNAPSHOT: "awareness:getSnapshot",
   AWARENESS_LIST_EVENTS: "awareness:listEvents",
-  AUTONOMY_GET_CONFIG: "autonomy:getConfig",
-  AUTONOMY_SAVE_CONFIG: "autonomy:saveConfig",
-  AUTONOMY_GET_STATE: "autonomy:getState",
-  AUTONOMY_LIST_DECISIONS: "autonomy:listDecisions",
-  AUTONOMY_LIST_ACTIONS: "autonomy:listActions",
-  AUTONOMY_UPDATE_DECISION: "autonomy:updateDecision",
-  AUTONOMY_TRIGGER_EVALUATION: "autonomy:triggerEvaluation",
 
   // Memory Features (Global Toggles)
   MEMORY_FEATURES_GET_SETTINGS: "memoryFeatures:getSettings",

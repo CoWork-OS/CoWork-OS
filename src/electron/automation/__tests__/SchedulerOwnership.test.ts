@@ -111,9 +111,9 @@ describe("persistent scheduler fencing", () => {
     leaseStore.release(lease);
     leaseStore.acquire({ owner: "second", now, leaseMs: 60000 });
     const budget = new PersistentDispatchBudget(db, { getSchedulerFence: () => lease });
-    await expect(budget.tryConsume({ workspaceId: "fixture", source: "autonomy" })).rejects.toThrow(
-      "ownership expired or changed",
-    );
+    await expect(
+      budget.tryConsume({ workspaceId: "fixture", source: "workflow_intelligence" }),
+    ).rejects.toThrow("ownership expired or changed");
     expect((await budget.snapshot("fixture")).dispatchesToday).toBe(0);
     expect(() => assertSchedulerFence(db, lease)).toThrow();
   });
@@ -140,7 +140,7 @@ describe("persistent scheduler fencing", () => {
     });
     const committed = await budget.tryConsume({
       workspaceId: workspace.id,
-      source: "autonomy",
+      source: "workflow_intelligence",
       occurrenceKey: "event:committed",
     });
     await new TaskRepository(db).create({
@@ -177,7 +177,7 @@ describe("persistent scheduler fencing", () => {
     expect(
       await current.tryConsume({
         workspaceId: workspace.id,
-        source: "autonomy",
+        source: "workflow_intelligence",
         occurrenceKey: "event:committed",
         manual: true,
       }),

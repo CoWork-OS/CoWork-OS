@@ -2195,13 +2195,6 @@ export const AutomationProfileAttachRequestSchema = z
     activeHours: HeartbeatActiveHoursSchema.nullable().optional(),
   })
   .strict();
-export const StandupDeliveryRequestSchema = z
-  .object({
-    reportId: UUIDSchema,
-    channelType: ChannelTypeSchema,
-    channelId: z.string().trim().min(1).max(200),
-  })
-  .strict();
 export const CoreTraceKindSchema = z.enum([
   "pulse_cycle",
   "subconscious_cycle",
@@ -2821,37 +2814,6 @@ export const AwarenessConfigSchema = z.object({
   sources: z.record(AwarenessSourceSchema, AwarenessSourcePolicySchema).optional(),
 });
 
-const ChiefOfStaffActionTypeSchema = z.enum([
-  "prepare_briefing",
-  "create_task",
-  "schedule_follow_up",
-  "draft_message",
-  "draft_agenda",
-  "organize_work_session",
-  "nudge_user",
-  "execute_local_action",
-]);
-const AutonomyPolicyLevelSchema = z.enum([
-  "observe_only",
-  "suggest_only",
-  "execute_local",
-  "execute_with_approval",
-  "never",
-]);
-const ActionPolicySchema = z.object({
-  actionType: ChiefOfStaffActionTypeSchema.optional(),
-  level: AutonomyPolicyLevelSchema.optional(),
-  allowExternalSideEffects: z.boolean().optional(),
-  cooldownMinutes: z.number().int().min(0).max(10080).optional(),
-});
-
-export const AutonomyConfigSchema = z.object({
-  enabled: z.boolean().optional(),
-  autoEvaluate: z.boolean().optional(),
-  maxPendingDecisions: z.number().int().min(1).max(100).optional(),
-  actionPolicies: z.record(ChiefOfStaffActionTypeSchema, ActionPolicySchema).optional(),
-});
-
 export const QAStartRunSchema = z.object({
   taskId: z.string().min(1).max(200),
   workspaceId: WorkspaceIdSchema,
@@ -3046,16 +3008,6 @@ export function parsePersonalitySaveOptions(
 }
 
 export const AwarenessUpdateBeliefSchema = z.object({
-  id: z.string().min(1).max(200),
-  patch: z
-    .record(z.string(), z.unknown())
-    .optional()
-    .refine((p) => p == null || (typeof p === "object" && JSON.stringify(p).length <= 50000), {
-      message: "Patch must be under 50KB",
-    }),
-});
-
-export const AutonomyUpdateDecisionSchema = z.object({
   id: z.string().min(1).max(200),
   patch: z
     .record(z.string(), z.unknown())

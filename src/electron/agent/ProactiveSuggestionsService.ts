@@ -15,7 +15,6 @@ import { UserProfileService } from "../memory/UserProfileService";
 import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getAwarenessService } from "../awareness/AwarenessService";
-import { getAutonomyEngine } from "../awareness/AutonomyEngine";
 import type {
   HeartbeatWorkspaceScope,
   ProactiveSuggestion,
@@ -491,11 +490,6 @@ export class ProactiveSuggestionsService {
       /* best-effort */
     }
     try {
-      await this.generateChiefOfStaffSuggestions(workspaceId);
-    } catch {
-      /* best-effort */
-    }
-    try {
       this.pruneExpired(workspaceId);
     } catch {
       /* best-effort */
@@ -604,7 +598,7 @@ export class ProactiveSuggestionsService {
     if (dueSoon) {
       await this.propose({
         workspaceId,
-        // Due-soon items are relationship commitments: the same entity AutonomyEngine follows up.
+        // Due-soon items are relationship commitments: one entity key across producers.
         entityKey: dueSoon.tags.includes("commitment")
           ? commitmentEntityKey(dueSoon.id)
           : undefined,
@@ -635,24 +629,6 @@ export class ProactiveSuggestionsService {
         sourceEntity: contextShift.id,
         confidence: Math.max(0.64, contextShift.score || 0.64),
       });
-    }
-  }
-
-  static async generateChiefOfStaffSuggestions(workspaceId: string): Promise<void> {
-    const decisions = getAutonomyEngine()
-      .listDecisions(workspaceId)
-      .filter(
-        (decision) =>
-          decision.status === "suggested" &&
-          (decision.policyLevel === "suggest_only" ||
-            decision.policyLevel === "execute_with_approval"),
-      )
-      .slice(0, 4);
-
-    for (const decision of decisions) {
-      await this.propose(
-        ProactiveSuggestionsService.autonomyDecisionProposal(workspaceId, decision),
-      );
     }
   }
 
@@ -1061,36 +1037,6 @@ export class ProactiveSuggestionsService {
         const until = this.suppressedEntities.get(`${workspaceId}::${entityKey}`) || 0;
         return until > Date.now();
       },
-    };
-  }
-
-  /** Map a chief-of-staff decision onto a sink proposal (entity shared with awareness/briefing). */
-  static autonomyDecisionProposal(
-    workspaceId: string,
-    decision: {
-      id: string;
-      title: string;
-      description: string;
-      priority?: string;
-      suggestedPrompt?: string;
-      entityKey?: string;
-      evidenceRefs?: string[];
-    },
-  ): SuggestionProposal {
-    return {
-      workspaceId,
-      entityKey: decision.entityKey,
-      source: "autonomy",
-      type: "follow_up",
-      title: decision.title.slice(0, 80),
-      why: decision.description,
-      actionPrompt:
-        decision.suggestedPrompt ||
-        `Review this chief-of-staff recommendation and take the next appropriate action: ${decision.title}`,
-      sourceEntity: decision.id,
-      evidence: decision.evidenceRefs,
-      confidence: decision.priority === "high" ? 0.9 : 0.76,
-      urgency: decision.priority === "high" ? "high" : undefined,
     };
   }
 

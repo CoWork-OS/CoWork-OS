@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
-  AutonomyConfig,
   AwarenessConfig,
   AwarenessSource,
   MemoryFeaturesSettings,
@@ -195,18 +194,15 @@ export function ChronicleConnectionRow({
   );
 }
 
-/** Proactive: the chief of staff and awareness private mode (all workspaces). */
+/** Proactive: awareness private mode (all workspaces). */
 export function ProactiveSection(props: {
-  autonomyConfig: AutonomyConfig | null;
-  autonomySaving: boolean;
-  onSaveAutonomy: (next: AutonomyConfig) => void;
   awarenessConfig: AwarenessConfig | null;
   awarenessSaving: boolean;
   onSaveAwareness: (next: AwarenessConfig) => void;
   loaded: boolean;
 }) {
-  const { autonomyConfig, awarenessConfig } = props;
-  if (!autonomyConfig && !awarenessConfig) {
+  const { awarenessConfig } = props;
+  if (!awarenessConfig) {
     return (
       <div className="settings-empty">
         {props.loaded ? "Proactive features are not available here." : "Loading..."}
@@ -215,32 +211,6 @@ export function ProactiveSection(props: {
   }
   return (
     <>
-      {autonomyConfig && (
-        <SettingsRow
-          label="Chief of staff"
-          hint="Plans toward your goals, suggests next steps and runs allowed local actions."
-        >
-          <SettingsSwitch
-            label="Chief of staff"
-            checked={autonomyConfig.enabled}
-            onChange={(enabled) => props.onSaveAutonomy({ ...autonomyConfig, enabled })}
-            disabled={props.autonomySaving}
-          />
-        </SettingsRow>
-      )}
-      {autonomyConfig?.enabled && (
-        <SettingsRow
-          label="Auto-evaluate"
-          hint="Re-plan when ambient signals change, not only on request."
-        >
-          <SettingsSwitch
-            label="Auto-evaluate"
-            checked={autonomyConfig.autoEvaluate}
-            onChange={(autoEvaluate) => props.onSaveAutonomy({ ...autonomyConfig, autoEvaluate })}
-            disabled={props.autonomySaving}
-          />
-        </SettingsRow>
-      )}
       {awarenessConfig && (
         <SettingsRow
           label="Awareness private mode"
@@ -407,8 +377,6 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
   const [configsLoaded, setConfigsLoaded] = useState(false);
   const [awarenessConfig, setAwarenessConfig] = useState<AwarenessConfig | null>(null);
   const [awarenessSaving, setAwarenessSaving] = useState(false);
-  const [autonomyConfig, setAutonomyConfig] = useState<AutonomyConfig | null>(null);
-  const [autonomySaving, setAutonomySaving] = useState(false);
 
   const showError = useCallback((message: string) => {
     setActionNotice(null);
@@ -435,7 +403,6 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
     available: repoAvailable,
   });
   const awarenessAvailable = hasHostMethod("getAwarenessConfig");
-  const autonomyAvailable = hasHostMethod("getAutonomyConfig");
 
   useEffect(() => {
     let cancelled = false;
@@ -448,23 +415,19 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
         return null;
       }
     };
-    void Promise.all([
-      load(awarenessAvailable, () => window.electronAPI.getAwarenessConfig(), "awareness settings"),
-      load(
-        autonomyAvailable,
-        () => window.electronAPI.getAutonomyConfig(),
-        "chief of staff settings",
-      ),
-    ]).then(([awareness, autonomy]) => {
+    void load(
+      awarenessAvailable,
+      () => window.electronAPI.getAwarenessConfig(),
+      "awareness settings",
+    ).then((awareness) => {
       if (cancelled) return;
       setAwarenessConfig(awareness);
-      setAutonomyConfig(autonomy);
       setConfigsLoaded(true);
     });
     return () => {
       cancelled = true;
     };
-  }, [awarenessAvailable, autonomyAvailable, showError]);
+  }, [awarenessAvailable, showError]);
 
   const saveAwareness = async (next: AwarenessConfig) => {
     try {
@@ -508,20 +471,6 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
         [source]: { ...awarenessConfig.sources[source], ...updates },
       },
     });
-  };
-
-  const saveAutonomy = async (next: AutonomyConfig) => {
-    const previous = autonomyConfig;
-    setAutonomyConfig(next);
-    try {
-      setAutonomySaving(true);
-      setAutonomyConfig(await window.electronAPI.saveAutonomyConfig(next));
-    } catch (error) {
-      setAutonomyConfig(previous);
-      showError(errorText(error, "Failed to save chief of staff settings."));
-    } finally {
-      setAutonomySaving(false);
-    }
   };
 
   const saveFeatures = (updates: Partial<MemoryFeaturesSettings>) =>
@@ -634,12 +583,9 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
         <ChronicleConnectionRow onOpenSettingsTab={props.onOpenSettingsTab} />
       </SettingsSection>
 
-      {(awarenessAvailable || autonomyAvailable) && (
+      {awarenessAvailable && (
         <SettingsSection id="proactive" title="Proactive" scope={allScope}>
           <ProactiveSection
-            autonomyConfig={autonomyConfig}
-            autonomySaving={autonomySaving}
-            onSaveAutonomy={(next) => void saveAutonomy(next)}
             awarenessConfig={awarenessConfig}
             awarenessSaving={awarenessSaving}
             onSaveAwareness={(next) => void saveAwareness(next)}
@@ -770,21 +716,14 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
               </SettingsGroup>
             )}
 
-            {workspace && (awarenessConfig || autonomyConfig) && (
-              <SettingsGroup
-                id="awareness"
-                title="Awareness and chief of staff details"
-                scope={workspaceScope}
-              >
+            {workspace && awarenessConfig && (
+              <SettingsGroup id="awareness" title="Awareness details" scope={workspaceScope}>
                 <AwarenessDetailsPanel
                   key={workspace.id}
                   workspaceId={workspace.id}
                   awarenessConfig={awarenessConfig}
                   awarenessSaving={awarenessSaving}
                   onUpdateAwarenessSource={updateAwarenessSource}
-                  autonomyConfig={autonomyConfig}
-                  autonomySaving={autonomySaving}
-                  onSaveAutonomy={(next) => void saveAutonomy(next)}
                   onError={showError}
                 />
               </SettingsGroup>

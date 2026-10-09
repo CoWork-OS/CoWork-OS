@@ -31,10 +31,12 @@ describe("BackgroundDispatchBudget", () => {
     const budget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 3, now: time.now });
 
     expect(budget.tryConsume({ workspaceId: "ws-1", source: "heartbeat" }).allowed).toBe(true);
-    expect(budget.tryConsume({ workspaceId: "ws-1", source: "autonomy" }).allowed).toBe(true);
     expect(
       budget.tryConsume({ workspaceId: "ws-1", source: "workflow_intelligence" }).allowed,
     ).toBe(true);
+    expect(budget.tryConsume({ workspaceId: "ws-1", source: "strategic_planner" }).allowed).toBe(
+      true,
+    );
     const denied = budget.tryConsume({ workspaceId: "ws-1", source: "strategic_planner" });
     expect(denied).toMatchObject({
       allowed: false,
@@ -45,8 +47,8 @@ describe("BackgroundDispatchBudget", () => {
     expect(budget.tryConsume({ workspaceId: "ws-2", source: "heartbeat" }).allowed).toBe(true);
     expect(budget.snapshot("ws-1").bySource).toEqual({
       heartbeat: 1,
-      autonomy: 1,
       workflow_intelligence: 1,
+      strategic_planner: 1,
     });
   });
 
@@ -67,8 +69,11 @@ describe("BackgroundDispatchBudget", () => {
     const time = clock();
     const budget = new BackgroundDispatchBudget({ entityCooldownMs: 60 * 60_000, now: time.now });
     expect(
-      budget.tryConsume({ workspaceId: "ws-1", source: "autonomy", entityKey: "Commitment:1" })
-        .allowed,
+      budget.tryConsume({
+        workspaceId: "ws-1",
+        source: "workflow_intelligence",
+        entityKey: "Commitment:1",
+      }).allowed,
     ).toBe(true);
     const blocked = budget.tryConsume({
       workspaceId: "ws-1",
@@ -78,8 +83,11 @@ describe("BackgroundDispatchBudget", () => {
     expect(blocked).toMatchObject({ allowed: false, reason: "entity_cooldown" });
     time.advance(60 * 60_000);
     expect(
-      budget.tryConsume({ workspaceId: "ws-1", source: "autonomy", entityKey: "commitment:1" })
-        .allowed,
+      budget.tryConsume({
+        workspaceId: "ws-1",
+        source: "workflow_intelligence",
+        entityKey: "commitment:1",
+      }).allowed,
     ).toBe(true);
   });
 
@@ -95,6 +103,8 @@ describe("BackgroundDispatchBudget", () => {
     const budget = new BackgroundDispatchBudget({ maxPerWorkspacePerDay: 1 });
     const grant = budget.tryConsume({ workspaceId: "ws-1", source: "strategic_planner" });
     budget.refund(grant.ticket);
-    expect(budget.tryConsume({ workspaceId: "ws-1", source: "autonomy" }).allowed).toBe(true);
+    expect(
+      budget.tryConsume({ workspaceId: "ws-1", source: "workflow_intelligence" }).allowed,
+    ).toBe(true);
   });
 });

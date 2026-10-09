@@ -68,7 +68,6 @@ export type UiCopyKey =
   | "mcStatusOnline"
   | "mcWorkspaceLabel"
   | "mcMentionsLabel"
-  | "mcStandupButton"
   | "mcWakeAgent"
   | "mcNoActiveTask"
   | "mcTaskTab"
@@ -116,22 +115,9 @@ export type UiCopyKey =
   | "workingStateHistoryDelete"
   | "workingStateHistoryDeleteConfirm"
   | "workingStateHistoryFilesLabel"
-  | "standupTitle"
-  | "standupGenerate"
-  | "standupGenerating"
-  | "standupHistoryTitle"
-  | "standupEmpty"
-  | "standupGeneratedAt"
-  | "standupCompletedTitle"
-  | "standupInProgressTitle"
-  | "standupBlockedTitle"
-  | "standupCompletedEmpty"
-  | "standupInProgressEmpty"
-  | "standupBlockedEmpty"
   | "mcpEmptyTitle"
   | "mcpEmptyHint"
   | "scheduledNoWorkspaces"
-  | "standupLoading"
   | "taskBoardLoading"
   | "taskBoardTitle"
   | "taskBoardCount"
@@ -198,7 +184,6 @@ const UI_COPY: Record<UiCopyKey, string> = {
   mcStatusOnline: "ONLINE",
   mcWorkspaceLabel: "Workspace",
   mcMentionsLabel: "MENTIONS",
-  mcStandupButton: "Standup",
   mcWakeAgent: "Wake",
   mcNoActiveTask: "No active task",
   mcTaskTab: "TASK",
@@ -246,22 +231,9 @@ const UI_COPY: Record<UiCopyKey, string> = {
   workingStateHistoryDelete: "Delete",
   workingStateHistoryDeleteConfirm: "Delete this history entry?",
   workingStateHistoryFilesLabel: "Files:",
-  standupTitle: "Daily Standup Reports",
-  standupGenerate: "Generate Report",
-  standupGenerating: "Generating...",
-  standupHistoryTitle: "Report History",
-  standupEmpty: "No reports yet. Generate your first report to get started.",
-  standupGeneratedAt: "Generated at {time}",
-  standupCompletedTitle: "Completed",
-  standupInProgressTitle: "In Progress",
-  standupBlockedTitle: "Blocked",
-  standupCompletedEmpty: "No tasks completed",
-  standupInProgressEmpty: "No tasks in progress",
-  standupBlockedEmpty: "No blocked tasks",
   mcpEmptyTitle: "No MCP servers configured.",
   mcpEmptyHint: 'Click "Add Server" to connect to an MCP server and extend CoWork\'s capabilities.',
   scheduledNoWorkspaces: "No workspaces available",
-  standupLoading: "Loading standup reports...",
   taskBoardLoading: "Loading task board...",
   taskBoardTitle: "Task Board",
   taskBoardCount: "{count} tasks",
@@ -322,7 +294,6 @@ const PERSONA_UI_OVERRIDES: Partial<Record<PersonaId, Partial<Record<UiCopyKey, 
     mcColumnEmpty: "Nothing here yet",
     mcWorkspaceLabel: "Workspace",
     mcMentionsLabel: "MENTIONS",
-    mcStandupButton: "Check-in",
     mcWakeAgent: "Nudge",
     mcNoActiveTask: "Nothing active yet",
     mcTaskTab: "TASK",
@@ -364,23 +335,10 @@ const PERSONA_UI_OVERRIDES: Partial<Record<PersonaId, Partial<Record<UiCopyKey, 
     workingStateHistoryDelete: "Delete",
     workingStateHistoryDeleteConfirm: "Delete this history entry?",
     workingStateHistoryFilesLabel: "Files:",
-    standupTitle: "Daily Standup Reports",
-    standupGenerate: "Generate Report",
-    standupGenerating: "Generating...",
-    standupHistoryTitle: "Report History",
-    standupEmpty: "No reports yet. Generate your first report to get started.",
-    standupGeneratedAt: "Generated at {time}",
-    standupCompletedTitle: "Completed",
-    standupInProgressTitle: "In Progress",
-    standupBlockedTitle: "Blocked",
-    standupCompletedEmpty: "No tasks completed",
-    standupInProgressEmpty: "No tasks in progress",
-    standupBlockedEmpty: "No blocked tasks",
     mcpEmptyTitle: "No MCP servers configured.",
     mcpEmptyHint:
       'Click "Add Server" to connect to an MCP server and extend CoWork\'s capabilities.',
     scheduledNoWorkspaces: "No workspaces available",
-    standupLoading: "Loading standup reports...",
     taskBoardLoading: "Getting the board ready...",
     taskBoardTitle: "Task board",
     taskBoardCount: "{count} tasks",

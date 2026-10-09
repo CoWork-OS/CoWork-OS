@@ -1,8 +1,8 @@
 /**
  * SuggestionSink — the single entry point for proposing a user-facing suggestion.
  *
- * Heartbeat dispatch, Workflow Intelligence, ProactiveSuggestions generators (due soon, focus,
- * chief of staff, ...) and AutonomyEngine decisions all describe the same handful of entities
+ * Heartbeat dispatch, Workflow Intelligence and the ProactiveSuggestions generators (due soon,
+ * focus, ...) all describe the same handful of entities
  * (a commitment, an open loop, a WI target, a task). Before the sink each producer stored its
  * own suggestion and only exact titles were deduplicated, so one open loop could surface six
  * times. `propose()` merges proposals for the same entity into one suggestion that records
@@ -26,7 +26,6 @@ export type SuggestionSource =
   | "heartbeat"
   | "workflow_intelligence"
   | "awareness"
-  | "autonomy"
   | "briefing"
   | "proactive"
   | "follow_up"
@@ -100,7 +99,7 @@ export interface SuggestionProposalResult {
 
 /** Producer prefixes that describe the action, not the entity. */
 const TITLE_PREFIX_RE =
-  /^(?:review due soon|follow up on|follow up|decision needed|heartbeat review|workflow intelligence(?: code change)?|capture current focus|chief of staff|routine prep|prepare routine context|organize work session)\s*:\s*/i;
+  /^(?:review due soon|follow up on|follow up|decision needed|heartbeat review|workflow intelligence(?: code change)?|capture current focus|routine prep|prepare routine context|organize work session)\s*:\s*/i;
 
 const RECENT_PROPOSAL_TTL_MS = 10 * 60 * 1000;
 

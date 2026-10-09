@@ -46,7 +46,7 @@
     {
       "pattern": "^src/electron/reports/[a-z-]+-sql\\.ts$",
       "domain": "shared SQL",
-      "access": "Report stores (standup, agent reviews, briefing counts) run as reports-domain units: reads on the reporting reader and writes in the worker when COWORK_DB_WORKER_REPORTS is set, one host transaction otherwise.",
+      "access": "Report stores (briefing counts) run as reports-domain units: reads on the reporting reader and writes in the worker when COWORK_DB_WORKER_REPORTS is set, one host transaction otherwise.",
       "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
       "owner": "database platform"
     },

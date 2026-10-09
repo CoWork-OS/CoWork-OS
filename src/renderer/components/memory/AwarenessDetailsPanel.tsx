@@ -1,28 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  AutonomyAction,
-  AutonomyConfig,
-  AutonomyDecision,
   AwarenessBelief,
   AwarenessConfig,
   AwarenessSource,
   AwarenessSummary,
-  ChiefOfStaffWorldModel,
 } from "../../../shared/types";
 import { hasHostMethods, isBrowserHost } from "../../host/browser-capabilities";
 import { parseAwarenessTtlMinutes } from "./memory-settings-model";
-import { SettingsBadge, SettingsRow } from "./SettingsRow";
+import { SettingsBadge } from "./SettingsRow";
 
 type SourcePolicy = AwarenessConfig["sources"][AwarenessSource];
-
-function formatTimestamp(timestamp?: number): string | null {
-  if (!timestamp) return null;
-  try {
-    return new Date(timestamp).toLocaleString();
-  } catch {
-    return null;
-  }
-}
 
 function formatConfidence(confidence?: number): string {
   if (typeof confidence !== "number" || !Number.isFinite(confidence)) return "n/a";
@@ -84,44 +71,28 @@ const POLICY_COLUMNS: ReadonlyArray<{
 ];
 
 /**
- * Advanced → Awareness and chief of staff details: which local signals awareness may use
- * (all workspaces), this workspace's beliefs and summary, and the chief of staff's action
- * policies, world model, interventions and recent actions.
+ * Advanced → Awareness details: which local signals awareness may use
+ * (all workspaces), this workspace's beliefs and summary.
  */
 export function AwarenessDetailsPanel({
   workspaceId,
   awarenessConfig,
   awarenessSaving,
   onUpdateAwarenessSource,
-  autonomyConfig,
-  autonomySaving,
-  onSaveAutonomy,
   onError,
 }: {
   workspaceId: string;
   awarenessConfig: AwarenessConfig | null;
   awarenessSaving: boolean;
   onUpdateAwarenessSource: (source: AwarenessSource, updates: Partial<SourcePolicy>) => void;
-  autonomyConfig: AutonomyConfig | null;
-  autonomySaving: boolean;
-  onSaveAutonomy: (next: AutonomyConfig) => void;
   onError: (message: string) => void;
 }) {
   const [beliefs, setBeliefs] = useState<AwarenessBelief[]>([]);
   const [summary, setSummary] = useState<AwarenessSummary | null>(null);
-  const [worldModel, setWorldModel] = useState<ChiefOfStaffWorldModel | null>(null);
-  const [decisions, setDecisions] = useState<AutonomyDecision[]>([]);
-  const [actions, setActions] = useState<AutonomyAction[]>([]);
-  const [evaluating, setEvaluating] = useState(false);
   const alive = useRef(true);
   const report = useRef(onError);
   report.current = onError;
   const canReadAwareness = hasHostMethods("listAwarenessBeliefs", "getAwarenessSummary");
-  const canReadAutonomy = hasHostMethods(
-    "getAutonomyState",
-    "listAutonomyDecisions",
-    "listAutonomyActions",
-  );
 
   useEffect(() => {
     alive.current = true;
@@ -145,30 +116,10 @@ export function AwarenessDetailsPanel({
     }
   }, [workspaceId, canReadAwareness]);
 
-  const refreshAutonomy = useCallback(async () => {
-    if (!canReadAutonomy) return;
-    const [nextWorld, nextDecisions, nextActions] = await Promise.all([
-      window.electronAPI
-        .getAutonomyState(workspaceId)
-        .catch(() => null as ChiefOfStaffWorldModel | null),
-      window.electronAPI.listAutonomyDecisions(workspaceId).catch(() => [] as AutonomyDecision[]),
-      window.electronAPI.listAutonomyActions(workspaceId).catch(() => [] as AutonomyAction[]),
-    ]);
-    if (!alive.current) return;
-    setWorldModel(nextWorld);
-    setDecisions(nextDecisions);
-    setActions(nextActions);
-  }, [workspaceId, canReadAutonomy]);
-
   const hasAwareness = awarenessConfig !== null;
-  const hasAutonomy = autonomyConfig !== null;
   useEffect(() => {
     if (hasAwareness) void refreshAwareness();
   }, [hasAwareness, refreshAwareness]);
-
-  useEffect(() => {
-    if (hasAutonomy) void refreshAutonomy();
-  }, [hasAutonomy, refreshAutonomy]);
 
   const updateBelief = async (belief: AwarenessBelief, patch: Record<string, unknown>) => {
     try {
@@ -185,27 +136,6 @@ export function AwarenessDetailsPanel({
       await refreshAwareness();
     } catch (error) {
       if (alive.current) report.current(errorText(error, "Failed to delete awareness belief."));
-    }
-  };
-
-  const updateDecision = async (decisionId: string, patch: Record<string, unknown>) => {
-    try {
-      await window.electronAPI.updateAutonomyDecision(decisionId, patch);
-      await refreshAutonomy();
-    } catch (error) {
-      if (alive.current) report.current(errorText(error, "Failed to update the intervention."));
-    }
-  };
-
-  const evaluateNow = async () => {
-    try {
-      setEvaluating(true);
-      await window.electronAPI.triggerAutonomyEvaluation(workspaceId);
-      await refreshAutonomy();
-    } catch (error) {
-      if (alive.current) report.current(errorText(error, "Failed to evaluate now."));
-    } finally {
-      if (alive.current) setEvaluating(false);
     }
   };
 
@@ -358,163 +288,6 @@ export function AwarenessDetailsPanel({
                   <p className="settings-form-hint">No due-soon signals right now.</p>
                 )}
               </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {autonomyConfig && (
-        <>
-          <SettingsRow
-            label="Chief of staff action policies"
-            hint="What the chief of staff may do for each kind of action (all workspaces)."
-          >
-            <button
-              type="button"
-              className="settings-button"
-              onClick={() => void refreshAutonomy()}
-              disabled={autonomySaving}
-            >
-              Refresh state
-            </button>
-            <button
-              type="button"
-              className="settings-button"
-              onClick={() => void evaluateNow()}
-              disabled={autonomySaving || evaluating}
-            >
-              {evaluating ? "Evaluating..." : "Evaluate now"}
-            </button>
-          </SettingsRow>
-          <div className="memory-settings-policy-grid">
-            {Object.entries(autonomyConfig.actionPolicies).map(([actionType, policy]) => (
-              <label key={actionType} className="memory-settings-policy">
-                <span className="memory-hub-primary-label">{actionType}</span>
-                <select
-                  className="settings-select"
-                  value={policy.level}
-                  onChange={(event) =>
-                    onSaveAutonomy({
-                      ...autonomyConfig,
-                      actionPolicies: {
-                        ...autonomyConfig.actionPolicies,
-                        [actionType]: {
-                          ...policy,
-                          level: event.target.value as typeof policy.level,
-                        },
-                      },
-                    })
-                  }
-                  disabled={autonomySaving}
-                >
-                  <option value="observe_only">Observe only</option>
-                  <option value="suggest_only">Suggest only</option>
-                  <option value="execute_local">Execute local</option>
-                  <option value="execute_with_approval">Approval required</option>
-                  <option value="never">Never</option>
-                </select>
-              </label>
-            ))}
-          </div>
-
-          <div className="memory-settings-card-grid">
-            <div className="memory-settings-card">
-              <div className="memory-hub-section-title">World model</div>
-              <p className="settings-form-hint">What CoWork thinks is active right now.</p>
-              <div className="memory-hub-inline-primary">
-                <strong>Focus:</strong> {worldModel?.focusSession?.focusLabel || "Unknown"}
-              </div>
-              <div className="memory-hub-top-gap">
-                <div className="memory-hub-primary-label">Goals</div>
-                {(worldModel?.goals || []).slice(0, 4).map((goal) => (
-                  <div key={goal.id} className="memory-hub-text-block">
-                    <div>{goal.title}</div>
-                    <div className="memory-hub-text-secondary">
-                      {goal.status} • confidence {formatConfidence(goal.confidence)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="memory-hub-top-gap">
-                <div className="memory-hub-primary-label">Open loops</div>
-                {(worldModel?.openLoops || []).slice(0, 4).map((loop) => (
-                  <div key={loop.id} className="memory-hub-text-block">
-                    <div>{loop.title}</div>
-                    <div className="memory-hub-text-secondary">
-                      {loop.dueAt ? formatTimestamp(loop.dueAt) : "No due date"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="memory-hub-top-gap">
-                <div className="memory-hub-primary-label">Routines</div>
-                {(worldModel?.routines || []).slice(0, 3).map((routine) => (
-                  <div key={routine.id} className="memory-hub-text-block">
-                    <div>{routine.title}</div>
-                    <div className="memory-hub-text-secondary">{routine.description}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="memory-settings-card">
-              <div className="memory-hub-section-title">Pending interventions</div>
-              <p className="settings-form-hint">
-                What the chief of staff wants to do next, and why.
-              </p>
-              {decisions.slice(0, 8).map((decision) => (
-                <div key={decision.id} className="memory-settings-item">
-                  <div className="memory-hub-row-center">
-                    <div className="memory-hub-primary-label">{decision.title}</div>
-                    <SettingsBadge tone={decision.priority === "high" ? "warning" : "neutral"}>
-                      {decision.status}
-                    </SettingsBadge>
-                  </div>
-                  <div className="memory-hub-text-block-primary">{decision.description}</div>
-                  <div className="memory-hub-caption">
-                    {decision.actionType} • {decision.policyLevel} • {decision.reason}
-                  </div>
-                  <div className="memory-hub-chip-row">
-                    {decision.status !== "done" && (
-                      <button
-                        type="button"
-                        className="settings-button small"
-                        onClick={() => void updateDecision(decision.id, { status: "done" })}
-                      >
-                        Mark done
-                      </button>
-                    )}
-                    {decision.status !== "dismissed" && (
-                      <button
-                        type="button"
-                        className="settings-button small"
-                        onClick={() => void updateDecision(decision.id, { status: "dismissed" })}
-                      >
-                        Dismiss
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {decisions.length === 0 && (
-                <div className="settings-empty">No pending chief-of-staff interventions.</div>
-              )}
-            </div>
-
-            <div className="memory-settings-card">
-              <div className="memory-hub-section-title">Recent actions</div>
-              <p className="settings-form-hint">Local actions the chief of staff already tried.</p>
-              {actions.slice(0, 8).map((action) => (
-                <div key={action.id} className="memory-hub-text-block">
-                  <div className="memory-hub-text-primary">{action.summary}</div>
-                  <div className="memory-hub-text-secondary">
-                    {action.actionType} • {action.status} • {formatTimestamp(action.createdAt)}
-                  </div>
-                </div>
-              ))}
-              {actions.length === 0 && (
-                <div className="settings-empty">No recent chief-of-staff actions yet.</div>
-              )}
             </div>
           </div>
         </>

@@ -23,9 +23,7 @@ function renderTopBar() {
     isRefreshing: false,
     handleManualRefresh: vi.fn(),
     selectedWorkspace: { id: "workspace-one" },
-    setStandupOpen: vi.fn(),
     setTeamsOpen: vi.fn(),
-    setReviewsOpen: vi.fn(),
     activeTab: "overview",
     setActiveTab: vi.fn(),
     selectedCompany: null,
@@ -46,16 +44,8 @@ describe("Mission Control browser-only controls", () => {
     const markup = renderTopBar();
 
     expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Teams<\/button>/);
-    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Reviews<\/button>/);
-    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>mcStandupButton<\/button>/);
     expect(markup).toContain(
       'title="Team management is not available in this browser session yet."',
-    );
-    expect(markup).toContain(
-      'title="Performance reviews are not available in this browser session yet."',
-    );
-    expect(markup).toContain(
-      'title="Standup reports are not available in this browser session yet."',
     );
     expect(markup).toContain('role="status"');
     expect(markup).toContain("Command center summaries");
@@ -71,8 +61,6 @@ describe("Mission Control browser-only controls", () => {
     const markup = renderTopBar();
 
     expect(markup).toMatch(/<button[^>]*>Teams<\/button>/);
-    expect(markup).toMatch(/<button[^>]*>Reviews<\/button>/);
-    expect(markup).toMatch(/<button[^>]*>mcStandupButton<\/button>/);
     expect(markup).not.toContain("mc-v2-capability-notice");
   });
 });

@@ -2378,7 +2378,7 @@ button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
   box-shadow: var(--shadow-lg);
 }
 
-.mc-v2-standup-modal {
+.mc-v2-wide-modal {
   max-width: 900px;
 }
 

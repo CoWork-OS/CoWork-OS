@@ -102,7 +102,7 @@ See [Dreaming](dreaming.md) and [Memory Repo Phase 2](memory-repo-phase2-design.
 
 ## Heartbeat As Scheduler
 
-Heartbeat owns the "when should we think?" decision for Reflection and the chief-of-staff (AutonomyEngine) evaluation. Some other background loops (for example core memory distillation and Box Brain polling) still run on their own timers. Workflow Intelligence task and code-change dispatches draw from the shared per-workspace background budget (see [Heartbeat v3](heartbeat-v3.md)); over budget, or for a target dispatched within the last 2 hours, the decision becomes a review suggestion.
+Heartbeat owns the "when should we think?" decision for Reflection. Some other background loops (for example core memory distillation and Box Brain polling) still run on their own timers. Workflow Intelligence task and code-change dispatches draw from the shared per-workspace background budget (see [Heartbeat v3](heartbeat-v3.md)); over budget, or for a target dispatched within the last 2 hours, the decision becomes a review suggestion.
 
 Heartbeat can trigger reflection when signals justify it, for example:
 

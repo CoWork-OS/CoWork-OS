@@ -7,8 +7,6 @@ import { DatabaseManager } from "../../database/schema";
 import { WorkspaceStore } from "../../database/repositories";
 import { TaskRepository } from "../../database/repository-facades";
 import { PersistentDispatchBudget } from "../PersistentDispatchBudget";
-import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
-import { AutonomyEngine } from "../../awareness/AutonomyEngine";
 import { AgentRoleStore } from "../../agents/AgentRoleRepository";
 
 describe("durable background dispatch reservations", () => {
@@ -47,7 +45,9 @@ describe("durable background dispatch reservations", () => {
     await before.tryConsume({ workspaceId, source: "heartbeat", entityKey: "Loop:1" });
     manager.close();
     manager = new DatabaseManager({ dbPath: path.join(directory, "test.db") });
-    expect(await budget().tryConsume({ workspaceId, source: "autonomy" })).toMatchObject({
+    expect(
+      await budget().tryConsume({ workspaceId, source: "workflow_intelligence" }),
+    ).toMatchObject({
       allowed: false,
       reason: "workspace_budget_exhausted",
     });
@@ -59,7 +59,9 @@ describe("durable background dispatch reservations", () => {
       await cooldown.tryConsume({ workspaceId, source: "strategic_planner", entityKey: "loop:1" }),
     ).toMatchObject({ allowed: false, reason: "entity_cooldown" });
     now += 24 * 60 * 60 * 1000;
-    expect((await budget().tryConsume({ workspaceId, source: "autonomy" })).allowed).toBe(true);
+    expect(
+      (await budget().tryConsume({ workspaceId, source: "workflow_intelligence" })).allowed,
+    ).toBe(true);
   });
   it("atomically allows one remaining ticket across independent database connections", async () => {
     const peer = new Database(path.join(directory, "test.db"));
@@ -70,7 +72,7 @@ describe("durable background dispatch reservations", () => {
       });
       const results = await Promise.all([
         budget().tryConsume({ workspaceId, source: "heartbeat" }),
-        other.tryConsume({ workspaceId, source: "autonomy" }),
+        other.tryConsume({ workspaceId, source: "workflow_intelligence" }),
       ]);
       expect(results.filter((r) => r.allowed)).toHaveLength(1);
       expect((await other.snapshot(workspaceId)).dispatchesToday).toBe(1);
@@ -88,230 +90,12 @@ describe("durable background dispatch reservations", () => {
     expect(
       await budget().tryConsume({
         workspaceId,
-        source: "autonomy",
+        source: "workflow_intelligence",
         occurrenceKey: "responsibility:1:rev:2:event:3",
         manual: true,
       }),
     ).toMatchObject({ allowed: false, reason: "duplicate_occurrence" });
   });
-  it("refuses a restored autonomy decision after task commit, even beyond cooldown and day rollover", async () => {
-    const createTask = async (
-      workspace: string,
-      title: string,
-      prompt: string,
-      config?: { backgroundDispatchTicket?: string },
-    ) =>
-      new TaskRepository(manager.getDatabase()).create({
-        workspaceId: workspace,
-        title,
-        prompt,
-        status: "pending",
-        agentConfig: config,
-      });
-    const tasks: string[] = [];
-    const run = async (id: string, fingerprint = id) => {
-      const settings = new SecureSettingsRepository(manager.getDatabase());
-      const engine = new AutonomyEngine({
-        dispatchBudget: new PersistentDispatchBudget(manager.getDatabase(), {
-          maxPerWorkspacePerDay: 10,
-          entityCooldownMs: 0,
-          now: () => now,
-        }),
-        createTask: async (...args) => {
-          const checkpoint = settings.load<{ decisions: Array<{ id: string; status: string }> }>(
-            "autonomy-chief-of-staff",
-          );
-          expect(
-            checkpoint?.decisions.some((entry) => entry.id === id && entry.status === "pending"),
-          ).toBe(true);
-          const task = await createTask(...args);
-          tasks.push(task.id);
-          return task;
-        },
-      });
-      const internals = engine as unknown as {
-        state: {
-          decisions: unknown[];
-          config: { actionPolicies: { create_task: { level: string } } };
-        };
-        executePendingDecisions: (workspaceId: string) => Promise<void>;
-      };
-      const config = engine.getConfig();
-      config.actionPolicies.create_task.level = "execute_local";
-      engine.saveConfig(config);
-      const decision = {
-        id,
-        workspaceId,
-        status: "pending",
-        actionType: "create_task",
-        title: "Persisted work",
-        description: "Do the work",
-        entityKey: "loop:stable",
-        fingerprint,
-        createdAt: now,
-      };
-      internals.state.decisions = [decision];
-      await internals.executePendingDecisions(workspaceId);
-      return decision.status;
-    };
-    expect(await run("saved-decision")).toBe("executed");
-    manager.close();
-    manager = new DatabaseManager({ dbPath: path.join(directory, "test.db") });
-    now += 24 * 60 * 60 * 1000;
-    expect(await run("saved-decision")).toBe("suggested");
-    expect(tasks).toHaveLength(1);
-    expect(await run("regenerated-id", "saved-decision")).toBe("suggested");
-    expect(tasks).toHaveLength(1);
-    expect(await run("new-decision")).toBe("executed");
-    expect(tasks).toHaveLength(2);
-  });
-  it("canonicalizes competing regenerated autonomy decisions before task admission", async () => {
-    const settings = new SecureSettingsRepository(manager.getDatabase());
-    const taskIds: string[] = [];
-    const engines = Array.from(
-      { length: 2 },
-      () =>
-        new AutonomyEngine({
-          dispatchBudget: new PersistentDispatchBudget(manager.getDatabase(), {
-            maxPerWorkspacePerDay: 10,
-            entityCooldownMs: 0,
-            now: () => now,
-          }),
-          createTask: async (workspace, title, prompt, config) => {
-            const task = await new TaskRepository(manager.getDatabase()).create({
-              workspaceId: workspace,
-              title,
-              prompt,
-              status: "pending",
-              agentConfig: config,
-            });
-            taskIds.push(task.id);
-            return task;
-          },
-        }),
-    );
-    const config = engines[0].getConfig();
-    config.actionPolicies.create_task.level = "execute_local";
-    engines[0].saveConfig(config);
-    const admissions = engines.map((engine, index) => {
-      engine.getConfig();
-      const internals = engine as unknown as {
-        state: { decisions: unknown[] };
-        executePendingDecisions: (workspaceId: string) => Promise<void>;
-      };
-      internals.state.decisions = [
-        {
-          id: `generated-${index}`,
-          workspaceId,
-          fingerprint: "one-occurrence",
-          actionType: "create_task",
-          status: "pending",
-          title: "Shared event",
-          description: "Do the work",
-          evidenceRefs: [],
-          createdAt: now,
-          updatedAt: now,
-          cooldownUntil: now + 60_000,
-        },
-      ];
-      return internals.executePendingDecisions(workspaceId);
-    });
-    await Promise.all(admissions);
-    expect(taskIds).toHaveLength(1);
-    expect(
-      settings.load<{ decisions: unknown[] }>("autonomy-chief-of-staff")?.decisions,
-    ).toHaveLength(1);
-    expect(
-      manager.getDatabase().prepare("SELECT state FROM background_dispatch_reservations").all(),
-    ).toEqual([{ state: "committed" }]);
-  });
-
-  it("retains a peer writer's policy and decisions after task completion and encrypted-state reopen", async () => {
-    const original = new SecureSettingsRepository(manager.getDatabase());
-    const peer = new Database(path.join(directory, "test.db"));
-    const engine = new AutonomyEngine({
-      dispatchBudget: new PersistentDispatchBudget(manager.getDatabase(), {
-        maxPerWorkspacePerDay: 10,
-        now: () => now,
-      }),
-      createTask: async (workspace, title, prompt, config) => {
-        const task = await new TaskRepository(manager.getDatabase()).create({
-          workspaceId: workspace,
-          title,
-          prompt,
-          status: "pending",
-          agentConfig: config,
-        });
-        const writer = new SecureSettingsRepository(peer);
-        writer.update<{
-          config: ReturnType<typeof engine.getConfig>;
-          decisions: Array<{ id: string; workspaceId?: string; status: string; title: string }>;
-        }>("autonomy-chief-of-staff", (state) => {
-          state!.config.actionPolicies.create_task.level = "suggest_only";
-          state!.decisions[0].status = "dismissed";
-          state!.decisions.push({
-            ...state!.decisions[0],
-            id: "peer-decision",
-            workspaceId: "peer-workspace",
-            title: "Preserve peer work",
-          });
-          return state;
-        });
-        return task;
-      },
-    });
-    try {
-      const config = engine.getConfig();
-      config.actionPolicies.create_task.level = "execute_local";
-      engine.saveConfig(config);
-      const internals = engine as unknown as {
-        state: { decisions: unknown[] };
-        executePendingDecisions: (workspaceId: string) => Promise<void>;
-      };
-      internals.state.decisions = [
-        {
-          id: "peer-policy-task",
-          workspaceId,
-          actionType: "create_task",
-          status: "pending",
-          title: "Task before revocation",
-          description: "Do the work",
-          fingerprint: "peer-policy-event",
-          evidenceRefs: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      ];
-      await internals.executePendingDecisions(workspaceId);
-      await engine.stop();
-      const stored = original.load<{
-        config: ReturnType<typeof engine.getConfig>;
-        decisions: Array<{ id: string; status: string }>;
-        actions: Array<{ status: string }>;
-      }>("autonomy-chief-of-staff")!;
-      expect(stored.config.actionPolicies.create_task.level).toBe("suggest_only");
-      expect(stored.decisions).toContainEqual(expect.objectContaining({ id: "peer-decision" }));
-      expect(stored.decisions).toContainEqual(
-        expect.objectContaining({ id: "peer-policy-task", status: "dismissed" }),
-      );
-      expect(stored.actions.filter((action) => action.status === "success")).toHaveLength(1);
-    } finally {
-      peer.close();
-    }
-    manager.close();
-    manager = new DatabaseManager({ dbPath: path.join(directory, "test.db") });
-    new SecureSettingsRepository(manager.getDatabase());
-    const restored = new AutonomyEngine();
-    expect(restored.getConfig().actionPolicies.create_task.level).toBe("suggest_only");
-    expect(restored.updateDecision("peer-policy-task", { status: "pending" })).toMatchObject({
-      status: "pending",
-      statusRevision: 1,
-    });
-    expect(
-      manager.getDatabase().prepare("SELECT state FROM background_dispatch_reservations").all(),
-    ).toEqual([{ state: "committed" }]);
-  });
-
   it("records manual runs beyond the automatic budget and refunds failed reservations once", async () => {
     const persistent = budget();
     const grant = await persistent.tryConsume({ workspaceId, source: "heartbeat" });

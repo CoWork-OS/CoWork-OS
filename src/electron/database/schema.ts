@@ -342,7 +342,9 @@ export class DatabaseManager {
     this.db.pragma("secure_delete = ON");
     try {
       const result = this.db
-        .prepare("DELETE FROM secure_settings WHERE category IN ('x', 'infra', 'supermemory')")
+        .prepare(
+          "DELETE FROM secure_settings WHERE category IN ('x', 'infra', 'supermemory', 'autonomy-chief-of-staff')",
+        )
         .run();
       if (result.changes > 0) {
         schemaLogger.info(`Retired ${result.changes} settings row(s) of removed features`);
@@ -4834,30 +4836,6 @@ export class DatabaseManager {
       // Table already exists, ignore
     }
 
-    // Migration: Create standup_reports table for daily standups
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS standup_reports (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL,
-          report_date TEXT NOT NULL,
-          completed_task_ids TEXT,
-          in_progress_task_ids TEXT,
-          blocked_task_ids TEXT,
-          summary TEXT NOT NULL,
-          delivered_to_channel TEXT,
-          created_at INTEGER NOT NULL,
-          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-          UNIQUE(workspace_id, report_date)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_standup_reports_workspace ON standup_reports(workspace_id);
-        CREATE INDEX IF NOT EXISTS idx_standup_reports_date ON standup_reports(report_date);
-      `);
-    } catch {
-      // Table already exists, ignore
-    }
-
     // The R&D Council feature was retired; its tables are dropped once on upgrade.
     this.db.exec(`
       DROP TABLE IF EXISTS council_memos;
@@ -5000,31 +4978,6 @@ export class DatabaseManager {
       this.db.exec("ALTER TABLE agent_team_runs ADD COLUMN multi_llm_mode INTEGER DEFAULT 0");
     } catch {
       // Column already exists, ignore
-    }
-
-    // ============ Agent Performance Reviews (Mission Control) ============
-
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS agent_performance_reviews (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-          agent_role_id TEXT NOT NULL REFERENCES agent_roles(id),
-          period_start INTEGER NOT NULL,
-          period_end INTEGER NOT NULL,
-          rating INTEGER NOT NULL,
-          summary TEXT NOT NULL,
-          metrics TEXT,
-          recommended_autonomy_level TEXT,
-          recommendation_rationale TEXT,
-          created_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_reviews_workspace ON agent_performance_reviews(workspace_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_agent_reviews_role ON agent_performance_reviews(agent_role_id, created_at DESC);
-      `);
-    } catch {
-      // Table already exists, ignore
     }
 
     // ============ Git Worktree Support ============
@@ -8063,6 +8016,8 @@ export class DatabaseManager {
       DROP TABLE IF EXISTS supervisor_exchange_messages;
       DROP TABLE IF EXISTS supervisor_exchanges;
       DROP TABLE IF EXISTS supermemory_remote_refs;
+      DROP TABLE IF EXISTS standup_reports;
+      DROP TABLE IF EXISTS agent_performance_reviews;
     `);
   }
 

@@ -163,9 +163,13 @@ describe("bot outcome metrics baseline", () => {
       "ticket-2",
     );
     expect(replay).toMatchObject({ allowed: false, reason: "duplicate_occurrence" });
-    const exhausted = budget.reserve({ workspaceId, source: "autonomy" }, params, "ticket-3");
+    const exhausted = budget.reserve(
+      { workspaceId, source: "workflow_intelligence" },
+      params,
+      "ticket-3",
+    );
     expect(exhausted).toMatchObject({ allowed: false, reason: "workspace_budget_exhausted" });
-    budget.reserve({ workspaceId, source: "autonomy" }, params, "ticket-4");
+    budget.reserve({ workspaceId, source: "workflow_intelligence" }, params, "ticket-4");
     const metrics = new BotOutcomeMetricsStore(db).summary({ workspaceId, windowDays: 7 }, now);
     expect(metrics.dispatch).toEqual({
       reservations: 1,

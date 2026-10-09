@@ -56,6 +56,12 @@ type RenderPart =
   | { type: "mention"; key: string; span: IntegrationMentionSpan }
   | { type: "link"; key: string; span: ComposerLinkSpan };
 
+type ComposerEditState = {
+  value: string;
+  mentions: IntegrationMentionSpan[];
+  selection: { start: number; end: number } | null;
+};
+
 type ComposerLinkSpan = {
   start: number;
   end: number;
@@ -405,6 +411,70 @@ function replaceRange(
   return { value: nextValue, mentions: nextMentions, cursor: start + replacement.length };
 }
 
+/**
+ * Replace `[start, end)` in the composer text. A range that touches a mention
+ * or link chip is widened to the whole chip so a chip is never half-edited.
+ */
+export function applyComposerTextReplacement(
+  value: string,
+  mentions: IntegrationMentionSpan[],
+  start: number,
+  end: number,
+  replacement: string,
+): { value: string; mentions: IntegrationMentionSpan[]; cursor: number } {
+  const validMentions = sortedValidMentions(value, mentions);
+  const touchedSpans = [...validMentions, ...parseMarkdownLinks(value, validMentions)].filter(
+    (span) => span.start < end && span.end > start,
+  );
+  const expandedStart = Math.min(start, ...touchedSpans.map((span) => span.start));
+  const expandedEnd = Math.max(end, ...touchedSpans.map((span) => span.end));
+  return replaceRange(value, validMentions, expandedStart, expandedEnd, replacement);
+}
+
+/**
+ * The native input a handled keydown would have produced. The editor applies
+ * the edit itself on keydown and cancels the key, which already suppresses the
+ * native input in Chromium. The echo is kept only to drop a stray copy of that
+ * same edit; it must never swallow a different input that happens to arrive
+ * before the next task (a paste, IME commit, dictation, or programmatic text
+ * insertion right after Shift+Enter).
+ */
+export type KeyboardEditEcho = {
+  inputTypes: readonly string[];
+  data?: string;
+};
+
+const LINE_BREAK_INPUT_TYPES = ["insertLineBreak", "insertParagraph"] as const;
+const BACKWARD_DELETE_INPUT_TYPES = [
+  "deleteContentBackward",
+  "deleteWordBackward",
+  "deleteSoftLineBackward",
+  "deleteHardLineBackward",
+] as const;
+const FORWARD_DELETE_INPUT_TYPES = [
+  "deleteContentForward",
+  "deleteWordForward",
+  "deleteSoftLineForward",
+  "deleteHardLineForward",
+] as const;
+
+export function keyboardEditEchoForKey(key: string): KeyboardEditEcho | null {
+  if (key === "Enter") return { inputTypes: LINE_BREAK_INPUT_TYPES };
+  if (key === "Backspace") return { inputTypes: BACKWARD_DELETE_INPUT_TYPES };
+  if (key === "Delete") return { inputTypes: FORWARD_DELETE_INPUT_TYPES };
+  if (key.length === 1) return { inputTypes: ["insertText"], data: key };
+  return null;
+}
+
+export function isKeyboardEditEcho(
+  echo: KeyboardEditEcho,
+  inputType: string,
+  data: string | null,
+): boolean {
+  if (!echo.inputTypes.includes(inputType)) return false;
+  return echo.data === undefined || data === echo.data;
+}
+
 function renderComposerDom(root: HTMLElement, parts: RenderPart[]): void {
   const fragment = document.createDocumentFragment();
 
@@ -476,7 +546,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
   ) {
     const rootRef = useRef<HTMLDivElement>(null);
     const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
-    const skipNextBeforeInputRef = useRef(false);
+    const pendingKeyboardEchoRef = useRef<KeyboardEditEcho | null>(null);
     const pasteHandledRef = useRef(false);
     const validMentions = useMemo(() => sortedValidMentions(value, mentions), [mentions, value]);
     const mentionsById = useMemo(
@@ -484,6 +554,16 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       [validMentions],
     );
     const parts = useMemo(() => buildRenderParts(value, validMentions), [validMentions, value]);
+    // The text every edit builds on. Edits update it synchronously, so a second
+    // edit that arrives before the parent re-renders with the first one starts
+    // from the first edit's result (and caret) instead of the stale `value`
+    // prop. Each committed render resets it to the props.
+    const committedRef = useRef({ value, mentions: validMentions });
+    const editStateRef = useRef<ComposerEditState>({
+      value,
+      mentions: validMentions,
+      selection: null,
+    });
 
     const resize = useCallback((_shrink = false) => {
       const root = rootRef.current;
@@ -549,46 +629,73 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       applySelection(pending.start, pending.end);
     }, [applySelection, onContentPresenceChange, parts, resize, value.length]);
 
+    // Runs after every commit: once the parent has rendered, its props are the
+    // source of truth again and the DOM selection reflects the last edit.
+    useLayoutEffect(() => {
+      committedRef.current = { value, mentions: validMentions };
+      editStateRef.current = { value, mentions: validMentions, selection: null };
+    });
+
+    const recordUnrenderedEdit = useCallback((next: ComposerEditState) => {
+      editStateRef.current = next;
+      // A parent that keeps its state unchanged does not re-render, so the
+      // layout effect above never resets the edit state. Fall back to the
+      // committed props once the current task's synchronous work is done; a
+      // parent that does re-render has already committed by then.
+      queueMicrotask(() => {
+        if (editStateRef.current !== next) return;
+        editStateRef.current = { ...committedRef.current, selection: null };
+      });
+    }, []);
+
     const emitDomChange = useCallback(
       (shrink: boolean) => {
         const root = rootRef.current;
         if (!root) return;
         const snapshot = readEditable(root, mentionsById);
-        pendingSelectionRef.current = { start: snapshot.cursor, end: snapshot.cursor };
+        const caret = { start: snapshot.cursor, end: snapshot.cursor };
+        recordUnrenderedEdit({
+          value: snapshot.value,
+          mentions: snapshot.mentions,
+          selection: caret,
+        });
+        pendingSelectionRef.current = caret;
         onContentPresenceChange?.(snapshot.value.length > 0);
         onChange(snapshot.value, snapshot.cursor, snapshot.mentions, shrink);
       },
-      [mentionsById, onChange, onContentPresenceChange],
+      [mentionsById, onChange, onContentPresenceChange, recordUnrenderedEdit],
     );
 
     const applyTextReplacement = useCallback(
       (start: number, end: number, replacement: string) => {
-        const protectedSpans = [...validMentions, ...parseMarkdownLinks(value, validMentions)];
-        const expandedStart = Math.min(
+        const base = editStateRef.current;
+        const next = applyComposerTextReplacement(
+          base.value,
+          base.mentions,
           start,
-          ...protectedSpans
-            .filter((span) => span.start < end && span.end > start)
-            .map((span) => span.start),
-        );
-        const expandedEnd = Math.max(
           end,
-          ...protectedSpans
-            .filter((span) => span.start < end && span.end > start)
-            .map((span) => span.end),
+          replacement,
         );
-        const next = replaceRange(value, validMentions, expandedStart, expandedEnd, replacement);
-        pendingSelectionRef.current = { start: next.cursor, end: next.cursor };
+        const caret = { start: next.cursor, end: next.cursor };
+        recordUnrenderedEdit({ value: next.value, mentions: next.mentions, selection: caret });
+        pendingSelectionRef.current = caret;
         onContentPresenceChange?.(next.value.length > 0);
-        onChange(next.value, next.cursor, next.mentions, next.value.length < value.length);
+        onChange(next.value, next.cursor, next.mentions, next.value.length < base.value.length);
       },
-      [onChange, onContentPresenceChange, validMentions, value],
+      [onChange, onContentPresenceChange, recordUnrenderedEdit],
     );
 
     const getSelectionRange = useCallback(() => {
+      // An edit that has not been rendered yet leaves the DOM selection behind
+      // the text; its caret is the one the next edit must use.
+      const unrendered = editStateRef.current.selection;
+      if (unrendered) return { start: unrendered.start, end: unrendered.end };
       const root = rootRef.current;
       const selection = window.getSelection();
       if (!root || !selection || selection.rangeCount === 0) {
-        const cursor = root ? getSelectionIndex(root, mentionsById) : value.length;
+        const cursor = root
+          ? getSelectionIndex(root, mentionsById)
+          : editStateRef.current.value.length;
         return { start: cursor, end: cursor };
       }
       const anchor = getIndexForDomPosition(
@@ -604,7 +711,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         mentionsById,
       );
       return { start: Math.min(anchor, focus), end: Math.max(anchor, focus) };
-    }, [mentionsById, value.length]);
+    }, [mentionsById]);
 
     const deleteSelectionRange = useCallback(
       (direction: "backward" | "forward") => {
@@ -616,19 +723,21 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
             if (start === 0) return;
             start -= 1;
           } else {
-            if (end >= value.length) return;
+            if (end >= editStateRef.current.value.length) return;
             end += 1;
           }
         }
         applyTextReplacement(start, end, "");
       },
-      [applyTextReplacement, getSelectionRange, value.length],
+      [applyTextReplacement, getSelectionRange],
     );
 
-    const markKeyboardEditHandled = useCallback(() => {
-      skipNextBeforeInputRef.current = true;
+    const markKeyboardEditHandled = useCallback((key: string) => {
+      const echo = keyboardEditEchoForKey(key);
+      pendingKeyboardEchoRef.current = echo;
+      if (!echo) return;
       window.setTimeout(() => {
-        skipNextBeforeInputRef.current = false;
+        if (pendingKeyboardEchoRef.current === echo) pendingKeyboardEchoRef.current = null;
       }, 0);
     }, []);
 
@@ -642,13 +751,15 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
     const handleNativeBeforeInput = useCallback(
       (nativeEvent: InputEvent) => {
         if (nativeEvent.isComposing) return;
-        if (skipNextBeforeInputRef.current) {
-          nativeEvent.preventDefault();
-          skipNextBeforeInputRef.current = false;
-          return;
-        }
-
         const inputType = nativeEvent.inputType;
+        const keyboardEcho = pendingKeyboardEchoRef.current;
+        if (keyboardEcho) {
+          pendingKeyboardEchoRef.current = null;
+          if (isKeyboardEditEcho(keyboardEcho, inputType, nativeEvent.data)) {
+            nativeEvent.preventDefault();
+            return;
+          }
+        }
 
         if (inputType === "insertFromPaste") {
           if (pasteHandledRef.current) {
@@ -708,12 +819,15 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
     }, [handleNativeBeforeInput]);
 
     const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      // A new key press ends the window in which the previous key's native
+      // input could still arrive.
+      pendingKeyboardEchoRef.current = null;
       onKeyDown(event);
       if (event.defaultPrevented) return;
       if (event.nativeEvent.isComposing) return;
       if (event.key === "Enter" && event.shiftKey) {
         event.preventDefault();
-        markKeyboardEditHandled();
+        markKeyboardEditHandled(event.key);
         const range = getSelectionRange();
         applyTextReplacement(range.start, range.end, "\n");
         return;
@@ -721,14 +835,14 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
 
       if (event.key === "Backspace") {
         event.preventDefault();
-        markKeyboardEditHandled();
+        markKeyboardEditHandled(event.key);
         deleteSelectionRange("backward");
         return;
       }
 
       if (event.key === "Delete") {
         event.preventDefault();
-        markKeyboardEditHandled();
+        markKeyboardEditHandled(event.key);
         deleteSelectionRange("forward");
         return;
       }
@@ -738,7 +852,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       if (!isPlainTextKey) return;
 
       event.preventDefault();
-      markKeyboardEditHandled();
+      markKeyboardEditHandled(event.key);
       const range = getSelectionRange();
       applyTextReplacement(range.start, range.end, event.key);
     };
@@ -765,14 +879,20 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
     const handleCopy = (event: ReactClipboardEvent<HTMLDivElement>) => {
       const range = getSelectionRange();
       if (range.start === range.end) return;
-      event.clipboardData.setData("text/plain", value.slice(range.start, range.end));
+      event.clipboardData.setData(
+        "text/plain",
+        editStateRef.current.value.slice(range.start, range.end),
+      );
       event.preventDefault();
     };
 
     const handleCut = (event: ReactClipboardEvent<HTMLDivElement>) => {
       const range = getSelectionRange();
       if (range.start === range.end) return;
-      event.clipboardData.setData("text/plain", value.slice(range.start, range.end));
+      event.clipboardData.setData(
+        "text/plain",
+        editStateRef.current.value.slice(range.start, range.end),
+      );
       event.preventDefault();
       applyTextReplacement(range.start, range.end, "");
     };
@@ -781,6 +901,11 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       const root = rootRef.current;
       if (!root) return;
       onCursorChange(getSelectionIndex(root, mentionsById));
+    };
+
+    const handleKeyUp = () => {
+      pendingKeyboardEchoRef.current = null;
+      handleCursorChange();
     };
 
     return (
@@ -795,7 +920,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         data-placeholder={placeholder || ""}
         onInput={() => emitDomChange(false)}
         onKeyDown={handleKeyDown}
-        onKeyUp={handleCursorChange}
+        onKeyUp={handleKeyUp}
         onMouseUp={handleCursorChange}
         onPaste={handlePaste}
         onCopy={handleCopy}

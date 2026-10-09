@@ -4769,6 +4769,33 @@ if (isMacSafeStorageMigrationWorker) {
       return BrowserWindow.getFocusedWindow()?.isMaximized() ?? false;
     });
 
+    /** Set a workbench session's access policy from its task's effective access profile. */
+    const applyBrowserWorkbenchAccessPolicy = async (
+      taskId: string,
+      sessionId: string,
+    ): Promise<boolean> => {
+      if (!agentDaemon) return false;
+      const task = await agentDaemon.getTaskById(taskId);
+      const workspace = task && agentDaemon.getWorkspaceById(task.workspaceId);
+      if (!task || !workspace) return false;
+      const effective = applyAccessProfileToWorkspace(
+        workspace,
+        resolveEffectiveAccessProfile({
+          task,
+          workspace,
+          settings: PermissionSettingsManager.loadSettings(),
+          adminPolicies: loadPolicies(),
+        }),
+      );
+      getBrowserWorkbenchService().setAccessPolicy({
+        taskId: task.id,
+        sessionId,
+        networkEnabled: effective.permissions.network === true,
+        accessNetworkMode: effective.permissions.accessNetworkMode,
+        profileDomainRules: effective.permissions.accessDomainRules,
+      });
+      return true;
+    };
     ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_REGISTER, async (event, data: Any) => {
       if (!data || typeof data.taskId !== "string" || typeof data.webContentsId !== "number") {
         throw new Error("Invalid browser workbench registration");
@@ -4787,25 +4814,14 @@ if (isMacSafeStorageMigrationWorker) {
         throw new Error("Invalid browser workbench registration");
       }
       if (!agentDaemon) throw new Error("Agent daemon is not ready");
-      const task = await agentDaemon.getTaskById(data.taskId);
-      const workspace = task && agentDaemon.getWorkspaceById(task.workspaceId);
-      if (!task || !workspace) throw new Error("Browser task workspace not found");
-      const effective = applyAccessProfileToWorkspace(
-        workspace,
-        resolveEffectiveAccessProfile({
-          task,
-          workspace,
-          settings: PermissionSettingsManager.loadSettings(),
-          adminPolicies: loadPolicies(),
-        }),
-      );
-      getBrowserWorkbenchService().setAccessPolicy({
-        taskId: task.id,
-        sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
-        networkEnabled: effective.permissions.network === true,
-        accessNetworkMode: effective.permissions.accessNetworkMode,
-        profileDomainRules: effective.permissions.accessDomainRules,
-      });
+      if (
+        !(await applyBrowserWorkbenchAccessPolicy(
+          data.taskId,
+          typeof data.sessionId === "string" ? data.sessionId : "default",
+        ))
+      ) {
+        throw new Error("Browser task workspace not found");
+      }
       await getBrowserWorkbenchService().registerSession({
         taskId: data.taskId,
         sessionId: typeof data.sessionId === "string" ? data.sessionId : "default",
@@ -4858,10 +4874,11 @@ if (isMacSafeStorageMigrationWorker) {
       };
       if (!data || typeof data.taskId !== "string" || typeof data.url !== "string") return invalid;
       // Allowances are scoped to a real task's session. The first tab may still be
-      // registering when the user types, so the task (not the session) is checked.
+      // registering when the user types, so the task's access policy is applied here
+      // too (the same derivation registration uses).
       if (
         !getBrowserWorkbenchService().getSession(data.taskId, sessionId) &&
-        !(await agentDaemon?.getTaskById(data.taskId))
+        !(await applyBrowserWorkbenchAccessPolicy(data.taskId, sessionId))
       ) {
         return invalid;
       }

@@ -136,6 +136,12 @@ import {
 import { isLlmRequestCancelledEvent } from "./utils/task-event-visibility";
 import { markSessionAutoResolvingApproval } from "./utils/approval-event-state";
 import { appendRendererTaskEvents, capTaskEvents } from "./utils/task-event-append";
+import {
+  accumulateTaskUsage,
+  isLlmUsageEvent,
+  retainTaskUsage,
+  type TaskUsageTotalsByTaskId,
+} from "./utils/task-usage-totals";
 import { TaskTimelineCache } from "./utils/task-timeline-cache";
 import {
   deriveBotConversationProjection,
@@ -634,6 +640,7 @@ const EMPTY_RIGHT_PANEL_INPUT = {
   hasActiveChildren: false,
   childTasks: [],
   childEvents: [],
+  childUsageByTaskId: {},
   highlightOutputPath: null,
 };
 
@@ -808,6 +815,7 @@ type SelectedTaskWorkspaceViewProps = {
     hasActiveChildren: boolean;
     childTasks: Task[];
     childEvents: TaskEvent[];
+    childUsageByTaskId: TaskUsageTotalsByTaskId;
     highlightOutputPath: string | null;
   };
   onSelectChildTask: (taskId: string) => void;
@@ -1868,6 +1876,7 @@ const SelectedTaskWorkspaceView = memo(
                 hasActiveChildren={rightPanelInput.hasActiveChildren}
                 childTasks={rightPanelInput.childTasks}
                 childEvents={rightPanelInput.childEvents}
+                childUsageByTaskId={rightPanelInput.childUsageByTaskId}
                 onSelectTask={onSelectTask}
                 onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
                 onOpenDocumentArtifact={openDocumentArtifact}
@@ -1944,6 +1953,7 @@ const SelectedTaskWorkspaceView = memo(
 );
 
 const MAX_RENDERER_CHILD_EVENTS = 300;
+const EMPTY_TASK_USAGE_TOTALS: TaskUsageTotalsByTaskId = {};
 const MAX_TIMELINE_HISTORY_EVENTS = 1200;
 const MAX_TIMELINE_HISTORY_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_TIMELINE_HISTORY_PAGE_PAYLOAD_BYTES = 512 * 1024;
@@ -2237,6 +2247,10 @@ export function App() {
   } | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [childEvents, setChildEvents] = useState<TaskEvent[]>([]);
+  // Cumulative usage per child task, kept apart from childEvents so the timeline cap can
+  // evict old llm_usage events without the specialist totals going backwards.
+  const [childUsageByTaskId, setChildUsageByTaskId] =
+    useState<TaskUsageTotalsByTaskId>(EMPTY_TASK_USAGE_TOTALS);
   const botConversationTasksRef = useRef<Task[]>([]);
   botConversationTasksRef.current = botConversationTasks;
 
@@ -4838,6 +4852,13 @@ export function App() {
       }
 
       // Capture events from dispatched child tasks for sub-agent lifecycle rows / CliAgentFrame
+      if (
+        !isSelectedTask &&
+        isLlmUsageEvent(rawEvent) &&
+        childTaskIdsRef.current.has(event.taskId)
+      ) {
+        setChildUsageByTaskId((prev) => accumulateTaskUsage(prev, [rawEvent]));
+      }
       if (!isSelectedTask && event.type !== "llm_streaming" && event.type !== "llm_usage") {
         if (childTaskIdsRef.current.has(event.taskId)) {
           setChildEvents((prev) =>
@@ -5460,10 +5481,12 @@ export function App() {
   useEffect(() => {
     if (childTasks.length === 0) {
       setChildEvents([]);
+      setChildUsageByTaskId(EMPTY_TASK_USAGE_TOTALS);
       return;
     }
     if (remoteTaskView) {
       setChildEvents([]);
+      setChildUsageByTaskId(EMPTY_TASK_USAGE_TOTALS);
       return;
     }
     if (!window.electronAPI?.getTaskEvents) return;
@@ -5476,6 +5499,11 @@ export function App() {
           allEvents.push(...evts);
         }
         allEvents.sort((a, b) => a.timestamp - b.timestamp);
+        const childTaskIds = childTasks.map((child) => child.id);
+        // Fold usage in before capping: the cap drops older usage events.
+        setChildUsageByTaskId((prev) =>
+          accumulateTaskUsage(retainTaskUsage(prev, childTaskIds), allEvents),
+        );
         setChildEvents(
           capTaskEvents(mergeUniqueTaskEvents([], allEvents), MAX_RENDERER_CHILD_EVENTS),
         );
@@ -6489,6 +6517,9 @@ export function App() {
       hasActiveChildren: replayControls.isReplayMode ? false : rightPanelHasActiveChildren,
       childTasks: replayControls.isReplayMode ? [] : rightPanelChildTasks,
       childEvents: replayControls.isReplayMode ? [] : childEvents,
+      childUsageByTaskId: replayControls.isReplayMode
+        ? EMPTY_TASK_USAGE_TOTALS
+        : childUsageByTaskId,
       highlightOutputPath: replayControls.isReplayMode ? null : rightPanelHighlightPath,
     }),
     [
@@ -6501,6 +6532,7 @@ export function App() {
       rightPanelReplayTask,
       rightPanelSharedTaskEventUi,
       childEvents,
+      childUsageByTaskId,
     ],
   );
   const deferredRightPanelInput = useDeferredValue(rightPanelInput);

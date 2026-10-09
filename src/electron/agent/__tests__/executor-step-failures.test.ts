@@ -1691,6 +1691,276 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect(String(step.error || "")).toContain(".json");
   });
 
+  describe("artifact verification inspection evidence", () => {
+    let workspaceDir: string;
+
+    beforeEach(() => {
+      workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-artifact-evidence-"));
+    });
+
+    afterEach(() => {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    });
+
+    const runVerification = async (opts: {
+      calls: Array<[string, Record<string, Any>]>;
+      results: (name: string, input: Any) => Any;
+      createdFiles: string[];
+      prompt?: string;
+      description?: string;
+      files?: string[];
+      priorOutput?: string;
+    }) => {
+      for (const file of opts.files || []) {
+        const target = path.join(workspaceDir, file);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, "artifact");
+        // Artifacts were produced by an earlier step, so an inspection command
+        // must not look like a fresh mutation in the verification step.
+        const earlier = new Date(Date.now() - 60 * 60 * 1000);
+        fs.utimesSync(target, earlier, earlier);
+      }
+      executor = createExecutorWithStubs(
+        [...opts.calls.map(([name, input]) => toolUseResponse(name, input)), textResponse("OK")],
+        {},
+      );
+      (executor as Any).workspace.path = workspaceDir;
+      if (opts.prompt) (executor as Any).task.prompt = opts.prompt;
+      if (opts.priorOutput) (executor as Any).lastNonVerificationOutput = opts.priorOutput;
+      (executor as Any).toolRegistry.executeTool = vi.fn(async (name: string, input: Any) =>
+        opts.results(name, input),
+      );
+      (executor as Any).fileOperationTracker = {
+        getKnowledgeSummary: vi.fn().mockReturnValue(""),
+        getCreatedFiles: vi.fn().mockReturnValue(opts.createdFiles),
+      };
+      const step: Any = {
+        id: "verify-artifact-inspection",
+        description:
+          opts.description ||
+          "Verify completion: ensure the output file exists, opens correctly, and has the requested structure.",
+        status: "pending",
+      };
+      (executor as Any).plan = { description: "Plan", steps: [step] };
+      await (executor as Any).executeStep(step);
+      return step;
+    };
+
+    const parsed = (filePath: string, detectedType: string) => ({
+      content: "Northstar brief",
+      format: "text",
+      detected_type: detectedType,
+      truncated: false,
+      char_count: 15,
+      provenance: { path: path.join(workspaceDir, filePath), sourceKind: "workspace_native" },
+    });
+
+    it("accepts successful parse_document results for both requested document formats", async () => {
+      const step = await runVerification({
+        prompt: "Create the client brief as both a DOCX file and a PDF file.",
+        createdFiles: ["Northstar-brief.docx", "Northstar-brief-pdf.pdf"],
+        priorOutput: "Created Northstar-brief.docx and Northstar-brief-pdf.pdf.",
+        calls: [
+          ["parse_document", { path: "Northstar-brief.docx" }],
+          ["parse_document", { path: "Northstar-brief-pdf.pdf" }],
+        ],
+        results: (_name, input) =>
+          parsed(String(input.path), path.extname(String(input.path)).slice(1)),
+      });
+
+      expect(String(step.error || "")).toBe("");
+      expect(step.status).toBe("completed");
+    });
+
+    it("rejects a parse_document failure reported in the result body", async () => {
+      const step = await runVerification({
+        createdFiles: ["brief.docx"],
+        calls: [["parse_document", { path: "brief.docx" }]],
+        results: () => ({
+          content: "",
+          format: "text",
+          detected_type: "unknown",
+          truncated: false,
+          char_count: 0,
+          error: "Corrupt zip: end of central directory record signature not found",
+        }),
+      });
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("expected artifact file evidence");
+    });
+
+    it("rejects parser evidence whose detected format does not match the artifact", async () => {
+      const step = await runVerification({
+        createdFiles: ["brief.pdf"],
+        calls: [["parse_document", { path: "brief.pdf" }]],
+        results: () => parsed("brief.pdf", "txt"),
+      });
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("expected artifact file evidence");
+    });
+
+    it("rejects parse_document of an unrelated file", async () => {
+      const step = await runVerification({
+        createdFiles: ["brief.docx"],
+        calls: [["parse_document", { path: "notes.docx" }]],
+        results: () => parsed("notes.docx", "docx"),
+      });
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("expected artifact file evidence");
+    });
+
+    it("accepts a glob listing of the exact artifact path as presence evidence", async () => {
+      const step = await runVerification({
+        createdFiles: ["brief.docx"],
+        calls: [["glob", { pattern: "brief*", path: "." }]],
+        results: () => ({
+          success: true,
+          pattern: "brief*",
+          matches: [{ path: "brief.docx", size: 10, modified: new Date().toISOString() }],
+          totalMatches: 1,
+          truncated: false,
+        }),
+      });
+
+      expect(String(step.error || "")).toBe("");
+      expect(step.status).toBe("completed");
+    });
+
+    it("does not treat a glob pattern or unrelated matches as artifact evidence", async () => {
+      const step = await runVerification({
+        createdFiles: ["brief.docx"],
+        calls: [["glob", { pattern: "brief.docx", path: "." }]],
+        results: () => ({
+          success: true,
+          pattern: "brief.docx",
+          matches: [{ path: "archive/brief.docx", size: 10, modified: new Date().toISOString() }],
+          totalMatches: 1,
+          truncated: false,
+        }),
+      });
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("expected artifact file evidence");
+    });
+
+    it("accepts a successful command that inspects the exact artifact path", async () => {
+      const step = await runVerification({
+        createdFiles: ["Northstar-brief-pdf.pdf"],
+        files: ["Northstar-brief-pdf.pdf"],
+        calls: [
+          [
+            "run_command",
+            { command: "pdfinfo Northstar-brief-pdf.pdf 2>/dev/null | grep '^Pages:' || true" },
+          ],
+        ],
+        results: () => ({
+          success: true,
+          stdout: "Pages:           2\n",
+          stderr: "",
+          exitCode: 0,
+          terminationReason: "normal",
+        }),
+      });
+
+      expect(String(step.error || "")).toBe("");
+      expect(step.status).toBe("completed");
+    });
+
+    it("accepts a script that opens the exact workbook path from the workspace", async () => {
+      const step = await runVerification({
+        createdFiles: ["Northstar-pilot-costs.xlsx"],
+        files: ["Northstar-pilot-costs.xlsx"],
+        description:
+          "Verify the workbook exists, opens as a valid .xlsx file, contains both sheets, and includes the required formulas and formatting.",
+        calls: [
+          [
+            "run_command",
+            {
+              command:
+                "python3 - <<'PY'\nimport openpyxl\np='Northstar-pilot-costs.xlsx'\nwb=openpyxl.load_workbook(p)\nprint('both sheets PASS')\nPY",
+              cwd: workspaceDir,
+            },
+          ],
+        ],
+        results: () => ({
+          success: true,
+          stdout: "zip_integrity OK\nboth sheets PASS\n",
+          stderr: "",
+          exitCode: 0,
+          terminationReason: "normal",
+        }),
+      });
+
+      expect(String(step.error || "")).toBe("");
+      expect(step.status).toBe("completed");
+    });
+
+    it("does not accept a generic successful command that never names the artifact", async () => {
+      const step = await runVerification({
+        createdFiles: ["brief.pdf"],
+        files: ["brief.pdf"],
+        calls: [["run_command", { command: "ls -la" }]],
+        results: () => ({
+          success: true,
+          stdout: "total 8\n-rw-r--r-- 1 user staff 8 brief.pdf\n",
+          stderr: "",
+          exitCode: 0,
+          terminationReason: "normal",
+        }),
+      });
+
+      expect(step.status).toBe("failed");
+      expect(String(step.error || "")).toContain("expected artifact file evidence");
+    });
+
+    it("does not accept an artifact command with empty or error output", async () => {
+      const emptyOutput = await runVerification({
+        createdFiles: ["brief.pdf"],
+        files: ["brief.pdf"],
+        calls: [["run_command", { command: "pdfinfo brief.pdf 2>/dev/null | grep Pages || true" }]],
+        results: () => ({ success: true, stdout: "", stderr: "", exitCode: 0 }),
+      });
+      expect(emptyOutput.status).toBe("failed");
+      expect(String(emptyOutput.error || "")).toContain("expected artifact file evidence");
+
+      const errorOutput = await runVerification({
+        createdFiles: ["brief.pdf"],
+        files: ["brief.pdf"],
+        calls: [["run_command", { command: "pdfinfo brief.pdf 2>&1 || true" }]],
+        results: () => ({
+          success: true,
+          stdout: "Syntax Error: Couldn't find trailer dictionary\nError: May not be a PDF file\n",
+          stderr: "",
+          exitCode: 0,
+        }),
+      });
+      expect(errorOutput.status).toBe("failed");
+      expect(String(errorOutput.error || "")).toContain("expected artifact file evidence");
+    });
+
+    it("does not accept a command for a missing file or a same-named file elsewhere", async () => {
+      const missing = await runVerification({
+        createdFiles: ["brief.pdf"],
+        calls: [["run_command", { command: "pdfinfo brief.pdf" }]],
+        results: () => ({ success: true, stdout: "Pages: 2\n", stderr: "", exitCode: 0 }),
+      });
+      expect(missing.status).toBe("failed");
+      expect(String(missing.error || "")).toContain("expected artifact file evidence");
+
+      const elsewhere = await runVerification({
+        createdFiles: ["deliverables/brief.pdf"],
+        files: ["deliverables/brief.pdf", "old/brief.pdf"],
+        calls: [["run_command", { command: "pdfinfo old/brief.pdf" }]],
+        results: () => ({ success: true, stdout: "Pages: 2\n", stderr: "", exitCode: 0 }),
+      });
+      expect(elsewhere.status).toBe("failed");
+      expect(String(elsewhere.error || "")).toContain("expected artifact file evidence");
+    });
+  });
+
   it("ignores strategy-context docx cues when inferring required artifact types", () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
     (executor as Any).task.prompt = `Create a fully working website simulating the Windows 95 UI.

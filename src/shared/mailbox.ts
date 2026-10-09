@@ -1180,6 +1180,155 @@ export function buildMailboxComposeDraftInputFromPrompt(
   };
 }
 
+// Closing phrases that end the letter itself; anything after the closing and its
+// signature block belongs to the surrounding answer, not to the email.
+const EMAIL_SIGN_OFF_PATTERN =
+  /^(?:thanks(?:\s+(?:again|so\s+much))?|thank\s+you(?:\s+(?:again|so\s+much))?|many\s+thanks|best(?:\s+(?:regards|wishes))?|all\s+the\s+best|kind(?:est)?\s+regards|warm(?:est)?\s+regards|regards|sincerely(?:\s+yours)?|yours(?:\s+(?:sincerely|truly|faithfully))?|cheers|respectfully|talk\s+soon)\s*[,.!]?$/i;
+const EMAIL_MAX_SIGNATURE_LINES = 6;
+
+function isMarkdownFenceLine(line: string): boolean {
+  return /^\s{0,3}(?:```|~~~)/.test(line);
+}
+
+function isMarkdownSectionBoundary(line: string): boolean {
+  return /^\s{0,3}#{1,6}\s+\S/.test(line) || /^\s{0,3}(?:[-*_]\s*){3,}$/.test(line);
+}
+
+function isMarkdownTableLine(line: string): boolean {
+  return /^\s*\|.*\|\s*$/.test(line);
+}
+
+function isEmailSignOffLine(line: string): boolean {
+  return EMAIL_SIGN_OFF_PATTERN.test(normalizeEmailMarkdownInline(line).trim());
+}
+
+function looksLikeSignatureLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 80) return false;
+  if (isMarkdownSectionBoundary(trimmed) || isMarkdownTableLine(trimmed)) return false;
+  if (/^\s*(?:[-*+]|\d+[.)])\s+/.test(trimmed)) return false;
+  // Sentences ("Let me know if you want changes.") are commentary, not signatures.
+  return !/[.?!:]$/.test(normalizeEmailMarkdownInline(trimmed).trim());
+}
+
+function isPostscriptLine(line: string): boolean {
+  return /^\s*(?:\*\*|__)?p\.?\s?s\.?(?:\*\*|__)?[\s:]/i.test(line);
+}
+
+/**
+ * Keep only the email itself from the text that follows a Subject line. The email
+ * ends at the first Markdown heading or horizontal rule after its content, or after
+ * the last closing phrase plus its signature block (and any P.S.), so a separately
+ * requested table, checklist, or commentary is never pulled into the draft.
+ */
+function boundEmailBodyLines(lines: string[]): string[] {
+  const contentLines: string[] = [];
+  let hasContent = false;
+  for (const line of lines) {
+    if (isMarkdownFenceLine(line)) continue;
+    if (isMarkdownSectionBoundary(line)) {
+      if (hasContent) break;
+      continue;
+    }
+    if (line.trim()) hasContent = true;
+    contentLines.push(line);
+  }
+
+  let signOffIndex = -1;
+  for (let index = contentLines.length - 1; index >= 0; index -= 1) {
+    const line = contentLines[index] ?? "";
+    if (isMarkdownTableLine(line)) continue;
+    if (isEmailSignOffLine(line)) {
+      signOffIndex = index;
+      break;
+    }
+  }
+  if (signOffIndex < 0) return contentLines;
+
+  const kept = contentLines.slice(0, signOffIndex + 1);
+  let signatureLines = 0;
+  let index = signOffIndex + 1;
+  while (index < contentLines.length) {
+    const line = contentLines[index] ?? "";
+    if (line.trim()) {
+      if (signatureLines >= EMAIL_MAX_SIGNATURE_LINES || !looksLikeSignatureLine(line)) break;
+      kept.push(line);
+      signatureLines += 1;
+      index += 1;
+      continue;
+    }
+    let nextIndex = index;
+    while (nextIndex < contentLines.length && !(contentLines[nextIndex] ?? "").trim()) {
+      nextIndex += 1;
+    }
+    const next = contentLines[nextIndex];
+    if (next === undefined) break;
+    if (isPostscriptLine(next)) {
+      kept.push("");
+      let postscriptIndex = nextIndex;
+      while (
+        postscriptIndex < contentLines.length &&
+        (contentLines[postscriptIndex] ?? "").trim()
+      ) {
+        kept.push(contentLines[postscriptIndex] ?? "");
+        postscriptIndex += 1;
+      }
+      index = postscriptIndex;
+      continue;
+    }
+    // Allow one blank line between the closing phrase and the name.
+    if (signatureLines === 0 && looksLikeSignatureLine(next)) {
+      kept.push("");
+      index = nextIndex;
+      continue;
+    }
+    break;
+  }
+  return kept;
+}
+
+/**
+ * The compose editor stores and sends plain text (bodyHtml stays null), so inline
+ * Markdown from an assistant answer is reduced to the text a reader would see.
+ */
+function normalizeEmailMarkdownInline(value: string): string {
+  const escapes: string[] = [];
+  let text = value.replace(/\\([\\`*_{}[\]()#+\-.!|>~])/g, (_match, char: string) => {
+    escapes.push(char);
+    return `\uE000${escapes.length - 1}\uE001`;
+  });
+  text = text
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, "$1")
+    .replace(
+      /\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
+      (_match, label: string, url: string) => {
+        const target = url.replace(/^mailto:/i, "");
+        return label.trim() === target || label.trim() === url ? label : `${label} (${target})`;
+      },
+    )
+    .replace(/<((?:https?|mailto):[^>\s]+)>/gi, (_match, url: string) =>
+      url.replace(/^mailto:/i, ""),
+    )
+    .replace(/(\*\*|__)(?=\S)([^\n]*?\S)\1/g, "$2")
+    .replace(/~~(?=\S)([^\n]*?\S)~~/g, "$1")
+    .replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])/g, "$1$2")
+    .replace(/(^|[^\w])_(?=[^\s_])([^_\n]*?[^\s_])_(?!\w)/g, "$1$2");
+  return text.replace(
+    /\uE000(\d+)\uE001/g,
+    (_match, index: string) => escapes[Number(index)] ?? "",
+  );
+}
+
+function normalizeEmailMarkdownLine(line: string): string {
+  const listMatch = line.match(/^(\s*)[*+-]\s+(.*)$/);
+  const normalized = listMatch
+    ? `${listMatch[1]}- ${normalizeEmailMarkdownInline(listMatch[2] ?? "")}`
+    : normalizeEmailMarkdownInline(line);
+  // Drop Markdown hard-break markers (trailing double space or backslash).
+  return normalized.replace(/\\$/, "").replace(/[ \t]+$/, "");
+}
+
 export function extractMailboxComposeDraftInputFromText(
   assistantMessage: string,
   sourceUserMessage = "",
@@ -1195,7 +1344,7 @@ export function extractMailboxComposeDraftInputFromText(
     /^\s*(?:\*\*)?subject(?:\s+line)?(?:\*\*)?\s*:\s*(.+)$/im,
   );
   if (!subjectMatch?.[1]) return null;
-  const subject = subjectMatch[1].replace(/\*\*/g, "").trim();
+  const subject = normalizeEmailMarkdownInline(subjectMatch[1].replace(/\*\*/g, "")).trim();
   if (!subject) return null;
 
   const subjectLineIndex = assistantMessage.toLowerCase().indexOf(subjectMatch[0].toLowerCase());
@@ -1203,8 +1352,9 @@ export function extractMailboxComposeDraftInputFromText(
     subjectLineIndex >= 0
       ? assistantMessage.slice(subjectLineIndex + subjectMatch[0].length)
       : assistantMessage;
-  const bodyText = afterSubject
-    .replace(/^\s*[-–—]*\s*/g, "")
+  const bodyText = boundEmailBodyLines(afterSubject.replace(/^\s*[-–—]*\s*/g, "").split(/\r?\n/))
+    .map(normalizeEmailMarkdownLine)
+    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   if (!bodyText) return null;

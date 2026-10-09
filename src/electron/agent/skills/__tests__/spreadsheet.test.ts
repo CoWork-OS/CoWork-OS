@@ -235,6 +235,96 @@ describe("SpreadsheetBuilder", () => {
     expect(ws.getCell("D3").numFmt).toBe("#,##0");
     expect(ws.getCell("B2").value).toBe(180);
   });
+
+  it("stores ISO date text as real Excel dates and keeps ids as text", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-spreadsheet-"));
+    const outPath = path.join(tmpDir, "Northstar-pilot-costs.xlsx");
+
+    // The create_spreadsheet input from the live round-3 expense workbook.
+    const report = await new SpreadsheetBuilder(createWorkspace(tmpDir)).create(outPath, [
+      {
+        name: "Expenses",
+        data: [
+          ["Invoice ID", "Date", "Supplier", "Net EUR", "VAT rate", "VAT EUR", "Gross EUR"],
+          ["00041", "2026-10-05", "Audio kit rental", 120, 0.23, "=D2*E2", "=D2+F2"],
+          ["00042", "2026-10-07", "Printed welcome cards", 45.5, 0.23, "=D3*E3", "=D3+F3"],
+          ["CR-0041", "2026-10-08", "Audio kit rental credit", -20, 0.23, "=D4*E4", "=D4+F4"],
+          ["00043", "2026-10-09", "Caption editing", 80, 0, "=D5*E5", "=D5+F5"],
+        ],
+      },
+      {
+        name: "Summary",
+        data: [
+          ["Metric", "EUR"],
+          ["Net total", "=SUM(Expenses!D2:D5)"],
+          ["Days covered", "=Expenses!B5-Expenses!B2"],
+        ],
+      },
+    ]);
+
+    expect(report.formulas).toEqual({ computed: 10, uncached: [] });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(outPath);
+    const ws = wb.getWorksheet("Expenses")!;
+    expect(ws.getCell("B2").value).toEqual(new Date(Date.UTC(2026, 9, 5)));
+    expect(ws.getCell("B5").value).toEqual(new Date(Date.UTC(2026, 9, 9)));
+    expect(ws.getCell("B2").numFmt).toBe("yyyy-mm-dd");
+    expect(ws.getCell("B1").value).toBe("Date");
+    expect(["A2", "A3", "A4", "A5"].map((address) => ws.getCell(address).value)).toEqual([
+      "00041",
+      "00042",
+      "CR-0041",
+      "00043",
+    ]);
+    // Dates are numbers to formulas.
+    expect(wb.getWorksheet("Summary")!.getCell("B3").result).toBe(4);
+    // A date column is sized for the date, not for Date#toString().
+    expect(ws.getColumn(2).width).toBeLessThan(15);
+  });
+
+  it("reads date text in the order of a requested date format and respects text formats", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-spreadsheet-"));
+    const outPath = path.join(tmpDir, "dates.xlsx");
+
+    await new SpreadsheetBuilder(createWorkspace(tmpDir)).create(outPath, [
+      {
+        name: "Dates",
+        data: [
+          ["Due", "Booked", "Code", "Logged", "Amount"],
+          ["05/10/2026", "2026-10-05", "2026-10-05", "2026-10-05T09:30", "2026-10-05"],
+          ["31/04/2026", "2026-02-30", "00041", "2026-10-05 09:30:15", "12"],
+        ],
+        numberFormats: [
+          { column: "Due", numFmt: "DD/MM/YYYY" },
+          { column: "Booked", numFmt: "dd/mm/yyyy" },
+          { column: "Code", numFmt: "@" },
+          { column: "Amount", numFmt: "€#,##0.00" },
+        ],
+      },
+    ]);
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(outPath);
+    const ws = wb.getWorksheet("Dates")!;
+    // 05/10/2026 under DD/MM/YYYY is 5 October; 31/04 does not exist and stays text.
+    expect(ws.getCell("A2").value).toEqual(new Date(Date.UTC(2026, 9, 5)));
+    expect(ws.getCell("A2").numFmt).toBe("DD/MM/YYYY");
+    expect(ws.getCell("A3").value).toBe("31/04/2026");
+    // The requested format is kept; an impossible ISO date stays text.
+    expect(ws.getCell("B2").value).toEqual(new Date(Date.UTC(2026, 9, 5)));
+    expect(ws.getCell("B2").numFmt).toBe("dd/mm/yyyy");
+    expect(ws.getCell("B3").value).toBe("2026-02-30");
+    // "@" keeps text as text.
+    expect(ws.getCell("C2").value).toBe("2026-10-05");
+    expect(ws.getCell("C3").value).toBe("00041");
+    // A time of day keeps its precision in the default format.
+    expect(ws.getCell("D2").value).toEqual(new Date(Date.UTC(2026, 9, 5, 9, 30)));
+    expect(ws.getCell("D2").numFmt).toBe("yyyy-mm-dd hh:mm");
+    expect(ws.getCell("D3").numFmt).toBe("yyyy-mm-dd hh:mm:ss");
+    // A currency column is not reinterpreted as dates.
+    expect(ws.getCell("E2").value).toBe("2026-10-05");
+    expect(ws.getCell("E3").value).toBe(12);
+  });
 });
 
 function createWorkspace(tmpDir: string): Workspace {

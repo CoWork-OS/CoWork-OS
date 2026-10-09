@@ -16,6 +16,7 @@ import type { SensitiveSourceRef, Workspace } from "../../../shared/types";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 import { formatSpreadsheetValue } from "../../../shared/spreadsheet-number-format";
+import { isDateNumberFormat } from "../../utils/document-generators/spreadsheet-cells";
 import { extractPdfText } from "../../utils/pdf-text";
 import {
   buildSensitiveSourceRefForPath,
@@ -146,7 +147,8 @@ function describeSheetFormulasAndFormats(
       if (isFormula) {
         formulaCount += 1;
         if (formulas.length < MAX_SPREADSHEET_DETAIL_ENTRIES) {
-          const result = (raw as { result?: unknown }).result;
+          // cell.result keeps a 0 or FALSE result that ExcelJS leaves out of cell.value.
+          const result = cell.result as unknown;
           const saved =
             result === undefined || result === null
               ? "no saved result"
@@ -158,12 +160,20 @@ function describeSheetFormulasAndFormats(
       if (numFmt && !/^general$/i.test(numFmt)) {
         formatCount += 1;
         if (formats.length < MAX_SPREADSHEET_DETAIL_ENTRIES) {
-          const value = isFormula ? (raw as { result?: unknown }).result : raw;
+          const value = isFormula ? (cell.result as unknown) : raw;
           const shown =
             typeof value === "number" || value instanceof Date
               ? formatSpreadsheetValue(value, numFmt, { date1904 })
               : null;
-          formats.push(`- ${cell.address}: ${numFmt}${shown ? ` (shown as ${shown})` : ""}`);
+          // A date format on text changes nothing in Excel; say so, so a check
+          // that reads only the format cannot pass a date stored as text.
+          const textUnderDateFormat =
+            typeof value === "string" && isDateNumberFormat(numFmt)
+              ? ` (text ${JSON.stringify(value)}, not a date value)`
+              : "";
+          formats.push(
+            `- ${cell.address}: ${numFmt}${shown ? ` (shown as ${shown})` : ""}${textUnderDateFormat}`,
+          );
         }
       }
     });

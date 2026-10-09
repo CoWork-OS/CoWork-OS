@@ -388,4 +388,53 @@ describe("capTaskEvents", () => {
 
     expect(second[0]).toBe(first[0]);
   });
+
+  it("keeps the newest llm_usage event of each task when structural events fill the cap", () => {
+    const usage = (taskId: string, timestamp: number, inputTokens: number) =>
+      makeEvent({
+        taskId,
+        type: "llm_usage",
+        timestamp,
+        payload: { totals: { inputTokens, outputTokens: 10, cost: 0.01 } },
+      });
+    const events: TaskEvent[] = [
+      usage("child-a", 1, 100),
+      usage("child-b", 2, 200),
+      usage("child-a", 3, 300),
+      ...Array.from({ length: 10 }, (_, i) =>
+        makeEvent({ taskId: i % 2 ? "child-a" : "child-b", type: "tool_call", timestamp: 10 + i }),
+      ),
+    ];
+
+    const result = capTaskEvents(events, 6);
+
+    expect(result).toHaveLength(6);
+    const usageEvents = result.filter((event) => event.type === "llm_usage");
+    expect(usageEvents.map((event) => event.id)).toEqual([
+      "child-b:llm_usage:2",
+      "child-a:llm_usage:3",
+    ]);
+    expect(result.slice(-4).every((event) => event.type === "tool_call")).toBe(true);
+    const timestamps = result.map((event) => event.timestamp);
+    expect(timestamps).toEqual(timestamps.slice().sort((a, b) => a - b));
+  });
+
+  it("keeps canonical usage events pinned when noise is evicted", () => {
+    const canonicalUsage = makeEvent({
+      taskId: "child-a",
+      type: "timeline_step_updated" as TaskEvent["type"],
+      timestamp: 1,
+      payload: { legacyType: "llm_usage", totals: { inputTokens: 500, outputTokens: 50 } },
+    });
+    const noise = Array.from({ length: 6 }, (_, i) =>
+      makeEvent({ taskId: "child-a", type: "log", timestamp: 2 + i }),
+    );
+    const structural = makeEvent({ taskId: "child-a", type: "assistant_message", timestamp: 20 });
+
+    const result = capTaskEvents([canonicalUsage, ...noise, structural], 3);
+
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe(canonicalUsage);
+    expect(result[result.length - 1]).toBe(structural);
+  });
 });

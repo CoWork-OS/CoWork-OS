@@ -1719,7 +1719,7 @@ export async function setupIpcHandlers(
     listRootUserUpdates: (rootTaskId: string) => agentDaemon.listUserFollowUpMessages(rootTaskId),
     completeRootTask: async (taskId, status, summary, metadata) => {
       if (status === "failed") {
-        agentDaemon.failTask(taskId, summary, {
+        agentDaemon.failTask(taskId, metadata?.failureReason || summary, {
           resultSummary: summary,
         });
         return;

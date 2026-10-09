@@ -14803,6 +14803,7 @@ export class AgentDaemon extends EventEmitter {
     if (isTerminalTaskStatus(currentStatus)) {
       return;
     }
+    if (this.reconcilePendingUserUpdateBeforeCompletion(taskId).deferred) return;
 
     this.cleanupPendingApprovalsForTask(
       taskId,
@@ -18002,6 +18003,54 @@ export class AgentDaemon extends EventEmitter {
       this.getTaskEventsForReplay(taskId),
       resultSummary,
     );
+  }
+
+  /**
+   * A child task's result is consumed by its parent as soon as the child
+   * completes. When a user update was accepted for the child but is still
+   * waiting in its executor queue, the finishing turn never saw it, so its
+   * answer predates the newest revision. Keep the child executing instead:
+   * the queued update runs as the next turn once this one returns, and that
+   * turn's answer becomes the stored result the parent's synthesis reads.
+   * Follow-up turns call this before their own completion as well.
+   */
+  reconcilePendingUserUpdateBeforeCompletion(taskId: string): {
+    deferred: boolean;
+    pendingMessageIds: string[];
+  } {
+    const task = this.taskRepo.findById(taskId);
+    if (!task?.parentTaskId) return { deferred: false, pendingMessageIds: [] };
+    const executor = this.activeTasks.get(taskId)?.executor;
+    let queued: TaskFollowUpInput[] = [];
+    try {
+      const pending = executor?.runtime?.state?.queues?.pendingFollowUps;
+      queued = Array.isArray(pending) ? pending : [];
+    } catch (error) {
+      log.warn(`Could not read queued follow-ups for task ${taskId}:`, error);
+      return { deferred: false, pendingMessageIds: [] };
+    }
+    const pendingUserUpdates = queued.filter(
+      (followUp) =>
+        followUp?.deliveryMode === "follow_up" &&
+        followUp.messageSource !== "agent" &&
+        typeof followUp.message === "string" &&
+        followUp.message.trim().length > 0,
+    );
+    if (pendingUserUpdates.length === 0) return { deferred: false, pendingMessageIds: [] };
+    const pendingMessageIds = pendingUserUpdates
+      .map((followUp) => (typeof followUp.messageId === "string" ? followUp.messageId : ""))
+      .filter(Boolean);
+    if (task.status !== "executing") this.updateTaskStatus(taskId, "executing");
+    this.logEvent(taskId, "log", {
+      message:
+        "Completion deferred: a user update arrived after this answer was drafted; the update runs next and its answer becomes the result.",
+      metric: "completion_deferred_for_user_update",
+      pendingUpdateCount: pendingUserUpdates.length,
+      ...(pendingMessageIds.length > 0 ? { pendingMessageIds } : {}),
+    });
+    // A running executor drains its queue when its current run returns.
+    if (executor && !executor.isRunning) this.processOrphanedFollowUps(taskId, executor);
+    return { deferred: true, pendingMessageIds };
   }
 
   /**

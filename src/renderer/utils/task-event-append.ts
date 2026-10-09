@@ -147,6 +147,19 @@ export function isRendererNoiseEvent(event: TaskEvent): boolean {
   return RENDERER_NOISE_EVENT_TYPES.has(getEffectiveTaskEventType(event));
 }
 
+/**
+ * The newest `llm_usage` event of each task. Its payload carries the task's cumulative
+ * token and cost totals, so it is kept through the cap even though usage events are
+ * otherwise droppable noise; evicting it made displayed totals fall back to zero.
+ */
+function getLatestUsageEventsByTask(events: TaskEvent[]): Set<TaskEvent> {
+  const latestByTask = new Map<string, TaskEvent>();
+  for (const event of events) {
+    if (getEffectiveTaskEventType(event) === "llm_usage") latestByTask.set(event.taskId, event);
+  }
+  return new Set(latestByTask.values());
+}
+
 export function capTaskEvents(
   events: TaskEvent[],
   maxEvents: number = DEFAULT_MAX_EVENTS,
@@ -172,6 +185,9 @@ export function capTaskEvents(
     return trimmedEvents;
   };
   const eventsForByteCap = getTrimmedEvents();
+  const pinnedUsageEvents = getLatestUsageEventsByTask(eventsForByteCap);
+  const isDroppableNoise = (event: TaskEvent) =>
+    isRendererNoiseEvent(event) && !pinnedUsageEvents.has(event);
   let payloadBytes = 0;
   for (let index = eventsForByteCap.length - 1; index >= 0; index -= 1) {
     payloadBytes += estimateEventPayloadBytes(eventsForByteCap[index]);
@@ -183,7 +199,7 @@ export function capTaskEvents(
       let compactBudget = maxPayloadBytes;
       for (let olderIndex = index; olderIndex >= 0; olderIndex -= 1) {
         const event = eventsForByteCap[olderIndex];
-        if (isRendererNoiseEvent(event)) continue;
+        if (isDroppableNoise(event)) continue;
         if (!isBulkyEvent(event)) {
           older.push(event);
           continue;
@@ -197,32 +213,63 @@ export function capTaskEvents(
       const recent = eventsForByteCap.slice(index + 1);
       const kept = [...older, ...recent];
       if (kept.length <= maxEvents) return kept;
-      const olderBudget = Math.max(0, maxEvents - recent.length);
-      const keptOlder = olderBudget > 0 ? older.slice(-olderBudget) : [];
-      return [...keptOlder, ...recent].slice(-maxEvents);
+      return keepNewestWithPinned(kept, maxEvents, pinnedUsageEvents);
     }
   }
 
-  const trimmed = getTrimmedEvents();
+  const trimmed = eventsForByteCap;
   if (trimmed.length <= maxEvents) return trimmed;
 
   const indexed = trimmed.map((event, index) => ({ event, index }));
-  const structural = indexed.filter(({ event }) => !isRendererNoiseEvent(event));
+  const structural = indexed.filter(({ event }) => !isDroppableNoise(event));
 
   if (structural.length >= maxEvents) {
-    return structural.slice(-maxEvents).map(({ event }) => event);
+    return keepNewestWithPinned(
+      structural.map(({ event }) => event),
+      maxEvents,
+      pinnedUsageEvents,
+    );
   }
 
   const noiseBudget = maxEvents - structural.length;
-  const recentNoise = indexed
-    .filter(({ event }) => isRendererNoiseEvent(event))
-    .slice(-noiseBudget);
+  const recentNoise = indexed.filter(({ event }) => isDroppableNoise(event)).slice(-noiseBudget);
   const keepIndexes = new Set<number>([
     ...structural.map(({ index }) => index),
     ...recentNoise.map(({ index }) => index),
   ]);
 
   return indexed.filter(({ index }) => keepIndexes.has(index)).map(({ event }) => event);
+}
+
+/**
+ * The newest `maxEvents` of `events`, except that pinned events older than that window
+ * are kept in place of the oldest unpinned ones. Order is preserved and the result never
+ * exceeds `maxEvents`.
+ */
+function keepNewestWithPinned(
+  events: TaskEvent[],
+  maxEvents: number,
+  pinned: ReadonlySet<TaskEvent>,
+): TaskEvent[] {
+  if (events.length <= maxEvents) return events;
+  const windowStart = events.length - maxEvents;
+  let pinnedOutside = 0;
+  for (let index = 0; index < windowStart; index += 1) {
+    if (pinned.has(events[index])) pinnedOutside += 1;
+  }
+  if (pinnedOutside === 0) return events.slice(windowStart);
+  const kept: TaskEvent[] = [];
+  let unpinnedToSkip = windowStart;
+  for (const event of events) {
+    if (pinned.has(event)) {
+      kept.push(event);
+    } else if (unpinnedToSkip > 0) {
+      unpinnedToSkip -= 1;
+    } else {
+      kept.push(event);
+    }
+  }
+  return kept.slice(-maxEvents);
 }
 
 export function getTransientEventReplacementKey(event: TaskEvent): string | null {

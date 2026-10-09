@@ -1045,6 +1045,57 @@ export function shouldPreserveExistingDeliverableForRecovery(opts: {
   return recoveryLooksLikeNarrowStatus && !recoveryHasDeliverableSignals;
 }
 
+const STRUCTURED_DELIVERABLE_MIN_CHARS = 1_200;
+const STRUCTURED_RECOMMENDATION_HEADING =
+  /^(?:#{1,6}\s+|\*\*)[^\n]*\b(?:plan|recommend(?:ation|ations|ed)?|proposal|proposed|schedule|timeline|next steps?|decisions?|action (?:items|plan)|roadmap|checklist|verdict|conclusion)\b/im;
+
+/**
+ * A long, sectioned deliverable whose sections commit to a course of action
+ * (a plan, a proposed schedule, a recommendation, next steps, a checklist).
+ * Such an answer states its decision through structure rather than a stock
+ * phrase like "I recommend", so it satisfies a decision requirement.
+ */
+export function responseIsStructuredRecommendation(text: string): boolean {
+  const normalized = String(text || "").trim();
+  if (normalized.length < STRUCTURED_DELIVERABLE_MIN_CHARS) return false;
+  if (responseLooksOperationalOnly(normalized)) return false;
+  const headingCount = (normalized.match(/^#{1,6}\s+\S/gm) || []).length;
+  const hasTable = /^\s*\|.*\|\s*$\n^\s*\|?\s*:?-{3,}/m.test(normalized);
+  const listItemCount = (normalized.match(/^\s*(?:[-*+]|\d+[.)])\s+\S/gm) || []).length;
+  const isSectioned = headingCount >= 3 || (headingCount >= 2 && (hasTable || listItemCount >= 3));
+  return isSectioned && STRUCTURED_RECOMMENDATION_HEADING.test(normalized);
+}
+
+function responseSatisfiesDecisionRequirement(text: string): boolean {
+  return responseHasDecisionSignal(text) || responseIsStructuredRecommendation(text);
+}
+
+/**
+ * The specific unmet direct-answer condition for a candidate, so a guard
+ * failure names what is missing instead of a generic status-only verdict.
+ */
+export function describeDirectAnswerShortfall(opts: {
+  text: string;
+  contract: CompletionContract;
+  minResultSummaryLength?: number;
+}): string {
+  const normalized = String(opts.text || "").trim();
+  if (!normalized) {
+    return "Task missing direct answer: no final response was produced.";
+  }
+  if (responseLooksOperationalOnly(normalized) && !opts.contract.allowsOperationalStatus) {
+    return "Task missing direct answer: the final response does not clearly answer the user request and appears to be operational status only.";
+  }
+  if (opts.contract.requiresDecisionSignal && !responseSatisfiesDecisionRequirement(normalized)) {
+    return "Task missing direct answer: the request asks for a decision or recommendation, but the final response does not state one.";
+  }
+  const minLength = opts.minResultSummaryLength ?? 0;
+  if (minLength > 0 && normalized.length < minLength) {
+    return `Task missing direct answer: the final response is too brief to answer the request (${normalized.length} characters).`;
+  }
+  return "Task missing direct answer: the final response does not clearly answer the user request.";
+}
+
 export function responseDirectlyAddressesPrompt(opts: {
   text: string;
   contract: CompletionContract;
@@ -1056,7 +1107,9 @@ export function responseDirectlyAddressesPrompt(opts: {
   if (responseLooksOperationalOnly(normalized) && !opts.contract.allowsOperationalStatus) {
     return false;
   }
-  if (opts.contract.requiresDecisionSignal && !responseHasDecisionSignal(normalized)) return false;
+  if (opts.contract.requiresDecisionSignal && !responseSatisfiesDecisionRequirement(normalized)) {
+    return false;
+  }
   const needsDetailedAnswer =
     !opts.contract.allowsOperationalStatus &&
     (opts.contract.requiresExecutionEvidence || opts.contract.requiresDecisionSignal);
@@ -1177,6 +1230,7 @@ export function getFinalOutcomeGuardError(opts: {
   responseDirectlyAddressesPrompt: (text: string, contract: CompletionContract) => boolean;
   fallbackContainsDirectAnswer: (contract: CompletionContract) => boolean;
   hasVerificationEvidence: (bestCandidate: string) => boolean;
+  minResultSummaryLength?: number;
 }): string | null {
   const bestEffortMode =
     opts.preferBestEffortCompletion &&
@@ -1210,7 +1264,11 @@ export function getFinalOutcomeGuardError(opts: {
     if (opts.fallbackContainsDirectAnswer(opts.contract)) {
       return null;
     }
-    return "Task missing direct answer: the final response does not clearly answer the user request and appears to be operational status only.";
+    return describeDirectAnswerShortfall({
+      text: opts.bestCandidate,
+      contract: opts.contract,
+      minResultSummaryLength: opts.minResultSummaryLength,
+    });
   }
 
   if (

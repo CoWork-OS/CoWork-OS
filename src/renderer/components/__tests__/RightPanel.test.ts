@@ -153,6 +153,85 @@ describe("RightPanel checklist rendering", () => {
     expect(markup).toContain("Needs review");
   });
 
+  it("uses cumulative child usage when the capped event list no longer has usage events", () => {
+    const childTasks = [
+      {
+        id: "child-1",
+        parentTaskId: "task-1",
+        agentType: "sub",
+        status: "executing",
+        title: "Market research",
+        prompt: "Research",
+        createdAt: 1000,
+        updatedAt: 3000,
+      },
+      {
+        id: "child-2",
+        parentTaskId: "task-1",
+        agentType: "sub",
+        status: "executing",
+        title: "Pricing review",
+        prompt: "Review",
+        createdAt: 2000,
+        updatedAt: 3000,
+      },
+    ] as Any;
+    const render = (childEvents: unknown[], childUsageByTaskId?: unknown) =>
+      renderToStaticMarkup(
+        React.createElement(RightPanel, {
+          task: {
+            id: "task-1",
+            status: "executing",
+            title: "Collaborative plan",
+            prompt: "Prompt",
+            agentConfig: { collaborativeMode: true },
+          } as Any,
+          workspace: null,
+          events: [] as Any,
+          childTasks,
+          childEvents: childEvents as Any,
+          childUsageByTaskId: childUsageByTaskId as Any,
+        }),
+      );
+    // Only structural events survive the cap; the usage events were evicted.
+    const cappedEvents = [
+      {
+        id: "evt-tool",
+        taskId: "child-1",
+        timestamp: 2900,
+        schemaVersion: 2,
+        type: "tool_call",
+        payload: { tool: "read_file" },
+      },
+    ];
+
+    const withAccumulated = render(cappedEvents, {
+      "child-1": {
+        inputTokens: 60_000,
+        outputTokens: 8_000,
+        cost: 0.006,
+        costKnown: true,
+        llmCallCount: 10,
+        countedEventKeys: new Set(),
+      },
+      "child-2": {
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0.002,
+        costKnown: false,
+        llmCallCount: 4,
+        countedEventKeys: new Set(),
+      },
+    });
+    expect(withAccumulated).toContain("68K");
+    expect(withAccumulated).toMatch(/LLM calls<\/span><strong>14</);
+    expect(withAccumulated).toContain("$0.0080+");
+
+    const withoutUsage = render(cappedEvents);
+    expect(withoutUsage).toMatch(/Cost<\/span><strong[^>]*>—</);
+    expect(withoutUsage).not.toContain("$0<");
+  });
+
   it("renders the latest session checklist state and verification nudge", () => {
     const markup = renderToStaticMarkup(
       React.createElement(RightPanel, {

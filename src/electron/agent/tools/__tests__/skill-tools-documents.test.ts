@@ -64,6 +64,67 @@ describe("SkillTools document results", () => {
     );
   });
 
+  it("create_document writes the exact requested file names for a DOCX and PDF pair", async () => {
+    const workspace = makeWorkspace();
+    const daemon = { logEvent: vi.fn() } as Any;
+    const tools = new SkillTools(workspace, daemon, "task-1");
+    const content = [
+      { type: "heading", text: "Northstar", level: 1 },
+      { type: "paragraph", text: "Overview." },
+      { type: "page_break" },
+      { type: "heading", text: "Responsibilities", level: 1 },
+    ];
+
+    const docx = await tools.createDocument({
+      filename: "Northstar-brief.docx",
+      format: "docx",
+      content,
+      pageNumbers: true,
+    });
+    const pdf = await tools.createDocument({
+      filename: "Northstar-brief.pdf",
+      format: "pdf",
+      content,
+      pageNumbers: true,
+    });
+
+    expect(docx.path).toBe("Northstar-brief.docx");
+    expect(pdf.path).toBe("Northstar-brief.pdf");
+    expect(fs.readdirSync(workspace.path).sort()).toEqual([
+      "Northstar-brief.docx",
+      "Northstar-brief.pdf",
+    ]);
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "file_created",
+      expect.objectContaining({ path: "Northstar-brief.pdf", format: "pdf" }),
+    );
+  });
+
+  it("create_document only appends a missing extension and rejects a conflicting one", async () => {
+    const workspace = makeWorkspace();
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    const content = [{ type: "paragraph", text: "Body." }];
+
+    expect((await tools.createDocument({ filename: "brief", format: "pdf", content })).path).toBe(
+      "brief.pdf",
+    );
+    expect(
+      (await tools.createDocument({ filename: "Brief.PDF", format: "pdf", content })).path,
+    ).toBe("Brief.PDF");
+    expect(
+      (await tools.createDocument({ filename: "notes.v2", format: "docx", content })).path,
+    ).toBe("notes.v2.docx");
+    // The extension states the format when the format is left out.
+    expect((await tools.createDocument({ filename: "memo.docx", content } as Any)).path).toBe(
+      "memo.docx",
+    );
+    await expect(
+      tools.createDocument({ filename: "report.docx", format: "pdf", content }),
+    ).rejects.toThrow('Use filename "report.pdf"');
+    expect(fs.existsSync(path.join(workspace.path, "report.docx.pdf"))).toBe(false);
+  });
+
   it("create_presentation reports the slides written and why the deck differs from the request", async () => {
     const workspace = makeWorkspace();
     const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");

@@ -205,6 +205,36 @@ describe("DocumentParserTools", () => {
     expect(result.content).toContain("Number formats in Notes: none (all cells use General)");
   });
 
+  it("flags date-formatted text and reports a zero formula result", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Expenses");
+    sheet.addRow(["Date", "Net", "VAT"]);
+    sheet.addRow(["2026-10-05", 80, { formula: "B2*0", result: 0 }]);
+    sheet.getCell("A2").numFmt = "DD/MM/YYYY";
+    await workbook.xlsx.writeFile(path.join(tmpDir, "dates.xlsx"));
+
+    const tools = new DocumentParserTools({
+      id: "ws-1",
+      name: "Test Workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: false,
+        shell: false,
+        allowedPaths: [],
+      },
+    } as Any);
+
+    const result = await tools.parseDocument({ path: "dates.xlsx" });
+
+    expect(result.content).toContain('- A2: DD/MM/YYYY (text "2026-10-05", not a date value)');
+    expect(result.content).toContain("- C2: =B2*0 (saved result 0)");
+  });
+
   it("returns lossless continuation metadata for bounded document windows", async () => {
     fs.writeFileSync(path.join(tmpDir, "long.txt"), "0123456789".repeat(30));
     const tools = new DocumentParserTools({

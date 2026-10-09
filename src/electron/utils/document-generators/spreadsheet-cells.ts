@@ -72,6 +72,189 @@ export function normalizeSpreadsheetCell(
   return options.coerceNumbers === false ? value : coerceNumericText(value);
 }
 
+/** Format a cell gets when ISO date text becomes a date and no date format was requested. */
+export const DEFAULT_DATE_NUMBER_FORMAT = "yyyy-mm-dd";
+const DEFAULT_DATE_TIME_NUMBER_FORMAT = "yyyy-mm-dd hh:mm";
+const DEFAULT_DATE_TIME_SECONDS_NUMBER_FORMAT = "yyyy-mm-dd hh:mm:ss";
+
+/** "2026-10-05", "2026-10-05T09:30", "2026-10-05 09:30:15", "2026-10-05T09:30:15.250Z". */
+const ISO_DATE_TEXT_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?Z?$/;
+/** "05/10/2026", "5.10.2026", "10-05-2026": read in the day/month order of the cell's format. */
+const NUMERIC_DATE_TEXT_PATTERN = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{4})$/;
+/** "2026/10/05", "2026.10.05": year first is never ambiguous. */
+const YEAR_FIRST_DATE_TEXT_PATTERN = /^(\d{4})([/.])(\d{1,2})\2(\d{1,2})$/;
+const MIN_DATE_YEAR = 1900;
+const MAX_DATE_YEAR = 9999;
+
+/** A format code without its quoted text, escaped characters and [colour]/[$locale] parts. */
+function dateTokensOf(numFmt: string): string {
+  return numFmt
+    .replace(/"[^"]*"/g, "")
+    .replace(/\\./g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .toLowerCase();
+}
+
+/** Whether an Excel number format code displays a calendar date (it has day or year codes). */
+export function isDateNumberFormat(numFmt: unknown): boolean {
+  if (typeof numFmt !== "string") return false;
+  const code = numFmt.trim();
+  if (!code || /^general$/i.test(code) || code === "@") return false;
+  return /[dy]/.test(dateTokensOf(code));
+}
+
+function utcDate(
+  year: number,
+  month: number,
+  day: number,
+  hours = 0,
+  minutes = 0,
+  seconds = 0,
+  ms = 0,
+): Date | null {
+  if (year < MIN_DATE_YEAR || year > MAX_DATE_YEAR || hours > 23 || minutes > 59 || seconds > 59) {
+    return null;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds, ms));
+  // Rejects 2026-02-30 and 31/04/2026 instead of rolling them into the next month.
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date
+    : null;
+}
+
+export interface SpreadsheetDateText {
+  /** The date at UTC, which is how ExcelJS turns a Date into an Excel serial. */
+  date: Date;
+  /** "date", or the precision of the time of day the text carries. */
+  precision: "date" | "minutes" | "seconds";
+}
+
+/**
+ * Reads text that unambiguously names a calendar date: ISO dates (optionally with a time of day)
+ * always, and day/month/year text only when `dateNumFmt` is a date format that fixes the order
+ * of day and month ("dd/mm/yyyy" reads 05/10/2026 as 5 October). Anything else, including ids
+ * such as "00041" or "CR-0041" and impossible dates, returns null.
+ */
+export function parseSpreadsheetDateText(
+  text: string,
+  dateNumFmt?: string,
+): SpreadsheetDateText | null {
+  const trimmed = text.trim();
+  if (trimmed.length < 8 || trimmed.length > 30) return null;
+  const iso = ISO_DATE_TEXT_PATTERN.exec(trimmed);
+  if (iso) {
+    const [, y, mo, d, h, mi, s, ms] = iso;
+    if (!h && trimmed.endsWith("Z")) return null;
+    const date = utcDate(
+      Number(y),
+      Number(mo),
+      Number(d),
+      Number(h ?? 0),
+      Number(mi ?? 0),
+      Number(s ?? 0),
+      Number((ms ?? "0").padEnd(3, "0")),
+    );
+    if (!date) return null;
+    return { date, precision: !h ? "date" : s ? "seconds" : "minutes" };
+  }
+  if (!dateNumFmt || !isDateNumberFormat(dateNumFmt)) return null;
+  const yearFirst = YEAR_FIRST_DATE_TEXT_PATTERN.exec(trimmed);
+  if (yearFirst) {
+    const date = utcDate(Number(yearFirst[1]), Number(yearFirst[3]), Number(yearFirst[4]));
+    return date ? { date, precision: "date" } : null;
+  }
+  const numeric = NUMERIC_DATE_TEXT_PATTERN.exec(trimmed);
+  if (!numeric) return null;
+  const tokens = dateTokensOf(dateNumFmt);
+  const dayIndex = tokens.indexOf("d");
+  const monthIndex = tokens.indexOf("m");
+  if (dayIndex < 0 || monthIndex < 0) return null;
+  const [first, second] = [Number(numeric[1]), Number(numeric[3])];
+  const date =
+    dayIndex < monthIndex
+      ? utcDate(Number(numeric[4]), second, first)
+      : utcDate(Number(numeric[4]), first, second);
+  return date ? { date, precision: "date" } : null;
+}
+
+function defaultDateFormat(precision: SpreadsheetDateText["precision"]): string {
+  if (precision === "seconds") return DEFAULT_DATE_TIME_SECONDS_NUMBER_FORMAT;
+  return precision === "minutes" ? DEFAULT_DATE_TIME_NUMBER_FORMAT : DEFAULT_DATE_NUMBER_FORMAT;
+}
+
+/**
+ * The date a text cell should hold instead of its text, and the number format to give it when
+ * it has no date format yet. ISO dates qualify unless the cell is formatted as text ("@") or
+ * with a non-date number format; day/month text qualifies only under a date format that fixes
+ * its order. Returns null for everything else.
+ */
+export function coerceSpreadsheetDateText(
+  text: string,
+  numFmt: unknown,
+): { date: Date; numFmt?: string } | null {
+  const code = typeof numFmt === "string" ? numFmt.trim() : "";
+  const dateFormat = isDateNumberFormat(code);
+  if (!dateFormat && code && !/^general$/i.test(code)) return null;
+  const parsed = parseSpreadsheetDateText(text, dateFormat ? code : undefined);
+  if (!parsed) return null;
+  return dateFormat
+    ? { date: parsed.date }
+    : { date: parsed.date, numFmt: defaultDateFormat(parsed.precision) };
+}
+
+/**
+ * Stores date text in data cells as real Excel dates (see coerceSpreadsheetDateText). Models
+ * send dates as text, and a date number format applied to text changes nothing: the cell stays
+ * a string that cannot be sorted, filtered or used in date arithmetic, and Excel shows it
+ * unformatted. A converted cell keeps its requested date format, or gets an ISO one. Returns how
+ * many cells were converted.
+ */
+export function convertSpreadsheetDateText(
+  worksheet: ExcelJS.Worksheet,
+  options: { firstDataRow: number },
+): number {
+  let converted = 0;
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber < options.firstDataRow) return;
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      if (typeof cell.value !== "string") return;
+      const coerced = coerceSpreadsheetDateText(cell.value, cell.numFmt);
+      if (!coerced) return;
+      cell.value = coerced.date;
+      if (coerced.numFmt) cell.numFmt = coerced.numFmt;
+      converted += 1;
+    });
+  });
+  return converted;
+}
+
+/**
+ * Text cells that carry a date number format, such as "2026-10-05" formatted "DD/MM/YYYY":
+ * Excel shows them as the raw text and cannot sort, filter or compute with them. Used to report
+ * them after a workbook is changed outside the native writer (see restoreXlsxFormulaCaches).
+ */
+export function findDateFormattedTextCells(worksheet: ExcelJS.Worksheet): string[] {
+  const addresses: string[] = [];
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      const value = cell.value;
+      const text =
+        typeof value === "string"
+          ? value
+          : value && typeof value === "object" && "richText" in value
+            ? value.richText.map((part) => part.text).join("")
+            : null;
+      if (text !== null && text.trim() && isDateNumberFormat(cell.numFmt)) {
+        addresses.push(cell.address);
+      }
+    });
+  });
+  return addresses;
+}
+
 /**
  * A number format requested through tool input: an Excel format code ("€#,##0.00", "0.0%",
  * "yyyy-mm-dd") for a column (letter or header text) or an A1 cell/range. Fields are unknown
@@ -91,7 +274,7 @@ export interface SpreadsheetNumberFormatInput {
 export const SPREADSHEET_NUMBER_FORMATS_SCHEMA = {
   type: "array",
   description:
-    'Optional Excel number formats for currency, decimals, percentages and dates. Column formats skip the header row. E.g. [{"column":"Amount EUR","numFmt":"€#,##0.00;[Red]-€#,##0.00"},{"range":"B2:B6","numFmt":"€#,##0.00"}]',
+    'Optional Excel number formats for currency, decimals, percentages and dates. Column formats skip the header row. Send dates as ISO text ("2026-10-05"): they are stored as real Excel dates, shown with the column\'s date format (e.g. "dd/mm/yyyy") or as yyyy-mm-dd. Use "@" to keep a column as text. E.g. [{"column":"Amount EUR","numFmt":"€#,##0.00;[Red]-€#,##0.00"},{"column":"Date","numFmt":"dd/mm/yyyy"},{"range":"B2:B6","numFmt":"€#,##0.00"}]',
   items: {
     type: "object",
     properties: {
@@ -149,11 +332,23 @@ function resolveFormatColumn(column: unknown, headerRow: unknown[]): number | nu
 }
 
 /**
- * Applies requested number formats to a worksheet. Column formats cover the data rows (not the
- * header); range formats cover exactly the cells named. Requests that cannot be applied are
- * returned as warnings instead of failing the whole workbook.
+ * Applies requested number formats to a worksheet, then stores date text in the data rows as
+ * real dates (see convertSpreadsheetDateText), so it runs for every sheet the writers create,
+ * with or without formats. Column formats cover the data rows (not the header); range formats
+ * cover exactly the cells named. Requests that cannot be applied are returned as warnings instead
+ * of failing the whole workbook.
  */
 export function applySpreadsheetNumberFormats(
+  worksheet: ExcelJS.Worksheet,
+  formats: unknown,
+  options: { headerRow?: unknown[]; firstDataRow: number },
+): string[] {
+  const warnings = applyRequestedNumberFormats(worksheet, formats, options);
+  convertSpreadsheetDateText(worksheet, options);
+  return warnings;
+}
+
+function applyRequestedNumberFormats(
   worksheet: ExcelJS.Worksheet,
   formats: unknown,
   options: { headerRow?: unknown[]; firstDataRow: number },

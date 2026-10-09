@@ -166,3 +166,109 @@ describe("collaborative root follow-ups", () => {
     );
   });
 });
+
+describe("team lane completion after a forwarded user update", () => {
+  const LANE_ID = "lane-1";
+  const UPDATE =
+    "The user updated the parent request while you were working. Update the pilot: it now starts 26 October, with 8 staff.";
+
+  function createLaneDaemon(options: {
+    parentTaskId?: string;
+    status?: string;
+    queue: Array<Record<string, unknown>>;
+    running?: boolean;
+  }) {
+    const lane = {
+      id: LANE_ID,
+      title: "Arjuna (builder)",
+      prompt: "Plan the pilot starting 19 October for 12 staff.",
+      status: options.status ?? "executing",
+      ...(options.parentTaskId === undefined ? { parentTaskId: ROOT_ID } : {}),
+      ...(options.parentTaskId ? { parentTaskId: options.parentTaskId } : {}),
+      agentConfig: {},
+    };
+    const queue = options.queue;
+    const executor = {
+      isRunning: options.running ?? true,
+      runtime: { state: { queues: { pendingFollowUps: queue } } },
+    };
+    const proceeded = new Error("completion proceeded");
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: { findById: vi.fn((id: string) => (id === LANE_ID ? lane : undefined)) },
+      activeTasks: new Map([[LANE_ID, { executor, lastAccessed: 0, status: "active" }]]),
+      getTaskEventsForReplay: vi.fn(() => []),
+      logEvent: vi.fn(),
+      updateTaskStatus: vi.fn(),
+      processOrphanedFollowUps: vi.fn(),
+      cleanupPendingApprovalsForTask: vi.fn(() => {
+        throw proceeded;
+      }),
+    }) as Any;
+    return { daemon, executor, queue, proceeded };
+  }
+
+  const queuedUpdate = {
+    message: UPDATE,
+    deliveryMode: "follow_up",
+    messageSource: "user",
+    messageId: "root-msg:lane:lane-1",
+  };
+
+  it("does not store a stale result while the accepted update is still queued", async () => {
+    // Live order: update accepted at 09:00:11, the original final step
+    // finishes at 09:00:43 without having seen it, then completeTask runs.
+    const { daemon, queue, proceeded } = createLaneDaemon({ queue: [{ ...queuedUpdate }] });
+
+    await daemon.completeTask(LANE_ID, "Plan: starts 19 October, 12 staff, €600.");
+
+    expect(daemon.cleanupPendingApprovalsForTask).not.toHaveBeenCalled();
+    expect(daemon.logEvent).not.toHaveBeenCalledWith(LANE_ID, "task_completed", expect.anything());
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      LANE_ID,
+      "log",
+      expect.objectContaining({
+        metric: "completion_deferred_for_user_update",
+        pendingMessageIds: ["root-msg:lane:lane-1"],
+      }),
+    );
+    // The running executor drains the update when its run returns.
+    expect(daemon.processOrphanedFollowUps).not.toHaveBeenCalled();
+
+    // The update turn consumes the queue; its completion is authoritative.
+    queue.splice(0, queue.length);
+    await expect(
+      daemon.completeTask(LANE_ID, "Plan: starts 26 October, 8 staff, €350."),
+    ).rejects.toBe(proceeded);
+  });
+
+  it("drains the update itself when the executor is no longer running", () => {
+    const { daemon, executor } = createLaneDaemon({
+      queue: [{ ...queuedUpdate }],
+      running: false,
+      status: "completed",
+    });
+
+    expect(daemon.reconcilePendingUserUpdateBeforeCompletion(LANE_ID)).toEqual({
+      deferred: true,
+      pendingMessageIds: ["root-msg:lane:lane-1"],
+    });
+    expect(daemon.updateTaskStatus).toHaveBeenCalledWith(LANE_ID, "executing");
+    expect(daemon.processOrphanedFollowUps).toHaveBeenCalledWith(LANE_ID, executor);
+  });
+
+  it.each([
+    ["only teammate messages are queued", { queue: [{ ...queuedUpdate, messageSource: "agent" }] }],
+    [
+      "a queue-only agent message is waiting",
+      { queue: [{ ...queuedUpdate, deliveryMode: "message" }] },
+    ],
+    ["an internal retry note is waiting", { queue: [{ message: "[RETRY CONTEXT]: again" }] }],
+    ["the queue is empty", { queue: [] }],
+    ["the task has no parent", { queue: [{ ...queuedUpdate }], parentTaskId: "" }],
+  ])("completes normally when %s", (_label, options) => {
+    const { daemon } = createLaneDaemon(options);
+
+    expect(daemon.reconcilePendingUserUpdateBeforeCompletion(LANE_ID).deferred).toBe(false);
+    expect(daemon.logEvent).not.toHaveBeenCalled();
+  });
+});

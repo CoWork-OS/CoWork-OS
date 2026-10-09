@@ -798,14 +798,26 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(numberFormats.items.required).toEqual(["numFmt"]);
   });
 
-  it("advertises the table, list and code blocks create_document renders", () => {
+  it("advertises the table, list, code and page_break blocks create_document renders", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-document-schema");
     const createDocument = registry.getTools().find((tool) => tool.name === "create_document");
     const block = createDocument!.input_schema.properties.content.items.properties;
 
-    expect(block.type.enum).toEqual(["heading", "paragraph", "list", "table", "code"]);
+    expect(block.type.enum).toEqual([
+      "heading",
+      "paragraph",
+      "list",
+      "table",
+      "code",
+      "page_break",
+    ]);
     expect(block.items.items.type).toBe("string");
     expect(block.rows.items.items.type).toBe("string");
+    expect(createDocument!.input_schema.properties.pageNumbers.type).toBe("boolean");
+    // The filename is the exact output name, extension included.
+    expect(createDocument!.input_schema.properties.filename.description).toMatch(
+      /exact output file name including the extension/i,
+    );
   });
 
   it("keeps canonical tool facts when prompt guidance is appended", () => {

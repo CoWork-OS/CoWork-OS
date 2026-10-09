@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react";
 import { InlineHtmlPreview, InlineHtmlSourcePreview } from "./InlineHtmlPreview";
+// Shared with the plain-text fallback, so both agree on what counts as a rendered page.
+import { getRenderableHtmlTitle, looksLikeRenderableHtml } from "../../shared/rich-embeds";
 import { InlineVideoPreview } from "./InlineVideoPreview";
 import { normalizeInlineLists, unwrapMarkdownCodeBlocks } from "../utils/markdown-inline-lists";
 import { sanitizeToolCallTextFromAssistant } from "../../shared/tool-call-text-sanitizer";
@@ -436,33 +438,6 @@ function parseFrameDirective(
       chrome: parsed.chrome === true,
     },
   };
-}
-
-function getRenderableHtmlTitle(html: string): string | undefined {
-  const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
-  const title = titleMatch?.[1]
-    ?.replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (title) return title;
-
-  const headingMatch = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-  const heading = headingMatch?.[1]
-    ?.replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return heading || undefined;
-}
-
-function looksLikeRenderableHtml(html: string): boolean {
-  const trimmed = html.trim();
-  if (trimmed.length < 80) return false;
-  if (
-    !/<(?:!doctype|html|head|body|form|style|script|input|textarea|select|button)\b/i.test(trimmed)
-  ) {
-    return false;
-  }
-  return /<(?:form|input|textarea|select|button)\b/i.test(trimmed) || /<html\b/i.test(trimmed);
 }
 
 export function parseAssistantMessageSegments(message: string): MessageSegment[] {

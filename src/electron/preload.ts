@@ -143,10 +143,6 @@ import type {
   BrowserAnnotationTargetRef,
   BrowserAnnotationTargetResolveResult,
   ProfileExportResult,
-  EvalBaselineMetrics,
-  EvalCase,
-  EvalRun,
-  EvalSuite,
   ImprovementCampaign,
   ImprovementCandidate,
   ImprovementEligibility,
@@ -5079,14 +5075,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.SUBSCRIPTION_EVENT, subscription);
   },
 
-  listEvalSuites: (options?: { windowDays?: number }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVAL_LIST_SUITES, options),
-  runEvalSuite: (suiteId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_RUN_SUITE, suiteId),
-  getEvalRun: (runId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_GET_RUN, runId),
-  getEvalCase: (caseId: string) => ipcRenderer.invoke(IPC_CHANNELS.EVAL_GET_CASE, caseId),
-  createEvalCaseFromTask: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.EVAL_CREATE_CASE_FROM_TASK, { taskId }),
-
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_MOVE_COLUMN, taskId, column),
@@ -8623,14 +8611,6 @@ export interface ElectronAPI {
   getTaskSubscribers: (taskId: string) => Promise<TaskSubscription[]>;
   getAgentSubscriptions: (agentRoleId: string) => Promise<TaskSubscription[]>;
   onSubscriptionEvent: (callback: (event: SubscriptionEvent) => void) => () => void;
-  listEvalSuites: (options?: { windowDays?: number }) => Promise<{
-    suites: Array<EvalSuite & { caseCount: number; latestRun?: Partial<EvalRun> }>;
-    metrics: EvalBaselineMetrics;
-  }>;
-  runEvalSuite: (suiteId: string) => Promise<EvalRun>;
-  getEvalRun: (runId: string) => Promise<(EvalRun & { caseRuns: Any[] }) | null>;
-  getEvalCase: (caseId: string) => Promise<EvalCase | null>;
-  createEvalCaseFromTask: (taskId: string) => Promise<EvalCase>;
   // Task Board APIs
   moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<Any>;
   setTaskPriority: (taskId: string, priority: number) => Promise<Any>;

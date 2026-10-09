@@ -240,9 +240,6 @@
       "prepare": 33,
       "runtimeImport": 1
     },
-    "src/electron/eval/EvalService.ts": {
-      "prepare": 25
-    },
     "src/electron/file-hub/file-hub-sql.ts": {
       "prepare": 2
     },

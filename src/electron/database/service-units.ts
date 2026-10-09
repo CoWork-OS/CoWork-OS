@@ -10,7 +10,6 @@ import { CORE_UNITS } from "../core/core-units";
 import { IDENTITY_UNITS } from "../identity/identity-units";
 import { MANAGED_UNITS } from "../managed/managed-units";
 import { WORKSPACE_UNITS } from "../workspaces/workspace-units";
-import { EVAL_UNITS } from "../eval/eval-units";
 import { ACTIVITY_UNITS } from "../activity/activity-units";
 import { TRIGGER_UNITS } from "../triggers/trigger-units";
 import { AGENT_SIGNAL_UNITS } from "../agents/agent-signal-units";
@@ -57,7 +56,6 @@ export const SERVICE_UNITS = {
   ...MANAGED_UNITS,
   ...IDENTITY_UNITS,
   ...WORKSPACE_UNITS,
-  ...EVAL_UNITS,
   ...MISSION_CONTROL_UNITS,
   ...ACTIVITY_UNITS,
   ...TRIGGER_UNITS,

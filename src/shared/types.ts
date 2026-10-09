@@ -4363,55 +4363,6 @@ export interface TaskFileChanges {
   deleted: string[];
 }
 
-export interface EvalCase {
-  id: string;
-  name: string;
-  workspaceId?: string;
-  sourceTaskId?: string;
-  prompt: string;
-  sanitizedPrompt: string;
-  assertions?: {
-    expectedTerminalStatus?: Task["terminalStatus"];
-    mustContainAll?: string[];
-    mustCreatePaths?: string[];
-  };
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface EvalSuite {
-  id: string;
-  name: string;
-  description?: string;
-  caseIds: string[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface EvalRun {
-  id: string;
-  suiteId: string;
-  status: "running" | "completed" | "failed" | "skipped";
-  startedAt: number;
-  completedAt?: number;
-  passCount: number;
-  failCount: number;
-  skippedCount: number;
-  metadata?: Record<string, unknown>;
-}
-
-export interface EvalCaseRun {
-  id: string;
-  runId: string;
-  caseId: string;
-  status: "pass" | "fail" | "skipped";
-  details?: string;
-  startedAt: number;
-  completedAt?: number;
-  durationMs?: number;
-}
-
 export interface EvalBaselineMetrics {
   generatedAt: number;
   windowDays: number;
@@ -7875,11 +7826,6 @@ export const IPC_CHANNELS = {
   MC_AUTOMATION_OUTCOME_RETRY: "missionControl:automationOutcomeRetry",
 
   // Eval Suites / Runs (Reliability Flywheel)
-  EVAL_LIST_SUITES: "eval:listSuites",
-  EVAL_RUN_SUITE: "eval:runSuite",
-  EVAL_GET_RUN: "eval:getRun",
-  EVAL_GET_CASE: "eval:getCase",
-  EVAL_CREATE_CASE_FROM_TASK: "eval:createCaseFromTask",
 
   // Mission Control - Agent Teams
   TEAM_LIST: "team:list",

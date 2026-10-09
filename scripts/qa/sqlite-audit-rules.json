@@ -371,13 +371,6 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/eval/EvalService\\.ts$",
-      "domain": "shared SQL",
-      "access": "Eval store (cases, suites, runs, case runs, baseline metrics): synchronous SQL run as services-domain units behind the async EvalService facade (COWORK_DB_WORKER_SERVICES). Creating a case links it on its source task and adds it to the default suite in one unit; a suite run grades every case against its task's replay and records the results in one unit.",
-      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
-      "owner": "database platform"
-    },
-    {
       "pattern": "^src/electron/workspaces/(WorkContextService|WorkContextRepository|SessionMembershipService)\\.ts$",
       "domain": "shared SQL",
       "access": "Work context and session membership stores (contexts, task membership, human members, invites, audit): synchronous SQL run as services-domain units behind the async WorkContextService and SessionMembershipService facades (COWORK_DB_WORKER_SERVICES). Each authorization check shares its unit with the write it guards. The host keeps renderer client bindings and reads the one-row local principal once on its own connection.",

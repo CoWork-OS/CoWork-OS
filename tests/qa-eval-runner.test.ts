@@ -142,10 +142,15 @@ async function startHookServer(
       return;
     }
 
+    // A trigger counts as soon as its headers arrive. The hung-trigger test aborts the
+    // request after a short client timeout, which on a slow runner can land before the
+    // request body's "end" event, so counting there made the hit flaky.
+    const isTrigger = request.url === "/hooks/agent";
+    if (isTrigger) triggerHits += 1;
+
     request.resume();
     request.once("end", () => {
-      if (request.url === "/hooks/agent") {
-        triggerHits += 1;
+      if (isTrigger) {
         if (options.hangTrigger) return;
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ taskId: "hook-task-1" }));

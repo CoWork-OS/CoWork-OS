@@ -29,7 +29,6 @@ const ACTIVITY_TYPE_LABELS: Partial<Record<ActivityType, string>> = {
   command_executed: "Command",
   tool_used: "Tool Used",
   mention: "Mention",
-  supervisor_exchange: "Supervisor Exchange",
   agent_assigned: "Agent Assigned",
   error: "Error",
   info: "Info",

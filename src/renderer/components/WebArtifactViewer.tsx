@@ -62,7 +62,6 @@ type WebArtifactViewerProps = {
   onOpenSettings?: (tab?: WebSettingsTab) => void;
   turnContext?: SpreadsheetTurnContext | null;
   refreshKey?: string | number | null;
-  readOnlyPreview?: boolean;
 };
 
 type ViewerData = NonNullable<FileViewerResult["data"]>;
@@ -113,7 +112,6 @@ export function WebArtifactViewer({
   onOpenSettings,
   turnContext,
   refreshKey,
-  readOnlyPreview = false,
 }: WebArtifactViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +159,7 @@ export function WebArtifactViewer({
     if (
       cached?.fileType === "html" &&
       (cached.webPreview || cached.htmlContent) &&
-      (readOnlyPreview || !cached.webPreviewUrl)
+      !cached.webPreviewUrl
     ) {
       setFileData(cached);
       setLoading(false);
@@ -204,7 +202,7 @@ export function WebArtifactViewer({
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, filePath, refreshKey, workspacePath, readOnlyPreview]);
+  }, [cacheKey, filePath, refreshKey, workspacePath]);
 
   useEffect(() => {
     if (!copyMessage) return;
@@ -328,10 +326,8 @@ export function WebArtifactViewer({
         title={fileName}
         // Interactive previews load from cowork-preview://, which carries its own
         // CSP; a srcdoc frame inherits the app's and cannot run inline scripts.
-        {...(!readOnlyPreview && fileData?.webPreviewUrl
-          ? { src: fileData.webPreviewUrl }
-          : { srcDoc: htmlContent })}
-        sandbox={readOnlyPreview ? "" : "allow-scripts allow-forms allow-pointer-lock"}
+        {...(fileData?.webPreviewUrl ? { src: fileData.webPreviewUrl } : { srcDoc: htmlContent })}
+        sandbox="allow-scripts allow-forms allow-pointer-lock"
       />
     );
   };

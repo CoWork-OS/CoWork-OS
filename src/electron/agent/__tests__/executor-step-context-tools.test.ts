@@ -254,6 +254,40 @@ describe("step tool allowlists follow the step's intent", () => {
   });
 });
 
+describe("business-agent tools in plan steps", () => {
+  it("keeps tools the business lane admitted, whatever the step wording", () => {
+    const executor = createStepExecutor(() => textResponse("unused"));
+    const step: Any = {
+      id: "1",
+      description: "Cancel order A-1 through Example Co.'s PACT business agent.",
+      status: "pending",
+    };
+    executor.task.title = "Cancel order A-1 with Example Co.";
+    executor.task.prompt = "Use Example Co.'s PACT business agent to cancel my order A-1.";
+    executor.plan = { description: "Cancel the order", steps: [step] };
+    executor.currentStepId = step.id;
+    const business = { capabilityTags: ["business", "integration"] };
+    const catalog = [
+      { name: "read_file" },
+      { name: "write_file" },
+      { name: "pact_discover", runtime: business },
+      { name: "pact_send_message", runtime: business },
+      { name: "pact_get_conversation", runtime: business },
+    ].map((tool) => ({
+      description: "",
+      input_schema: { type: "object", properties: {} },
+      ...tool,
+    }));
+
+    const exposed = executor.applyStepScopedToolPolicy(catalog).map((tool: Any) => tool.name);
+
+    expect(exposed).toEqual(
+      expect.arrayContaining(["pact_discover", "pact_send_message", "pact_get_conversation"]),
+    );
+    expect(exposed).not.toContain("write_file");
+  });
+});
+
 describe("step context for later plan steps", () => {
   async function runSecondStep() {
     const contexts: string[] = [];

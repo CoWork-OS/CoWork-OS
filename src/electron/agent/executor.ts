@@ -8451,8 +8451,6 @@ ${transcript}
     this.cachedLlmSettings = LLMProviderFactory.loadSettings();
     const llmSelection = LLMProviderFactory.resolveTaskModelSelection(task.agentConfig, {
       isVerificationTask,
-      allowProviderOverride: task.source === "sample",
-      allowModelOverride: task.source === "sample",
     });
     this.applyResolvedProviderSelection(llmSelection);
     this.rebuildProviderFailoverSelections(llmSelection, this.llmProfileUsed);
@@ -19648,6 +19646,10 @@ ${transcript}
       // capability grant. Connected tools stay discoverable in every language;
       // task allowlists and execution permission checks still govern calls.
       if (tool.runtime?.capabilityTags?.includes("mcp") || name.startsWith("mcp_")) return true;
+      // Business-agent (PACT) tools reach this point only when the task-level business lane
+      // admitted them; the PACT runtime admits and approves every call itself. Step prose
+      // rarely names a file write, so step scoping would otherwise hide them from every step.
+      if (tool.runtime?.capabilityTags?.[0] === "business") return true;
       return allowlist.has(name);
     });
 
@@ -40734,12 +40736,6 @@ Return ONLY a JSON object:
     forceProfile?: LlmProfile,
     opts?: { requiresImageInput?: boolean },
   ): void {
-    if (this.task.source === "sample") {
-      this.providerFailoverSelections = [primarySelection];
-      this.providerFailoverIndex = 0;
-      this.providerFailoverPreserveUntil = 0;
-      return;
-    }
     this.providerFailoverRequiresImageInput = opts?.requiresImageInput === true;
     this.providerFailoverSelections = LLMProviderFactory.resolveProviderFailoverChain(
       primarySelection,

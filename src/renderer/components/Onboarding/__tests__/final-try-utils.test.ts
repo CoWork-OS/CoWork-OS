@@ -6,7 +6,7 @@ import {
   submitFinalTryPrompt,
 } from "../final-try-utils";
 
-describe("onboarding first-task prompt", () => {
+describe("onboarding final try prompt", () => {
   it("explains that the prompt starts a normal task after setup", () => {
     expect(`${FINAL_TRY_HEADLINE} ${FINAL_TRY_NEXT_STEP}`).not.toMatch(/instant/i);
     expect(FINAL_TRY_NEXT_STEP).toContain("saves your setup");

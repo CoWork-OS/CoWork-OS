@@ -1411,7 +1411,7 @@ if (isMacSafeStorageMigrationWorker) {
     if (!ACTIVE_FOREGROUND_TASK_STATUSES.has(task.status)) return false;
     if (isAutomatedTaskLike(task)) return false;
     const source = task.source || "manual";
-    return source === "manual" || source === "api" || source === "sample";
+    return source === "manual" || source === "api";
   }
   if (!gotTheLock) {
     if (process.env.NODE_ENV === "development") {

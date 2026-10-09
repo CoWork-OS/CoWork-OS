@@ -327,14 +327,6 @@ Install enterprise connectors from **Settings** > **MCP Servers** > **Browse Reg
 
 Each connector provides tools like `search`, `get`, `create`, and `update` for its respective service.
 
-### Social Integrations (Optional)
-
-#### X (Twitter)
-
-1. Open **Settings** > **X (Twitter)**
-2. Choose Browser Cookies or Manual Cookies
-3. Save and test the connection
-
 ## Development Workflow
 
 ### Making Changes

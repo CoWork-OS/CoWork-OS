@@ -109,7 +109,7 @@ const MAX_GATEWAY_SIGNAL_USERS = 500;
 const ACCOUNT_MAX = 500;
 const CHANNEL_PUBLIC_CONFIG_KEYS: Record<string, Set<string>> = {
   telegram: new Set(["groupRoutingMode", "allowedGroupChatIds"]),
-  discord: new Set(["supervisor", "applicationId", "guildIds"]),
+  discord: new Set(["applicationId", "guildIds"]),
   slack: new Set(["progressRelayMode"]),
   whatsapp: new Set([
     "selfChatMode",
@@ -231,7 +231,6 @@ const CHANNEL_CREDENTIAL_CONFIG_KEYS: Record<string, Set<string>> = {
 const CHANNEL_UPDATE_CONFIG_KEYS = new Set([
   "ownerUserIds",
   "selfChatMode",
-  "supervisor",
   "progressRelayMode",
   "responsePrefix",
   "trustedGroupMemoryOptIn",
@@ -407,20 +406,6 @@ const channelUpdateSchema = z
   })
   .strict();
 
-const supervisorConfigSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    coordinationChannelId: z.string().max(100).optional(),
-    watchedChannelIds: z.array(z.string().max(100)).max(100).optional(),
-    workerAgentRoleId: z.string().uuid().optional(),
-    supervisorAgentRoleId: z.string().uuid().optional(),
-    humanEscalationChannelId: z.string().max(100).optional(),
-    humanEscalationUserId: z.string().max(100).optional(),
-    peerBotUserIds: z.array(z.string().max(100)).max(20).optional(),
-    strictMode: z.boolean().optional(),
-  })
-  .strict();
-
 function parseChannelConfigUpdate(
   channelType: string,
   config: Record<string, unknown>,
@@ -435,9 +420,7 @@ function parseChannelConfigUpdate(
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(config)) {
     if (!allowed.has(key) || !CHANNEL_UPDATE_CONFIG_KEYS.has(key)) return invalidRequest();
-    if (key === "supervisor") {
-      sanitized[key] = parseSchema(supervisorConfigSchema, value);
-    } else if (key === "ownerUserIds") {
+    if (key === "ownerUserIds") {
       if (!Array.isArray(value)) return invalidRequest();
       const owners = validateGatewayOwnerIds(value);
       if (!owners.ok) return invalidRequest();
@@ -467,10 +450,6 @@ function parseChannelConfigUpdate(
 }
 
 function safePublicConfigValue(key: string, value: unknown): unknown {
-  if (key === "supervisor") {
-    const parsed = supervisorConfigSchema.safeParse(value);
-    return parsed.success ? parsed.data : undefined;
-  }
   if (typeof value === "string") {
     if (URL_CONFIG_KEYS.has(key)) return safeWebUrl(value, 512);
     return value.slice(0, 512);
@@ -778,7 +757,6 @@ async function addChannel(gateway: Gateway, request: AddChannelRequest) {
         request.botToken!,
         request.applicationId!,
         request.guildIds,
-        request.discordSupervisor as Parameters<Gateway["addDiscordChannel"]>[4],
         securityMode,
       );
     case "slack":

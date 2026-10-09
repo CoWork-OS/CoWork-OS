@@ -2772,7 +2772,6 @@ export interface Task {
     | "subconscious"
     | "symphony"
     | "managed_agent_panel"
-    | "sample"
     | "side_chat";
   // Strategy/routing controls
   strategyLock?: boolean; // When true, do not re-route intent at runtime
@@ -7781,7 +7780,6 @@ export type ActivityType =
   | "command_executed"
   | "tool_used"
   | "mention"
-  | "supervisor_exchange"
   | "agent_assigned"
   | "error"
   | "info";
@@ -7885,88 +7883,6 @@ export interface MentionListQuery {
   status?: MentionStatus | MentionStatus[];
   limit?: number;
   offset?: number;
-}
-
-// ============ Discord Supervisor Protocol ============
-
-export interface DiscordSupervisorConfig {
-  enabled: boolean;
-  coordinationChannelId?: string;
-  watchedChannelIds?: string[];
-  workerAgentRoleId?: string;
-  supervisorAgentRoleId?: string;
-  humanEscalationChannelId?: string;
-  humanEscalationUserId?: string;
-  peerBotUserIds?: string[];
-  strictMode?: boolean;
-}
-
-export type SupervisorProtocolIntent =
-  | "status_request"
-  | "review_request"
-  | "escalation_notice"
-  | "ack";
-
-export type SupervisorExchangeStatus = "open" | "acknowledged" | "escalated" | "closed" | "ignored";
-
-export type SupervisorActorKind = "peer" | "worker" | "supervisor" | "human" | "system";
-
-export interface SupervisorEvidenceRef {
-  channelId: string;
-  messageId: string;
-  summary?: string;
-  capturedAt: number;
-}
-
-export interface SupervisorExchange {
-  id: string;
-  workspaceId: string;
-  coordinationChannelId: string;
-  sourceChannelId?: string;
-  sourceMessageId?: string;
-  sourcePeerUserId?: string;
-  workerAgentRoleId?: string;
-  supervisorAgentRoleId?: string;
-  linkedTaskId?: string;
-  escalationTarget?: string;
-  status: SupervisorExchangeStatus;
-  lastIntent?: SupervisorProtocolIntent;
-  turnCount: number;
-  terminalReason?: string;
-  evidenceRefs?: SupervisorEvidenceRef[];
-  humanResolution?: string;
-  createdAt: number;
-  updatedAt: number;
-  closedAt?: number;
-}
-
-export interface SupervisorExchangeMessage {
-  id: string;
-  exchangeId: string;
-  discordMessageId: string;
-  channelId: string;
-  authorUserId?: string;
-  actorKind: SupervisorActorKind;
-  intent: SupervisorProtocolIntent;
-  rawContent: string;
-  createdAt: number;
-}
-
-export interface SupervisorExchangeListQuery {
-  workspaceId: string;
-  status?: SupervisorExchangeStatus | SupervisorExchangeStatus[];
-  limit?: number;
-}
-
-export interface ResolveSupervisorExchangeRequest {
-  id: string;
-  resolution: string;
-  mirrorToDiscord?: boolean;
-}
-
-export interface SupervisorExchangeEvent {
-  type: "created" | "updated" | "resolved";
-  exchange: SupervisorExchange;
 }
 
 // ─── Proactive Suggestions ──────────────────────────────────────
@@ -8221,11 +8137,6 @@ export const IPC_CHANNELS = {
   MENTION_DISMISS: "mention:dismiss",
   MENTION_EVENT: "mention:event",
 
-  // Discord Supervisor Protocol
-  SUPERVISOR_EXCHANGE_LIST: "supervisorExchange:list",
-  SUPERVISOR_EXCHANGE_RESOLVE: "supervisorExchange:resolve",
-  SUPERVISOR_EXCHANGE_EVENT: "supervisorExchange:event",
-
   // Mission Control - Heartbeat System
   HEARTBEAT_GET_CONFIG: "heartbeat:getConfig",
   HEARTBEAT_UPDATE_CONFIG: "heartbeat:updateConfig",
@@ -8464,18 +8375,6 @@ export const IPC_CHANNELS = {
   WORKSPACE_TOUCH: "workspace:touch",
   WORKSPACE_GET_TEMP: "workspace:getTemp", // Get or create temp workspace
   WORKSPACE_PRUNE_TEMP: "workspace:pruneTemp", // Check or delete unused temp workspaces
-  FIRST_TASK_START: "firstTask:start",
-  FIRST_TASK_PREFLIGHT: "firstTask:preflight",
-  FIRST_TASK_SETUP_GET: "firstTask:setupGet",
-  FIRST_TASK_SETUP_SET: "firstTask:setupSet",
-  FIRST_TASK_GET: "firstTask:get",
-  FIRST_TASK_VERIFY: "firstTask:verify",
-  FIRST_TASK_INSPECT: "firstTask:inspect",
-  FIRST_TASK_REQUEST_REVISION: "firstTask:requestRevision",
-  FIRST_TASK_CANCEL_REVISION: "firstTask:cancelRevision",
-  FIRST_TASK_REAL_WORK_GET: "firstTask:realWorkGet",
-  FIRST_TASK_REAL_WORK_INSPECT: "firstTask:realWorkInspect",
-  FIRST_TASK_REAL_WORK_USEFUL: "firstTask:realWorkUseful",
 
   // Approval operations
   APPROVAL_RESPOND: "approval:respond",
@@ -10034,7 +9933,6 @@ export interface ChannelData {
   createdAt: number;
   config?: {
     selfChatMode?: boolean;
-    supervisor?: DiscordSupervisorConfig;
     progressRelayMode?: "minimal" | "curated";
     groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
     trustedGroupMemoryOptIn?: boolean;
@@ -10065,7 +9963,6 @@ export interface AddChannelRequest {
   name: string;
   botToken?: string;
   securityMode?: SecurityMode;
-  discordSupervisor?: Partial<DiscordSupervisorConfig>;
   /**
    * Ambient inbox options (stored in channel config).
    * - ambientMode: log messages but only process explicit commands (messages starting with '/')
@@ -10192,7 +10089,6 @@ export interface UpdateChannelRequest {
   securityMode?: SecurityMode;
   config?: {
     selfChatMode?: boolean;
-    supervisor?: DiscordSupervisorConfig;
     progressRelayMode?: "minimal" | "curated";
     groupRoutingMode?: "all" | "mentionsOnly" | "mentionsOrCommands" | "commandsOnly";
     trustedGroupMemoryOptIn?: boolean;

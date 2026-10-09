@@ -7,9 +7,7 @@ interface StarterMissionBase {
   category: "productivity" | "code" | "research" | "writing" | "planning";
 }
 
-export type StarterMission =
-  | (StarterMissionBase & { kind: "prompt"; prompt: string })
-  | (StarterMissionBase & { kind: "bundled"; fixtureId: "release-brief-v1"; version: 1 });
+export type StarterMission = StarterMissionBase & { kind: "prompt"; prompt: string };
 
 export const LLM_WIKI_GUI_PROMPT =
   "Build a persistent Obsidian-friendly research vault in this workspace. If I have not given the topic yet, ask me for it first. Preserve raw sources, create linked notes, keep the index, inbox, and log current, and file durable answers or visuals back into the vault.";
@@ -32,15 +30,6 @@ export const LLM_WIKI_BRIEF_GUI_PROMPT =
  * CoWork OS capabilities immediately.
  */
 export const STARTER_MISSIONS: StarterMission[] = [
-  {
-    kind: "bundled",
-    id: "release-brief-v1",
-    title: "Turn a messy release folder into a launch brief",
-    fixtureId: "release-brief-v1",
-    version: 1,
-    icon: "📦",
-    category: "writing",
-  },
   {
     kind: "prompt",
     id: "plan-30min",

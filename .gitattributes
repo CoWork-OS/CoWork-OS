@@ -1,3 +1,1 @@
 resources/numbat/patches/*.patch text eol=lf -whitespace
-# Starter mission inputs are checked against SHA-256 hashes; keep their bytes on every OS.
-resources/starter-missions/** -text

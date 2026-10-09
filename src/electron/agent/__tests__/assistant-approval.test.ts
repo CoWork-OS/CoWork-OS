@@ -48,6 +48,23 @@ describe("assistant mediated approvals", () => {
     expect(request.questions[0].options?.[1].description).toBe("Forget this memory.");
   });
 
+  it("shows the full review text even past the description limit", () => {
+    const message = `Please cancel order A-1. ${"Keep the refund on my card. ".repeat(30)}End.`;
+    const request = buildAssistantApprovalRequest(
+      "external_service",
+      "Send a change to Example Co. Support.",
+      {
+        tool: "pact_send_message",
+        approvalReviewText: `Message: “${message.trim()}” Permissions: orders:cancel.`,
+        permissionPrompt: { scopePreview: "pact_send_message on domain example.com" },
+      },
+    );
+    const question = request.questions[0]!.question;
+    expect(message.length).toBeGreaterThan(480);
+    expect(question).toContain(`Message: “${message.trim()}” Permissions: orders:cancel.`);
+    expect(question.indexOf("Message:")).toBeLessThan(question.indexOf("Scope:"));
+  });
+
   it("fails closed on the default answer and parses only an explicit allow", () => {
     const request = buildAssistantApprovalRequest("data_export", "Export the report", {
       permissionPrompt: { scopePreview: "domain api.example.com" },

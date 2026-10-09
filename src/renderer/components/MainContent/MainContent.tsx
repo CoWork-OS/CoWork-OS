@@ -115,10 +115,8 @@ import {
   type ModeSuggestion,
 } from "../../../shared/mode-suggestion-detection";
 import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
-import { FirstTaskCard } from "../FirstTaskCard";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
-import { RealWorkFeedback } from "../RealWorkFeedback";
 import { CollaborativeSummaryPanel } from "../CollaborativeSummaryPanel";
 import { AgentLifecycleRow } from "../timeline/AgentLifecycleRow";
 import { assignAgentGlyphs } from "../../utils/agent-glyphs";
@@ -636,7 +634,6 @@ interface MainContentProps {
     options?: CreateTaskOptions,
     images?: ImageAttachment[],
   ) => void | boolean | Promise<void | boolean>;
-  onFirstTaskReady?: (task: Task, workspace: Workspace) => void;
   onAskInbox?: (query: string) => void;
   onChangeWorkspace?: () => void;
   onSelectWorkspace?: (workspace: Workspace) => void;
@@ -3858,7 +3855,6 @@ function MainContentComponent({
   onStartOnboarding,
   onStartFreshSession,
   onCreateTask,
-  onFirstTaskReady,
   onAskInbox,
   onChangeWorkspace,
   onSelectWorkspace,
@@ -9985,17 +9981,6 @@ function MainContentComponent({
               </p>
             )}
 
-            {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
-              onFirstTaskReady &&
-              onOpenWebArtifact &&
-              onOpenSettings && (
-                <FirstTaskCard
-                  onTaskReady={onFirstTaskReady}
-                  onOpenBrief={onOpenWebArtifact}
-                  onOpenSettings={() => onOpenSettings("llm")}
-                />
-              )}
-
             <div className="terminal-only">
               <div className="welcome-logo">
                 <img
@@ -11462,33 +11447,6 @@ function MainContentComponent({
       }`}
     >
       {fullAccessConfirmation.dialog}
-      {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
-        task?.source === "sample" &&
-        onFirstTaskReady &&
-        onOpenWebArtifact &&
-        onOpenSettings && (
-          <FirstTaskCard
-            taskId={task.id}
-            onTaskReady={onFirstTaskReady}
-            onOpenBrief={onOpenWebArtifact}
-            onOpenSettings={() => onOpenSettings("llm")}
-            onRevise={(prompt) => onSendMessage(prompt)}
-            onUseOwnFiles={onChangeWorkspace}
-          />
-        )}
-      {import.meta.env.VITE_FIRST_TASK_BETA === "1" &&
-        task?.status === "completed" &&
-        task.source !== "sample" &&
-        !task.parentTaskId &&
-        !task.evalCaseId &&
-        hasTaskOutputs(taskOutputSummary) &&
-        onViewTaskOutputs && (
-          <RealWorkFeedback
-            taskId={task.id}
-            primaryOutputPath={taskOutputSummary.primaryOutputPath}
-            onViewOutputs={onViewTaskOutputs}
-          />
-        )}
       {/* Header: in the app title bar when the shell provides a slot for it */}
       {renderMainHeader(
         <div className="main-header">

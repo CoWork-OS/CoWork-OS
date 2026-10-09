@@ -99,8 +99,8 @@ and administrator/tool-policy ceiling. Skills may narrow or guide execution,
 but they cannot add command tools, widen filesystem or network scope, bypass an
 approval, or recover a missing/invalid profile.
 
-A task-level `allowedTools` list set by the caller (API, CLI, automation, or an
-internal task such as the first-task sample) is an authority boundary: skills cannot add
+A task-level `allowedTools` list set by the caller (API, CLI or automation) is an
+authority boundary: skills cannot add
 tools to it. When the caller set no allowlist, the first skill with `allowedTools`
 creates one and later skills' lists are merged into it.
 

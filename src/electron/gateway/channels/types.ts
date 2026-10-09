@@ -220,8 +220,6 @@ export interface DiscordConfig extends ChannelConfig {
   applicationId: string;
   /** Guild IDs to operate in (empty = all guilds) */
   guildIds?: string[];
-  /** Supervisor-mode settings for controlled bot-to-bot coordination */
-  supervisor?: import("../../../shared/types").DiscordSupervisorConfig;
 }
 
 /**

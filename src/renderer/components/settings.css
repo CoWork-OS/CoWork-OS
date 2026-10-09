@@ -2664,10 +2664,6 @@
   align-self: flex-start;
 }
 
-.settings-page-layout .settings-content .ea-preview-form > button {
-  justify-self: start;
-}
-
 .settings-page-layout .settings-content .update-button {
   width: auto;
 }
@@ -2818,8 +2814,6 @@
     .btn-secondary,
     .btn-danger,
     .chatgpt-import-btn,
-    .ea-primary-button,
-    .ea-secondary-button,
     .memory-inline-btn,
     .regenerate-button
   ) {
@@ -2868,8 +2862,6 @@
     .btn-secondary,
     .btn-danger,
     .chatgpt-import-btn,
-    .ea-primary-button,
-    .ea-secondary-button,
     .memory-inline-btn,
     .regenerate-button
   ):hover:not(:disabled) {
@@ -2897,7 +2889,6 @@
     .settings-button-primary,
     .btn-primary,
     .chatgpt-import-btn-primary,
-    .ea-primary-button,
     .regenerate-button
   ),
 .settings-page-layout
@@ -2908,7 +2899,6 @@
     .settings-button-primary,
     .btn-primary,
     .chatgpt-import-btn-primary,
-    .ea-primary-button,
     .regenerate-button
   ):hover:not(:disabled) {
   border-color: transparent;
@@ -2925,7 +2915,6 @@ html.visual-calm
     .settings-button-primary,
     .btn-primary,
     .chatgpt-import-btn-primary,
-    .ea-primary-button,
     .regenerate-button
   ),
 html.visual-calm
@@ -2937,7 +2926,6 @@ html.visual-calm
     .settings-button-primary,
     .btn-primary,
     .chatgpt-import-btn-primary,
-    .ea-primary-button,
     .regenerate-button
   ):hover:not(:disabled) {
   background: var(--calm-ink);
@@ -2952,7 +2940,6 @@ html.visual-calm
     .settings-button-primary,
     .btn-primary,
     .chatgpt-import-btn-primary,
-    .ea-primary-button,
     .regenerate-button
   ):hover:not(:disabled) {
   opacity: 0.88;
@@ -2997,8 +2984,6 @@ html.visual-calm
     .btn-secondary,
     .btn-danger,
     .chatgpt-import-btn,
-    .ea-primary-button,
-    .ea-secondary-button,
     .memory-inline-btn,
     .regenerate-button
   ):disabled {

@@ -260,7 +260,8 @@ export class PactTools {
       : origin === "owner_cli"
         ? "out_of_band"
         : "none";
-    const effective = this.daemon.getEffectiveWorkspaceForTask(this.taskId) ?? this.workspace;
+    // No resolvable task workspace means no network (fail closed), never the raw tool workspace.
+    const effective = this.daemon.getEffectiveWorkspaceForTask(this.taskId);
     return {
       taskId: this.taskId,
       workspaceId: this.workspace.id,

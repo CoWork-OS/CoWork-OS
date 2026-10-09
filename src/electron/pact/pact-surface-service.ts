@@ -11,11 +11,8 @@ import type {
   PactStatusView,
 } from "../../shared/pact";
 import type { Workspace } from "../../shared/types";
-import { loadPolicies } from "../admin/policies";
-import { resolveEffectiveAccessProfile } from "../security/access-profile-resolver";
-import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import type { NetworkPolicyContext } from "../security/policy-checked-fetch";
-import { effectiveWorkspace, networkContextOf } from "./daemon-host";
+import { defaultNetworkContext, effectiveWorkspace, networkContextOf } from "./daemon-host";
 import { redactPactError } from "./redaction";
 import type { PactCallContext, PactRuntime } from "./runtime";
 import { PactSettingsManager } from "./settings";
@@ -52,15 +49,7 @@ export class PactSurfaceService {
       if (!workspace) throw new PactSurfaceError("not_found", "Unknown workspace");
       return networkContextOf(effectiveWorkspace(workspace)) ?? { networkEnabled: false };
     }
-    const profile = resolveEffectiveAccessProfile({
-      settings: PermissionSettingsManager.loadSettings(),
-      adminPolicies: loadPolicies(),
-    });
-    return {
-      networkEnabled: profile.networkEnabled,
-      accessNetworkMode: profile.definition.network,
-      profileDomainRules: profile.definition.domainRules,
-    };
+    return defaultNetworkContext();
   }
 
   private async context(

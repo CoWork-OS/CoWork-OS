@@ -27,6 +27,11 @@ type RequireScope = (client: unknown, scope: Scope) => void;
  * operations, including reading a pending sign-in link; configuration changes need `admin`. An opaque conversation id is not authority:
  * every call is checked against the principal. Remote callers act as the local owner (the shared
  * token is the owner's), recorded as the actor.
+ *
+ * Calls outside a task use the default access profile's network rules. Only an admin client may
+ * name a workspace to use that workspace's rules instead. Today a workspace's rules can only be
+ * the same or stricter (its network switch); the check keeps workspace choice from becoming a way
+ * to loosen rules if workspaces ever carry their own profiles.
  */
 export function registerPactMethods(input: {
   server: ControlPlaneServer;
@@ -37,6 +42,17 @@ export function registerPactMethods(input: {
     runtime: () => input.agentDaemon.getPactRuntime(),
     findWorkspace: (workspaceId) => input.agentDaemon.getWorkspaceForPact(workspaceId),
   });
+  const isAdmin = (client: unknown) =>
+    Boolean((client as { hasScope?: (scope: string) => boolean })?.hasScope?.("admin"));
+  const checkWorkspaceChoice = (client: unknown, params: { workspaceId?: string }) => {
+    if (params.workspaceId && !isAdmin(client)) {
+      throw {
+        code: ErrorCodes.INVALID_PARAMS,
+        message:
+          "Only an admin client can choose a workspace's network rules; omit workspaceId to use the default access profile.",
+      };
+    }
+  };
   const principalFor = async (client: unknown): Promise<PactPrincipal> => {
     const id = (client as { id?: unknown })?.id;
     const owner = await input.agentDaemon
@@ -51,7 +67,7 @@ export function registerPactMethods(input: {
     method: string,
     scope: Scope,
     schema: ZodType<T>,
-    run: (params: T, principal: PactPrincipal) => unknown,
+    run: (params: T, principal: PactPrincipal, client: unknown) => unknown,
   ) => {
     input.server.registerMethod(method, async (client, params) => {
       input.requireScope(client, scope);
@@ -63,7 +79,7 @@ export function registerPactMethods(input: {
         };
       }
       try {
-        return await run(parsed.data, await principalFor(client));
+        return await run(parsed.data, await principalFor(client), client);
       } catch (error) {
         if (error instanceof PactSurfaceError) {
           throw {
@@ -89,8 +105,14 @@ export function registerPactMethods(input: {
   register(Methods.PACT_IDENTITY_DEVICE_KEY, "admin", PactNoArgsSchema, () =>
     service.ensureDeviceKey(),
   );
-  register(Methods.PACT_BUSINESS_DISCOVER, "write", PactDiscoverSchema, (params, principal) =>
-    service.discover(principal, params),
+  register(
+    Methods.PACT_BUSINESS_DISCOVER,
+    "write",
+    PactDiscoverSchema,
+    (params, principal, client) => {
+      checkWorkspaceChoice(client, params);
+      return service.discover(principal, params);
+    },
   );
   register(Methods.PACT_BUSINESS_LIST, "read", PactNoArgsSchema, () => service.listBusinesses());
   register(Methods.PACT_CONVERSATION_GET, "read", PactIdSchema, (params, principal) =>
@@ -113,13 +135,11 @@ export function registerPactMethods(input: {
         message: `Invalid ${Methods.PACT_CONVERSATION_SEND} request: ${parsed.error.issues[0]?.message ?? "bad input"}`,
       };
     }
-    const isAdmin = Boolean(
-      (client as { hasScope?: (scope: string) => boolean })?.hasScope?.("admin"),
-    );
     try {
+      checkWorkspaceChoice(client, parsed.data);
       return await service.send(await principalFor(client), {
         ...parsed.data,
-        confirmed: parsed.data.confirmed && isAdmin,
+        confirmed: parsed.data.confirmed && isAdmin(client),
       });
     } catch (error) {
       if (error instanceof PactSurfaceError) {
@@ -138,7 +158,10 @@ export function registerPactMethods(input: {
     Methods.PACT_AUTHORIZATION_START,
     "operator",
     PactAuthorizationStartSchema,
-    (params, principal) => service.startAuthorization(principal, params),
+    (params, principal, client) => {
+      checkWorkspaceChoice(client, params);
+      return service.startAuthorization(principal, params);
+    },
   );
   register(Methods.PACT_AUTHORIZATION_GET, "read", PactIdSchema, (params, principal) =>
     service.getAuthorization(principal, params.id),

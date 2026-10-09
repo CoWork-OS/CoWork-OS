@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PactAuthorizationState, PactSettings } from "../../../shared/pact";
 import type { AdminPolicies } from "../../admin/policies";
+import type { NetworkPolicyContext } from "../../security/policy-checked-fetch";
 import { DevelopmentPactSigner } from "../development-signer";
 import { PactRuntime, type PactCallContext, type PactHost } from "../runtime";
 import { ensurePactSchema } from "../schema";
@@ -46,8 +47,21 @@ interface Harness {
   db: InstanceType<NonNullable<typeof nativeSqlite>>;
 }
 
+/** What the host reports for calls outside any workspace (the default access profile). */
+const DEFAULT_PROFILE_CONTEXT: NetworkPolicyContext = {
+  networkEnabled: true,
+  accessNetworkMode: "enabled",
+  profileDomainRules: [{ pattern: "**.example", access: "allow" }],
+};
+
 function makeHarness(
-  options: { delegated?: boolean; leaseOwner?: string; shared?: Partial<Harness> } = {},
+  options: {
+    delegated?: boolean;
+    leaseOwner?: string;
+    shared?: Partial<Harness>;
+    /** Records the network rules each signer call was made under. */
+    signerContexts?: NetworkPolicyContext[];
+  } = {},
 ): Harness {
   const db = options.shared?.db ?? new nativeSqlite!(":memory:");
   ensurePactSchema(db);
@@ -120,8 +134,10 @@ function makeHarness(
     logInteractiveApprovalUnavailable(_taskId, message) {
       host.unavailable.push(message);
     },
-    async networkContextForWorkspace() {
-      return { networkEnabled: true, accessNetworkMode: "enabled" };
+    async networkContextForWorkspace(workspaceId) {
+      return workspaceId === null
+        ? DEFAULT_PROFILE_CONTEXT
+        : { networkEnabled: true, accessNetworkMode: "enabled" };
     },
     async taskStillWaiting() {
       return true;
@@ -135,7 +151,23 @@ function makeHarness(
     policies: () => policies,
     transportFor: () => new PactTransport(network),
     now: () => clock.now,
-    signerFor: () => signer,
+    signerFor: () =>
+      options.signerContexts
+        ? {
+            deployment: signer.deployment,
+            get issuer() {
+              return signer.issuer;
+            },
+            sign: (audience: string, networkContext: NetworkPolicyContext) => {
+              options.signerContexts!.push(networkContext);
+              return signer.sign(audience);
+            },
+            status: (networkContext: NetworkPolicyContext) => {
+              options.signerContexts!.push(networkContext);
+              return signer.status();
+            },
+          }
+        : signer,
     ownerPrincipalId: () => "principal-owner",
     authorizationPollIntervalMs: 5,
     sleep: async () => undefined,
@@ -194,6 +226,35 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(route.route).toBe("pact");
     // Discovery runs without credentials.
     expect(harness.network.log.every((entry) => !entry.headers.Authorization)).toBe(true);
+  });
+
+  it("asks the signer under the task's network rules, and the default profile outside a task", async () => {
+    await harness.runtime.shutdown();
+    const signerContexts: NetworkPolicyContext[] = [];
+    harness = makeHarness({ signerContexts });
+    const taskRules: NetworkPolicyContext = {
+      networkEnabled: true,
+      accessNetworkMode: "enabled",
+      profileDomainRules: [{ pattern: "**.provider.example", access: "allow" }],
+    };
+    const ctx = taskContext({ networkContext: taskRules });
+    const { business } = await harness.runtime.discover(owner, { domain: "shop.example" }, ctx);
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "What is the status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      ctx,
+    );
+    expect(signerContexts.length).toBeGreaterThan(0);
+    expect(signerContexts.every((rules) => rules === taskRules)).toBe(true);
+
+    signerContexts.length = 0;
+    await harness.runtime.status(owner);
+    expect(signerContexts).toEqual([DEFAULT_PROFILE_CONTEXT]);
   });
 
   it("completes the acceptance journey: approval, consent, introduction, send, verified receipt", async () => {
@@ -818,6 +879,35 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     ).toBe(false);
     await harness.runtime.cancelAuthorization(owner, authorizationId);
     await other.runtime.shutdown();
+  });
+
+  it("resumes a sign-in under its task's rules and fails it closed when the task is gone", async () => {
+    const business = await discover();
+    harness.host.onWait = () => undefined;
+    const outcome = await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Where is my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext({ waitForConsent: false }),
+    );
+    const authorizationId = (outcome as { authorizationId: string }).authorizationId;
+    await harness.runtime.shutdown();
+    const restarted = makeHarness({ leaseOwner: "restarted", shared: harness });
+    const lookups: unknown[][] = [];
+    restarted.host.networkContextForWorkspace = async (...args) => {
+      lookups.push(args);
+      return null;
+    };
+    const view = await restarted.runtime.resumeAuthorization(owner, authorizationId);
+    expect(lookups).toEqual([["ws-1", "task-1"]]);
+    expect(view?.state).toBe("failed");
+    // The task's sign-in card stops waiting too.
+    expect(restarted.host.settled.at(-1)?.state).toBe("failed");
+    await restarted.runtime.shutdown();
   });
 
   it("detects a receipt replayed from an earlier turn", async () => {

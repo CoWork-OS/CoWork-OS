@@ -124,6 +124,9 @@ describe("JWS and JWK handling", () => {
   });
 });
 
+/** Network rules of the calling task; the signer must use them for its own calls. */
+const NET = { networkEnabled: true, accessNetworkMode: "enabled" as const };
+
 describe("signer contract client", () => {
   function signerWith(
     respond: (
@@ -131,16 +134,16 @@ describe("signer contract client", () => {
       path: string,
     ) => Promise<{ status: number; body?: unknown }>,
   ) {
-    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const calls: { url: string; headers: Record<string, string>; networkContext: unknown }[] = [];
     const signer = new HttpPactSigner({
       deployment: "self_hosted",
       issuer: ISSUER,
       signerUrl: "https://signer.example.com",
       auth: { mode: "credential", credential: "credential-0123456789abcdef" },
-      transport: () =>
+      transport: (networkContext) =>
         new PactTransport({
           async fetch(input) {
-            calls.push({ url: input.url, headers: input.headers });
+            calls.push({ url: input.url, headers: input.headers, networkContext });
             const reply = await respond(
               JSON.parse(input.body ?? "{}"),
               new URL(input.url).pathname,
@@ -170,14 +173,35 @@ describe("signer contract client", () => {
       };
     });
     const cache = new PactTokenCache(signer, () => Date.now());
-    const first = await cache.token("aud-1");
-    const second = await cache.token("aud-1");
+    const first = await cache.token("aud-1", NET);
+    const second = await cache.token("aud-1", NET);
     expect(first.token).toBe(second.token);
     expect(signCalls).toBe(1);
     expect(calls[0]?.headers.Authorization).toBe("Bearer credential-0123456789abcdef");
     expect(calls[0]?.url).toBe("https://signer.example.com/pact/sign");
-    await cache.token("aud-2");
+    await cache.token("aud-2", NET);
     expect(signCalls).toBe(2);
+  });
+
+  it("calls the signer under each caller's network rules, never sharing a request across them", async () => {
+    const dev = new DevelopmentPactSigner({ subject: "subject-1", issuer: ISSUER });
+    const { signer, calls } = signerWith(async (body) => ({
+      status: 200,
+      body: { token: (await dev.sign(String(body.audience))).token, nonce: body.nonce },
+    }));
+    const cache = new PactTokenCache(signer, () => Date.now());
+    const restricted = { networkEnabled: true, profileDomainRules: [] };
+    await Promise.all([cache.token("aud", NET), cache.token("aud", restricted)]);
+    expect(calls.map((call) => call.networkContext)).toEqual([NET, restricted]);
+    // Cached tokens are served only under the rules they were fetched under.
+    await cache.token("aud", NET);
+    await cache.token("aud", restricted);
+    expect(calls).toHaveLength(2);
+    cache.invalidate("aud");
+    await cache.token("aud", restricted);
+    expect(calls).toHaveLength(3);
+    await signer.status(restricted);
+    expect(calls.at(-1)?.networkContext).toBe(restricted);
   });
 
   it("treats a missing nonce echo, a disabled signer and a foreign issuer as errors", async () => {
@@ -208,9 +232,9 @@ describe("signer contract client", () => {
       make(async (body) => ({
         status: 200,
         body: { token: (await dev.sign(String(body.audience))).token },
-      })).sign("aud"),
+      })).sign("aud", NET),
     ).rejects.toThrow(/nonce/);
-    await expect(make(async () => ({ status: 403 })).sign("aud")).rejects.toMatchObject({
+    await expect(make(async () => ({ status: 403 })).sign("aud", NET)).rejects.toMatchObject({
       code: "disabled",
     });
     const foreign = new DevelopmentPactSigner({
@@ -221,12 +245,12 @@ describe("signer contract client", () => {
       make(async (body) => ({
         status: 200,
         body: { token: (await foreign.sign(String(body.audience))).token, nonce: body.nonce },
-      })).sign("aud"),
+      })).sign("aud", NET),
     ).rejects.toThrow(/issuer/);
     const status = await make(async () => ({
       status: 200,
       body: { issuer: "https://other.example" },
-    })).status();
+    })).status(NET);
     expect(status.ok).toBe(false);
   });
 
@@ -240,12 +264,12 @@ describe("signer contract client", () => {
     });
     const spy = vi.spyOn(dev, "sign");
     const cache = new PactTokenCache(dev, () => now);
-    await cache.token("aud");
+    await cache.token("aud", NET);
     now += 60_000;
-    await cache.token("aud");
+    await cache.token("aud", NET);
     expect(spy).toHaveBeenCalledTimes(1);
     now += 40_000; // 100 s old, 20 s left: below the remaining-life floor
-    await cache.token("aud");
+    await cache.token("aud", NET);
     expect(spy).toHaveBeenCalledTimes(2);
   });
 

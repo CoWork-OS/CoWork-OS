@@ -112,6 +112,8 @@ Admin policy (`policies.json`):
 
 Network policy (`runtime.network.*`), access-profile domain rules and the internal-address boundary
 apply to every PACT request, including discovery redirects, provider metadata, JWKS and the signer.
+Signer calls use the rules of the request they serve: the task's workspace, or the default access
+profile for calls outside a task (Settings, the CLI, the Control Plane).
 
 Support switch: `COWORK_PACT_DISABLED=1` disables the adapter for a process. The managed signer has
 its own server-side disable, which works without a client release.
@@ -134,7 +136,9 @@ Methods (both the desktop and the Node daemon):
 Results never contain tokens, device codes or signer credentials. `pact.authorization.signIn` is
 the only method that returns a sign-in link. A send's `confirmed` flag is honoured only from an
 `admin` client (the owner's own token). Remote callers act as the profile owner (the Control
-Plane token is the owner's) and are recorded as the actor.
+Plane token is the owner's) and are recorded as the actor. Calls use the default access profile's
+network rules; only an `admin` client may pass `workspaceId` to use a workspace's rules instead.
+A paused sign-in that resumes after a restart keeps its task's own access-profile rules.
 
 ## CLI
 

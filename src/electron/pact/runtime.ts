@@ -125,8 +125,15 @@ export interface PactHost {
   ): Promise<void>;
   logEvent(taskId: string, type: string, payload: Record<string, unknown>): void;
   logInteractiveApprovalUnavailable(taskId: string, message: string): void;
-  /** For waits resumed after a restart. */
-  networkContextForWorkspace(workspaceId: string | null): Promise<NetworkPolicyContext | null>;
+  /**
+   * Network rules for a wait resumed after a restart: its task's own access profile when it has a
+   * task, else its workspace's rules, else (`null`, `null`) the default access profile's rules.
+   * A `null` result means the task or workspace no longer exists.
+   */
+  networkContextForWorkspace(
+    workspaceId: string | null,
+    taskId?: string | null,
+  ): Promise<NetworkPolicyContext | null>;
   taskStillWaiting(taskId: string): Promise<boolean>;
 }
 
@@ -216,8 +223,13 @@ export class PactRuntime {
   >();
   private identityState: IdentityState | null = null;
   private ownerId: string | null = null;
-  private signerStatusCache: { fingerprint: string; at: number; status: PactSignerStatus } | null =
-    null;
+  /** Keyed by identity and by the network rules the status was fetched under. */
+  private signerStatusCache: {
+    fingerprint: string;
+    contextKey: string;
+    at: number;
+    status: PactSignerStatus;
+  } | null = null;
   private stopped = false;
 
   constructor(private readonly deps: PactRuntimeDeps) {
@@ -337,8 +349,7 @@ export class PactRuntime {
         issuer: identity.issuer,
         signerUrl: identity.signerUrl,
         auth,
-        transport: () =>
-          this.deps.transportFor({ networkEnabled: true, accessNetworkMode: "enabled" }),
+        transport: (networkContext) => this.deps.transportFor(networkContext),
         now: () => this.now(),
       });
       state = {
@@ -415,7 +426,10 @@ export class PactRuntime {
     this.identityState = null;
   }
 
-  private async resolveIdentity(principal: PactPrincipal): Promise<ResolvedIdentity> {
+  private async resolveIdentity(
+    principal: PactPrincipal,
+    networkContext: NetworkPolicyContext,
+  ): Promise<ResolvedIdentity> {
     await this.ownerPrincipal();
     const identity = this.identity();
     if (!identity)
@@ -423,7 +437,7 @@ export class PactRuntime {
     if (identity.development && !identity.issuer) {
       identity.issuer = await identity.development.start();
     }
-    const status = await this.signerStatus(identity);
+    const status = await this.signerStatus(identity, networkContext);
     if (!status.ok) {
       throw blocked(
         status.disabled ? "identity_disabled" : "identity_not_ready",
@@ -443,33 +457,50 @@ export class PactRuntime {
   }
 
   /** Signer status is cached briefly: every send needs it, and it is a network call. */
-  private async signerStatus(identity: IdentityState, refresh = false): Promise<PactSignerStatus> {
+  private async signerStatus(
+    identity: IdentityState,
+    networkContext: NetworkPolicyContext,
+    refresh = false,
+  ): Promise<PactSignerStatus> {
     const cached = this.signerStatusCache;
     if (
       !refresh &&
       cached &&
       cached.fingerprint === identity.fingerprint &&
+      cached.contextKey === JSON.stringify(networkContext) &&
       this.now() - cached.at < SIGNER_STATUS_TTL_MS &&
       cached.status.ok
     ) {
       return cached.status;
     }
-    const status = await identity.tokens.status();
-    this.signerStatusCache = { fingerprint: identity.fingerprint, at: this.now(), status };
+    const status = await identity.tokens.status(networkContext);
+    this.signerStatusCache = {
+      fingerprint: identity.fingerprint,
+      contextKey: JSON.stringify(networkContext),
+      at: this.now(),
+      status,
+    };
     return status;
   }
 
-  private async currentSignerStatus(): Promise<PactSignerStatus | null> {
+  private async currentSignerStatus(
+    networkContext: NetworkPolicyContext,
+  ): Promise<PactSignerStatus | null> {
     await this.ownerPrincipal();
     const identity = this.identity();
     if (!identity) return null;
     try {
       if (identity.development && !identity.issuer)
         identity.issuer = await identity.development.start();
-      return await this.signerStatus(identity);
+      return await this.signerStatus(identity, networkContext);
     } catch {
       return null;
     }
+  }
+
+  /** Rules for signer calls made outside any task or workspace (status in Settings, CLI). */
+  private async defaultNetworkContext(): Promise<NetworkPolicyContext> {
+    return (await this.deps.host.networkContextForWorkspace(null)) ?? { networkEnabled: false };
   }
 
   private async providerContext(
@@ -487,12 +518,13 @@ export class PactRuntime {
     identity: IdentityState,
     provider: PactProviderRecord,
     binding: PactSubjectBindingRecord,
+    networkContext: NetworkPolicyContext,
   ): Promise<PactClientCredentials> {
     if (!provider.audience)
       throw blocked("provider_not_ready", "The provider has no audience configured.");
     let token;
     try {
-      token = await identity.tokens.token(provider.audience);
+      token = await identity.tokens.token(provider.audience, networkContext);
     } catch (error) {
       if (error instanceof PactSignerError) {
         throw blocked(
@@ -523,7 +555,7 @@ export class PactRuntime {
       try {
         if (identity.development && !identity.issuer)
           identity.issuer = await identity.development.start();
-        signerStatus = await this.signerStatus(identity, true);
+        signerStatus = await this.signerStatus(identity, await this.defaultNetworkContext(), true);
         identityReady = signerStatus.ok;
         identityReason = signerStatus.reason;
       } catch (error) {
@@ -587,7 +619,7 @@ export class PactRuntime {
     if (!availability.available && availability.reason !== "identity_not_configured") {
       throw blocked("pact_disabled", "PACT is turned off for this profile.");
     }
-    const signerStatus = await this.currentSignerStatus();
+    const signerStatus = await this.currentSignerStatus(ctx.networkContext);
     const result = await this.discovery.discover({
       ...input,
       ...(input.refresh ? { forceRefresh: true } : {}),
@@ -706,7 +738,7 @@ export class PactRuntime {
     if (effectivePactPreference(this.settings()) === "disabled") {
       throw blocked("pact_disabled", "PACT is turned off for business interactions.");
     }
-    const { identity, binding, status } = await this.resolveIdentity(principal);
+    const { identity, binding, status } = await this.resolveIdentity(principal, ctx.networkContext);
     const { business, provider: resolvedProvider } = await this.loadBusiness(
       request.businessId,
       ctx,
@@ -885,7 +917,7 @@ export class PactRuntime {
       grantId: grant?.id ?? null,
     });
     const transport = this.deps.transportFor(ctx.networkContext, ctx.taskId);
-    const credentials = () => this.credentialsFor(identity, provider, binding);
+    const credentials = () => this.credentialsFor(identity, provider, binding, ctx.networkContext);
     const usedGrant = grant;
     const turn = await this.conversations
       .sendTurn({
@@ -1274,7 +1306,14 @@ export class PactRuntime {
         interfaceUrl: state.business.interfaceUrl,
         transport,
         paJwt: async () =>
-          (await this.credentialsFor(state.identity, state.provider, state.binding)).paJwt,
+          (
+            await this.credentialsFor(
+              state.identity,
+              state.provider,
+              state.binding,
+              ctx.networkContext,
+            )
+          ).paJwt,
         delegationToken: async () => undefined,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
@@ -1390,7 +1429,8 @@ export class PactRuntime {
     }
     const delegation = state.business.descriptor.delegation;
     const transport = this.deps.transportFor(ctx.networkContext, ctx.taskId);
-    const credentials = () => this.credentialsFor(state.identity, state.provider, state.binding);
+    const credentials = () =>
+      this.credentialsFor(state.identity, state.provider, state.binding, ctx.networkContext);
     const turn = await this.conversations.sendTurn({
       conversation: state.conversation,
       operationId: target.operationId,
@@ -1473,7 +1513,12 @@ export class PactRuntime {
         state.conversation?.id,
       );
     }
-    const credentials = await this.credentialsFor(state.identity, state.provider, state.binding);
+    const credentials = await this.credentialsFor(
+      state.identity,
+      state.provider,
+      state.binding,
+      ctx.networkContext,
+    );
     let started;
     try {
       started = await this.authorizations.start({
@@ -1641,9 +1686,9 @@ export class PactRuntime {
           // Policy and provider readiness are rechecked on every poll.
           const current = await this.providers.requireReady(
             provider.origin,
-            await this.providerContext(await this.currentSignerStatus()),
+            await this.providerContext(await this.currentSignerStatus(networkContext)),
           );
-          return this.credentialsFor(identity, current, binding);
+          return this.credentialsFor(identity, current, binding, networkContext);
         },
         signal: abort.signal,
       })
@@ -1740,7 +1785,10 @@ export class PactRuntime {
       const availability = this.availability();
       if (!availability.available)
         throw blocked(availability.reason ?? "pact_disabled", "PACT is not available.");
-      const { identity, binding, status } = await this.resolveIdentity(principal);
+      const { identity, binding, status } = await this.resolveIdentity(
+        principal,
+        ctx.networkContext,
+      );
       const { business } = await this.loadBusiness(input.businessId, ctx, status);
       const provider = await this.providers.requireReady(
         new URL(business.interfaceUrl).origin,
@@ -1752,7 +1800,12 @@ export class PactRuntime {
       if (!delegation)
         throw blocked("not_delegated", "This business does not offer account access.");
       const scopes = union(input.scopes);
-      const credentials = await this.credentialsFor(identity, provider, binding);
+      const credentials = await this.credentialsFor(
+        identity,
+        provider,
+        binding,
+        ctx.networkContext,
+      );
       const started = await this.authorizations.start({
         business,
         scopes,
@@ -1877,18 +1930,28 @@ export class PactRuntime {
         }
         return this.getAuthorization(principal, authorizationId);
       }
-      const { identity, binding } = await this.resolveIdentity(principal);
-      const business = await this.repo.getBusiness(record.businessId);
-      if (!business || binding.id !== record.subjectBindingId)
+      try {
+        // The wait's own task and workspace rules; a removed task or workspace ends the wait.
+        const networkContext = await this.deps.host.networkContextForWorkspace(
+          record.workspaceId,
+          record.taskId,
+        );
+        if (!networkContext) {
+          throw blocked("workspace_unavailable", "The task or workspace for this sign-in is gone.");
+        }
+        const { identity, binding } = await this.resolveIdentity(principal, networkContext);
+        const business = await this.repo.getBusiness(record.businessId);
+        if (!business || binding.id !== record.subjectBindingId)
+          return this.getAuthorization(principal, authorizationId);
+        const provider = await this.providers.requireReady(
+          new URL(business.interfaceUrl).origin,
+          await this.providerContext(await this.currentSignerStatus(networkContext)),
+        );
+        this.startPoller(record, business, provider, binding, identity, networkContext);
+      } catch (error) {
+        await this.failResumedAuthorization(record, redactPactError(error));
         return this.getAuthorization(principal, authorizationId);
-      const provider = await this.providers.requireReady(
-        new URL(business.interfaceUrl).origin,
-        await this.providerContext(await this.currentSignerStatus()),
-      );
-      const networkContext =
-        (await this.deps.host.networkContextForWorkspace(record.workspaceId)) ??
-        ({ networkEnabled: true, accessNetworkMode: "enabled" } as NetworkPolicyContext);
-      this.startPoller(record, business, provider, binding, identity, networkContext);
+      }
     }
     return this.awaitAuthorization(principal, authorizationId);
   }
@@ -2066,31 +2129,45 @@ export class PactRuntime {
       }
       try {
         const principal = await this.ownerPrincipal();
-        const { identity, binding } = await this.resolveIdentity(principal);
+        const networkContext = await this.deps.host.networkContextForWorkspace(
+          record.workspaceId,
+          record.taskId,
+        );
+        if (!networkContext) throw new Error("validation_changed");
+        const { identity, binding } = await this.resolveIdentity(principal, networkContext);
         const business = (await this.repo.getBusiness(record.businessId))!;
         const provider = await this.providers.requireReady(
           new URL(business.interfaceUrl).origin,
-          await this.providerContext(await this.currentSignerStatus()),
+          await this.providerContext(await this.currentSignerStatus(networkContext)),
         );
-        const networkContext = await this.deps.host.networkContextForWorkspace(record.workspaceId);
-        if (
-          !networkContext ||
-          binding.id !== record.subjectBindingId ||
-          provider.readiness !== "ready"
-        ) {
+        if (binding.id !== record.subjectBindingId || provider.readiness !== "ready") {
           throw new Error("validation_changed");
         }
         this.startPoller(record, business, provider, binding, identity, networkContext);
         resumed += 1;
       } catch (error) {
         expired += 1;
-        await this.authorizations.settle(record, {
-          kind: "failed",
-          reason: redactPactError(error),
-        });
+        await this.failResumedAuthorization(record, redactPactError(error));
       }
     }
     return { abandoned: abandoned.length, resumed, expired };
+  }
+
+  /** A wait that cannot resume fails, and its task card stops waiting with the reason. */
+  private async failResumedAuthorization(
+    record: PactAuthorizationRecord,
+    reason: string,
+  ): Promise<void> {
+    const settled = await this.authorizations.settle(record, { kind: "failed", reason });
+    if (settled?.inputRequestId) {
+      await this.deps.host
+        .settleAuthorizationWait(
+          settled.inputRequestId,
+          settled.state,
+          `The business sign-in could not resume (${reason}).`,
+        )
+        .catch(() => undefined);
+    }
   }
 
   private async resumeBlocker(record: PactAuthorizationRecord): Promise<string | null> {

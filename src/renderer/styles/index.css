@@ -2961,29 +2961,6 @@ a,
   color: var(--color-accent);
 }
 
-/* Replay entry button in the timeline controls */
-.replay-entry-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 0;
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.15s ease;
-}
-
-.replay-entry-btn:hover {
-  color: var(--color-accent);
-}
-
-.replay-entry-btn svg {
-  width: 13px;
-  height: 13px;
-}
-
 .input-request-composer-shell {
   width: 100%;
   margin-bottom: 10px;
@@ -20622,19 +20599,6 @@ a,
   opacity: 0.6;
 }
 
-.visual-oblivion .verbose-toggle-btn {
-  font-family: var(--font-ui);
-  text-transform: none;
-  letter-spacing: 0;
-  border-radius: var(--radius-md);
-}
-
-.visual-oblivion .verbose-switch-label {
-  font-family: var(--font-ui);
-  text-transform: none;
-  letter-spacing: 0;
-}
-
 .visual-oblivion .goal-mode-switch-track {
   border-radius: 999px;
 }
@@ -22331,26 +22295,6 @@ a,
 
 .density-focused .bubble-feedback-toggle {
   display: none;
-}
-
-/* Hide code toggle button in focused mode — keep verbose switch visible */
-.density-focused .verbose-toggle-btn {
-  display: none;
-}
-
-.density-focused .verbose-switch {
-  display: flex;
-}
-
-.density-focused .verbose-switch-label {
-  font-family: var(--font-ui);
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 13px;
-}
-
-.density-focused .timeline-controls .verbose-switch-label {
-  font-size: 12px;
 }
 
 /* Hide the entire below-actions row in focused mode (model is shown inline instead) */

@@ -1667,18 +1667,27 @@ html.visual-calm .browser-workbench-newtab-mode .browser-workbench-surface {
   background: radial-gradient(60% 45% at 100% 100%, var(--calm-sky-2), transparent 70%);
 }
 
-/* URL bar reads as one rounded field; toolbar buttons are quiet icons. */
+/* URL bar reads as one rounded field (the bar, not the input inside it, carries
+   the fill and focus ring); toolbar buttons are quiet icons. */
+html.visual-calm .browser-workbench-omnibox {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .browser-workbench-omnibox:focus-within {
+  background: var(--calm-surface);
+}
+
 html.visual-calm .browser-workbench-url-form input {
   height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: var(--calm-surface-muted);
+  padding: 0 10px;
   text-align: left;
 }
 
+html.visual-calm .browser-workbench-url-form input,
 html.visual-calm .browser-workbench-url-form input:focus {
-  background: var(--calm-surface);
-  border-color: var(--calm-border-strong);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 html.visual-calm .browser-workbench-icon-btn,

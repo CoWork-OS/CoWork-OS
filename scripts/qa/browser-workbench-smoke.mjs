@@ -625,6 +625,75 @@ try {
     assert.match(answer, /^err:(NotAllowed|Abort)Error$/);
   });
 
+  await step("the focused address bar draws a single frame", async () => {
+    const omnibox = main.getByLabel("Browser URL");
+    for (const calm of [false, true]) {
+      await main.evaluate(
+        (on) => document.documentElement.classList.toggle("visual-calm", on),
+        calm,
+      );
+      await omnibox.click();
+      const style = await omnibox.evaluate((input) => {
+        const computed = getComputedStyle(input);
+        return {
+          border: computed.borderTopColor,
+          shadow: computed.boxShadow,
+          background: computed.backgroundColor,
+        };
+      });
+      assert.equal(style.shadow, "none", `input shadow (calm: ${calm})`);
+      assert.match(style.border, /rgba\(0, 0, 0, 0\)|transparent/, `input border (calm: ${calm})`);
+      assert.match(
+        style.background,
+        /rgba\(0, 0, 0, 0\)|transparent/,
+        `input fill (calm: ${calm})`,
+      );
+      if (calm) await main.screenshot({ path: path.join(outputDir, "omnibox-focus-calm.png") });
+      await main.keyboard.press("Escape");
+    }
+    await main.evaluate(() => document.documentElement.classList.remove("visual-calm"));
+  });
+
+  await step("the More menu holds page size, screenshots and developer views", async () => {
+    await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+    await main
+      .locator(".browser-workbench-toolbar-menu")
+      .getByRole("button", { name: "More" })
+      .click();
+    // Toolbar icons must actually render (an inherited rule once collapsed them to 0px).
+    const iconWidths = await main.evaluate(() =>
+      Array.from(
+        document.querySelectorAll(
+          ".browser-workbench-nav-controls button svg, .browser-workbench-toolbar-menu > button svg",
+        ),
+      ).map((svg) => svg.getBoundingClientRect().width),
+    );
+    assert.ok(iconWidths.length >= 4 && iconWidths.every((width) => width >= 12), `${iconWidths}`);
+    const menu = main.locator(".browser-workbench-toolbar-popover");
+    await menu.waitFor({ timeout: 5000 });
+    for (const label of ["Save screenshot", "Fit to panel", "Mobile", "Diagnostics"]) {
+      await menu.getByText(label, { exact: true }).waitFor();
+    }
+    await main.screenshot({ path: path.join(outputDir, "toolbar-menu.png") });
+    await menu.getByText("Mobile", { exact: true }).click();
+    await main.locator(".browser-workbench-size-chip").waitFor({ timeout: 5000 });
+    assert.match(await main.locator(".browser-workbench-size-chip").innerText(), /390.844/);
+    await main.locator(".browser-workbench-size-chip").click();
+    assert.equal(await main.locator(".browser-workbench-size-chip").count(), 0);
+  });
+
+  await step("the new tab page offers an ask box, ideas and recent sites", async () => {
+    await main.getByRole("button", { name: "New tab", exact: true }).click();
+    await main.getByLabel("Ask CoWork").waitFor({ timeout: 5000 });
+    await main.locator(".browser-newtab-idea").first().waitFor();
+    await main.locator(".browser-newtab-site").first().waitFor();
+    await main.screenshot({ path: path.join(outputDir, "new-tab.png") });
+    await main
+      .locator(".browser-workbench-tab-shell.is-active")
+      .getByRole("button", { name: "Close tab" })
+      .click();
+  });
+
   await step("closing and reopening the workbench restores its tabs", async () => {
     await main.getByRole("button", { name: "Close browser workbench" }).click();
     await waitFor(async () => (await guests()).length === 0, "the webviews to close");

@@ -108,7 +108,7 @@ This cursor is a Browser Workbench overlay. It appears for actions routed throug
 
 When the tool runs against the visible workbench, CoWork applies Chrome DevTools device metrics to the page and emits a workbench viewport event. The renderer then resizes the shared webview to that controlled size, shows the active size in the toolbar, and keeps screenshots aligned with the tested breakpoint. This makes long browser QA runs reviewable: the user can see the page at each breakpoint, and `browser_screenshot` captures the same controlled viewport.
 
-The workbench toolbar also has manual desktop/tablet/mobile preset buttons. These are user controls for the same visual surface; agent-driven testing should still use `browser_emulate` so the task timeline and tool output record the tested dimensions.
+The toolbar's More menu also has manual desktop/tablet/mobile page sizes. These are user controls for the same visual surface; agent-driven testing should still use `browser_emulate` so the task timeline and tool output record the tested dimensions.
 
 ## Browser V2 Snapshots
 
@@ -136,11 +136,14 @@ The Browser Workbench header and toolbar are functional, not cosmetic:
 
 - **Back / Forward / Reload** control the active tab's history and reload; reload becomes Stop while a page loads.
 - **Address bar** navigates the active tab, or searches when the input is not an address (see Address Bar, Tabs And Shortcuts below).
-- **Viewport presets** resize the visible webview to desktop, tablet, or mobile breakpoints for responsive checks.
-- **Screenshot** captures the current visible browser page into the workspace.
-- **Diagnostics** opens a compact browser panel for console, network, downloads, storage, and trace context.
-- **Snapshot overlay** draws the boxes and refs of CoWork's latest snapshot of the tab.
-- **Annotate screenshot** captures the page, opens an annotation layer, and can save the marked-up image or send it to the agent as an image attachment.
+- **Annotate** (the toolbar's one labelled action) comments on an element or a dragged area of the page.
+- **More (⋯)** holds the rest:
+  - **Annotate screenshot** captures the page, opens an annotation layer, and can save the marked-up image or send it to the agent as an image attachment.
+  - **Save screenshot** captures the current visible browser page into the workspace.
+  - **Open in system browser** opens the page outside CoWork.
+  - **Page size** (Fit to panel, Desktop, Tablet, Mobile) resizes the visible webview for responsive checks. A forced size shows as a chip next to the address bar; click it to fit the panel again.
+  - **Element outlines** draws the boxes and refs of CoWork's latest snapshot of the tab.
+  - **Diagnostics** opens a compact browser panel for console, network, downloads, storage, and trace context.
 - **Fullscreen** promotes the same browser session into the full app view.
 - **Close** closes the workbench and restores the normal right panel.
 
@@ -319,7 +322,7 @@ npm run build:react
 node scripts/qa/browser-workbench-smoke.mjs
 ```
 
-It opens the workbench from the title bar and checks: a typed local dev server address loads; three tabs keep form input, scroll and page state when switching; `target=_blank` opens a tab; a `window.open` sign-in popup posts to its opener and closes; five sidebar/full-view switches keep the page loaded; Cmd+F counts matches; Cmd+= zooms; a geolocation request prompts in the tab and "Never allow" is remembered; a download lands in the workspace and on the shelf; closing a tab with unsaved changes asks "Leave site?" and "Stay" keeps it; `confirm` and `alert` are shown and answered in the tab with CoWork's debugger attached; a browser approval shows as a card over the tab and not as a dialog; an admin policy locks developer mode and blocks the camera without a prompt; notifications can be allowed for a site from the profile menu; screen sharing shows the source picker and Cancel denies it; closing and reopening restores the tabs; a link to an unopened local port shows the blocked notice; Cmd+Shift+B reopens the browser from the task view. Results and screenshots go to a temporary folder printed at the end.
+It opens the workbench from the title bar and checks: a typed local dev server address loads; three tabs keep form input, scroll and page state when switching; `target=_blank` opens a tab; a `window.open` sign-in popup posts to its opener and closes; five sidebar/full-view switches keep the page loaded; Cmd+F counts matches; Cmd+= zooms; a geolocation request prompts in the tab and "Never allow" is remembered; a download lands in the workspace and on the shelf; closing a tab with unsaved changes asks "Leave site?" and "Stay" keeps it; `confirm` and `alert` are shown and answered in the tab with CoWork's debugger attached; a browser approval shows as a card over the tab and not as a dialog; an admin policy locks developer mode and blocks the camera without a prompt; notifications can be allowed for a site from the profile menu; screen sharing shows the source picker and Cancel denies it; the focused address bar draws a single frame; the More menu sets a page size and the size chip clears it; the new tab page shows the ask box, ideas and recent sites; closing and reopening restores the tabs; a link to an unopened local port shows the blocked notice; Cmd+Shift+B reopens the browser from the task view. Results and screenshots go to a temporary folder printed at the end.
 
 Manual checks (things the harness cannot drive):
 

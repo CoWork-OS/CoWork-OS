@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Camera,
   ChevronDown,
-  ExternalLink,
   Maximize2,
+  MessageSquarePlus,
   Mic,
   Minimize2,
   Monitor,
-  PencilLine,
-  Plus,
   RotateCw,
-  ScanLine,
   Search,
   Smartphone,
   Square,
@@ -75,6 +70,7 @@ import {
   useAgentDriving,
 } from "./BrowserWorkbench/AgentDrivingBanner";
 import { BrowserApprovalCard } from "./BrowserWorkbench/BrowserApprovalCard";
+import { ToolbarMenu } from "./BrowserWorkbench/ToolbarMenu";
 import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
 import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
 import { type AdjustChanges, describeAdjustChanges } from "./BrowserWorkbench/adjust-changes";
@@ -1953,158 +1949,83 @@ export function BrowserWorkbenchView({
           onQueryChange={handleOmniboxQuery}
           onNotice={setToolbarNotice}
         />
-        <div className="browser-workbench-device-toolbar" aria-label="Viewport presets">
-          {VIEWPORT_PRESETS.map((preset) => {
-            const Icon = preset.icon;
-            const active =
-              controlledViewport?.width === preset.width &&
-              controlledViewport.height === preset.height;
-            return (
-              <button
-                key={preset.label}
-                type="button"
-                className={`browser-workbench-device-btn ${active ? "is-active" : ""}`}
-                onClick={() => applyViewportPreset(preset)}
-                title={`${preset.label} ${preset.width} x ${preset.height}`}
-                aria-label={`${preset.label} viewport`}
-              >
-                <Icon size={14} strokeWidth={2.2} aria-hidden="true" />
-              </button>
-            );
-          })}
-          {controlledViewport && (
-            <>
-              <span className="browser-workbench-device-size" title={controlledViewport.label}>
-                {controlledViewport.width}x{controlledViewport.height}
-              </span>
-              <button
-                type="button"
-                className="browser-workbench-device-btn"
-                onClick={() => {
-                  setControlledViewport(null);
-                  setToolbarNotice("Auto viewport");
-                }}
-                title="Return to automatic viewport"
-                aria-label="Return to automatic viewport"
-              >
-                <X size={13} strokeWidth={2.2} aria-hidden="true" />
-              </button>
-            </>
-          )}
-        </div>
+        {controlledViewport && (
+          <button
+            type="button"
+            className="browser-workbench-size-chip"
+            onClick={() => {
+              setControlledViewport(null);
+              setToolbarNotice("Fit to panel");
+            }}
+            title={`${controlledViewport.label || "Custom size"}: back to fit to panel`}
+            aria-label="Return to automatic page size"
+          >
+            {controlledViewport.width}×{controlledViewport.height}
+            <X size={12} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+        )}
         <div className="browser-workbench-right-actions">
-          {activeUrl && (
-            <span className="browser-workbench-profile" title={activeTab?.url || activeUrl}>
-              {activeUrl.startsWith("https://") ? "https" : "http"}
-            </span>
-          )}
           {toolbarNotice && (
-            <span className="browser-workbench-toolbar-notice">{toolbarNotice}</span>
+            <span className="browser-workbench-toolbar-notice" role="status">
+              {toolbarNotice}
+            </span>
           )}
           {activeIsYouTube && (
             <button
               type="button"
-              className={`browser-workbench-nav-btn browser-workbench-action-btn ${youtubeAskOpen ? "is-active" : ""}`}
+              className={`browser-workbench-nav-btn ${youtubeAskOpen ? "is-active" : ""}`}
               onClick={() => setYoutubeAskOpen((current) => !current)}
-              title="Ask video"
+              title="Ask about this video"
               aria-label="Ask video"
             >
-              <Search
-                className="browser-workbench-lucide-icon"
-                size={16}
-                strokeWidth={2.2}
-                aria-hidden="true"
-              />
+              <Search size={16} strokeWidth={2} aria-hidden="true" />
             </button>
           )}
           <button
             type="button"
-            className="browser-workbench-nav-btn browser-workbench-action-btn"
-            onClick={() => void openCurrentPageExternal()}
-            title="Open current page in external browser"
-            aria-label="Open current page in external browser"
-          >
-            <ExternalLink
-              className="browser-workbench-lucide-icon"
-              size={16}
-              strokeWidth={2.2}
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            className={`browser-workbench-nav-btn browser-workbench-action-btn ${snapshotOverlay ? "is-active" : ""}`}
-            onClick={() => setSnapshotOverlay((current) => !current)}
-            title="Snapshot overlay"
-            aria-label="Snapshot overlay"
-          >
-            <ScanLine
-              className="browser-workbench-lucide-icon"
-              size={16}
-              strokeWidth={2.2}
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            className={`browser-workbench-nav-btn browser-workbench-action-btn ${diagnosticsOpen ? "is-active" : ""}`}
-            onClick={() => setDiagnosticsOpen((current) => !current)}
-            title="Diagnostics"
-            aria-label="Diagnostics"
-          >
-            <Activity
-              className="browser-workbench-lucide-icon"
-              size={16}
-              strokeWidth={2.2}
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            className="browser-workbench-nav-btn browser-workbench-action-btn"
-            onClick={() => void captureScreenshot("screenshot")}
-            title="Take screenshot"
-            aria-label="Take screenshot"
-          >
-            <Camera
-              className="browser-workbench-lucide-icon"
-              size={16}
-              strokeWidth={2.2}
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            className={`browser-workbench-nav-btn browser-workbench-action-btn ${liveAnnotationMode ? "is-active" : ""}`}
+            className={`browser-workbench-annotate-btn ${liveAnnotationMode ? "is-active" : ""}`}
             onClick={() => {
               setLiveAnnotationMode((current) => !current);
               cancelLiveAnnotationTarget();
               setToolbarNotice(liveAnnotationMode ? "Annotation mode off" : "Annotating");
             }}
-            title="Annotate page element"
+            disabled={!activeUrl && !liveAnnotationMode}
+            title="Comment on the page: click an element or drag an area"
             aria-label="Annotate page element"
+            aria-pressed={liveAnnotationMode}
           >
-            <PencilLine
-              className="browser-workbench-lucide-icon"
-              size={16}
-              strokeWidth={2.2}
-              aria-hidden="true"
-            />
+            <MessageSquarePlus size={15} strokeWidth={2} aria-hidden="true" />
+            <span>Annotate</span>
           </button>
-          <button
-            type="button"
-            className="browser-workbench-nav-btn browser-workbench-action-btn"
-            onClick={() => void captureScreenshot("annotation")}
-            title="Annotate screenshot"
-            aria-label="Annotate screenshot"
-          >
-            <Plus
-              className="browser-workbench-lucide-icon"
-              size={16}
-              strokeWidth={2.2}
-              aria-hidden="true"
-            />
-          </button>
+          <ToolbarMenu
+            hasPage={Boolean(activeUrl)}
+            viewports={VIEWPORT_PRESETS}
+            activeViewport={
+              controlledViewport
+                ? VIEWPORT_PRESETS.find(
+                    (preset) =>
+                      preset.width === controlledViewport.width &&
+                      preset.height === controlledViewport.height,
+                  )?.label || "custom"
+                : null
+            }
+            snapshotOverlay={snapshotOverlay}
+            diagnosticsOpen={diagnosticsOpen}
+            onAnnotateScreenshot={() => void captureScreenshot("annotation")}
+            onScreenshot={() => void captureScreenshot("screenshot")}
+            onOpenExternal={() => void openCurrentPageExternal()}
+            onViewport={(viewport) => {
+              if (!viewport) {
+                setControlledViewport(null);
+                setToolbarNotice("Fit to panel");
+                return;
+              }
+              const preset = VIEWPORT_PRESETS.find((entry) => entry.label === viewport.label);
+              if (preset) applyViewportPreset(preset);
+            }}
+            onToggleSnapshotOverlay={() => setSnapshotOverlay((current) => !current)}
+            onToggleDiagnostics={() => setDiagnosticsOpen((current) => !current)}
+          />
         </div>
       </div>
       {isLoading && <div className="browser-workbench-progress" aria-hidden="true" />}

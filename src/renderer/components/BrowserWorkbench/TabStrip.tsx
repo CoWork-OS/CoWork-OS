@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pin, Plus, Volume2, VolumeX, X } from "lucide-react";
+import { Globe, Pin, Plus, Volume2, VolumeX, X } from "lucide-react";
 import type { BrowserTab } from "./browser-tabs-model";
 
 export type TabMenuCommand =
@@ -144,9 +144,11 @@ export function TabStrip({
                 className={`browser-workbench-tab-icon ${tab.loading ? "is-loading" : ""}`}
                 aria-hidden="true"
               >
-                {!tab.loading && tab.favicon ? (
+                {tab.loading ? null : tab.favicon ? (
                   <img src={tab.favicon} alt="" draggable={false} />
-                ) : null}
+                ) : (
+                  <Globe size={13} strokeWidth={2} />
+                )}
               </span>
               {!tab.pinned && (
                 <span className="browser-workbench-tab-label">{browserTabLabel(tab)}</span>

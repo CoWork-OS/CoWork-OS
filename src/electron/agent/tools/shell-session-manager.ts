@@ -614,8 +614,17 @@ export class ShellSessionManager {
     runtime.process = child;
     runtime.buffer = "";
     runtime.ready = true;
+    runtime.exitStatusOverride = undefined;
+
+    // A stopped shell is signalled but not awaited, so the session can start a
+    // replacement before the old process exits. Once a newer process owns the
+    // session, the old one's late output and exit must not touch it; its exit
+    // used to clear `runtime.process` and fail the next command with
+    // "Persistent shell unavailable".
+    const replacedByNewerProcess = () => runtime.process !== null && runtime.process !== child;
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      if (replacedByNewerProcess()) return;
       const output = chunk.toString("utf-8");
       if (runtime.pending.length > 0) {
         runtime.buffer += output;
@@ -627,6 +636,7 @@ export class ShellSessionManager {
       this.tryCompletePending(runtime);
     });
     child.stderr?.on("data", (chunk: Buffer) => {
+      if (replacedByNewerProcess()) return;
       const output = chunk.toString("utf-8");
       if (runtime.pending.length > 0) {
         runtime.buffer += output;
@@ -639,6 +649,7 @@ export class ShellSessionManager {
     });
 
     child.on("exit", (code, signal) => {
+      if (replacedByNewerProcess()) return;
       const nextStatus = runtime.exitStatusOverride || "ended";
       runtime.exitStatusOverride = undefined;
       runtime.process = null;

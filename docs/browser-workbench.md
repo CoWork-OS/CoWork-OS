@@ -19,7 +19,7 @@ For prompts like this, `browser_navigate` opens the Browser Workbench in the rig
 The Browser Workbench supports:
 
 - resizable right-sidebar placement with the same persisted width behavior used by documents, spreadsheets, presentations, and web page artifacts
-- fullscreen mode with the same follow-up composer and latest-turn/working context frame as artifact workbenches
+- a full view that gives the whole window to the browser (the task conversation stays in the normal view; tasks are sent from the new tab page, page menus and annotations)
 - a persistent per-workspace browser profile that keeps cookies and local storage separate from system Chrome
 - tab strip, URL bar, profile/security indicator, back, forward, reload, fullscreen, close, screenshot, annotation, diagnostics, and snapshot overlay controls
 - desktop/tablet/mobile viewport presets for responsive testing, plus agent-driven viewport resizing through `browser_emulate`
@@ -153,7 +153,7 @@ The workbench keeps its pages loaded when moving between sidebar and fullscreen.
 
 The right sidebar can be resized by dragging its left edge. The width is persisted globally and reused by other artifact workbenches.
 
-The main task pane shrinks as the browser expands, down to a mobile-sized minimum. This keeps the conversation visible while giving the browser as much room as possible. Fullscreen mode removes the split pane and focuses on the browser, while preserving the follow-up composer so the user can continue steering the task.
+The main task pane shrinks as the browser expands, down to a mobile-sized minimum. This keeps the conversation visible while giving the browser as much room as possible. Full view removes the split pane and gives the whole window to the browser; switch back to the sidebar (Cmd+Shift+B) to keep chatting with the task.
 
 ## Session And Authentication Model
 
@@ -212,7 +212,7 @@ Browser V2 treats browser side effects as governed workspace actions:
 - JavaScript dialogs are handled with `browser_handle_dialog` and should be visible in diagnostics.
 - Once CoWork's debugger is attached to a tab (after any agent action or diagnostics), Chromium stops showing the page's own `alert`/`confirm` and the page waits for an answer. The workbench shows them as a dialog over the tab (OK / Cancel, Enter / Esc) and brings that tab to the front; CoWork can still answer with `browser_handle_dialog`, whichever comes first. Popup windows use a native dialog. Without the debugger Electron shows its native dialog. `prompt()` isn't supported by Electron and throws in the page.
 - A page that asks before unloading (unsaved changes) gets a native "Leave site?" dialog when you reload, navigate away, close its popup window or close its tab; "Stay" keeps the page and the tab. Closing a tab runs the page's check first. While CoWork is acting on the tab the page is left without asking, so the agent is never stuck behind the dialog. This works both before and after CoWork's debugger is attached to the page.
-- Approvals CoWork asks for while using the browser (site access, page scripts in developer mode, uploads, downloads, history search) appear as a card over the tab while the browser is open, instead of the approval dialog. It answers through the same approval path with the same choices; with the browser closed, or in the classic browser, the dialog is used.
+- Approvals CoWork asks for while using the browser (site access, page scripts in developer mode, uploads, downloads, history search) appear as a card over the tab while the browser is open, instead of the approval dialog. It answers through the same approval path with the same choices; with the browser closed, the dialog is used.
 - Site permissions are never granted silently. Fullscreen, sanitized clipboard writes and encrypted media playback are allowed; camera, microphone, location, notifications, clipboard reads, MIDI, HID, serial, USB, pointer/keyboard lock, file system access and opening external apps show a prompt in the tab (Allow this time, Always allow, Never allow); everything else is denied. "Always" and "Never" are remembered per workspace browser profile and site. Pages that are not registered workbench tabs are denied.
 - Screen sharing (`getDisplayMedia`) shows a picker in the tab with the screens and windows to share; nothing is shared until one is picked, and Cancel denies the request. On macOS the app needs Screen Recording permission for sources to appear.
 - Electron reports a permission the site has not been granted as "denied" (it has no "ask" state), so sites that check before asking, notifications especially, may never ask. The profile menu has a per-site Notifications control (Ask, Allow, Block) for the current site; reload the page after changing it.
@@ -297,7 +297,7 @@ Browser Use Cloud API errors, live URLs, and CDP URLs are redacted before enteri
 
 Key files:
 
-- `src/renderer/components/BrowserWorkbenchView.tsx`: tab strip, toolbar, diagnostics drawer, snapshot overlay, fullscreen mode, screenshot annotation, follow-up composer, and visible cursor overlay
+- `src/renderer/components/BrowserWorkbenchView.tsx`: tab strip, toolbar, diagnostics drawer, snapshot overlay, full view, screenshot annotation, and visible cursor overlay
 - `src/renderer/components/BrowserWorkbench/`: tab state and session restore (`browser-tabs-model.ts`, `useBrowserTabs.ts`), one webview per tab (`BrowserTabView.tsx`), blocked/failed/crashed notices, the permission prompt, and the dock that keeps the workbench mounted across sidebar and full view
 - `src/electron/browser/browser-guest-attach.ts`: window-open handling (tabs and registered popup windows)
 - `src/electron/browser/browser-permissions.ts`: site permission handlers and remembered decisions
@@ -335,8 +335,7 @@ Manual checks (things the harness cannot drive):
 7. Let an agent navigate to a sign-in page; confirm the sign-in banner and that Done continues.
 8. Annotate an area by dragging, and Adjust an element's text and font size; confirm the live preview, the sent changes and that the page is restored.
 9. Settings > Browser: change the search engine, clear history, reset a site permission, toggle developer mode and confirm `browser_evaluate` asks for approval once per site.
-10. Settings > Browser > "Use the classic browser" switches to the previous single-tab workbench (rollback for one release).
-11. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
+10. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
 
 Build checks:
 

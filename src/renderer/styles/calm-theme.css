@@ -1609,7 +1609,6 @@ html.visual-calm:not(.theme-light) .calm-sidebar .sidebar-sessions-search input 
 /* ---------- Icon buttons vs. the global button rule ----------
    right-panel.css ships an unscoped `button { padding: 10px 16px }`. Fixed-size
    icon buttons that don't set their own padding collapse their icon to 0px. */
-html.visual-calm .browser-workbench-device-btn,
 html.visual-calm .browser-workbench-icon-btn,
 html.visual-calm .title-bar-btn,
 html.visual-calm [class*="-icon-btn"] {
@@ -1627,41 +1626,6 @@ html.visual-calm .calm-main .prompt-composer-input:empty::before {
 }
 
 /* ---------- In-app browser ---------- */
-
-html.visual-calm .browser-workbench-newtab-eyebrow {
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--calm-text-muted);
-}
-
-html.visual-calm .browser-workbench-newtab-title {
-  font-family: var(--calm-font-display);
-  font-size: 30px;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
-
-html.visual-calm .browser-workbench-newtab-subtitle {
-  font-size: 15px;
-  color: var(--calm-text-secondary);
-}
-
-html.visual-calm .browser-workbench-newtab-tile {
-  border-color: var(--calm-border);
-  border-radius: 14px;
-  background: var(--calm-surface);
-  box-shadow: var(--calm-shadow-soft);
-}
-
-html.visual-calm .browser-workbench-newtab-tile:hover {
-  background: var(--calm-surface);
-  border-color: var(--calm-border-strong);
-  box-shadow: var(--calm-shadow-pop);
-}
 
 html.visual-calm .browser-workbench-newtab-mode .browser-workbench-surface {
   background: radial-gradient(60% 45% at 100% 100%, var(--calm-sky-2), transparent 70%);
@@ -1690,17 +1654,14 @@ html.visual-calm .browser-workbench-url-form input:focus {
   box-shadow: none;
 }
 
-html.visual-calm .browser-workbench-icon-btn,
-html.visual-calm .browser-workbench-device-btn {
+html.visual-calm .browser-workbench-icon-btn {
   border-color: transparent;
   background: transparent;
   border-radius: 10px;
   color: var(--calm-text-secondary);
 }
 
-html.visual-calm .browser-workbench-icon-btn:hover,
-html.visual-calm .browser-workbench-device-btn:hover,
-html.visual-calm .browser-workbench-device-btn.is-active {
+html.visual-calm .browser-workbench-icon-btn:hover {
   background: var(--calm-surface-hover);
   color: var(--calm-text);
 }

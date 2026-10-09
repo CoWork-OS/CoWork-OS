@@ -69,4 +69,20 @@ describe("formatSpreadsheetValue", () => {
   it("applies the text section to text values", () => {
     expect(formatSpreadsheetValue("abc", '0.00;-0.00;0;"Item: "@')).toBe("Item: abc");
   });
+
+  it("shows nothing for values whose section is empty", () => {
+    expect(formatSpreadsheetValue(0, "0;-0;;@")).toBe("");
+    expect(formatSpreadsheetValue(5, "0;-0;;@")).toBe("5");
+    expect(formatSpreadsheetValue(-5, "0;-0;;@")).toBe("-5");
+    expect(formatSpreadsheetValue("abc", "0;-0;;@")).toBe("abc");
+    expect(formatSpreadsheetValue(-5, "0;")).toBe("");
+    expect(formatSpreadsheetValue(0, "0;")).toBe("0");
+    expect(formatSpreadsheetValue("abc", "0;-0;0;")).toBe("");
+    expect([7, -7, 0, "abc"].map((value) => formatSpreadsheetValue(value, ";;;"))).toEqual([
+      "",
+      "",
+      "",
+      "",
+    ]);
+  });
 });

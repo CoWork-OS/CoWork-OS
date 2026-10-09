@@ -65,6 +65,28 @@ describe("assistant mediated approvals", () => {
     expect(question.indexOf("Message:")).toBeLessThan(question.indexOf("Scope:"));
   });
 
+  it("lists every permission in full even when the review text fills its bound", () => {
+    const message = "x".repeat(4000);
+    const permissions = Array.from(
+      { length: 20 },
+      (_, index) => `${"Change your account settings ".repeat(17).trim()} (account:scope-${index})`,
+    );
+    const request = buildAssistantApprovalRequest(
+      "external_service",
+      "Send a change to Example Co. Support.",
+      {
+        tool: "pact_send_message",
+        approvalReviewText: `Message: “${message}”`,
+        approvalReviewPermissions: permissions,
+      },
+    );
+    const question = request.questions[0]!.question;
+    expect(question).toContain(`Message: “${message}”`);
+    expect(question).toContain(` Permissions: ${permissions.join("; ")}.`);
+    expect(question).toContain("(account:scope-19).");
+    expect(question.endsWith("Do you want CoWork to continue?")).toBe(true);
+  });
+
   it("fails closed on the default answer and parses only an explicit allow", () => {
     const request = buildAssistantApprovalRequest("data_export", "Export the report", {
       permissionPrompt: { scopePreview: "domain api.example.com" },

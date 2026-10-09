@@ -264,7 +264,7 @@ export function formatSpreadsheetValue(
     if (typeof value === "string") {
       const textSection =
         sections.length >= 4 ? sections[3] : sections.find((s) => s.includes("@"));
-      if (!textSection) return null;
+      if (textSection === undefined) return null;
       return tokenize(textSection)
         .map((p) => (p.kind === "literal" ? p.text : p.kind === "text" ? value : ""))
         .join("");
@@ -277,15 +277,17 @@ export function formatSpreadsheetValue(
     let section = sections[0];
     let magnitude = serial;
     let sign = "";
-    if (serial < 0 && sections.length >= 2 && sections[1] !== "") {
+    if (serial < 0 && sections.length >= 2) {
       section = sections[1];
       magnitude = -serial; // the negative section carries its own "-" or parentheses
-    } else if (serial === 0 && sections.length >= 3 && sections[2] !== "") {
+    } else if (serial === 0 && sections.length >= 3) {
       section = sections[2];
     } else if (serial < 0) {
       magnitude = -serial;
       sign = "-";
     }
+    // An empty section shows nothing for its values ("0;-0;;@" hides zeros, ";;;" hides all).
+    if (section === "") return "";
     if (/^general$/i.test(section.trim())) return sign + formatGeneral(magnitude);
     const parts = tokenize(section);
     if (parts.some((p) => p.kind === "date" || p.kind === "ampm")) {

@@ -23,6 +23,9 @@ const HIGH_IMPACT_APPROVAL_TYPES = new Set<ApprovalType>([
   "computer_use",
 ]);
 
+/** Fits a business scope description (500) plus its id (200), so none is cut in practice. */
+const MAX_REVIEW_PERMISSION_LENGTH = 720;
+
 function normalizeText(value: unknown, maxLength = 480): string {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   if (text.length <= maxLength) return text;
@@ -149,13 +152,22 @@ export function buildAssistantApprovalRequest(
   // Exact content the decision is about (a PACT message is up to 4000 characters), written by
   // the main process; it gets its own bound so the description limit never truncates it.
   const reviewText = normalizeText(detailsRecord?.approvalReviewText, 4600);
+  // What the user grants by approving: always listed in full, outside the review text bound.
+  const rawPermissions: unknown = detailsRecord?.approvalReviewPermissions;
+  const reviewPermissions = Array.isArray(rawPermissions)
+    ? rawPermissions
+        .map((permission) => normalizeText(permission, MAX_REVIEW_PERMISSION_LENGTH))
+        .filter(Boolean)
+    : [];
+  const permissionsText =
+    reviewPermissions.length > 0 ? ` Permissions: ${reviewPermissions.join("; ")}.` : "";
 
   return {
     questions: [
       {
         header: "Permission",
         id: questionId,
-        question: `${safeDescription}${reviewText ? ` ${reviewText}` : ""}${scopeText}${
+        question: `${safeDescription}${reviewText ? ` ${reviewText}` : ""}${permissionsText}${scopeText}${
           taskConsent
             ? allowLabel === "Allow for this chat"
               ? ` Consent covers ${taskConsent}.`

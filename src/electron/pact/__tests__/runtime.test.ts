@@ -277,8 +277,12 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(harness.host.approvals).toHaveLength(1);
     // The approval shows the exact message and the permissions it uses.
     expect(harness.host.approvalDetails[0]?.approvalReviewText).toBe(
-      "Message: “Please cancel order A-88213.” Permissions: Cancel an order that has not shipped (orders:cancel); Look up your orders and their status (orders:read).",
+      "Message: “Please cancel order A-88213.”",
     );
+    expect(harness.host.approvalDetails[0]?.approvalReviewPermissions).toEqual([
+      "Cancel an order that has not shipped (orders:cancel)",
+      "Look up your orders and their status (orders:read)",
+    ]);
     expect(harness.host.waits).toHaveLength(1);
     expect(harness.host.settled).toEqual([{ requestId: "input-1", state: "granted" }]);
     // The effectful message went only into a context opened by a non-mutating introduction.
@@ -777,6 +781,28 @@ describe.skipIf(!nativeSqlite)("PactRuntime against a reference-shaped provider"
     expect(
       await harness.runtime.disconnectGrant({ id: "someone-else", kind: "local_owner" }, grant!.id),
     ).toBeNull();
+  });
+
+  it("lists a grant past its lifetime as expired and stops counting it as connected", async () => {
+    const business = await discover();
+    await harness.runtime.send(
+      owner,
+      {
+        businessId: business.id,
+        text: "Status of my order?",
+        effect: "inspect",
+        requiredScopes: ["orders:read"],
+      },
+      taskContext(),
+    );
+    const [grant] = await harness.runtime.listGrants(owner);
+    expect(grant).toMatchObject({ state: "active" });
+    expect((await harness.runtime.status(owner)).activeGrants).toBe(1);
+    harness.clock.now = grant!.grantExpiresAt! + 1;
+    expect((await harness.runtime.listGrants(owner)).map((entry) => entry.state)).toEqual([
+      "expired",
+    ]);
+    expect((await harness.runtime.status(owner)).activeGrants).toBe(0);
   });
 
   it("refreshes an expiring token with rotation and invalidates the grant when refresh is rejected", async () => {

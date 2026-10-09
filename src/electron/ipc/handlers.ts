@@ -374,6 +374,11 @@ import {
 } from "../security/workspace-permission-manifest";
 import {
   validateInput,
+  CronJobCreateSchema,
+  CronJobIdSchema,
+  CronJobPatchSchema,
+  CronListOptionsSchema,
+  CronRunModeSchema,
   WorkspaceCreateSchema,
   TaskCreateSchema,
   TaskRenameSchema,
@@ -11824,21 +11829,24 @@ function setupCronHandlers(): void {
   });
 
   // List all jobs
-  ipcMain.handle(IPC_CHANNELS.CRON_LIST_JOBS, async (_, opts?: { includeDisabled?: boolean }) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_LIST_JOBS, async (_, rawOpts?: unknown) => {
+    const opts = validateInput(CronListOptionsSchema, rawOpts, "cron list options");
     const service = getCronService();
     if (!service) return [];
     return service.list(opts);
   });
 
   // Get a single job
-  ipcMain.handle(IPC_CHANNELS.CRON_GET_JOB, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_GET_JOB, async (_, rawId: unknown) => {
+    const id = validateInput(CronJobIdSchema, rawId, "cron job id");
     const service = getCronService();
     if (!service) return null;
     return service.get(id);
   });
 
   // Add a new job
-  ipcMain.handle(IPC_CHANNELS.CRON_ADD_JOB, async (_, jobData) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_ADD_JOB, async (_, rawJobData: unknown) => {
+    const jobData = validateInput(CronJobCreateSchema, rawJobData, "scheduled task");
     const service = getCronService();
     if (!service) {
       return { ok: false, error: "Cron service not initialized" };
@@ -11847,7 +11855,9 @@ function setupCronHandlers(): void {
   });
 
   // Update an existing job
-  ipcMain.handle(IPC_CHANNELS.CRON_UPDATE_JOB, async (_, id: string, patch) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_UPDATE_JOB, async (_, rawId: unknown, rawPatch: unknown) => {
+    const id = validateInput(CronJobIdSchema, rawId, "cron job id");
+    const patch = validateInput(CronJobPatchSchema, rawPatch, "scheduled task update");
     const service = getCronService();
     if (!service) {
       return { ok: false, error: "Cron service not initialized" };
@@ -11856,7 +11866,8 @@ function setupCronHandlers(): void {
   });
 
   // Remove a job
-  ipcMain.handle(IPC_CHANNELS.CRON_REMOVE_JOB, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_REMOVE_JOB, async (_, rawId: unknown) => {
+    const id = validateInput(CronJobIdSchema, rawId, "cron job id");
     const service = getCronService();
     if (!service) {
       return {
@@ -11869,7 +11880,9 @@ function setupCronHandlers(): void {
   });
 
   // Run a job immediately
-  ipcMain.handle(IPC_CHANNELS.CRON_RUN_JOB, async (_, id: string, mode?: "due" | "force") => {
+  ipcMain.handle(IPC_CHANNELS.CRON_RUN_JOB, async (_, rawId: unknown, rawMode?: unknown) => {
+    const id = validateInput(CronJobIdSchema, rawId, "cron job id");
+    const mode = validateInput(CronRunModeSchema, rawMode, "cron run mode");
     const service = getCronService();
     if (!service) {
       return { ok: false, error: "Cron service not initialized" };
@@ -11878,14 +11891,16 @@ function setupCronHandlers(): void {
   });
 
   // Get run history for a job
-  ipcMain.handle(IPC_CHANNELS.CRON_GET_RUN_HISTORY, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_GET_RUN_HISTORY, async (_, rawId: unknown) => {
+    const id = validateInput(CronJobIdSchema, rawId, "cron job id");
     const service = getCronService();
     if (!service) return null;
     return service.getRunHistory(id);
   });
 
   // Clear run history for a job
-  ipcMain.handle(IPC_CHANNELS.CRON_CLEAR_RUN_HISTORY, async (_, id: string) => {
+  ipcMain.handle(IPC_CHANNELS.CRON_CLEAR_RUN_HISTORY, async (_, rawId: unknown) => {
+    const id = validateInput(CronJobIdSchema, rawId, "cron job id");
     const service = getCronService();
     if (!service) return false;
     return service.clearRunHistory(id);

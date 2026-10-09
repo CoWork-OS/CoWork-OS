@@ -116,4 +116,44 @@ describeWithSqlite("ChannelStore.delete", () => {
     });
     expect(db.pragma("foreign_key_check")).toEqual([]);
   });
+
+  it("deletes a discontinued channel's pairings, sessions and messages but keeps its tasks", () => {
+    const db = manager.getDatabase();
+    const repository = new ChannelStore(db);
+    const channel = repository.create({
+      type: "twitch",
+      name: "Twitch",
+      enabled: true,
+      config: { oauthToken: "oauth:secret" },
+      securityConfig: { mode: "pairing" },
+      status: "disconnected",
+    });
+    const now = Date.now();
+    db.prepare(
+      "INSERT INTO workspaces (id, name, path, created_at, permissions) VALUES (?, ?, ?, ?, ?)",
+    ).run("ws-1", "Workspace", path.join(tempDir, "ws"), now, "{}");
+    db.prepare(
+      "INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run("task-1", "From chat", "Do it", "completed", "ws-1", now, now);
+    db.prepare(
+      "INSERT INTO channel_users (id, channel_id, channel_user_id, display_name, allowed, created_at, last_seen_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+    ).run("user-1", channel.id, "viewer", "Viewer", now, now);
+    db.prepare(
+      "INSERT INTO channel_sessions (id, channel_id, chat_id, user_id, task_id, workspace_id, created_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("session-1", channel.id, "#stream", "user-1", "task-1", "ws-1", now, now);
+    db.prepare(
+      "INSERT INTO channel_messages (id, channel_id, session_id, channel_message_id, chat_id, user_id, direction, content, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("message-1", channel.id, "session-1", "m-1", "#stream", "user-1", "incoming", "hi", now);
+
+    repository.delete(channel.id);
+
+    expect(repository.findById(channel.id)).toBeUndefined();
+    for (const table of ["channel_users", "channel_sessions", "channel_messages"]) {
+      expect(db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
+    }
+    expect(db.prepare("SELECT id, status FROM tasks").all()).toEqual([
+      { id: "task-1", status: "completed" },
+    ]);
+    expect(db.pragma("foreign_key_check")).toEqual([]);
+  });
 });

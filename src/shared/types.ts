@@ -8772,9 +8772,6 @@ export const IPC_CHANNELS = {
   WHATSAPP_CONNECTED: "whatsapp:connected",
   WHATSAPP_STATUS: "whatsapp:status",
 
-  // Citation Engine
-  CITATION_GET_FOR_TASK: "citation:getForTask",
-
   // Event Triggers
   TRIGGER_LIST: "trigger:list",
   TRIGGER_ADD: "trigger:add",

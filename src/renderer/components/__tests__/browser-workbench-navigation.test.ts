@@ -26,6 +26,33 @@ describe("Browser workbench navigation controls", () => {
     expect(tabView).not.toContain("display: none");
   });
 
+  it("reports status for the tab active now, not the one active when a tab mounted", () => {
+    const source = readFileSync(componentPath, "utf8");
+    const statusMatch = source.match(/const handleTabStatus = useCallback\([\s\S]*?\}, \[\]\);/);
+
+    expect(statusMatch?.[0]).toContain("tabId !== activeTabIdRef.current");
+    expect(source).toContain("activeTabIdRef.current = activeTabId;");
+  });
+
+  it("never lets an older navigation or the initial URL override a newer one", () => {
+    const tabView = readFileSync(tabViewPath, "utf8");
+    const registerMatch = tabView.match(/const register = async \(\) => \{[\s\S]*?\n    \};/);
+
+    expect(tabView).toContain("const seq = ++navigationSeqRef.current;");
+    expect(tabView).toContain("checkUserNavigation(tab.id, url, isCurrent)");
+    expect(registerMatch?.[0]).toContain("if (seq > 0) return;");
+    expect(registerMatch?.[0]).toContain("if (!isCurrent()) return;");
+  });
+
+  it("goes back from a blocked navigation to the page still loaded under it", () => {
+    const tabView = readFileSync(tabViewPath, "utf8");
+
+    expect(tabView).toContain(
+      'const loadedUrl = tabRef.current.blocked ? getLoadedPageUrl() : "";',
+    );
+    expect(tabView).toContain("onUpdate(tab.id, { url: loadedUrl, blocked: undefined });");
+  });
+
   it("does not require the dom-ready flag before invoking toolbar navigation commands", () => {
     const source = readFileSync(componentPath, "utf8");
     const commandMatch = source.match(/const runWebviewCommand = useCallback\([\s\S]*?\n  \);/);

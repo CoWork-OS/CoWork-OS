@@ -24,6 +24,7 @@ import { SessionManager } from "./session";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 import {
+  CHANNEL_TYPES,
   ChannelAdapter,
   ChannelType,
   ChannelConfig,
@@ -648,6 +649,9 @@ export class ChannelGateway {
     if (mainWindow) {
       this.router.setMainWindow(mainWindow);
     }
+
+    // Delete rows of discontinued channel types before any adapter loads.
+    await this.removeRetiredChannels();
 
     // Load and register enabled channels
     await this.loadChannels();
@@ -1882,7 +1886,11 @@ export class ChannelGateway {
    * Get all channels
    */
   async getChannels(): Promise<Channel[]> {
-    return this.channelRepo.findAll();
+    // Older databases can still hold rows of retired channel types (Twitch, X).
+    // They have no adapter, so they are not offered anywhere.
+    return (await this.channelRepo.findAll()).filter((channel) =>
+      (CHANNEL_TYPES as readonly string[]).includes(channel.type),
+    );
   }
 
   /**
@@ -2066,10 +2074,49 @@ export class ChannelGateway {
   }
 
   /**
+   * Delete channels whose type is no longer supported (the discontinued Twitch
+   * and X channels): the row with its sealed config and credentials, and its
+   * pairings, sessions and message log. Tasks those channels created are kept.
+   * There is no adapter to log out. A failing row is retried on the next start.
+   */
+  private async removeRetiredChannels(): Promise<void> {
+    let channels: Channel[];
+    try {
+      channels = await this.channelRepo.findAll();
+    } catch (error) {
+      logger.warn("Failed to list channels for retired channel cleanup:", error);
+      return;
+    }
+
+    const removedByType = new Map<string, number>();
+    for (const channel of channels) {
+      if ((CHANNEL_TYPES as readonly string[]).includes(channel.type)) continue;
+      try {
+        await this.channelRepo.delete(channel.id);
+      } catch (error) {
+        logger.warn(`Failed to remove retired ${channel.type} channel ${channel.id}:`, error);
+        continue;
+      }
+      removedByType.set(channel.type, (removedByType.get(channel.type) ?? 0) + 1);
+      // Channel ids are UUIDs; never resolve a recursive delete from anything else.
+      if (/^[A-Za-z0-9_-]+$/.test(channel.id)) {
+        await fs.promises
+          .rm(this.getWebhookStateDir(channel.id), { recursive: true, force: true })
+          .catch((error) => logger.warn("Failed to remove retired channel state:", error));
+      }
+    }
+
+    if (removedByType.size > 0) {
+      const summary = [...removedByType].map(([type, count]) => `${type} x${count}`).join(", ");
+      logger.info(`Removed discontinued channels: ${summary}`);
+    }
+  }
+
+  /**
    * Load and register channel adapters
    */
   private async loadChannels(): Promise<void> {
-    const channels = await this.channelRepo.findAll();
+    const channels = await this.getChannels();
 
     for (const channel of channels) {
       try {

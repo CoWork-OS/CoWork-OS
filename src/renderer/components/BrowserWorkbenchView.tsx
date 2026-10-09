@@ -58,6 +58,8 @@ import { TabStrip, type TabMenuCommand } from "./BrowserWorkbench/TabStrip";
 import {
   type BrowserPermissionChoice,
   type BrowserPermissionPromptRequest,
+  livePermissionRequests,
+  PERMISSION_PROMPT_SYNC_MS,
   PermissionPrompt,
 } from "./BrowserWorkbench/PermissionPrompt";
 import { type BrowserPageDialogRequest, PageDialog } from "./BrowserWorkbench/PageDialog";
@@ -311,8 +313,8 @@ export function BrowserWorkbenchView({
   } = useBrowserTabs(
     browserTabsStorageKey(workspaceId, taskId, sessionId),
     initialNavigationUrl,
-    // Settings load asynchronously; until then restore (the default).
-    !browserSettingsLoaded || browserSettings.restoreTabs,
+    // Settings load asynchronously; undefined restores (the default) until they arrive.
+    browserSettingsLoaded ? browserSettings.restoreTabs : undefined,
   );
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -536,12 +538,14 @@ export function BrowserWorkbenchView({
 
   /** User-chosen URLs go through the main process: local dev servers get allowed, blocks get explained. */
   const checkUserNavigation = useCallback(
-    async (tabId: string, url: string): Promise<boolean> => {
+    async (tabId: string, url: string, isCurrent?: () => boolean): Promise<boolean> => {
       const check = window.electronAPI.browserWorkbenchUserNavigate;
       if (!check) return true;
       try {
         const result = await check({ taskId, sessionId, tabId, url });
         if (result.allowed) return true;
+        // A newer navigation in this tab owns its address and notice now.
+        if (isCurrent && !isCurrent()) return false;
         updateTab(tabId, {
           url: result.url || url,
           loading: false,
@@ -559,13 +563,14 @@ export function BrowserWorkbenchView({
     [sessionId, taskId, updateTab],
   );
 
-  const handleTabStatus = useCallback(
-    (tabId: string, status: { url: string; title: string }) => {
-      if (tabId !== activeTabId) return;
-      onStatusChangeRef.current?.(status);
-    },
-    [activeTabId],
-  );
+  // Tabs keep the status callback they mounted with, so it reads the active tab
+  // through a ref: a background tab must never report its URL as the current one.
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const handleTabStatus = useCallback((tabId: string, status: { url: string; title: string }) => {
+    if (tabId !== activeTabIdRef.current) return;
+    onStatusChangeRef.current?.(status);
+  }, []);
 
   const handleGuardFailed = useCallback((tabId: string) => {
     if (tabId) setToolbarNotice("Browser network guards could not be installed.");
@@ -604,10 +609,12 @@ export function BrowserWorkbenchView({
     return () => unsubscribe?.();
   }, [sessionId, taskId, updateTab]);
 
+  const answeredPermissionIdsRef = useRef(new Set<string>());
   useEffect(() => {
     let cancelled = false;
     const addRequest = (prompt: BrowserPermissionPromptRequest) =>
       setPermissionRequests((current) =>
+        answeredPermissionIdsRef.current.has(prompt.requestId) ||
         current.some((request) => request.requestId === prompt.requestId)
           ? current
           : [...current, prompt],
@@ -627,6 +634,44 @@ export function BrowserWorkbenchView({
       unsubscribe?.();
     };
   }, [sessionId, taskId]);
+
+  // The main process drops a prompt on its own timeout or when the page's process
+  // goes away (tab closed, crashed or discarded) without telling this view, and
+  // only the oldest prompt of a tab is shown: re-read the pending list so a dead
+  // prompt neither lingers nor hides the ones behind it.
+  const tabIdsKey = tabs.map((tab) => tab.id).join("\n");
+  const hasPermissionRequests = permissionRequests.length > 0;
+  useEffect(() => {
+    if (!hasPermissionRequests) return;
+    const list = window.electronAPI.listBrowserWorkbenchPermissionRequests;
+    if (!list) return;
+    let cancelled = false;
+    const tabIds = new Set(tabIdsKey.split("\n"));
+    const sync = () => {
+      void list({ taskId, sessionId })
+        .then((pending) => {
+          if (cancelled) return;
+          const live = livePermissionRequests(
+            pending || [],
+            answeredPermissionIdsRef.current,
+            tabIds,
+          );
+          setPermissionRequests((current) =>
+            current.length === live.length &&
+            current.every((request, index) => request.requestId === live[index].requestId)
+              ? current
+              : live,
+          );
+        })
+        .catch(() => undefined);
+    };
+    sync();
+    const timer = window.setInterval(sync, PERMISSION_PROMPT_SYNC_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasPermissionRequests, sessionId, tabIdsKey, taskId]);
 
   // Page alert/confirm while CoWork's debugger owns the page's dialogs.
   const [pageDialogs, setPageDialogs] = useState<BrowserPageDialogRequest[]>([]);
@@ -666,6 +711,7 @@ export function BrowserWorkbenchView({
   );
 
   const respondToPermission = useCallback((requestId: string, choice: BrowserPermissionChoice) => {
+    answeredPermissionIdsRef.current.add(requestId);
     setPermissionRequests((current) =>
       current.filter((request) => request.requestId !== requestId),
     );

@@ -8,6 +8,8 @@ import { BrowserService } from "../../browser/browser-service";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import { BrowserUseCloudClient } from "../../browser/browser-use-cloud-client";
+import { BrowserSettingsManager } from "../../../settings/browser-settings-manager";
+import { DEFAULT_BROWSER_SETTINGS } from "../../../../shared/browser-settings";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1154,6 +1156,286 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(closed).toMatchObject({ success: true, closedTabId: "tab-2" });
   });
 
+  it("lists, switches, opens and closes visible workbench tabs", async () => {
+    const workbenchTabs = [
+      { tabId: "tab-a", url: "https://a.example/", title: "A", active: true, kind: "tab" },
+      { tabId: "tab-b", url: "https://b.example/", title: "B", active: false, kind: "tab" },
+    ];
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+    } as Any;
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({ taskId: "task-1", sessionId: "default" }),
+      getTabs: vi.fn().mockReturnValue(workbenchTabs),
+      activateTab: vi.fn().mockReturnValue(true),
+      openTab: vi.fn().mockResolvedValue("tab-c"),
+      closeTab: vi.fn().mockReturnValue(true),
+      allowLocalPreviewUrl: vi.fn(),
+    };
+    const tools = new BrowserTools(workspace, daemon, "task-1", browserWorkbenchService as Any);
+    (tools as Any).browserService = { hasSession: () => false, close: vi.fn() };
+
+    expect(await tools.executeTool("browser_tabs", {})).toMatchObject({
+      success: true,
+      tabs: workbenchTabs,
+    });
+
+    const switched = await tools.executeTool("browser_switch_tab", { tab_id: "tab-b" });
+    expect(browserWorkbenchService.activateTab).toHaveBeenCalledWith({
+      taskId: "task-1",
+      sessionId: undefined,
+      tabId: "tab-b",
+      notifyRenderer: true,
+    });
+    expect(switched).toMatchObject({ success: true, tab: { tabId: "tab-b", active: true } });
+
+    const missing = await tools.executeTool("browser_switch_tab", { tab_id: "tab-x" });
+    expect(missing).toMatchObject({ success: false });
+    expect(String(missing.error)).toContain("browser_tabs");
+
+    const opened = await tools.executeTool("browser_new_tab", {});
+    expect(browserWorkbenchService.openTab).toHaveBeenCalledWith({
+      taskId: "task-1",
+      sessionId: undefined,
+      url: undefined,
+      background: false,
+    });
+    expect(opened).toMatchObject({ success: true, tabId: "tab-c", active: true });
+
+    const closed = await tools.executeTool("browser_close_tab", { tab_id: "tab-b" });
+    expect(browserWorkbenchService.closeTab).toHaveBeenCalledWith({
+      taskId: "task-1",
+      sessionId: undefined,
+      tabId: "tab-b",
+    });
+    expect(closed).toMatchObject({ success: true, closedTabId: "tab-b" });
+  });
+
+  it("marks workbench tool calls as driving and stops while the user has taken over", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "visible",
+    } as Any);
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+    } as Any;
+    const order: string[] = [];
+    let paused = false;
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({ taskId: "task-1", sessionId: "default" }),
+      isPausedByUser: vi.fn(() => paused),
+      beginDriving: vi.fn(() => order.push("begin")),
+      endDriving: vi.fn(() => order.push("end")),
+      snapshot: vi.fn(async () => {
+        order.push("snapshot");
+        return { success: true, nodes: [], url: "https://a.example/" };
+      }),
+      getTabs: vi.fn().mockReturnValue([]),
+    };
+    const tools = new BrowserTools(workspace, daemon, "task-1", browserWorkbenchService as Any);
+    (tools as Any).browserService = { hasSession: () => false, close: vi.fn() };
+
+    await tools.executeTool("browser_snapshot", {});
+    expect(order).toEqual(["begin", "snapshot", "end"]);
+    expect(browserWorkbenchService.beginDriving).toHaveBeenCalledWith(
+      "task-1",
+      undefined,
+      "browser_snapshot",
+    );
+
+    // Listing tabs reads CoWork's own state: it neither drives nor waits on a pause.
+    paused = true;
+    await tools.executeTool("browser_tabs", {});
+    const blocked = await tools.executeTool("browser_snapshot", {});
+    expect(blocked).toMatchObject({ success: false, error: "paused_by_user" });
+    expect(browserWorkbenchService.snapshot).toHaveBeenCalledTimes(1);
+    // Surface flags do not let tab tools past the pause.
+    expect(await tools.executeTool("browser_new_tab", { visible: false })).toMatchObject({
+      success: false,
+      error: "paused_by_user",
+    });
+  });
+
+  it("needs developer mode and a per-site approval for full DevTools tools", async () => {
+    const settings = vi.spyOn(BrowserSettingsManager, "loadSettings");
+    settings.mockReturnValue({ ...DEFAULT_BROWSER_SETTINGS, developerMode: false });
+    const requestApproval = vi.fn().mockResolvedValue(true);
+    const daemon = { logEvent: vi.fn(), registerArtifact: vi.fn(), requestApproval } as Any;
+    const evaluate = vi.fn().mockResolvedValue({ success: true, result: 2 });
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({
+        taskId: "task-1",
+        sessionId: "default",
+        url: "https://app.example/page",
+      }),
+      getTabs: vi.fn().mockReturnValue([]),
+      evaluate,
+    };
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "visible",
+    } as Any);
+    const tools = new BrowserTools(workspace, daemon, "task-1", browserWorkbenchService as Any);
+    (tools as Any).browserService = { hasSession: () => false, close: vi.fn() };
+
+    const off = await tools.executeTool("browser_evaluate", { script: "1+1" });
+    expect(off).toMatchObject({ success: false });
+    expect(String(off.error)).toContain("developer mode");
+    expect(requestApproval).not.toHaveBeenCalled();
+
+    settings.mockReturnValue({ ...DEFAULT_BROWSER_SETTINGS, developerMode: true });
+    await tools.executeTool("browser_evaluate", { script: "1+1" });
+    await tools.executeTool("browser_evaluate", { script: "2+2" });
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(requestApproval.mock.calls[0][3]).toMatchObject({
+      kind: "browser_developer_access",
+      origin: "https://app.example",
+    });
+  });
+
+  it("reports a popup the page opened and its closing", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "visible",
+    } as Any);
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+    } as Any;
+    let tabs = [{ tabId: "a", url: "https://a.example/", active: true, kind: "tab" }];
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({ taskId: "task-1", sessionId: "default" }),
+      getTabs: vi.fn(() => tabs),
+      clickRef: vi.fn(async () => {
+        tabs = [
+          { tabId: "a", url: "https://a.example/", active: false, kind: "tab" },
+          { tabId: "popup-1", url: "https://auth.example/", active: true, kind: "popup" },
+        ];
+        return { success: true };
+      }),
+      snapshot: vi.fn(async () => {
+        tabs = [{ tabId: "a", url: "https://a.example/", active: true, kind: "tab" }];
+        return { success: true, nodes: [] };
+      }),
+    };
+    const tools = new BrowserTools(workspace, daemon, "task-1", browserWorkbenchService as Any);
+    (tools as Any).browserService = { hasSession: () => false, close: vi.fn() };
+
+    const clicked = await tools.executeTool("browser_click", { ref: "b2:snap-1:3" });
+    expect(clicked).toMatchObject({
+      success: true,
+      switchedToTab: { tabId: "popup-1", kind: "popup" },
+    });
+    const after = await tools.executeTool("browser_snapshot", {});
+    expect(after).toMatchObject({ activeTabClosed: "popup-1", activeTabId: "a" });
+  });
+
+  it("opens the visible workbench for @Browser even when browsing defaults to the background", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+    } as Any);
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+      recordSensitiveSourceRead: vi.fn(),
+      getTaskById: vi.fn(async () => ({
+        id: "task-1",
+        agentConfig: { integrationMentions: [{ id: "builtin:browser-use", label: "Browser" }] },
+      })),
+    } as Any;
+    const navigate = vi.fn().mockResolvedValue({
+      success: true,
+      url: "https://example.com/",
+      title: "Example",
+      visible: true,
+    });
+    const tools = new BrowserTools(workspace, daemon, "task-1", {
+      getSession: vi.fn().mockReturnValue(null),
+      getTabs: vi.fn().mockReturnValue([]),
+      navigate,
+    } as Any);
+    const headlessNavigate = vi.fn();
+    (tools as Any).browserService = { navigate: headlessNavigate, close: vi.fn() };
+    vi.spyOn(tools as Any, "ensureVisibleNavigationAllowed").mockResolvedValue(
+      "https://example.com/",
+    );
+
+    const result = await tools.executeTool("browser_navigate", { url: "https://example.com/" });
+    expect(result).toMatchObject({ visible: true });
+    expect(navigate).toHaveBeenCalled();
+    expect(headlessNavigate).not.toHaveBeenCalled();
+  });
+
+  it("asks once before searching browsing history", async () => {
+    const db = new Database(":memory:");
+    const { BROWSER_HISTORY_SCHEMA_SQL, BrowserHistoryStore } =
+      await import("../../../database/BrowserHistoryRepository");
+    db.exec(BROWSER_HISTORY_SCHEMA_SQL);
+    // The responsibility policy check reads the task row.
+    db.exec(
+      "CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, parent_task_id TEXT, agent_config TEXT)",
+    );
+    db.prepare("INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'workspace-1')").run();
+    new BrowserHistoryStore(db).recordVisit({
+      profileKey: "workspace-1",
+      url: "https://pricing.example/plans",
+      title: "Pricing plans",
+    });
+    const requestApproval = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval,
+      recordSensitiveSourceRead: vi.fn(),
+      getDatabase: () => db,
+    } as Any;
+    const tools = new BrowserTools(workspace, daemon, "task-1", {
+      getSession: vi.fn().mockReturnValue(null),
+      getTabs: vi.fn().mockReturnValue([]),
+    } as Any);
+
+    const denied = await tools.executeTool("browser_history_search", { query: "pricing" });
+    expect(denied).toMatchObject({ success: false });
+    const found = await tools.executeTool("browser_history_search", { query: "pricing" });
+    expect(found).toMatchObject({
+      success: true,
+      results: [expect.objectContaining({ url: "https://pricing.example/plans" })],
+    });
+    await tools.executeTool("browser_history_search", { query: "plans" });
+    expect(requestApproval).toHaveBeenCalledTimes(2);
+    expect(requestApproval.mock.calls[0][4]).toEqual({ allowAutoApprove: false });
+  });
+
+  it("keeps the last workbench tab open and needs a workbench for new tabs", async () => {
+    const daemon = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      requestApproval: vi.fn(),
+    } as Any;
+    const lastTab = [
+      { tabId: "tab-a", url: "https://a.example/", title: "A", active: true, kind: "tab" },
+    ];
+    const browserWorkbenchService = {
+      getSession: vi.fn().mockReturnValue({ taskId: "task-1", sessionId: "default" }),
+      getTabs: vi.fn().mockReturnValue(lastTab),
+      closeTab: vi.fn(),
+    };
+    const tools = new BrowserTools(workspace, daemon, "task-1", browserWorkbenchService as Any);
+    (tools as Any).browserService = { hasSession: () => false, close: vi.fn() };
+
+    const closed = await tools.executeTool("browser_close_tab", { tab_id: "tab-a" });
+    expect(closed).toMatchObject({ success: false });
+    expect(browserWorkbenchService.closeTab).not.toHaveBeenCalled();
+
+    browserWorkbenchService.getSession.mockReturnValue(null);
+    const opened = await tools.executeTool("browser_new_tab", {});
+    expect(opened).toMatchObject({ success: false });
+    expect(String(opened.error)).toContain("visible workbench");
+  });
+
   it("arms the next headless dialog decision instead of requiring the visible workbench", async () => {
     const armNextDialog = vi.fn().mockReturnValue({
       nextDialog: { action: "accept", promptText: "my-project" },
@@ -1246,6 +1528,10 @@ describe("BrowserTools headless browser capabilities", () => {
 
     it("uploads a workspace file into a headless file input", async () => {
       setup();
+      vi.spyOn(BrowserSettingsManager, "loadSettings").mockReturnValue({
+        ...DEFAULT_BROWSER_SETTINGS,
+        agentUploads: "allow",
+      });
       try {
         fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
         const uploadFile = vi.fn().mockResolvedValue({ success: true, selector: "#cv" });
@@ -1312,8 +1598,48 @@ describe("BrowserTools headless browser capabilities", () => {
       }
     });
 
+    it("follows the CoWork upload setting: block refuses, ask requests approval", async () => {
+      setup();
+      try {
+        fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
+        const uploadFile = vi.fn().mockResolvedValue({ success: true });
+        const { tools, daemon } = makeHeadlessTools({ uploadFile }, uploadWorkspace);
+        const settings = vi.spyOn(BrowserSettingsManager, "loadSettings");
+
+        settings.mockReturnValue({ ...DEFAULT_BROWSER_SETTINGS, agentUploads: "block" });
+        const blocked = await tools.executeTool("browser_upload_file", {
+          file_path: "resume.pdf",
+          selector: "#cv",
+        });
+        expect(blocked).toMatchObject({ success: false });
+        expect(String(blocked.error)).toContain("blocked");
+
+        settings.mockReturnValue({ ...DEFAULT_BROWSER_SETTINGS, agentUploads: "ask" });
+        daemon.requestApproval.mockResolvedValueOnce(false);
+        const denied = await tools.executeTool("browser_upload_file", {
+          file_path: "resume.pdf",
+          selector: "#cv",
+        });
+        expect(denied).toMatchObject({ success: false });
+        expect(daemon.requestApproval).toHaveBeenLastCalledWith(
+          "task-1",
+          "browser",
+          expect.stringContaining("resume.pdf"),
+          expect.objectContaining({ kind: "browser_upload" }),
+          { allowAutoApprove: false },
+        );
+        expect(uploadFile).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    });
+
     it("requires a selector for headless uploads", async () => {
       setup();
+      vi.spyOn(BrowserSettingsManager, "loadSettings").mockReturnValue({
+        ...DEFAULT_BROWSER_SETTINGS,
+        agentUploads: "allow",
+      });
       try {
         fs.writeFileSync(path.join(workspaceRoot, "resume.pdf"), "pdf");
         const uploadFile = vi.fn();
@@ -1424,6 +1750,7 @@ describe("BrowserTools headless browser capabilities", () => {
     expect(descriptionOf("browser_tabs")).toContain("popup");
     expect(descriptionOf("browser_switch_tab")).toContain("browser_tabs");
     expect(descriptionOf("browser_close_tab")).toContain("headless");
+    expect(descriptionOf("browser_new_tab")).toContain("tab_id");
   });
 });
 

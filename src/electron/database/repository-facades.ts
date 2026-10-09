@@ -44,6 +44,7 @@ import type {
 } from "./browser-host-sql";
 import type { ComposerDraftStore } from "./composer-draft-repository";
 import type { TaskLabelStore } from "./TaskLabelRepository";
+import type { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import type { DeviceProfileStore } from "./DeviceProfileRepository";
 import type { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
 import type { STORAGE_UNITS } from "./storage-units";
@@ -421,6 +422,24 @@ export const ComposerDraftRepository = repositoryFacade<
   ComposerDraftStore,
   (typeof COMPOSERDRAFT_METHODS)[number]
 >("composerDraft_", COMPOSERDRAFT_METHODS);
+
+const BROWSER_HISTORY_METHODS = [
+  "recordVisit",
+  "updatePage",
+  "findById",
+  "search",
+  "list",
+  "remove",
+  "clear",
+] as const;
+export type BrowserHistoryRepository = AsyncStore<
+  BrowserHistoryStore,
+  (typeof BROWSER_HISTORY_METHODS)[number]
+>;
+export const BrowserHistoryRepository = repositoryFacade<
+  BrowserHistoryStore,
+  (typeof BROWSER_HISTORY_METHODS)[number]
+>("browserHistory_", BROWSER_HISTORY_METHODS);
 
 const TASKLABEL_METHODS = [
   "create",

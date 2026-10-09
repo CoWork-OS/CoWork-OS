@@ -231,6 +231,10 @@ const EventTriggersPanel = lazySettingsPanel(
   "EventTriggersPanel",
 );
 const BriefingPanel = lazySettingsPanel(() => import("./BriefingPanel"), "BriefingPanel");
+const BrowserSettingsPanel = lazySettingsPanel(
+  () => import("./BrowserSettingsPanel"),
+  "BrowserSettingsPanel",
+);
 const WebAccessSettingsPanel = lazySettingsPanel(
   () => import("./WebAccessSettingsPanel"),
   "WebAccessSettingsPanel",
@@ -296,11 +300,13 @@ type SettingsTab =
   | "briefing"
   | "subconscious"
   | "access"
-  | "webaccess";
+  | "webaccess"
+  | "browser";
 
 // A missing browser service should produce an explanation, never an endless loading panel.
 const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
   appearance: [],
+  browser: ["getBrowserSettings", "saveBrowserSettings"],
   personality: ["getPersonalityConfigV2", "getRelationshipStats", "savePersonalityConfigV2"],
   aimodels: ["getLLMSettings", "saveLLMSettings"],
   jev: ["testJevProvider"],
@@ -867,6 +873,12 @@ const sidebarItems: SidebarItem[] = [
     label: "Access",
     group: "Advanced",
     icon: <Monitor {...I} />,
+  },
+  {
+    tab: "browser",
+    label: "Browser",
+    group: "Advanced",
+    icon: <Globe {...I} />,
   },
   {
     tab: "extensions",
@@ -9550,6 +9562,8 @@ export function Settings({
                   <ChronicleSettingsCard />
                   <ComputerUseSettings />
                 </div>
+              ) : activeTab === "browser" ? (
+                <BrowserSettingsPanel workspaceId={workspaceId} />
               ) : activeTab === "access" ? (
                 <div className="more-channels-panel">
                   <div className="more-channels-header">

@@ -47,6 +47,7 @@ const READ_PARALLEL_TOOLS = new Set([
   "scratchpad_read",
   "browser_snapshot",
   "browser_tabs",
+  "browser_history_search",
   "browser_console",
   "browser_network",
   "browser_downloads",
@@ -265,6 +266,7 @@ function inferReadOnly(toolName: string, concurrencyClass: RuntimeToolConcurrenc
       toolName === "browser_get_text" ||
       toolName === "browser_snapshot" ||
       toolName === "browser_tabs" ||
+      toolName === "browser_history_search" ||
       toolName === "browser_console" ||
       toolName === "browser_network" ||
       toolName === "browser_downloads" ||

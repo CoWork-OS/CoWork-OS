@@ -74,6 +74,8 @@ const BROWSER_TOOLS = new Set([
   "browser_tabs",
   "browser_switch_tab",
   "browser_close_tab",
+  "browser_new_tab",
+  "browser_history_search",
   "browser_get_content",
   "browser_click",
   "browser_hover",

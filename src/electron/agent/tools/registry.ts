@@ -125,6 +125,8 @@ import {
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import { BuiltinToolsSettingsManager } from "./builtin-settings";
+import { BrowserSettingsManager } from "../../settings/browser-settings-manager";
+import { DEVELOPER_MODE_BROWSER_TOOLS } from "../../../shared/browser-settings";
 import { getCustomSkillLoader } from "../custom-skill-loader";
 import { SkillProposalService } from "../skills/SkillProposalService";
 import { SkillEvalService, type SkillEvalCase } from "../skills/SkillEvalService";
@@ -1665,6 +1667,14 @@ export class ToolRegistry {
         ].includes(tool.name)
       ) {
         return true;
+      }
+      // Page scripts, storage and traces need developer mode (Settings > Browser).
+      if (
+        DEVELOPER_MODE_BROWSER_TOOLS.has(tool.name) &&
+        !BrowserSettingsManager.loadSettings().developerMode
+      ) {
+        disabledBySettings.push(tool.name);
+        return false;
       }
       // Check built-in tool settings
       const isEnabled = BuiltinToolsSettingsManager.isToolEnabled(tool.name);

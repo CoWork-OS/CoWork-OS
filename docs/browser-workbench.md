@@ -84,6 +84,8 @@ Browser tools first route to the active Browser Workbench session for the select
 - `browser_tabs`
 - `browser_switch_tab`
 - `browser_close_tab`
+- `browser_new_tab`
+- `browser_history_search` (asks the user once per task)
 - `browser_console`
 - `browser_network`
 - `browser_downloads`
@@ -132,17 +134,17 @@ Snapshot output is treated as untrusted web content. The agent can use it to dec
 
 The Browser Workbench header and toolbar are functional, not cosmetic:
 
-- **Back / Forward / Reload** control the embedded webview history and page reload.
-- **URL bar** navigates the current workbench session.
+- **Back / Forward / Reload** control the active tab's history and reload; reload becomes Stop while a page loads.
+- **Address bar** navigates the active tab, or searches when the input is not an address (see Address Bar, Tabs And Shortcuts below).
 - **Viewport presets** resize the visible webview to desktop, tablet, or mobile breakpoints for responsive checks.
 - **Screenshot** captures the current visible browser page into the workspace.
 - **Diagnostics** opens a compact browser panel for console, network, downloads, storage, and trace context.
-- **Snapshot overlay** shows the class of element regions the agent can target from Browser V2 snapshots.
+- **Snapshot overlay** draws the boxes and refs of CoWork's latest snapshot of the tab.
 - **Annotate screenshot** captures the page, opens an annotation layer, and can save the marked-up image or send it to the agent as an image attachment.
 - **Fullscreen** promotes the same browser session into the full app view.
 - **Close** closes the workbench and restores the normal right panel.
 
-The workbench keeps the same browser session when moving between sidebar and fullscreen. Closing the workbench unregisters the visible session from the main process.
+The workbench keeps its pages loaded when moving between sidebar and fullscreen. Closing the workbench unregisters its tabs from the main process; reopening it restores the tabs' URLs.
 
 ## Sidebar And Fullscreen
 
@@ -167,17 +169,54 @@ For sites that require an existing signed-in Chrome profile, use an explicit fal
 
 `browser_attach` and `debugger_url` (attaching to an already-running Chrome or Edge over the DevTools Protocol) are refused under the enforced network policy. Sign in inside the Browser Workbench or use a dedicated browser profile instead. Real signed-in Chrome control requires explicit user consent, and the default embedded Browser Workbench never reuses system Chrome cookies automatically.
 
+## Tabs, Popups And Local Pages
+
+- Each workbench tab keeps its own mounted webview, so switching tabs keeps scroll position, form input and history. Inactive tabs are hidden, not unloaded; beyond 12 live tabs the least recently used ones are unloaded and reload their URL when selected.
+- Every tab registers with the main process (`{ taskId, sessionId, tabId, webContentsId }`) before it loads anything; an unregistered page is denied every request. Tools act on the active tab: `browser_tabs` lists all tabs, `browser_switch_tab` and `browser_close_tab` work on workbench tabs, and `browser_new_tab` opens one. Snapshot refs belong to one tab; a ref used on another tab fails with the owning tab id.
+- Links with `target=_blank` and plain `window.open(url)` open as workbench tabs next to the page that opened them. `window.open` with window features (OAuth and payment popups) opens a real popup window on the same partition, so `window.opener` works; it is registered as a `popup` tab and becomes the tab tools act on until it closes. Popup targets are checked against the task's access profile first.
+- Switching between the sidebar and full view keeps the pages loaded: the workbench is mounted once and positioned over the sidebar slot instead of being remounted. Closing the workbench and opening it again for the same task restores the tabs' URLs for the app session (pages reload).
+- A local dev server typed into the address bar (for example `localhost:5173`) opens for the rest of the session; allowances the agent or a preview creates expire after five minutes without use. Loopback allowances cover the whole origin, so the server's routes and assets load. Local HTML files still need an explicit preview.
+- Blocked, failed and crashed pages show a notice in the tab with the reason (access profile, admin policy, local page not opened, unsupported link type) instead of doing nothing. A policy block cannot be overridden from the notice.
+- The workbench presents a Chrome-compatible user agent (the bundled Chrome version, without Electron or app tokens) so sites that refuse embedded browsers render normally. Use the real Chrome profile option for sites that still refuse.
+
+## Address Bar, Tabs And Shortcuts
+
+- Address bar: typing words searches with the default search engine (Settings > Browser, or the picker at the bottom of the suggestions); URL-looking input (`example.com`, `localhost:5173`, an IP) navigates. Suggestions come from history, open tabs and recently closed tabs. The chip on the left shows the connection (secure, not secure, local, blocked) and copies the address; a zoom badge appears when the page is zoomed.
+- Tab strip: favicons, loading and audio indicators, middle-click to close, drag to reorder, pinned tabs, and a tab menu (new tab to the right, reload, duplicate, pin, mute, close, close others, close to the right, reopen closed tab).
+- Shortcuts while the page or the workbench has focus (they replace the app's Cmd+R / Cmd+W / zoom there): Cmd+T, Cmd+W, Cmd+Shift+T, Ctrl+Tab, Cmd+Shift+] / [, Cmd+1–9, Cmd+L, Cmd+R, Cmd+Shift+R, Cmd+[ / ], Cmd+F, Cmd+G, Cmd+Shift+G, Cmd+= / - / 0, Cmd+Shift+B (sidebar ↔ full view). Ctrl replaces Cmd on Windows and Linux. Other keys reach the page.
+- Find in page (match count, match case), per-site zoom (remembered), trackpad pinch, trackpad swipe and mouse back/forward buttons.
+- Right-click menu in pages: navigation, link and image actions, copy/paste and spelling, search the web, Ask CoWork About This, Annotate This Element, Take Screenshot, and Inspect Element in developer mode.
+- Diagnostics drawer: the visible tab's console (level filter, search, clear, send errors to CoWork), network (failed only), downloads, storage and trace.
+- Snapshot overlay: boxes and refs from CoWork's latest `browser_snapshot` of the tab. It never takes a snapshot itself.
+
+## Working Alongside CoWork
+
+- `@Browser` in the composer opens the in-app browser for the task, and CoWork then browses in the visible workbench even when browsing defaults to the background.
+- When an action makes the page open a popup or tab, the result reports `switchedToTab` and later actions target it; when that popup closes, the result reports `activeTabClosed` and actions return to its opener.
+- Annotate: click an element, or drag to annotate an area (the elements inside it are recorded). For one element, Adjust edits text, font, size, weight, line height, colors, margin, padding, radius and alignment with a live preview in the page; the annotation carries the requested changes and before/after screenshots, and the page is put back when the annotation is saved or cancelled.
+
+- While CoWork acts in the workbench, a banner says what it is doing and a click on the page asks whether to take over. Taking over pauses CoWork: its next browser tool calls return `paused_by_user` until you press Resume.
+- When an agent navigation lands on a sign-in page (a known identity provider, or a login page with a password field), the tool result says `needs_user_sign_in` and the workbench asks you to sign in; Done tells CoWork to continue.
+- The profile menu (person icon) clears browsing data, signs out of all sites, opens the page in the system browser, and opens Settings > Browser.
+
 ## Downloads, Uploads, Dialogs, And Permissions
 
 Browser V2 treats browser side effects as governed workspace actions:
 
-- Downloads are tracked in session diagnostics and should default to workspace artifacts.
-- Executable downloads are not run automatically.
+- Downloads you start go to the system Downloads folder, the workspace's `downloads/` folder, or a save dialog (Settings > Browser). Downloads CoWork causes always go to the workspace's `downloads/` folder, and Settings > Browser decides whether they are allowed, asked for, or blocked. A download's URL must pass the tab's access policy; downloads from pages that are not workbench tabs are cancelled. The download shelf shows progress, pause, resume, cancel, open and show in folder, and `browser_downloads` reports the saved file.
+- Executables, installers, scripts and archives are flagged: they are never opened automatically and opening one asks first.
 - Uploads require workspace-readable file paths and path validation.
 - JavaScript dialogs are handled with `browser_handle_dialog` and should be visible in diagnostics.
-- Camera, microphone, location, clipboard, notifications, downloads, uploads, and real-browser profile control should surface permission prompts instead of being silently granted.
+- Site permissions are never granted silently. Fullscreen, sanitized clipboard writes and encrypted media playback are allowed; camera, microphone, location, notifications, clipboard reads, MIDI, HID, serial, USB, pointer/keyboard lock, file system access and opening external apps show a prompt in the tab (Allow this time, Always allow, Never allow); everything else, including screen capture, is denied. "Always" and "Never" are remembered per workspace browser profile and site. Pages that are not registered workbench tabs are denied.
+- Downloads, uploads, and real-browser profile control should surface permission prompts instead of being silently granted.
 - Console, network, storage, and download metadata are redacted before entering agent context.
 - The active access profile is checked before these browser actions; a profile or domain deny cannot be widened by a backend switch or a one-shot approval.
+
+## History And Settings
+
+- Pages visited in workbench tabs are recorded per workspace browser profile (URL, title, visit count and time). Credentials, fragments and secret-looking query parameters (tokens, OAuth codes) are removed before anything is stored; non-web URLs and popup windows are not recorded. Up to 10,000 pages are kept per profile.
+- Developer mode gates `browser_evaluate`, `browser_storage` and `browser_trace_start`/`browser_trace_stop`: without it they are not offered to CoWork, and with it the first use on each site in a task asks for approval. Uploads by CoWork follow the upload setting (ask each time by default).
+- Settings > Browser: search engine, download location, restore tabs, open conversation links in the in-app browser, Chrome-compatible user agent (applies after restart), recording history, CoWork downloads and uploads (ask / allow / block), developer mode, and per-workspace history, remembered site permissions and browsing data. Access profiles and admin policies still decide which sites can be reached; these settings cannot widen them.
 
 ## Relationship To Web Page Artifacts
 
@@ -246,7 +285,11 @@ Browser Use Cloud API errors, live URLs, and CDP URLs are redacted before enteri
 
 Key files:
 
-- `src/renderer/components/BrowserWorkbenchView.tsx`: renderer-owned webview, tab strip, toolbar, diagnostics drawer, snapshot overlay, fullscreen mode, screenshot annotation, follow-up composer, and visible cursor overlay
+- `src/renderer/components/BrowserWorkbenchView.tsx`: tab strip, toolbar, diagnostics drawer, snapshot overlay, fullscreen mode, screenshot annotation, follow-up composer, and visible cursor overlay
+- `src/renderer/components/BrowserWorkbench/`: tab state and session restore (`browser-tabs-model.ts`, `useBrowserTabs.ts`), one webview per tab (`BrowserTabView.tsx`), blocked/failed/crashed notices, the permission prompt, and the dock that keeps the workbench mounted across sidebar and full view
+- `src/electron/browser/browser-guest-attach.ts`: window-open handling (tabs and registered popup windows)
+- `src/electron/browser/browser-permissions.ts`: site permission handlers and remembered decisions
+- `src/electron/browser/browser-user-agent.ts`: Chrome-compatible user agent for the browser partitions
 - `src/electron/browser/browser-session-manager.ts`: Browser V2 session registry, backend kind, CDP actions, accessibility snapshots, ref staleness, diagnostics, uploads, downloads, storage, emulation, and trace state
 - `src/electron/browser/browser-workbench-service.ts`: main-process bridge that maps `{ taskId, sessionId }` to the renderer webview `webContentsId`, routes Browser V2 actions, captures screenshots, and emits cursor and viewport events
 - `src/electron/agent/browser/browser-use-cloud-client.ts`: Browser Use Cloud API client, credential lookup, private-target blocking, and error redaction
@@ -259,21 +302,28 @@ The deeper implementation contract lives in [Browser V2 Architecture](browser-v2
 
 ## Verification
 
-Manual smoke checks:
+Automated end-to-end check in the real app (disposable profile, local fixture site, no model needed):
 
-1. Run a task such as `go to example.com and test the application as a normal user`.
-2. Confirm the Browser Workbench opens in the right sidebar.
-3. Confirm the page uses the full sidebar width and height.
-4. Confirm back, forward, reload, screenshot, annotate, fullscreen, and close controls work.
-5. Confirm the visible cursor moves during agent clicks, fills, reads, waits, scrolls, and navigation.
-6. Call `browser_snapshot` and confirm refs are returned.
-7. Use refs for click/fill/type/get-text actions, then confirm stale refs require a fresh snapshot after navigation or layout changes.
-8. Toggle the snapshot overlay and diagnostics drawer.
-9. Capture console, network, downloads, storage, and trace diagnostics.
-10. Call `browser_emulate` for desktop, tablet, and mobile dimensions and confirm the visible workbench resizes with a size badge.
-11. Capture screenshots at each breakpoint and confirm the saved image dimensions match the controlled viewport.
-12. Toggle fullscreen and confirm the same session is preserved.
-13. Send a follow-up from fullscreen and confirm the prompt clears, the context frame switches to working, and the browser remains visible.
+```bash
+npm run build:electron
+npm run build:react
+node scripts/qa/browser-workbench-smoke.mjs
+```
+
+It opens the workbench from the title bar and checks: a typed local dev server address loads; three tabs keep form input, scroll and page state when switching; `target=_blank` opens a tab; a `window.open` sign-in popup posts to its opener and closes; five sidebar/full-view switches keep the page loaded; Cmd+F counts matches; Cmd+= zooms; a geolocation request prompts in the tab and "Never allow" is remembered; a download lands in the workspace and on the shelf; closing and reopening restores the tabs; a link to an unopened local port shows the blocked notice. Results and screenshots go to a temporary folder printed at the end.
+
+Manual checks (things the harness cannot drive):
+
+1. Right-click a page, a link, an image, selected text and a text field; confirm the native menus and their actions (open in new tab, copy, search, Ask CoWork, spelling suggestions).
+2. Use the keyboard shortcuts with focus in the page and in the address bar; confirm Cmd+R and Cmd+W act on the tab, not the app.
+3. Trackpad swipe and mouse back/forward buttons over the browser.
+4. Sign in to Google in the workbench (Chrome-compatible user agent).
+5. Run a task with `@Browser`: the browser opens, the "CoWork is using this tab" banner appears, clicking the page offers Take over, and Resume continues the task.
+6. Let an agent navigate to a sign-in page; confirm the sign-in banner and that Done continues.
+7. Annotate an area by dragging, and Adjust an element's text and font size; confirm the live preview, the sent changes and that the page is restored.
+8. Settings > Browser: change the search engine, clear history, reset a site permission, toggle developer mode and confirm `browser_evaluate` asks for approval once per site.
+9. Settings > Browser > "Use the classic browser" switches to the previous single-tab workbench (rollback for one release).
+10. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
 
 Build checks:
 
@@ -281,4 +331,6 @@ Build checks:
 npm run build:react
 npm run build:electron
 npm run type-check
+npm run lint
+npm run test
 ```

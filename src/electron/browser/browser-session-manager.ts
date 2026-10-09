@@ -104,7 +104,15 @@ export interface BrowserNetworkEntry {
   failed?: boolean;
   errorText?: string;
   timestamp: number;
+  /** Downloads: file name, where it was saved, and its state. */
+  filename?: string;
+  savePath?: string;
+  state?: string;
+  agentInitiated?: boolean;
 }
+
+/** "tab" is a workbench tab the renderer shows; "popup" is a window a page opened. */
+export type BrowserTabKind = "tab" | "popup";
 
 export interface BrowserTabInfo {
   tabId: string;
@@ -112,14 +120,42 @@ export interface BrowserTabInfo {
   url: string;
   active: boolean;
   backend: BrowserBackendKind;
+  kind: BrowserTabKind;
+  openerTabId?: string;
 }
 
-interface ElectronWorkbenchSessionRegistration {
+export interface ElectronWorkbenchSessionRegistration {
   taskId: string;
   sessionId?: string;
+  /** Workbench tab this webContents renders; defaults to the single legacy tab id. */
+  tabId?: string;
+  kind?: BrowserTabKind;
+  openerTabId?: string;
+  /** Make this the tab tools act on. A session's first tab is always activated. */
+  activate?: boolean;
   webContentsId: number;
   url?: string;
   title?: string;
+}
+
+export type BrowserNavigationBlockReason = "policy" | "local_preview" | "scheme";
+
+export interface BrowserNavigationBlockedEvent {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  url: string;
+  reason: BrowserNavigationBlockReason;
+  /** Policy decision reason (e.g. profile_domain_denied) when reason is "policy". */
+  detail?: string;
+  at: number;
+}
+
+export interface BrowserTabOwner {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  kind: BrowserTabKind;
 }
 
 export interface BrowserSessionAccessPolicy {
@@ -128,15 +164,19 @@ export interface BrowserSessionAccessPolicy {
   profileDomainRules?: AccessDomainRule[];
 }
 
+/** One browser tab (webContents) of a workbench session. */
 interface BrowserSessionRecord {
   taskId: string;
   sessionId: string;
+  tabId: string;
+  kind: BrowserTabKind;
+  openerTabId?: string;
   webContentsId: number;
   url: string;
   title: string;
   backend: BrowserBackendKind;
-  activeTabId: string;
   registeredAt: number;
+  lastActiveAt: number;
   latestSnapshotId?: string;
   /** URL (without fragment) of the document the current refs belong to. */
   snapshotUrl?: string;
@@ -155,6 +195,16 @@ interface BrowserSessionRecord {
   traceActive?: boolean;
 }
 
+/** The tabs of one workbench session (taskId + sessionId). */
+interface BrowserWorkbenchTabs {
+  taskId: string;
+  sessionId: string;
+  activeTabId: string;
+  tabs: Map<string, BrowserSessionRecord>;
+  /** Snapshot id -> tab id, so a ref used on the wrong tab gets a precise error. */
+  snapshotTabs: Map<string, string>;
+}
+
 interface BrowserRefTarget {
   snapshotId: string;
   backendNodeId?: number;
@@ -162,6 +212,9 @@ interface BrowserRefTarget {
   node: BrowserSnapshotNode;
 }
 
+/** Tab id used by callers that predate workbench tabs. */
+export const DEFAULT_BROWSER_TAB_ID = "active";
+const MAX_TRACKED_SNAPSHOTS = 60;
 const DEFAULT_SNAPSHOT_LIMIT = 140;
 const MAX_SNAPSHOT_LIMIT = 400;
 /** Remote objects created while acting on the page; released after each action. */
@@ -250,6 +303,26 @@ function normalizeSessionId(sessionId?: unknown): string {
 
 function sessionKey(taskId: string, sessionId?: unknown): string {
   return `${taskId}:${normalizeSessionId(sessionId)}`;
+}
+
+function normalizeTabId(tabId?: unknown): string {
+  const value = typeof tabId === "string" ? tabId.trim().slice(0, 120) : "";
+  return value || DEFAULT_BROWSER_TAB_ID;
+}
+
+function tabIdOrUndefined(tabId?: unknown): string | undefined {
+  const value = typeof tabId === "string" ? tabId.trim() : "";
+  return value ? value.slice(0, 120) : undefined;
+}
+
+/** Origin key for a loopback dev server ("http://localhost:5173"), or "" when not loopback. */
+function loopbackOrigin(rawUrl: string): string {
+  if (!isLoopbackHttpUrl(rawUrl)) return "";
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return "";
+  }
 }
 
 function getAxValue(value: unknown): string {
@@ -388,7 +461,7 @@ function looselyContains(actual: string, expected: string): boolean {
 }
 
 export class BrowserSessionManager {
-  private sessions = new Map<string, BrowserSessionRecord>();
+  private sessions = new Map<string, BrowserWorkbenchTabs>();
   private debuggerHandlers = new Map<number, (...args: Any[]) => void>();
   private accessPolicies = new Map<string, BrowserSessionAccessPolicy>();
   private accessGuardHandlers = new Map<
@@ -396,7 +469,14 @@ export class BrowserSessionManager {
     { contents: Any; willNavigate: Any; willRedirect: Any }
   >();
   private guardedWebRequestSessions = new WeakSet<object>();
+  /** Exact local HTML file URLs an agent or preview service opened (TTL). */
   private allowedLocalPreviewUrls = new Map<string, number>();
+  /** Loopback dev-server origins an agent or preview service opened (TTL). */
+  private allowedLoopbackOrigins = new Map<string, number>();
+  /** Loopback origins the user opened from the address bar, per session (no TTL). */
+  private userLoopbackOrigins = new Map<string, Set<string>>();
+  private navigationBlockedListener: ((event: BrowserNavigationBlockedEvent) => void) | null = null;
+  private recentBlocks = new Map<string, number>();
 
   private static readonly LOCAL_PREVIEW_TTL_MS = 5 * 60_000;
 
@@ -410,15 +490,32 @@ export class BrowserSessionManager {
 
   clearAccessPolicy(taskId: string, sessionId?: unknown): void {
     this.accessPolicies.delete(sessionKey(taskId, sessionId));
+    this.userLoopbackOrigins.delete(sessionKey(taskId, sessionId));
+  }
+
+  /** Receive every navigation the guards cancel, so the tab can say why instead of doing nothing. */
+  setNavigationBlockedListener(
+    listener: ((event: BrowserNavigationBlockedEvent) => void) | null,
+  ): void {
+    this.navigationBlockedListener = listener;
   }
 
   /**
-   * Permit one explicitly requested local HTML preview. Local file URLs are
-   * never allowed merely because they have a valid `.html` extension: the
-   * renderer must first register the exact URL it intends to display.
+   * Permit one explicitly requested local preview. Local file URLs are never
+   * allowed merely because they have a valid `.html` extension: the exact URL
+   * must be registered. A loopback dev server is allowed by origin (its
+   * scripts, styles and routes live under it) for a refreshed TTL.
    */
   allowLocalPreviewUrl(rawUrl: string): void {
-    if (!isLocalHtmlFileUrl(rawUrl) && !isLoopbackHttpUrl(rawUrl)) return;
+    const origin = loopbackOrigin(rawUrl);
+    if (origin) {
+      this.allowedLoopbackOrigins.set(
+        origin,
+        Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
+      );
+      return;
+    }
+    if (!isLocalHtmlFileUrl(rawUrl)) return;
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.set(
@@ -428,34 +525,98 @@ export class BrowserSessionManager {
   }
 
   revokeLocalPreviewUrl(rawUrl: string): void {
+    const origin = loopbackOrigin(rawUrl);
+    if (origin) {
+      this.allowedLoopbackOrigins.delete(origin);
+      return;
+    }
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return;
     this.allowedLocalPreviewUrls.delete(normalized);
   }
 
-  private isAllowedLocalPreviewUrl(rawUrl: string): boolean {
+  /**
+   * Allow a loopback origin the user typed or chose in this session's address
+   * bar. Unlike agent allowances it does not expire, but it is scoped to the
+   * session and refused when the effective profile disables networking.
+   */
+  allowUserLocalPreviewUrl(taskId: string, rawUrl: string, sessionId?: unknown): boolean {
+    const origin = loopbackOrigin(rawUrl);
+    if (!origin) return false;
+    const key = sessionKey(taskId, sessionId);
+    if (!this.userLoopbackPermitted(this.accessPolicies.get(key), rawUrl)) return false;
+    const origins = this.userLoopbackOrigins.get(key) || new Set<string>();
+    origins.add(origin);
+    this.userLoopbackOrigins.set(key, origins);
+    return true;
+  }
+
+  /**
+   * A user loopback allowance only stands while the session's effective policy
+   * would allow the URL (network on, not disabled, no domain rule against it).
+   * It is re-checked on every request, so tightening the profile revokes it.
+   */
+  private userLoopbackPermitted(
+    policy: BrowserSessionAccessPolicy | undefined,
+    rawUrl: string,
+  ): boolean {
+    if (!policy) return false;
+    return (
+      evaluateNetworkPolicy({
+        url: rawUrl,
+        toolName: "browser_workbench_request",
+        networkEnabled: policy.networkEnabled === true,
+        accessNetworkMode: policy.accessNetworkMode,
+        profileDomainRules: policy.profileDomainRules,
+      }).action === "allow"
+    );
+  }
+
+  private isAllowedLocalPreviewUrl(rawUrl: string, key?: string): boolean {
+    const origin = loopbackOrigin(rawUrl);
+    if (origin) {
+      if (
+        key &&
+        this.userLoopbackOrigins.get(key)?.has(origin) &&
+        this.userLoopbackPermitted(this.accessPolicies.get(key), rawUrl)
+      ) {
+        return true;
+      }
+      return this.touchAllowance(this.allowedLoopbackOrigins, origin);
+    }
     const normalized = normalizeWebviewUrl(rawUrl);
     if (!normalized) return false;
-    const expiresAt = this.allowedLocalPreviewUrls.get(normalized);
+    return this.touchAllowance(this.allowedLocalPreviewUrls, normalized);
+  }
+
+  private touchAllowance(allowances: Map<string, number>, key: string): boolean {
+    const expiresAt = allowances.get(key);
     if (!expiresAt) return false;
     if (expiresAt <= Date.now()) {
-      this.allowedLocalPreviewUrls.delete(normalized);
+      allowances.delete(key);
       return false;
     }
-    this.allowedLocalPreviewUrls.set(
-      normalized,
-      Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS,
-    );
+    allowances.set(key, Date.now() + BrowserSessionManager.LOCAL_PREVIEW_TTL_MS);
     return true;
   }
 
   assertUrlAllowed(taskId: string, rawUrl: string, sessionId?: unknown): void {
     const key = sessionKey(taskId, sessionId);
-    const session = this.sessions.get(key);
-    const policy = session ? this.getAccessPolicy(session) : this.accessPolicies.get(key);
-    if (!this.isUrlAllowedWithPolicy(policy, rawUrl)) {
+    if (!this.isUrlAllowedWithPolicy(this.accessPolicies.get(key), rawUrl, key)) {
       throw new Error(`Browser access denied for "${rawUrl}" by the active access profile.`);
     }
+  }
+
+  /** Why a URL would be blocked for this session, or null when it is allowed. */
+  explainUrlBlock(
+    taskId: string,
+    rawUrl: string,
+    sessionId?: unknown,
+  ): { reason: BrowserNavigationBlockReason; detail?: string } | null {
+    const key = sessionKey(taskId, sessionId);
+    const policy = this.accessPolicies.get(key);
+    if (this.isUrlAllowedWithPolicy(policy, rawUrl, key)) return null;
+    return this.classifyBlock(policy, rawUrl);
   }
 
   async registerElectronWorkbenchSession(
@@ -463,18 +624,40 @@ export class BrowserSessionManager {
   ): Promise<void> {
     const sessionId = normalizeSessionId(registration.sessionId);
     const key = sessionKey(registration.taskId, sessionId);
-    const existing = this.sessions.get(key);
+    const tabId = normalizeTabId(registration.tabId);
+    let workbench = this.sessions.get(key);
+    if (!workbench) {
+      workbench = {
+        taskId: registration.taskId,
+        sessionId,
+        activeTabId: tabId,
+        tabs: new Map(),
+        snapshotTabs: new Map(),
+      };
+      this.sessions.set(key, workbench);
+    }
+    // A webContents renders one tab: drop a stale record that claimed it under another id.
+    for (const [otherId, other] of workbench.tabs) {
+      if (otherId !== tabId && other.webContentsId === registration.webContentsId) {
+        workbench.tabs.delete(otherId);
+      }
+    }
+    const existing = workbench.tabs.get(tabId);
     // Refs hold backend node ids of one renderer; a new webContents invalidates them.
     const sameContents = existing?.webContentsId === registration.webContentsId;
-    this.sessions.set(key, {
+    const now = Date.now();
+    const record: BrowserSessionRecord = {
       taskId: registration.taskId,
       sessionId,
+      tabId,
+      kind: registration.kind || existing?.kind || "tab",
+      openerTabId: registration.openerTabId ?? existing?.openerTabId,
       webContentsId: registration.webContentsId,
       url: registration.url || existing?.url || "",
       title: registration.title || existing?.title || "",
       backend: "electron-workbench",
-      activeTabId: existing?.activeTabId || "active",
-      registeredAt: existing?.registeredAt || Date.now(),
+      registeredAt: existing?.registeredAt || now,
+      lastActiveAt: existing?.lastActiveAt || now,
       latestSnapshotId: existing?.latestSnapshotId,
       snapshotUrl: sameContents ? existing?.snapshotUrl : undefined,
       refsInvalidatedReason:
@@ -487,40 +670,180 @@ export class BrowserSessionManager {
       downloads: existing?.downloads || [],
       lastDialog: existing?.lastDialog,
       traceActive: existing?.traceActive,
-    });
+    };
+    workbench.tabs.set(tabId, record);
+    if (registration.activate === true || !workbench.tabs.has(workbench.activeTabId)) {
+      workbench.activeTabId = tabId;
+      record.lastActiveAt = now;
+    }
 
-    await this.getWebContents(this.sessions.get(key));
+    await this.getWebContents(record);
   }
 
-  async getGuardedWebContents(taskId: string, sessionId?: unknown): Promise<Any | null> {
-    return this.getWebContents(this.sessions.get(sessionKey(taskId, sessionId)));
+  async getGuardedWebContents(
+    taskId: string,
+    sessionId?: unknown,
+    tabId?: unknown,
+  ): Promise<Any | null> {
+    return this.getWebContents(this.getTab(taskId, sessionId, tabId));
   }
 
-  unregisterSession(input: { taskId: string; sessionId?: string; webContentsId?: number }): void {
+  /**
+   * Remove tabs. With a tabId only that tab, with a webContentsId only the tab
+   * it renders, otherwise every tab of the session. When the active tab goes,
+   * its opener (or the most recently used tab) becomes active.
+   */
+  unregisterSession(input: {
+    taskId: string;
+    sessionId?: string;
+    tabId?: string;
+    webContentsId?: number;
+  }): { activeTabClosed: boolean; activeTabId?: string } {
     const key = sessionKey(input.taskId, input.sessionId);
-    const existing = this.sessions.get(key);
-    if (!existing) return;
-    if (typeof input.webContentsId === "number" && existing.webContentsId !== input.webContentsId) {
-      return;
+    const workbench = this.sessions.get(key);
+    if (!workbench) return { activeTabClosed: false };
+    const tabId = tabIdOrUndefined(input.tabId);
+    let targets: BrowserSessionRecord[];
+    if (tabId) {
+      const tab = workbench.tabs.get(tabId);
+      targets =
+        tab &&
+        (typeof input.webContentsId !== "number" || tab.webContentsId === input.webContentsId)
+          ? [tab]
+          : [];
+    } else if (typeof input.webContentsId === "number") {
+      targets = Array.from(workbench.tabs.values()).filter(
+        (tab) => tab.webContentsId === input.webContentsId,
+      );
+    } else {
+      targets = Array.from(workbench.tabs.values());
     }
-    this.sessions.delete(key);
-    const handlers = this.accessGuardHandlers.get(existing.webContentsId);
-    if (handlers) {
-      handlers.contents.removeListener?.("will-navigate", handlers.willNavigate);
-      handlers.contents.removeListener?.("will-redirect", handlers.willRedirect);
-      this.accessGuardHandlers.delete(existing.webContentsId);
+    if (targets.length === 0) return { activeTabClosed: false, activeTabId: workbench.activeTabId };
+
+    const activeTabClosed = targets.some((tab) => tab.tabId === workbench.activeTabId);
+    for (const tab of targets) {
+      workbench.tabs.delete(tab.tabId);
+      this.detachAccessGuards(tab.webContentsId);
+      for (const [snapshotId, owner] of workbench.snapshotTabs) {
+        if (owner === tab.tabId) workbench.snapshotTabs.delete(snapshotId);
+      }
     }
+    if (workbench.tabs.size === 0) {
+      this.sessions.delete(key);
+      return { activeTabClosed };
+    }
+    if (activeTabClosed) {
+      const closed = targets.find((tab) => tab.tabId === workbench.activeTabId);
+      const opener = closed?.openerTabId ? workbench.tabs.get(closed.openerTabId) : undefined;
+      const fallback =
+        opener ||
+        Array.from(workbench.tabs.values()).sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      workbench.activeTabId = fallback.tabId;
+      fallback.lastActiveAt = Date.now();
+    }
+    return { activeTabClosed, activeTabId: workbench.activeTabId };
+  }
+
+  /** Make a tab the one tools act on. */
+  activateTab(taskId: string, tabId: string, sessionId?: unknown): boolean {
+    const workbench = this.sessions.get(sessionKey(taskId, sessionId));
+    const tab = workbench?.tabs.get(normalizeTabId(tabId));
+    if (!workbench || !tab) return false;
+    workbench.activeTabId = tab.tabId;
+    tab.lastActiveAt = Date.now();
+    return true;
+  }
+
+  /**
+   * Install the navigation guards on a just-created tab's webContents now,
+   * instead of after registration resolves the webContents asynchronously.
+   */
+  guardTabContents(contents: Any): void {
+    const tab =
+      typeof contents?.id === "number" ? this.findSessionByWebContentsId(contents.id) : null;
+    if (tab) this.attachAccessGuards(tab, contents);
+  }
+
+  getTabWebContentsId(taskId: string, tabId: string, sessionId?: unknown): number | null {
+    return this.getTab(taskId, sessionId, tabId)?.webContentsId ?? null;
+  }
+
+  /** Record a download's real file and state, so browser_downloads reports what happened. */
+  recordDownload(
+    taskId: string,
+    sessionId: unknown,
+    tabId: string,
+    download: {
+      url: string;
+      filename: string;
+      savePath?: string;
+      state: string;
+      agentInitiated: boolean;
+    },
+  ): void {
+    const session = this.getTab(taskId, sessionId, tabId);
+    if (!session) return;
+    const url = redactBrowserText(download.url, 1200);
+    const existing = session.downloads.find(
+      (entry) => entry.url === url && entry.filename === download.filename,
+    );
+    const entry: BrowserNetworkEntry = {
+      url,
+      resourceType: "download",
+      timestamp: existing?.timestamp || Date.now(),
+      filename: download.filename,
+      savePath: download.savePath,
+      state: download.state,
+      agentInitiated: download.agentInitiated,
+    };
+    // The CDP downloadWillBegin entry for the same URL is replaced by the tracked one.
+    session.downloads = session.downloads.filter(
+      (candidate) => candidate !== existing && !(candidate.url === url && !candidate.filename),
+    );
+    session.downloads.push(entry);
+    session.downloads = session.downloads.slice(-MAX_DIAGNOSTIC_ENTRIES);
+  }
+
+  getActiveWebContentsId(taskId: string, sessionId?: unknown): number | null {
+    return this.getTab(taskId, sessionId)?.webContentsId ?? null;
+  }
+
+  getActiveTabId(taskId: string, sessionId?: unknown): string | null {
+    return this.sessions.get(sessionKey(taskId, sessionId))?.activeTabId || null;
+  }
+
+  hasTab(taskId: string, tabId: string, sessionId?: unknown): boolean {
+    return Boolean(
+      this.sessions.get(sessionKey(taskId, sessionId))?.tabs.has(normalizeTabId(tabId)),
+    );
+  }
+
+  /** The workbench tab a guest webContents belongs to, if it is registered. */
+  findTabOwner(webContentsId: number): BrowserTabOwner | null {
+    const tab = this.findSessionByWebContentsId(webContentsId);
+    return tab
+      ? { taskId: tab.taskId, sessionId: tab.sessionId, tabId: tab.tabId, kind: tab.kind }
+      : null;
   }
 
   updateSession(input: {
     taskId: string;
     sessionId?: string;
+    tabId?: string;
     webContentsId?: number;
     url?: string;
     title?: string;
   }): void {
-    const key = sessionKey(input.taskId, input.sessionId);
-    const existing = this.sessions.get(key);
+    const workbench = this.sessions.get(sessionKey(input.taskId, input.sessionId));
+    if (!workbench) return;
+    const tabId = tabIdOrUndefined(input.tabId);
+    const existing = tabId
+      ? workbench.tabs.get(tabId)
+      : typeof input.webContentsId === "number"
+        ? Array.from(workbench.tabs.values()).find(
+            (tab) => tab.webContentsId === input.webContentsId,
+          )
+        : workbench.tabs.get(workbench.activeTabId);
     if (!existing) return;
     if (typeof input.webContentsId === "number" && input.webContentsId !== existing.webContentsId) {
       return;
@@ -537,17 +860,32 @@ export class BrowserSessionManager {
   }
 
   getTabs(taskId: string, sessionId?: unknown): BrowserTabInfo[] {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
-    if (!session) return [];
-    return [
-      {
-        tabId: session.activeTabId,
-        title: session.title || session.url || "Browser",
-        url: session.url,
-        active: true,
-        backend: session.backend,
-      },
-    ];
+    const workbench = this.sessions.get(sessionKey(taskId, sessionId));
+    if (!workbench) return [];
+    return Array.from(workbench.tabs.values()).map((tab) => ({
+      tabId: tab.tabId,
+      title: tab.title || tab.url || (tab.kind === "popup" ? "Popup" : "Browser"),
+      url: tab.url,
+      active: tab.tabId === workbench.activeTabId,
+      backend: tab.backend,
+      kind: tab.kind,
+      ...(tab.openerTabId ? { openerTabId: tab.openerTabId } : {}),
+    }));
+  }
+
+  /** A tab record: the given tab, or the session's active tab. */
+  private getTab(
+    taskId: string,
+    sessionId?: unknown,
+    tabId?: unknown,
+  ): BrowserSessionRecord | undefined {
+    const workbench = this.sessions.get(sessionKey(taskId, sessionId));
+    if (!workbench) return undefined;
+    return workbench.tabs.get(tabIdOrUndefined(tabId) || workbench.activeTabId);
+  }
+
+  private *allTabs(): Generator<BrowserSessionRecord> {
+    for (const workbench of this.sessions.values()) yield* workbench.tabs.values();
   }
 
   async snapshot(
@@ -556,7 +894,7 @@ export class BrowserSessionManager {
       sessionId?: unknown;
     } & BrowserSnapshotOptions,
   ): Promise<BrowserSnapshotResult | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId));
+    const session = this.getTab(input.taskId, input.sessionId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -682,6 +1020,7 @@ export class BrowserSessionManager {
     }
 
     session.latestSnapshotId = snapshotId;
+    this.recordSnapshotOwner(session, snapshotId);
     session.refs = refs;
     session.refsInvalidatedReason = undefined;
     session.url = contents.getURL?.() || session.url;
@@ -694,7 +1033,7 @@ export class BrowserSessionManager {
     return {
       success: true,
       sessionId: session.sessionId,
-      tabId: session.activeTabId,
+      tabId: session.tabId,
       url: session.url,
       title: session.title,
       nodes,
@@ -741,7 +1080,7 @@ export class BrowserSessionManager {
     sessionId?: unknown;
     selector: string;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const session = this.getTab(input.taskId, input.sessionId) || null;
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -774,7 +1113,7 @@ export class BrowserSessionManager {
     sessionId?: unknown;
     selector: string;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const session = this.getTab(input.taskId, input.sessionId) || null;
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -879,7 +1218,7 @@ export class BrowserSessionManager {
     selector: string;
     value: string;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const session = this.getTab(input.taskId, input.sessionId) || null;
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -912,7 +1251,7 @@ export class BrowserSessionManager {
     selector: string;
     text: string;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const session = this.getTab(input.taskId, input.sessionId) || null;
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -929,7 +1268,7 @@ export class BrowserSessionManager {
    * default actions run (Enter submits a form, Tab moves focus).
    */
   async pressKey(input: { taskId: string; sessionId?: unknown; key: string }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const session = this.getTab(input.taskId, input.sessionId) || null;
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -994,7 +1333,7 @@ export class BrowserSessionManager {
     ref?: string;
     selector?: string;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId));
+    const session = this.getTab(input.taskId, input.sessionId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -1031,7 +1370,7 @@ export class BrowserSessionManager {
     accept?: boolean;
     promptText?: string;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId));
+    const session = this.getTab(input.taskId, input.sessionId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -1047,7 +1386,7 @@ export class BrowserSessionManager {
     taskId: string,
     sessionId?: unknown,
   ): { success: true; entries: BrowserConsoleEntry[] } | null {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
+    const session = this.getTab(taskId, sessionId);
     if (!session) return null;
     return { success: true, entries: session.consoleEntries.slice(-MAX_DIAGNOSTIC_ENTRIES) };
   }
@@ -1056,7 +1395,7 @@ export class BrowserSessionManager {
     taskId: string,
     sessionId?: unknown,
   ): { success: true; entries: BrowserNetworkEntry[] } | null {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
+    const session = this.getTab(taskId, sessionId);
     if (!session) return null;
     return { success: true, entries: session.networkEntries.slice(-MAX_DIAGNOSTIC_ENTRIES) };
   }
@@ -1065,15 +1404,99 @@ export class BrowserSessionManager {
     taskId: string,
     sessionId?: unknown,
   ): { success: true; entries: BrowserNetworkEntry[] } | null {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
+    const session = this.getTab(taskId, sessionId);
     if (!session) return null;
     return { success: true, entries: session.downloads.slice(-MAX_DIAGNOSTIC_ENTRIES) };
   }
 
+  /**
+   * Diagnostics for the workbench drawer: a tab's console, network or download
+   * buffer (already redacted). Opening the drawer attaches the debugger so the
+   * buffers fill even before an agent has acted on the tab.
+   */
+  async getTabDiagnostics(input: {
+    taskId: string;
+    sessionId?: unknown;
+    tabId?: unknown;
+    kind: "console" | "network" | "downloads" | "storage";
+  }): Promise<Any | null> {
+    const session = this.getTab(input.taskId, input.sessionId, input.tabId);
+    if (!session) return null;
+    if (input.kind === "storage") {
+      const contents = await this.getWebContents(session);
+      if (!contents) return null;
+      return this.readStorage(session, contents);
+    }
+    const contents = await this.getWebContents(session).catch(() => null);
+    if (contents) await this.ensureDebugger(session, contents).catch(() => undefined);
+    const entries =
+      input.kind === "console"
+        ? session.consoleEntries
+        : input.kind === "network"
+          ? session.networkEntries
+          : session.downloads;
+    return {
+      success: true,
+      tabId: session.tabId,
+      traceActive: session.traceActive === true,
+      entries: entries.slice(-MAX_DIAGNOSTIC_ENTRIES),
+    };
+  }
+
+  /** Clear a tab's console or network buffer (drawer "Clear"). */
+  clearTabDiagnostics(input: {
+    taskId: string;
+    sessionId?: unknown;
+    tabId?: unknown;
+    kind: "console" | "network";
+  }): void {
+    const session = this.getTab(input.taskId, input.sessionId, input.tabId);
+    if (!session) return;
+    if (input.kind === "console") session.consoleEntries = [];
+    else session.networkEntries = [];
+  }
+
+  /**
+   * The nodes of the tab's latest snapshot, as the agent saw them, for the
+   * snapshot overlay. Reading them never takes a new snapshot, so the agent's
+   * refs stay valid.
+   */
+  getSnapshotOverlay(
+    taskId: string,
+    sessionId?: unknown,
+    tabId?: unknown,
+  ): {
+    tabId: string;
+    snapshotId?: string;
+    url?: string;
+    stale: boolean;
+    staleReason?: string;
+    nodes: BrowserSnapshotNode[];
+  } | null {
+    const session = this.getTab(taskId, sessionId, tabId);
+    if (!session) return null;
+    const nodes = Array.from(session.refs.values())
+      .map((target) => target.node)
+      .filter((node) => node.bounds && !node.offscreen)
+      .slice(0, MAX_SNAPSHOT_LIMIT);
+    return {
+      tabId: session.tabId,
+      snapshotId: session.latestSnapshotId,
+      url: session.snapshotUrl,
+      stale: Boolean(session.refsInvalidatedReason),
+      ...(session.refsInvalidatedReason ? { staleReason: session.refsInvalidatedReason } : {}),
+      nodes,
+    };
+  }
+
   async getStorage(taskId: string, sessionId?: unknown): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
+    const session = this.getTab(taskId, sessionId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
+    return this.readStorage(session, contents);
+  }
+
+  private async readStorage(session: BrowserSessionRecord, contents: Any): Promise<Any> {
     await this.ensureDebugger(session, contents);
     const result = await this.sendCommand(contents, "Runtime.evaluate", {
       returnByValue: true,
@@ -1105,7 +1528,7 @@ export class BrowserSessionManager {
     deviceScaleFactor?: number;
     mobile?: boolean;
   }): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId));
+    const session = this.getTab(input.taskId, input.sessionId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -1122,8 +1545,8 @@ export class BrowserSessionManager {
     return { success: true, width, height, deviceScaleFactor, mobile };
   }
 
-  async traceStart(taskId: string, sessionId?: unknown): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
+  async traceStart(taskId: string, sessionId?: unknown, tabId?: unknown): Promise<Any | null> {
+    const session = this.getTab(taskId, sessionId, tabId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -1135,8 +1558,8 @@ export class BrowserSessionManager {
     return { success: true };
   }
 
-  async traceStop(taskId: string, sessionId?: unknown): Promise<Any | null> {
-    const session = this.sessions.get(sessionKey(taskId, sessionId));
+  async traceStop(taskId: string, sessionId?: unknown, tabId?: unknown): Promise<Any | null> {
+    const session = this.getTab(taskId, sessionId, tabId);
     const contents = await this.getWebContents(session);
     if (!session || !contents) return null;
     await this.ensureDebugger(session, contents);
@@ -1158,7 +1581,7 @@ export class BrowserSessionManager {
     contents: Any | null;
     target: BrowserRefTarget | null;
   }> {
-    const session = this.sessions.get(sessionKey(input.taskId, input.sessionId)) || null;
+    const session = this.getTab(input.taskId, input.sessionId) || null;
     const contents = await this.getWebContents(session);
     if (!session || !contents) return { session, contents, target: null };
     const currentUrl = urlWithoutFragment(contents.getURL?.() || "");
@@ -1175,10 +1598,31 @@ export class BrowserSessionManager {
     session.refsInvalidatedReason = reason;
   }
 
+  private recordSnapshotOwner(session: BrowserSessionRecord, snapshotId: string): void {
+    const workbench = this.sessions.get(sessionKey(session.taskId, session.sessionId));
+    if (!workbench) return;
+    workbench.snapshotTabs.set(snapshotId, session.tabId);
+    while (workbench.snapshotTabs.size > MAX_TRACKED_SNAPSHOTS) {
+      const oldest = workbench.snapshotTabs.keys().next().value;
+      if (oldest === undefined) break;
+      workbench.snapshotTabs.delete(oldest);
+    }
+  }
+
   private getFreshRefTarget(session: BrowserSessionRecord, ref: string): BrowserRefTarget {
     const key = String(ref || "");
     const target = session.refs.get(key);
     if (target) return target;
+    const ownerTabId = this.sessions
+      .get(sessionKey(session.taskId, session.sessionId))
+      ?.snapshotTabs.get(snapshotIdFromRef(key));
+    if (ownerTabId && ownerTabId !== session.tabId) {
+      throw new Error(
+        `Stale browser ref: ${key} belongs to tab "${ownerTabId}", but the active tab is ` +
+          `"${session.tabId}". Call browser_switch_tab with tab_id "${ownerTabId}", or take a ` +
+          "browser_snapshot of the active tab and use its refs.",
+      );
+    }
     if (session.refsInvalidatedReason) {
       throw new Error(
         `Stale browser ref: ${session.refsInvalidatedReason} after the last browser_snapshot. ` +
@@ -1879,7 +2323,7 @@ export class BrowserSessionManager {
   }
 
   private findSessionByWebContentsId(webContentsId: number): BrowserSessionRecord | null {
-    for (const session of this.sessions.values()) {
+    for (const session of this.allTabs()) {
       if (session.webContentsId === webContentsId) return session;
     }
     return null;
@@ -1894,7 +2338,7 @@ export class BrowserSessionManager {
     if (!setup) {
       setup = (async () => {
         const proxy = await createBrowserNetworkProxy((url) => {
-          const owners = Array.from(this.sessions.values()).filter(
+          const owners = Array.from(this.allTabs()).filter(
             (candidate) =>
               this.accessGuardHandlers.get(candidate.webContentsId)?.contents.session ===
               electronSession,
@@ -1927,7 +2371,12 @@ export class BrowserSessionManager {
     const electron = await import("electron");
     const contents = (electron as Any).webContents?.fromId?.(session.webContentsId);
     if (!contents || contents.isDestroyed?.()) {
-      this.unregisterSession(session);
+      this.unregisterSession({
+        taskId: session.taskId,
+        sessionId: session.sessionId,
+        tabId: session.tabId,
+        webContentsId: session.webContentsId,
+      });
       return null;
     }
     this.attachAccessGuards(session, contents);
@@ -1941,12 +2390,17 @@ export class BrowserSessionManager {
   }
 
   private isUrlAllowed(session: BrowserSessionRecord, rawUrl: string): boolean {
-    return this.isUrlAllowedWithPolicy(this.getAccessPolicy(session), rawUrl);
+    return this.isUrlAllowedWithPolicy(
+      this.getAccessPolicy(session),
+      rawUrl,
+      sessionKey(session.taskId, session.sessionId),
+    );
   }
 
   private isUrlAllowedWithPolicy(
     policy: BrowserSessionAccessPolicy | undefined,
     rawUrl: string,
+    key?: string,
   ): boolean {
     const url = String(rawUrl || "").trim();
     if (!url || url === "about:blank") return true;
@@ -1959,7 +2413,7 @@ export class BrowserSessionManager {
     }
 
     if (parsed.protocol === "file:" || isLoopbackHttpUrl(url)) {
-      return this.isAllowedLocalPreviewUrl(url);
+      return this.isAllowedLocalPreviewUrl(url, key);
     }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
 
@@ -1972,6 +2426,70 @@ export class BrowserSessionManager {
         profileDomainRules: policy?.profileDomainRules,
       }).action === "allow"
     );
+  }
+
+  private classifyBlock(
+    policy: BrowserSessionAccessPolicy | undefined,
+    rawUrl: string,
+  ): { reason: BrowserNavigationBlockReason; detail?: string } {
+    let parsed: URL;
+    try {
+      parsed = new URL(String(rawUrl || "").trim());
+    } catch {
+      return { reason: "scheme", detail: "invalid_url" };
+    }
+    if (parsed.protocol === "file:" || isLoopbackHttpUrl(parsed.href)) {
+      return { reason: "local_preview" };
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { reason: "scheme", detail: parsed.protocol.replace(/:$/, "") };
+    }
+    const decision = evaluateNetworkPolicy({
+      url: parsed.href,
+      toolName: "browser_workbench_request",
+      networkEnabled: policy?.networkEnabled === true,
+      accessNetworkMode: policy?.accessNetworkMode,
+      profileDomainRules: policy?.profileDomainRules,
+    });
+    return { reason: "policy", detail: decision.reason };
+  }
+
+  /** Tell the listener a main-frame navigation of a registered tab was cancelled. */
+  private reportBlockedNavigation(session: BrowserSessionRecord, rawUrl: string): void {
+    if (!this.navigationBlockedListener) return;
+    const url = String(rawUrl || "");
+    const dedupeKey = `${session.webContentsId}|${url}`;
+    const now = Date.now();
+    const last = this.recentBlocks.get(dedupeKey);
+    this.recentBlocks.set(dedupeKey, now);
+    if (this.recentBlocks.size > 200) {
+      for (const [entry, at] of this.recentBlocks) {
+        if (now - at > 5_000) this.recentBlocks.delete(entry);
+      }
+    }
+    if (last && now - last < 1_500) return;
+    const block = this.classifyBlock(this.getAccessPolicy(session), url);
+    try {
+      this.navigationBlockedListener({
+        taskId: session.taskId,
+        sessionId: session.sessionId,
+        tabId: session.tabId,
+        url: redactBrowserText(url, 2000),
+        reason: block.reason,
+        ...(block.detail ? { detail: block.detail } : {}),
+        at: now,
+      });
+    } catch {
+      // A listener failure must never turn a denial into an allow.
+    }
+  }
+
+  private detachAccessGuards(webContentsId: number): void {
+    const handlers = this.accessGuardHandlers.get(webContentsId);
+    if (!handlers) return;
+    handlers.contents.removeListener?.("will-navigate", handlers.willNavigate);
+    handlers.contents.removeListener?.("will-redirect", handlers.willRedirect);
+    this.accessGuardHandlers.delete(webContentsId);
   }
 
   private assertCurrentUrlAllowed(session: BrowserSessionRecord, url: string): void {
@@ -1989,12 +2507,19 @@ export class BrowserSessionManager {
         const currentSession = this.findSessionByWebContentsId(webContentsId);
         if (currentSession && !this.isUrlAllowed(currentSession, url)) {
           event.preventDefault?.();
+          this.reportBlockedNavigation(currentSession, url);
         }
       };
-      const willRedirect = (event: Any, url: string) => {
+      const willRedirect = (
+        event: Any,
+        url: string,
+        _isInPlace?: boolean,
+        isMainFrame?: boolean,
+      ) => {
         const currentSession = this.findSessionByWebContentsId(webContentsId);
         if (currentSession && !this.isUrlAllowed(currentSession, url)) {
           event.preventDefault?.();
+          if (isMainFrame !== false) this.reportBlockedNavigation(currentSession, url);
         }
       };
       contents.on?.("will-navigate", willNavigate);
@@ -2017,9 +2542,10 @@ export class BrowserSessionManager {
     webRequest.onBeforeRequest(
       { urls: ["<all_urls>"] },
       (details: Any, callback: (response: { cancel?: boolean }) => void) => {
-        const matchingSession = Array.from(this.sessions.values()).find(
-          (candidate) => candidate.webContentsId === details.webContentsId,
-        );
+        const matchingSession =
+          typeof details.webContentsId === "number"
+            ? this.findSessionByWebContentsId(details.webContentsId)
+            : null;
         if (
           matchingSession &&
           !/^wss?:/.test(details.url) &&
@@ -2029,6 +2555,9 @@ export class BrowserSessionManager {
           return;
         }
         callback({ cancel: true });
+        if (matchingSession && details.resourceType === "mainFrame") {
+          this.reportBlockedNavigation(matchingSession, details.url);
+        }
       },
     );
   }

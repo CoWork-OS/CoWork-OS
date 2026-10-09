@@ -2278,6 +2278,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   unregisterBrowserWorkbenchSession: (data: {
     taskId: string;
     sessionId?: string;
+    tabId?: string;
     webContentsId?: number;
   }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_UNREGISTER, data) as Promise<{
@@ -2286,11 +2287,147 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateBrowserWorkbenchStatus: (data: {
     taskId: string;
     sessionId?: string;
+    tabId?: string;
     webContentsId?: number;
     url?: string;
     title?: string;
   }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_STATUS, data) as Promise<{ success: true }>,
+  activateBrowserWorkbenchTab: (data: { taskId: string; sessionId?: string; tabId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_ACTIVATE, data) as Promise<{
+      success: boolean;
+    }>,
+  browserWorkbenchUserNavigate: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId?: string;
+    url: string;
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BROWSER_WORKBENCH_USER_NAVIGATE,
+      data,
+    ) as Promise<BrowserWorkbenchUserNavigateResult>,
+  respondBrowserWorkbenchPermission: (data: {
+    requestId: string;
+    response: BrowserWorkbenchPermissionResponse;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_RESPOND, data) as Promise<{
+      success: boolean;
+    }>,
+  listBrowserWorkbenchPermissionRequests: (data: { taskId: string; sessionId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_LIST, data) as Promise<
+      BrowserWorkbenchPermissionPrompt[]
+    >,
+  inspectBrowserWorkbenchArea: (data: {
+    taskId: string;
+    sessionId?: string;
+    rect: { x: number; y: number; width: number; height: number };
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_INSPECT_AREA, data) as Promise<{
+      success: boolean;
+      area?: BrowserWorkbenchInspectArea;
+      error?: string;
+    }>,
+  previewBrowserWorkbenchStyle: (data: {
+    taskId: string;
+    sessionId?: string;
+    selector: string;
+    action: "apply" | "revert";
+    styles?: Record<string, string>;
+    text?: string;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_STYLE_PREVIEW, data) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  setBrowserWorkbenchFocus: (focused: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_FOCUS, { focused }) as Promise<{
+      success: boolean;
+    }>,
+  getBrowserWorkbenchDiagnostics: (data: BrowserWorkbenchDiagnosticsRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BROWSER_WORKBENCH_DIAGNOSTICS_GET,
+      data,
+    ) as Promise<BrowserWorkbenchDiagnosticsResult>,
+  browserWorkbenchTrace: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId?: string;
+    action: "start" | "stop";
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_TRACE, data) as Promise<{
+      success: boolean;
+      message?: string;
+      error?: string;
+    }>,
+  getBrowserWorkbenchSnapshot: (data: { taskId: string; sessionId?: string; tabId?: string }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BROWSER_WORKBENCH_SNAPSHOT_GET,
+      data,
+    ) as Promise<BrowserWorkbenchSnapshotOverlay | null>,
+  getBrowserSettings: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SETTINGS_GET) as Promise<BrowserSettings>,
+  saveBrowserSettings: (settings: Partial<BrowserSettings>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SETTINGS_SAVE, settings) as Promise<{
+      success: boolean;
+      settings?: BrowserSettings;
+    }>,
+  listBrowserSitePermissions: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, data) as Promise<
+      BrowserSitePermissionEntry[]
+    >,
+  resetBrowserSitePermission: (data: {
+    workspaceId: string;
+    origin?: string;
+    permission?: string;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_RESET, data) as Promise<{
+      success: boolean;
+    }>,
+  searchBrowserHistory: (data: { workspaceId: string; query: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_HISTORY_SEARCH, data) as Promise<
+      BrowserHistoryEntryView[]
+    >,
+  listBrowserHistory: (data: {
+    workspaceId: string;
+    limit?: number;
+    offset?: number;
+    query?: string;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_HISTORY_LIST, data) as Promise<
+      BrowserHistoryEntryView[]
+    >,
+  removeBrowserHistory: (data: { workspaceId: string; ids: string[] }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_HISTORY_REMOVE, data) as Promise<{
+      success: boolean;
+      removed: number;
+    }>,
+  clearBrowserHistory: (data: { workspaceId: string; since?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_HISTORY_CLEAR, data) as Promise<{
+      success: boolean;
+      removed: number;
+    }>,
+  clearBrowserData: (data: { workspaceId: string; types: BrowserDataType[]; since?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_CLEAR_DATA, data) as Promise<{
+      success: boolean;
+    }>,
+  listBrowserDownloads: (data: { taskId: string; sessionId?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_DOWNLOAD_LIST, data) as Promise<
+      BrowserWorkbenchDownloadEvent[]
+    >,
+  browserDownloadAction: (data: {
+    id: string;
+    action: "pause" | "resume" | "cancel" | "open" | "reveal" | "clear";
+    confirmedDangerous?: boolean;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_DOWNLOAD_ACTION, data) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  setBrowserWorkbenchPaused: (data: { taskId: string; sessionId?: string; paused: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_WORKBENCH_SET_PAUSED, data) as Promise<{
+      success: boolean;
+    }>,
   captureBrowserWorkbenchScreenshot: (data: {
     taskId: string;
     sessionId?: string;
@@ -2356,6 +2493,55 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_: Any, event: BrowserWorkbenchViewportEvent) => callback(event);
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_VIEWPORT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_VIEWPORT, handler);
+  },
+  onBrowserWorkbenchTabCommand: (callback: (command: BrowserWorkbenchTabCommand) => void) => {
+    const handler = (_: Any, command: BrowserWorkbenchTabCommand) => callback(command);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
+  },
+  onBrowserWorkbenchNavigationBlocked: (
+    callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
+  ) => {
+    const handler = (_: Any, event: BrowserWorkbenchNavigationBlockedEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_NAVIGATION_BLOCKED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_NAVIGATION_BLOCKED, handler);
+  },
+  onBrowserWorkbenchDriving: (callback: (event: BrowserWorkbenchDrivingEvent) => void) => {
+    const handler = (_: Any, event: BrowserWorkbenchDrivingEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_DRIVING, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_DRIVING, handler);
+  },
+  onBrowserWorkbenchDownload: (callback: (event: BrowserWorkbenchDownloadEvent) => void) => {
+    const handler = (_: Any, event: BrowserWorkbenchDownloadEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_DOWNLOAD_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_DOWNLOAD_EVENT, handler);
+  },
+  onBrowserWorkbenchSignInRequired: (callback: (event: BrowserWorkbenchSignInEvent) => void) => {
+    const handler = (_: Any, event: BrowserWorkbenchSignInEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_SIGN_IN_REQUIRED, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_SIGN_IN_REQUIRED, handler);
+  },
+  onBrowserWorkbenchShortcut: (callback: (event: BrowserWorkbenchShortcutEvent) => void) => {
+    const handler = (_: Any, event: BrowserWorkbenchShortcutEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_SHORTCUT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_SHORTCUT, handler);
+  },
+  onBrowserWorkbenchContextAction: (
+    callback: (event: BrowserWorkbenchContextActionEvent) => void,
+  ) => {
+    const handler = (_: Any, event: BrowserWorkbenchContextActionEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_CONTEXT_ACTION, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_CONTEXT_ACTION, handler);
+  },
+  onBrowserWorkbenchPermissionRequest: (
+    callback: (prompt: BrowserWorkbenchPermissionPrompt) => void,
+  ) => {
+    const handler = (_: Any, prompt: BrowserWorkbenchPermissionPrompt) => callback(prompt);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_REQUEST, handler);
+    return () =>
+      ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_PERMISSION_REQUEST, handler);
   },
   ingestYouTubeVideo: (data: {
     workspaceId: string;
@@ -5526,9 +5712,193 @@ export interface BrowserWorkbenchOpenRequest {
 export interface BrowserWorkbenchSessionRegistration {
   taskId: string;
   sessionId: string;
+  /** Workbench tab this webContents renders. */
+  tabId?: string;
+  /** Make this the tab tools act on. */
+  activate?: boolean;
   webContentsId: number;
   url?: string;
   title?: string;
+}
+
+/** Main -> renderer: open, show or close a workbench tab. */
+export interface BrowserWorkbenchTabCommand {
+  taskId: string;
+  sessionId: string;
+  command: "open" | "activate" | "close";
+  tabId: string;
+  url?: string;
+  background?: boolean;
+  openerTabId?: string;
+  at: number;
+}
+
+export type BrowserWorkbenchBlockReason = "policy" | "local_preview" | "scheme";
+
+export interface BrowserWorkbenchNavigationBlockedEvent {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  url: string;
+  reason: BrowserWorkbenchBlockReason;
+  detail?: string;
+  at: number;
+}
+
+export interface BrowserWorkbenchUserNavigateResult {
+  allowed: boolean;
+  url: string;
+  block?: { reason: BrowserWorkbenchBlockReason | string; detail?: string };
+}
+
+export type BrowserSettings = import("../shared/browser-settings").BrowserSettings;
+export type BrowserDataType = import("../shared/browser-settings").BrowserDataType;
+export type BrowserSitePermissionEntry =
+  import("../shared/browser-settings").BrowserSitePermissionEntry;
+
+export interface BrowserWorkbenchInspectArea {
+  rect: { x: number; y: number; width: number; height: number };
+  scroll?: { x: number; y: number };
+  elements: Array<{
+    rect?: { x: number; y: number; width: number; height: number };
+    selector?: string;
+    tagName?: string;
+    role?: string;
+    accessibleName?: string;
+    textQuote?: string;
+  }>;
+}
+
+export interface BrowserHistoryEntryView {
+  id: string;
+  url: string;
+  title: string;
+  faviconUrl?: string;
+  visitCount: number;
+  firstVisitAt: number;
+  lastVisitAt: number;
+}
+
+export interface BrowserWorkbenchDrivingEvent {
+  taskId: string;
+  sessionId: string;
+  tabId?: string;
+  driving: { toolName: string; label: string; startedAt: number } | null;
+  pausedByUser: boolean;
+  at: number;
+}
+
+export interface BrowserWorkbenchDownloadEvent {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  url: string;
+  filename: string;
+  savePath?: string;
+  state: "progressing" | "paused" | "completed" | "cancelled" | "interrupted" | "blocked";
+  receivedBytes: number;
+  totalBytes: number;
+  dangerous: boolean;
+  agentInitiated: boolean;
+  startedAt: number;
+  error?: string;
+  at?: number;
+}
+
+export interface BrowserWorkbenchSignInEvent {
+  taskId: string;
+  sessionId: string;
+  tabId?: string;
+  url: string;
+  at: number;
+}
+
+export type BrowserWorkbenchShortcutCommand =
+  import("../shared/browser-shortcuts").BrowserShortcutCommand;
+
+export interface BrowserWorkbenchShortcutEvent {
+  taskId?: string;
+  sessionId?: string;
+  tabId?: string;
+  command: BrowserWorkbenchShortcutCommand;
+  gesture?: boolean;
+  at: number;
+}
+
+export type BrowserWorkbenchContextAction =
+  | { kind: "search"; text: string }
+  | { kind: "ask"; text: string; url: string }
+  | { kind: "annotate"; x: number; y: number }
+  | { kind: "screenshot" };
+
+export interface BrowserWorkbenchContextActionEvent {
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  action: BrowserWorkbenchContextAction;
+  at: number;
+}
+
+export type BrowserWorkbenchDiagnosticsKind = "console" | "network" | "downloads" | "storage";
+
+export interface BrowserWorkbenchDiagnosticsRequest {
+  taskId: string;
+  sessionId?: string;
+  tabId?: string;
+  kind: BrowserWorkbenchDiagnosticsKind;
+  clear?: boolean;
+}
+
+export interface BrowserWorkbenchDiagnosticsResult {
+  success: boolean;
+  error?: string;
+  tabId?: string;
+  traceActive?: boolean;
+  entries?: Array<{
+    level?: string;
+    text?: string;
+    source?: string;
+    method?: string;
+    url?: string;
+    status?: number;
+    resourceType?: string;
+    failed?: boolean;
+    errorText?: string;
+    timestamp: number;
+  }>;
+  storage?: unknown;
+}
+
+export interface BrowserWorkbenchSnapshotOverlay {
+  tabId: string;
+  snapshotId?: string;
+  url?: string;
+  stale: boolean;
+  staleReason?: string;
+  nodes: Array<{
+    ref: string;
+    role: string;
+    name: string;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }>;
+}
+
+export type BrowserWorkbenchPermissionResponse =
+  | "allow-once"
+  | "allow-always"
+  | "block"
+  | "dismiss";
+
+export interface BrowserWorkbenchPermissionPrompt {
+  requestId: string;
+  taskId: string;
+  sessionId: string;
+  tabId: string;
+  origin: string;
+  permissions: string[];
+  externalUrl?: string;
+  at: number;
 }
 
 export interface BrowserWorkbenchCursorEvent {
@@ -5646,15 +6016,123 @@ export interface ElectronAPI {
   unregisterBrowserWorkbenchSession: (data: {
     taskId: string;
     sessionId?: string;
+    tabId?: string;
     webContentsId?: number;
   }) => Promise<{ success: boolean }>;
   updateBrowserWorkbenchStatus: (data: {
     taskId: string;
     sessionId?: string;
+    tabId?: string;
     webContentsId?: number;
     url?: string;
     title?: string;
   }) => Promise<{ success: boolean }>;
+  activateBrowserWorkbenchTab: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId: string;
+  }) => Promise<{ success: boolean }>;
+  browserWorkbenchUserNavigate: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId?: string;
+    url: string;
+  }) => Promise<BrowserWorkbenchUserNavigateResult>;
+  respondBrowserWorkbenchPermission: (data: {
+    requestId: string;
+    response: BrowserWorkbenchPermissionResponse;
+  }) => Promise<{ success: boolean }>;
+  listBrowserWorkbenchPermissionRequests: (data: {
+    taskId: string;
+    sessionId?: string;
+  }) => Promise<BrowserWorkbenchPermissionPrompt[]>;
+  inspectBrowserWorkbenchArea: (data: {
+    taskId: string;
+    sessionId?: string;
+    rect: { x: number; y: number; width: number; height: number };
+  }) => Promise<{ success: boolean; area?: BrowserWorkbenchInspectArea; error?: string }>;
+  previewBrowserWorkbenchStyle: (data: {
+    taskId: string;
+    sessionId?: string;
+    selector: string;
+    action: "apply" | "revert";
+    styles?: Record<string, string>;
+    text?: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  setBrowserWorkbenchFocus: (focused: boolean) => Promise<{ success: boolean }>;
+  getBrowserWorkbenchDiagnostics: (
+    data: BrowserWorkbenchDiagnosticsRequest,
+  ) => Promise<BrowserWorkbenchDiagnosticsResult>;
+  browserWorkbenchTrace: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId?: string;
+    action: "start" | "stop";
+  }) => Promise<{ success: boolean; message?: string; error?: string }>;
+  getBrowserWorkbenchSnapshot: (data: {
+    taskId: string;
+    sessionId?: string;
+    tabId?: string;
+  }) => Promise<BrowserWorkbenchSnapshotOverlay | null>;
+  getBrowserSettings: () => Promise<BrowserSettings>;
+  saveBrowserSettings: (
+    settings: Partial<BrowserSettings>,
+  ) => Promise<{ success: boolean; settings?: BrowserSettings }>;
+  listBrowserSitePermissions: (data: {
+    workspaceId: string;
+  }) => Promise<BrowserSitePermissionEntry[]>;
+  resetBrowserSitePermission: (data: {
+    workspaceId: string;
+    origin?: string;
+    permission?: string;
+  }) => Promise<{ success: boolean }>;
+  searchBrowserHistory: (data: {
+    workspaceId: string;
+    query: string;
+    limit?: number;
+  }) => Promise<BrowserHistoryEntryView[]>;
+  listBrowserHistory: (data: {
+    workspaceId: string;
+    limit?: number;
+    offset?: number;
+    query?: string;
+  }) => Promise<BrowserHistoryEntryView[]>;
+  removeBrowserHistory: (data: {
+    workspaceId: string;
+    ids: string[];
+  }) => Promise<{ success: boolean; removed: number }>;
+  clearBrowserHistory: (data: {
+    workspaceId: string;
+    since?: number;
+  }) => Promise<{ success: boolean; removed: number }>;
+  clearBrowserData: (data: {
+    workspaceId: string;
+    types: BrowserDataType[];
+    since?: number;
+  }) => Promise<{ success: boolean }>;
+  listBrowserDownloads: (data: {
+    taskId: string;
+    sessionId?: string;
+  }) => Promise<BrowserWorkbenchDownloadEvent[]>;
+  browserDownloadAction: (data: {
+    id: string;
+    action: "pause" | "resume" | "cancel" | "open" | "reveal" | "clear";
+    confirmedDangerous?: boolean;
+  }) => Promise<{ success: boolean; error?: string }>;
+  setBrowserWorkbenchPaused: (data: {
+    taskId: string;
+    sessionId?: string;
+    paused: boolean;
+  }) => Promise<{ success: boolean }>;
+  onBrowserWorkbenchDriving: (
+    callback: (event: BrowserWorkbenchDrivingEvent) => void,
+  ) => () => void;
+  onBrowserWorkbenchDownload: (
+    callback: (event: BrowserWorkbenchDownloadEvent) => void,
+  ) => () => void;
+  onBrowserWorkbenchSignInRequired: (
+    callback: (event: BrowserWorkbenchSignInEvent) => void,
+  ) => () => void;
   captureBrowserWorkbenchScreenshot: (data: {
     taskId: string;
     sessionId?: string;
@@ -5701,6 +6179,21 @@ export interface ElectronAPI {
   onBrowserWorkbenchCursor: (callback: (event: BrowserWorkbenchCursorEvent) => void) => () => void;
   onBrowserWorkbenchViewport: (
     callback: (event: BrowserWorkbenchViewportEvent) => void,
+  ) => () => void;
+  onBrowserWorkbenchTabCommand: (
+    callback: (command: BrowserWorkbenchTabCommand) => void,
+  ) => () => void;
+  onBrowserWorkbenchNavigationBlocked: (
+    callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
+  ) => () => void;
+  onBrowserWorkbenchPermissionRequest: (
+    callback: (prompt: BrowserWorkbenchPermissionPrompt) => void,
+  ) => () => void;
+  onBrowserWorkbenchShortcut: (
+    callback: (event: BrowserWorkbenchShortcutEvent) => void,
+  ) => () => void;
+  onBrowserWorkbenchContextAction: (
+    callback: (event: BrowserWorkbenchContextActionEvent) => void,
   ) => () => void;
   ingestYouTubeVideo: (data: {
     workspaceId: string;

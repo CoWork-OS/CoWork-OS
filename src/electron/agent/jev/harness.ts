@@ -42,6 +42,7 @@ const REVIEW_APPROVAL_TYPES = new Set<ApprovalType>([
 const READ_ONLY_BROWSER_TOOLS = new Set([
   "browser_snapshot",
   "browser_tabs",
+  "browser_history_search",
   "browser_console",
   "browser_network",
   "browser_downloads",

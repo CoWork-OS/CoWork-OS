@@ -1,5 +1,6 @@
 import { TEAMS_CONVERSATION_REFERENCE_SCHEMA } from "../gateway/TeamsConversationReferenceStore";
 import { CHANNEL_DECISION_SCHEMA } from "../gateway/ChannelDecisionStore";
+import { BROWSER_HISTORY_SCHEMA_SQL } from "./BrowserHistoryRepository";
 import { NOTIFICATION_INBOX_SCHEMA } from "../notifications/NotificationInboxStore";
 import { BOT_NOTIFICATION_SCHEMA } from "../notifications/BotNotificationStore";
 import {
@@ -6741,6 +6742,12 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_acp_tasks_assignee_status
           ON acp_tasks(assignee_id, status, updated_at DESC);
       `);
+    } catch {
+      // Table or indexes already exist, ignore
+    }
+    try {
+      // In-app browser history (URLs and titles only), per browser profile.
+      this.db.exec(BROWSER_HISTORY_SCHEMA_SQL);
     } catch {
       // Table or indexes already exist, ignore
     }

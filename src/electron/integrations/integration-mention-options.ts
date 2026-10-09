@@ -200,7 +200,8 @@ const BROWSER_USE_OPTION: IntegrationMentionOption = {
   source: "builtin",
   providerKey: "browser-use",
   iconKey: "browser",
-  description: "Open, inspect, test, and interact with web pages in the Browser Use session.",
+  description:
+    "Use the in-app browser: open it for this task and let CoWork browse while you watch.",
   aliases: [
     "browser",
     "browser use",
@@ -227,9 +228,13 @@ const BROWSER_USE_OPTION: IntegrationMentionOption = {
     "browser_evaluate",
     "browser_wait",
     "browser_scroll",
+    "browser_tabs",
+    "browser_new_tab",
+    "browser_switch_tab",
+    "browser_close_tab",
   ],
   promptHint:
-    "Use Browser Use/browser_* tools for interactive web pages, local app testing, login flows, forms, screenshots, and visual checks. Prefer the visible browser session and inspect with browser_snapshot before acting.",
+    "The user asked for the in-app browser: use browser_* tools in the visible workbench (browser_navigate opens it for this task) for web pages, local app testing, login flows, forms, screenshots, and visual checks. Inspect with browser_snapshot before acting. If a page needs the user to sign in, ask them to do it in the browser.",
   status: "configured",
 };
 

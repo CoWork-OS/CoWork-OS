@@ -95,6 +95,7 @@ import {
 import { SessionProgressCard } from "./SessionProgressCard";
 import { SessionDashboardCard } from "./SessionDashboardCard";
 import { SessionMembersCard } from "./SessionMembersCard";
+import { getRecoveredSynthesisTaskIds } from "../../shared/synthesis-agent-detection";
 import "./right-panel.css";
 
 /**
@@ -327,6 +328,8 @@ type CollaborativeAgentRow = {
   task: Task;
   statusKind: CollaborativeAgentStatusKind;
   statusLabel: string;
+  /** A failed synthesis attempt replaced by a successful retry: history, not a failure. */
+  recovered: boolean;
   eventCount: number;
   toolCallCount: number;
   llmCallCount: number;
@@ -623,19 +626,22 @@ function getCollaborativeAgentTotals(
   }
 
   let hasUsage = false;
+  const recoveredTaskIds = getRecoveredSynthesisTaskIds(childTasks);
   const rows = childTasks
     .slice()
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
     .map((task): CollaborativeAgentRow => {
       const taskEvents = eventsByTaskId.get(task.id) || [];
-      const statusKind = getCollaborativeAgentStatusKind(task);
+      const recovered = recoveredTaskIds.has(task.id);
+      const statusKind = recovered ? "warning" : getCollaborativeAgentStatusKind(task);
       const agentUsage = getCollaborativeAgentUsage(taskEvents, childUsageByTaskId[task.id]);
       hasUsage = hasUsage || agentUsage.hasUsage;
       const endMs = task.completedAt ?? task.updatedAt ?? task.createdAt;
       return {
         task,
         statusKind,
-        statusLabel: getCollaborativeAgentStatusLabel(statusKind, task),
+        statusLabel: recovered ? "Retried" : getCollaborativeAgentStatusLabel(statusKind, task),
+        recovered,
         eventCount: taskEvents.length,
         toolCallCount: taskEvents.filter(
           (event) => getEffectiveTaskEventType(event) === "tool_call",
@@ -652,7 +658,7 @@ function getCollaborativeAgentTotals(
   );
   const counts = rows.reduce(
     (acc, row) => {
-      acc[row.statusKind] += 1;
+      if (!row.recovered) acc[row.statusKind] += 1;
       acc.eventCount += row.eventCount;
       acc.toolCallCount += row.toolCallCount;
       acc.llmCallCount += row.llmCallCount;

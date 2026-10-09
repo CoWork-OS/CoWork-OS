@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { AgentTeamRun, Task, TaskEvent } from "../../../shared/types";
-import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
+import { CollaborativeAgentLines, hasLiveAgentLine } from "../CollaborativeAgentLines";
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
@@ -190,6 +190,16 @@ describe("CollaborativeAgentLines", () => {
     );
 
     expect(markup).toBe("");
+  });
+
+  it("stops counting a never-spawned team item as live once the main task finishes", () => {
+    const placeholder = { statusKind: "pending" as const, task: null };
+    const failed = { statusKind: "failed" as const, task: makeTask({ status: "failed" }) };
+    expect(hasLiveAgentLine([failed, placeholder], false)).toBe(true);
+    expect(hasLiveAgentLine([failed, placeholder], true)).toBe(false);
+    const queued = { statusKind: "pending" as const, task: makeTask({ status: "pending" }) };
+    expect(hasLiveAgentLine([failed, queued], true)).toBe(true);
+    expect(hasLiveAgentLine([{ statusKind: "running" as const, task: null }], true)).toBe(true);
   });
 
   it("renders ordinary delegated children without a collaborative run", () => {

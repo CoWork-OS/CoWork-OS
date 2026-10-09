@@ -63,6 +63,10 @@ import {
   PermissionPrompt,
 } from "./BrowserWorkbench/PermissionPrompt";
 import { type BrowserPageDialogRequest, PageDialog } from "./BrowserWorkbench/PageDialog";
+import {
+  type BrowserScreenShareRequest,
+  ScreenSharePicker,
+} from "./BrowserWorkbench/ScreenSharePicker";
 import { useBrowserTabs } from "./BrowserWorkbench/useBrowserTabs";
 import {
   AgentDrivingBanner,
@@ -672,6 +676,40 @@ export function BrowserWorkbenchView({
       window.clearInterval(timer);
     };
   }, [hasPermissionRequests, sessionId, tabIdsKey, taskId]);
+
+  // Screen sharing requests (getDisplayMedia): the source picker.
+  const [screenShareRequests, setScreenShareRequests] = useState<BrowserScreenShareRequest[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    setScreenShareRequests([]);
+    const add = (request: BrowserScreenShareRequest) =>
+      setScreenShareRequests((current) =>
+        current.some((entry) => entry.requestId === request.requestId)
+          ? current
+          : [...current, request],
+      );
+    void window.electronAPI
+      .listBrowserWorkbenchScreenShareRequests?.({ taskId, sessionId })
+      .then((pending) => {
+        if (!cancelled) for (const request of pending || []) add(request);
+      })
+      .catch(() => undefined);
+    const unsubscribe = window.electronAPI.onBrowserWorkbenchScreenShareRequest?.((prompt) => {
+      if (prompt.taskId !== taskId || prompt.sessionId !== sessionId) return;
+      add(prompt);
+      activateTab(prompt.tabId);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [activateTab, sessionId, taskId]);
+  const respondToScreenShare = useCallback((requestId: string, sourceId: string | null) => {
+    setScreenShareRequests((current) => current.filter((entry) => entry.requestId !== requestId));
+    void window.electronAPI
+      .respondBrowserWorkbenchScreenShare?.({ requestId, sourceId })
+      .catch(() => undefined);
+  }, []);
 
   // Page alert/confirm while CoWork's debugger owns the page's dialogs.
   const [pageDialogs, setPageDialogs] = useState<BrowserPageDialogRequest[]>([]);
@@ -2222,6 +2260,16 @@ export function BrowserWorkbenchView({
                 </BrowserTabView>
               ),
             )}
+            {screenShareRequests
+              .filter((request) => request.tabId === activeTabId)
+              .slice(0, 1)
+              .map((request) => (
+                <ScreenSharePicker
+                  key={request.requestId}
+                  request={request}
+                  onRespond={respondToScreenShare}
+                />
+              ))}
             {pageDialogs
               .filter((dialog) => dialog.tabId === activeTabId)
               .slice(0, 1)

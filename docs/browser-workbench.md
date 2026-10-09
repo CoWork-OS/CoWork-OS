@@ -210,7 +210,10 @@ Browser V2 treats browser side effects as governed workspace actions:
 - Once CoWork's debugger is attached to a tab (after any agent action or diagnostics), Chromium stops showing the page's own `alert`/`confirm` and the page waits for an answer. The workbench shows them as a dialog over the tab (OK / Cancel, Enter / Esc) and brings that tab to the front; CoWork can still answer with `browser_handle_dialog`, whichever comes first. Popup windows use a native dialog. Without the debugger Electron shows its native dialog. `prompt()` isn't supported by Electron and throws in the page.
 - A page that asks before unloading (unsaved changes) gets a native "Leave site?" dialog when you reload, navigate away, close its popup window or close its tab; "Stay" keeps the page and the tab. Closing a tab runs the page's check first. While CoWork is acting on the tab the page is left without asking, so the agent is never stuck behind the dialog. This works both before and after CoWork's debugger is attached to the page.
 - Approvals CoWork asks for while using the browser (site access, page scripts in developer mode, uploads, downloads, history search) appear as a card over the tab while the browser is open, instead of the approval dialog. It answers through the same approval path with the same choices; with the browser closed, or in the classic browser, the dialog is used.
-- Site permissions are never granted silently. Fullscreen, sanitized clipboard writes and encrypted media playback are allowed; camera, microphone, location, notifications, clipboard reads, MIDI, HID, serial, USB, pointer/keyboard lock, file system access and opening external apps show a prompt in the tab (Allow this time, Always allow, Never allow); everything else, including screen capture, is denied. "Always" and "Never" are remembered per workspace browser profile and site. Pages that are not registered workbench tabs are denied.
+- Site permissions are never granted silently. Fullscreen, sanitized clipboard writes and encrypted media playback are allowed; camera, microphone, location, notifications, clipboard reads, MIDI, HID, serial, USB, pointer/keyboard lock, file system access and opening external apps show a prompt in the tab (Allow this time, Always allow, Never allow); everything else is denied. "Always" and "Never" are remembered per workspace browser profile and site. Pages that are not registered workbench tabs are denied.
+- Screen sharing (`getDisplayMedia`) shows a picker in the tab with the screens and windows to share; nothing is shared until one is picked, and Cancel denies the request. On macOS the app needs Screen Recording permission for sources to appear.
+- Electron reports a permission the site has not been granted as "denied" (it has no "ask" state), so sites that check before asking, notifications especially, may never ask. The profile menu has a per-site Notifications control (Ask, Allow, Block) for the current site; reload the page after changing it.
+- Admin policies (`browser` section in [Admin Policies](admin-policies.md)) can lock developer mode and deny site permissions outright; a policy block beats any user decision.
 - Downloads, uploads, and real-browser profile control should surface permission prompts instead of being silently granted.
 - Console, network, storage, and download metadata are redacted before entering agent context.
 - The active access profile is checked before these browser actions; a profile or domain deny cannot be widened by a backend switch or a one-shot approval.
@@ -219,6 +222,9 @@ Browser V2 treats browser side effects as governed workspace actions:
 
 - Pages visited in workbench tabs are recorded per workspace browser profile (URL, title, visit count and time). Credentials, fragments and secret-looking query parameters (tokens, OAuth codes) are removed before anything is stored; non-web URLs and popup windows are not recorded. Up to 10,000 pages are kept per profile.
 - Developer mode gates `browser_evaluate`, `browser_storage` and `browser_trace_start`/`browser_trace_stop`: without it they are not offered to CoWork, and with it the first use on each site in a task asks for approval. Uploads by CoWork follow the upload setting (ask each time by default).
+- Right-click an image: Save Image to Workspace downloads it into the task workspace's `downloads/` folder as your own download.
+- Clear browsing data with a time range clears history in that range, and cookies and site storage for the sites visited in it (from history). Cached files can only be cleared for all time.
+- Cmd+Shift+B (Ctrl+Shift+B) in a task opens the browser, or switches it between the sidebar and full view.
 - Settings > Browser: search engine, download location, restore tabs, open conversation links in the in-app browser, Chrome-compatible user agent (applies after restart), recording history, CoWork downloads and uploads (ask / allow / block), developer mode, and per-workspace history, remembered site permissions and browsing data. Access profiles and admin policies still decide which sites can be reached; these settings cannot widen them.
 
 ## Relationship To Web Page Artifacts
@@ -313,20 +319,21 @@ npm run build:react
 node scripts/qa/browser-workbench-smoke.mjs
 ```
 
-It opens the workbench from the title bar and checks: a typed local dev server address loads; three tabs keep form input, scroll and page state when switching; `target=_blank` opens a tab; a `window.open` sign-in popup posts to its opener and closes; five sidebar/full-view switches keep the page loaded; Cmd+F counts matches; Cmd+= zooms; a geolocation request prompts in the tab and "Never allow" is remembered; a download lands in the workspace and on the shelf; closing a tab with unsaved changes asks "Leave site?" and "Stay" keeps it; `confirm` and `alert` are shown and answered in the tab with CoWork's debugger attached; a browser approval shows as a card over the tab and not as a dialog; closing and reopening restores the tabs; a link to an unopened local port shows the blocked notice. Results and screenshots go to a temporary folder printed at the end.
+It opens the workbench from the title bar and checks: a typed local dev server address loads; three tabs keep form input, scroll and page state when switching; `target=_blank` opens a tab; a `window.open` sign-in popup posts to its opener and closes; five sidebar/full-view switches keep the page loaded; Cmd+F counts matches; Cmd+= zooms; a geolocation request prompts in the tab and "Never allow" is remembered; a download lands in the workspace and on the shelf; closing a tab with unsaved changes asks "Leave site?" and "Stay" keeps it; `confirm` and `alert` are shown and answered in the tab with CoWork's debugger attached; a browser approval shows as a card over the tab and not as a dialog; an admin policy locks developer mode and blocks the camera without a prompt; notifications can be allowed for a site from the profile menu; screen sharing shows the source picker and Cancel denies it; closing and reopening restores the tabs; a link to an unopened local port shows the blocked notice; Cmd+Shift+B reopens the browser from the task view. Results and screenshots go to a temporary folder printed at the end.
 
 Manual checks (things the harness cannot drive):
 
-1. Right-click a page, a link, an image, selected text and a text field; confirm the native menus and their actions (open in new tab, copy, search, Ask CoWork, spelling suggestions).
-2. Use the keyboard shortcuts with focus in the page and in the address bar; confirm Cmd+R and Cmd+W act on the tab, not the app.
-3. Trackpad swipe and mouse back/forward buttons over the browser.
-4. Sign in to Google in the workbench (Chrome-compatible user agent).
-5. Run a task with `@Browser`: the browser opens, the "CoWork is using this tab" banner appears, clicking the page offers Take over, and Resume continues the task.
-6. Let an agent navigate to a sign-in page; confirm the sign-in banner and that Done continues.
-7. Annotate an area by dragging, and Adjust an element's text and font size; confirm the live preview, the sent changes and that the page is restored.
-8. Settings > Browser: change the search engine, clear history, reset a site permission, toggle developer mode and confirm `browser_evaluate` asks for approval once per site.
-9. Settings > Browser > "Use the classic browser" switches to the previous single-tab workbench (rollback for one release).
-10. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
+1. Right-click a page, a link, an image, selected text and a text field; confirm the native menus and their actions (open in new tab, copy, Save Image to Workspace, search, Ask CoWork, spelling suggestions).
+2. Share a real screen from a page that calls `getDisplayMedia` (needs Screen Recording permission).
+3. Use the keyboard shortcuts with focus in the page and in the address bar; confirm Cmd+R and Cmd+W act on the tab, not the app.
+4. Trackpad swipe and mouse back/forward buttons over the browser.
+5. Sign in to Google in the workbench (Chrome-compatible user agent).
+6. Run a task with `@Browser`: the browser opens, the "CoWork is using this tab" banner appears, clicking the page offers Take over, and Resume continues the task.
+7. Let an agent navigate to a sign-in page; confirm the sign-in banner and that Done continues.
+8. Annotate an area by dragging, and Adjust an element's text and font size; confirm the live preview, the sent changes and that the page is restored.
+9. Settings > Browser: change the search engine, clear history, reset a site permission, toggle developer mode and confirm `browser_evaluate` asks for approval once per site.
+10. Settings > Browser > "Use the classic browser" switches to the previous single-tab workbench (rollback for one release).
+11. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
 
 Build checks:
 

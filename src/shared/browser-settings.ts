@@ -26,6 +26,17 @@ export interface BrowserSettings {
   classicWorkbench: boolean;
 }
 
+/** What the organization's admin policy decides for the in-app browser (read-only for users). */
+export interface BrowserSettingsPolicy {
+  /** Developer mode is set by policy; the toggle shows the forced value. */
+  developerModeLocked: boolean;
+  /** Site permissions denied without a prompt. */
+  blockedSitePermissions: string[];
+}
+
+/** Settings as returned to Settings > Browser, with the admin policy applied. */
+export type BrowserSettingsState = BrowserSettings & { policy?: BrowserSettingsPolicy };
+
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   searchEngine: "google",
   downloadLocation: "system",

@@ -658,6 +658,11 @@ export const STORAGE_UNITS = {
   browserHistory_clear: storeUnit((db: Database.Database) => new BrowserHistoryStore(db), "clear", {
     readonly: false,
   }),
+  browserHistory_originsVisitedSince: storeUnit(
+    (db: Database.Database) => new BrowserHistoryStore(db),
+    "originsVisitedSince",
+    { readonly: true },
+  ),
   taskLabel_create: storeUnit((db: Database.Database) => new TaskLabelStore(db), "create", {
     readonly: false,
   }),

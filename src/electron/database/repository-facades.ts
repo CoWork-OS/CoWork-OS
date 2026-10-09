@@ -431,6 +431,7 @@ const BROWSER_HISTORY_METHODS = [
   "list",
   "remove",
   "clear",
+  "originsVisitedSince",
 ] as const;
 export type BrowserHistoryRepository = AsyncStore<
   BrowserHistoryStore,

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import "./react-refresh-ignored-exports";
 import { App } from "./App";
 import "./styles/index.css";
+import "./styles/browser-workbench.css";
 import "./components/right-panel.css";
 import "./styles/calm-theme.css";
 

@@ -39,17 +39,21 @@ const PERMISSION_LABELS: Record<string, string> = {
   pointerLock: "Pointer lock",
   keyboardLock: "Keyboard lock",
   fileSystem: "File editing",
+  openExternal: "Opening apps",
+  "display-capture": "Screen sharing",
 };
 
 function Toggle({
   label,
   description,
   checked,
+  disabled,
   onChange,
 }: {
   label: string;
   description?: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
@@ -63,6 +67,7 @@ function Toggle({
           type="checkbox"
           aria-label={label}
           checked={checked}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.checked)}
         />
         <span className="toggle-slider" />
@@ -107,7 +112,7 @@ const AGENT_OPTIONS: Array<{ value: BrowserAgentPermission; label: string }> = [
 
 /** Settings > Browser: preferences, history, site permissions and developer mode. */
 export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) {
-  const { settings, save } = useBrowserSettings();
+  const { settings, policy, save } = useBrowserSettings();
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
   const [profileId, setProfileId] = useState(workspaceId || "");
   const [historyQuery, setHistoryQuery] = useState("");
@@ -249,10 +254,24 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
         />
         <Toggle
           label="Developer mode"
-          description="Adds Inspect Element and lets CoWork run page scripts and read storage and traces (full DevTools access)."
+          description={
+            policy?.developerModeLocked
+              ? `Set by your organization's policy (${settings.developerMode ? "on" : "off"}).`
+              : "Adds Inspect Element and lets CoWork run page scripts and read storage and traces (full DevTools access)."
+          }
           checked={settings.developerMode}
+          disabled={policy?.developerModeLocked}
           onChange={(developerMode) => update({ developerMode })}
         />
+        {policy && policy.blockedSitePermissions.length > 0 && (
+          <p className="settings-description">
+            Your organization blocks these site permissions in the browser:{" "}
+            {policy.blockedSitePermissions
+              .map((permission) => PERMISSION_LABELS[permission] || permission)
+              .join(", ")}
+            .
+          </p>
+        )}
       </div>
 
       <div className="settings-group">

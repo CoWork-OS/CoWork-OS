@@ -90,6 +90,8 @@ const DANGEROUS_EXTENSIONS = new Set([
 
 /** CoWork acted on the tab within this window: a download then counts as CoWork's. */
 const AGENT_DOWNLOAD_WINDOW_MS = 30_000;
+/** How long a "Save Image to Workspace" waits for its download to start. */
+const WORKSPACE_SAVE_WINDOW_MS = 30_000;
 
 export function isDangerousDownload(filename: string): boolean {
   const lower = filename.toLowerCase();
@@ -155,6 +157,8 @@ export type BrowserDownloadAction = "pause" | "resume" | "cancel" | "open" | "re
 export class BrowserDownloadManager {
   private downloads = new Map<string, TrackedDownload>();
   private attachedSessions = new WeakSet<object>();
+  /** "Save Image to Workspace" requests waiting for their download to start. */
+  private workspaceSaves: Array<{ webContentsId: number; url: string; at: number }> = [];
 
   constructor(private readonly deps: BrowserDownloadManagerDeps) {}
 
@@ -164,6 +168,31 @@ export class BrowserDownloadManager {
     electronSession.on?.("will-download", (event: Any, item: Any, contents: Any) =>
       this.handleWillDownload(event, item, contents),
     );
+  }
+
+  /**
+   * The user chose "Save Image to Workspace": the next download of this URL from
+   * this page goes to the workspace's downloads folder as the user's own download.
+   */
+  requestWorkspaceSave(webContentsId: number, url: string): void {
+    const now = Date.now();
+    this.workspaceSaves = this.workspaceSaves.filter(
+      (entry) => now - entry.at < WORKSPACE_SAVE_WINDOW_MS,
+    );
+    this.workspaceSaves.push({ webContentsId, url, at: now });
+  }
+
+  private takeWorkspaceSave(webContentsId: number, url: string): boolean {
+    const now = Date.now();
+    const index = this.workspaceSaves.findIndex(
+      (entry) =>
+        entry.webContentsId === webContentsId &&
+        entry.url === url &&
+        now - entry.at < WORKSPACE_SAVE_WINDOW_MS,
+    );
+    if (index < 0) return false;
+    this.workspaceSaves.splice(index, 1);
+    return true;
   }
 
   list(taskId: string, sessionId: string): Array<Omit<TrackedDownload, "item">> {
@@ -225,6 +254,7 @@ export class BrowserDownloadManager {
       event?.preventDefault?.();
       return;
     }
+    const toWorkspace = this.takeWorkspaceSave(webContentsId, url);
     const base: Omit<TrackedDownload, "state"> = {
       id: randomUUID(),
       taskId: owner.taskId,
@@ -238,6 +268,7 @@ export class BrowserDownloadManager {
       // Attribution errs toward CoWork: its downloads land in the workspace and follow the
       // agent download setting, while the user's own clicks after taking over are theirs.
       agentInitiated:
+        !toWorkspace &&
         !this.deps.service.isPausedByUser(owner.taskId, owner.sessionId) &&
         this.deps.service.wasRecentlyDriven(
           owner.taskId,
@@ -262,9 +293,11 @@ export class BrowserDownloadManager {
     const settings = this.deps.loadSettings();
     let savePath: string | undefined;
     try {
-      savePath = base.agentInitiated
-        ? this.agentSavePath(owner.taskId, filename, settings)
-        : this.userSavePath(owner.taskId, filename, settings);
+      savePath = toWorkspace
+        ? this.workspacePath(owner.taskId, filename)
+        : base.agentInitiated
+          ? this.agentSavePath(owner.taskId, filename, settings)
+          : this.userSavePath(owner.taskId, filename, settings);
     } catch (error) {
       event?.preventDefault?.();
       this.record({

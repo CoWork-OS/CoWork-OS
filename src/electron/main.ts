@@ -55,6 +55,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  desktopCapturer,
   ipcMain,
   dialog,
   session,
@@ -249,6 +250,7 @@ import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessServ
 import { getBrowserSessionManager } from "./browser/browser-session-manager";
 import { attachBrowserGuest } from "./browser/browser-guest-attach";
 import { BrowserUnloadGuard } from "./browser/browser-unload-guard";
+import { BrowserScreenShare } from "./browser/browser-screen-share";
 import { applyBrowserUserAgent } from "./browser/browser-user-agent";
 import { BrowserDownloadManager } from "./browser/browser-download-manager";
 import {
@@ -675,8 +677,35 @@ function prepareBrowserWorkbenchPartition(partition: string): void {
     BrowserSettingsManager.loadSettings().chromeCompatibleUserAgent,
   );
   getBrowserWorkbenchService().getPermissionManager().attach(browserSession, partition);
+  getBrowserScreenShare().attach(browserSession);
   getBrowserDownloadManager().attach(browserSession);
   browserWorkbenchSessions.set(browserSession, partition);
+}
+
+let browserScreenShare: BrowserScreenShare | null = null;
+function getBrowserScreenShare(): BrowserScreenShare {
+  browserScreenShare ??= new BrowserScreenShare({
+    resolveOwner: (webContentsId) => {
+      const owner = getBrowserSessionManager().findTabOwner(webContentsId);
+      return owner && owner.kind === "tab"
+        ? { taskId: owner.taskId, sessionId: owner.sessionId, tabId: owner.tabId }
+        : null;
+    },
+    contentsForFrame: (frame) => webContents.fromFrame(frame) ?? null,
+    listSources: () =>
+      desktopCapturer.getSources({
+        types: ["screen", "window"],
+        thumbnailSize: { width: 320, height: 200 },
+      }),
+    sendPrompt: (prompt) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return false;
+      mainWindow.webContents.send(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_REQUEST, prompt);
+      return true;
+    },
+    isBlocked: () =>
+      BrowserSettingsManager.loadPolicy().blockedSitePermissions.includes("display-capture"),
+  });
+  return browserScreenShare;
 }
 
 let browserUnloadGuard: BrowserUnloadGuard | null = null;
@@ -764,6 +793,10 @@ app.on("web-contents-created", (_event, contents) => {
         recordHistory: createBrowserHistoryRecorder(() => dbManager.getDatabase(), profileKey),
         isDeveloperMode: () => BrowserSettingsManager.loadSettings().developerMode,
         unloadGuard: getBrowserUnloadGuard(),
+        saveToWorkspace: (contents, url) => {
+          getBrowserDownloadManager().requestWorkspaceSave(contents.id, url);
+          contents.downloadURL(url);
+        },
       });
     }
   });
@@ -4929,6 +4962,21 @@ if (isMacSafeStorageMigrationWorker) {
         tabId,
       });
       return { success };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_RESPOND, (_event, data: Any) => {
+      if (!data || typeof data.requestId !== "string" || data.requestId.length > 100) {
+        return { success: false };
+      }
+      const sourceId =
+        typeof data.sourceId === "string" && data.sourceId.length <= 200 ? data.sourceId : null;
+      return { success: getBrowserScreenShare().respond(data.requestId, sourceId) };
+    });
+    ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_SCREEN_SHARE_LIST, (_event, data: Any) => {
+      if (!data || typeof data.taskId !== "string") return [];
+      return getBrowserScreenShare().listPending(
+        data.taskId,
+        typeof data.sessionId === "string" ? data.sessionId : "default",
+      );
     });
     ipcMain.handle(
       IPC_CHANNELS.BROWSER_WORKBENCH_PAGE_DIALOG_RESPOND,

@@ -37,6 +37,57 @@ export function ProfileMenu({
   });
   const [range, setRange] = useState(RANGES[3].ms);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const siteOrigin = (() => {
+    try {
+      const url = new URL(currentUrl);
+      return /^https?:$/.test(url.protocol) ? url.origin : null;
+    } catch {
+      return null;
+    }
+  })();
+  // Electron reports an undecided permission as "denied" to pages, so a site that
+  // checks before asking never asks: notifications can be allowed here instead.
+  const [notifications, setNotifications] = useState<"ask" | "allow" | "block">("ask");
+  useEffect(() => {
+    if (!open || !workspaceId || !siteOrigin) return;
+    let cancelled = false;
+    void window.electronAPI
+      .listBrowserSitePermissions?.({ workspaceId })
+      .then((entries) => {
+        if (cancelled) return;
+        const entry = (entries || []).find(
+          (candidate) =>
+            candidate.origin === siteOrigin && candidate.permission === "notifications",
+        );
+        setNotifications(
+          entry?.decision === "allow" || entry?.decision === "block" ? entry.decision : "ask",
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, siteOrigin, workspaceId]);
+  const updateNotifications = (value: "ask" | "allow" | "block") => {
+    if (!workspaceId || !siteOrigin) return;
+    setNotifications(value);
+    const request =
+      value === "ask"
+        ? window.electronAPI.resetBrowserSitePermission?.({
+            workspaceId,
+            origin: siteOrigin,
+            permission: "notifications",
+          })
+        : window.electronAPI.setBrowserSitePermission?.({
+            workspaceId,
+            origin: siteOrigin,
+            permission: "notifications",
+            decision: value,
+          });
+    void request
+      ?.then(() => onNotice("Reload the page for the change to take effect"))
+      .catch(() => undefined);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -99,7 +150,7 @@ export function ProfileMenu({
                 </label>
               ))}
               <label>
-                History time range
+                Time range
                 <select value={range} onChange={(event) => setRange(Number(event.target.value))}>
                   {RANGES.map((entry) => (
                     <option key={entry.label} value={entry.ms}>
@@ -108,9 +159,12 @@ export function ProfileMenu({
                   ))}
                 </select>
               </label>
-              <span className="browser-workbench-clear-data-note">
-                Cookies, cache and storage are cleared for all time.
-              </span>
+              {range ? (
+                <span className="browser-workbench-clear-data-note">
+                  Cookies and site storage are cleared for the sites you visited in this range.
+                  Cached files are cleared for all time.
+                </span>
+              ) : null}
               <div className="browser-workbench-notice-actions">
                 <button type="button" onClick={() => setClearing(false)}>
                   Cancel
@@ -131,6 +185,21 @@ export function ProfileMenu({
             </div>
           ) : (
             <>
+              {siteOrigin && workspaceId && (
+                <label className="browser-workbench-site-setting">
+                  Notifications from {new URL(siteOrigin).host}
+                  <select
+                    value={notifications}
+                    onChange={(event) =>
+                      updateNotifications(event.target.value as "ask" | "allow" | "block")
+                    }
+                  >
+                    <option value="ask">Ask</option>
+                    <option value="allow">Allow</option>
+                    <option value="block">Block</option>
+                  </select>
+                </label>
+              )}
               <button type="button" role="menuitem" onClick={() => setClearing(true)}>
                 Clear browsing data…
               </button>

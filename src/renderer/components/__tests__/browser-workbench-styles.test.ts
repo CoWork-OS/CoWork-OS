@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const stylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.url));
+const stylesPath = fileURLToPath(new URL("../../styles/browser-workbench.css", import.meta.url));
+// The resizable sidebar is shared by every artifact viewer, so it stays in index.css.
+const appStylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.url));
 
 describe("Browser workbench styles", () => {
   it("keeps sidebar chrome below the app title bar", () => {
@@ -14,7 +16,7 @@ describe("Browser workbench styles", () => {
   });
 
   it("shrinks the browser sidebar before it can crowd out the main column", () => {
-    const source = readFileSync(stylesPath, "utf8");
+    const source = readFileSync(appStylesPath, "utf8");
 
     expect(source).toMatch(
       /\.spreadsheet-resizable-sidebar\s*\{[^}]*min-width:\s*min\(420px,\s*max\(0px,\s*calc\(100% - 398px\)\)\);[^}]*max-width:\s*max\(0px,\s*calc\(100% - 398px\)\);/s,

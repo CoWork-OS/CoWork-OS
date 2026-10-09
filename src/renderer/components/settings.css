@@ -2654,12 +2654,7 @@
 /* Buttons inside flex-column / grid containers size to their label. */
 .settings-page-layout
   .settings-content
-  :is(
-    .settings-subsection,
-    .form-group,
-    .settings-card,
-    .computer-use-status-card
-  )
+  :is(.settings-subsection, .form-group, .settings-card, .computer-use-status-card)
   > :is(button, .settings-button, .button-primary, .button-secondary, .button-danger) {
   align-self: flex-start;
 }

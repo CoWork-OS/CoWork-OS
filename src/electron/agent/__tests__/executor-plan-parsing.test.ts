@@ -1541,11 +1541,13 @@ image_generation_contract:
         "Review only the team analyses provided in the prompt. Extract their venue and logistics recommendations.",
       ),
     ).toBe(false);
-    expect(executor.descriptionIndicatesVerification("Review the final checklist for accuracy")).toBe(
-      true,
-    );
     expect(
-      executor.descriptionIndicatesVerification("Review the report and identify any missing sections"),
+      executor.descriptionIndicatesVerification("Review the final checklist for accuracy"),
+    ).toBe(true);
+    expect(
+      executor.descriptionIndicatesVerification(
+        "Review the report and identify any missing sections",
+      ),
     ).toBe(true);
   });
 

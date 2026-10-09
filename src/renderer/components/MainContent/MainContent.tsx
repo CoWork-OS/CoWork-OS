@@ -1795,8 +1795,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               : item.kind === "agent-lifecycle"
                 ? `agent-lifecycle:${item.row.id}`
                 : item.kind === "action_block"
-                ? `action-block:${item.blockId}`
-                : `event:${item.event.id}`;
+                  ? `action-block:${item.blockId}`
+                  : `event:${item.event.id}`;
       if (item.kind === "event") {
         visiblePerfEventId = item.event.id;
       } else if (item.kind === "action_block") {
@@ -1827,20 +1827,20 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     .map((taskId) => `${taskId}:${childTasksById.get(taskId)?.status ?? "none"}`)
                     .join(",")}`
                 : item.kind === "action_block"
-                ? `${item.blockId}:${item.events.length}:${
-                    item.events[item.events.length - 1]?.id ?? "none"
-                  }:${item.eventIndices
-                    .map((eventIndex: number) =>
-                      getCommandOutputSessionsRevision(
-                        commandOutputSessionsByInsertIndex.get(eventIndex),
-                      ),
-                    )
-                    .join("||")}`
-                : `${item.event.id}:${getEffectiveTaskEventType(item.event)}:${
-                    toolCallPairing.completions.get(item.event.id)?.id ?? "none"
-                  }:${getCommandOutputSessionsRevision(
-                    commandOutputSessionsByInsertIndex.get(item.eventIndex),
-                  )}`;
+                  ? `${item.blockId}:${item.events.length}:${
+                      item.events[item.events.length - 1]?.id ?? "none"
+                    }:${item.eventIndices
+                      .map((eventIndex: number) =>
+                        getCommandOutputSessionsRevision(
+                          commandOutputSessionsByInsertIndex.get(eventIndex),
+                        ),
+                      )
+                      .join("||")}`
+                  : `${item.event.id}:${getEffectiveTaskEventType(item.event)}:${
+                      toolCallPairing.completions.get(item.event.id)?.id ?? "none"
+                    }:${getCommandOutputSessionsRevision(
+                      commandOutputSessionsByInsertIndex.get(item.eventIndex),
+                    )}`;
 
       rows.push({
         kind: "timeline",
@@ -5690,7 +5690,11 @@ function MainContentComponent({
             // parent's own narration interleaves between them. Those rows replace the
             // parent's per-agent "Created an agent" / "Agent finished" events.
             for (const row of buildAgentLifecycleRows(nonCliChildTasks)) {
-              specialItems.push({ kind: "agent-lifecycle" as const, timestamp: row.timestamp, row });
+              specialItems.push({
+                kind: "agent-lifecycle" as const,
+                timestamp: row.timestamp,
+                row,
+              });
             }
             eventItems = withoutCoveredAgentLifecycleEvents(
               eventItems,

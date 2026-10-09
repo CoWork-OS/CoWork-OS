@@ -77,6 +77,8 @@ import { parseNaturalLlmWikiPrompt } from "../../shared/llm-wiki-prompt-routing"
 import { parseOnboardingSlashCommand } from "../../shared/onboarding";
 import { RICH_FRAME_DESIGN_LANGUAGE_PROMPT } from "../../shared/rich-frame-design-language";
 import { HTML_SURFACE_RUNTIME_PROMPT } from "../../shared/answer-surfaces/html-bridge";
+import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
+import { extractToolDataTable, toolDataHandle, toolDataNote } from "../answer-surfaces/tool-data";
 import { formatAnswerSurfaceChanges } from "../answer-surfaces/answer-surface-changes";
 import { ANSWER_SURFACE_PROMPT } from "../../shared/answer-surfaces/prompt";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
@@ -2292,7 +2294,43 @@ export class TaskExecutor {
       normalizedToolResult.toolResult.is_error ? "failed" : "completed",
     );
 
-    return normalizedToolResult.toolResult;
+    return this.keepToolResultAsAnswerData(params, normalizedToolResult.toolResult);
+  }
+
+  /**
+   * When a tool returned table-like data and answer components are offered, keep the full
+   * table under a short handle and add one line telling the model it can compute an
+   * answer from it ({"tool": handle}) rather than retyping the numbers. The note is added
+   * after truncation, so the context budget never cuts it off.
+   */
+  private keepToolResultAsAnswerData(
+    params: { toolName: string; toolUseId: string; result: Any },
+    toolResult: LLMToolResult,
+  ): LLMToolResult {
+    if (toolResult.is_error || typeof toolResult.content !== "string") return toolResult;
+    if (!params.toolUseId || !this.shouldOfferAnswerSurfaces()) return toolResult;
+    try {
+      const handle = toolDataHandle(this.task.id, params.toolUseId);
+      const extracted = extractToolDataTable(
+        params.toolName,
+        params.result,
+        `${params.toolName} output ${handle}`,
+      );
+      if (!extracted) return toolResult;
+      const { table, json } = extracted;
+      void AnswerToolDataStore.put(
+        this.task.id,
+        handle,
+        params.toolUseId,
+        params.toolName,
+        json,
+      ).catch(() => {
+        // Not kept: an answer that names this handle says the result is unavailable.
+      });
+      return { ...toolResult, content: `${toolResult.content}\n${toolDataNote(handle, table)}` };
+    } catch {
+      return toolResult;
+    }
   }
 
   private shouldCompactToolResultsForLocalModel(): boolean {

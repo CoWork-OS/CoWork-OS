@@ -562,6 +562,7 @@ import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { setupAnswerSurfaceHandlers } from "./answer-surface-handlers";
 import { AnswerDataError, readAnswerDataTable } from "../answer-surfaces/answer-data";
+import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
 import { hasHiddenSegment } from "../../shared/answer-surfaces/data";
 import { answerImageNetworkContext } from "../answer-surfaces/network-context";
 import { configuredImageSearch } from "../answer-surfaces/web-image-search";
@@ -11138,6 +11139,22 @@ export async function setupIpcHandlers(
       imageSearch: configuredImageSearch,
     }),
     store: AnswerSurfaceStateStore,
+    // Tool results this task kept as data; only the task's own rows can be found.
+    loadToolData: async (taskId, handle, options) => {
+      const row = await AnswerToolDataStore.get(taskId, handle);
+      if (!row) throw new AnswerDataError(`No saved tool result ${handle} in this task`);
+      const limit = Math.max(
+        1,
+        Math.floor(options.maxCells / Math.max(1, row.table.columns.length)),
+      );
+      return {
+        ...row.table,
+        // Tool output (possibly web content), labelled as such under the answer.
+        file: `${row.toolName} output ${handle}`,
+        rows: row.table.rows.slice(0, limit),
+        truncated: row.table.truncated || row.table.rows.length > limit,
+      };
+    },
     authorizeTaskView: (event, taskId) => {
       authorizeTaskForEvent(event, taskId, "view");
     },

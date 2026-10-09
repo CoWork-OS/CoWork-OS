@@ -23,6 +23,7 @@ import {
 } from "../../shared/answer-surfaces/html-bridge";
 import {
   AnswerSurfaceDataSchema,
+  isToolDataSource,
   MAX_ANSWER_DATA_CELLS,
   type AnswerDataResult,
   type AnswerDataTable,
@@ -116,6 +117,12 @@ export interface AnswerSurfaceIpcDeps {
     filePath: string,
     options: { maxCells: number },
   ) => Promise<AnswerDataTable>;
+  /** A table this task's tool call produced, by its handle (see tool-data.ts). */
+  loadToolData?: (
+    taskId: string,
+    handle: string,
+    options: { maxCells: number },
+  ) => Promise<AnswerDataTable>;
   /** Throws when the channel is over its rate limit. */
   checkRateLimit?: (channel: string) => void;
 }
@@ -167,20 +174,25 @@ export function createAnswerSurfaceIpcHandlers(
       const entries = Object.entries(value.sources);
       // One cell budget shared by the block's files.
       const maxCells = Math.floor(MAX_ANSWER_DATA_CELLS / entries.length);
-      for (const [id, filePath] of entries) {
-        if (!deps.loadDataSource) {
-          results[id] = { file: filePath, error: "Data files are read in the desktop app" };
+      for (const [id, source] of entries) {
+        const tool = isToolDataSource(source);
+        const label = tool ? `tool output ${source.tool}` : source;
+        const load = tool
+          ? deps.loadToolData && (() => deps.loadToolData!(value.taskId, source.tool, { maxCells }))
+          : deps.loadDataSource && (() => deps.loadDataSource!(value.taskId, source, { maxCells }));
+        if (!load) {
+          results[id] = { file: label, error: "Data is read in the desktop app" };
           continue;
         }
         try {
-          results[id] = await deps.loadDataSource(value.taskId, filePath, { maxCells });
+          results[id] = await load();
         } catch (error) {
           // Only messages written for the user are shown; raw errors can carry absolute
           // paths or file contents (parser messages), so they become a generic message.
           const safe = error instanceof Error && error.name === "AnswerDataError";
           results[id] = {
-            file: filePath,
-            error: safe ? error.message.slice(0, 200) : "The file could not be read",
+            file: label,
+            error: safe ? error.message.slice(0, 200) : "The data could not be read",
           };
         }
       }

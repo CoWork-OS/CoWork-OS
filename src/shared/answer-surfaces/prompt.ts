@@ -330,6 +330,7 @@ export const ANSWER_SURFACE_PROMPT = [
   "- Accuracy: use well-established ratios and real data. Do not invent prices, places, quotes or statistics; if key data is missing, give a useful partial answer with editable defaults or ask one focused question.",
   '- When the user later changes controls, their values come back to you as "Interactive answer state". Build on them.',
   '- Real data: when the user attached or the task produced a data file (CSV, TSV, XLSX or JSON), compute every number from it instead of typing values in. Add "data": {"sales": "uploads/sales.csv"} (the workspace-relative path you were given) beside "logic"; compute(state, data) gets data.sales = {columns, rows, totalRows, truncated} with numbers parsed, plus helpers records(table), column(table, name), sum(list), mean(list) and groupBy(list, key). The app reads the file and shows its name and row count under the answer. Use only columns you have actually seen.',
+  '- Tool results as data: when a tool result ends with [CoWork data: … {"tool": "r3f9a2c41"} …], compute from that result instead of retyping its values: "data": {"hits": {"tool": "r3f9a2c41"}}, read in compute(state, data) exactly like a file (data.hits.columns, data.hits.rows).',
   "Examples (a calculator, a chart story, a trip plan, a schedule with logic, a chart from a data file):",
   example(ANSWER_SURFACE_EXAMPLES.calculator),
   example(ANSWER_SURFACE_EXAMPLES.chart),

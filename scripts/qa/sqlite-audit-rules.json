@@ -93,13 +93,6 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/first-task/(first-task-sql|real-work-state)\\.ts$",
-      "domain": "shared SQL",
-      "access": "First-task flow store (setup choice, sample attempts, real-work state): services-domain units behind FirstTaskRepository. The sample task and its attempt row are created in one unit.",
-      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
-      "owner": "database platform"
-    },
-    {
       "pattern": "^src/electron/hooks/HookSessionRepository\\.ts$",
       "domain": "shared SQL",
       "access": "Hook and mention session store (idempotent task creation, session locks): services-domain units behind the async HookSessionRepository facade; acquiring a lock clears expired locks in the same transaction.",
@@ -220,7 +213,7 @@
       "owner": "settings and security"
     },
     {
-      "pattern": "^src/electron/(first-task/attempt-schema|routines/service)\\.ts$",
+      "pattern": "^src/electron/routines/service\\.ts$",
       "domain": "lifecycle",
       "access": "Service schema setup at construction (CREATE ... IF NOT EXISTS, column checks). Idempotent; nothing is written once the tables exist. The main schema bootstraps off the host thread in the schema bootstrap worker.",
       "plan": "reviewed exception (DB6): stays",
@@ -378,13 +371,6 @@
       "owner": "database platform"
     },
     {
-      "pattern": "^src/electron/supervisor/SupervisorExchangeRepository\\.ts$",
-      "domain": "shared SQL",
-      "access": "Discord supervisor exchange store: synchronous SQL run as services-domain units behind the async SupervisorExchangeRepository facade (COWORK_DB_WORKER_SERVICES).",
-      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
-      "owner": "database platform"
-    },
-    {
       "pattern": "^src/electron/eval/EvalService\\.ts$",
       "domain": "shared SQL",
       "access": "Eval store (cases, suites, runs, case runs, baseline metrics): synchronous SQL run as services-domain units behind the async EvalService facade (COWORK_DB_WORKER_SERVICES). Creating a case links it on its source task and adds it to the default suite in one unit; a suite run grades every case against its task's replay and records the results in one unit.",
@@ -414,7 +400,7 @@
       "ratchetExemptKeys": ["getDatabase"]
     },
     {
-      "pattern": "^src/electron/(agents|supervisor|mission-control|managed|automation|triggers|routines|subconscious|improvement|core|eval|identity|workspaces|first-task|briefing|file-hub|git|youtube|chronicle|voice|activity|sessions|hooks|acp|gateway|tray|utils)/",
+      "pattern": "^src/electron/(agents|mission-control|managed|automation|triggers|routines|subconscious|improvement|core|eval|identity|workspaces|briefing|file-hub|git|youtube|chronicle|voice|activity|sessions|hooks|acp|gateway|tray|utils)/",
       "domain": "background and domain services",
       "access": "Scheduler, teams, heartbeats, automations, evaluation and other domain stores: reads and writes on their own timers or user actions, not per task event.",
       "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",

@@ -15926,12 +15926,7 @@ export class AgentDaemon extends EventEmitter {
     try {
       const isTopLevelTask =
         existingTask && !existingTask.parentTaskId && (existingTask.agentType ?? "main") === "main";
-      if (
-        isCompletedOutcome &&
-        isTopLevelTask &&
-        existingTask.source !== "sample" &&
-        !taskDisablesMemoryCapture(existingTask)
-      ) {
+      if (isCompletedOutcome && isTopLevelTask && !taskDisablesMemoryCapture(existingTask)) {
         const workspaceName = this.workspaceRepo.findById(existingTask.workspaceId)?.name;
         PersonalityManager.recordTaskCompleted(workspaceName);
         const gatewayContext = existingTask.agentConfig?.gatewayContext ?? "private";

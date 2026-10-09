@@ -243,8 +243,7 @@ export const templatesForInit = (
         `3. Add durable rules/constraints to \`.cowork/MEMORY.md\`.\n` +
         `4. Fill in \`.cowork/COMPANY.md\`, \`.cowork/OPERATIONS.md\`, and \`.cowork/KPIS.md\`.\n` +
         `5. Add recurring checks to \`.cowork/HEARTBEAT.md\`.\n` +
-        `6. If using Discord supervisor mode, define review and escalation policy in \`.cowork/SUPERVISOR.md\`.\n` +
-        `7. Review \`.cowork/VIBES.md\` and \`.cowork/LORE.md\` over time.\n\n` +
+        `6. Review \`.cowork/VIBES.md\` and \`.cowork/LORE.md\` over time.\n\n` +
         (isVenturePreset
           ? `Suggested next step for venture mode: activate a founder-office or operator twin and link each active project to a workspace.\n\n`
           : ``) +
@@ -360,27 +359,6 @@ export const templatesForInit = (
           ? `- Review team performance and update autonomy levels if needed\n` +
             `- Review experiment outcomes, blocked deals, and operator handoffs\n`
           : `- Review team performance and update autonomy levels if needed\n`),
-    },
-    {
-      relPath: path.join(kitDirName, "SUPERVISOR.md"),
-      content:
-        `# Supervisor Protocol\n\n` +
-        `Use this file when Discord supervisor mode is enabled. It defines what the worker may propose, what the supervisor must verify, and when a human must be escalated.\n\n` +
-        `## Review Thresholds\n` +
-        `- Freshness window:\n` +
-        `- Required evidence:\n` +
-        `- Duplicate / repetition checks:\n\n` +
-        `## Escalation Rules\n` +
-        `- Escalate when external judgment is required\n` +
-        `- Escalate when freshness, safety, or policy checks fail\n` +
-        `- Escalate when the worker output cannot be verified from evidence\n\n` +
-        `## Channel Quality Checks\n` +
-        `- Output channels:\n` +
-        `- Required disclaimers:\n` +
-        `- Forbidden output patterns:\n\n` +
-        `## Role Boundaries\n` +
-        `- Worker: provide status, evidence, and reviewable proposals only\n` +
-        `- Supervisor: ACK or escalate; do not produce the primary work product\n`,
     },
     {
       relPath: path.join(kitDirName, "PRIORITIES.md"),

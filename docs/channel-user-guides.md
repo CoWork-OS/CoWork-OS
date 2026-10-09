@@ -126,7 +126,6 @@ Best for:
 
 - Team or community workspaces.
 - Engineering groups that want native slash commands, threads, and richer task interactions.
-- Supervisor-style workflows with dedicated coordination channels.
 - Fetching live Discord messages and attachments for agent context.
 
 Features:
@@ -137,7 +136,6 @@ Features:
 - Thread-aware routing where Discord provides thread context.
 - Buttons, select menus, embeds, and approval controls.
 - Live Discord message fetch and attachment download tools.
-- Optional supervisor mode for structured worker/supervisor operations.
 - `/task <prompt>` compatibility shortcut for starting a task from native slash UI.
 
 Best practices:
@@ -147,7 +145,6 @@ Best practices:
 - Use `/task prompt:...` only when you intentionally want to start task text from the Discord slash UI.
 - Use threads for focused task discussions.
 - Restrict guild IDs if the bot is installed in multiple servers.
-- Keep supervisor mode in dedicated channels so normal chat does not mix with coordination protocol messages.
 
 Watch-outs:
 

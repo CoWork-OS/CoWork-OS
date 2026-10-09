@@ -269,8 +269,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
       // Handle regular messages (for conversations)
       this.client.on(Events.MessageCreate, async (message) => {
-        const shouldForwardBotMessage = this.shouldForwardBotMessage(message);
-        if (message.author.bot && !shouldForwardBotMessage) return;
+        if (message.author.bot) return;
 
         if (
           message.guildId &&
@@ -290,17 +289,8 @@ export class DiscordAdapter implements ChannelAdapter {
           `Discord message received: isDM=${isDM}, isMentioned=${isMentioned}, isThread=${isThread}, content="${message.content.slice(0, 50)}"`,
         );
 
-        const isSupervisorBotMessage = message.author.bot && shouldForwardBotMessage;
-        if (isDM || isMentioned || isSupervisorBotMessage) {
+        if (isDM || isMentioned) {
           const incomingMessage = this.mapMessageToIncoming(message);
-          if (isSupervisorBotMessage) {
-            incomingMessage.ingestOnly = true;
-            incomingMessage.metadata = {
-              ...incomingMessage.metadata,
-              discordSupervisorCandidate: true,
-              authorIsBot: true,
-            };
-          }
           console.log(
             `Processing Discord message from ${message.author.username}: ${incomingMessage.text.slice(0, 50)}`,
           );
@@ -1506,19 +1496,6 @@ export class DiscordAdapter implements ChannelAdapter {
         );
       }
     }
-  }
-
-  private shouldForwardBotMessage(message: Message): boolean {
-    const supervisor = this.config.supervisor;
-    if (!supervisor?.enabled) return false;
-
-    const peerIds = new Set((supervisor.peerBotUserIds || []).filter(Boolean));
-    if (!peerIds.has(message.author.id)) return false;
-
-    const watched = new Set(
-      [supervisor.coordinationChannelId, ...(supervisor.watchedChannelIds || [])].filter(Boolean),
-    );
-    return watched.has(message.channelId);
   }
 
   private handleError(error: Error, context?: string): void {

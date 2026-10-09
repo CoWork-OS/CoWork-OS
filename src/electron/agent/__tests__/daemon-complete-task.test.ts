@@ -477,23 +477,6 @@ describe("AgentDaemon.completeTask", () => {
     );
   });
 
-  it("does not learn from a completed synthetic sample task", () => {
-    const daemonLike = createDaemonLike();
-    daemonLike.taskRepo.findById.mockReturnValue({
-      id: "task-1",
-      title: "Synthetic sample",
-      status: "executing",
-      workspaceId: "workspace-1",
-      agentType: "main",
-      source: "sample",
-    });
-    (PersonalityManager.recordTaskCompleted as Any).mockClear();
-
-    AgentDaemon.prototype.completeTask.call(daemonLike, "task-1", "done", { terminalStatus: "ok" });
-
-    expect(PersonalityManager.recordTaskCompleted).not.toHaveBeenCalled();
-  });
-
   it("persists semanticSummary and verification metadata on completion when provided", () => {
     const daemonLike = createDaemonLike();
 

@@ -126,15 +126,6 @@ describeWithSqlite("TaskRepository.delete", () => {
       null,
     );
 
-    db.prepare(
-      `
-        INSERT INTO supervisor_exchanges (
-          id, workspace_id, coordination_channel_id, linked_task_id, status, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `,
-    ).run(randomUUID(), workspace.id, "discord:ops", task.id, "open", now, now);
-
     taskRepo.delete(task.id);
 
     expect(taskRepo.findById(task.id)).toBeUndefined();
@@ -146,12 +137,6 @@ describeWithSqlite("TaskRepository.delete", () => {
         task_id: string | null;
       },
     ).toEqual({ task_id: null });
-
-    expect(
-      db.prepare("SELECT linked_task_id FROM supervisor_exchanges").get() as {
-        linked_task_id: string | null;
-      },
-    ).toEqual({ linked_task_id: null });
 
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });

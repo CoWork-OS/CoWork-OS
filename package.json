@@ -327,13 +327,6 @@
     ],
     "extraResources": [
       {
-        "from": "resources/starter-missions",
-        "to": "starter-missions",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
         "from": "resources/skills",
         "to": "skills",
         "filter": [

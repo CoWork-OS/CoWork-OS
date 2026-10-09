@@ -1839,11 +1839,6 @@ export class TaskStore {
       );
       clearHeartbeatRunTaskId.run(taskId);
 
-      const clearSupervisorExchangeTaskId = this.db.prepare(
-        "UPDATE supervisor_exchanges SET linked_task_id = NULL WHERE linked_task_id = ?",
-      );
-      clearSupervisorExchangeTaskId.run(taskId);
-
       const clearLlmCallEventTaskId = this.db.prepare(
         "UPDATE llm_call_events SET task_id = NULL WHERE task_id = ?",
       );

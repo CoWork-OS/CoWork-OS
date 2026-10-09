@@ -2772,7 +2772,7 @@ export class DatabaseManager {
     this.upgradeTaskReferenceForeignKeysToSetNull();
     this.initializeKnowledgeGraphFTS();
     this.upgradeKnowledgeGraphQuality();
-    this.dropRetiredEverydayAgentTables();
+    this.dropRetiredFeatureTables();
     this.migrateMemoryPayloadTables();
     this.initializeMemoryItems();
     this.ensureForeignKeyChildIndexes();
@@ -4101,69 +4101,6 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_mentions_to_agent ON agent_mentions(to_agent_role_id, status);
         CREATE INDEX IF NOT EXISTS idx_mentions_task ON agent_mentions(task_id);
         CREATE INDEX IF NOT EXISTS idx_mentions_workspace ON agent_mentions(workspace_id, created_at DESC);
-      `);
-    } catch {
-      // Table already exists, ignore
-    }
-
-    // Migration: Create supervisor exchange tables for Discord supervisor protocol
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS supervisor_exchanges (
-          id TEXT PRIMARY KEY,
-          workspace_id TEXT NOT NULL,
-          coordination_channel_id TEXT NOT NULL,
-          source_channel_id TEXT,
-          source_message_id TEXT,
-          source_peer_user_id TEXT,
-          worker_agent_role_id TEXT,
-          supervisor_agent_role_id TEXT,
-          linked_task_id TEXT,
-          escalation_target TEXT,
-          status TEXT NOT NULL,
-          last_intent TEXT,
-          turn_count INTEGER NOT NULL DEFAULT 0,
-          terminal_reason TEXT,
-          evidence_refs_json TEXT,
-          human_resolution TEXT,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
-          closed_at INTEGER,
-          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
-          FOREIGN KEY (worker_agent_role_id) REFERENCES agent_roles(id),
-          FOREIGN KEY (supervisor_agent_role_id) REFERENCES agent_roles(id),
-          FOREIGN KEY (linked_task_id) REFERENCES tasks(id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_supervisor_exchanges_workspace
-          ON supervisor_exchanges(workspace_id, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_supervisor_exchanges_status
-          ON supervisor_exchanges(status, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_supervisor_exchanges_source
-          ON supervisor_exchanges(source_message_id);
-      `);
-    } catch {
-      // Table already exists, ignore
-    }
-
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS supervisor_exchange_messages (
-          id TEXT PRIMARY KEY,
-          exchange_id TEXT NOT NULL REFERENCES supervisor_exchanges(id) ON DELETE CASCADE,
-          discord_message_id TEXT NOT NULL UNIQUE,
-          channel_id TEXT NOT NULL,
-          author_user_id TEXT,
-          actor_kind TEXT NOT NULL,
-          intent TEXT NOT NULL,
-          raw_content TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_supervisor_exchange_messages_exchange
-          ON supervisor_exchange_messages(exchange_id, created_at ASC);
-        CREATE INDEX IF NOT EXISTS idx_supervisor_exchange_messages_channel
-          ON supervisor_exchange_messages(channel_id, created_at DESC);
       `);
     } catch {
       // Table already exists, ignore
@@ -8104,10 +8041,10 @@ export class DatabaseManager {
    * table-rebuild procedure: copy, drop, rename) when an older definition is found.
    */
   /**
-   * The Everyday Agent feature was retired; its tables are dropped once on upgrade (children
-   * first so the drop never violates a foreign key).
+   * Retired features (Everyday Agent, the first-task beta and Discord supervisor mode) have
+   * their tables dropped once on upgrade, children first so the drop never violates a foreign key.
    */
-  private dropRetiredEverydayAgentTables(): void {
+  private dropRetiredFeatureTables(): void {
     this.db.exec(`
       DROP TABLE IF EXISTS everyday_agent_task_links;
       DROP TABLE IF EXISTS everyday_agent_routine_provenance;
@@ -8119,6 +8056,11 @@ export class DatabaseManager {
       DROP TABLE IF EXISTS everyday_agent_pause_scopes;
       DROP TABLE IF EXISTS everyday_agent_consent_history;
       DROP TABLE IF EXISTS everyday_agent_profiles;
+      DROP TABLE IF EXISTS first_task_real_work;
+      DROP TABLE IF EXISTS first_task_attempts;
+      DROP TABLE IF EXISTS first_task_setup;
+      DROP TABLE IF EXISTS supervisor_exchange_messages;
+      DROP TABLE IF EXISTS supervisor_exchanges;
     `);
   }
 

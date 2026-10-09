@@ -48,7 +48,6 @@ const TEMP_WORKSPACE_REFERENCE_POLICY: Record<string, ReferenceAction> = {
   "tasks.branch_from_task_id": "nullify",
   "tasks.parent_task_id": "nullify",
   "eval_cases.source_task_id": "nullify",
-  "supervisor_exchanges.linked_task_id": "nullify",
   "dreaming_runs.source_task_id": "nullify",
   "strategic_planner_configs.planning_workspace_id": "nullify",
   "companies.default_workspace_id": "nullify",

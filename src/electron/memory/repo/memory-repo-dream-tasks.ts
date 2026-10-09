@@ -24,7 +24,6 @@ const EXCLUDED_SOURCES: ReadonlySet<string> = new Set([
   "improvement",
   "subconscious",
   "symphony",
-  "sample",
 ]);
 /** Most candidate rows read per dream (the repository's own cap). */
 const CANDIDATE_LIMIT = 200;

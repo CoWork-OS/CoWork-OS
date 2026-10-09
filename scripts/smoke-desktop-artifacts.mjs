@@ -329,27 +329,6 @@ async function disposableProfile() {
   return fs.mkdtemp(path.join(os.tmpdir(), "cowork-desktop-smoke-profile-"));
 }
 
-async function validateStarterMission(resourcesRoot) {
-  const missionRoot = path.join(resourcesRoot, "starter-missions", "release-brief-v1");
-  const manifestPath = path.join(missionRoot, "manifest.json");
-  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  const expectedFiles = ["brief-instructions.md", "issues.csv", "release-notes.md"];
-  if (manifest.id !== "release-brief-v1" ||
-      JSON.stringify(Object.keys(manifest.inputs || {}).sort()) !== JSON.stringify(expectedFiles)) {
-    throw new Error("Packaged starter mission manifest is incomplete");
-  }
-  for (const name of expectedFiles) {
-    const stat = await fs.lstat(path.join(missionRoot, name));
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) {
-      throw new Error(`Packaged starter mission input is unsafe: ${name}`);
-    }
-    const digest = createHash("sha256").update(await fs.readFile(path.join(missionRoot, name))).digest("hex");
-    if (!/^[a-f0-9]{64}$/.test(manifest.inputs[name]) || digest !== manifest.inputs[name]) {
-      throw new Error(`Packaged starter mission input failed integrity check: ${name}`);
-    }
-  }
-}
-
 async function assertNoRetiredHealthBridge(resourcesRoot) {
   const bridgePath = path.join(resourcesRoot, "healthkit-bridge");
   try {
@@ -563,7 +542,6 @@ async function smokeMac({ releaseDir, expectedVersion, allowUnsigned }) {
       path.join(appPath, "Contents", "Resources"),
       `darwin-${process.arch}`,
     );
-    await validateStarterMission(path.join(appPath, "Contents", "Resources"));
     await validateDatabaseWorkerAssets(
       path.join(appPath, "Contents", "Resources"),
       `darwin-${process.arch}`,
@@ -756,7 +734,6 @@ Write-Output $item.VersionInfo.ProductVersion
       path.join(path.dirname(appExe), "resources"),
       `win32-${process.arch}`,
     );
-    await validateStarterMission(path.join(path.dirname(appExe), "resources"));
     await validateDatabaseWorkerAssets(
       path.join(path.dirname(appExe), "resources"),
       `win32-${process.arch}`,

@@ -82,7 +82,6 @@ import {
   type DiscordMessage,
   type DiscordDownloadedAttachment,
 } from "./channel-live-fetch";
-import { DiscordSupervisorService } from "../supervisor/DiscordSupervisorService";
 
 export interface GatewayConfig {
   /** Router configuration */
@@ -139,7 +138,6 @@ export class ChannelGateway {
   private agentDaemon?: AgentDaemon;
   private daemonListeners: Array<{ event: string; handler: (...args: Any[]) => void }> = [];
   private pendingCleanupInterval: ReturnType<typeof setInterval> | null = null;
-  private discordSupervisorService?: DiscordSupervisorService;
 
   /** Start router work from an event handler without holding it up; report failures. */
   private detachRouterWork(work: Promise<unknown>, label: string): void {
@@ -166,7 +164,6 @@ export class ChannelGateway {
     if (config.agentDaemon) {
       this.agentDaemon = config.agentDaemon;
       this.setupAgentDaemonListeners(config.agentDaemon);
-      // discordSupervisorService is lazy-initialized on first access via getDiscordSupervisorService()
     }
   }
 
@@ -688,18 +685,6 @@ export class ChannelGateway {
     this.router.setMainWindow(window);
   }
 
-  getDiscordSupervisorService(): DiscordSupervisorService | undefined {
-    if (!this.discordSupervisorService && this.agentDaemon) {
-      this.discordSupervisorService = new DiscordSupervisorService(
-        this.db,
-        this.agentDaemon,
-        () => this.router.getMainWindow(),
-        () => this.router.getAdapter("discord") as DiscordAdapter | undefined,
-      );
-    }
-    return this.discordSupervisorService;
-  }
-
   /**
    * Shutdown the gateway
    */
@@ -863,7 +848,6 @@ export class ChannelGateway {
     botToken: string,
     applicationId: string,
     guildIds?: string[],
-    supervisor?: _DiscordConfig["supervisor"],
     securityMode: "open" | "allowlist" | "pairing" = "pairing",
   ): Promise<Channel> {
     // Check if Discord channel already exists
@@ -877,7 +861,7 @@ export class ChannelGateway {
       type: "discord",
       name,
       enabled: false, // Don't enable until tested
-      config: { botToken, applicationId, guildIds, supervisor },
+      config: { botToken, applicationId, guildIds },
       securityConfig: {
         mode: securityMode,
         pairingCodeTTL: 300, // 5 minutes
@@ -1681,7 +1665,6 @@ export class ChannelGateway {
         : undefined);
     if (!adapter) {
       adapter = this.createAdapterForChannel(channel);
-      this.attachDiscordSupervisorHandler(adapter);
       this.router.registerAdapter(adapter, channel.id);
     }
 
@@ -1727,7 +1710,6 @@ export class ChannelGateway {
     let adapter = this.router.getAdapter("whatsapp") as WhatsAppAdapter | undefined;
     if (!adapter) {
       adapter = this.createAdapterForChannel(channel) as WhatsAppAdapter;
-      this.attachDiscordSupervisorHandler(adapter);
       this.router.registerAdapter(adapter);
     }
 
@@ -2095,21 +2077,11 @@ export class ChannelGateway {
           continue;
         }
         const adapter = this.createAdapterForChannel(channel);
-        this.attachDiscordSupervisorHandler(adapter);
         this.router.registerAdapter(adapter, channel.id);
       } catch (error) {
         console.error(`Failed to create adapter for channel ${channel.type}:`, error);
       }
     }
-  }
-
-  private attachDiscordSupervisorHandler(adapter: ChannelAdapter): void {
-    if (!(adapter instanceof DiscordAdapter) || !this.discordSupervisorService) {
-      return;
-    }
-    adapter.onMessage(async (message) => {
-      await this.discordSupervisorService?.handleIncomingDiscordMessage(adapter, message);
-    });
   }
 
   private isMicrosoftEmailOAuthChannel(channel: Channel): boolean {
@@ -2340,7 +2312,6 @@ export class ChannelGateway {
           botToken: channel.config.botToken as string,
           applicationId: channel.config.applicationId as string,
           guildIds: channel.config.guildIds as string[] | undefined,
-          supervisor: channel.config.supervisor as _DiscordConfig["supervisor"],
         });
 
       case "slack":

@@ -6,7 +6,6 @@ Discord is best for team, community, and engineering workflows where native slas
 
 - Engineering communities and product teams.
 - Server channels with focused task threads.
-- Supervisor or worker coordination workflows.
 - Fetching recent Discord messages or attachments into task context.
 - Native slash-command task starts.
 
@@ -19,7 +18,6 @@ Discord is best for team, community, and engineering workflows where native slas
 - Channel and thread specialization for workspace, agent role, guidance, and tool policy.
 - Buttons, select menus, embeds, and approval controls.
 - Live Discord message fetch and attachment download tools.
-- Optional supervisor mode.
 - `/task <prompt>` compatibility shortcut for starting a task directly.
 
 ## Daily Workflow
@@ -41,7 +39,6 @@ Use `/task prompt:...` when you want Discord's native slash command UI to start 
 - Use thread specialization for incident, launch, or project threads that should route to a dedicated workspace or role.
 - Restrict guild IDs when the bot is installed in multiple servers.
 - Use DMs for private approvals.
-- Keep supervisor mode in dedicated coordination channels.
 - Use `/new` before changing topics in a shared channel.
 - Use `/background` for side work that should not take over the active chat task.
 
@@ -56,5 +53,4 @@ Use `/task prompt:...` when you want Discord's native slash command UI to start 
 
 - [Channel Integrations](../channels.md#discord)
 - [Channel Specialization](../channels.md#channel-specialization)
-- [Supervisor Mode on Discord](../supervisor-mode-discord.md)
 - [Gateway User Guide](../gateway-user-guide.md)

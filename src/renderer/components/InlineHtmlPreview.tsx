@@ -287,6 +287,9 @@ function HtmlSurfaceFrame({
         sandbox="allow-scripts allow-forms"
         referrerPolicy="no-referrer"
         title={title}
+        // Chromium paints an opaque backdrop behind a frame whose color scheme differs
+        // from its element's, which shows as square corners behind rounded cards.
+        style={{ colorScheme: designOptions.theme ?? "light" }}
         onLoad={() => void handleLoad()}
       />
       {/* Drawn by the app, outside the frame, so generated content can't pass as app UI. */}

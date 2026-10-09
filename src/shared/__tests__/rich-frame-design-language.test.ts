@@ -25,7 +25,7 @@ describe("rich frame design language", () => {
     const result = applyRichFrameDesignLanguage(html, { theme: "dark" });
 
     expect(result).toContain("color-scheme: dark");
-    expect(result).toContain("--rf-bg: #17191d");
+    expect(result).toContain("--rf-bg: #1c1d21");
     expect(result).toContain("--rf-host-bg: transparent");
     expect(result).toContain("background: var(--rf-bg) !important");
   });

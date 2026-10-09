@@ -10,6 +10,7 @@ import {
   HTML_SURFACE_BOOTSTRAP_SCRIPT,
   HTML_SURFACE_MAX_HTML_CHARS,
 } from "../../shared/answer-surfaces/html-bridge";
+import { HTML_KIT_SCRIPT } from "../../shared/answer-surfaces/html-kit-script";
 import { findOpeningTags, insertAfterTag } from "../../shared/html-tags";
 import { applyRichFrameDesignLanguage } from "../../shared/rich-frame-design-language";
 import { validateInput } from "../utils/validation";
@@ -25,10 +26,10 @@ export const RegisterHtmlSurfaceSchema = z
 
 export type RegisterHtmlSurfaceRequest = z.infer<typeof RegisterHtmlSurfaceSchema>;
 
-const RUNTIME_TAGS = [
-  `<style id="cowork-surface-autosize">\n${HTML_SURFACE_AUTOSIZE_CSS}\n</style>`,
-  `<script id="cowork-surface-bridge">\n${HTML_SURFACE_BOOTSTRAP_SCRIPT}\n</script>`,
-].join("\n");
+const AUTOSIZE_TAG = `<style id="cowork-surface-autosize">\n${HTML_SURFACE_AUTOSIZE_CSS}\n</style>`;
+const BRIDGE_TAG = `<script id="cowork-surface-bridge">\n${HTML_SURFACE_BOOTSTRAP_SCRIPT}\n</script>`;
+/** Runs before the bridge, which exposes its helpers as cowork.chart, cowork.icon, … */
+const KIT_TAG = `<script id="cowork-surface-kit">\n${HTML_KIT_SCRIPT}\n</script>`;
 
 /** Resource hints are not covered by the CSP and could leak data through DNS lookups. */
 const RESOURCE_HINT_REL =
@@ -51,11 +52,12 @@ function stripResourceHints(html: string): string {
 }
 
 /** Puts the bridge first in <head>, so it is defined before any page script runs. */
-function injectRuntime(html: string): string {
+function injectRuntime(html: string, withKit: boolean): string {
+  const tags = [AUTOSIZE_TAG, ...(withKit ? [KIT_TAG] : []), BRIDGE_TAG].join("\n");
   return (
-    insertAfterTag(html, "head", `\n${RUNTIME_TAGS}`) ??
-    insertAfterTag(html, "html", `\n<head>${RUNTIME_TAGS}</head>`) ??
-    `${RUNTIME_TAGS}\n${html}`
+    insertAfterTag(html, "head", `\n${tags}`) ??
+    insertAfterTag(html, "html", `\n<head>${tags}</head>`) ??
+    `${tags}\n${html}`
   );
 }
 
@@ -67,7 +69,7 @@ export function prepareHtmlSurfaceDocument(request: RegisterHtmlSurfaceRequest):
         hostBackground: request.hostBackground,
       })
     : html;
-  return injectRuntime(themed);
+  return injectRuntime(themed, request.designLanguage);
 }
 
 /** Validates a renderer request and returns the preview URL the frame loads. */

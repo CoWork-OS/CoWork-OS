@@ -170,8 +170,10 @@ jobs:
 
   test-macos:
     # The release workflow runs the suite on macOS too (sandbox-exec, Keychain and slower
-    # runners); run it here so failures surface on the pull request, not mid-release.
+    # runners); run it on every push to main (and on manual runs) so macOS-only failures
+    # surface right after merge, not mid-release. Pull requests skip it to keep their CI fast.
     name: Tests (macOS)
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
 
     steps:

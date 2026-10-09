@@ -75,10 +75,10 @@ describe("Browser workbench navigation controls", () => {
     expect(source).toContain("reloadCrashedTab(tab.id)");
   });
 
-  it("hides the browser profile pill when there is no active URL", () => {
+  it("shows the connection only in the address bar, not as a separate pill", () => {
     const source = readFileSync(componentPath, "utf8");
 
-    expect(source).toMatch(/\{activeUrl && \(\s*<span className="browser-workbench-profile"/);
+    expect(source).not.toContain('className="browser-workbench-profile"');
     expect(source).not.toContain('"workspace"');
     expect(source).not.toContain("Workspace browser");
   });
@@ -88,7 +88,10 @@ describe("Browser workbench navigation controls", () => {
 
     expect(source).toContain("onBrowserWorkbenchViewport");
     expect(source).toContain("VIEWPORT_PRESETS");
-    expect(source).toContain("browser-workbench-device-toolbar");
+    // Presets live in the toolbar's More menu; a forced size shows as a chip.
+    expect(source).toContain("<ToolbarMenu");
+    expect(source).toContain("viewports={VIEWPORT_PRESETS}");
+    expect(source).toContain("browser-workbench-size-chip");
     expect(source).toContain("has-controlled-viewport");
   });
 
@@ -97,7 +100,7 @@ describe("Browser workbench navigation controls", () => {
 
     expect(source).toContain("openCurrentPageExternal");
     expect(source).toContain("window.electronAPI.openExternal(externalUrl)");
-    expect(source).toContain('aria-label="Open current page in external browser"');
+    expect(source).toContain("onOpenExternal={() => void openCurrentPageExternal()}");
     expect(source).toContain("getExternalBrowserUrl");
   });
 

@@ -119,14 +119,20 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--color-border-subtle);
   background: var(--color-bg-elevated);
 }
 
+/* Tab row and toolbar read as one piece of chrome; only the toolbar has a rule under it. */
 .browser-workbench-header {
   justify-content: space-between;
-  min-height: 44px;
-  padding: 6px 14px;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px 2px;
+  background: color-mix(in srgb, var(--color-text) 3%, var(--color-bg-elevated));
+}
+
+.browser-workbench-toolbar {
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .browser-workbench-fullscreen .browser-workbench-header {
@@ -136,7 +142,7 @@
 .browser-workbench-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
   flex: 1 1 auto;
   overflow-x: auto;
@@ -176,25 +182,47 @@
 }
 
 .browser-workbench-tab-shell {
-  max-width: min(360px, 42vw);
+  max-width: min(240px, 42vw);
   min-width: 0;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 8px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  color: color-mix(in srgb, var(--color-accent) 72%, var(--color-text));
-  font-size: 13px;
-  font-weight: 600;
+  gap: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
   border: 0;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.browser-workbench-tab-shell:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  color: var(--color-text);
 }
 
 .browser-workbench-tab-shell.is-active {
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-  color: color-mix(in srgb, var(--color-accent) 82%, var(--color-text));
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-border-subtle) 80%, transparent),
+    0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+/* Close shows on hover and on the active tab, like a desktop browser. */
+.browser-workbench-tab-shell .browser-workbench-tab-close {
+  opacity: 0;
+}
+
+.browser-workbench-tab-shell:hover .browser-workbench-tab-close,
+.browser-workbench-tab-shell.is-active .browser-workbench-tab-close,
+.browser-workbench-tab-close:focus-visible {
+  opacity: 1;
 }
 
 .browser-workbench-tab-shell {
@@ -316,17 +344,24 @@
 }
 
 .browser-workbench-tab-add {
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--color-border-subtle);
+  width: 28px;
+  height: 28px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  background: var(--color-bg);
+  background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
+}
+
+.browser-workbench-tab-add:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-text);
 }
 
 .browser-workbench-tab-add svg {
@@ -348,7 +383,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--color-text-secondary) 22%, transparent);
+  background: transparent;
+  color: var(--color-text-muted);
   overflow: hidden;
 }
 
@@ -389,30 +425,29 @@
 
 .browser-workbench-toolbar {
   position: relative;
-  min-height: 40px;
-  padding: 4px 12px;
+  min-height: 44px;
+  padding: 6px 10px;
+  gap: 6px;
   justify-content: space-between;
 }
 
 .browser-workbench-nav-controls,
 .browser-workbench-right-actions {
-  width: 180px;
-  flex: 0 0 180px;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
 }
 
 .browser-workbench-right-actions {
-  width: 252px;
-  flex-basis: 252px;
   justify-content: flex-end;
+  gap: 4px;
   position: relative;
   z-index: 2;
 }
 
 .browser-workbench-toolbar-notice {
-  max-width: 82px;
+  max-width: 140px;
   overflow: hidden;
   color: var(--color-text-muted);
   font-size: 12px;
@@ -585,22 +620,24 @@
 }
 
 .browser-workbench-icon-btn {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg);
-  color: var(--color-text);
+  background: transparent;
+  color: var(--color-text-secondary);
   cursor: pointer;
   position: relative;
 }
 
-.browser-workbench-icon-btn:hover {
+.browser-workbench-icon-btn:hover,
+.browser-workbench-icon-btn[aria-expanded="true"] {
   color: var(--color-text);
-  border-color: var(--color-border);
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
 .browser-workbench-icon-btn svg {
@@ -614,22 +651,45 @@
 }
 
 .browser-workbench-nav-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  /* right-panel.css styles every button with padding; icon buttons need none. */
+  padding: 0;
   border: 0;
   border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
   cursor: pointer;
   position: relative;
 }
 
-.browser-workbench-nav-btn:hover {
+/* Something upstream collapses inline SVG width in these flex buttons; size the icon explicitly. */
+.browser-workbench-nav-btn svg,
+.browser-workbench-annotate-btn svg,
+.browser-workbench-size-chip svg {
+  display: block;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: currentColor;
+  stroke: currentColor;
+  pointer-events: none;
+}
+
+.browser-workbench-size-chip svg {
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
+}
+
+.browser-workbench-nav-btn:hover:not(:disabled),
+.browser-workbench-nav-btn.is-active {
   color: var(--color-text);
-  background: var(--color-bg-subtle);
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
 .browser-workbench-glyph {
@@ -744,15 +804,24 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 30px;
+  height: 32px;
   padding: 0 4px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.browser-workbench-omnibox:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 
 .browser-workbench-omnibox:focus-within {
   background: var(--color-bg);
-  box-shadow: 0 0 0 1px var(--color-border-subtle);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-accent) 35%, transparent),
+    0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
 .browser-workbench-omnibox input {
@@ -985,8 +1054,16 @@
 .browser-workbench-url-form input:focus {
   text-align: left;
   outline: 0;
-  border-color: var(--color-border-subtle);
-  background: var(--color-bg);
+}
+
+/* The bar draws the field and its focus ring; the text input inside never adds a second frame. */
+.browser-workbench-omnibox input,
+.browser-workbench-omnibox input:focus,
+.browser-workbench-omnibox input:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  outline: 0;
 }
 
 .browser-workbench-device-toolbar {
@@ -1548,10 +1625,7 @@
 }
 
 .browser-workbench-newtab-mode {
-  background:
-    radial-gradient(circle at 18% 12%, rgba(99, 102, 241, 0.08), transparent 55%),
-    radial-gradient(circle at 82% 88%, rgba(34, 211, 238, 0.07), transparent 60%),
-    var(--color-bg-primary, #fff);
+  background: var(--color-bg-primary, var(--color-bg));
 }
 
 .browser-workbench-newtab-mode .browser-workbench-header,
@@ -2620,4 +2694,523 @@
 .browser-annotation-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Annotate: the toolbar's one labelled action. */
+.browser-workbench-annotate-btn {
+  height: 30px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.browser-workbench-annotate-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-text);
+}
+
+.browser-workbench-annotate-btn.is-active {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
+}
+
+.browser-workbench-annotate-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Forced page size (desktop/tablet/mobile or CoWork's emulation); click to fit again. */
+.browser-workbench-size-chip {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 6px 0 9px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: color-mix(in srgb, var(--color-accent) 80%, var(--color-text));
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.browser-workbench-toolbar-menu {
+  position: relative;
+}
+
+.browser-workbench-toolbar-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 240px;
+}
+
+.browser-workbench-toolbar-popover button span {
+  flex: 1 1 auto;
+}
+
+.browser-workbench-toolbar-popover button svg {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.browser-workbench-menu-check {
+  color: var(--color-accent) !important;
+}
+
+.browser-workbench-menu-heading {
+  padding: 6px 10px 2px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.browser-workbench-menu-row {
+  position: relative;
+  display: block;
+}
+
+.browser-workbench-menu-row > button {
+  width: 100%;
+  padding-right: 88px;
+}
+
+.browser-workbench-menu-hint {
+  position: absolute;
+  top: 50%;
+  right: 30px;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+@container browser-workbench-toolbar (max-width: 520px) {
+  .browser-workbench-annotate-btn span {
+    display: none;
+  }
+
+  .browser-workbench-annotate-btn {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* ---------- New tab page ---------- */
+.browser-newtab {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: clamp(28px, 11vh, 112px) 28px 40px;
+  overflow: auto;
+}
+
+.browser-newtab-inner {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.browser-newtab-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.browser-newtab-mark {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 22%, transparent),
+    color-mix(in srgb, #8b5cf6 18%, transparent)
+  );
+  color: color-mix(in srgb, var(--color-accent) 85%, var(--color-text));
+}
+
+.browser-newtab-mark svg {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+}
+
+.browser-newtab-title {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-ui, inherit);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.browser-newtab-subtitle {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.browser-newtab-composer {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 14px;
+  background: var(--color-bg-elevated);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.browser-newtab-composer:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border-subtle));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent),
+    0 6px 20px rgba(15, 23, 42, 0.06);
+}
+
+.browser-newtab-composer.is-disabled {
+  opacity: 0.65;
+}
+
+.browser-newtab-composer textarea {
+  min-height: 52px;
+  max-height: 160px;
+  padding: 14px 16px 4px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.browser-newtab-composer textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.browser-newtab-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 8px 16px;
+}
+
+.browser-newtab-composer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browser-newtab-composer-hint svg {
+  width: 13px;
+  min-width: 13px;
+  height: 13px;
+}
+
+.browser-newtab-send {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.browser-newtab-send:disabled {
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.browser-newtab-send svg {
+  width: 15px;
+  min-width: 15px;
+  height: 15px;
+}
+
+.browser-newtab-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 16px 14px;
+  margin-top: 4px;
+}
+
+.browser-newtab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  --tone: var(--color-accent);
+}
+
+.browser-newtab-group.is-research {
+  --tone: #4f7cf7;
+}
+
+.browser-newtab-group.is-automate {
+  --tone: #8b5cf6;
+}
+
+.browser-newtab-group.is-capture {
+  --tone: #10a37f;
+}
+
+.browser-newtab-group h3,
+.browser-newtab-section h3 {
+  margin: 0 0 6px;
+  padding: 0 8px;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.browser-newtab-idea {
+  justify-content: flex-start;
+  height: 34px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.browser-newtab-idea:hover:not(:disabled),
+.browser-newtab-idea:focus-visible {
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  color: var(--color-text);
+  outline: 0;
+}
+
+.browser-newtab-idea:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.browser-newtab-idea-icon {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  color: var(--tone);
+}
+
+.browser-newtab-idea-icon svg {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+}
+
+.browser-newtab-idea-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-newtab-idea-go {
+  flex: 0 0 auto;
+  width: 13px;
+  min-width: 13px;
+  height: 13px;
+  color: var(--color-text-muted);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.browser-newtab-idea:hover:not(:disabled) .browser-newtab-idea-go,
+.browser-newtab-idea:focus-visible .browser-newtab-idea-go {
+  opacity: 1;
+  transform: none;
+}
+
+.browser-newtab-section {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.browser-newtab-sites {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 2px 14px;
+}
+
+.browser-newtab-site {
+  justify-content: flex-start;
+  min-width: 0;
+  height: 44px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-newtab-site:hover {
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+}
+
+.browser-newtab-site-icon {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  background: hsl(var(--site-hue, 220) 70% 95%);
+  color: hsl(var(--site-hue, 220) 50% 38%);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.browser-newtab-site-icon img {
+  width: 16px;
+  height: 16px;
+}
+
+.browser-newtab-site-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.browser-newtab-site-title,
+.browser-newtab-site-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-newtab-site-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.browser-newtab-site-host {
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+}
+
+.browser-newtab-closed {
+  display: flex;
+  flex-direction: column;
+}
+
+.browser-newtab-closed button {
+  justify-content: flex-start;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-newtab-closed button:hover {
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  color: var(--color-text);
+}
+
+.browser-newtab-closed button svg {
+  width: 13px;
+  min-width: 13px;
+  height: 13px;
+  color: var(--color-text-muted);
+}
+
+.browser-newtab-closed button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dark themes: deeper tints. */
+html:not(.theme-light) .browser-newtab-site-icon {
+  background: hsl(var(--site-hue, 220) 30% 20%);
+  color: hsl(var(--site-hue, 220) 70% 78%);
+}
+
+html:not(.theme-light) .browser-newtab-idea-icon {
+  background: color-mix(in srgb, var(--tone) 20%, transparent);
 }

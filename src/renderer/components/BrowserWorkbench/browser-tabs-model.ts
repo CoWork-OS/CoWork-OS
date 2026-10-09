@@ -77,7 +77,9 @@ export type BrowserTabsAction =
   | { type: "update"; id: string; patch: Partial<BrowserTab> }
   | { type: "reopenClosed"; id?: string; now?: number }
   | { type: "move"; id: string; toIndex: number }
-  | { type: "reloadCrashed"; id: string };
+  | { type: "reloadCrashed"; id: string }
+  /** Swap in another tab set (a different task or session, or a declined restore). */
+  | { type: "replace"; state: BrowserTabsState };
 
 /** Live webviews beyond this are discarded, least recently used first. */
 export const MAX_LIVE_BROWSER_TABS = 12;
@@ -304,6 +306,8 @@ export function browserTabsReducer(
         },
       });
     }
+    case "replace":
+      return action.state;
     default:
       return state;
   }

@@ -321,6 +321,74 @@ describe("CronService", () => {
     });
   });
 
+  describe("retired R&D Council jobs", () => {
+    const councilJob = () => ({
+      id: "job-council",
+      name: "Weekly council",
+      description: "[cowork:council:c-1]",
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      workspaceId: "ws-1",
+      taskPrompt: "<cowork_council:c-1>",
+      schedule: { kind: "every" as const, everyMs: 60000 },
+      state: {
+        nextRunAtMs: 900000,
+        runHistory: [],
+        totalRuns: 0,
+        successfulRuns: 0,
+        failedRuns: 0,
+      },
+    });
+
+    it("disables a Council job on startup with a reason instead of running its trigger", async () => {
+      (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
+        version: 1,
+        jobs: [councilJob()],
+      } satisfies CronStoreFile);
+
+      service = createService();
+      await service.start();
+
+      const job = await service.get("job-council");
+      expect(job?.enabled).toBe(false);
+      expect(job?.state.nextRunAtMs).toBeUndefined();
+      expect(job?.state.lastStatus).toBe("needs_user_action");
+      expect(job?.state.lastError).toContain("R&D Council");
+      expect(job?.state.runHistory).toHaveLength(0);
+      expect(mockCreateTask).not.toHaveBeenCalled();
+    });
+
+    it("refuses a forced run and re-enabling until the prompt is rewritten", async () => {
+      (loadCronStore as ReturnType<typeof vi.fn>).mockResolvedValue({
+        version: 1,
+        jobs: [councilJob()],
+      } satisfies CronStoreFile);
+
+      service = createService();
+      await service.start();
+
+      const forced = await service.run("job-council", "force");
+      expect(forced).toEqual({ ok: false, error: expect.stringContaining("R&D Council") });
+      expect(mockCreateTask).not.toHaveBeenCalled();
+
+      const reenabled = await service.update("job-council", { enabled: true });
+      expect(reenabled.ok).toBe(false);
+      expect((await service.get("job-council"))?.enabled).toBe(false);
+
+      const renamed = await service.update("job-council", { name: "Old council" });
+      expect(renamed.ok).toBe(true);
+
+      const rewritten = await service.update("job-council", {
+        enabled: true,
+        taskPrompt: "Summarize this week's research notes",
+      });
+      expect(rewritten.ok).toBe(true);
+      const ran = await service.run("job-council", "force");
+      expect(ran).toEqual({ ok: true, ran: true, taskId: "task-123" });
+    });
+  });
+
   describe("status", () => {
     it("should return service status", async () => {
       service = createService();

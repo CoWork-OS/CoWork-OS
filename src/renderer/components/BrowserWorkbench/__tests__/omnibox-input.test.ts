@@ -39,6 +39,38 @@ describe("omnibox input", () => {
     expect(parseOmniboxInput("   ")).toEqual({ kind: "empty" });
   });
 
+  it("keeps queries and fragments on local addresses and brackets the IPv6 loopback", () => {
+    expect(parseOmniboxInput("localhost:3000?x")).toEqual({
+      kind: "url",
+      url: "http://localhost:3000/?x",
+    });
+    expect(parseOmniboxInput("localhost#top")).toEqual({
+      kind: "url",
+      url: "http://localhost/#top",
+    });
+    expect(parseOmniboxInput("127.0.0.1:8080#a")).toEqual({
+      kind: "url",
+      url: "http://127.0.0.1:8080/#a",
+    });
+    expect(parseOmniboxInput("10.0.0.2?q=1")).toEqual({ kind: "url", url: "http://10.0.0.2/?q=1" });
+    expect(parseOmniboxInput("::1")).toEqual({ kind: "url", url: "http://[::1]/" });
+    expect(parseOmniboxInput("::1/app")).toEqual({ kind: "url", url: "http://[::1]/app" });
+    expect(parseOmniboxInput("[::1]:3000")).toEqual({ kind: "url", url: "http://[::1]:3000/" });
+  });
+
+  it("searches for file names instead of navigating to them", () => {
+    expect(parseOmniboxInput("package.json")).toMatchObject({
+      kind: "search",
+      query: "package.json",
+    });
+    expect(parseOmniboxInput("index.html").kind).toBe("search");
+    expect(parseOmniboxInput("tsconfig.app.json").kind).toBe("search");
+    // Real top-level domains that look like extensions still navigate.
+    expect(parseOmniboxInput("example.io").kind).toBe("url");
+    expect(parseOmniboxInput("readme.md").kind).toBe("url");
+    expect(parseOmniboxInput("https://example.com/package.json").kind).toBe("url");
+  });
+
   it("refuses script and local schemes", () => {
     expect(parseOmniboxInput("javascript:alert(1)")).toEqual({
       kind: "unsupported",

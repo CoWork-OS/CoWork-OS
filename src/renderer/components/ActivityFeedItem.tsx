@@ -87,8 +87,12 @@ export function ActivityFeedItem({
   onDelete,
   compact = false,
 }: ActivityFeedItemProps) {
-  const icon = ACTIVITY_ICONS[activity.activityType];
-  const color = ACTIVITY_COLORS[activity.activityType];
+  // Rows of retired activity types (such as supervisor_exchange) are still stored.
+  const activityType = Object.hasOwn(ACTIVITY_ICONS, activity.activityType)
+    ? activity.activityType
+    : "info";
+  const icon = ACTIVITY_ICONS[activityType];
+  const color = ACTIVITY_COLORS[activityType];
   const handleClick = () => {
     if (!activity.isRead) {
       onMarkRead(activity.id);

@@ -5468,10 +5468,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
-  // Citation Engine
-  getCitationsForTask: (taskId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CITATION_GET_FOR_TASK, taskId),
-
   // Event Triggers
   listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
   listMcpEvents: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_LIST, serverId),

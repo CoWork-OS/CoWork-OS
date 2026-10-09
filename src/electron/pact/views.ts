@@ -85,16 +85,26 @@ export function toConversationView(
   };
 }
 
+/**
+ * With `now`, an active grant whose lifetime has run out reads as expired: grants are only
+ * marked expired in storage when next used, so a listing must not show them as connected.
+ */
 export function toGrantView(
   grant: PactGrantRecord,
   business: PactBusinessRecord | null,
+  now?: number,
 ): PactGrantView {
+  const lapsed =
+    now !== undefined &&
+    grant.state === "active" &&
+    grant.grantExpiresAt !== null &&
+    grant.grantExpiresAt <= now;
   return {
     id: grant.id,
     businessId: grant.businessId,
     businessName: business?.displayName ?? "Unknown business",
     scopes: scopeViews(business, grant.scopes),
-    state: grant.state,
+    state: lapsed ? "expired" : grant.state,
     createdAt: grant.createdAt,
     ...(grant.lastUsedAt ? { lastUsedAt: grant.lastUsedAt } : {}),
     ...(grant.accessExpiresAt ? { accessExpiresAt: grant.accessExpiresAt } : {}),

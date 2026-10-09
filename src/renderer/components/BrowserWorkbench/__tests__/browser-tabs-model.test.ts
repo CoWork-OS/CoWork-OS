@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type BrowserTabsState,
   browserTabsReducer,
@@ -7,6 +7,7 @@ import {
   restoreBrowserTabs,
   serializeBrowserTabs,
 } from "../browser-tabs-model";
+import { loadBrowserTabsState } from "../useBrowserTabs";
 
 function open(state: BrowserTabsState, id: string, extra: Record<string, unknown> = {}) {
   return browserTabsReducer(state, { type: "open", id, url: `https://${id}.example/`, ...extra });
@@ -151,5 +152,45 @@ describe("browser tabs model", () => {
     expect(state.tabs.map((tab) => tab.id)).toEqual(["c"]);
     expect(state.activeTabId).toBe("c");
     expect(state.closed.map((entry) => entry.url)).toHaveLength(3);
+  });
+
+  it("replaces the whole tab set", () => {
+    const current = open(createInitialBrowserTabsState("https://a.example/"), "b");
+    const other = createInitialBrowserTabsState("https://other.example/");
+    expect(browserTabsReducer(current, { type: "replace", state: other })).toBe(other);
+  });
+});
+
+describe("loading stored tabs", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubSessionStorage(entries: Record<string, string>) {
+    vi.stubGlobal("window", {
+      sessionStorage: { getItem: (key: string) => entries[key] ?? null },
+    });
+  }
+
+  it("restores the tabs stored under the key, or starts fresh when restore is off", () => {
+    let stored = createInitialBrowserTabsState("https://a.example/");
+    stored = open(stored, "b");
+    stubSessionStorage({ "task-1": serializeBrowserTabs(stored) });
+
+    const restored = loadBrowserTabsState("task-1", "https://start.example/", true);
+    expect(restored.restored).toBe(true);
+    expect(restored.state.tabs.map((tab) => tab.url)).toEqual([
+      "https://a.example/",
+      "https://b.example/",
+    ]);
+
+    const declined = loadBrowserTabsState("task-1", "https://start.example/", false);
+    expect(declined.restored).toBe(false);
+    expect(declined.state.tabs.map((tab) => tab.url)).toEqual(["https://start.example/"]);
+
+    // Another task's key never sees these tabs.
+    const otherTask = loadBrowserTabsState("task-2", "", true);
+    expect(otherTask.restored).toBe(false);
+    expect(otherTask.state.tabs.map((tab) => tab.url)).toEqual([""]);
   });
 });

@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  keyEventFromModalDialog,
   responsibilityActionReviewDecisionAllowed,
   responsibilityActionReviewOptionDisabled,
   StructuredInputPromptCard,
@@ -75,5 +76,18 @@ describe("StructuredInputPromptCard exact-write review gate", () => {
     expect(responsibilityActionReviewDecisionAllowed(ordinary.questions[0], 0, "invalid")).toBe(
       true,
     );
+  });
+});
+
+describe("StructuredInputPromptCard keyboard shortcuts", () => {
+  it("leaves keys pressed inside an open modal, like the image lightbox, to that modal", () => {
+    const element = (modal: object | null) => ({
+      closest: (selector: string) => (selector === '[aria-modal="true"]' ? modal : null),
+    });
+
+    expect(keyEventFromModalDialog(element({}) as unknown as EventTarget)).toBe(true);
+    expect(keyEventFromModalDialog(element(null) as unknown as EventTarget)).toBe(false);
+    expect(keyEventFromModalDialog({} as EventTarget)).toBe(false);
+    expect(keyEventFromModalDialog(null)).toBe(false);
   });
 });

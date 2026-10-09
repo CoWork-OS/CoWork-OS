@@ -948,6 +948,33 @@ function MeasuredTaskFeedRow({
   return <div ref={rowRef}>{children}</div>;
 }
 
+/**
+ * Render revision for a sub-agent lifecycle row. It covers every child-task field the row shows:
+ * status updates land before the finished task's summary or error, so status alone would keep
+ * the cached row without its outcome.
+ */
+export function getAgentLifecycleRowRevision(
+  row: AgentLifecycleRowModel,
+  childTasksById: ReadonlyMap<string, Task>,
+): string {
+  return JSON.stringify([
+    row.id,
+    row.state,
+    row.taskIds.map((taskId) => {
+      const childTask = childTasksById.get(taskId);
+      return childTask
+        ? [
+            taskId,
+            childTask.status,
+            childTask.title,
+            childTask.resultSummary ?? null,
+            childTask.error ?? null,
+          ]
+        : [taskId, null];
+    }),
+  ]);
+}
+
 function getTaskFeedRowsSignature(rows: TaskFeedRow[]): string {
   return rows.map((row) => `${row.key}:${row.revision}`).join("|");
 }
@@ -1823,9 +1850,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   .map((childTask) => `${childTask.id}:${childTask.status}`)
                   .join(",")}:${childEvents.length}:${collaborativeRun?.id ?? "none"}`
               : item.kind === "agent-lifecycle"
-                ? `${item.row.id}:${(item.row.taskIds as string[])
-                    .map((taskId) => `${taskId}:${childTasksById.get(taskId)?.status ?? "none"}`)
-                    .join(",")}`
+                ? getAgentLifecycleRowRevision(item.row as AgentLifecycleRowModel, childTasksById)
                 : item.kind === "action_block"
                   ? `${item.blockId}:${item.events.length}:${
                       item.events[item.events.length - 1]?.id ?? "none"

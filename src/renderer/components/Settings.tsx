@@ -958,7 +958,7 @@ const secondaryChannelSearchTerms: Partial<Record<SecondaryChannel, string[]>> =
   bluebubbles: ["bluebubbles", "blue bubbles"],
 };
 
-const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> = {
+export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> = {
   addtools: [{ terms: ["add tools", "discover tools", "plugins", "connectors", "skills", "mcp"] }],
   appearance: [
     {
@@ -1108,6 +1108,8 @@ const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntry[]>> =
       terms: ["identity", "contacts", "crm", "contact identity"],
       target: { tab: "integrations", integrationsSubTab: "identity" },
     },
+  ],
+  customize: [
     {
       terms: [
         "feature packs",

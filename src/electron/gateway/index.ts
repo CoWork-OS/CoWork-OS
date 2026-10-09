@@ -24,6 +24,7 @@ import { SessionManager } from "./session";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { formatUserFacingCompletionSummary } from "../../shared/task-completion";
 import {
+  CHANNEL_TYPES,
   ChannelAdapter,
   ChannelType,
   ChannelConfig,
@@ -1882,7 +1883,11 @@ export class ChannelGateway {
    * Get all channels
    */
   async getChannels(): Promise<Channel[]> {
-    return this.channelRepo.findAll();
+    // Older databases can still hold rows of retired channel types (Twitch, X).
+    // They have no adapter, so they are not offered anywhere.
+    return (await this.channelRepo.findAll()).filter((channel) =>
+      (CHANNEL_TYPES as readonly string[]).includes(channel.type),
+    );
   }
 
   /**
@@ -2069,7 +2074,7 @@ export class ChannelGateway {
    * Load and register channel adapters
    */
   private async loadChannels(): Promise<void> {
-    const channels = await this.channelRepo.findAll();
+    const channels = await this.getChannels();
 
     for (const channel of channels) {
       try {

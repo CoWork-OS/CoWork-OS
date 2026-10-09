@@ -36,6 +36,7 @@ import {
 } from "./outcome-counts";
 import { computeNextRunAtMs, validateCronExpression, validateCronTimeZone } from "./schedule";
 import { CronWebhookServer } from "./webhook";
+import { getRetiredCronJobReason } from "./retired-jobs";
 import { createLogger } from "../utils/logger";
 
 const cronLogger = createLogger("CronService");
@@ -525,6 +526,12 @@ export class CronService {
 
       const job = store.jobs[index];
       const wasEnabled = job.enabled;
+      const retiredReason = getRetiredCronJobReason({
+        taskPrompt: patch.taskPrompt ?? job.taskPrompt,
+      });
+      if (retiredReason && (patch.enabled ?? job.enabled)) {
+        return { ok: false, error: retiredReason };
+      }
       let proposedSchedule = patch.schedule ?? job.schedule;
       const scheduleWillBeActivated =
         patch.schedule !== undefined || (!wasEnabled && patch.enabled === true);
@@ -647,6 +654,11 @@ export class CronService {
 
       if (!job.enabled && mode !== "force") {
         return { ok: true, ran: false, reason: "disabled" };
+      }
+
+      const retiredReason = getRetiredCronJobReason(job);
+      if (retiredReason) {
+        return { ok: false, error: retiredReason };
       }
 
       if (this.state.runningJobIds.has(job.id)) {
@@ -981,6 +993,15 @@ export class CronService {
           },
           job.maxHistoryEntries ?? this.state.deps.maxHistoryEntries,
         );
+      }
+
+      const retiredReason = job.enabled ? getRetiredCronJobReason(job) : null;
+      if (retiredReason) {
+        job.enabled = false;
+        job.updatedAtMs = nowMs;
+        job.state.lastStatus = "needs_user_action";
+        job.state.lastError = retiredReason;
+        log.warn(`Disabled cron job "${job.name}": ${retiredReason}`);
       }
 
       if (!job.enabled) {

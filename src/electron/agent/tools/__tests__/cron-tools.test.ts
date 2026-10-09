@@ -164,4 +164,55 @@ describe("CronTools.schedule_create workspace behavior", () => {
       },
     });
   });
+
+  it("offers and accepts only supported delivery channel types", async () => {
+    const scheduleTool = CronTools.getToolDefinitions().find(
+      (tool) => tool.name === "schedule_task",
+    );
+    const schema = scheduleTool?.input_schema as Any;
+    const createEnum: string[] = schema.properties.delivery.properties.channelType.enum;
+    const updateEnum: string[] =
+      schema.properties.updates.properties.delivery.properties.channelType.enum;
+    for (const offered of [createEnum, updateEnum]) {
+      expect(offered).toContain("telegram");
+      expect(offered).not.toContain("x");
+      expect(offered).not.toContain("twitch");
+    }
+
+    const workspace: Workspace = {
+      id: "ws-delivery",
+      name: "Delivery Workspace",
+      path: "/tmp/delivery-workspace",
+      createdAt: 0,
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+    };
+    const tools = new CronTools(workspace, makeDaemonStub(), "task-delivery");
+
+    const rejected = await tools.createJob({
+      name: "Post to X",
+      prompt: "Share the summary",
+      schedule: { type: "interval", every: "1h" },
+      delivery: { enabled: true, channelType: "x", channelId: "@me" },
+    });
+    expect(rejected).toEqual({ success: false, error: "Unsupported delivery channel type: x" });
+    expect(await service.list({ includeDisabled: true })).toHaveLength(0);
+
+    const created = await tools.createJob({
+      name: "Post to Telegram",
+      prompt: "Share the summary",
+      schedule: { type: "interval", every: "1h" },
+      delivery: { enabled: true, channelType: "telegram", channelId: "123" },
+    });
+    expect(created.success).toBe(true);
+
+    const updated = await tools.updateJob({
+      id: created.job!.id,
+      updates: { delivery: { enabled: true, channelType: "twitch", channelId: "#chan" } },
+    });
+    expect(updated).toEqual({
+      success: false,
+      error: "Unsupported delivery channel type: twitch",
+    });
+    expect((await service.get(created.job!.id))?.delivery?.channelType).toBe("telegram");
+  });
 });

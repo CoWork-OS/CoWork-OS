@@ -8,6 +8,7 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { getCronService } from "../../cron";
+import { CHANNEL_TYPES } from "../../gateway/channels/types";
 import type {
   CronJob,
   CronJobCreate,
@@ -15,6 +16,13 @@ import type {
   CronStatusSummary,
   CronRunHistoryResult,
 } from "../../cron/types";
+
+function unsupportedDeliveryChannelError(channelType: string | undefined): string | null {
+  if (channelType === undefined || (CHANNEL_TYPES as readonly string[]).includes(channelType)) {
+    return null;
+  }
+  return `Unsupported delivery channel type: ${channelType}`;
+}
 
 /**
  * CronTools provides scheduled task management capabilities
@@ -128,6 +136,10 @@ export class CronTools {
     }
     if (params.target === "task" && !params.targetTaskId?.trim()) {
       return { success: false, error: 'targetTaskId is required when target is "task"' };
+    }
+    const deliveryChannelError = unsupportedDeliveryChannelError(params.delivery?.channelType);
+    if (deliveryChannelError) {
+      return { success: false, error: deliveryChannelError };
     }
 
     // Parse the schedule into CronSchedule format
@@ -324,6 +336,12 @@ export class CronTools {
     }
 
     if (params.updates.delivery !== undefined) {
+      const deliveryChannelError = unsupportedDeliveryChannelError(
+        params.updates.delivery?.channelType,
+      );
+      if (deliveryChannelError) {
+        return { success: false, error: deliveryChannelError };
+      }
       patch.delivery = params.updates.delivery;
     }
 
@@ -738,20 +756,7 @@ export class CronTools {
                 },
                 channelType: {
                   type: "string",
-                  enum: [
-                    "telegram",
-                    "discord",
-                    "slack",
-                    "whatsapp",
-                    "imessage",
-                    "signal",
-                    "mattermost",
-                    "matrix",
-                    "email",
-                    "teams",
-                    "googlechat",
-                    "x",
-                  ],
+                  enum: [...CHANNEL_TYPES],
                   description: "Type of messaging channel to deliver to",
                 },
                 channelDbId: {
@@ -818,7 +823,7 @@ export class CronTools {
                   description: "Channel delivery config update",
                   properties: {
                     enabled: { type: "boolean" },
-                    channelType: { type: "string" },
+                    channelType: { type: "string", enum: [...CHANNEL_TYPES] },
                     channelDbId: { type: "string" },
                     channelId: { type: "string" },
                     deliverOnSuccess: { type: "boolean" },

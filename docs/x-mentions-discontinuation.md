@@ -8,6 +8,6 @@ This decision removes the mention bridge service, the `x` channel adapter, the `
 
 **Kept:** the read-only `x_search` tool, which searches X through xAI's API with your Grok OAuth or xAI API key and never touched the X account or cookies, and the bundled `bird` and `twitter` skills, which drive their own command-line tools.
 
-**Upgrade data handling:** On first start of a release containing this change, CoWork OS deletes the `x` settings row (cookie source, manual `auth_token` and `ct0` cookies, mention-trigger settings) from the active profile database. The same cleanup runs if an older database is later copied into the profile. An existing `x` channel row in the gateway database is no longer loaded; remove it from **Settings > Channels** if it is still listed. Tasks that mentions created are ordinary tasks and are kept.
+**Upgrade data handling:** On first start of a release containing this change, CoWork OS deletes the `x` settings row (cookie source, manual `auth_token` and `ct0` cookies, mention-trigger settings) from the active profile database. The same cleanup runs if an older database is later copied into the profile. An existing `x` channel row in the gateway database is no longer loaded or offered as a delivery channel. Tasks that mentions created are ordinary tasks and are kept.
 
 Historical release notes describe what shipped at the time and are superseded by this decision for current product availability.

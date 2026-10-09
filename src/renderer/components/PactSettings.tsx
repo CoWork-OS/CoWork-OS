@@ -4,6 +4,7 @@ import type {
   PactBusinessView,
   PactGrantView,
   PactIdentityDeployment,
+  PactIdentitySettings,
   PactProviderConfig,
   PactSettings as PactSettingsValue,
   PactStatusView,
@@ -34,6 +35,50 @@ function formatDate(value?: number): string {
   return value ? new Date(value).toLocaleString() : "unknown";
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** A grant counts as connected only while it is active and its lifetime has not run out. */
+export function isPactGrantConnected(grant: PactGrantView, now: number = Date.now()): boolean {
+  return grant.state === "active" && (!grant.grantExpiresAt || grant.grantExpiresAt > now);
+}
+
+/**
+ * The identity update for "Save identity". The form has no auth-mode control, so the saved
+ * mode is kept; settings replace `identity` as a whole, and dropping it would reset the signer.
+ */
+export function buildPactIdentityUpdate(input: {
+  deployment: PactIdentityDeployment;
+  issuer: string;
+  signerUrl: string;
+  current: PactIdentitySettings;
+}): PactIdentitySettings {
+  return {
+    deployment: input.deployment,
+    ...(input.issuer.trim() ? { issuer: input.issuer.trim() } : {}),
+    ...(input.signerUrl.trim() ? { signerUrl: input.signerUrl.trim() } : {}),
+    authMode: input.current.authMode ?? "credential",
+  };
+}
+
+export function PactSettingsLoadFailure({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="settings-section" role="alert">
+      <p className="settings-error">Could not load PACT settings: {message}</p>
+      <button className="settings-button" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
 /**
  * Settings for PACT business agents: the protocol preference, the personal-agent identity
  * (signer), the providers CoWork is registered with, and the businesses the user connected,
@@ -52,6 +97,7 @@ export function PactSettings() {
   const [providerAudience, setProviderAudience] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [nextSettings, nextStatus, nextGrants, nextBusinesses] = await Promise.all([
@@ -69,9 +115,14 @@ export function PactSettings() {
     setSignerUrl(nextSettings.identity.signerUrl ?? "");
   }, []);
 
-  useEffect(() => {
-    void load().catch((error) => setMessage({ ok: false, text: String(error?.message || error) }));
+  const initialLoad = useCallback(() => {
+    setLoadError(null);
+    load().catch((error) => setLoadError(errorText(error)));
   }, [load]);
+
+  useEffect(() => {
+    initialLoad();
+  }, [initialLoad]);
 
   const run = async (label: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(label);
@@ -81,18 +132,20 @@ export function PactSettings() {
       await load();
       if (success) setMessage({ ok: true, text: success });
     } catch (error) {
-      setMessage({ ok: false, text: error instanceof Error ? error.message : String(error) });
+      setMessage({ ok: false, text: errorText(error) });
     } finally {
       setBusy(null);
     }
   };
 
   if (!settings || !status) {
+    if (loadError) return <PactSettingsLoadFailure message={loadError} onRetry={initialLoad} />;
     return <div className="settings-loading">Loading PACT settings...</div>;
   }
 
   const providers: PactProviderConfig[] = settings.providers;
-  const activeGrants = grants.filter((grant) => grant.state === "active");
+  const now = Date.now();
+  const activeGrants = grants.filter((grant) => isPactGrantConnected(grant, now));
 
   return (
     <div className="googlechat-settings">
@@ -237,12 +290,12 @@ export function PactSettings() {
                 "identity",
                 async () => {
                   await window.electronAPI.updatePactSettings({
-                    identity: {
+                    identity: buildPactIdentityUpdate({
                       deployment,
-                      ...(issuer.trim() ? { issuer: issuer.trim() } : {}),
-                      ...(signerUrl.trim() ? { signerUrl: signerUrl.trim() } : {}),
-                      authMode: "credential",
-                    },
+                      issuer,
+                      signerUrl,
+                      current: settings.identity,
+                    }),
                   });
                   if (credential.trim()) {
                     await window.electronAPI.setPactSignerCredential({

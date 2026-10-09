@@ -1022,9 +1022,9 @@ export class PactRuntime {
       `Send a ${input.effectClass === "change" ? "change" : "request"} to ${input.business.displayName}.`,
       {
         // Shown in full with the approval question: the user approves this exact text.
-        approvalReviewText: `Message: “${input.text.trim()}”${
-          permissions.length > 0 ? ` Permissions: ${permissions.join("; ")}.` : ""
-        }`,
+        approvalReviewText: `Message: “${input.text.trim()}”`,
+        // Listed separately so a long message can never push them out of the question.
+        approvalReviewPermissions: permissions,
         tool: "pact_send_message",
         params: {
           business: input.business.displayName,
@@ -2068,7 +2068,7 @@ export class PactRuntime {
     const grants = await this.repo.listGrants({ principalId: principal.id });
     const views: PactGrantView[] = [];
     for (const grant of grants)
-      views.push(toGrantView(grant, await this.repo.getBusiness(grant.businessId)));
+      views.push(toGrantView(grant, await this.repo.getBusiness(grant.businessId), this.now()));
     return views;
   }
 

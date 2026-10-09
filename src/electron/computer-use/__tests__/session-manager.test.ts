@@ -1,20 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("../safety-overlay", () => ({
-  CUASafetyOverlay: class {
-    show = vi.fn();
-    hide = vi.fn();
-    updateStatus = vi.fn();
-  },
-}));
-
-vi.mock("../window-isolation", () => ({
-  WindowIsolation: class {
-    isolate = vi.fn().mockResolvedValue(undefined);
-    restore = vi.fn().mockResolvedValue(undefined);
-  },
-}));
-
 vi.mock("../shortcut-guard", () => ({
   ShortcutGuard: class {
     enable = vi.fn();

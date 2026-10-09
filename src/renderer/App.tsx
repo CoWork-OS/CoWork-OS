@@ -51,7 +51,6 @@ import type { AutomationOwner } from "./components/automation-library";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
-// TaskQueuePanel moved to RightPanel
 import { ToastContainer } from "./components/Toast";
 import {
   ComputerUseApprovalDialog,

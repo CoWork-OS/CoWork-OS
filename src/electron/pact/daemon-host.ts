@@ -41,14 +41,30 @@ export interface PactDaemonLike {
   logEvent(taskId: string, type: string, payload: unknown): void;
   isTaskWaitingForInput(taskId: string): Promise<boolean>;
   getWorkspaceForPact(workspaceId: string): Workspace | undefined;
+  /** A task's workspace with its own access profile applied (what its live tool calls use). */
+  getEffectiveWorkspaceForTask(taskId: string): Workspace | undefined;
 }
 
 export function networkContextOf(workspace: Workspace | undefined): NetworkPolicyContext | null {
   if (!workspace) return null;
   return {
-    networkEnabled: workspace.permissions?.network,
+    // Missing permissions mean no network, not "unspecified".
+    networkEnabled: workspace.permissions?.network === true,
     accessNetworkMode: workspace.permissions?.accessNetworkMode,
     profileDomainRules: workspace.permissions?.accessDomainRules,
+  };
+}
+
+/** The default access profile's network rules, for calls outside any workspace. */
+export function defaultNetworkContext(): NetworkPolicyContext {
+  const profile = resolveEffectiveAccessProfile({
+    settings: PermissionSettingsManager.loadSettings(),
+    adminPolicies: loadPolicies(),
+  });
+  return {
+    networkEnabled: profile.networkEnabled,
+    accessNetworkMode: profile.definition.network,
+    profileDomainRules: profile.definition.domainRules,
   };
 }
 
@@ -105,8 +121,13 @@ export class DaemonPactHost implements PactHost {
 
   async networkContextForWorkspace(
     workspaceId: string | null,
+    taskId?: string | null,
   ): Promise<NetworkPolicyContext | null> {
-    if (!workspaceId) return null;
+    if (taskId) {
+      // A resumed wait keeps its task's own access profile, not the workspace default.
+      return networkContextOf(this.daemon.getEffectiveWorkspaceForTask(taskId));
+    }
+    if (!workspaceId) return defaultNetworkContext();
     const workspace = this.daemon.getWorkspaceForPact(workspaceId);
     return networkContextOf(workspace ? effectiveWorkspace(workspace) : undefined);
   }

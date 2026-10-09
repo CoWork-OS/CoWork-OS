@@ -327,6 +327,106 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     });
   });
 
+  it.each([
+    ["an ordinary request", false, true],
+    ["a PACT business operation (noStandingApproval)", true, false],
+  ])(
+    "applies a matching recurring allow only to %s",
+    async (_label, noStandingApproval, usesRecurring) => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
+      const previousVitest = process.env.VITEST;
+      const previousHeadless = process.env.COWORK_HEADLESS;
+      process.env.NODE_ENV = "production";
+      delete process.env.COWORK_APPROVAL_PROMPTS;
+      delete process.env.VITEST;
+      // A headless run cannot answer inline, which would skip the path under test.
+      delete process.env.COWORK_HEADLESS;
+
+      const workspace = { id: "ws-1", path: "/tmp/ws-1", permissions: { network: true } };
+      const recurringApprovalService = {
+        findActive: vi.fn().mockResolvedValue({ summary: { id: "recurring-1", effect: "allow" } }),
+      };
+      const approvalRepo = {
+        create: vi.fn((row: Any) => ({ id: "inline-request", ...row })),
+        approvedRevisionCurrent: vi.fn().mockResolvedValue(true),
+        update: vi.fn().mockResolvedValue(true),
+        resolvePending: vi.fn().mockResolvedValue(true),
+      };
+      const daemonLike = {
+        options: { recurringApprovalService },
+        sessionAutoApproveAll: false,
+        approvalRepo,
+        // The user answers Deny: only a recurring approval could make this request pass.
+        requestAssistantApproval: vi.fn(async (...args: Any[]) =>
+          args[7] ? args[7](false) : false,
+        ),
+        buildRecurringApprovalInput: vi.fn().mockReturnValue({ kind: "external_service" }),
+        logEvent: vi.fn(),
+        updateTask: vi.fn(),
+        evaluatePermissionRequest: vi.fn().mockReturnValue({
+          evaluation: {
+            decision: "ask",
+            reason: { type: "mode", mode: "default", summary: "Prompt for business message." },
+          },
+          promptDetails: {
+            reason: { type: "mode", mode: "default", summary: "Prompt for business message." },
+            scopePreview: "pact_send_message on domain agent.example.com",
+            suggestedActions: [],
+          },
+          scope: { kind: "domain", toolName: "pact_send_message", domain: "agent.example.com" },
+          trackingKey: "domain:pact_send_message:agent.example.com",
+          runtime: null,
+          workspace,
+        }),
+        taskRepo: {
+          findById: vi
+            .fn()
+            .mockReturnValue({ agentConfig: { accessProfileId: "ask_for_approval" } }),
+        },
+        pendingApprovals: new Map(),
+      } as Any;
+
+      try {
+        const approved = await AgentDaemon.prototype.requestApproval.call(
+          daemonLike,
+          "task-pact",
+          "external_service",
+          "Send a change to Example Co.",
+          { tool: "pact_send_message", params: { message: "Cancel order A-1." } },
+          {
+            requireExplicitApproval: noStandingApproval,
+            allowAutoApprove: !noStandingApproval,
+            noStandingApproval,
+          },
+        );
+
+        expect(approved).toBe(usesRecurring);
+        if (usesRecurring) {
+          expect(recurringApprovalService.findActive).toHaveBeenCalledOnce();
+          expect(daemonLike.requestAssistantApproval).not.toHaveBeenCalled();
+          expect(daemonLike.logEvent).toHaveBeenCalledWith(
+            "task-pact",
+            "log",
+            expect.objectContaining({ reason: "recurring_approval" }),
+          );
+        } else {
+          expect(recurringApprovalService.findActive).not.toHaveBeenCalled();
+          expect(daemonLike.requestAssistantApproval).toHaveBeenCalledOnce();
+        }
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        if (previousPromptMode === undefined) delete process.env.COWORK_APPROVAL_PROMPTS;
+        else process.env.COWORK_APPROVAL_PROMPTS = previousPromptMode;
+        if (previousVitest === undefined) delete process.env.VITEST;
+        else process.env.VITEST = previousVitest;
+        if (previousHeadless === undefined) delete process.env.COWORK_HEADLESS;
+        else process.env.COWORK_HEADLESS = previousHeadless;
+      }
+    },
+  );
+
   it("routes ordinary approval decisions to assistant input with a canonical request", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;

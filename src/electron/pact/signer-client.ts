@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { decodeCompactJws, signCompactJws, type Es256KeyPair, type PactJwsAlgorithm } from "./jws";
+import type { NetworkPolicyContext } from "../security/policy-checked-fetch";
 import { PactTransportError, type PactTransport } from "./transport";
 
 export const PACT_JWT_MAX_LIFETIME_SECONDS = 300;
@@ -48,8 +49,12 @@ export interface PactSignedToken {
 export interface PactSigner {
   readonly deployment: "managed" | "self_hosted" | "development";
   readonly issuer: string;
-  sign(audience: string): Promise<PactSignedToken>;
-  status(): Promise<PactSignerStatus>;
+  /**
+   * `networkContext` is the caller's (task workspace or default access profile): signer calls
+   * obey the same network rules as the business calls they serve.
+   */
+  sign(audience: string, networkContext: NetworkPolicyContext): Promise<PactSignedToken>;
+  status(networkContext: NetworkPolicyContext): Promise<PactSignerStatus>;
 }
 
 export interface PactSignerStatus {
@@ -133,9 +138,16 @@ export function checkSignedToken(input: {
   };
 }
 
-/** Per-audience cache in front of any signer; concurrent callers share one signing request. */
+/**
+ * Per-audience cache in front of any signer; concurrent callers share one signing request.
+ * Entries are also keyed by the caller's network rules, so a token fetched under looser rules is
+ * never handed to a caller whose rules would not have let it reach the signer.
+ */
 export class PactTokenCache {
-  private readonly tokens = new Map<string, { token: PactSignedToken; fetchedAt: number }>();
+  private readonly tokens = new Map<
+    string,
+    { audience: string; token: PactSignedToken; fetchedAt: number }
+  >();
   private readonly inflight = new Map<string, Promise<PactSignedToken>>();
 
   constructor(
@@ -151,8 +163,9 @@ export class PactTokenCache {
     return this.signer.issuer;
   }
 
-  async token(audience: string): Promise<PactSignedToken> {
-    const cached = this.tokens.get(audience);
+  async token(audience: string, networkContext: NetworkPolicyContext): Promise<PactSignedToken> {
+    const key = JSON.stringify([audience, networkContext]);
+    const cached = this.tokens.get(key);
     const at = this.now();
     if (
       cached &&
@@ -161,27 +174,31 @@ export class PactTokenCache {
     ) {
       return cached.token;
     }
-    const pending = this.inflight.get(audience);
+    const pending = this.inflight.get(key);
     if (pending) return pending;
     const request = this.signer
-      .sign(audience)
+      .sign(audience, networkContext)
       .then((token) => {
-        this.tokens.set(audience, { token, fetchedAt: this.now() });
+        this.tokens.set(key, { audience, token, fetchedAt: this.now() });
         return token;
       })
-      .finally(() => this.inflight.delete(audience));
-    this.inflight.set(audience, request);
+      .finally(() => this.inflight.delete(key));
+    this.inflight.set(key, request);
     return request;
   }
 
   /** Drop cached tokens, e.g. after a 401 or a signer configuration change. */
   invalidate(audience?: string): void {
-    if (audience === undefined) this.tokens.clear();
-    else this.tokens.delete(audience);
+    if (audience === undefined) {
+      this.tokens.clear();
+      return;
+    }
+    for (const [key, entry] of this.tokens)
+      if (entry.audience === audience) this.tokens.delete(key);
   }
 
-  status(): Promise<PactSignerStatus> {
-    return this.signer.status();
+  status(networkContext: NetworkPolicyContext): Promise<PactSignerStatus> {
+    return this.signer.status(networkContext);
   }
 }
 
@@ -213,7 +230,7 @@ export class HttpPactSigner implements PactSigner {
       issuer: string;
       signerUrl: string;
       auth: PactSignerAuth;
-      transport: () => PactTransport;
+      transport: (networkContext: NetworkPolicyContext) => PactTransport;
       expectedSubject?: string;
       now?: () => number;
     },
@@ -254,10 +271,14 @@ export class HttpPactSigner implements PactSigner {
     return `${this.options.signerUrl.replace(/\/+$/, "")}${path}`;
   }
 
-  private async post(path: string, body: Record<string, unknown>) {
+  private async post(
+    path: string,
+    body: Record<string, unknown>,
+    networkContext: NetworkPolicyContext,
+  ) {
     let response;
     try {
-      response = await this.options.transport().request({
+      response = await this.options.transport(networkContext).request({
         purpose: "signer",
         method: "POST",
         url: this.endpoint(path),
@@ -290,9 +311,9 @@ export class HttpPactSigner implements PactSigner {
     return readJsonObject(response.bodyText);
   }
 
-  async sign(audience: string): Promise<PactSignedToken> {
+  async sign(audience: string, networkContext: NetworkPolicyContext): Promise<PactSignedToken> {
     const nonce = randomUUID();
-    const body = await this.post("/pact/sign", { audience, nonce });
+    const body = await this.post("/pact/sign", { audience, nonce }, networkContext);
     if (body.nonce !== nonce) {
       throw new PactSignerError("invalid_token", "Signer response does not echo the request nonce");
     }
@@ -315,25 +336,29 @@ export class HttpPactSigner implements PactSigner {
    * Device-key enrollment (account-free managed identity): prove possession of the install's key
    * and receive the opaque subject the signer assigns to it.
    */
-  async enroll(): Promise<{ subject: string; issuer: string }> {
+  async enroll(networkContext: NetworkPolicyContext): Promise<{ subject: string; issuer: string }> {
     const auth = this.options.auth;
     if (auth.mode !== "device_key") {
       throw new PactSignerError("not_configured", "Enrollment needs the install's device key");
     }
-    const body = await this.post("/pact/enroll", {
-      publicJwk: auth.keyPair.publicJwk,
-      proof: this.authorization("/pact/enroll").replace(/^PACT-Device /, ""),
-    });
+    const body = await this.post(
+      "/pact/enroll",
+      {
+        publicJwk: auth.keyPair.publicJwk,
+        proof: this.authorization("/pact/enroll").replace(/^PACT-Device /, ""),
+      },
+      networkContext,
+    );
     if (typeof body.subject !== "string" || body.issuer !== this.options.issuer) {
       throw new PactSignerError("rejected", "The signer did not confirm enrollment");
     }
     return { subject: body.subject, issuer: body.issuer };
   }
 
-  async status(): Promise<PactSignerStatus> {
+  async status(networkContext: NetworkPolicyContext): Promise<PactSignerStatus> {
     const jwksUri = `${this.options.issuer.replace(/\/+$/, "")}/.well-known/jwks.json`;
     try {
-      const body = await this.post("/pact/status", {});
+      const body = await this.post("/pact/status", {}, networkContext);
       const audiences: Record<string, string> = {};
       if (body.audiences && typeof body.audiences === "object" && !Array.isArray(body.audiences)) {
         for (const [origin, audience] of Object.entries(

@@ -4,6 +4,21 @@
 
 Everything is a pure function of `t`. `window.seek = async (t) => { ...set every style... }`. If a value would "accumulate" (position after a drag, a counter), express it as a closed-form function of `t` instead. Any timestamp must be directly seekable in any order.
 
+## Timeline
+
+Every beat is a named timestamp in seconds in `timeline.json`, grouped by act (`a1`, `a2`, …), plus `duration` and `fps`:
+
+```json
+{ "duration": 28, "fps": 60,
+  "a1": { "wordmark": 0.0, "squeeze": 0.5, "pill": 1.0, "label": 1.25 },
+  "a2": { "drop": 6.0, "items": [6.5, 6.75, 7.0] } }
+```
+
+- The film, the cue sheet, `sheet.mjs` and `wave.mjs` all read this file, so retiming one file retimes picture, sound and review together. Every number in it is read as a beat except `duration`, `fps`, `bpm` and anything under `meta`.
+- Never hardcode a start time in scene code; offsets from a beat (`TL.a1.pill + 0.05`) are fine.
+- `film.html` reads `window.TL`. The render script injects it with `page.addInitScript((tl) => { window.TL = tl; }, timeline)`; for live preview served over `python3 -m http.server`, fall back to `fetch('timeline.json')`.
+- The beat map in `beat-map.md` is this file in table form, written for humans.
+
 ## Springs
 
 Closed-form underdamped step response (0 → 1):
@@ -70,9 +85,10 @@ Before frame 0: `await document.fonts.ready` and `await img.decode()` for every 
 
 ## Sound
 
-- Every event gets a downloaded SFX (Mixkit); never synthesized.
+Sources, cue sheets, levels and the bundled generator engine: `sound.md`. For downloaded SFX and music:
+
 - Measure each SFX's peak offset (e.g. numpy over decoded samples) and place it so the peak lands on the event: `start = event_t − peak_offset`.
-- Start the song on a downbeat; align the drop to the big reveal, the breakdown to the quiet moment.
+- Find the song's tempo, downbeats and drop with `scripts/beats.py`; start the song on a downbeat, align the drop to the big reveal and the breakdown to the quiet moment.
 - Mix with `adelay` + `amix`, then `loudnorm=I=-14:TP=-1:LRA=11`.
 
 ## Render
@@ -88,5 +104,5 @@ ffmpeg -i video.mp4 -i mix.wav -c:v copy -c:a aac -b:a 256k -shortest final.mp4
 
 ## QA
 
-- Extract one frame per beat and compare against the beat map.
+- Contact sheets at every beat and the checklist: `review-loop.md`.
 - Pops: compute mean abs difference between consecutive frames; flag frame i where `d[i] > 3 × mean(d[i−1], d[i+1])`. Inspect and fix each.

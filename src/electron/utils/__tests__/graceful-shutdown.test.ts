@@ -218,7 +218,9 @@ describe("graceful Electron shutdown", () => {
 
     const childScript = `
       const { runShutdownSteps } = require(${JSON.stringify(runnerPath)});
-      console.log("READY");
+      // Install the handler before announcing readiness: the parent sends SIGTERM as soon
+      // as it sees READY, and a signal that lands before the handler exists kills the
+      // process with the default action (exit code null) instead of running the steps.
       process.on("SIGTERM", () => {
         void runShutdownSteps([
           { name: "agent daemon", run: () => new Promise(() => {}) },
@@ -227,6 +229,7 @@ describe("graceful Electron shutdown", () => {
           .then((result) => { console.log(JSON.stringify(result)); process.exit(result.quiescent ? 0 : 1); });
       });
       setInterval(() => {}, 1000);
+      console.log("READY");
     `;
     const child = spawn(process.execPath, ["-e", childScript], {
       cwd: repoRoot,

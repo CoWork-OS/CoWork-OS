@@ -1,6 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ANSWER_SURFACE_EXAMPLES } from "../../../shared/answer-surfaces/prompt";
 import { AnswerSurfaceBlock } from "../AnswerSurface/AnswerSurface";
 import { parseAssistantMessageSegments } from "../AssistantMessageContent";
 import { cleanAssistantMessageForDisplay } from "../MainContent/markdown-normalization";
@@ -77,6 +78,50 @@ describe("AnswerSurfaceBlock", () => {
   it("shows a placeholder while the block is still streaming", () => {
     expect(render({ closed: false, streaming: true })).toContain("Building interactive answer");
     expect(render({ closed: false })).toContain("did not finish");
+  });
+
+  it("renders the themed calculator with the result first and editable inputs", () => {
+    const html = render({ source: JSON.stringify(ANSWER_SURFACE_EXAMPLES.calculator) });
+    expect(html).toContain("as-theme-ocean");
+    expect(html).toContain("as-card-gradient");
+    expect(html.indexOf("as-hero")).toBeLessThan(html.indexOf("as-number"));
+    expect(html).toContain("$754");
+    expect(html).toMatch(/<input[^>]*inputMode="decimal"[^>]*value="50,000"/);
+    expect(html).toContain("as-metrics-colorful");
+    expect(html).toContain("--as-fill:40%");
+  });
+
+  it("renders tabs, a timeline and tags for a plan", () => {
+    const html = render({ source: JSON.stringify(ANSWER_SURFACE_EXAMPLES.plan) });
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain("Tram 28 to Alfama");
+    // Only the active tab's panel is rendered.
+    expect(html).not.toContain("LX Factory");
+    expect(html).toContain("as-timeline-marker");
+    expect(html).toContain("as-tag as-tone-orange");
+  });
+
+  it("renders metric deltas with their direction and sentiment", () => {
+    const html = render({ source: JSON.stringify(ANSWER_SURFACE_EXAMPLES.chart) });
+    expect(html).toContain("as-delta as-delta-good");
+    expect(html).toContain("No growth");
+    expect(html).toContain("$76,123");
+  });
+
+  it("renders progress bars and rings from values", () => {
+    const html = render({
+      source: JSON.stringify({
+        type: "stack",
+        children: [
+          { type: "progress", items: [{ label: "Saved", value: 40 }] },
+          { type: "progress", style: "ring", items: [{ label: "Steps", value: 50, max: 200 }] },
+        ],
+      }),
+    });
+    expect(html).toContain("--as-fill:0.4");
+    expect(html).toContain('role="progressbar"');
+    expect(html).toContain("as-ring-fill");
   });
 
   it("does not render invalid blocks", () => {

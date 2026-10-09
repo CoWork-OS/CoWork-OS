@@ -1,5 +1,8 @@
 import { evaluateExpression, type ExpressionValue } from "./expression";
 import {
+  initialSurfaceState,
+  interpolationExpressions,
+  isContainerNode,
   replaceInterpolations,
   walkSurface,
   type AnswerSurfaceSpec,
@@ -23,7 +26,7 @@ export function buildSurfaceScope(
     scope[id] = Array.isArray(value) ? value.length : value;
   }
   walkSurface(spec.root, (node) => {
-    if (node.type !== "card" && node.type !== "stack" && node.type !== "grid") return;
+    if (!isContainerNode(node)) return;
     for (const [id, expr] of Object.entries(node.computed ?? {})) {
       const value = evaluateExpression(expr, scope);
       if (value !== null) scope[id] = value;
@@ -103,4 +106,96 @@ export function formatControlValue(
       ? String(options.step).split(".")[1]?.length
       : undefined;
   return joinUnit(formatNumber(value, decimals), options.unit, options.prefix);
+}
+
+/** Decimal places a number is written with, up to two (86.4 → 1), so tweening keeps them. */
+function fractionDigits(value: number): number {
+  if (Number.isInteger(value)) return 0;
+  return Math.min(2, (String(value).split(".")[1] ?? "").length);
+}
+
+/**
+ * A value as a number plus a formatter for any number near it, so the renderer can animate
+ * between results and still show units, prefixes and the right precision.
+ */
+export function resolveSurfaceNumber(
+  value: AnswerSurfaceValue,
+  scope: SurfaceScope,
+): { number: number; format: (value: number) => string } | null {
+  const number = numericSurfaceValue(value, scope);
+  if (number === null || !Number.isFinite(number)) return null;
+  if (typeof value === "string") return null;
+  if (typeof value === "number") return { number, format: (next) => formatNumber(next) };
+  const decimals = value.decimals ?? fractionDigits(number);
+  return {
+    number,
+    format: (next) => joinUnit(formatNumber(next, decimals), value.unit, value.prefix),
+  };
+}
+
+const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+/** Axis and label text for chart numbers: compact for large values, with prefix and unit. */
+export function formatChartNumber(
+  value: number,
+  options: { prefix?: string; unit?: string; format?: "number" | "compact" | "percent" },
+): string {
+  if (!Number.isFinite(value)) return "";
+  const format = options.format ?? (Math.abs(value) >= 10_000 ? "compact" : "number");
+  const text =
+    format === "compact"
+      ? COMPACT.format(value)
+      : format === "percent"
+        ? `${formatNumber(value, Number.isInteger(value) ? 0 : 1)}%`
+        : formatNumber(value, Number.isInteger(value) ? 0 : Math.abs(value) < 10 ? 2 : 1);
+  return joinUnit(text, format === "percent" ? undefined : options.unit, options.prefix);
+}
+
+/**
+ * Formulas that produce no value with the surface's default inputs (division by zero, a
+ * typo'd function, a NaN). The renderer shows "—" for these, so tests and evals use this
+ * to catch answers whose headline number would be blank.
+ */
+export function lintAnswerSurface(spec: AnswerSurfaceSpec): string[] {
+  const scope = buildSurfaceScope(spec, initialSurfaceState(spec));
+  const problems: string[] = [];
+  const check = (value: AnswerSurfaceValue | undefined) => {
+    if (value === undefined) return;
+    if (typeof value === "string") {
+      for (const expr of interpolationExpressions(value)) {
+        if (evaluateExpression(expr, scope) === null) problems.push(`{{${expr}}} has no value`);
+      }
+      return;
+    }
+    if (typeof value === "object" && value.expr && evaluateExpression(value.expr, scope) === null) {
+      problems.push(`"${value.expr}" has no value`);
+    }
+  };
+  walkSurface(spec.root, (node) => {
+    switch (node.type) {
+      case "hero":
+        check(node.value);
+        check(node.delta);
+        break;
+      case "metrics":
+        for (const item of node.items) {
+          check(item.value);
+          check(item.delta);
+        }
+        break;
+      case "values":
+      case "progress":
+        for (const item of node.items) check(item.value);
+        break;
+      case "table":
+        for (const row of node.rows) row.forEach(check);
+        break;
+      case "chart":
+        for (const series of node.series) series.values.forEach(check);
+        break;
+      default:
+        break;
+    }
+  });
+  return problems;
 }

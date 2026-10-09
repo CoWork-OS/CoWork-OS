@@ -101,6 +101,63 @@ describe("SkillTools document results", () => {
     );
   });
 
+  it("create_document reports the PDF page count and whether it fits maxPages", async () => {
+    const workspace = makeWorkspace();
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    const content = [
+      { type: "heading", text: "Brief", level: 1 },
+      { type: "paragraph", text: "Overview." },
+      { type: "page_break" },
+      { type: "paragraph", text: "Details." },
+    ];
+
+    const plain = await tools.createDocument({ filename: "plain.pdf", format: "pdf", content });
+    expect(plain.pageCount).toBe(2);
+    expect(plain.fittedToMaxPages).toBeUndefined();
+
+    const fits = await tools.createDocument({
+      filename: "fits.pdf",
+      format: "pdf",
+      content,
+      maxPages: 2,
+    });
+    expect(fits).toMatchObject({ pageCount: 2, fittedToMaxPages: true });
+    expect(fits.warnings).toBeUndefined();
+
+    const over = await tools.createDocument({
+      filename: "over.pdf",
+      format: "pdf",
+      content,
+      maxPages: 1,
+    });
+    expect(over).toMatchObject({ success: true, pageCount: 2, fittedToMaxPages: false });
+    expect(over.warnings?.join("\n")).toMatch(/The PDF has 2 pages, more than maxPages 1/);
+
+    await expect(
+      tools.createDocument({ filename: "bad.pdf", format: "pdf", content, maxPages: 0 }),
+    ).rejects.toThrow(/maxPages/);
+    expect(fs.existsSync(path.join(workspace.path, "bad.pdf"))).toBe(false);
+  });
+
+  it("create_document does not claim a DOCX page count", async () => {
+    const workspace = makeWorkspace();
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    const content = [{ type: "paragraph", text: "Body." }];
+
+    const docx = await tools.createDocument({
+      filename: "brief.docx",
+      format: "docx",
+      content,
+      maxPages: 2,
+    });
+    expect(docx.pageCount).toBeUndefined();
+    expect(docx.fittedToMaxPages).toBeUndefined();
+    expect(docx.pageCountNote).toMatch(/not measured/);
+
+    const plain = await tools.createDocument({ filename: "plain.docx", format: "docx", content });
+    expect(plain.pageCountNote).toBeUndefined();
+  });
+
   it("create_document only appends a missing extension and rejects a conflicting one", async () => {
     const workspace = makeWorkspace();
     const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");

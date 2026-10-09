@@ -568,6 +568,7 @@ import {
   detectTestRequirement as detectTestRequirementUtil,
   extractNamedTestCommands as extractNamedTestCommandsUtil,
   isBuildCheckCommand as isBuildCheckCommandUtil,
+  isLatexPdfRequest as isLatexPdfRequestUtil,
   isTestCommand as isTestCommandUtil,
   promptIsWatchSkipRecommendationTask as promptIsWatchSkipRecommendationTaskUtil,
   promptRequestsDecision as promptRequestsDecisionUtil,
@@ -22418,12 +22419,7 @@ You are continuing a previous conversation. The context from the previous conver
     this.emitEvent("log", { message: "Analyzing task requirements..." });
 
     const prompt = this.getContractPrompt().toLowerCase();
-    const isLatexPdfTask =
-      /\b(latex|tex|tikz)\b/.test(prompt) ||
-      /\.tex\b/.test(prompt) ||
-      (/\b(write|create|generate|produce|draft|prepare)\b/.test(prompt) &&
-        /\b(paper|article|report|document)\b/.test(prompt) &&
-        /\bcompile(?:d)?\s+(?:pdf|document)|pdf\b/.test(prompt));
+    const isLatexPdfTask = isLatexPdfRequestUtil(prompt);
 
     // Exclusion patterns: code/development tasks should NOT trigger document hints
     const isCodeTask =

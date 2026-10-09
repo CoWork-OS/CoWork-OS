@@ -4,8 +4,15 @@ import * as path from "path";
 import JSZip from "jszip";
 import PDFDocument from "pdfkit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DocumentBuilder, type ContentBlockInput } from "../document";
+import {
+  choosePageFit,
+  DocumentBuilder,
+  parseMaxPages,
+  PDF_FIT_LADDER,
+  type ContentBlockInput,
+} from "../document";
 import { parsePdfBuffer } from "../../../utils/pdf-parser";
+import northstarBrief from "./fixtures/northstar-brief-pt.json";
 
 /** Text drawn on one page, from the cursor before the call to the cursor after it. */
 interface TextBox {
@@ -36,16 +43,32 @@ let log: DrawLog;
 /**
  * Records where the renderer draws text and rules by wrapping pdfkit's own
  * drawing calls, so assertions check the real positions in the saved PDF.
+ * Fitting a page budget lays the content out several times; `log` holds the
+ * drawing of the document that was written (ended), and `layoutPasses`
+ * counts the documents laid out.
  */
+let layoutPasses = 0;
+
 function instrumentPdfDrawing(): void {
   log = { boxes: [], rules: [], pageBottoms: [] };
-  const pages = new Map<object, number>();
+  layoutPasses = 0;
+  const logs = new Map<object, { log: DrawLog; pages: Map<object, number> }>();
+  const docLog = (doc: Any): { log: DrawLog; pages: Map<object, number> } => {
+    let entry = logs.get(doc);
+    if (!entry) {
+      entry = { log: { boxes: [], rules: [], pageBottoms: [] }, pages: new Map() };
+      logs.set(doc, entry);
+      layoutPasses++;
+    }
+    return entry;
+  };
   const pageIndex = (doc: Any): number => {
+    const { log: target, pages } = docLog(doc);
     let index = pages.get(doc.page);
     if (index === undefined) {
       index = pages.size;
       pages.set(doc.page, index);
-      log.pageBottoms[index] = doc.page.height - doc.page.margins.bottom;
+      target.pageBottoms[index] = doc.page.height - doc.page.margins.bottom;
     }
     return index;
   };
@@ -53,7 +76,8 @@ function instrumentPdfDrawing(): void {
   const originalText = proto.text;
   const originalMoveTo = proto.moveTo;
   const originalLineTo = proto.lineTo;
-  let pendingMove: { page: number; x: number; y: number } | null = null;
+  const originalEnd = proto.end;
+  let pendingMove: { doc: object; page: number; x: number; y: number } | null = null;
 
   vi.spyOn(proto, "text").mockImplementation(function (this: Any, ...args: unknown[]) {
     const startPage = this.page;
@@ -61,20 +85,25 @@ function instrumentPdfDrawing(): void {
     const result = originalText.apply(this, args);
     // Flowing text that continued onto a new page has no single box.
     if (this.page === startPage) {
-      log.boxes.push({ page: pageIndex(this), top, bottom: this.y, text: String(args[0]) });
+      const page = pageIndex(this);
+      docLog(this).log.boxes.push({ page, top, bottom: this.y, text: String(args[0]) });
     }
     return result;
   });
   vi.spyOn(proto, "moveTo").mockImplementation(function (this: Any, x: number, y: number) {
-    pendingMove = { page: pageIndex(this), x, y };
+    pendingMove = { doc: this, page: pageIndex(this), x, y };
     return originalMoveTo.call(this, x, y);
   });
   vi.spyOn(proto, "lineTo").mockImplementation(function (this: Any, x: number, y: number) {
-    if (pendingMove && pendingMove.y === y && pendingMove.x !== x) {
-      log.rules.push({ page: pendingMove.page, y, x1: pendingMove.x, x2: x });
+    if (pendingMove && pendingMove.doc === this && pendingMove.y === y && pendingMove.x !== x) {
+      docLog(this).log.rules.push({ page: pendingMove.page, y, x1: pendingMove.x, x2: x });
     }
     pendingMove = null;
     return originalLineTo.call(this, x, y);
+  });
+  vi.spyOn(proto, "end").mockImplementation(function (this: Any) {
+    log = docLog(this).log;
+    return originalEnd.call(this);
   });
 }
 
@@ -282,6 +311,189 @@ describe("PDF page structure", () => {
     await expect(
       builder.create(path.join(dir, "empty.pdf"), "pdf", [{ type: "page_break" }]),
     ).rejects.toThrow(/empty/i);
+  });
+});
+
+/** Text drawn on each page apart from the "N / M" page number. */
+function contentPages(): number[] {
+  return [
+    ...new Set(log.boxes.filter((box) => !/^\d+ \/ \d+$/.test(box.text)).map((box) => box.page)),
+  ].sort((a, b) => a - b);
+}
+
+describe("PDF page budget", () => {
+  // create_document input from live two-page brief tasks that came out as three pages.
+  const briefs = northstarBrief as Record<string, ContentBlockInput[]>;
+
+  it.each(Object.keys(briefs))(
+    "fits the live %s brief into two numbered pages without rules crossing text",
+    async (name) => {
+      const { builder, dir } = makeBuilder();
+      const content = briefs[name];
+      expect(builder.measurePdfLayouts(content, { pageNumbers: true })[0]).toBe(3);
+      vi.restoreAllMocks();
+      instrumentPdfDrawing();
+
+      const outputPath = path.join(dir, "Northstar-brief.pdf");
+      const report = await builder.create(outputPath, "pdf", content, {
+        pageNumbers: true,
+        maxPages: 2,
+      });
+
+      expect(report).toMatchObject({ pageCount: 2, fittedToMaxPages: true, warnings: [] });
+      expect(report.layoutLevel).toBeGreaterThan(0);
+      const parsed = await parsePdfBuffer(fs.readFileSync(outputPath));
+      expect(parsed.numpages).toBe(2);
+      expect(boxesWithText("1 / 2").map((box) => box.page)).toEqual([0]);
+      expect(boxesWithText("2 / 2").map((box) => box.page)).toEqual([1]);
+      expect(log.boxes.some((box) => box.text.endsWith(" / 3"))).toBe(false);
+      expect(rulesCrossingText()).toEqual([]);
+      for (const box of log.boxes.filter((entry) => !/^\d+ \/ \d+$/.test(entry.text))) {
+        expect(box.bottom).toBeLessThanOrEqual(log.pageBottoms[box.page] + 0.5);
+      }
+      // The page_break still starts page 2, which now holds the last section.
+      const breakIndex = content.findIndex((block) => block.type === "page_break");
+      expect(boxesWithText(String(content[breakIndex + 1].text))[0].page).toBe(1);
+      expect(boxesWithText("Decisões em aberto")[0].page).toBe(1);
+      expect(boxesWithText(String(content[breakIndex - 2].text))[0].page).toBe(0);
+    },
+  );
+
+  it("leaves content that already fits exactly as it is drawn without a budget", async () => {
+    const content: ContentBlockInput[] = [
+      { type: "heading", text: "Short brief", level: 1 },
+      { type: "paragraph", text: "Overview." },
+      scheduleTable(3),
+      { type: "page_break" },
+      { type: "heading", text: "Page two", level: 1 },
+      { type: "list", items: ["One", "Two"] },
+    ];
+    const { builder, dir } = makeBuilder();
+    const plain = await builder.create(path.join(dir, "plain.pdf"), "pdf", content, {
+      pageNumbers: true,
+    });
+    const plainLog = log;
+
+    vi.restoreAllMocks();
+    instrumentPdfDrawing();
+    const budget = await builder.create(path.join(dir, "budget.pdf"), "pdf", content, {
+      pageNumbers: true,
+      maxPages: 2,
+    });
+
+    expect(plain).toMatchObject({ pageCount: 2, layoutLevel: 0 });
+    expect(plain.fittedToMaxPages).toBeUndefined();
+    expect(budget).toMatchObject({ pageCount: 2, layoutLevel: 0, fittedToMaxPages: true });
+    // One layout pass, drawn identically.
+    expect(layoutPasses).toBe(1);
+    expect(log).toEqual(plainLog);
+  });
+
+  it("writes the tightest layout and warns with the page count when content cannot fit", async () => {
+    const { builder, dir } = makeBuilder();
+    const outputPath = path.join(dir, "long.pdf");
+    const content: ContentBlockInput[] = Array.from({ length: 120 }, (_, index) => ({
+      type: "paragraph",
+      text: `Paragraph ${index + 1}. ${longCell} ${longCell}`,
+    }));
+
+    const report = await builder.create(outputPath, "pdf", content, {
+      pageNumbers: true,
+      maxPages: 2,
+    });
+
+    const parsed = await parsePdfBuffer(fs.readFileSync(outputPath));
+    expect(report.fittedToMaxPages).toBe(false);
+    expect(report.layoutLevel).toBe(PDF_FIT_LADDER.length - 1);
+    expect(report.pageCount).toBe(parsed.numpages);
+    expect(report.pageCount).toBeGreaterThan(2);
+    const [budgetWarning] = report.warnings;
+    expect(budgetWarning).toContain(`The PDF has ${report.pageCount} pages, more than maxPages 2`);
+    expect(budgetWarning).toMatch(/Shorten the content/);
+    // The default and the tightest layout are measured; the levels between are skipped.
+    expect(layoutPasses).toBe(2);
+    expect(boxesWithText(`${report.pageCount} / ${report.pageCount}`)).toHaveLength(1);
+  });
+
+  it("says when the page breaks alone exceed the budget", async () => {
+    const { builder, dir } = makeBuilder();
+    const report = await builder.create(
+      path.join(dir, "breaks.pdf"),
+      "pdf",
+      [
+        { type: "paragraph", text: "One." },
+        { type: "page_break" },
+        { type: "paragraph", text: "Two." },
+        { type: "page_break" },
+        { type: "paragraph", text: "Three." },
+      ],
+      { maxPages: 2 },
+    );
+
+    expect(report).toMatchObject({ pageCount: 3, fittedToMaxPages: false });
+    expect(report.warnings[0]).toMatch(/page_break blocks alone start 3 pages/);
+  });
+
+  it("never turns a page_break into a blank page", async () => {
+    const { builder, dir } = makeBuilder();
+    const outputPath = path.join(dir, "breaks.pdf");
+
+    const report = await builder.create(
+      outputPath,
+      "pdf",
+      [
+        { type: "page_break" },
+        { type: "paragraph", text: "One." },
+        { type: "page_break" },
+        { type: "page_break" },
+        { type: "paragraph", text: "Two." },
+        { type: "page_break" },
+      ],
+      { pageNumbers: true, maxPages: 2 },
+    );
+
+    const parsed = await parsePdfBuffer(fs.readFileSync(outputPath));
+    expect(parsed.numpages).toBe(2);
+    expect(report).toMatchObject({ pageCount: 2, fittedToMaxPages: true });
+    expect(contentPages()).toEqual([0, 1]);
+  });
+
+  it("chooses the first layout that fits and measures as few layouts as it can", () => {
+    const measured: number[] = [];
+    const pages = (counts: number[]) => (level: number) => {
+      measured.push(level);
+      return counts[level];
+    };
+
+    expect(choosePageFit(2, 4, pages([2, 2, 1, 1]))).toEqual({
+      level: 0,
+      pageCount: 2,
+      fitted: true,
+    });
+    expect(measured.splice(0)).toEqual([0]);
+
+    expect(choosePageFit(2, 4, pages([3, 3, 2, 2]))).toEqual({
+      level: 2,
+      pageCount: 2,
+      fitted: true,
+    });
+    expect(measured.splice(0)).toEqual([0, 3, 1, 2]);
+
+    expect(choosePageFit(2, 4, pages([5, 4, 4, 3]))).toEqual({
+      level: 3,
+      pageCount: 3,
+      fitted: false,
+    });
+    expect(measured.splice(0)).toEqual([0, 3]);
+  });
+
+  it("accepts whole-number page budgets only", () => {
+    expect(parseMaxPages(undefined)).toBeUndefined();
+    expect(parseMaxPages(2)).toBe(2);
+    expect(parseMaxPages(" 3 ")).toBe(3);
+    for (const invalid of [0, -1, 1.5, "two", true]) {
+      expect(() => parseMaxPages(invalid)).toThrow(/maxPages/);
+    }
   });
 });
 

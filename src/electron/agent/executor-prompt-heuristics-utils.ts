@@ -132,6 +132,20 @@ export function isBuildCheckCommand(command: string): boolean {
   return BUILD_CHECK_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+/**
+ * Whether a request wants a LaTeX/TeX build. Only explicit LaTeX intent counts: the words
+ * LaTeX, TeX or TikZ, a .tex file, or asking to compile a paper/report into a PDF. A request
+ * for "a Word document and a matching PDF" is an ordinary document request.
+ */
+export function isLatexPdfRequest(prompt: string): boolean {
+  const text = prompt.toLowerCase();
+  if (/\b(latex|tex|tikz|overleaf|bibtex)\b/.test(text) || /\.tex\b/.test(text)) return true;
+  return (
+    /\b(paper|article|report|document|thesis|manuscript)\b/.test(text) &&
+    /\bcompil(?:e|ed|ing)\b[^.\n]{0,40}\bpdf\b/.test(text)
+  );
+}
+
 export function promptRequiresDirectAnswer(taskTitle: string, taskPrompt: string): boolean {
   const prompt = `${taskTitle}\n${taskPrompt}`.toLowerCase();
   if (prompt.includes("?")) return true;

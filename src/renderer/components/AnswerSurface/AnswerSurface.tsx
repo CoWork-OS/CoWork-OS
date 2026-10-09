@@ -1,5 +1,17 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Check } from "lucide-react";
+import {
+  isContainerNode,
   parseAnswerSurfaceSource,
   walkSurface,
   type AnswerSurfaceImageRef,
@@ -7,6 +19,8 @@ import {
   type AnswerSurfaceSpec,
   type AnswerSurfaceState,
   type AnswerSurfaceStateValue,
+  type AnswerSurfaceTone,
+  type AnswerSurfaceValue,
 } from "../../../shared/answer-surfaces/schema";
 import {
   buildSurfaceScope,
@@ -14,10 +28,13 @@ import {
   formatSurfaceValue,
   interpolateText,
   numericSurfaceValue,
+  resolveSurfaceNumber,
   type SurfaceScope,
 } from "../../../shared/answer-surfaces/runtime";
 import { answerImageCredit } from "../../../shared/answer-surfaces/images";
 import { useAnswerSurfaceState } from "../../hooks/useAnswerSurfaceState";
+import { useTweenedNumber } from "../../hooks/useTweenedNumber";
+import { SurfaceIcon } from "./AnswerSurfaceIcon";
 import {
   answerImageKey,
   useAnswerImages,
@@ -107,6 +124,12 @@ function collectImageRefs(spec: AnswerSurfaceSpec): AnswerSurfaceImageRef[] {
   return refs;
 }
 
+/**
+ * Surfaces already shown in this window. A surface animates in the first time it appears;
+ * scrolling it out of the virtualized feed and back does not replay the entrance.
+ */
+const revealedSurfaces = new Set<string>();
+
 function AnswerSurfaceView({
   spec,
   surfaceKey,
@@ -122,12 +145,36 @@ function AnswerSurfaceView({
   const scope = useMemo(() => buildSurfaceScope(spec, state), [spec, state]);
   const imageRefs = useMemo(() => collectImageRefs(spec), [spec]);
   const images = useAnswerImages(imageRefs, taskId);
+  const [entering] = useState(() => {
+    const revealKey = `${taskId ?? ""}:${surfaceKey}`;
+    if (revealedSurfaces.has(revealKey)) return false;
+    revealedSurfaces.add(revealKey);
+    return true;
+  });
   const context: SurfaceContext = { state, scope, setValue, images };
   return (
-    <div className="answer-surface" data-surface-key={surfaceKey}>
+    <div
+      className={`answer-surface as-theme-accent${entering ? " as-enter" : ""}`}
+      data-surface-key={surfaceKey}
+    >
       <SurfaceNode node={spec.root} context={context} />
     </div>
   );
+}
+
+/** A container's own theme class, so it and everything inside it pick up that palette. */
+function themeClass(node: AnswerSurfaceNode): string {
+  return isContainerNode(node) && node.theme ? ` as-theme-${node.theme}` : "";
+}
+
+function toneClass(tone: AnswerSurfaceTone | undefined, index?: number): string {
+  if (tone) return `as-tone-${tone}`;
+  return index === undefined ? "as-tone-accent" : `as-series-${(index % 5) + 1}`;
+}
+
+/** A CSS custom property for a value the stylesheet reads (fills, positions). */
+function cssVars(vars: Record<string, string | number>): CSSProperties {
+  return vars as CSSProperties;
 }
 
 function SurfaceNode({
@@ -146,19 +193,48 @@ function SurfaceNode({
   switch (node.type) {
     case "card":
       return (
-        <section className="as-card" aria-label={node.title ? text(node.title) : undefined}>
-          {node.eyebrow && <div className="as-eyebrow">{text(node.eyebrow)}</div>}
-          {node.title && <h3 className="as-card-title">{text(node.title)}</h3>}
-          {node.subtitle && <p className="as-card-subtitle">{text(node.subtitle)}</p>}
+        <section
+          className={`as-card as-card-${node.style ?? "plain"}${themeClass(node)}`}
+          aria-label={node.title ? text(node.title) : undefined}
+        >
+          {(node.title || node.eyebrow || node.subtitle) && (
+            <header className={`as-card-header${node.icon ? " as-card-header-icon" : ""}`}>
+              {node.icon && (
+                <span className="as-icon-chip as-tone-accent">
+                  <SurfaceIcon name={node.icon} className="as-icon" />
+                </span>
+              )}
+              <div className="as-card-heading">
+                {node.eyebrow && <div className="as-eyebrow">{text(node.eyebrow)}</div>}
+                {node.title && <h3 className="as-card-title">{text(node.title)}</h3>}
+                {node.subtitle && <p className="as-card-subtitle">{text(node.subtitle)}</p>}
+              </div>
+            </header>
+          )}
           {node.children.length > 0 && <div className="as-stack">{children(node.children)}</div>}
         </section>
       );
     case "stack":
-      return <div className="as-stack">{children(node.children)}</div>;
-    case "grid":
+      return <div className={`as-stack${themeClass(node)}`}>{children(node.children)}</div>;
+    case "grid": {
+      const columns = node.columns ?? 2;
       return (
-        <div className={`as-grid as-grid-${node.columns ?? 2}`}>{children(node.children)}</div>
+        <div className={`as-grid as-grid-${columns}${themeClass(node)}`}>
+          {node.children.map((child, index) => {
+            const span = Math.min(columns, Math.max(1, node.spans?.[index] ?? 1));
+            return (
+              <div key={`${child.type}-${index}`} className={`as-grid-cell as-span-${span}`}>
+                <SurfaceNode node={child} context={context} />
+              </div>
+            );
+          })}
+        </div>
       );
+    }
+    case "tabs":
+      return <SurfaceTabs node={node} context={context} />;
+    case "hero":
+      return <SurfaceHero node={node} context={context} />;
     case "heading":
       return node.level === 4 ? (
         <h5 className="as-heading as-heading-small">{text(node.text)}</h5>
@@ -207,21 +283,55 @@ function SurfaceNode({
     case "tiles":
       return <SurfaceTiles node={node} context={context} />;
     case "metrics":
+      return <SurfaceMetrics node={node} context={context} />;
+    case "progress":
+      return <SurfaceProgress node={node} context={context} />;
+    case "timeline":
       return (
-        <div className="as-metrics">
-          {node.items.map((item, index) => (
-            <div key={index} className="as-metric">
-              <div className="as-metric-label">{text(item.label)}</div>
-              <div className="as-metric-value">{formatSurfaceValue(item.value, context.scope)}</div>
-              {item.caption && <div className="as-metric-caption">{text(item.caption)}</div>}
-            </div>
-          ))}
+        <div className="as-timeline">
+          {node.title && <div className="as-block-title">{text(node.title)}</div>}
+          <ol className="as-list as-timeline-list">
+            {node.items.map((item, index) => {
+              // Without a status a step is part of a plan, not a tracked task: keep its color.
+              const status = item.status ?? "step";
+              return (
+                <li
+                  key={index}
+                  className={`as-timeline-item as-timeline-${status} ${toneClass(item.tone)}`}
+                >
+                  <span className="as-timeline-marker" aria-hidden="true">
+                    {status === "done" ? (
+                      <Check className="as-icon" strokeWidth={3} />
+                    ) : item.icon ? (
+                      <SurfaceIcon name={item.icon} className="as-icon" />
+                    ) : null}
+                  </span>
+                  <div className="as-timeline-body">
+                    {item.time && <div className="as-timeline-time">{text(item.time)}</div>}
+                    <div className="as-timeline-title">{text(item.title)}</div>
+                    {item.text && <p className="as-timeline-text">{text(item.text)}</p>}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
         </div>
+      );
+    case "tags":
+      return (
+        <ul className="as-list as-tags">
+          {node.items.map((item, index) => (
+            <li key={index} className={`as-tag ${toneClass(item.tone, index)}`}>
+              {item.icon && <SurfaceIcon name={item.icon} className="as-icon" />}
+              {text(item.label)}
+            </li>
+          ))}
+        </ul>
       );
     case "values":
       return (
         <div className="as-values">
-          {node.title && <div className="as-values-title">{text(node.title)}</div>}
+          {node.title && <div className="as-block-title">{text(node.title)}</div>}
           <dl className="as-values-list">
             {node.items.map((item, index) => (
               <div key={index} className="as-values-row">
@@ -229,7 +339,9 @@ function SurfaceNode({
                   {text(item.label)}
                   {item.note && <span className="as-values-note">{text(item.note)}</span>}
                 </dt>
-                <dd aria-live="polite">{formatSurfaceValue(item.value, context.scope)}</dd>
+                <dd aria-live="polite">
+                  <AnimatedValue value={item.value} scope={context.scope} />
+                </dd>
               </div>
             ))}
           </dl>
@@ -243,7 +355,13 @@ function SurfaceNode({
             <thead>
               <tr>
                 {node.columns.map((column, index) => (
-                  <th key={index} scope="col">
+                  <th
+                    key={index}
+                    scope="col"
+                    className={
+                      index > 0 && isNumericColumn(node.rows, index) ? "as-num" : undefined
+                    }
+                  >
                     {column}
                   </th>
                 ))}
@@ -253,7 +371,14 @@ function SurfaceNode({
               {node.rows.map((row, rowIndex) => (
                 <tr key={rowIndex}>
                   {node.columns.map((_column, cellIndex) => (
-                    <td key={cellIndex}>
+                    <td
+                      key={cellIndex}
+                      className={
+                        cellIndex > 0 && isNumericColumn(node.rows, cellIndex)
+                          ? "as-num"
+                          : undefined
+                      }
+                    >
                       {row[cellIndex] === undefined
                         ? ""
                         : formatSurfaceValue(row[cellIndex], context.scope)}
@@ -279,13 +404,24 @@ function SurfaceNode({
       });
       return (
         <figure className="as-chart">
-          {node.title && <figcaption className="as-chart-title">{text(node.title)}</figcaption>}
-          <Suspense fallback={<div className="as-chart-placeholder" />}>
+          {node.title && <figcaption className="as-block-title">{text(node.title)}</figcaption>}
+          <Suspense
+            fallback={<div className={`as-chart-placeholder as-chart-${node.height ?? "md"}`} />}
+          >
             <LazyAnswerSurfaceChart
               kind={node.kind}
               data={data}
-              series={node.series.map((series) => series.name)}
+              series={node.series.map((series) => ({
+                name: series.name,
+                style: series.style ?? "solid",
+                tone: series.tone,
+              }))}
               unit={node.unit}
+              prefix={node.prefix}
+              format={node.format}
+              stacked={node.stacked ?? false}
+              horizontal={node.horizontal ?? false}
+              height={node.height ?? "md"}
             />
           </Suspense>
         </figure>
@@ -298,6 +434,7 @@ function SurfaceNode({
         typeof context.state[node.id] === "number"
           ? (context.state[node.id] as number)
           : node.default;
+      const fill = ((value - node.min) / (node.max - node.min)) * 100;
       return (
         <label className="as-slider">
           <span className="as-control-row">
@@ -312,12 +449,15 @@ function SurfaceNode({
             max={node.max}
             step={node.step ?? 1}
             value={value}
+            style={cssVars({ "--as-fill": `${fill}%` })}
             aria-valuetext={formatControlValue(value, node)}
             onChange={(event) => context.setValue(node.id, Number(event.currentTarget.value))}
           />
         </label>
       );
     }
+    case "number":
+      return <SurfaceNumberInput node={node} context={context} />;
     case "select":
       return <SurfaceSelect node={node} context={context} />;
     case "toggle": {
@@ -337,18 +477,327 @@ function SurfaceNode({
         </button>
       );
     }
-    case "callout":
+    case "callout": {
+      const tone = node.tone ?? "info";
       return (
-        <div className={`as-callout as-callout-${node.tone ?? "info"}`} role="note">
-          {node.title && <strong>{text(node.title)} </strong>}
-          {text(node.text)}
+        <div className={`as-callout as-callout-${tone}`} role="note">
+          <SurfaceIcon
+            name={node.icon ?? CALLOUT_ICONS[tone]}
+            className="as-icon as-callout-icon"
+          />
+          <div>
+            {node.title && <strong>{text(node.title)} </strong>}
+            {text(node.text)}
+          </div>
         </div>
       );
+    }
     case "copy":
       return <SurfaceCopyButton label={node.label} text={text(node.text)} />;
     case "divider":
       return <hr className="as-divider" />;
   }
+}
+
+const CALLOUT_ICONS = {
+  info: "info",
+  tip: "lightbulb",
+  warning: "alert",
+  success: "check-circle",
+} as const;
+
+function isNumericColumn(rows: AnswerSurfaceValue[][], index: number): boolean {
+  const cells = rows.map((row) => row[index]).filter((cell) => cell !== undefined);
+  return (
+    cells.length > 0 && cells.every((cell) => typeof cell === "number" || typeof cell === "object")
+  );
+}
+
+/** A value that eases to its new result when the inputs it reads change. */
+function AnimatedValue({ value, scope }: { value: AnswerSurfaceValue; scope: SurfaceScope }) {
+  const resolved = resolveSurfaceNumber(value, scope);
+  const shown = useTweenedNumber(resolved?.number ?? 0);
+  return <>{resolved ? resolved.format(shown) : formatSurfaceValue(value, scope)}</>;
+}
+
+/** A change badge: the arrow follows the direction, the color follows whether that is good. */
+function SurfaceDelta({
+  delta,
+  direction,
+  good = "up",
+  scope,
+}: {
+  delta: AnswerSurfaceValue;
+  direction?: "up" | "down" | "flat";
+  good?: "up" | "down";
+  scope: SurfaceScope;
+}) {
+  const number = numericSurfaceValue(delta, scope);
+  const formatted = formatSurfaceValue(delta, scope);
+  const resolvedDirection =
+    direction ??
+    (number === null
+      ? /^\s*[-−]/.test(formatted)
+        ? "down"
+        : "up"
+      : number > 0
+        ? "up"
+        : number < 0
+          ? "down"
+          : "flat");
+  const sentiment =
+    resolvedDirection === "flat" ? "flat" : resolvedDirection === good ? "good" : "bad";
+  const Arrow =
+    resolvedDirection === "up"
+      ? ArrowUpRight
+      : resolvedDirection === "down"
+        ? ArrowDownRight
+        : ArrowRight;
+  return (
+    <span className={`as-delta as-delta-${sentiment}`}>
+      <Arrow className="as-icon" strokeWidth={2.5} aria-hidden="true" />
+      {formatted}
+    </span>
+  );
+}
+
+function SurfaceHero({
+  node,
+  context,
+}: {
+  node: Extract<AnswerSurfaceNode, { type: "hero" }>;
+  context: SurfaceContext;
+}) {
+  const text = (value: string) => interpolateText(value, context.scope);
+  const requested = node.style ?? (node.image ? "image" : "gradient");
+  const style = requested === "image" && !node.image ? "gradient" : requested;
+  return (
+    <section className={`as-hero as-hero-${style}`} aria-label={text(node.title)}>
+      {style === "image" && node.image && (
+        <SurfaceImage refValue={node.image} context={context} className="as-hero-image" />
+      )}
+      <div className="as-hero-content">
+        <div className="as-hero-top">
+          <div>
+            {node.eyebrow && <div className="as-hero-eyebrow">{text(node.eyebrow)}</div>}
+            <div className="as-hero-title">{text(node.title)}</div>
+          </div>
+          {node.icon && (
+            <span className="as-hero-icon">
+              <SurfaceIcon name={node.icon} className="as-icon" />
+            </span>
+          )}
+        </div>
+        {node.value !== undefined && (
+          <div className="as-hero-value" aria-live="polite">
+            <AnimatedValue value={node.value} scope={context.scope} />
+          </div>
+        )}
+        {(node.delta !== undefined || node.caption) && (
+          <div className="as-hero-footer">
+            {node.delta !== undefined && (
+              <SurfaceDelta delta={node.delta} direction={node.direction} scope={context.scope} />
+            )}
+            {node.caption && <span className="as-hero-caption">{text(node.caption)}</span>}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SurfaceTabs({
+  node,
+  context,
+}: {
+  node: Extract<AnswerSurfaceNode, { type: "tabs" }>;
+  context: SurfaceContext;
+}) {
+  const [active, setActive] = useState(0);
+  const baseId = useId();
+  const current = node.tabs[Math.min(active, node.tabs.length - 1)];
+  return (
+    <div className={`as-tabs${themeClass(node)}`}>
+      <div className="as-tab-list" role="tablist">
+        {node.tabs.map((tab, index) => (
+          <button
+            key={index}
+            type="button"
+            role="tab"
+            id={`${baseId}-tab-${index}`}
+            aria-selected={index === active}
+            aria-controls={`${baseId}-panel`}
+            className={`as-tab${index === active ? " as-tab-active" : ""}`}
+            onClick={() => setActive(index)}
+          >
+            {tab.icon && <SurfaceIcon name={tab.icon} className="as-icon" />}
+            {interpolateText(tab.label, context.scope)}
+          </button>
+        ))}
+      </div>
+      <div
+        className="as-stack as-tab-panel"
+        role="tabpanel"
+        id={`${baseId}-panel`}
+        aria-labelledby={`${baseId}-tab-${active}`}
+        key={active}
+      >
+        {current.children.map((child, index) => (
+          <SurfaceNode key={`${child.type}-${index}`} node={child} context={context} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const gradientId = useId();
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = values.map((value, index) => {
+    const x = (index / (values.length - 1)) * 100;
+    const y = 26 - ((value - min) / range) * 22;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+  return (
+    <svg className="as-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" className="as-spark-stop-top" />
+          <stop offset="100%" className="as-spark-stop-bottom" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,28 ${points.join(" ")} 100,28`} fill={`url(#${gradientId})`} />
+      <polyline points={points.join(" ")} className="as-spark-line" />
+    </svg>
+  );
+}
+
+function SurfaceMetrics({
+  node,
+  context,
+}: {
+  node: Extract<AnswerSurfaceNode, { type: "metrics" }>;
+  context: SurfaceContext;
+}) {
+  const style = node.style ?? "cards";
+  return (
+    <div className={`as-metrics as-metrics-${style}`}>
+      {node.items.map((item, index) => (
+        <div key={index} className={`as-metric ${toneClass(item.tone, index)}`}>
+          <div className="as-metric-head">
+            {item.icon && (
+              <span className="as-icon-chip">
+                <SurfaceIcon name={item.icon} className="as-icon" />
+              </span>
+            )}
+            <span className="as-metric-label">{interpolateText(item.label, context.scope)}</span>
+          </div>
+          <div className="as-metric-value" aria-live="polite">
+            <AnimatedValue value={item.value} scope={context.scope} />
+          </div>
+          {(item.delta !== undefined || item.caption) && (
+            <div className="as-metric-foot">
+              {item.delta !== undefined && (
+                <SurfaceDelta
+                  delta={item.delta}
+                  direction={item.direction}
+                  good={item.good}
+                  scope={context.scope}
+                />
+              )}
+              {item.caption && (
+                <span className="as-metric-caption">
+                  {interpolateText(item.caption, context.scope)}
+                </span>
+              )}
+            </div>
+          )}
+          {item.spark && <Sparkline values={item.spark} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const RING_RADIUS = 40;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+
+function SurfaceProgress({
+  node,
+  context,
+}: {
+  node: Extract<AnswerSurfaceNode, { type: "progress" }>;
+  context: SurfaceContext;
+}) {
+  const style = node.style ?? "bar";
+  return (
+    <div className={`as-progress as-progress-${style}`}>
+      {node.title && (
+        <div className="as-block-title">{interpolateText(node.title, context.scope)}</div>
+      )}
+      <div className="as-progress-items">
+        {node.items.map((item, index) => {
+          const number = numericSurfaceValue(item.value, context.scope) ?? 0;
+          const ratio = Math.min(1, Math.max(0, number / (item.max ?? 100)));
+          const label = interpolateText(item.label, context.scope);
+          const formatted = formatSurfaceValue(item.value, context.scope);
+          // Without a max the value is a percentage; say so when the value is a bare number.
+          const valueText =
+            item.max === undefined && /^[\d.,]+$/.test(formatted) ? `${formatted}%` : formatted;
+          return style === "ring" ? (
+            <div key={index} className={`as-ring ${toneClass(item.tone, index)}`}>
+              <svg viewBox="0 0 100 100" className="as-ring-svg" aria-hidden="true">
+                <circle cx="50" cy="50" r={RING_RADIUS} className="as-ring-track" />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r={RING_RADIUS}
+                  className="as-ring-fill"
+                  strokeDasharray={`${RING_LENGTH * ratio} ${RING_LENGTH}`}
+                />
+              </svg>
+              <div className="as-ring-center">
+                <span className="as-ring-value">{valueText}</span>
+              </div>
+              <div className="as-ring-label">{label}</div>
+              {item.caption && (
+                <div className="as-ring-caption">
+                  {interpolateText(item.caption, context.scope)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div key={index} className={`as-bar ${toneClass(item.tone, index)}`}>
+              <div className="as-control-row">
+                <span className="as-bar-label">{label}</span>
+                <span className="as-control-value">
+                  {valueText}
+                  {item.max !== undefined && item.max !== 100 && (
+                    <span className="as-bar-max"> / {item.max}</span>
+                  )}
+                </span>
+              </div>
+              <div
+                className="as-bar-track"
+                role="progressbar"
+                aria-label={label}
+                aria-valuemin={0}
+                aria-valuemax={item.max ?? 100}
+                aria-valuenow={number}
+              >
+                <span className="as-bar-fill" style={cssVars({ "--as-fill": ratio })} />
+              </div>
+              {item.caption && (
+                <div className="as-bar-caption">{interpolateText(item.caption, context.scope)}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function SurfaceImage({
@@ -427,16 +876,22 @@ function SurfaceTiles({
         {node.items.map((item, index) => {
           const content = (
             <>
-              {item.emoji && (
-                <span className="as-tile-emoji" aria-hidden="true">
-                  {item.emoji}
+              {item.icon ? (
+                <span className="as-icon-chip as-tile-icon">
+                  <SurfaceIcon name={item.icon} className="as-icon" />
                 </span>
+              ) : (
+                item.emoji && (
+                  <span className="as-tile-emoji" aria-hidden="true">
+                    {item.emoji}
+                  </span>
+                )
               )}
               <span className="as-tile-title">{item.title}</span>
               {item.subtitle && <span className="as-tile-subtitle">{item.subtitle}</span>}
             </>
           );
-          const classes = `as-tile as-tone-${item.tone ?? "gray"}${selected === item.title ? " as-tile-selected" : ""}`;
+          const classes = `as-tile ${toneClass(item.tone, index)}${selected === item.title ? " as-tile-selected" : ""}`;
           return selectable ? (
             <button
               key={index}
@@ -484,6 +939,12 @@ function SurfaceChecklist({
           {done} of {node.items.length} done
         </span>
       </div>
+      <div className="as-checklist-meter" aria-hidden="true">
+        <span
+          className="as-bar-fill"
+          style={cssVars({ "--as-fill": node.items.length ? done / node.items.length : 0 })}
+        />
+      </div>
       <ul className="as-list">
         {node.items.map((item) => {
           const isChecked = checked.has(item.id);
@@ -523,7 +984,9 @@ function SurfaceStepper({
     Math.min(node.max, Math.max(node.min, Math.round(next / step) * step));
   return (
     <div className="as-stepper" role="group" aria-label={node.label}>
-      <div className="as-eyebrow">{node.label}</div>
+      <span className="as-stepper-label">
+        <span className="as-control-label">{node.label}</span>
+      </span>
       <div className="as-stepper-row">
         <button
           type="button"
@@ -547,6 +1010,62 @@ function SurfaceStepper({
         >
           +
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** An editable amount (a goal, a balance, a price) with its prefix and unit beside it. */
+function SurfaceNumberInput({
+  node,
+  context,
+}: {
+  node: Extract<AnswerSurfaceNode, { type: "number" }>;
+  context: SurfaceContext;
+}) {
+  const value =
+    typeof context.state[node.id] === "number" ? (context.state[node.id] as number) : node.default;
+  const [draft, setDraft] = useState<string | null>(null);
+  const inputId = useId();
+  const clamp = (next: number) =>
+    Math.min(node.max ?? Infinity, Math.max(node.min ?? -Infinity, next));
+  const parse = (raw: string) => Number(raw.replace(/[,\s]/g, ""));
+  const commit = (raw: string) => {
+    const next = parse(raw);
+    if (raw.trim() !== "" && Number.isFinite(next)) context.setValue(node.id, clamp(next));
+    setDraft(null);
+  };
+  return (
+    <div className="as-number">
+      <label className="as-control-label" htmlFor={inputId}>
+        {node.label}
+      </label>
+      <div className="as-number-field">
+        {node.prefix && <span className="as-number-affix">{node.prefix}</span>}
+        <input
+          id={inputId}
+          type="text"
+          inputMode="decimal"
+          value={draft ?? formatControlValue(value, { step: node.step })}
+          // Selecting without changing the text keeps the selection; typing replaces it.
+          onFocus={(event) => event.currentTarget.select()}
+          onChange={(event) => {
+            const raw = event.currentTarget.value;
+            setDraft(raw);
+            const next = parse(raw);
+            const inRange =
+              (node.min === undefined || next >= node.min) &&
+              (node.max === undefined || next <= node.max);
+            if (raw.trim() !== "" && Number.isFinite(next) && inRange) {
+              context.setValue(node.id, next);
+            }
+          }}
+          onBlur={(event) => commit(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+        />
+        {node.unit && <span className="as-number-affix">{node.unit}</span>}
       </div>
     </div>
   );

@@ -114,6 +114,38 @@ function plainLines(
     case "stack":
     case "grid":
       return nodeChildren(node).flatMap((child) => plainLines(child, scope, state));
+    case "tabs":
+      return node.tabs.flatMap((tab) => [
+        `**${text(tab.label)}**`,
+        ...tab.children.flatMap((child) => plainLines(child, scope, state)),
+      ]);
+    case "hero": {
+      const value = node.value === undefined ? "" : formatSurfaceValue(node.value, scope);
+      const delta = node.delta === undefined ? "" : ` (${formatSurfaceValue(node.delta, scope)})`;
+      return [
+        node.eyebrow ? text(node.eyebrow) : "",
+        value ? `**${text(node.title)}: ${value}**${delta}` : `**${text(node.title)}**`,
+        node.caption ? text(node.caption) : "",
+      ];
+    }
+    case "progress": {
+      const lines = node.items.map((item) => {
+        const value = formatSurfaceValue(item.value, scope);
+        return `- ${text(item.label)}: ${value}${item.max !== undefined ? ` of ${item.max}` : ""}`;
+      });
+      return node.title ? [`**${text(node.title)}**`, ...lines] : lines;
+    }
+    case "timeline": {
+      const lines = node.items.map((item) => {
+        const time = item.time ? `${text(item.time)} — ` : "";
+        const detail = item.text ? `: ${text(item.text)}` : "";
+        const mark = item.status === "done" ? " ✓" : "";
+        return `- ${time}${text(item.title)}${detail}${mark}`;
+      });
+      return node.title ? [`**${text(node.title)}**`, ...lines] : lines;
+    }
+    case "tags":
+      return [node.items.map((item) => item.label).join(" · ")];
     case "heading":
       return [`**${text(node.text)}**`];
     case "text":
@@ -139,9 +171,10 @@ function plainLines(
       return node.caption ? [...lines, text(node.caption)] : lines;
     }
     case "metrics":
-      return node.items.map(
-        (item) => `- ${text(item.label)}: ${formatSurfaceValue(item.value, scope)}`,
-      );
+      return node.items.map((item) => {
+        const delta = item.delta === undefined ? "" : ` (${formatSurfaceValue(item.delta, scope)})`;
+        return `- ${text(item.label)}: ${formatSurfaceValue(item.value, scope)}${delta}`;
+      });
     case "values": {
       const lines = node.items.map(
         (item) => `- ${text(item.label)}: ${formatSurfaceValue(item.value, scope)}`,
@@ -179,7 +212,8 @@ function plainLines(
       return node.title ? [`**${text(node.title)}**`, ...lines] : lines;
     }
     case "stepper":
-    case "slider": {
+    case "slider":
+    case "number": {
       const value = typeof state[node.id] === "number" ? (state[node.id] as number) : node.default;
       return [`${node.label}: ${formatControlValue(value, node)}`];
     }
@@ -249,6 +283,7 @@ export function summarizeSurfaceChanges(
     switch (node.type) {
       case "stepper":
       case "slider":
+      case "number":
         if (state[node.id] !== defaults[node.id] && typeof state[node.id] === "number") {
           lines.push(`${node.label}: ${formatControlValue(state[node.id] as number, node)}`);
         }

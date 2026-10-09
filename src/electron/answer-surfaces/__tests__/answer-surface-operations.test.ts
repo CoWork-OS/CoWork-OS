@@ -72,7 +72,7 @@ describe("answer surface operations", () => {
     ).resolves.toEqual({
       a: table,
       b: { file: "uploads/missing.csv", error: "File not found: uploads/missing.csv" },
-      c: { file: "uploads/broken.csv", error: "The file could not be read" },
+      c: { file: "uploads/broken.csv", error: "The data could not be read" },
     });
     expect(loadDataSource).toHaveBeenCalledWith("task-1", "uploads/a.csv", { maxCells: 66666 });
     await expect(
@@ -81,7 +81,7 @@ describe("answer surface operations", () => {
         sources: { a: "uploads/a.csv" },
       }),
     ).resolves.toEqual({
-      a: { file: "uploads/a.csv", error: "Data files are read in the desktop app" },
+      a: { file: "uploads/a.csv", error: "Data is read in the desktop app" },
     });
     await expect(
       withData[IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]({
@@ -90,6 +90,42 @@ describe("answer surface operations", () => {
       }),
     ).rejects.toThrow(/answer data request/);
     expect(loadDataSource).toHaveBeenCalledTimes(3);
+  });
+
+  it("loads saved tool results by handle beside files", async () => {
+    const { deps } = setup();
+    const table = {
+      file: "web_search output r3f9a2c41",
+      columns: ["title"],
+      rows: [["a"], ["b"]],
+      totalRows: 2,
+      truncated: false,
+    };
+    const loadToolData = vi.fn(async (_taskId: string, handle: string) => {
+      if (handle !== "r3f9a2c41") {
+        const error = new Error(`No saved tool result ${handle} in this task`);
+        error.name = "AnswerDataError";
+        throw error;
+      }
+      return table;
+    });
+    const handlers = createAnswerSurfaceIpcHandlers({ ...deps, loadToolData });
+    await expect(
+      handlers[IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]({
+        taskId: "task-1",
+        sources: { hits: { tool: "r3f9a2c41" }, gone: { tool: "r00000000" } },
+      }),
+    ).resolves.toEqual({
+      hits: table,
+      gone: { file: "tool output r00000000", error: "No saved tool result r00000000 in this task" },
+    });
+    expect(loadToolData).toHaveBeenCalledWith("task-1", "r3f9a2c41", { maxCells: 100000 });
+    await expect(
+      handlers[IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA]({
+        taskId: "task-1",
+        sources: { a: { tool: "toolu_long_id" } },
+      }),
+    ).rejects.toThrow(/answer data request/);
   });
 
   it("rebuilds an HTML surface's summary from its state, ignoring the sent one", async () => {

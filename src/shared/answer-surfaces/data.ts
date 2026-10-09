@@ -62,16 +62,41 @@ const dataPath = z
     "must be a .csv, .tsv, .xlsx or .json file",
   );
 
-/** `"data": {"sales": "uploads/sales.csv"}` on a block's outer object. */
+/** Handles the app gives structured tool results, e.g. "r3f9a2c41" (see tool-data.ts). */
+export const TOOL_DATA_HANDLE_PATTERN = /^r[0-9a-f]{8}$/;
+
+/** A saved tool result of this task, by the handle the app told the model about. */
+const toolSource = z
+  .object({
+    tool: z
+      .string()
+      .trim()
+      .regex(TOOL_DATA_HANDLE_PATTERN, "must be a tool result handle like r3f9a2c41"),
+  })
+  .strict();
+
+export type AnswerSurfaceDataSource = string | { tool: string };
+
+export function isToolDataSource(source: AnswerSurfaceDataSource): source is { tool: string } {
+  return typeof source === "object" && source !== null && "tool" in source;
+}
+
+/**
+ * `"data": {"sales": "uploads/sales.csv", "hits": {"tool": "r3f9a2c41"}}` on a block's outer
+ * object: workspace files and saved tool results.
+ */
 export const AnswerSurfaceDataSchema = z
-  .record(z.string().trim().refine(isValidIdentifier, "must be a simple identifier"), dataPath)
+  .record(
+    z.string().trim().refine(isValidIdentifier, "must be a simple identifier"),
+    z.union([dataPath, toolSource]),
+  )
   .refine((value) => Object.keys(value).length >= 1, "needs at least one file")
   .refine(
     (value) => Object.keys(value).length <= MAX_ANSWER_DATA_SOURCES,
     `at most ${MAX_ANSWER_DATA_SOURCES} files`,
   );
 
-export type AnswerSurfaceData = Record<string, string>;
+export type AnswerSurfaceData = Record<string, AnswerSurfaceDataSource>;
 
 /** How a table is described next to the numbers computed from it. */
 export function describeAnswerData(table: AnswerDataTable): string {

@@ -23,6 +23,11 @@ describe("answer data sources", () => {
     ]) {
       expect(AnswerSurfaceDataSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
+    expect(AnswerSurfaceDataSchema.safeParse({ hits: { tool: "r3f9a2c41" } }).success).toBe(true);
+    expect(AnswerSurfaceDataSchema.safeParse({ hits: { tool: "../x" } }).success).toBe(false);
+    expect(
+      AnswerSurfaceDataSchema.safeParse({ hits: { tool: "r3f9a2c41", path: "x" } }).success,
+    ).toBe(false);
     expect(hasHiddenSegment("a/.git/x.csv")).toBe(true);
     expect(hasHiddenSegment("../reports/x.csv")).toBe(false);
   });

@@ -111,7 +111,12 @@ function toTable(
   };
 }
 
-function tableFromJson(value: unknown, file: string, rowLimit: number): AnswerDataTable {
+/** A JSON value (records, rows, or a wrapper holding them) as a table; also used for tool results. */
+export function tableFromJsonValue(
+  value: unknown,
+  file: string,
+  rowLimit: number,
+): AnswerDataTable {
   const list: unknown[] = Array.isArray(value)
     ? value
     : value && typeof value === "object"
@@ -232,7 +237,7 @@ export async function readAnswerDataTable(
         } catch {
           throw new AnswerDataError("The file is not valid JSON");
         }
-        table = tableFromJson(parsed, file, parseLimit);
+        table = tableFromJsonValue(parsed, file, parseLimit);
       } else {
         let skipped = 0;
         const grid = parseDelimitedRows(text, extension === ".tsv" ? "\t" : ",", {

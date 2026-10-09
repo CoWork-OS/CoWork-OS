@@ -2,8 +2,10 @@ import type Database from "better-sqlite3";
 import type { UnitCatalog } from "../database/statements/statement-catalog";
 import { storeUnit } from "../database/statements/store-units";
 import { AnswerSurfaceStateSqlStore } from "./answer-surface-state-sql";
+import { AnswerToolDataSqlStore } from "./tool-data-sql";
 
 const make = (db: Database.Database) => new AnswerSurfaceStateSqlStore(db);
+const makeToolData = (db: Database.Database) => new AnswerToolDataSqlStore(db);
 
 /** Answer surface state units (async SQLite migration plan, DB6), in the services domain. */
 export const ANSWER_SURFACE_UNITS = {
@@ -12,4 +14,6 @@ export const ANSWER_SURFACE_UNITS = {
   answerSurface_listUnreported: storeUnit(make, "listUnreported", { readonly: true }),
   answerSurface_markReported: storeUnit(make, "markReported", { readonly: false }),
   answerSurface_deleteForTask: storeUnit(make, "deleteForTask", { readonly: false }),
+  answerToolData_put: storeUnit(makeToolData, "put", { readonly: false }),
+  answerToolData_get: storeUnit(makeToolData, "get", { readonly: true }),
 } satisfies UnitCatalog;

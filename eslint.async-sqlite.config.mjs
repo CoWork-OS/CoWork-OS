@@ -291,8 +291,6 @@ export const ASYNC_SQLITE_LINT_FILES = [
   "src/electron/mission-control/mission-control-repository-facades.ts",
   "src/electron/mission-control/mission-control-units.ts",
   "src/electron/routines/types.ts",
-  "src/electron/supervisor/supervisor-repository-facades.ts",
-  "src/electron/supervisor/supervisor-units.ts",
   "src/electron/tray/TrayManager.ts",
   "src/electron/triggers/EventTriggerService.ts",
   "src/electron/triggers/trigger-sql.ts",

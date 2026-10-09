@@ -61,6 +61,10 @@ import {
   isBrowserUseDomainApproval,
 } from "./components/BrowserUseApprovalDialog";
 import { GenericApprovalDialog } from "./components/GenericApprovalDialog";
+import {
+  approvalMatchesBrowserSession,
+  isBrowserTabApproval,
+} from "./components/BrowserWorkbench/BrowserApprovalCard";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
 import { LibraryPanel } from "./components/calm/LibraryPanel";
 import { BuildPanel, type RecentBuild } from "./components/calm/BuildPanel";
@@ -865,6 +869,11 @@ type SelectedTaskWorkspaceViewProps = {
   onChangeWorkspace: () => void;
   onSelectWorkspace: (workspace: Workspace) => void;
   onOpenSettings: (tab?: string) => void;
+  /** The task's pending browser approval; shown over the browser tab while it is open. */
+  browserApproval: ApprovalRequest | null;
+  onBrowserApprovalRespond: (approval: ApprovalRequest, action: ApprovalResponseAction) => void;
+  /** Reports which approval the open browser shows, so the dialog is not shown twice. */
+  onBrowserApprovalDockedChange: (approvalId: string | null) => void;
   onViewRoutine: (routineId: string) => void;
   onStopTask: () => Promise<void>;
   onContinueWithoutCommandsForPausedTask: () => Promise<void>;
@@ -998,6 +1007,9 @@ const SelectedTaskWorkspaceView = memo(
     onChangeWorkspace,
     onSelectWorkspace,
     onOpenSettings,
+    browserApproval,
+    onBrowserApprovalRespond,
+    onBrowserApprovalDockedChange,
     onViewRoutine,
     onStopTask,
     onContinueWithoutCommandsForPausedTask,
@@ -1513,6 +1525,19 @@ const SelectedTaskWorkspaceView = memo(
     const WorkbenchComponent = browserSettings.classicWorkbench
       ? BrowserWorkbenchClassicView
       : BrowserWorkbenchView;
+    const dockedBrowserApproval =
+      !browserSettings.classicWorkbench &&
+      visibleBrowserWorkbench &&
+      task &&
+      browserApproval?.taskId === task.id &&
+      approvalMatchesBrowserSession(browserApproval, visibleBrowserWorkbench.sessionId)
+        ? browserApproval
+        : null;
+    const dockedBrowserApprovalId = dockedBrowserApproval?.id ?? null;
+    useEffect(() => {
+      onBrowserApprovalDockedChange(dockedBrowserApprovalId);
+    }, [dockedBrowserApprovalId, onBrowserApprovalDockedChange]);
+    useEffect(() => () => onBrowserApprovalDockedChange(null), [onBrowserApprovalDockedChange]);
     // One BrowserWorkbenchView instance serves both the sidebar and full view, so
     // switching modes never remounts it (a remounted <webview> reloads its page).
     const browserWorkbenchDock =
@@ -1548,6 +1573,8 @@ const SelectedTaskWorkspaceView = memo(
               onModelChange={onModelChange}
               onOpenSettings={onOpenSettings}
               turnContext={browserTurnContext}
+              pendingApproval={dockedBrowserApproval}
+              onApprovalRespond={onBrowserApprovalRespond}
             />
           </Suspense>
         </BrowserWorkbenchDock>
@@ -3921,6 +3948,20 @@ export function App() {
       );
     }
   };
+  const handleApprovalResponseRef = useRef(handleApprovalResponse);
+  handleApprovalResponseRef.current = handleApprovalResponse;
+  const respondToBrowserApproval = useCallback(
+    (approval: ApprovalRequest, action: ApprovalResponseAction) =>
+      void handleApprovalResponseRef.current(
+        approval,
+        action.startsWith("allow_"),
+        action,
+        approval.revisionHash,
+      ),
+    [],
+  );
+  const [dockedBrowserApprovalId, setDockedBrowserApprovalId] = useState<string | null>(null);
+  const browserTabApproval = isBrowserTabApproval(genericApproval) ? genericApproval : null;
 
   const syncPendingInputRequests = useCallback(() => {
     const pending = Array.from(pendingInputRequestsRef.current.values())
@@ -8661,6 +8702,9 @@ export function App() {
                     setSettingsTab((tab as typeof settingsTab | undefined) || "appearance");
                     setCurrentView("settings");
                   }}
+                  browserApproval={browserTabApproval}
+                  onBrowserApprovalRespond={respondToBrowserApproval}
+                  onBrowserApprovalDockedChange={setDockedBrowserApprovalId}
                   onStopTask={handleCancelTask}
                   onContinueWithoutCommandsForPausedTask={
                     handleContinueWithoutCommandsForPausedTask
@@ -8706,7 +8750,9 @@ export function App() {
               onAllowSession={() => void handleApprovalResponse(computerUseAppGrantApproval, true)}
               onDeny={() => void handleApprovalResponse(computerUseAppGrantApproval, false)}
             />
-          ) : genericApproval && isBrowserUseDomainApproval(genericApproval) ? (
+          ) : genericApproval &&
+            genericApproval.id === dockedBrowserApprovalId ? null : genericApproval &&
+            isBrowserUseDomainApproval(genericApproval) ? (
             <BrowserUseApprovalDialog
               approval={genericApproval}
               onRespond={(action) =>

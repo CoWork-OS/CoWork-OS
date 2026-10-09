@@ -476,6 +476,7 @@ export class BrowserSessionManager {
   /** Loopback origins the user opened from the address bar, per session (no TTL). */
   private userLoopbackOrigins = new Map<string, Set<string>>();
   private navigationBlockedListener: ((event: BrowserNavigationBlockedEvent) => void) | null = null;
+  private beforeUnloadDialogHandler: ((contents: Any) => boolean) | null = null;
   private recentBlocks = new Map<string, number>();
 
   private static readonly LOCAL_PREVIEW_TTL_MS = 5 * 60_000;
@@ -678,6 +679,14 @@ export class BrowserSessionManager {
     }
 
     await this.getWebContents(record);
+  }
+
+  /**
+   * Decides a page's "Leave site?" (true leaves) while CoWork's debugger owns
+   * its dialogs: Chromium then sends beforeunload to CDP and the page waits.
+   */
+  setBeforeUnloadDialogHandler(handler: ((contents: Any) => boolean) | null): void {
+    this.beforeUnloadDialogHandler = handler;
   }
 
   async getGuardedWebContents(
@@ -2301,6 +2310,17 @@ export class BrowserSessionManager {
         defaultPrompt: redactBrowserText(params?.defaultPrompt || "", 1200),
         timestamp: Date.now(),
       };
+      const decide = this.beforeUnloadDialogHandler;
+      if (params?.type === "beforeunload" && decide) {
+        void this.getWebContents(session)
+          .then((contents) => {
+            if (!contents) return;
+            const accept = decide(contents);
+            session.lastDialog = undefined;
+            return this.sendCommand(contents, "Page.handleJavaScriptDialog", { accept });
+          })
+          .catch(() => undefined);
+      }
     } else if (method === "Page.downloadWillBegin" || method === "Browser.downloadWillBegin") {
       const entry = {
         url: redactBrowserText(params?.url || "", 1200),

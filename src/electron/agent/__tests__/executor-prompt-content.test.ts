@@ -336,7 +336,6 @@ describe("execution prompt routing blocks", () => {
       "Summarize the attached contract.\n\nPDF attachment: contract.pdf\nPath: uploads/contract.pdf",
       "ATTACHED PDFS",
     ],
-    ["rich surface", "Show my weekly running distance as a chart.", "Inline HTML design kit"],
   ])("includes the %s block when its intent detector fires", (_label, prompt, heading) => {
     const executor = makePromptExecutor({
       title: "Help",
@@ -347,6 +346,32 @@ describe("execution prompt routing blocks", () => {
     });
 
     expect(executor.buildExecutionBaseInstructionPrompt()).toContain(heading);
+  });
+
+  it("puts the rich surface guidance and full component reference in their own section", () => {
+    const executor = makePromptExecutor({
+      title: "Help",
+      prompt: "Show my weekly running distance as a chart.",
+      taskDomain: "general",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+    const surfaces = executor.buildExecutionRichSurfacesPrompt();
+    expect(surfaces).toContain("Inline HTML design kit");
+    // The whole reference, not just the pointer to it: in the base instruction it was cut.
+    expect(surfaces).toContain("Components (`type`)");
+    expect(executor.buildExecutionBaseInstructionPrompt()).not.toContain("Inline HTML design kit");
+  });
+
+  it("leaves the surface section out for code tasks", () => {
+    const executor = makePromptExecutor({
+      title: "Fix failing parseDate test",
+      prompt: CODING_PROMPT,
+      taskDomain: "code",
+      taskIntent: "execution",
+      executionMode: "execute",
+    });
+    expect(executor.buildExecutionRichSurfacesPrompt()).toBe("");
   });
 
   it("keeps a routing block for the rest of the session once a follow-up triggered it", () => {

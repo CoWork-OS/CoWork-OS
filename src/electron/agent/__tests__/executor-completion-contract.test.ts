@@ -1471,7 +1471,7 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     await (executor as Any).execute();
 
     expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
-      expect.objectContaining({ maxTokens: 1200 }),
+      expect.objectContaining({ maxTokens: 4000 }),
       35_000,
       "Final answer synthesis",
     );
@@ -1530,7 +1530,7 @@ Saved to scratchpad under \`repo-state-recent-commits-alt-log\`.`;
     await (executor as Any).execute();
 
     expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
-      expect.objectContaining({ maxTokens: 1200 }),
+      expect.objectContaining({ maxTokens: 4000 }),
       35_000,
       "Final answer synthesis",
     );
@@ -2293,7 +2293,7 @@ End with a final section titled "Verification Evidence".`,
 
     expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledTimes(1);
     expect((executor as Any).createMessageWithTimeout).toHaveBeenCalledWith(
-      expect.objectContaining({ maxTokens: 1200 }),
+      expect.objectContaining({ maxTokens: 4000 }),
       35_000,
       "Final answer verification synthesis",
     );

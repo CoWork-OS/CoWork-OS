@@ -81,6 +81,7 @@ import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
 import { extractToolDataTable, toolDataHandle, toolDataNote } from "../answer-surfaces/tool-data";
 import { formatAnswerSurfaceChanges } from "../answer-surfaces/answer-surface-changes";
 import { ANSWER_SURFACE_PROMPT } from "../../shared/answer-surfaces/prompt";
+import { ANSWER_SURFACE_SECTION_TOKENS } from "./content/ContentBuilder";
 import {
   findAnswerSurfaceProblems,
   repairAnswerSurfaces,
@@ -15816,6 +15817,30 @@ ${transcript}
     });
   }
 
+  /**
+   * How a final-answer rewrite treats answer blocks. The rewrite is the answer the user
+   * sees, so for answer-style tasks it gets the component reference and room for a
+   * block; without them a block from the steps was dropped and none was written here.
+   */
+  private finalAnswerSurfaceOptions(): {
+    instruction: string;
+    systemSuffix: string;
+    candidateChars: number;
+    maxTokens: number;
+  } {
+    const offer =
+      this.shouldOfferAnswerSurfaces() &&
+      this.getActiveBasePromptRoutingBlocks().has("rich_surfaces");
+    if (!offer) return { instruction: "", systemSuffix: "", candidateChars: 4000, maxTokens: 1200 };
+    return {
+      instruction:
+        "If the previous response candidate has a ```cowork-ui block, keep it (fix it only if it is broken). Otherwise, when the answer is a calculation, comparison, plan, schedule or set of metrics, give it as one cowork-ui block after a short lead-in.",
+      systemSuffix: `\n\n${ANSWER_SURFACE_PROMPT}`,
+      candidateChars: 12_000,
+      maxTokens: 4000,
+    };
+  }
+
   private async ensureDirectFinalAnswerForCompletion(): Promise<void> {
     const contract = this.buildCompletionContract();
     if (!contract.requiresDirectAnswer) return;
@@ -15848,6 +15873,7 @@ ${transcript}
       .map((entry) => `- ${entry.tool}: ${String(entry.summary || "").slice(0, 2500)}`)
       .join("\n");
     const resultSummary = String(this.buildResultSummary() || "").trim();
+    const surfaces = this.finalAnswerSurfaceOptions();
     const synthesisPrompt = [
       "Produce the final user-facing answer to the original task now.",
       "Answer the requested question or report the requested result directly, using only the evidence below.",
@@ -15857,8 +15883,9 @@ ${transcript}
       "Keep the answer concise and omit internal planning or tool commentary.",
       "",
       `Original request:\n${this.getContractPrompt()}`,
+      surfaces.instruction,
       existingCandidate
-        ? `\nPrevious response candidate:\n${existingCandidate.slice(0, 4000)}`
+        ? `\nPrevious response candidate:\n${existingCandidate.slice(0, surfaces.candidateChars)}`
         : "",
       resultSummary ? `\nTask result summary:\n${resultSummary.slice(0, 4000)}` : "",
       completedSteps ? `\nCompleted steps:\n${completedSteps}` : "",
@@ -15871,8 +15898,8 @@ ${transcript}
       const response = await this.createMessageWithTimeout(
         {
           model: this.modelId,
-          maxTokens: 1200,
-          system: "Return a concise, direct, evidence-grounded final answer.",
+          maxTokens: surfaces.maxTokens,
+          system: `Return a concise, direct, evidence-grounded final answer.${surfaces.systemSuffix}`,
           messages: [{ role: "user", content: [{ type: "text", text: synthesisPrompt }] }],
         },
         35_000,
@@ -15886,9 +15913,9 @@ ${transcript}
         );
       }
 
-      const finalAnswer = String(
-        this.extractTextFromLLMContent(response?.content || []) || "",
-      ).trim();
+      const finalAnswer = await this.repairAnswerSurfaceText(
+        String(this.extractTextFromLLMContent(response?.content || []) || "").trim(),
+      );
       if (!finalAnswer || !this.responseDirectlyAddressesPrompt(finalAnswer, contract)) {
         this.emitEvent("log", {
           message:
@@ -15927,6 +15954,7 @@ ${transcript}
       .slice(-10)
       .map((entry) => `- ${entry.tool}: ${String(entry.summary || "").slice(0, 2500)}`)
       .join("\n");
+    const surfaces = this.finalAnswerSurfaceOptions();
     const synthesisPrompt = [
       "Restate the final user-facing answer to the original task, grounded in the evidence below.",
       "Say what the answer rests on (for example: according to the fetched page, the file read, or the command output).",
@@ -15936,8 +15964,9 @@ ${transcript}
       "Keep the answer concise and omit internal planning or tool commentary.",
       "",
       `Original request:\n${this.getContractPrompt()}`,
+      surfaces.instruction,
       existingCandidate
-        ? `\nPrevious response candidate:\n${existingCandidate.slice(0, 4000)}`
+        ? `\nPrevious response candidate:\n${existingCandidate.slice(0, surfaces.candidateChars)}`
         : "",
       toolEvidence ? `\nTool evidence (reference data):\n${toolEvidence}` : "",
     ]
@@ -15948,8 +15977,8 @@ ${transcript}
       const response = await this.createMessageWithTimeout(
         {
           model: this.modelId,
-          maxTokens: 1200,
-          system: "Return a concise final answer grounded in the supplied evidence.",
+          maxTokens: surfaces.maxTokens,
+          system: `Return a concise final answer grounded in the supplied evidence.${surfaces.systemSuffix}`,
           messages: [{ role: "user", content: [{ type: "text", text: synthesisPrompt }] }],
         },
         35_000,
@@ -15963,9 +15992,9 @@ ${transcript}
         );
       }
 
-      const finalAnswer = String(
-        this.extractTextFromLLMContent(response?.content || []) || "",
-      ).trim();
+      const finalAnswer = await this.repairAnswerSurfaceText(
+        String(this.extractTextFromLLMContent(response?.content || []) || "").trim(),
+      );
       if (
         !finalAnswer ||
         !this.hasVerificationEvidence(finalAnswer) ||
@@ -18523,6 +18552,33 @@ ${transcript}
     return active;
   }
 
+  /**
+   * The inline-surface guidance and the component reference. Its own prompt section (see
+   * ContentBuilder `answer_surfaces`): inside the capped base instruction it was cut
+   * mid-way, so in task mode the model saw only the pointer line, never the components.
+   */
+  private buildExecutionRichSurfacesPrompt(): string {
+    if (!this.getActiveBasePromptRoutingBlocks().has("rich_surfaces")) return "";
+    return [
+      "RICH INLINE SURFACES:",
+      ...(this.shouldOfferAnswerSurfaces()
+        ? [
+            "- For adjustable plans, calculators, comparisons, checklists, metric summaries, timelines and photo-led answers, use cowork-ui components in your final answer (see INTERACTIVE ANSWER COMPONENTS below).",
+            "- When a compact custom visual is needed that the components cannot express, such as a bespoke diagram, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+          ]
+        : [
+            "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
+          ]),
+      "- Do not print custom frame markup in your message. Mention the result in normal prose and let the artifact/preview system display it.",
+      "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
+      "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
+      RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
+      HTML_SURFACE_RUNTIME_PROMPT,
+      "",
+      ...(this.shouldOfferAnswerSurfaces() ? [ANSWER_SURFACE_PROMPT, ""] : []),
+    ].join("\n");
+  }
+
   private buildExecutionBaseInstructionPrompt(): string {
     const novelistConstraintPrompt = this.buildNovelistConstraintPrompt();
     const routing = this.getActiveBasePromptRoutingBlocks();
@@ -18588,26 +18644,6 @@ ${transcript}
       TASK_KICKOFF_PROMPT_RULES,
       "- Do not append trailing offer questions by default.",
       "",
-      ...(routing.has("rich_surfaces")
-        ? [
-            "RICH INLINE SURFACES:",
-            ...(this.shouldOfferAnswerSurfaces()
-              ? [
-                  "- For adjustable plans, calculators, comparisons, checklists, metric summaries, timelines and photo-led answers, use cowork-ui components in your final answer (see INTERACTIVE ANSWER COMPONENTS below).",
-                  "- When a compact custom visual is needed that the components cannot express, such as a bespoke diagram, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
-                ]
-              : [
-                  "- When the best answer is a compact visual surface such as a chart card, metric summary, progress/status panel, comparison, calculator, timeline, heatmap, debug trace, or data preview, create a small self-contained HTML artifact for that surface; the app can render suitable HTML artifacts inline automatically.",
-                ]),
-            "- Do not print custom frame markup in your message. Mention the result in normal prose and let the artifact/preview system display it.",
-            "- For full web pages, landing pages, websites, app designs, or user-requested standalone HTML files, keep the normal web artifact flow: create the HTML output and summarize it; do not try to force an inline frame.",
-            "- Inline surfaces may be static or animated. Use animation only when it clarifies state or progress.",
-            RICH_FRAME_DESIGN_LANGUAGE_PROMPT,
-            HTML_SURFACE_RUNTIME_PROMPT,
-            "",
-            ...(this.shouldOfferAnswerSurfaces() ? [ANSWER_SURFACE_PROMPT, ""] : []),
-          ]
-        : []),
       "HONESTY & UNCERTAINTY:",
       "- State uncertainty explicitly when it matters.",
       "- Never fabricate tool outputs or claim a tool succeeded when it did not.",
@@ -19411,6 +19447,7 @@ ${transcript}
       await this.bootstrapDebugRuntimeIfNeeded();
     }
 
+    const richSurfacesPrompt = this.buildExecutionRichSurfacesPrompt();
     return queryOrchestrator.buildExecutionPrompt({
       workspaceId: this.workspace.id,
       workspacePath: this.workspace.path,
@@ -19418,6 +19455,7 @@ ${transcript}
       identityPrompt: params.identityPrompt,
       safetyCorePrompt: SHARED_PROMPT_POLICY_CORE,
       baseInstructionPrompt: this.buildExecutionBaseInstructionPrompt(),
+      answerSurfacePrompt: richSurfacesPrompt,
       inputPolicyPrompt: this.buildExecutionInputPolicyPrompt(),
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),
       currentTimePrompt: `Current time: ${getCurrentDateTimeContext()}`,
@@ -19445,7 +19483,10 @@ ${transcript}
       taskDomain: params.taskDomain,
       webSearchModeContract: this.buildWebSearchModeContract(),
       worktreeBranch: this.task.worktreeBranch,
-      totalBudgetTokens: EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET,
+      // The surface reference adds its own share instead of crowding out other sections.
+      totalBudgetTokens:
+        EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET +
+        (richSurfacesPrompt ? ANSWER_SURFACE_SECTION_TOKENS : 0),
       transcriptContext,
       sectionCache: this.promptSectionCache,
     });

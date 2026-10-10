@@ -27,6 +27,7 @@ function fixture() {
   const transport = {
     sendRequest: vi.fn(() => toolResult.promise),
     sendResponse: vi.fn(async () => {}),
+    isConnected: vi.fn(() => true),
   };
   Object.assign(connection, {
     transport,

@@ -24,7 +24,12 @@ function fakeContents(session: unknown) {
     },
     getTitle: () => "Page",
     isLoading: () => false,
-    navigationHistory: { canGoBack: () => true, canGoForward: () => false, goBack: vi.fn() },
+    navigationHistory: {
+      canGoBack: () => true,
+      canGoForward: () => false,
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+    },
     reload: vi.fn(),
     setZoomLevel: vi.fn(),
     findInPage: vi.fn(),
@@ -160,6 +165,55 @@ describe("BrowserTabViewHost", () => {
       type: "mouseDown",
     });
     expect(idleEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("navigates with the mouse's back and forward buttons, and never passes them to the page", async () => {
+    const { children, open } = setup();
+    await open("a");
+    const contents = children[0].webContents;
+    const press = (button: string, type = "mouseDown") => {
+      const event = { preventDefault: vi.fn() };
+      contents.listeners.get("before-mouse-event")?.(event, { type, button });
+      return event;
+    };
+    expect(press("back").preventDefault).toHaveBeenCalled();
+    expect(contents.navigationHistory.goBack).toHaveBeenCalledTimes(1);
+    expect(press("back", "mouseUp").preventDefault).toHaveBeenCalled();
+    expect(contents.navigationHistory.goBack).toHaveBeenCalledTimes(1);
+    press("forward");
+    expect(contents.navigationHistory.goForward).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws the agent cursor inside the page, only for tabs it owns", async () => {
+    const { host, children, key, open } = setup();
+    await open("a");
+    const contents = children[0].webContents;
+    contents.executeJavaScriptInIsolatedWorld = vi.fn(async () => undefined);
+    expect(
+      host.paintCursor(key("a"), { x: 120.4, y: -5, kind: "click", label: "Click", pulse: true }),
+    ).toBe(true);
+    const [world, scripts] = contents.executeJavaScriptInIsolatedWorld.mock.calls[0];
+    expect(world).not.toBe(0);
+    expect(scripts[0].code).toContain(
+      '{"x":120,"y":0,"kind":"click","label":"Click","pulse":true}',
+    );
+    expect(host.paintCursor(key("missing"), { x: 1, y: 1 })).toBe(false);
+  });
+
+  it("finds the tab view under a screen point", async () => {
+    const { host, children, open } = setup();
+    await open("a");
+    children[0].getBounds = () => ({ x: 100, y: 50, width: 400, height: 300 });
+    host.layout({
+      taskId: "t",
+      sessionId: "s",
+      tabId: "a",
+      bounds: { x: 100, y: 50, width: 400, height: 300 },
+    });
+    const window = (host as Any).deps.getWindow();
+    window.getContentBounds = () => ({ x: 20, y: 30, width: 1000, height: 800 });
+    expect(host.viewKeyAtScreenPoint({ x: 220, y: 130 })).toMatchObject({ tabId: "a" });
+    expect(host.viewKeyAtScreenPoint({ x: 30, y: 40 })).toBeNull();
   });
 
   it("closes views explicitly and evicts the least recently used hidden ones", async () => {

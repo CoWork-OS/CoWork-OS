@@ -22,7 +22,8 @@ const env = {
   ...process.env,
   NODE_ENV: "production",
   COWORK_USER_DATA_DIR: path.join(outputDir, "profile"),
-  COWORK_DISABLE_OS_KEYCHAIN: "1",
+  // QA_OS_KEYCHAIN=1 uses the real keychain, which the saved-login fill check needs.
+  COWORK_DISABLE_OS_KEYCHAIN: process.env.QA_OS_KEYCHAIN === "1" ? "0" : "1",
   COWORK_IMPORT_ENV_SETTINGS: "0",
 };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -67,6 +68,19 @@ const server = http.createServer((request, response) => {
   if (url.pathname === "/page") {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end(PAGE(url.searchParams.get("n") || "1"));
+  } else if (url.pathname === "/echo") {
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end(
+      JSON.stringify({
+        userAgent: request.headers["user-agent"] || "",
+        secChUa: request.headers["sec-ch-ua"] || "",
+      }),
+    );
+  } else if (url.pathname === "/login") {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(
+      `<!doctype html><html><head><title>Sign in</title></head><body><form><input id="user" name="user" autocomplete="username"><input id="pass" type="password" name="pass" autocomplete="current-password"></form></body></html>`,
+    );
   } else if (url.pathname === "/unsaved") {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end(UNSAVED);
@@ -111,6 +125,7 @@ async function step(name, run) {
     await main
       ?.screenshot({ path: path.join(outputDir, `fail-${results.length}.png`) })
       .catch(() => undefined);
+    await windowCapture(`fail-window-${results.length}`).catch(() => undefined);
   }
 }
 
@@ -690,6 +705,73 @@ try {
     await main.keyboard.press("Escape");
   });
 
+  if (process.env.QA_GOOGLE_SIGNIN) {
+    // Reaches the real Google sign-in page (nothing is typed): it must show the sign-in form
+    // rather than refusing the browser. Needs network access.
+    await step(
+      "Google's sign-in page loads in the in-app browser and offers the form",
+      async () => {
+        await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+        await navigateActiveTab("https://accounts.google.com/signin/v2/identifier?hl=en");
+        const page = await waitFor(
+          async () => (await guests()).find((guest) => /accounts\.google\.com/.test(guest.url)),
+          "Google's sign-in page",
+          30000,
+        );
+        const state = await waitFor(
+          async () => {
+            const result = JSON.parse(
+              await inGuest(
+                page.id,
+                `JSON.stringify({ email: !!document.querySelector('input[name="identifier"], input[type="email"], input[autocomplete="username"]'), text: document.body.innerText.slice(0, 400), webdriver: navigator.webdriver })`,
+              ),
+            );
+            return result.email || /not secure|couldn.t sign you in|disallowed/i.test(result.text)
+              ? result
+              : null;
+          },
+          "the sign-in form",
+          30000,
+        );
+        assert.equal(state.email, true, state.text);
+        assert.doesNotMatch(state.text, /not secure|couldn.t sign you in|disallowed/i);
+        await navigateActiveTab(`${site}/page?n=1`);
+        await guestFor("/page?n=1");
+        return { title: state.text.split("\n")[0], webdriver: state.webdriver };
+      },
+    );
+  }
+
+  if (process.env.QA_REAL_SCREEN_SHARE) {
+    // Needs Screen Recording permission for the app (or the terminal that started it).
+    await step(
+      "sharing a real screen: real sources, pick one, the page gets a live video track",
+      async () => {
+        await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+        const first = await guestFor("/page?n=1");
+        await inGuest(
+          first.id,
+          `navigator.mediaDevices.getDisplayMedia({ video: true }).then((stream) => { window.__stream = stream; const t = stream.getVideoTracks()[0]; window.__share = "ok:" + t.readyState + ":" + (t.getSettings().width || 0); }, (e) => { window.__share = "err:" + e.name; }); 1`,
+        );
+        const picker = main.getByRole("dialog", { name: "Choose what to share" });
+        await picker.waitFor({ timeout: 10000 });
+        const options = await picker.getByRole("option").count();
+        assert.ok(options > 0, "the picker lists real screens or windows");
+        const hasThumbnail = await picker.locator("img").count();
+        await windowCapture("window-real-screen-share");
+        await picker.getByRole("option").first().click();
+        await picker.getByRole("button", { name: "Share" }).click();
+        const answer = await waitFor(
+          async () => inGuest(first.id, "window.__share"),
+          "the share answer",
+        );
+        assert.match(answer, /^ok:live:[1-9]/, answer);
+        await inGuest(first.id, "window.__stream.getTracks().forEach((t) => t.stop()); 1");
+        return { options, hasThumbnail, answer };
+      },
+    );
+  }
+
   await step("a page asking to share the screen shows a source picker", async () => {
     await desktop.evaluate(({ desktopCapturer }) => {
       desktopCapturer.getSources = async () => [
@@ -789,7 +871,332 @@ try {
       .locator(".browser-workbench-tab-shell.is-active")
       .getByRole("button", { name: "Close tab" })
       .click();
+    // The close is asynchronous (the page's unload check runs first).
+    await waitFor(
+      async () => (await main.getByRole("tab", { name: /New tab/ }).count()) === 0,
+      "the new tab to close",
+    );
   });
+
+  await step(
+    "the browser identifies as Chrome, with no Electron or app name anywhere",
+    async () => {
+      await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+      await guestFor("/page?n=1");
+      await navigateActiveTab(`${site}/echo`);
+      const echo = await guestFor("/echo");
+      const seen = JSON.parse(await inGuest(echo.id, "document.body.innerText"));
+      const client = JSON.parse(
+        await inGuest(
+          echo.id,
+          `JSON.stringify({ ua: navigator.userAgent, brands: (navigator.userAgentData?.brands || []).map((b) => b.brand), vendor: navigator.vendor })`,
+        ),
+      );
+      assert.match(seen.userAgent, /Chrome\/\d+/);
+      const everything = [seen.userAgent, seen.secChUa, client.ua, ...client.brands].join(" | ");
+      assert.doesNotMatch(everything, /Electron|CoWork/i, everything);
+      assert.equal(client.vendor, "Google Inc.");
+      await navigateActiveTab(`${site}/page?n=1`);
+      await guestFor("/page?n=1");
+      return { userAgent: seen.userAgent, secChUa: seen.secChUa };
+    },
+  );
+
+  await step(
+    "a click on the page while CoWork drives asks to take over; Take over pauses, Resume continues",
+    async () => {
+      const service = (fn, input) =>
+        desktop.evaluate(
+          (_, args) => {
+            const svc = process.mainModule.require(args.module).getBrowserWorkbenchService();
+            return new Function("svc", "input", `return (${args.fn})(svc, input)`)(svc, args.input);
+          },
+          { module: workbenchModule, fn: fn.toString(), input },
+        );
+      await service((svc, i) => svc.beginDriving(i.taskId, "default", "browser_click"), {
+        taskId: task.id,
+      });
+      await main.getByText(/CoWork is using this tab/).waitFor({ timeout: 5000 });
+      if (engine === "native") {
+        // A click on the page from the user: main stops it and the take-over bar asks.
+        await desktop.evaluate(({ webContents }) => {
+          const view = webContents
+            .getAllWebContents()
+            .find((c) => c.getType() === "window" && /\/page\?n=1$/.test(c.getURL()));
+          view.sendInputEvent({ type: "mouseDown", x: 60, y: 60, button: "left", clickCount: 1 });
+          view.sendInputEvent({ type: "mouseUp", x: 60, y: 60, button: "left", clickCount: 1 });
+        });
+        await main.locator(".browser-workbench-driving-ask").waitFor({ timeout: 5000 });
+        await windowCapture("window-takeover");
+        await main
+          .locator(".browser-workbench-driving-ask")
+          .getByRole("button", { name: "Take over" })
+          .click();
+      } else {
+        await main
+          .locator(".browser-workbench-driving-shield")
+          .click({ position: { x: 60, y: 60 } });
+        await main.getByText("CoWork is controlling this tab.").waitFor({ timeout: 5000 });
+        await main
+          .locator(".browser-workbench-driving-takeover")
+          .getByRole("button", { name: "Take over" })
+          .click();
+      }
+      await waitFor(
+        async () =>
+          service((svc, i) => svc.isPausedByUser(i.taskId, "default"), { taskId: task.id }),
+        "CoWork to be paused",
+      );
+      await main.getByText(/You have control/).waitFor({ timeout: 5000 });
+      await main.getByRole("button", { name: "Resume CoWork" }).click();
+      await waitFor(
+        async () =>
+          !(await service((svc, i) => svc.isPausedByUser(i.taskId, "default"), {
+            taskId: task.id,
+          })),
+        "CoWork to resume",
+      );
+      await service((svc, i) => svc.endDriving(i.taskId, "default"), { taskId: task.id });
+      await waitFor(
+        async () => (await main.getByText(/CoWork is using this tab/).count()) === 0,
+        "the banner to clear",
+      );
+    },
+  );
+
+  await step(
+    "a sign-in page CoWork lands on shows the hand-back banner; Done dismisses it",
+    async () => {
+      await desktop.evaluate(
+        (_, input) =>
+          process.mainModule
+            .require(input.module)
+            .getBrowserWorkbenchService()
+            .navigate({ taskId: input.taskId, sessionId: "default", url: input.url }),
+        { module: workbenchModule, taskId: task.id, url: `${site}/login` },
+      );
+      await guestFor("/login");
+      const banner = main.locator(".browser-workbench-driving.is-sign-in");
+      await banner.waitFor({ timeout: 8000 });
+      await windowCapture("window-signin");
+      await banner.getByRole("button", { name: "Done" }).click();
+      await waitFor(async () => (await banner.count()) === 0, "the sign-in banner to clear");
+      await navigateActiveTab(`${site}/page?n=1`);
+      await guestFor("/page?n=1");
+    },
+  );
+
+  await step(
+    "a password CSV imports and fills only on its own site, and the password never reaches the window",
+    async () => {
+      const csvPath = path.join(outputDir, "logins.csv");
+      await fs.writeFile(
+        csvPath,
+        `name,url,username,password\nlocal,${site}/login,qa-user,qa-secret-9f3\n`,
+      );
+      // Native pickers and Touch ID are answered here; the handlers still run for real.
+      await desktop.evaluate(({ dialog, systemPreferences }, file) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+        dialog.showMessageBox = async () => ({ response: 0 });
+        systemPreferences.promptTouchID = async () => undefined;
+      }, csvPath);
+      const detected = await main.evaluate(() => window.electronAPI.browserImportDetect());
+      assert.equal(detected.success, true);
+      const keychain = process.env.QA_OS_KEYCHAIN === "1";
+      assert.equal(detected.canStorePasswords, keychain, "saving needs OS encryption");
+      const prepared = await main.evaluate(
+        (id) => window.electronAPI.browserImportPrepare({ workspaceId: id, kind: "csv" }),
+        workspace.id,
+      );
+      assert.equal(prepared.success, true, JSON.stringify(prepared));
+      assert.equal(prepared.logins, 1);
+      assert.ok(!JSON.stringify(prepared).includes("qa-secret-9f3"), "no secret in the preview");
+      const committed = await main.evaluate(
+        (input) => window.electronAPI.browserImportCommit(input),
+        { workspaceId: workspace.id, token: prepared.token },
+      );
+      if (!keychain) {
+        // Without OS encryption nothing is saved rather than saved weakly.
+        assert.equal(committed.success, false);
+        assert.equal(committed.code, "encryption_unavailable");
+        const none = await main.evaluate(
+          (id) => window.electronAPI.listBrowserLogins({ workspaceId: id }),
+          workspace.id,
+        );
+        assert.equal(none.logins.length, 0);
+        return;
+      }
+      assert.equal(committed.success, true, JSON.stringify(committed));
+      assert.equal(committed.logins, 1);
+      const listed = await main.evaluate(
+        (id) => window.electronAPI.listBrowserLogins({ workspaceId: id }),
+        workspace.id,
+      );
+      assert.equal(listed.logins.length, 1);
+      assert.ok(!JSON.stringify(listed).includes("qa-secret-9f3"), "no secret in the list");
+      const saved = listed.logins[0];
+
+      // A look-alike address must refuse: same page, other origin.
+      await navigateActiveTab(`${site.replace("127.0.0.1", "localhost")}/login`);
+      const lookalike = await guestFor("/login");
+      const refused = await main.evaluate(
+        (input) => window.electronAPI.fillBrowserLogin(input),
+        { workspaceId: workspace.id, taskId: task.id, id: saved.id },
+      );
+      assert.equal(refused.success, false);
+      assert.equal(refused.code, "origin_mismatch");
+      assert.equal(await inGuest(lookalike.id, "document.getElementById('pass').value"), "");
+
+      await navigateActiveTab(`${site}/login`);
+      const login = await waitFor(async () => {
+        const found = (await guests()).find((guest) => guest.url === `${site}/login`);
+        return found;
+      }, "the exact-origin login page");
+      const hint = await main.evaluate(
+        (input) => window.electronAPI.listBrowserLoginsForPage(input),
+        { workspaceId: workspace.id, url: `${site}/login` },
+      );
+      assert.equal(hint.logins.length, 1);
+      // A refused fill starts a short cool-down.
+      await sleep(2300);
+      const filled = await main.evaluate(
+        (input) => window.electronAPI.fillBrowserLogin(input),
+        { workspaceId: workspace.id, taskId: task.id, id: saved.id },
+      );
+      assert.equal(filled.success, true, JSON.stringify(filled));
+      assert.equal(await inGuest(login.id, "document.getElementById('user').value"), "qa-user");
+      assert.equal(await inGuest(login.id, "document.getElementById('pass').value"), "qa-secret-9f3");
+      assert.ok(!JSON.stringify(filled).includes("qa-secret-9f3"), "fill result has no secret");
+
+      // Nothing the app stored on disk holds the password in plain text.
+      const scan = async (dir) => {
+        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (!/Cache|node_modules/.test(entry.name)) await scan(full);
+          } else if (/\.(db|json|sqlite|log)(-wal)?$/.test(entry.name)) {
+            const data = await fs.readFile(full).catch(() => Buffer.alloc(0));
+            assert.ok(!data.includes("qa-secret-9f3"), `plaintext password in ${full}`);
+          }
+        }
+      };
+      await scan(env.COWORK_USER_DATA_DIR);
+      await navigateActiveTab(`${site}/page?n=1`);
+      await guestFor("/page?n=1");
+    },
+  );
+
+  await step(
+    "Adjust edits the page live, the image under it follows, and closing reverts it",
+    async () => {
+      await main.getByRole("tab", { name: /Fixture 1-child/ }).click();
+      const child = await guestFor("/page?n=1-child");
+      const sizeOf = () =>
+        inGuest(child.id, `getComputedStyle(document.querySelector("#heading")).fontSize`);
+      const before = await sizeOf();
+      await main.getByRole("button", { name: "Annotate page element" }).click();
+      const layer = main.locator(".browser-live-annotation-layer");
+      await layer.waitFor({ timeout: 5000 });
+      await sleep(600);
+      await layer.click({ position: { x: 80, y: 32 } });
+      await main.locator(".browser-live-annotation-meta").waitFor({ timeout: 8000 });
+      await main.locator(".browser-annotation-adjust-toggle").click();
+      const frozen = main.locator(".browser-workbench-tab-freeze");
+      const imageBefore = engine === "native" ? await frozen.getAttribute("src") : null;
+      await main
+        .locator(".browser-annotation-adjust")
+        .getByLabel("Size", { exact: true })
+        .fill("52px");
+      await waitFor(async () => (await sizeOf()) === "52px", "the heading to grow on the page");
+      if (engine === "native") {
+        await waitFor(
+          async () => (await frozen.getAttribute("src").catch(() => null)) !== imageBefore,
+          "the still image to follow the edit",
+        );
+      }
+      await windowCapture("window-adjust");
+      await main.locator(".browser-annotation-adjust-toggle").click();
+      await waitFor(async () => (await sizeOf()) === before, "the edit to be reverted");
+      await main.getByRole("button", { name: "Cancel" }).first().click();
+      await main.getByRole("button", { name: "Annotate page element" }).click();
+      await waitFor(async () => (await layer.count()) === 0, "annotation mode to end");
+      await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+    },
+  );
+
+  if (engine === "native") {
+    await step("CoWork's cursor is drawn inside a native page", async () => {
+      await main.getByRole("tab", { name: /Fixture 1$/ }).click();
+      const first = await guestFor("/page?n=1");
+      await desktop.evaluate(
+        (_, input) => {
+          const service = process.mainModule.require(input.module).getBrowserWorkbenchService();
+          service.emitCursor(service.getSession(input.taskId, "default"), {
+            x: 220,
+            y: 160,
+            kind: "click",
+            label: "Click",
+            pulse: true,
+          });
+        },
+        { module: workbenchModule, taskId: task.id },
+      );
+      await waitFor(
+        async () => inGuest(first.id, `!!document.getElementById("__cowork_agent_cursor")`),
+        "the cursor marker",
+      );
+      // The page's own scripts see no scripts, listeners or events from it.
+      assert.equal(
+        await inGuest(first.id, `document.getElementById("__cowork_agent_cursor").shadowRoot`),
+        null,
+        "closed shadow root",
+      );
+      await sleep(500);
+      await windowCapture("window-agent-cursor");
+    });
+
+    await step(
+      "mouse and swipe back/forward act on the native page under the pointer",
+      async () => {
+        await navigateActiveTab(`${site}/page?n=9`);
+        await guestFor("/page?n=9");
+        await navigateActiveTab(`${site}/page?n=10`);
+        await guestFor("/page?n=10");
+        // Put the pointer over the page (the real pointer is not moved by the test).
+        const point = await desktop.evaluate(({ BrowserWindow, screen }) => {
+          const window = BrowserWindow.getAllWindows().find((w) =>
+            w.webContents.getURL().startsWith("file:"),
+          );
+          const view = window.contentView.children.find(
+            (child) => child.getVisible?.() && /n=10/.test(child.webContents?.getURL?.() || ""),
+          );
+          const bounds = view.getBounds();
+          const content = window.getContentBounds();
+          const target = { x: content.x + bounds.x + 40, y: content.y + bounds.y + 40 };
+          screen.getCursorScreenPoint = () => target;
+          return target;
+        });
+        assert.ok(point.x > 0);
+        await desktop.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows().find((w) =>
+            w.webContents.getURL().startsWith("file:"),
+          );
+          window.emit("app-command", {}, "browser-backward");
+        });
+        await guestFor("/page?n=9");
+        await desktop.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows().find((w) =>
+            w.webContents.getURL().startsWith("file:"),
+          );
+          window.emit("swipe", {}, "right");
+        });
+        await guestFor("/page?n=10");
+        // Leave the tab as later steps expect it.
+        await navigateActiveTab(`${site}/page?n=1`);
+        await guestFor("/page?n=1");
+      },
+    );
+  }
 
   await step("closing and reopening the workbench restores its tabs", async () => {
     const before = await guestFor("/page?n=1");

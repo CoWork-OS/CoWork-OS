@@ -63,6 +63,7 @@ import {
 import { BrowserApprovalCard } from "./BrowserWorkbench/BrowserApprovalCard";
 import { BrowserTabNativeView, type NativeTabCover } from "./BrowserWorkbench/BrowserTabNativeView";
 import { useSurfaceOcclusion } from "./BrowserWorkbench/useSurfaceOcclusion";
+import { SavedLoginsMenu } from "./BrowserWorkbench/SavedLoginsMenu";
 import { ToolbarMenu } from "./BrowserWorkbench/ToolbarMenu";
 import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
 import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
@@ -1522,6 +1523,9 @@ export function BrowserWorkbenchView({
     height: number;
   } | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  // Native tabs show a still image while annotating: Adjust edits the live page, so the
+  // image is retaken after each preview.
+  const [freezeNonce, setFreezeNonce] = useState(0);
   const [adjustChanges, setAdjustChanges] = useState<AdjustChanges | null>(null);
   const adjustBeforePathRef = useRef<string | undefined>(undefined);
 
@@ -1863,6 +1867,13 @@ export function BrowserWorkbenchView({
           onMenuCommand={handleTabMenuCommand}
         />
         <div className="browser-workbench-header-actions">
+          <SavedLoginsMenu
+            workspaceId={workspaceId}
+            taskId={taskId}
+            sessionId={sessionId}
+            currentUrl={activeUrl}
+            onNotice={setToolbarNotice}
+          />
           <ProfileMenu
             workspaceId={workspaceId}
             currentUrl={activeUrl}
@@ -2173,6 +2184,7 @@ export function BrowserWorkbenchView({
                   sessionId={sessionId}
                   partition={partition}
                   cover={tab.id === activeTabId ? nativeCover : "hide"}
+                  freezeNonce={freezeNonce}
                   onUpdate={updateTab}
                   onStatus={handleTabStatus}
                   onGuardFailed={handleGuardFailed}
@@ -2402,6 +2414,7 @@ export function BrowserWorkbenchView({
                     </div>
                     {adjustOpen && liveAnnotationTarget.selector && (
                       <AdjustPanel
+                        onPreviewed={() => setFreezeNonce((value) => value + 1)}
                         taskId={taskId}
                         sessionId={sessionId}
                         selector={liveAnnotationTarget.selector}

@@ -248,6 +248,21 @@ Browser V2 treats browser side effects as governed workspace actions:
 - Cmd+Shift+B (Ctrl+Shift+B) in a task opens the browser, or switches it between the sidebar and full view.
 - Settings > Browser: search engine, download location, restore tabs, open conversation links in the in-app browser, Chrome-compatible user agent (applies after restart), recording history, CoWork downloads and uploads (ask / allow / block), developer mode, and per-workspace history, remembered site permissions and browsing data. Access profiles and admin policies still decide which sites can be reached; these settings cannot widen them.
 
+## Importing Cookies And Saved Logins
+
+Settings > Browser > Import from another browser brings in cookies (to stay signed in) and saved logins for the selected workspace profile. Sources: Chrome, Edge, Brave, Chromium, Vivaldi and Arc (cookies and passwords), Firefox (cookies; export passwords to CSV from Firefox), and a password CSV file (Chrome, Edge, Bitwarden, 1Password, Firefox and similar column names). macOS only for browser import; CSV works everywhere.
+
+How it is kept safe:
+
+- **Nothing is imported without you.** Reading another browser's key makes macOS ask for permission; if you refuse, nothing is read. You then review counts and site names, and a native confirmation (outside the page UI) approves the import. The staged data lives only in the main process, expires after 5 minutes, works once and only for that workspace, and is wiped on commit or cancel.
+- **Secrets never reach the app UI.** The window sees counts and site names only. Passwords are sealed one by one with the OS keychain (Electron `safeStorage`); if the OS would only obfuscate them (for example a Linux basic text backend), saving is refused rather than weakened. Saved logins can't be viewed, copied or exported from the app.
+- **Filling is user-started and origin-locked.** The key button in the toolbar appears only when the current page's exact origin (https, or loopback http) has a saved login. Choosing one needs Touch ID (or a native confirmation where Touch ID is unavailable), then fills only the top page, only if the live address still matches, in an isolated script world. CoWork has no tool to fill logins, and any filled password is masked in everything CoWork reads back from that page.
+- **Other browsers' files are never modified.** Their databases are copied to a private temporary folder, read read-only with the system `sqlite3`, and the copies are deleted. Profile ids are validated and never used as paths directly.
+- **CSV files are untrusted input.** Size, row and field limits apply; binary or non-UTF-8 files, non-web and `http://` (non-loopback) logins and rows without a password are skipped and counted. After importing, you can delete the plain-text file (overwrite then remove; on SSDs this can't be guaranteed, so keep disk encryption on and empty the Trash).
+- Cookies are validated (host, name, value and prefix rules, expiry) before being set on the workspace profile; partitioned, container and expired cookies are skipped.
+
+Limits worth knowing: a page you fill a login into can read that field, as with any password manager; JavaScript strings holding a secret can't be wiped from memory on demand; Chrome-family Windows and Linux browsers aren't read directly (export a CSV).
+
 ## Relationship To Web Page Artifacts
 
 Generated web pages and live websites use different surfaces:
@@ -342,6 +357,8 @@ node scripts/qa/browser-workbench-smoke.mjs
 
 It opens the workbench from the title bar and checks: a typed local dev server address loads; three tabs keep form input, scroll and page state when switching; `target=_blank` opens a tab; a `window.open` sign-in popup posts to its opener and closes; five sidebar/full-view switches keep the page loaded; Cmd+F counts matches; Cmd+= zooms; a geolocation request prompts in the tab and "Never allow" is remembered; a download lands in the workspace and on the shelf; closing a tab with unsaved changes asks "Leave site?" and "Stay" keeps it; `confirm` and `alert` are shown and answered in the tab with CoWork's debugger attached; a browser approval shows as a card over the tab and not as a dialog; an admin policy locks developer mode and blocks the camera without a prompt; notifications can be allowed for a site from the profile menu; screen sharing shows the source picker and Cancel denies it; the focused address bar draws a single frame; the More menu sets a page size and the size chip clears it; the new tab page shows the ask box, ideas and recent sites; closing and reopening restores the tabs; a link to an unopened local port shows the blocked notice; Cmd+Shift+B reopens the browser from the task view. Results and screenshots go to a temporary folder printed at the end.
 
+The smoke also checks the CSV import end to end (disposable profile, stubbed file dialog) and that a saved login fills only on its own site; set `QA_REAL_SCREEN_SHARE=1` and `QA_GOOGLE_SIGNIN=1` for the opt-in real screen share and Google sign-in page checks.
+
 Manual checks (things the harness cannot drive):
 
 1. Right-click a page, a link, an image, selected text and a text field; confirm the native menus and their actions (open in new tab, copy, Save Image to Workspace, search, Ask CoWork, spelling suggestions).
@@ -353,7 +370,8 @@ Manual checks (things the harness cannot drive):
 7. Let an agent navigate to a sign-in page; confirm the sign-in banner and that Done continues.
 8. Annotate an area by dragging, and Adjust an element's text and font size; confirm the live preview, the sent changes and that the page is restored.
 9. Settings > Browser: change the search engine, clear history, reset a site permission, toggle developer mode and confirm `browser_evaluate` asks for approval once per site.
-10. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
+10. Import cookies and saved logins from a real browser (approve the macOS key prompt), then fill one with Touch ID on its site; confirm it refuses on a look-alike address.
+11. Call `browser_emulate` for desktop, tablet and mobile; confirm the size badge and screenshot dimensions.
 
 Build checks:
 

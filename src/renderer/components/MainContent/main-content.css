@@ -12065,9 +12065,16 @@ button.collab-timeline-thought-agent:hover {
   overscroll-behavior: contain;
 }
 
+/* More folders than fit: a row cut by the edge reads as more to scroll, not as clipped. */
+.workspace-dropdown-list.workspace-dropdown-list-scrolls {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+
 .workspace-dropdown-item {
   display: flex;
   align-items: center;
+  /* The global button rule centers content; rows and footer actions line up left. */
+  justify-content: flex-start;
   gap: 10px;
   width: 100%;
   padding: 10px 14px;
@@ -12146,7 +12153,115 @@ button.collab-timeline-thought-agent:hover {
 
 .workspace-dropdown-item.new-folder {
   color: var(--color-accent);
-  padding: 12px 14px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.workspace-dropdown-item.new-folder:last-child {
+  margin-bottom: 4px;
+}
+
+/* A folder row: select it, or remove it from CoWork (shown on hover or focus). */
+.workspace-dropdown-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.workspace-dropdown-remove {
+  position: absolute;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.workspace-dropdown-row:hover .workspace-dropdown-remove,
+.workspace-dropdown-remove:focus-visible {
+  opacity: 1;
+}
+
+.workspace-dropdown-remove:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--color-error, #dc2626);
+}
+
+.workspace-dropdown-row:hover .workspace-dropdown-item .workspace-item-info {
+  padding-right: 28px;
+}
+
+.workspace-dropdown-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.workspace-dropdown-confirm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.workspace-dropdown-confirm-text strong {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.workspace-dropdown-confirm-error {
+  color: var(--color-error, #dc2626);
+}
+
+.workspace-dropdown-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.workspace-dropdown-confirm-actions button {
+  padding: 5px 12px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workspace-dropdown-confirm-cancel {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.workspace-dropdown-confirm-remove {
+  border: 1px solid transparent;
+  background: var(--color-error, #dc2626);
+  color: #fff;
+}
+
+.workspace-dropdown-confirm-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .workspace-dropdown-item.new-folder svg {

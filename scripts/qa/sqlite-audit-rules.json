@@ -129,6 +129,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/database/workspace-removal-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Removing a workspace from CoWork: the workspace_removeWithHistory store unit (WorkspaceStore.removeWithHistory) checks what still binds the workspace and deletes its history rows and record in one transaction.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/answer-surfaces/tool-data-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Tool results kept as answer data: services-domain units behind the static AnswerToolDataStore, which creates the schema on the host first, plus the delete that runs inside the task-delete transaction.",

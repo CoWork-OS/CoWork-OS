@@ -5790,8 +5790,8 @@ export async function setupIpcHandlers(
     },
   );
 
-  ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, rawId: unknown) => {
-    const id = validateInput(UUIDSchema, rawId, "task ID");
+  /** Delete one task and everything derived from it (the TASK_DELETE path). */
+  const deleteTaskCompletely = async (id: string): Promise<void> => {
     const existingTask = await taskRepo.findById(id);
     // Capture only validated durable refs while the receipt events still
     // exist. Release them after the DB delete succeeds so a failed delete
@@ -5826,6 +5826,38 @@ export async function setupIpcHandlers(
         purgeDerivedMemory: true,
       });
     }
+  };
+
+  ipcMain.handle(IPC_CHANNELS.TASK_DELETE, async (_, rawId: unknown) => {
+    const id = validateInput(UUIDSchema, rawId, "task ID");
+    await deleteTaskCompletely(id);
+  });
+
+  // Remove a workspace from CoWork: its sessions (each deleted like TASK_DELETE), its
+  // memory in every store, then the workspace record. Files in the folder are never touched.
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_REMOVE, async (_, rawId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.WORKSPACE_REMOVE, RATE_LIMIT_CONFIGS.limited);
+    const workspaceId = validateInput(WorkspaceIdSchema, rawId, "workspace id");
+    const workspace = await workspaceRepo.findById(workspaceId);
+    if (!workspace) throw new Error("This folder is no longer in CoWork.");
+    if (workspace.isTemp || isTempWorkspaceId(workspace.id)) {
+      throw new Error("The scratch workspace for work without a folder can't be removed.");
+    }
+    const tasks = await taskRepo.findByWorkspace(workspaceId);
+    for (const task of tasks) await deleteTaskCompletely(task.id);
+    const memory = await MemoryWorkspacePurgeService.purgeWorkspace({
+      id: workspaceId,
+      path: workspace.path,
+    });
+    const result = await workspaceRepo.removeWithHistory(workspaceId);
+    if (!result.removed) {
+      throw new Error(
+        result.blockers.length > 0
+          ? `This folder is still used by ${result.blockers.join(", ")}. Remove those first.`
+          : "This folder could not be removed.",
+      );
+    }
+    return { removed: true, tasks: tasks.length, memoryErrors: Object.keys(memory.errors) };
   });
 
   // ============ Sub-Agent / Parallel Agent Handlers ============

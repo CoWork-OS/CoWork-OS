@@ -1189,6 +1189,11 @@ export const STORAGE_UNITS = {
   workspace_delete: storeUnit((db: Database.Database) => new WorkspaceStore(db), "delete", {
     readonly: false,
   }),
+  workspace_removeWithHistory: storeUnit(
+    (db: Database.Database) => new WorkspaceStore(db),
+    "removeWithHistory",
+    { readonly: false },
+  ),
   workspace_upsertWithId: storeUnit(
     (db: Database.Database) => new WorkspaceStore(db),
     "upsertWithId",

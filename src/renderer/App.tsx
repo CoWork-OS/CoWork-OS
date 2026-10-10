@@ -5839,6 +5839,13 @@ export function App() {
     [fetchSidebarProjectTasks, loadTasks],
   );
 
+  // Removing a folder deletes its sessions in main; reload the sidebar's list.
+  useEffect(() => {
+    const reload = () => void loadTasks();
+    window.addEventListener("cowork:tasks-removed", reload);
+    return () => window.removeEventListener("cowork:tasks-removed", reload);
+  }, [loadTasks]);
+
   const loadBotConversations = useCallback(async () => {
     const workspaceId = currentWorkspace?.id;
     if (!workspaceId) {

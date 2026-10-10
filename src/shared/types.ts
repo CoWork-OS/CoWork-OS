@@ -8057,6 +8057,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_TOUCH: "workspace:touch",
   WORKSPACE_GET_TEMP: "workspace:getTemp", // Get or create temp workspace
   WORKSPACE_PRUNE_TEMP: "workspace:pruneTemp", // Check or delete unused temp workspaces
+  WORKSPACE_REMOVE: "workspace:remove", // Remove a workspace from CoWork (sessions, memory); files stay
 
   // Approval operations
   APPROVAL_RESPOND: "approval:respond",

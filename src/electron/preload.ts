@@ -3354,6 +3354,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   pruneTempWorkspaces: (options?: { dryRun?: boolean }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_PRUNE_TEMP, options),
   touchWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_TOUCH, id),
+  removeWorkspace: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_REMOVE, id),
   updateWorkspacePermissions: (
     id: string,
     permissions: {
@@ -7017,6 +7018,10 @@ export interface ElectronAPI {
     dryRun: boolean;
   }>;
   touchWorkspace: (id: string) => Promise<Any>;
+  /** Removes the workspace from CoWork with its sessions and memory; files stay. */
+  removeWorkspace: (
+    id: string,
+  ) => Promise<{ removed: boolean; tasks: number; memoryErrors: string[] }>;
   updateWorkspacePermissions: (
     id: string,
     permissions: {

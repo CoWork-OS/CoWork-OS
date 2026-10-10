@@ -50,6 +50,7 @@ import {
 import { updateTaskTitleIfUnchanged } from "./task-title-sql";
 import { BUILD_PROMPT_MARKER } from "../../shared/build-task";
 import { purgeTaskDerivedRows } from "../memory/memory-purge-sql";
+import { removeWorkspaceWithHistory } from "./workspace-removal-sql";
 import { deleteWorkspaceMemoriesOlderThan } from "../memory/memory-retention-sql";
 import {
   flushPendingTimelineEvent,
@@ -381,6 +382,11 @@ export class WorkspaceStore {
   delete(id: string): void {
     const stmt = this.db.prepare("DELETE FROM workspaces WHERE id = ?");
     stmt.run(id);
+  }
+
+  /** The workspace and its history rows, unless configuration still binds it (WORKSPACE_REMOVE). */
+  removeWithHistory(id: string): { removed: boolean; blockers: string[] } {
+    return removeWorkspaceWithHistory(this.db, id);
   }
 
   private mapRowToWorkspace(row: Any): Workspace {

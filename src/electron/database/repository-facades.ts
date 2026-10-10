@@ -715,6 +715,7 @@ const WORKSPACE_METHODS = [
   "updateLastUsedAt",
   "updatePath",
   "delete",
+  "removeWithHistory",
   "upsertWithId",
 ] as const;
 export type WorkspaceRepository = AsyncStore<WorkspaceStore, (typeof WORKSPACE_METHODS)[number]>;

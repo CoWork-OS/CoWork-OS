@@ -497,6 +497,7 @@ import { ParallelGroupFeed } from "../timeline/ParallelGroupFeed";
 import { ActionBlock } from "../timeline/ActionBlock";
 import { TurnHeader } from "../timeline/TurnHeader";
 import { SelectionReplyPopover } from "./SelectionReplyPopover";
+import { WorkspaceDropdownMenu } from "./WorkspaceDropdownMenu";
 import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
 import type { SurfaceActionOrigin } from "../../../shared/answer-surfaces/actions";
 import {
@@ -6701,6 +6702,16 @@ function MainContentComponent({
     onSelectWorkspace?.(selectedWorkspace);
   };
 
+  // Remove a folder from CoWork (its sessions and memory; files stay), then refresh.
+  const handleWorkspaceRemove = async (removed: Workspace) => {
+    const result = await window.electronAPI.removeWorkspace(removed.id);
+    await loadRecentWorkspaces();
+    window.dispatchEvent(new CustomEvent("cowork:tasks-removed"));
+    if (result.memoryErrors.length > 0) {
+      console.warn("Some memory stores could not be cleared:", result.memoryErrors);
+    }
+  };
+
   // Handle selecting a new folder via Finder
   const handleSelectNewFolder = () => {
     setShowWorkspaceDropdown(false);
@@ -10581,85 +10592,18 @@ function MainContentComponent({
                             </svg>
                           </button>
                           {showWorkspaceDropdown && (
-                            <div className="workspace-dropdown">
-                              {workspacesList.length > 0 && (
-                                <>
-                                  <div className="workspace-dropdown-header">Recent Folders</div>
-                                  <div className="workspace-dropdown-list">
-                                    {workspacesList.slice(0, 10).map((w) => (
-                                      <button
-                                        key={w.id}
-                                        className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                                        onClick={() => handleWorkspaceSelect(w)}
-                                      >
-                                        <svg
-                                          width="14"
-                                          height="14"
-                                          viewBox="0 0 24 24"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="2"
-                                        >
-                                          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                                        </svg>
-                                        <div className="workspace-item-info">
-                                          <span className="workspace-item-name">{w.name}</span>
-                                          <span className="workspace-item-path">{w.path}</span>
-                                        </div>
-                                        {workspace?.id === w.id && (
-                                          <svg
-                                            width="14"
-                                            height="14"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            className="check-icon"
-                                          >
-                                            <path d="M20 6L9 17l-5-5" />
-                                          </svg>
-                                        )}
-                                      </button>
-                                    ))}
-                                  </div>
-                                  <div className="workspace-dropdown-divider" />
-                                </>
-                              )}
-                              <button
-                                className="workspace-dropdown-item new-folder"
-                                onClick={handleSelectNewFolder}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <path d="M12 5v14M5 12h14" />
-                                </svg>
-                                <span>Work in another folder...</span>
-                              </button>
-                              {canSwitchToTempWorkspace && (
-                                <button
-                                  className="workspace-dropdown-item new-folder"
-                                  onClick={() => void handleUseTempWorkspace()}
-                                >
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                  >
-                                    <path d="M18 6L6 18M6 6l12 12" />
-                                  </svg>
-                                  <span>Work without a folder</span>
-                                </button>
-                              )}
-                            </div>
+                            <WorkspaceDropdownMenu
+                              workspaces={workspacesList}
+                              currentWorkspaceId={workspace?.id}
+                              onSelect={handleWorkspaceSelect}
+                              onSelectNewFolder={handleSelectNewFolder}
+                              onUseTempWorkspace={
+                                canSwitchToTempWorkspace
+                                  ? () => void handleUseTempWorkspace()
+                                  : undefined
+                              }
+                              onRemove={handleWorkspaceRemove}
+                            />
                           )}
                         </div>
                       )}
@@ -11111,85 +11055,16 @@ function MainContentComponent({
                       </span>
                     </button>
                     {showWorkspaceDropdown && (
-                      <div className="workspace-dropdown">
-                        {workspacesList.length > 0 && (
-                          <>
-                            <div className="workspace-dropdown-header">Recent Folders</div>
-                            <div className="workspace-dropdown-list">
-                              {workspacesList.slice(0, 10).map((w) => (
-                                <button
-                                  key={w.id}
-                                  className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                                  onClick={() => handleWorkspaceSelect(w)}
-                                >
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                  >
-                                    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                                  </svg>
-                                  <div className="workspace-item-info">
-                                    <span className="workspace-item-name">{w.name}</span>
-                                    <span className="workspace-item-path">{w.path}</span>
-                                  </div>
-                                  {workspace?.id === w.id && (
-                                    <svg
-                                      width="14"
-                                      height="14"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                      className="check-icon"
-                                    >
-                                      <path d="M20 6L9 17l-5-5" />
-                                    </svg>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="workspace-dropdown-divider" />
-                          </>
-                        )}
-                        <button
-                          className="workspace-dropdown-item new-folder"
-                          onClick={handleSelectNewFolder}
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M12 5v14M5 12h14" />
-                          </svg>
-                          <span>Work in another folder...</span>
-                        </button>
-                        {canSwitchToTempWorkspace && (
-                          <button
-                            className="workspace-dropdown-item new-folder"
-                            onClick={() => void handleUseTempWorkspace()}
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <path d="M18 6L6 18M6 6l12 12" />
-                            </svg>
-                            <span>Work without a folder</span>
-                          </button>
-                        )}
-                      </div>
+                      <WorkspaceDropdownMenu
+                        workspaces={workspacesList}
+                        currentWorkspaceId={workspace?.id}
+                        onSelect={handleWorkspaceSelect}
+                        onSelectNewFolder={handleSelectNewFolder}
+                        onUseTempWorkspace={
+                          canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
+                        }
+                        onRemove={handleWorkspaceRemove}
+                      />
                     )}
                   </div>
                 </div>
@@ -12660,85 +12535,16 @@ function MainContentComponent({
             {uiDensity === "focused" && (
               <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
                 {showWorkspaceDropdown && (
-                  <div className="workspace-dropdown">
-                    {workspacesList.length > 0 && (
-                      <>
-                        <div className="workspace-dropdown-header">Recent Folders</div>
-                        <div className="workspace-dropdown-list">
-                          {workspacesList.slice(0, 10).map((w) => (
-                            <button
-                              key={w.id}
-                              className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                              onClick={() => handleWorkspaceSelect(w)}
-                            >
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                              >
-                                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                              </svg>
-                              <div className="workspace-item-info">
-                                <span className="workspace-item-name">{w.name}</span>
-                                <span className="workspace-item-path">{w.path}</span>
-                              </div>
-                              {workspace?.id === w.id && (
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  className="check-icon"
-                                >
-                                  <path d="M20 6L9 17l-5-5" />
-                                </svg>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="workspace-dropdown-divider" />
-                      </>
-                    )}
-                    <button
-                      className="workspace-dropdown-item new-folder"
-                      onClick={handleSelectNewFolder}
-                    >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M12 5v14M5 12h14" />
-                      </svg>
-                      <span>Work in another folder...</span>
-                    </button>
-                    {canSwitchToTempWorkspace && (
-                      <button
-                        className="workspace-dropdown-item new-folder"
-                        onClick={() => void handleUseTempWorkspace()}
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                        <span>Work without a folder</span>
-                      </button>
-                    )}
-                  </div>
+                  <WorkspaceDropdownMenu
+                    workspaces={workspacesList}
+                    currentWorkspaceId={workspace?.id}
+                    onSelect={handleWorkspaceSelect}
+                    onSelectNewFolder={handleSelectNewFolder}
+                    onUseTempWorkspace={
+                      canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
+                    }
+                    onRemove={handleWorkspaceRemove}
+                  />
                 )}
               </div>
             )}
@@ -12896,85 +12702,16 @@ function MainContentComponent({
                     </svg>
                   </button>
                   {showWorkspaceDropdown && (
-                    <div className="workspace-dropdown">
-                      {workspacesList.length > 0 && (
-                        <>
-                          <div className="workspace-dropdown-header">Recent Folders</div>
-                          <div className="workspace-dropdown-list">
-                            {workspacesList.slice(0, 10).map((w) => (
-                              <button
-                                key={w.id}
-                                className={`workspace-dropdown-item ${workspace?.id === w.id ? "active" : ""}`}
-                                onClick={() => handleWorkspaceSelect(w)}
-                              >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                                </svg>
-                                <div className="workspace-item-info">
-                                  <span className="workspace-item-name">{w.name}</span>
-                                  <span className="workspace-item-path">{w.path}</span>
-                                </div>
-                                {workspace?.id === w.id && (
-                                  <svg
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    className="check-icon"
-                                  >
-                                    <path d="M20 6L9 17l-5-5" />
-                                  </svg>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="workspace-dropdown-divider" />
-                        </>
-                      )}
-                      <button
-                        className="workspace-dropdown-item new-folder"
-                        onClick={handleSelectNewFolder}
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                        <span>Work in another folder...</span>
-                      </button>
-                      {canSwitchToTempWorkspace && (
-                        <button
-                          className="workspace-dropdown-item new-folder"
-                          onClick={() => void handleUseTempWorkspace()}
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                          <span>Work without a folder</span>
-                        </button>
-                      )}
-                    </div>
+                    <WorkspaceDropdownMenu
+                      workspaces={workspacesList}
+                      currentWorkspaceId={workspace?.id}
+                      onSelect={handleWorkspaceSelect}
+                      onSelectNewFolder={handleSelectNewFolder}
+                      onUseTempWorkspace={
+                        canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
+                      }
+                      onRemove={handleWorkspaceRemove}
+                    />
                   )}
                 </div>
               </>

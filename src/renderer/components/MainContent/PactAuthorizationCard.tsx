@@ -1,3 +1,4 @@
+import { ExternalLink, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { PactAuthorizationView } from "../../../shared/pact";
 import type { InputRequest } from "../../../shared/types";
@@ -92,29 +93,36 @@ export function PactAuthorizationCard({ request, onCancel }: PactAuthorizationCa
         </div>
         {view?.purpose && <div className="pact-authorization-purpose">{view.purpose}</div>}
         {view && view.requestedScopes.length > 0 && (
-          <ul className="pact-authorization-scopes" aria-label="Requested permissions">
-            {view.requestedScopes.map((scope) => (
-              // Descriptions are shown verbatim, as the business wrote them.
-              <li key={scope.id}>
-                <span className="pact-authorization-scope-description">{scope.description}</span>
-                <span className="pact-authorization-scope-id">{scope.id}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="pact-authorization-section">
+            <div className="pact-authorization-section-label">Requested permissions</div>
+            <ul className="pact-authorization-scopes" aria-label="Requested permissions">
+              {view.requestedScopes.map((scope) => (
+                // Descriptions are shown verbatim, as the business wrote them.
+                <li key={scope.id}>
+                  <span className="pact-authorization-scope-description">{scope.description}</span>
+                  <span className="pact-authorization-scope-id">{scope.id}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {view?.verificationOrigin && view.verificationOriginMatchesBusiness === false && (
+          <div className="pact-authorization-caution" role="note">
+            <TriangleAlert size={14} aria-hidden="true" />
+            <span>
+              {`Caution: ${view.verificationOrigin} is not on ${businessName}'s own site. Only sign in if you recognise it.`}
+            </span>
+          </div>
         )}
         <div className="input-request-hint">
           {view?.verificationOrigin
             ? `The sign-in page is ${view.verificationOrigin}. CoWork never sees your password; you can uncheck any permission there.`
             : "The sign-in happens on the business's own page. CoWork never sees your password."}
         </div>
-        {view?.verificationOrigin && view.verificationOriginMatchesBusiness === false && (
-          <div className="input-request-hint pact-authorization-error">
-            {`Caution: ${view.verificationOrigin} is not on ${businessName}'s own site. Only sign in if you recognise it.`}
-          </div>
-        )}
         {userCode && (
           <div className="input-request-hint pact-authorization-code">
-            {`Check that the page shows the code ${userCode}.`}
+            Check that the page shows the code{" "}
+            <code className="pact-authorization-code-value">{userCode}</code>
           </div>
         )}
         {view && view.state !== "pending" && (
@@ -122,15 +130,17 @@ export function PactAuthorizationCard({ request, onCancel }: PactAuthorizationCa
         )}
         {error && <div className="input-request-hint pact-authorization-error">{error}</div>}
         <div className="input-request-actions">
-          <button className="input-request-dismiss" onClick={onCancel}>
+          <button type="button" className="input-request-dismiss" onClick={onCancel}>
             Cancel sign-in
           </button>
           <button
-            className="input-request-submit"
+            type="button"
+            className="input-request-submit pact-authorization-open"
             onClick={() => void openSignIn()}
             disabled={!view || view.state !== "pending" || opening}
           >
             {opening ? "Opening…" : "Open sign-in"}
+            {!opening && <ExternalLink size={13} aria-hidden="true" />}
           </button>
         </div>
       </div>

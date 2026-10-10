@@ -105,6 +105,46 @@ interface TabViewRecord {
 
 const DEFAULT_MAX_LIVE_VIEWS = 24;
 
+/** Isolated world for the cursor marker (page scripts never run in it). */
+const CURSOR_WORLD_ID = 1970;
+
+/** Runs in the page's isolated world: creates or moves the marker, then hides it. */
+const CURSOR_SCRIPT = `function (c) {
+  var root = document.documentElement;
+  if (!root) return;
+  var host = document.getElementById("__cowork_agent_cursor");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "__cowork_agent_cursor";
+    host.setAttribute("style", "all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none;");
+    var shadow = host.attachShadow({ mode: "closed" });
+    shadow.innerHTML = '<style>' +
+      '.m{position:absolute;left:0;top:0;transition:transform 260ms cubic-bezier(.2,.8,.2,1),opacity 200ms;opacity:0;will-change:transform}' +
+      '.m svg{display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}' +
+      '.l{position:absolute;left:16px;top:18px;padding:2px 7px;border-radius:999px;background:#2563eb;color:#fff;font:600 11px/1.5 -apple-system,system-ui,sans-serif;white-space:nowrap}' +
+      '.p{position:absolute;left:-14px;top:-14px;width:28px;height:28px;border-radius:50%;border:2px solid #2563eb;opacity:0}' +
+      '.p.go{animation:p 520ms ease-out}' +
+      '@keyframes p{0%{opacity:.8;transform:scale(.3)}100%{opacity:0;transform:scale(1.4)}}' +
+      '</style><div class="m"><div class="p"></div><svg width="18" height="22" viewBox="0 0 18 22"><path d="M1 1l15 9.5-6.5 1.6L6.2 20z" fill="#2563eb" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg><div class="l"></div></div>';
+    root.appendChild(host);
+    host.__shadow = shadow;
+  }
+  var shadow = host.__shadow;
+  var marker = shadow.querySelector(".m");
+  shadow.querySelector(".l").textContent = c.label || "";
+  shadow.querySelector(".l").style.display = c.label ? "" : "none";
+  marker.style.transform = "translate(" + c.x + "px," + c.y + "px)";
+  marker.style.opacity = "1";
+  if (c.pulse) {
+    var ring = shadow.querySelector(".p");
+    ring.classList.remove("go");
+    void ring.offsetWidth;
+    ring.classList.add("go");
+  }
+  clearTimeout(host.__hide);
+  host.__hide = setTimeout(function () { marker.style.opacity = "0"; }, 2400);
+}`;
+
 function recordKey(key: BrowserTabViewKey): string {
   return `${key.taskId}\u0000${key.sessionId}\u0000${key.tabId}`;
 }
@@ -229,6 +269,57 @@ export class BrowserTabViewHost {
     // Aborted loads (a newer navigation, a blocked request) reject; events report the outcome.
     Promise.resolve(record.contents.loadURL(url)).catch(() => undefined);
     return true;
+  }
+
+  /**
+   * Draw CoWork's cursor inside the page: a native view covers the app's own cursor overlay.
+   * The marker lives in an isolated world behind a closed shadow root, ignores the pointer and
+   * hides itself, so it never reaches the page's scripts or events. Returns false when the tab
+   * has no native view (the renderer draws the cursor then).
+   */
+  paintCursor(
+    key: BrowserTabViewKey,
+    cursor: { x: number; y: number; kind?: string; label?: string; pulse?: boolean },
+  ): boolean {
+    const record = this.get(key);
+    if (!record || record.contents.isDestroyed?.()) return false;
+    const payload = JSON.stringify({
+      x: Math.max(0, Math.round(Number(cursor.x) || 0)),
+      y: Math.max(0, Math.round(Number(cursor.y) || 0)),
+      kind: String(cursor.kind || "move").slice(0, 16),
+      label: String(cursor.label || "").slice(0, 40),
+      pulse: cursor.pulse === true,
+    });
+    void Promise.resolve(
+      record.contents.executeJavaScriptInIsolatedWorld?.(CURSOR_WORLD_ID, [
+        { code: `(${CURSOR_SCRIPT})(${payload})` },
+      ]),
+    ).catch(() => undefined);
+    return true;
+  }
+
+  /** The visible tab view under a screen point (window gestures act on the page under the pointer). */
+  viewKeyAtScreenPoint(point: { x: number; y: number }): BrowserTabViewKey | null {
+    const window = this.deps.getWindow();
+    const content = window?.getContentBounds?.();
+    if (!content) return null;
+    const zoom = Number(window?.webContents?.getZoomFactor?.()) || 1;
+    for (const record of this.records.values()) {
+      if (!record.visible) continue;
+      const bounds = record.view.getBounds?.();
+      if (!bounds) continue;
+      const x = (point.x - content.x) * zoom;
+      const y = (point.y - content.y) * zoom;
+      if (
+        x >= bounds.x &&
+        x < bounds.x + bounds.width &&
+        y >= bounds.y &&
+        y < bounds.y + bounds.height
+      ) {
+        return { ...record.key };
+      }
+    }
+    return null;
   }
 
   command(key: BrowserTabViewKey, command: BrowserTabViewCommand, args: Any = {}): boolean {
@@ -487,6 +578,14 @@ export class BrowserTabViewHost {
     // While CoWork drives the tab, a click on the page asks to take over instead
     // of reaching the page (the webview engine used a shield over the page).
     contents.on("before-mouse-event", (event: Any, mouse: Any) => {
+      // The mouse's back and forward buttons navigate the page they are over, as in any browser.
+      if (mouse?.button === "back" || mouse?.button === "forward") {
+        event.preventDefault();
+        if (mouse.type === "mouseDown") {
+          this.command(key, mouse.button === "back" ? "goBack" : "goForward");
+        }
+        return;
+      }
       if (mouse?.type !== "mouseDown") return;
       if (!this.deps.isAgentDriving?.(key.taskId, key.sessionId)) return;
       event.preventDefault();

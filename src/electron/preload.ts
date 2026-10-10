@@ -2373,6 +2373,47 @@ contextBridge.exposeInMainWorld("electronAPI", {
       IPC_CHANNELS.BROWSER_WORKBENCH_SNAPSHOT_GET,
       data,
     ) as Promise<BrowserWorkbenchSnapshotOverlay | null>,
+  browserImportDetect: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_DETECT) as Promise<BrowserImportDetectResult>,
+  browserImportPrepare: (data: BrowserImportPrepareRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_PREPARE, data) as Promise<BrowserImportPrepareResult>,
+  browserImportCommit: (data: {
+    workspaceId: string;
+    token: string;
+    cookies?: boolean;
+    passwords?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_COMMIT, data) as Promise<BrowserImportCommitResult>,
+  browserImportCancel: (data: { token: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_CANCEL, data) as Promise<{ success: boolean }>,
+  browserImportDeleteFile: (data: { token: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_DELETE_FILE, data) as Promise<{
+      success: boolean;
+      deleted?: boolean;
+      error?: string;
+    }>,
+  listBrowserLogins: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_LIST, data) as Promise<BrowserLoginsResult>,
+  listBrowserLoginsForPage: (data: { workspaceId: string; url: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_FOR_PAGE, data) as Promise<BrowserLoginsResult>,
+  removeBrowserLogin: (data: { workspaceId: string; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_REMOVE, data) as Promise<{ success: boolean }>,
+  clearBrowserLogins: (data: { workspaceId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_CLEAR, data) as Promise<{
+      success: boolean;
+      removed: number;
+    }>,
+  fillBrowserLogin: (data: {
+    workspaceId: string;
+    taskId: string;
+    sessionId?: string;
+    id: string;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_FILL, data) as Promise<{
+      success: boolean;
+      filledUsername?: boolean;
+      code?: string;
+      error?: string;
+    }>,
   getBrowserSettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SETTINGS_GET) as Promise<BrowserSettingsState>,
   saveBrowserSettings: (settings: Partial<BrowserSettings>) =>
@@ -5894,6 +5935,61 @@ export interface BrowserWorkbenchInspectArea {
   }>;
 }
 
+export interface BrowserImportableBrowser {
+  id: string;
+  name: string;
+  kind: "chromium" | "firefox";
+  profiles: Array<{ id: string; name: string }>;
+}
+export interface BrowserImportDetectResult {
+  success: boolean;
+  browsers: BrowserImportableBrowser[];
+  canStorePasswords: boolean;
+}
+export type BrowserImportPrepareRequest =
+  | { workspaceId: string; kind: "csv" }
+  | {
+      workspaceId: string;
+      kind: "browser";
+      browserId: string;
+      profileId: string;
+      cookies: boolean;
+      passwords: boolean;
+    };
+export type BrowserImportPrepareResult =
+  | {
+      success: true;
+      token: string;
+      source: string;
+      cookies: number;
+      logins: number;
+      sampleSites: string[];
+      skipped: Record<string, number>;
+    }
+  | { success: false; code: string; error: string };
+export type BrowserImportCommitResult =
+  | {
+      success: true;
+      cookies: number;
+      cookiesRejected: number;
+      logins: number;
+      loginsUpdated: number;
+      canDeleteFile: boolean;
+    }
+  | { success: false; code: string; error: string };
+export interface BrowserSavedLogin {
+  id: string;
+  origin: string;
+  username: string;
+  createdAt: number;
+  lastUsedAt?: number;
+}
+export interface BrowserLoginsResult {
+  success: boolean;
+  logins: BrowserSavedLogin[];
+  canStore?: boolean;
+}
+
 export interface BrowserHistoryEntryView {
   id: string;
   url: string;
@@ -6205,6 +6301,33 @@ export interface ElectronAPI {
     sessionId?: string;
     tabId?: string;
   }) => Promise<BrowserWorkbenchSnapshotOverlay | null>;
+  browserImportDetect: () => Promise<BrowserImportDetectResult>;
+  browserImportPrepare: (data: BrowserImportPrepareRequest) => Promise<BrowserImportPrepareResult>;
+  browserImportCommit: (data: {
+    workspaceId: string;
+    token: string;
+    cookies?: boolean;
+    passwords?: boolean;
+  }) => Promise<BrowserImportCommitResult>;
+  browserImportCancel: (data: { token: string }) => Promise<{ success: boolean }>;
+  browserImportDeleteFile: (data: {
+    token: string;
+  }) => Promise<{ success: boolean; deleted?: boolean; error?: string }>;
+  listBrowserLogins: (data: { workspaceId: string }) => Promise<BrowserLoginsResult>;
+  listBrowserLoginsForPage: (data: {
+    workspaceId: string;
+    url: string;
+  }) => Promise<BrowserLoginsResult>;
+  removeBrowserLogin: (data: { workspaceId: string; id: string }) => Promise<{ success: boolean }>;
+  clearBrowserLogins: (data: {
+    workspaceId: string;
+  }) => Promise<{ success: boolean; removed: number }>;
+  fillBrowserLogin: (data: {
+    workspaceId: string;
+    taskId: string;
+    sessionId?: string;
+    id: string;
+  }) => Promise<{ success: boolean; filledUsername?: boolean; code?: string; error?: string }>;
   getBrowserSettings: () => Promise<BrowserSettingsState>;
   saveBrowserSettings: (
     settings: Partial<BrowserSettings>,

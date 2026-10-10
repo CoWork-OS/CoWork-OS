@@ -65,6 +65,7 @@ import {
   nativeImage,
   screen,
   safeStorage,
+  systemPreferences,
   webContents,
   WebContentsView,
   type BrowserWindowConstructorOptions,
@@ -259,6 +260,13 @@ import {
   createBrowserHistoryRecorder,
   registerBrowserPlatformIpc,
 } from "./browser/browser-platform-ipc";
+import {
+  registerBrowserCredentialsIpc,
+  shredFileOnDisk,
+} from "./browser/credentials/browser-credentials-ipc";
+import { defaultExternalBrowserDeps } from "./browser/credentials/external-browsers";
+import { ImportSessions } from "./browser/credentials/import-session";
+import { getBrowserVault } from "./browser/credentials/vault";
 import { BrowserSettingsManager } from "./settings/browser-settings-manager";
 import { browserProfileKeyFromPartition } from "../shared/browser-profile";
 import { matchBrowserShortcut } from "../shared/browser-shortcuts";
@@ -737,6 +745,14 @@ function getBrowserTabViewHost(): BrowserTabViewHost {
       !getBrowserWorkbenchService().isPausedByUser(taskId, sessionId),
   });
   setBrowserTabViewHost(browserTabViewHost);
+  getBrowserWorkbenchService().setNativeCursorPainter((session, event) =>
+    browserTabViewHost
+      ? browserTabViewHost.paintCursor(
+          { taskId: session.taskId, sessionId: session.sessionId, tabId: session.tabId || "" },
+          event,
+        )
+      : false,
+  );
   return browserTabViewHost;
 }
 
@@ -927,15 +943,29 @@ function attachBrowserWorkbenchWindowInput(window: BrowserWindow): void {
     event.preventDefault();
     getBrowserWorkbenchService().sendShortcut(undefined, command);
   });
+  // The pointer is over a native tab view: the renderer never sees it, so the gesture acts on
+  // that view directly from the cursor position.
+  const navigateNativeUnderPointer = (direction: "back" | "forward"): boolean => {
+    const host = browserTabViewHost;
+    if (!host) return false;
+    const key = host.viewKeyAtScreenPoint(screen.getCursorScreenPoint());
+    return key ? host.command(key, direction === "back" ? "goBack" : "goForward") : false;
+  };
   window.on("swipe", (_event, direction) => {
+    const back = direction === "left";
+    if ((back || direction === "right") && navigateNativeUnderPointer(back ? "back" : "forward")) {
+      return;
+    }
     if (direction === "left") getBrowserWorkbenchService().sendShortcut(undefined, "back", true);
     if (direction === "right")
       getBrowserWorkbenchService().sendShortcut(undefined, "forward", true);
   });
   window.on("app-command", (_event, command) => {
     if (command === "browser-backward") {
+      if (navigateNativeUnderPointer("back")) return;
       getBrowserWorkbenchService().sendShortcut(undefined, "back", true);
     } else if (command === "browser-forward") {
+      if (navigateNativeUnderPointer("forward")) return;
       getBrowserWorkbenchService().sendShortcut(undefined, "forward", true);
     }
   });
@@ -5203,6 +5233,66 @@ if (isMacSafeStorageMigrationWorker) {
       service: getBrowserWorkbenchService(),
       downloads: getBrowserDownloadManager(),
       sessionFromPartition: (partition) => session.fromPartition(partition),
+    });
+    registerBrowserCredentialsIpc({
+      ipcMain,
+      // Only the app's own window; never a page inside a browser tab.
+      isMainWindowSender: (event) =>
+        Boolean(
+          mainWindow &&
+            !mainWindow.isDestroyed() &&
+            event?.sender === mainWindow.webContents &&
+            // The app's own top page, not a frame inside it.
+            (!event.senderFrame || event.senderFrame.parent === null),
+        ),
+      vault: getBrowserVault(),
+      external: defaultExternalBrowserDeps(),
+      sessions: new ImportSessions(),
+      cookieJar: (partition) => {
+        const cookies = session.fromPartition(partition).cookies;
+        return { set: (details) => cookies.set(details) };
+      },
+      getTabContents: (taskId, sessionId) =>
+        getBrowserWorkbenchService().getTabContents(taskId, sessionId),
+      pickPasswordFile: async () => {
+        const options = {
+          title: "Choose a password export",
+          properties: ["openFile" as const],
+          filters: [{ name: "CSV", extensions: ["csv"] }],
+        };
+        const result =
+          mainWindow && !mainWindow.isDestroyed()
+            ? await dialog.showOpenDialog(mainWindow, options)
+            : await dialog.showOpenDialog(options);
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
+      confirm: async ({ message, detail, confirmLabel }) => {
+        const options = {
+          type: "question" as const,
+          message,
+          detail,
+          buttons: [confirmLabel, "Cancel"],
+          defaultId: 1,
+          cancelId: 1,
+        };
+        const result =
+          mainWindow && !mainWindow.isDestroyed()
+            ? await dialog.showMessageBox(mainWindow, options)
+            : await dialog.showMessageBox(options);
+        return result.response === 0;
+      },
+      promptBiometric:
+        process.platform === "darwin" && systemPreferences.canPromptTouchID()
+          ? async (reason) => {
+              try {
+                await systemPreferences.promptTouchID(reason);
+                return true;
+              } catch {
+                return false;
+              }
+            }
+          : null,
+      shredFile: shredFileOnDisk,
     });
     ipcMain.handle(IPC_CHANNELS.BROWSER_WORKBENCH_INSPECT_AREA, async (_event, data: Any) => {
       const rect = data?.rect;

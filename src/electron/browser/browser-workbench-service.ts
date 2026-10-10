@@ -1,4 +1,5 @@
 import * as fs from "fs/promises";
+import { forgetFilledPasswords } from "./credentials/autofill";
 import * as path from "path";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import type { WorkspacePermissions } from "../../shared/types";
@@ -470,6 +471,7 @@ export class BrowserWorkbenchService {
     const tabs = this.browserSessionManager.getTabs?.(input.taskId, sessionId) || [];
     if (tabs.length === 0) {
       this.sessions.delete(key);
+      forgetFilledPasswords(input.taskId, sessionId);
       return result;
     }
     if (result.activeTabClosed && result.activeTabId) {
@@ -1215,6 +1217,11 @@ export class BrowserWorkbenchService {
     return { success: true, result };
   }
 
+  /** The page of a workbench tab, for features the user starts themselves (saved logins). */
+  async getTabContents(taskId: string, sessionId?: unknown): Promise<Any | null> {
+    return this.getWebContents(this.getSession(taskId, sessionId));
+  }
+
   async goBack(taskId: string, sessionId?: unknown): Promise<AnyRecord | null> {
     const session = this.getSession(taskId, sessionId);
     const contents = await this.getWebContents(session);
@@ -1746,11 +1753,24 @@ export class BrowserWorkbenchService {
     });
   }
 
+  private nativeCursorPainter:
+    | ((
+        session: BrowserWorkbenchSession,
+        event: Omit<BrowserWorkbenchCursorEvent, "taskId" | "sessionId" | "at">,
+      ) => boolean)
+    | null = null;
+
+  /** Native tab views draw CoWork's cursor inside the page (the app's overlay sits behind them). */
+  setNativeCursorPainter(painter: BrowserWorkbenchService["nativeCursorPainter"]): void {
+    this.nativeCursorPainter = painter;
+  }
+
   private emitCursor(
     session: BrowserWorkbenchSession | null,
     event: Omit<BrowserWorkbenchCursorEvent, "taskId" | "sessionId" | "at">,
   ): void {
     if (!session || !this.mainWindow || this.mainWindow.isDestroyed?.()) return;
+    if (this.nativeCursorPainter?.(session, event)) return;
     this.mainWindow.webContents.send(IPC_CHANNELS.BROWSER_WORKBENCH_CURSOR, {
       taskId: session.taskId,
       sessionId: session.sessionId,

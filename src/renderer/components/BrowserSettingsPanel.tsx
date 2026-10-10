@@ -9,6 +9,7 @@ import type {
   BrowserSitePermissionEntry,
 } from "../../shared/browser-settings";
 import { useBrowserSettings } from "../hooks/useBrowserSettings";
+import { BrowserImportPanel } from "./BrowserImportPanel";
 
 type HistoryEntry = {
   id: string;
@@ -396,6 +397,8 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
             ))}
           </ul>
         </div>
+
+        {profileId && <BrowserImportPanel workspaceId={profileId} onNotice={showNotice} />}
 
         <div className="settings-field">
           <label>Browsing data</label>

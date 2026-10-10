@@ -32,6 +32,7 @@ export function AdjustPanel({
   textQuote,
   canEditText,
   onChange,
+  onPreviewed,
 }: {
   taskId: string;
   sessionId: string;
@@ -40,6 +41,8 @@ export function AdjustPanel({
   textQuote: string;
   canEditText: boolean;
   onChange: (changes: AdjustChanges) => void;
+  /** The page now shows the edit (or its revert): a still image of the page is out of date. */
+  onPreviewed?: () => void;
 }) {
   const initial = useRef<Record<string, string>>({ ...computedStyle, text: textQuote });
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...initial.current }));
@@ -83,7 +86,8 @@ export function AdjustPanel({
           styles,
           text: textChanged ? next.text : undefined,
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => onPreviewed?.());
     }, 120);
   };
 

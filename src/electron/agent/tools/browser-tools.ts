@@ -1,4 +1,5 @@
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
+import { maskFilledPasswords, passwordRecentlyFilled } from "../../browser/credentials/autofill";
 import * as os from "os";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -134,6 +135,13 @@ interface BrowserUseCloudSessionState {
 }
 
 /** Browser tools whose result carries page content (text, DOM, script output, pixels). */
+const PASSWORD_SENSITIVE_TOOLS = new Set([
+  "browser_screenshot",
+  "browser_evaluate",
+  "browser_storage",
+  "browser_act_batch",
+]);
+
 const BROWSER_PAGE_READ_TOOLS = new Set([
   "browser_navigate",
   "browser_snapshot",
@@ -1974,6 +1982,21 @@ export class BrowserTools {
     // while the user has taken over the tab.
     const drives = this.drivesVisibleWorkbench(toolName, input);
     const sessionId = this.getSessionId(input);
+    // Right after the user fills a saved login, anything that could capture the password
+    // as pixels or by script is held back on that tab.
+    if (
+      PASSWORD_SENSITIVE_TOOLS.has(toolName) &&
+      passwordRecentlyFilled(this.taskId, sessionId || "default")
+    ) {
+      return {
+        success: false,
+        error: "saved_login_filled",
+        message:
+          "The user just filled a saved login on this tab. Screenshots, page scripts and storage " +
+          "reads are unavailable for a couple of minutes so the password is not captured. " +
+          "Continue with other tools, or wait.",
+      };
+    }
     if (drives && this.browserWorkbenchService.isPausedByUser?.(this.taskId, sessionId)) {
       return {
         success: false,
@@ -1999,6 +2022,8 @@ export class BrowserTools {
     } finally {
       if (drives) this.browserWorkbenchService.endDriving?.(this.taskId, sessionId);
     }
+    // A password the user filled from their saved logins never reaches the model.
+    result = maskFilledPasswords(this.taskId, sessionId || "default", result);
     if (BROWSER_PAGE_READ_TOOLS.has(toolName) && result && result.success !== false) {
       // Page text is untrusted: a later agent memory write goes to the inbox (design §7.3).
       const url = typeof result.url === "string" && result.url ? result.url : "browser://page";

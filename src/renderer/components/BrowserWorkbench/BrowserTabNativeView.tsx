@@ -14,6 +14,8 @@ type BrowserTabNativeViewProps = {
   sessionId: string;
   partition: string;
   cover: NativeTabCover;
+  /** Changes when the page changed under a still image: retake it. */
+  freezeNonce?: number;
   onUpdate: (tabId: string, patch: Partial<BrowserTab>) => void;
   onStatus?: (tabId: string, status: { url: string; title: string }) => void;
   onGuardFailed?: (tabId: string) => void;
@@ -53,6 +55,7 @@ export function BrowserTabNativeView({
   sessionId,
   partition,
   cover,
+  freezeNonce = 0,
   onUpdate,
   onStatus,
   onGuardFailed,
@@ -373,7 +376,7 @@ export function BrowserTabNativeView({
     return () => {
       cancelled = true;
     };
-  }, [active, cover]);
+  }, [active, cover, freezeNonce]);
 
   // Leaving (browser closed, task switched): the view stays alive but out of sight.
   useEffect(() => () => hide(), []);

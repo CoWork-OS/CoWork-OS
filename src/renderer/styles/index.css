@@ -3348,11 +3348,24 @@ a,
   }
 }
 
-/* PACT business sign-in card (PactAuthorizationCard.tsx) */
+/* PACT business sign-in card (PactAuthorizationCard.tsx); the scope list is shared with PactSettings. */
 .pact-authorization-purpose {
+  margin: -6px 0 12px;
   font-size: 13px;
+  line-height: 1.45;
   color: var(--color-text-secondary);
-  margin-bottom: 8px;
+}
+
+.pact-authorization-section {
+  margin-bottom: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.pact-authorization-section-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .pact-authorization-scopes {
@@ -3372,18 +3385,83 @@ a,
   color: var(--color-text-primary);
 }
 
+.pact-authorization-card .pact-authorization-scopes {
+  gap: 6px;
+  margin: 0;
+}
+
+.pact-authorization-card .pact-authorization-scopes li {
+  position: relative;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 1px;
+  padding-left: 14px;
+  line-height: 1.4;
+}
+
+.pact-authorization-card .pact-authorization-scopes li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-text-muted);
+}
+
 .pact-authorization-scope-id {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
   color: var(--color-text-muted);
 }
 
+.pact-authorization-caution {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px 0 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #f59e0b 13%, transparent);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pact-authorization-caution svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #d97706;
+}
+
 .pact-authorization-code {
   color: var(--color-text-secondary);
 }
 
+.pact-authorization-code-value {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 .pact-authorization-error {
   color: var(--color-error, #f87171);
+}
+
+.input-request-submit.pact-authorization-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .pact-evidence-note {

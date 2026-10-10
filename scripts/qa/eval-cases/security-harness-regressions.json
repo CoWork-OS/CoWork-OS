@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "csf_9962c722759f2797a5f0725c",
-    "taskId": "csf_9962c722759f2797a5f0725c"
+    "incident": "qa-server-subprocess-policy",
+    "taskId": "qa-server-subprocess-policy"
   },
   "categories": [
     {
@@ -336,6 +336,19 @@
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true,
         "executableTest": "src/electron/agent/tools/__tests__/registry-tool-catalog.test.ts"
+      }
+    },
+    {
+      "id": "qa-server-subprocess-policy-confirmed-fix",
+      "prompt": "Regression guard for QA server subprocesses preserve administrator network policy, backend requirements, fresh task authority, and guarded local listeners: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "qa-server-subprocess-policy",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/qa/__tests__/qa-server-policy.test.ts",
+        "liveTest": "src/electron/agent/qa/__tests__/qa-server-policy-live.test.ts"
       }
     },
     {

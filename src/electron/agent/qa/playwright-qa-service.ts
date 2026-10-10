@@ -15,10 +15,15 @@ import * as net from "net";
 import { BrowserService } from "../browser/browser-service";
 import { Workspace } from "../../../shared/types";
 import {
+  hasEffectiveFilesystemScope,
   resolveWorkspaceFilesystemAccessWithApproval,
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { createSandbox, type ISandbox } from "../sandbox/sandbox-factory";
+import { getLoopbackListenerGuard } from "../sandbox/loopback-listener-guard";
+import { loadPolicies, type AdminPolicies } from "../../admin/policies";
+import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
+import { authorizationFingerprint } from "../../security/authorization-identity";
 import {
   QARun,
   QARunConfig,
@@ -133,6 +138,7 @@ export class PlaywrightQAService {
   private browserService: BrowserService | null = null;
   private serverProcess: ChildProcess | null = null;
   private serverSandbox: ISandbox | null = null;
+  private stopServerProcess: (() => void) | null = null;
   private currentRun: QARun | null = null;
   private eventListeners: Array<(event: QAEvent) => void> = [];
 
@@ -141,6 +147,7 @@ export class PlaywrightQAService {
     private screenshotDir?: string,
     private requestServerCommandApproval?: (command: string, cwd: string) => Promise<boolean>,
     private filesystemApprovalHandlers: WorkspaceFilesystemApprovalHandlers = {},
+    private getCurrentWorkspace?: () => Workspace | undefined,
   ) {}
 
   // -----------------------------------------------------------------------
@@ -547,7 +554,10 @@ export class PlaywrightQAService {
         await this.browserService.close();
         this.browserService = null;
       }
-      if (this.serverProcess && !this.serverProcess.killed) {
+      if (this.stopServerProcess) {
+        this.stopServerProcess();
+        this.stopServerProcess = null;
+      } else if (this.serverProcess && !this.serverProcess.killed) {
         this.serverProcess.kill("SIGTERM");
       }
       this.serverProcess = null;
@@ -586,6 +596,18 @@ export class PlaywrightQAService {
     if (!this.requestServerCommandApproval) {
       throw new Error("QA server commands require an approval context");
     }
+    const policies = loadPolicies();
+    const authorityFingerprint = (currentPolicies: AdminPolicies, workspace = this.workspace) => {
+      return authorizationFingerprint({
+        workspaceId: workspace?.id,
+        workspacePath: workspace?.path,
+        permissions: workspace?.permissions,
+        policyVersion: currentPolicies.version,
+        policyUpdatedAt: currentPolicies.updatedAt,
+        runtime: currentPolicies.runtime,
+      });
+    };
+    const admittedAuthority = authorityFingerprint(policies);
     const approved = await this.requestServerCommandApproval(config.serverCommand, cwd);
     if (!approved) throw new Error("QA server command approval denied");
 
@@ -599,45 +621,114 @@ export class PlaywrightQAService {
     // Spawn server process
     const { command, args } = parseServerCommand(config.serverCommand);
     const requestedSandboxType = this.workspace.permissions.sandboxType || "auto";
-    this.serverSandbox = await createSandbox(this.workspace, requestedSandboxType);
-    const restrictedProfile = this.workspace.permissions.accessSandboxMode !== "danger-full-access";
-    if (restrictedProfile && this.serverSandbox.type === "none") {
-      this.serverSandbox.cleanup();
-      this.serverSandbox = null;
-      throw new Error(
-        "QA server commands require an OS-level sandbox for the active access profile",
-      );
-    }
-
-    const sandboxProcess = this.serverSandbox.spawnProcess?.(command, args, {
-      cwd,
-      // The process sandbox only has a binary network switch; it cannot
-      // enforce the profile's domain allow/deny language. Fail closed for a
-      // scoped domain profile so a dev server cannot use the QA helper as an
-      // unrestricted network tunnel. Browser navigation still applies the
-      // domain policy at the page/request layer.
-      allowNetwork:
-        this.workspace.permissions.network === true &&
-        this.workspace.permissions.accessNetworkMode !== "disabled" &&
-        this.workspace.permissions.accessNetworkMode !== "on-request" &&
-        (this.workspace.permissions.accessDomainRules?.length || 0) === 0,
-      envPassthrough: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR"],
-    });
-    if (!sandboxProcess) {
-      this.serverSandbox.cleanup();
-      this.serverSandbox = null;
-      throw new Error("The selected QA sandbox cannot start a long-running server process");
-    }
+    const sandbox = await createSandbox(this.workspace, requestedSandboxType);
+    let guardLoopback = false;
+    const sandboxProcess = (() => {
+      try {
+        const currentWorkspace = this.getCurrentWorkspace
+          ? this.getCurrentWorkspace()
+          : this.workspace;
+        if (
+          !currentWorkspace ||
+          authorityFingerprint(loadPolicies(), currentWorkspace) !== admittedAuthority
+        ) {
+          throw new Error(
+            "QA server authority changed after command approval; request approval again.",
+          );
+        }
+        // A server-command approval is not an on-request network grant.
+        // Scoped or administrator-denied egress must remain off at this sink.
+        const permissions = this.workspace.permissions;
+        // Approving a server command does not grant on-request network access.
+        const allowNetwork =
+          permissions.accessNetworkMode !== "on-request" &&
+          canEnableSubprocessNetwork(permissions, policies);
+        if (sandbox.type === "none") {
+          const unrestricted =
+            permissions.accessSandboxMode === "danger-full-access" &&
+            permissions.accessApprovalPolicy === "never" &&
+            permissions.unrestrictedFileAccess === true &&
+            permissions.read === true &&
+            permissions.write === true &&
+            permissions.delete === true &&
+            !hasEffectiveFilesystemScope(this.workspace.path, permissions);
+          if (
+            !unrestricted ||
+            !allowNetwork ||
+            policies.runtime.requireSandboxForShell ||
+            !policies.runtime.allowUnsandboxedShell
+          ) {
+            throw new Error(
+              "QA server commands require an OS-level sandbox for the active access profile and administrator policy",
+            );
+          }
+        } else if (!policies.runtime.allowedSandboxTypes.includes(sandbox.type)) {
+          throw new Error(
+            `QA server sandbox type "${sandbox.type}" is blocked by administrator policy`,
+          );
+        }
+        guardLoopback = sandbox.type === "macos" && !allowNetwork;
+        const launched = sandbox.spawnProcess?.(command, args, {
+          cwd,
+          allowNetwork,
+          allowLoopbackListen: guardLoopback,
+          detached: guardLoopback,
+          envPassthrough: ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR"],
+        });
+        if (!launched)
+          throw new Error("The selected QA sandbox cannot start a long-running server process");
+        return launched;
+      } catch (error) {
+        sandbox.cleanup();
+        throw error;
+      }
+    })();
+    this.serverSandbox = sandbox;
     this.serverProcess = sandboxProcess.process;
-    this.serverProcess.once("close", () => {
+    const child = sandboxProcess.process;
+    let unwatch = () => {};
+    let listenerError: Error | undefined;
+    let stopped = false;
+    const release = () => {
+      unwatch();
       sandboxProcess.cleanup();
+    };
+    const stop = (signal: NodeJS.Signals = "SIGTERM") => {
+      if (stopped) return;
+      stopped = true;
+      if (guardLoopback && Number.isInteger(child.pid) && child.pid! > 0) {
+        try {
+          process.kill(-child.pid!, signal);
+        } catch {
+          child.kill(signal);
+        }
+      } else if (!child.killed) child.kill(signal);
+      release();
+    };
+    this.stopServerProcess = stop;
+    child.once("close", () => {
+      stopped = true;
+      release();
     });
-    this.serverProcess.once("error", () => {
-      sandboxProcess.cleanup();
+    child.once("error", () => {
+      stopped = true;
+      release();
     });
-
+    if (guardLoopback) {
+      if (!Number.isInteger(child.pid) || child.pid! <= 0) {
+        stop();
+        throw new Error("QA server process cannot be guarded for loopback-only listening");
+      }
+      unwatch = getLoopbackListenerGuard().watch(child.pid!, (violation) => {
+        listenerError = new Error(
+          `QA server listened on a non-loopback address: ${violation.address}`,
+        );
+        stop("SIGKILL");
+      });
+    }
     // Wait for port to be ready
     const ready = await waitForPort(port, timeout);
+    if (listenerError) throw listenerError;
     if (!ready) {
       throw new Error(
         `Dev server did not start on port ${port} within ${timeout}ms. ` +

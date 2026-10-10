@@ -11,6 +11,8 @@ const repo = path.resolve(__dirname, "../..");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-approval-smoke-"));
 process.env.COWORK_USER_DATA_DIR = path.join(root, "profile");
 process.env.COWORK_ACCESS_POLICY_VERSION = "boundary";
+// Queue scenarios explicitly exercise the supported compatibility surface.
+process.env.COWORK_APPROVAL_PROMPTS = "on";
 const dist = path.join(repo, "dist", process.env.COWORK_SMOKE_DIST || "electron");
 const fromBuild = (relative) => require(path.join(dist, relative));
 let daemon;
@@ -24,9 +26,8 @@ async function main() {
     WorkspaceStore: WorkspaceRepository,
     TaskStore: TaskRepository,
     ApprovalStore: ApprovalRepository,
-  } = fromBuild(
-    "electron/database/repositories.js",
-  );
+    InputRequestStore: InputRequestRepository,
+  } = fromBuild("electron/database/repositories.js");
   const { AgentDaemon } = fromBuild("electron/agent/daemon.js");
   const { ToolRegistry } = fromBuild("electron/agent/tools/registry.js");
   const { PermissionSettingsManager } = fromBuild(
@@ -64,6 +65,46 @@ async function main() {
     return requestApproval(...args);
   };
 
+  // Durable rows precede the in-memory waiter. Respond only after both exist,
+  // otherwise the broker treats the response as a persisted-task restart.
+  const waitForPending = async (taskId, count = 1) => {
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
+      const pending = approvals.findPendingByTaskId(taskId);
+      if (
+        pending.length === count &&
+        pending.every((item) => daemon.pendingApprovals.has(item.id))
+      ) {
+        return pending;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(
+      `Timed out waiting for ${count} live approvals for ${taskId}: ${JSON.stringify({ pending: approvals.findPendingByTaskId(taskId), liveIds: [...daemon.pendingApprovals.keys()], events: daemon.getTaskEvents(taskId).slice(-5) })}`,
+    );
+  };
+  const withShellConsent = async (taskId, operation) => {
+    const result = operation();
+    // Attach the rejection handler immediately while the broker records consent.
+    const settled = result.then(
+      (value) => ({ value }),
+      (error) => ({ error }),
+    );
+    const pending = await Promise.race([
+      waitForPending(taskId),
+      settled.then((outcome) => {
+        throw (
+          outcome.error ||
+          new Error(`Shell completed without requesting consent: ${JSON.stringify(outcome.value)}`)
+        );
+      }),
+    ]);
+    assert.equal(pending[0].type, "run_command");
+    await daemon.respondToApproval(pending[0].id, true, "allow_once");
+    const outcome = await settled;
+    if (outcome.error) throw outcome.error;
+    return outcome.value;
+  };
+
   for (const id of ["ask_for_approval", "approve_for_me", "full_access"]) {
     const task = makeTask(id);
     const registry = new ToolRegistry(
@@ -89,38 +130,49 @@ async function main() {
     assert.equal(fs.readFileSync(note, "utf8"), "Edited note");
     const directory = await registry.executeTool("create_directory", { path: `${id}-artifacts` });
     assert.equal(directory.success, true, JSON.stringify(directory));
+    assert.equal(approvalCalls, before, `${id} file operations requested approval`);
     // The real shell handler must use a functioning OS sandbox for bounded
     // profiles. This intentionally fails on hosts without a supported backend.
     if (id !== "full_access") {
-      const command = await registry.executeTool("run_command", {
-        command: `printf 'sandboxed command' > ${id}-command-proof.txt`,
-      });
+      const command = await withShellConsent(task.id, () =>
+        registry.executeTool("run_command", {
+          command: `printf 'sandboxed command' > ${id}-command-proof.txt`,
+        }),
+      );
       assert.equal(command.success, true, JSON.stringify(command));
       assert.equal(
         fs.readFileSync(path.join(session, `${id}-command-proof.txt`), "utf8"),
         "sandboxed command",
       );
       const siblingProof = path.join(path.dirname(session), `${id}-sibling-proof.txt`);
-      const siblingAttempt = await registry.executeTool("run_command", {
-        command: `printf 'escape' > ../${id}-sibling-proof.txt`,
-      });
+      const siblingAttempt = await withShellConsent(task.id, () =>
+        registry.executeTool("run_command", {
+          command: `printf 'escape' > ../${id}-sibling-proof.txt`,
+        }),
+      );
       assert.equal(siblingAttempt.success, false, JSON.stringify(siblingAttempt));
       assert.equal(fs.existsSync(siblingProof), false);
     }
-    assert.equal(approvalCalls, before, `${id} requested approval`);
+    const expectedApprovals = id === "full_access" ? 0 : 2;
+    assert.equal(approvalCalls - before, expectedApprovals, `${id} shell consent count`);
     assert.equal(
       db.prepare("SELECT count(*) n FROM approvals WHERE task_id = ?").get(task.id).n,
-      0,
+      expectedApprovals,
     );
     assert.equal(taskRepo.findById(task.id).status, "executing");
     assert.equal(
-      daemon.getTaskEvents(task.id).filter((event) => event.type.startsWith("approval_")).length,
-      0,
+      daemon
+        .getTaskEvents(task.id)
+        .filter(
+          (event) =>
+            (event.legacyType || event.payload?.legacyType || event.type) === "approval_requested",
+        ).length,
+      expectedApprovals,
     );
     results.push({
       scenario: `${id}: registered temporary-session create, update, read, edit, mkdir${id !== "full_access" ? " and sandboxed command" : ""}`,
       passed: true,
-      approvalCalls: 0,
+      approvalCalls: expectedApprovals,
     });
   }
 
@@ -133,16 +185,6 @@ async function main() {
       path: path.join(root, "outside.md"),
       operation: "write",
     },
-  };
-  // The permission path awaits storage reads before it records an approval, so wait for
-  // the pending rows rather than expecting them when the call returns.
-  const waitForPending = async (taskId, count = 1) => {
-    let pending = approvals.findPendingByTaskId(taskId);
-    for (let attempt = 0; attempt < 200 && pending.length < count; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      pending = approvals.findPendingByTaskId(taskId);
-    }
-    return pending;
   };
   const decision = daemon.authorizeToolAction(externalTask.id, external);
   const pending = await waitForPending(externalTask.id);
@@ -213,7 +255,7 @@ async function main() {
   results.push({ scenario: "pending approval invalidated when authority narrows", passed: true });
 
   const endedTask = makeTask("ask_for_approval");
-  const endedDecision = daemon.authorizeToolAction(endedTask.id, external);
+  const endedDecision = daemon.authorizeToolAction(endedTask.id, external).catch(() => false);
   const endedApproval = (await waitForPending(endedTask.id))[0];
   assert.ok(endedApproval);
   taskRepo.update(endedTask.id, { status: "completed" });
@@ -256,16 +298,59 @@ async function main() {
   assert.equal(approvals.findPendingByTaskId(cancelledTask.id).length, 0);
   results.push({ scenario: "cancelled execution cannot retain a pending approval", passed: true });
 
+  // The default UI routes consent through inline input rather than the queue.
+  process.env.COWORK_APPROVAL_PROMPTS = "off";
+  const inlineTask = makeTask("ask_for_approval");
+  const inlineDecision = daemon.authorizeToolAction(inlineTask.id, external);
+  const inlineSettled = inlineDecision.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+  const inputs = new InputRequestRepository(db);
+  let inlineInput;
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    inlineInput = inputs.findPendingByTaskId(inlineTask.id)[0];
+    if (inlineInput && daemon.pendingInputRequests.has(inlineInput.id)) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(
+    inlineInput && daemon.pendingInputRequests.has(inlineInput.id),
+    "Inline consent waiter missing",
+  );
+  const inlineApproval = approvals.findPendingByTaskId(inlineTask.id)[0];
+  assert.ok(inlineApproval);
+  await daemon.respondToInputRequest({
+    requestId: inlineInput.id,
+    taskId: inlineTask.id,
+    status: "submitted",
+    answers: { approval_decision: { optionLabel: "Allow once" } },
+  });
+  const inlineOutcome = await inlineSettled;
+  if (inlineOutcome.error) throw inlineOutcome.error;
+  assert.equal(inlineOutcome.value, true);
+  assert.equal(approvals.findById(inlineApproval.id).status, "approved");
+  assert.equal(daemon.pendingInputRequests.has(inlineInput.id), false);
+  results.push({
+    scenario: "default inline consent resolves its bound durable approval",
+    passed: true,
+  });
+
   console.log(
     JSON.stringify({ runtime: process.versions.electron ? "electron" : "node", results }, null, 2),
   );
 }
+
+const watchdog = setTimeout(() => {
+  console.error("Approval boundary smoke exceeded its 60-second deadline", JSON.stringify(results));
+  process.exit(1);
+}, 60_000);
 
 main()
   .then(async () => {
     await daemon?.shutdown();
     manager?.close();
     fs.rmSync(root, { recursive: true, force: true });
+    clearTimeout(watchdog);
     process.exit(0);
   })
   .catch(async (error) => {
@@ -273,5 +358,6 @@ main()
     await daemon?.shutdown().catch(() => {});
     manager?.close();
     fs.rmSync(root, { recursive: true, force: true });
+    clearTimeout(watchdog);
     process.exit(1);
   });

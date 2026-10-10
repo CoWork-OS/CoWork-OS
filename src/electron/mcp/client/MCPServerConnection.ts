@@ -67,6 +67,22 @@ export interface MCPConnectorEvent {
   payload?: Record<string, Any>;
 }
 
+/**
+ * Servers that closed when probed with `server/discover`, keyed by how they are launched
+ * or reached. Kept for the app's lifetime so reconnects go straight to `initialize`.
+ */
+const legacyOnlyServers = new Set<string>();
+
+function legacyOnlyServerKey(config: MCPServerConfig): string {
+  return JSON.stringify([
+    config.id,
+    config.transport,
+    config.command ?? null,
+    config.args ?? null,
+    config.url ?? null,
+  ]);
+}
+
 export class MCPServerConnection extends EventEmitter {
   private config: MCPServerConfig;
   private transport: MCPTransport | null = null;
@@ -403,7 +419,11 @@ export class MCPServerConnection extends EventEmitter {
 
     logger.debug(`Initializing connection to ${this.config.name}`);
 
-    if (this.config.transport === "stdio" || this.config.transport === "streamable-http") {
+    const legacyKey = legacyOnlyServerKey(this.config);
+    if (
+      (this.config.transport === "stdio" || this.config.transport === "streamable-http") &&
+      !legacyOnlyServers.has(legacyKey)
+    ) {
       this.transport.setProtocolVersion?.(MODERN_PROTOCOL_VERSION);
       try {
         const discovered = await this.transport.sendRequest("server/discover", undefined, {
@@ -426,8 +446,19 @@ export class MCPServerConnection extends EventEmitter {
       } catch (error) {
         logger.debug(`Modern MCP discovery unavailable for ${this.config.name}:`, error);
       }
-      this.transport.setProtocolVersion?.(PROTOCOL_VERSION);
+      if (!this.transport.isConnected()) {
+        // A strict server (one that requires `initialize` first, as the 2025 spec says)
+        // exits on the unknown discovery request. Start it again for the classic handshake,
+        // and skip discovery for it from now on.
+        legacyOnlyServers.add(legacyKey);
+        logger.info(`${this.config.name} closed on MCP discovery; reconnecting with initialize.`);
+        await this.transport.disconnect().catch(() => {});
+        this.transport = this.createTransport();
+        this.setupTransportHandlers();
+        await this.transport.connect();
+      }
     }
+    this.transport.setProtocolVersion?.(PROTOCOL_VERSION);
 
     const result = await this.transport!.sendRequest(MCP_METHODS.INITIALIZE, {
       protocolVersion: PROTOCOL_VERSION,

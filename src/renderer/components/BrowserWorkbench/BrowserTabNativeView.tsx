@@ -81,7 +81,7 @@ export function BrowserTabNativeView({
 
   const hide = useCallback(() => {
     void window.electronAPI
-      .layoutBrowserTabView?.({ ...keyRef.current, tabId: null, bounds: null })
+      .layoutBrowserTabView?.({ ...keyRef.current, bounds: null })
       .catch(() => undefined);
   }, []);
 
@@ -187,6 +187,7 @@ export function BrowserTabNativeView({
         onUpdate(tab.id, {
           url: state.url,
           title: state.title || tabRef.current.title,
+          favicon: state.favicon || tabRef.current.favicon,
           canGoBack: state.canGoBack,
           canGoForward: state.canGoForward,
           loading: state.loading,
@@ -309,15 +310,16 @@ export function BrowserTabNativeView({
   useEffect(() => {
     if (!showing) return;
     let frame = 0;
+    let lastSentAt = 0;
     const send = (bounds: Bounds | null) => {
-      if (sameBounds(bounds, lastBoundsRef.current)) return;
+      const now = Date.now();
+      // Unchanged bounds are re-sent once a second, so the main process can put back a
+      // view whose visibility drifted (it applies every show).
+      if (sameBounds(bounds, lastBoundsRef.current) && now - lastSentAt < 1000) return;
+      lastSentAt = now;
       lastBoundsRef.current = bounds;
       void window.electronAPI
-        .layoutBrowserTabView?.({
-          ...keyRef.current,
-          tabId: bounds ? keyRef.current.tabId : null,
-          bounds,
-        })
+        .layoutBrowserTabView?.({ ...keyRef.current, bounds })
         .catch(() => undefined);
     };
     const measure = () => {

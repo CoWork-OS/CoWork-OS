@@ -701,6 +701,11 @@ function attachBrowserWorkbenchGuest(guest: Electron.WebContents, partition: str
     recordHistory: createBrowserHistoryRecorder(() => dbManager.getDatabase(), profileKey),
     isDeveloperMode: () => BrowserSettingsManager.loadSettings().developerMode,
     unloadGuard: getBrowserUnloadGuard(),
+    focusApp: (contents) => {
+      if (!contents.hostWebContents && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.focus();
+      }
+    },
     saveToWorkspace: (contents, url) => {
       getBrowserDownloadManager().requestWorkspaceSave(contents.id, url);
       contents.downloadURL(url);

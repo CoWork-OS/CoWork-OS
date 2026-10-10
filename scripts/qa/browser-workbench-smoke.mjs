@@ -809,6 +809,8 @@ try {
     const after = await guestFor("/page?n=1");
     await guestFor("/page?n=3");
     if (engine === "native") {
+      await sleep(1500);
+      await windowCapture("window-reopened");
       assert.equal(after.id, before.id, "same page view reattached");
       assert.equal(await inGuest(after.id, "window.__loadedAt"), loadedAt, "page not reloaded");
     }

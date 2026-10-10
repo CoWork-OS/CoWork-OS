@@ -34,6 +34,8 @@ export interface BrowserTabViewState {
   reused: boolean;
   url: string;
   title: string;
+  /** The page's last reported favicon (a reattached tab shows it again). */
+  favicon?: string;
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
@@ -96,6 +98,7 @@ interface TabViewRecord {
   contents: Any;
   /** Read once: a destroyed webContents throws on property access. */
   webContentsId: number;
+  favicon?: string;
   lastUsed: number;
   visible: boolean;
 }
@@ -157,6 +160,7 @@ export class BrowserTabViewHost {
     const existing = this.get(key);
     if (existing && !existing.contents.isDestroyed?.()) {
       existing.lastUsed = Date.now();
+      this.ensureAttached(existing);
       const state = this.state(existing, true);
       await this.deps.register({
         ...key,
@@ -283,7 +287,8 @@ export class BrowserTabViewHost {
 
   /**
    * Show one tab of a session at these window-relative bounds (CSS pixels of the
-   * app window) and hide the session's other views. Null bounds hide them all.
+   * app window) and hide the session's other views. Null bounds hide that tab only,
+   * or every view of the session when tabId is null too.
    */
   layout(input: {
     taskId: string;
@@ -296,8 +301,14 @@ export class BrowserTabViewHost {
     const prefix = sessionKey(input.taskId, input.sessionId);
     for (const record of this.records.values()) {
       if (sessionKey(record.key.taskId, record.key.sessionId) !== prefix) continue;
+      // Hiding one tab (null bounds) leaves the session's other views as they are: a tab
+      // that unmounts or gets covered must not hide the one now shown.
+      if (input.bounds === null && input.tabId !== null && record.key.tabId !== input.tabId) {
+        continue;
+      }
       const show = input.bounds !== null && record.key.tabId === input.tabId;
       if (show && input.bounds) {
+        this.ensureAttached(record);
         const bounds = {
           x: Math.round(input.bounds.x * zoom),
           y: Math.round(input.bounds.y * zoom),
@@ -307,12 +318,15 @@ export class BrowserTabViewHost {
         record.view.setBounds(bounds);
         record.lastUsed = Date.now();
       }
-      if (record.visible !== show) {
-        record.visible = show;
-        record.view.setVisible?.(show);
-        // A view hidden since creation may not have painted yet: ask for a frame.
-        if (show) record.contents.invalidate?.();
+      // Always applied (not only on change): the renderer re-sends while shown, so a view
+      // whose visibility drifted from what was last recorded is corrected on the next frame.
+      if (show) {
+        if (!record.visible) record.contents.invalidate?.();
+        record.view.setVisible?.(true);
+      } else if (record.visible) {
+        record.view.setVisible?.(false);
       }
+      record.visible = show;
     }
   }
 
@@ -358,8 +372,16 @@ export class BrowserTabViewHost {
       url: reused ? String(contents.getURL?.() || "") : "",
       title: reused ? String(contents.getTitle?.() || "") : "",
       loading: reused ? Boolean(contents.isLoading?.()) : false,
+      ...(reused && record.favicon ? { favicon: record.favicon } : {}),
       ...history(contents),
     };
+  }
+
+  /** Put the view back in the window if it is not a child of it (window replaced, removed). */
+  private ensureAttached(record: TabViewRecord): void {
+    const contentView = this.deps.getWindow()?.contentView;
+    if (!contentView?.children || contentView.children.includes(record.view)) return;
+    contentView.addChildView(record.view);
   }
 
   private evictBeyondCap(): void {
@@ -421,7 +443,9 @@ export class BrowserTabViewHost {
       status();
     });
     contents.on("page-favicon-updated", (_event: Any, favicons: string[]) => {
-      emit({ type: "favicon", favicons: Array.isArray(favicons) ? favicons.slice(0, 8) : [] });
+      const list = Array.isArray(favicons) ? favicons.slice(0, 8) : [];
+      record.favicon = list.find((value) => /^https?:|^data:image\//.test(String(value)));
+      emit({ type: "favicon", favicons: list });
     });
     contents.on("did-start-loading", () =>
       emit({ type: "loading", loading: true, ...history(contents) }),

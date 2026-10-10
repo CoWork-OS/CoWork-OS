@@ -120,6 +120,17 @@ describe("BrowserTabViewHost", () => {
     expect(children.map((view) => view.visible)).toEqual([false, true]);
     expect(children[1].bounds).toEqual({ x: 10, y: 20, width: 300, height: 200 });
     expect(children[1].webContents.invalidate).toHaveBeenCalled();
+    // Hiding another tab leaves the shown one visible.
+    host.layout({ taskId: "t", sessionId: "s", tabId: "a", bounds: null });
+    expect(children.map((view) => view.visible)).toEqual([false, true]);
+    host.layout({ taskId: "t", sessionId: "s", tabId: "b", bounds: null });
+    expect(children.map((view) => view.visible)).toEqual([false, false]);
+    host.layout({
+      taskId: "t",
+      sessionId: "s",
+      tabId: "b",
+      bounds: { x: 1, y: 1, width: 5, height: 5 },
+    });
     host.hideSession("t", "s");
     expect(children.map((view) => view.visible)).toEqual([false, false]);
   });

@@ -606,10 +606,12 @@ export function GenericApprovalDialog({
             : "session-approval-card"
         }
       >
-        <div className="session-approval-icon-wrap" aria-hidden="true">
-          <span className="session-approval-icon">{iconForType(approval.type)}</span>
+        <div className="session-approval-heading">
+          <span className="session-approval-icon" aria-hidden="true">
+            {iconForType(approval.type)}
+          </span>
+          <h3 className="session-approval-title">{titleForApproval(approval.type, toolName)}</h3>
         </div>
-        <h3 className="session-approval-title">{titleForApproval(approval.type, toolName)}</h3>
         <p className="session-approval-prompt">{description}</p>
 
         {rows.length > 0 && (
@@ -683,21 +685,20 @@ export function GenericApprovalDialog({
               </div>
             </div>
 
-            {hasAdvancedScopes ? (
-              <button
-                type="button"
-                className="session-approval-approve-all-link"
-                aria-expanded={showAdvancedScopes}
-                onClick={() => {
-                  setShowAdvancedScopes(!showAdvancedScopes);
-                  setSelectedScope("once");
-                }}
-              >
-                {showAdvancedScopes ? "Hide advanced rules" : "Advanced permission rules"}
-              </button>
-            ) : null}
-
             <div className="session-approval-actions session-approval-actions--scoped">
+              {hasAdvancedScopes ? (
+                <button
+                  type="button"
+                  className="session-approval-approve-all-link"
+                  aria-expanded={showAdvancedScopes}
+                  onClick={() => {
+                    setShowAdvancedScopes(!showAdvancedScopes);
+                    setSelectedScope("once");
+                  }}
+                >
+                  {showAdvancedScopes ? "Hide advanced rules" : "Advanced permission rules"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="session-approval-btn-deny"

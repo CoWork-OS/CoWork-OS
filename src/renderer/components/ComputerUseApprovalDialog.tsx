@@ -43,12 +43,14 @@ export function ComputerUseApprovalDialog({
   return (
     <div className="session-approval-overlay" role="dialog" aria-modal="true">
       <div className="session-approval-card session-approval-card--computer-use">
-        <div className="session-approval-icon" aria-hidden="true">
-          🖥️
+        <div className="session-approval-heading">
+          <span className="session-approval-icon" aria-hidden="true">
+            🖥️
+          </span>
+          <h3 className="session-approval-title">Computer use — app access</h3>
         </div>
 
         <div className="session-approval-body">
-          <h3 className="session-approval-title">Computer use — app access</h3>
           <p className="session-approval-prompt">{approval.description}</p>
 
           <dl className="session-approval-details">
@@ -90,7 +92,7 @@ export function ComputerUseApprovalDialog({
             <p className="session-approval-sentinel-warning">{d.sentinelWarning}</p>
           ) : null}
 
-          <p className="session-approval-footer-hint session-approval-footer-hint--center">
+          <p className="session-approval-footer-hint">
             Grants apply only for this computer-use session. Press{" "}
             <kbd className="session-approval-kbd">Esc</kbd> during control to stop.
           </p>

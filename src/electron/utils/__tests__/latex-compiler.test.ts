@@ -187,6 +187,63 @@ describe("latex compiler", () => {
     },
   );
 
+  it.runIf(process.platform === "darwin").each(["/var", "/tmp"])(
+    "accepts the macOS %s system alias for approved source and output paths",
+    async (aliasRoot) => {
+      const lexicalWorkspace = await fs.mkdtemp(
+        path.join(aliasRoot === "/var" ? os.tmpdir() : aliasRoot, "cowork-latex-alias-"),
+      );
+      workspaces.push(lexicalWorkspace);
+      const workspace = await fs.realpath(lexicalWorkspace);
+      expect(workspace).toBe(`/private${lexicalWorkspace}`);
+      await fs.writeFile(path.join(workspace, "paper.tex"), "hello");
+      const execute = vi.fn(async (command, args = [], options) => {
+        if (command === "which") return ok();
+        expect(options?.cwd).toBe(workspace);
+        const scratch = args[args.indexOf("-output-directory") + 1];
+        await fs.writeFile(path.join(scratch, "paper.pdf"), "%PDF-1.4");
+        return ok();
+      });
+      const factory = sandboxFor(execute);
+      const result = await compileLatex({
+        workspacePath: lexicalWorkspace,
+        sourcePath: path.join(lexicalWorkspace, "paper.tex"),
+        outputPath: path.join(lexicalWorkspace, "paper.pdf"),
+        engine: "pdflatex",
+        allowExternalPaths: true,
+        sandboxFactory: factory,
+      });
+      expect(result.success, result.diagnostic).toBe(true);
+      expect(result.sourcePath).toBe(path.join(workspace, "paper.tex"));
+      expect(result.pdfPath).toBe(path.join(workspace, "paper.pdf"));
+      const policy = factory.mock.calls[0][0];
+      expect(evaluateWorkspaceFilesystemAccess(policy, workspace, "read").decision).toBe("allow");
+      expect(evaluateWorkspaceFilesystemAccess(policy, workspace, "write").decision).toBe("deny");
+      expect(await fs.readFile(result.pdfPath, "utf8")).toBe("%PDF-1.4");
+    },
+  );
+
+  it("rejects a PDF alias substituted before caller authorization is rechecked", async () => {
+    const workspace = await makeWorkspace();
+    const outside = await makeWorkspace();
+    const destination = path.join(outside, "secret.pdf");
+    await fs.writeFile(destination, "unchanged");
+    await fs.writeFile(path.join(workspace, "paper.tex"), "hello");
+    await fs.symlink(destination, path.join(workspace, "paper.pdf"));
+    const factory = vi.fn();
+    const result = await compileLatex({
+      workspacePath: workspace,
+      sourcePath: path.join(workspace, "paper.tex"),
+      outputPath: path.join(workspace, "paper.pdf"),
+      allowExternalPaths: true,
+      sandboxFactory: factory,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("output path changed after authorization");
+    expect(factory).not.toHaveBeenCalled();
+    expect(await fs.readFile(destination, "utf8")).toBe("unchanged");
+  });
+
   it("rejects a source alias substituted after caller authorization", async () => {
     const workspace = await makeWorkspace();
     const outside = await makeWorkspace();

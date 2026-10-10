@@ -6762,6 +6762,8 @@ export function App() {
       returnOnAccepted?: boolean;
       /** Send exactly this text (an approved answer action), never a rewritten reply. */
       verbatim?: boolean;
+      /** Where an approved answer action came from; shown to the model and in the timeline. */
+      surfaceOrigin?: "answer" | "page";
     },
   ) => {
     if (!selectedTaskId) return;

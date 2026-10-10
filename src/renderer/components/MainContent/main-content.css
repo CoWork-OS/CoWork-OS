@@ -6438,6 +6438,16 @@ button.collab-timeline-thought-agent:hover {
   background: var(--color-bg-secondary);
 }
 
+/* A message the user sent by approving an answer's action (SurfaceActions). */
+.chat-message.user-message .user-message-surface-origin {
+  align-self: flex-end;
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
 .inline-html-loading,
 .inline-html-error {
   padding: 16px;

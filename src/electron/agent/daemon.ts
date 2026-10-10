@@ -686,6 +686,7 @@ type DaemonFollowUpOptions = Pick<
   | "senderLabel"
   | "inReplyToMessageId"
   | "inReplyToTaskId"
+  | "surfaceOrigin"
 > & {
   /** Return to the renderer once the follow-up is durably admitted, not after provider completion. */
   returnOnAccepted?: boolean;
@@ -16394,6 +16395,9 @@ export class AgentDaemon extends EventEmitter {
           : {}),
         ...(integrationMentions && integrationMentions.length > 0 ? { integrationMentions } : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+        ...(effectiveOptions?.surfaceOrigin
+          ? { surfaceOrigin: effectiveOptions.surfaceOrigin }
+          : {}),
         ...(effectiveOptions?.queuedAttachmentRefs?.length
           ? { queuedAttachmentRefs: effectiveOptions.queuedAttachmentRefs }
           : {}),
@@ -16421,6 +16425,7 @@ export class AgentDaemon extends EventEmitter {
         deliveryMode,
         effectiveOptions?.inReplyToMessageId,
         effectiveOptions?.inReplyToTaskId,
+        effectiveOptions?.surfaceOrigin,
       );
       // queueFollowUp snapshots the pending item; include that row in the return
       // boundary so the accepted queue item survives an immediate restart.
@@ -16489,6 +16494,9 @@ export class AgentDaemon extends EventEmitter {
           ? { integrationMentions: effectiveOptions.integrationMentions }
           : {}),
         ...(quotedAssistantMessage ? { quotedAssistantMessage } : {}),
+        ...(effectiveOptions?.surfaceOrigin
+          ? { surfaceOrigin: effectiveOptions.surfaceOrigin }
+          : {}),
         ...(effectiveOptions?.queuedAttachmentRefs?.length
           ? { queuedAttachmentRefs: effectiveOptions.queuedAttachmentRefs }
           : {}),
@@ -16642,6 +16650,7 @@ export class AgentDaemon extends EventEmitter {
           senderLabel: effectiveOptions?.senderLabel,
           inReplyToMessageId: effectiveOptions?.inReplyToMessageId,
           inReplyToTaskId: effectiveOptions?.inReplyToTaskId,
+          surfaceOrigin: effectiveOptions?.surfaceOrigin,
           onAccepted: onAgentMessageAccepted ?? onQueuedUserFollowUpAccepted,
           onProviderDispatchStarted: onQueuedUserFollowUpProviderDispatchStarted,
           onProviderDispatchCompleted: onQueuedUserFollowUpProviderDispatchCompleted,

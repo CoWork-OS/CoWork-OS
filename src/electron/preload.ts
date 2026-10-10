@@ -3304,6 +3304,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
+      surfaceOrigin?: "answer" | "page";
     },
   ) => {
     const validatedImages = validateSendMessageAttachments(images);
@@ -3323,6 +3324,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ...(options && Object.prototype.hasOwnProperty.call(options, "integrationMentions")
         ? { integrationMentions: options.integrationMentions ?? [] }
         : {}),
+      ...(options?.surfaceOrigin ? { surfaceOrigin: options.surfaceOrigin } : {}),
     });
   },
 
@@ -6919,6 +6921,7 @@ export interface ElectronAPI {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
+      surfaceOrigin?: "answer" | "page";
     },
   ) => Promise<{
     queued: boolean;

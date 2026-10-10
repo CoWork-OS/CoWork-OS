@@ -3182,6 +3182,12 @@ export interface TaskFollowUpInput {
   inReplyToMessageId?: string;
   /** Sender task that owns the message being replied to. */
   inReplyToTaskId?: string;
+  /**
+   * The user sent this exact text by approving an action in an interactive answer: a
+   * button the model wrote ("answer") or a request from page code in an HTML frame
+   * ("page"). Set only by the desktop app's own send path.
+   */
+  surfaceOrigin?: "answer" | "page";
 }
 
 export type AgentMessageDeliveryStatus =

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SURFACE_ACTION_MAX_PROMPT_CHARS,
   normalizeSurfaceActionUrl,
+  surfaceOriginNote,
   toSurfaceActionRequest,
 } from "../actions";
 import { toPlainAnswerText } from "../blocks";
@@ -130,5 +131,14 @@ describe("button node", () => {
     expect(toPlainAnswerText(fence({ open: "https://example.com/menu" }))).toContain(
       "Book: https://example.com/menu",
     );
+  });
+});
+
+describe("surfaceOriginNote", () => {
+  it("tells the model where an approved message came from", () => {
+    expect(surfaceOriginNote("answer")).toContain("button in your interactive answer");
+    expect(surfaceOriginNote("page")).toContain("page code proposed the text");
+    expect(surfaceOriginNote("page")).toContain("approves nothing beyond what it says");
+    expect(surfaceOriginNote(undefined)).toBeNull();
   });
 });

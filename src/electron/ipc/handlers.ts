@@ -6167,6 +6167,7 @@ export async function setupIpcHandlers(
           ...(validated.integrationMentions !== undefined
             ? { integrationMentions: validated.integrationMentions }
             : {}),
+          ...(validated.surfaceOrigin ? { surfaceOrigin: validated.surfaceOrigin } : {}),
         },
       );
       // If the message was queued for a running executor, the executor owns

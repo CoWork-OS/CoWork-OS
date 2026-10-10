@@ -264,6 +264,14 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
           ...(permissions?.read === false
             ? []
             : [{ path: workspacePath, access: "read" as const }]),
+          ...[...(permissions?.accessWorkspaceRoots || []), ...(permissions?.allowedPaths || [])]
+            .map((root) => resolveAccessControlledPath(workspacePath, root))
+            .filter(
+              (root) =>
+                evaluateWorkspaceFilesystemAccess(policyWorkspace, root, "read").decision ===
+                "allow",
+            )
+            .map((root) => ({ path: root, access: "read" as const })),
           ...(permissions?.accessFilesystemRules || []).map((rule) => ({
             path: resolveAccessControlledPath(workspacePath, rule.path),
             access: rule.access === "write" ? ("read" as const) : rule.access,
@@ -300,7 +308,7 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
     let compilerSourcePath = sourcePath;
     if (
       !isPathInsideWorkspace(sourcePath, workspacePath) &&
-      evaluateWorkspaceFilesystemAccess(policyWorkspace, sourcePath, "read").decision !== "allow"
+      evaluateWorkspaceFilesystemAccess(sandboxWorkspace, sourcePath, "read").decision !== "allow"
     ) {
       compilerSourcePath = path.join(scratchPath, path.basename(sourcePath));
       const source = await fs.open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);

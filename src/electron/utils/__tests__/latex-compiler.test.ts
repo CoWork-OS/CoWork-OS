@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
+import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 import { createSandbox } from "../../agent/sandbox/sandbox-factory";
 import type { CompileLatexParams, LatexEngine } from "../document-generators/latex-compiler";
 import type { ISandbox } from "../../agent/sandbox/sandbox-factory";
@@ -258,6 +259,64 @@ describe("latex compiler", () => {
     expect(result.success, result.diagnostic).toBe(true);
   });
 
+  it.each(["accessWorkspaceRoots", "allowedPaths"] as const)(
+    "retains %s read grants without granting external writes",
+    async (rootField) => {
+      const workspace = await makeWorkspace();
+      const external = await makeWorkspace();
+      await fs.writeFile(path.join(external, "paper.tex"), "hello");
+      const execute = vi.fn(async (command, args = []) => {
+        if (command === "which") return ok();
+        const scratch = args[args.indexOf("-output-directory") + 1];
+        await fs.writeFile(path.join(scratch, "paper.pdf"), "%PDF-1.4");
+        return ok();
+      });
+      const factory = sandboxFor(execute);
+      const result = await compileLatex({
+        workspacePath: workspace,
+        sourcePath: path.join(external, "paper.tex"),
+        outputPath: "paper.pdf",
+        engine: "pdflatex",
+        allowExternalPaths: true,
+        sandboxFactory: factory,
+        workspacePermissions: {
+          read: true,
+          write: true,
+          delete: true,
+          shell: true,
+          network: false,
+          [rootField]: [external],
+          ...(rootField === "accessWorkspaceRoots"
+            ? {
+                accessFilesystemRules: [
+                  { path: path.join(external, "denied"), access: "deny" as const },
+                ],
+              }
+            : {}),
+        },
+      });
+      expect(result.success, result.diagnostic).toBe(true);
+      const policy = factory.mock.calls[0][0];
+      expect(
+        evaluateWorkspaceFilesystemAccess(policy, path.join(external, "chapter.tex"), "read")
+          .decision,
+      ).toBe("allow");
+      if (rootField === "accessWorkspaceRoots") {
+        expect(
+          evaluateWorkspaceFilesystemAccess(
+            policy,
+            path.join(external, "denied", "secret.tex"),
+            "read",
+          ).decision,
+        ).toBe("deny");
+      }
+      expect(
+        evaluateWorkspaceFilesystemAccess(policy, path.join(external, "chapter.tex"), "write")
+          .decision,
+      ).toBe("deny");
+    },
+  );
+
   const live = process.env.COWORK_LATEX_SANDBOX_LIVE === "1";
   const engines = (
     process.env.COWORK_LATEX_LIVE_ENGINES || "latexmk,xelatex,lualatex,pdflatex"
@@ -345,7 +404,12 @@ describe("latex compiler", () => {
           shell: true,
           network: false,
           accessFilesystemScoped: true,
-          accessFilesystemRules: [{ path: outside, access: "read" }],
+          accessWorkspaceRoots: [outside],
+          ...(dockerImage
+            ? {}
+            : {
+                accessFilesystemRules: [{ path: path.join(outside, "denied"), access: "deny" }],
+              }),
         },
       });
       expect(approved.success, approved.diagnostic).toBe(true);

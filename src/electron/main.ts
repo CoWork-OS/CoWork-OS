@@ -328,6 +328,7 @@ import {
   registerMediaProtocol,
   registerMediaScheme,
   registerWebPreviewProtocol,
+  shouldBlockPreviewFrameNavigation,
   registerWebPreviewScheme,
 } from "./media";
 import { rememberApprovedImportFiles } from "./security/file-import-approvals";
@@ -2022,6 +2023,27 @@ if (isMacSafeStorageMigrationWorker) {
         if (!isAppOwnedUrl(url)) {
           event.preventDefault();
           void openExternalIfSafe(url);
+        }
+      });
+
+      // Preview frames (inline HTML answers, artifact previews) may not navigate themselves
+      // away from their page; see shouldBlockPreviewFrameNavigation.
+      mainWindow.webContents.on("will-frame-navigate", (details) => {
+        const appFrame = mainWindow?.webContents.mainFrame;
+        const blocked = shouldBlockPreviewFrameNavigation({
+          isMainFrame: details.isMainFrame,
+          currentUrl: details.frame?.url,
+          targetUrl: details.url,
+          initiatedByApp: Boolean(
+            appFrame &&
+            details.initiator &&
+            details.initiator.processId === appFrame.processId &&
+            details.initiator.routingId === appFrame.routingId,
+          ),
+        });
+        if (blocked) {
+          details.preventDefault();
+          logger.warn("Blocked a preview frame navigating away from its page.");
         }
       });
     }

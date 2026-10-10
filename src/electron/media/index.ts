@@ -8,4 +8,5 @@ export {
   createWebPreviewUrl,
   registerWebPreviewProtocol,
   registerWebPreviewScheme,
+  shouldBlockPreviewFrameNavigation,
 } from "./web-preview-protocol";

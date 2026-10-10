@@ -372,6 +372,127 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     expect(cleanupSandbox).toHaveBeenCalledTimes(1);
   }, 15_000);
 
+  it("requires network consent for an unrecognized background command", async () => {
+    const child = spawn("sleep", ["30"], { stdio: ["pipe", "pipe", "pipe"] });
+    const spawnProcess = vi.fn(() => ({ process: child, cleanup: () => child.kill("SIGKILL") }));
+    vi.mocked(createSandbox).mockResolvedValueOnce({
+      type: "docker",
+      spawnProcess,
+      cleanup: vi.fn(),
+    } as never);
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const workspace = createWorkspace();
+    workspace.permissions.accessSandboxMode = "workspace-write";
+    workspace.permissions.accessApprovalPolicy = "on-request";
+    workspace.permissions.accessNetworkMode = "on-request";
+    const authorizeToolAction = vi.fn().mockResolvedValue(true);
+    const tools = new ShellTools(
+      workspace,
+      { ...createDaemon(), authorizeToolAction } as unknown as AgentDaemon,
+      taskId,
+    );
+    const command = "python3 worker.py";
+    const result = await tools.startBackgroundCommand(command, { startupWaitMs: 0 });
+    expect(authorizeToolAction).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        noStandingApproval: true,
+        details: expect.objectContaining({ command, background: true, network: true }),
+      }),
+    );
+    expect(spawnProcess).toHaveBeenCalledWith(
+      "/bin/sh",
+      ["-c", command],
+      expect.objectContaining({ allowNetwork: true }),
+    );
+    expect(result).toMatchObject({ sandbox: "docker", running: true });
+  }, 15_000);
+
+  it("starts no background process when consent for an unknown script is denied", async () => {
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const workspace = createWorkspace();
+    workspace.permissions.accessNetworkMode = "on-request";
+    const tools = new ShellTools(workspace, createDaemon(false) as unknown as AgentDaemon, taskId);
+    await expect(
+      tools.startBackgroundCommand("python3 worker.py", { startupWaitMs: 0 }),
+    ).rejects.toThrow("User denied command execution");
+    expect(getBackgroundProcessManager().list(taskId)).toEqual([]);
+  });
+
+  it("passes an approved background network grant to the sandbox", async () => {
+    const child = spawn("sleep", ["30"], { stdio: ["pipe", "pipe", "pipe"] });
+    const spawnProcess = vi.fn(() => ({ process: child, cleanup: () => child.kill("SIGKILL") }));
+    vi.mocked(createSandbox).mockResolvedValueOnce({
+      type: "docker",
+      spawnProcess,
+      cleanup: vi.fn(),
+    } as never);
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const workspace = createWorkspace();
+    workspace.permissions.accessSandboxMode = "workspace-write";
+    workspace.permissions.accessApprovalPolicy = "on-request";
+    workspace.permissions.accessNetworkMode = "on-request";
+    const authorizeToolAction = vi.fn().mockResolvedValue(true);
+    const tools = new ShellTools(
+      workspace,
+      { ...createDaemon(), authorizeToolAction } as unknown as AgentDaemon,
+      taskId,
+    );
+    const command = "curl https://example.com";
+    await tools.startBackgroundCommand(command, { startupWaitMs: 0 });
+    expect(authorizeToolAction).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({
+        allowAutoApprove: false,
+        details: expect.objectContaining({ command, background: true, network: true }),
+      }),
+    );
+    expect(spawnProcess).toHaveBeenCalledWith(
+      "/bin/sh",
+      ["-c", command],
+      expect.objectContaining({ allowNetwork: true }),
+    );
+  }, 15_000);
+
+  it("preserves caller environment values on an approved direct foreground invocation", async () => {
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const workspace = createWorkspace();
+    workspace.permissions.accessNetworkMode = "on-request";
+    const daemon = createDaemon();
+    const tools = new ShellTools(workspace, daemon as unknown as AgentDaemon, taskId);
+    const result = await tools.runCommand('printf "%s\\n" "$BUILD_LABEL"; true', {
+      env: { BUILD_LABEL: "approved-build" },
+    });
+    expect(result).toMatchObject({ success: true, stdout: "approved-build\n" });
+    expect(daemon.requestApproval).toHaveBeenCalledWith(
+      taskId,
+      "run_command",
+      expect.any(String),
+      expect.objectContaining({ network: true }),
+      expect.objectContaining({ allowAutoApprove: false }),
+    );
+  });
+
+  it("preserves caller environment values on an approved direct background invocation", async () => {
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const workspace = createWorkspace();
+    workspace.permissions.accessNetworkMode = "on-request";
+    const tools = new ShellTools(workspace, createDaemon() as unknown as AgentDaemon, taskId);
+    const result = await tools.startBackgroundCommand('printf "%s\\n" "$BUILD_LABEL"; sleep 30', {
+      env: { BUILD_LABEL: "approved-background-build" },
+      startupWaitMs: 200,
+    });
+    expect(result).toMatchObject({ sandbox: "none", running: true });
+    expect(result.startup_output).toContain("approved-background-build");
+  }, 15_000);
+
   describe("foreground timeouts", () => {
     it("suggests background: true when a server-like command times out", async () => {
       const { shellTools } = newShellTools();

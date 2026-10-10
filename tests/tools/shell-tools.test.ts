@@ -44,6 +44,7 @@ import { ShellTools, _testUtils } from "../../src/electron/agent/tools/shell-too
 import { loadPolicies } from "../../src/electron/admin/policies";
 import type { AgentDaemon } from "../../src/electron/agent/daemon";
 import type { Workspace } from "../../src/shared/types";
+import { isLikelyNetworkShellCommand } from "../../src/shared/shell-network";
 
 const mockDaemon = {
   requestApproval: vi.fn().mockResolvedValue(true),
@@ -625,6 +626,235 @@ describe("ShellTools auto-approval", () => {
         allowNetwork: true,
       }),
     );
+  });
+
+  describe("on-request shell network authority", () => {
+    let workspace: Workspace;
+    let authorizeToolAction: ReturnType<typeof vi.fn>;
+    let tools: ShellTools;
+
+    beforeEach(() => {
+      vi.mocked(loadPolicies).mockReturnValue({
+        ...defaultPolicies,
+        runtime: {
+          ...defaultPolicies.runtime,
+          network: { ...defaultPolicies.runtime.network, allowShellNetwork: true },
+        },
+      });
+      workspace = {
+        ...mockWorkspace,
+        permissions: {
+          ...mockWorkspace.permissions,
+          accessProfileId: "ask_for_approval",
+          accessSandboxMode: "workspace-write",
+          accessApprovalPolicy: "on-request",
+          accessNetworkMode: "on-request",
+        },
+      };
+      authorizeToolAction = vi.fn().mockResolvedValue(true);
+      tools = new ShellTools(
+        workspace,
+        { ...mockDaemon, authorizeToolAction } as unknown as AgentDaemon,
+        "task-network",
+      );
+    });
+
+    it.each([
+      `python3 -c "__import__('so'+'cket').create_connection(('exa'+'mple.com', 443))"`,
+      `node -e "require(Buffer.from('bmV0','base64').toString()).connect(443, ['example','com'].join('.'))"`,
+    ])("requires explicit network consent even when the classifier misses: %s", async (command) => {
+      expect(isLikelyNetworkShellCommand(command)).toBe(false);
+      await tools.runCommand(command);
+      expect(authorizeToolAction).toHaveBeenCalledWith(
+        "task-network",
+        expect.objectContaining({
+          allowAutoApprove: false,
+          requireExplicitApproval: true,
+          noStandingApproval: true,
+          details: expect.objectContaining({ network: true }),
+        }),
+      );
+      expect(sandboxMocks.sandbox.execute).toHaveBeenCalledWith(
+        command,
+        [],
+        expect.objectContaining({ allowNetwork: true }),
+      );
+    });
+
+    it("does not reuse a network approval for the next command", async () => {
+      const command = "curl https://example.com";
+      await tools.runCommand(command);
+      expect(authorizeToolAction).toHaveBeenCalledWith(
+        "task-network",
+        expect.objectContaining({
+          allowAutoApprove: false,
+          details: expect.objectContaining({ command, network: true }),
+        }),
+      );
+      expect(sandboxMocks.sandbox.execute).toHaveBeenLastCalledWith(
+        command,
+        [],
+        expect.objectContaining({ allowNetwork: true }),
+      );
+      authorizeToolAction.mockResolvedValue(false);
+      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow("User denied command execution");
+      expect(authorizeToolAction).toHaveBeenLastCalledWith(
+        "task-network",
+        expect.objectContaining({
+          allowAutoApprove: false,
+          requireExplicitApproval: true,
+          noStandingApproval: true,
+          details: expect.objectContaining({ command: SAFE_CMD_1, network: true }),
+        }),
+      );
+      expect(sandboxMocks.sandbox.execute).toHaveBeenCalledOnce();
+      expect(sandboxMocks.sandbox.execute).toHaveBeenLastCalledWith(
+        command,
+        [],
+        expect.objectContaining({ allowNetwork: true }),
+      );
+    });
+
+    it.each(["curl https://example.com", "python3 worker.py"])(
+      "does not start a process when network approval is denied: %s",
+      async (command) => {
+        authorizeToolAction.mockResolvedValue(false);
+        await expect(tools.runCommand(command)).rejects.toThrow("User denied command execution");
+        expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(["auto-approve", "trusted", "single_bundle"])(
+      "requires fresh legacy consent despite %s shell settings",
+      async (setting) => {
+        vi.mocked(BuiltinToolsSettingsManager.getToolAutoApprove).mockReturnValue(
+          setting === "auto-approve",
+        );
+        vi.mocked(GuardrailManager.isCommandTrusted).mockReturnValue({
+          trusted: setting === "trusted",
+          pattern: "safe",
+        });
+        vi.mocked(BuiltinToolsSettingsManager.getRunCommandApprovalMode).mockReturnValue(
+          setting === "single_bundle" ? "single_bundle" : "per_command",
+        );
+        const legacy = new ShellTools(workspace, mockDaemon, "task-auto-network");
+        await legacy.runCommand(SAFE_CMD_1);
+        await legacy.runCommand(SAFE_CMD_1);
+        expect(mockDaemon.requestApproval).toHaveBeenCalledTimes(2);
+        expect(mockDaemon.requestApproval).toHaveBeenLastCalledWith(
+          "task-auto-network",
+          "run_command",
+          expect.stringContaining("potential network access"),
+          expect.objectContaining({ network: true, bundleScope: undefined }),
+          expect.objectContaining({
+            allowAutoApprove: false,
+            requireExplicitApproval: true,
+            noStandingApproval: true,
+          }),
+        );
+      },
+    );
+
+    it("starts no process when an opaque script with a loopback proxy lacks consent", async () => {
+      const command = "python3 worker.py";
+      expect(isLikelyNetworkShellCommand(command)).toBe(false);
+      authorizeToolAction.mockResolvedValue(false);
+      await expect(
+        tools.runCommand(command, {
+          env: { HTTPS_PROXY: "http://127.0.0.1:8787" },
+        }),
+      ).rejects.toThrow("User denied command execution");
+      expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
+      expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
+    });
+
+    it("preserves explicit enabled networking for ordinary commands", async () => {
+      workspace.permissions.accessNetworkMode = "enabled";
+      await tools.runCommand(SAFE_CMD_1);
+      expect(sandboxMocks.sandbox.execute).toHaveBeenCalledWith(
+        SAFE_CMD_1,
+        [],
+        expect.objectContaining({ allowNetwork: true }),
+      );
+    });
+
+    it("requires network approval through the legacy approval adapter", async () => {
+      const legacy = new ShellTools(workspace, mockDaemon, "task-legacy-network");
+      await legacy.runCommand("curl https://example.com");
+      expect(mockDaemon.requestApproval).toHaveBeenCalledWith(
+        "task-legacy-network",
+        "run_command",
+        expect.any(String),
+        expect.objectContaining({ network: true }),
+        expect.objectContaining({ allowAutoApprove: false }),
+      );
+    });
+
+    it("invalidates a pending network approval when the profile identity changes", async () => {
+      authorizeToolAction.mockImplementation(async () => {
+        workspace.permissions.accessProfileId = "different-profile";
+        return true;
+      });
+      await expect(tools.runCommand("curl https://example.com")).rejects.toThrow(
+        "authority changed",
+      );
+      expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+    });
+
+    it("invalidates a pending network approval when the administrator policy revision changes", async () => {
+      authorizeToolAction.mockImplementation(async () => {
+        vi.mocked(loadPolicies).mockReturnValue({ ...loadPolicies(), updatedAt: "new-revision" });
+        return true;
+      });
+      await expect(tools.runCommand("curl https://example.com")).rejects.toThrow(
+        "authority changed",
+      );
+      expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+    });
+
+    it("rechecks a network grant after asynchronous sandbox acquisition", async () => {
+      sandboxMocks.createSandbox.mockImplementation(async () => {
+        workspace.permissions.accessNetworkMode = "disabled";
+        return sandboxMocks.sandbox;
+      });
+      await expect(tools.runCommand("curl https://example.com")).rejects.toThrow(
+        "authority changed",
+      );
+      expect(sandboxMocks.sandbox.execute).not.toHaveBeenCalled();
+      expect(sandboxMocks.sandbox.cleanup).toHaveBeenCalledOnce();
+    });
+
+    it("does not consume a network grant after cancellation", async () => {
+      const controller = new AbortController();
+      authorizeToolAction.mockImplementation(async () => {
+        controller.abort();
+        return true;
+      });
+      await expect(
+        tools.runCommand("curl https://example.com", { signal: controller.signal }),
+      ).rejects.toThrow("cancelled");
+      expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
+    });
+
+    it("does not let an unsandboxed override bypass denied network consent", async () => {
+      workspace.permissions.accessSandboxMode = "danger-full-access";
+      workspace.permissions.accessApprovalPolicy = "never";
+      const policies = loadPolicies();
+      vi.mocked(loadPolicies).mockReturnValue({
+        ...policies,
+        runtime: {
+          ...policies.runtime,
+          requireSandboxForShell: false,
+          allowUnsandboxedShell: true,
+        },
+      });
+      process.env.COWORK_ALLOW_UNSANDBOXED_SHELL = "1";
+      sandboxMocks.createSandbox.mockResolvedValue({ type: "none", cleanup: vi.fn() } as never);
+      authorizeToolAction.mockResolvedValue(false);
+      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow("User denied command execution");
+      expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
+      expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
+    });
   });
 
   it("wires sandbox process handles for stdin support and clears them after completion", async () => {

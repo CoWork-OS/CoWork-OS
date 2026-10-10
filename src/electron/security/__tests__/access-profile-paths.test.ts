@@ -306,6 +306,34 @@ describe("workspace access-profile path evaluation", () => {
     );
   });
 
+  it("preserves one-shot shell consent through a legacy approval adapter", async () => {
+    const requestApproval = vi.fn(async () => false);
+    const allowed = await authorizeToolActionWithFallback(
+      { evaluateToolPermission: () => ({ decision: "allow" }), requestApproval },
+      "task-shell-consent",
+      {
+        toolName: "run_command",
+        approvalType: "run_command",
+        details: { command: "python3 worker.py", network: true },
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        noStandingApproval: true,
+      },
+    );
+    expect(allowed).toBe(false);
+    expect(requestApproval).toHaveBeenCalledWith(
+      "task-shell-consent",
+      "run_command",
+      expect.any(String),
+      expect.objectContaining({ network: true }),
+      expect.objectContaining({
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        noStandingApproval: true,
+      }),
+    );
+  });
+
   it("does not turn a profile deny into an approval prompt", async () => {
     const workspace = makeWorkspace({ isTemp: false });
     const deniedPath = path.join(workspace.path, "private.txt");

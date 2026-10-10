@@ -169,6 +169,7 @@ export interface ToolAuthorizationRequest {
   description?: string;
   allowAutoApprove?: boolean;
   requireExplicitApproval?: boolean;
+  noStandingApproval?: boolean;
   signal?: AbortSignal;
 }
 
@@ -191,6 +192,7 @@ interface ToolAuthorizationDaemon {
     options?: {
       allowAutoApprove?: boolean;
       requireExplicitApproval?: boolean;
+      noStandingApproval?: boolean;
       signal?: AbortSignal;
     },
   ) => Promise<unknown>;
@@ -247,6 +249,7 @@ export async function authorizeToolActionWithFallback(
         allowAutoApprove: request.allowAutoApprove,
         signal: request.signal,
         requireExplicitApproval: request.requireExplicitApproval,
+        ...(request.noStandingApproval ? { noStandingApproval: true } : {}),
       },
     )) === true
   );

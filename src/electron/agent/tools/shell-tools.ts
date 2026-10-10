@@ -19,6 +19,7 @@ import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
 import { OUTPUT_TRUNCATED_MARKER, boundOutput } from "../sandbox/bounded-output";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
 import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
+import { authorizationFingerprint } from "../../security/authorization-identity";
 import {
   RUN_COMMAND_DEFAULT_TIMEOUT_MS,
   RUN_COMMAND_MAX_TIMEOUT_MS,
@@ -791,24 +792,10 @@ export class ShellTools {
   }
 
   private getShellAccessScopeFingerprint(workspace: Workspace): string {
-    const permissions = workspace.permissions || ({} as Workspace["permissions"]);
-    return JSON.stringify({
+    return authorizationFingerprint({
       workspaceId: workspace.id,
       workspacePath: workspace.path,
-      shell: permissions.shell,
-      read: permissions.read,
-      write: permissions.write,
-      delete: permissions.delete,
-      network: permissions.network,
-      accessSandboxMode: permissions.accessSandboxMode,
-      accessApprovalPolicy: permissions.accessApprovalPolicy,
-      sandboxType: permissions.sandboxType,
-      accessNetworkMode: permissions.accessNetworkMode,
-      accessDomainRules: permissions.accessDomainRules,
-      accessWorkspaceRoots: permissions.accessWorkspaceRoots,
-      accessFilesystemRules: permissions.accessFilesystemRules,
-      allowedPaths: permissions.allowedPaths,
-      unrestrictedFileAccess: permissions.unrestrictedFileAccess,
+      permissions: workspace.permissions,
     });
   }
 
@@ -1424,7 +1411,7 @@ export class ShellTools {
         .catch(() => undefined);
     };
     let launch: BackgroundProcessLaunch | null = null;
-    if (shouldSandboxCommand) {
+    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies)) {
       const sandbox = await this.acquireCommandSandbox(command, {
         cwd,
         policies,
@@ -1764,7 +1751,14 @@ export class ShellTools {
 
     const networkCommand = isLikelyNetworkShellCommand(command);
     const policies = loadPolicies();
-    const runtimePolicy = JSON.stringify(policies.runtime);
+    const policyFingerprint = (policy: AdminPolicies) =>
+      authorizationFingerprint({
+        version: policy.version,
+        updatedAt: policy.updatedAt,
+        runtime: policy.runtime,
+      });
+    const runtimePolicy = policyFingerprint(policies);
+    const policyVersion = process.env.COWORK_ACCESS_POLICY_VERSION || "boundary";
     const beforeEffect = async () => {
       const checkScope = () => {
         if (options?.signal?.aborted) throw new Error("Command execution cancelled before effect");
@@ -1776,7 +1770,8 @@ export class ShellTools {
           !effective ||
           this.getShellAccessScopeFingerprint(effective) !== approvedScope ||
           this.getShellAccessScopeFingerprint(this.workspace) !== approvedScope ||
-          JSON.stringify(loadPolicies().runtime) !== runtimePolicy
+          policyFingerprint(loadPolicies()) !== runtimePolicy ||
+          (process.env.COWORK_ACCESS_POLICY_VERSION || "boundary") !== policyVersion
         )
           throw new Error(
             "Shell authority changed after command admission; request approval again.",
@@ -1821,8 +1816,11 @@ export class ShellTools {
         );
       }
     }
-    const networkRequiresApproval =
-      networkCommand && this.workspace.permissions.accessNetworkMode === "on-request";
+    // Shell text cannot prove that arbitrary scripts, dynamic imports, or child
+    // processes stay offline. Even the macOS no-network sandbox permits local
+    // connections that a proxy can relay. Require invocation-specific consent
+    // for every shell command under an on-request network profile.
+    const networkRequiresApproval = this.workspace.permissions.accessNetworkMode === "on-request";
 
     // Check if command is trusted (auto-approve without user confirmation)
     const trustCheck = GuardrailManager.isCommandTrusted(command);
@@ -1830,7 +1828,8 @@ export class ShellTools {
     const approvalMode: RunCommandApprovalMode =
       BuiltinToolsSettingsManager.getRunCommandApprovalMode();
     const safeForAutoApproval = this.isAutoApprovalSafe(command);
-    const bundleEligible = approvalMode === "single_bundle" && safeForAutoApproval;
+    const bundleEligible =
+      !networkRequiresApproval && approvalMode === "single_bundle" && safeForAutoApproval;
     let approved = false;
     const signature = this.getCommandSignature(command);
     const now = Date.now();
@@ -1840,6 +1839,9 @@ export class ShellTools {
     const backgroundNotice = background
       ? " It keeps running in the background until it is stopped or the task is cancelled."
       : "";
+    const approvalDescription = networkRequiresApproval
+      ? "Approve this shell command and its potential network access for this invocation. Shell scripts can access the network even when the command text does not show it."
+      : "Review the shell command below before approving.";
 
     if (typedAuthorizationAvailable) {
       // The daemon is the single execution authority.  In-scope commands are
@@ -1849,14 +1851,14 @@ export class ShellTools {
       approved = await authorizeToolActionWithFallback(this.daemon, this.taskId, {
         toolName: "run_command",
         approvalType: "run_command",
-        description: `Review the shell command below before approving.${backgroundNotice}`,
+        description: approvalDescription + backgroundNotice,
         details: {
           command,
           cwd,
           ...(background ? { background: true } : { timeout: options?.timeout || DEFAULT_TIMEOUT }),
           approvalMode,
           bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
-          network: networkCommand,
+          network: networkCommand || networkRequiresApproval,
         },
         // The daemon's auto-approve path matches trusted rules by bare command
         // prefix, so `git status; rm -rf ~/Documents` matches `git` and is
@@ -1864,6 +1866,9 @@ export class ShellTools {
         // same guards the legacy branches below apply; they must gate the
         // typed path too, or they are dead code in every shipping build.
         allowAutoApprove: safeForAutoApproval && !networkRequiresApproval,
+        ...(networkRequiresApproval
+          ? { requireExplicitApproval: true, noStandingApproval: true }
+          : {}),
         signal: options?.signal,
       });
     } else if (!networkRequiresApproval && bundleEligible && this.isBundleApprovalActive(now)) {
@@ -1913,7 +1918,7 @@ export class ShellTools {
           "run_command",
           (bundleEligible
             ? "Single approval bundle for this task: subsequent safe commands may run without another prompt until you deny or the task ends."
-            : "Review the shell command below before approving.") + backgroundNotice,
+            : approvalDescription) + backgroundNotice,
           {
             command,
             cwd,
@@ -1922,8 +1927,18 @@ export class ShellTools {
               : { timeout: options?.timeout || DEFAULT_TIMEOUT }),
             approvalMode,
             bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
+            network: networkCommand || networkRequiresApproval,
           },
-          { signal: options?.signal },
+          {
+            signal: options?.signal,
+            ...(networkRequiresApproval
+              ? {
+                  allowAutoApprove: false,
+                  requireExplicitApproval: true,
+                  noStandingApproval: true,
+                }
+              : {}),
+          },
         );
 
         if (approved && signature) {

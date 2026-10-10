@@ -293,8 +293,8 @@ Built-in browser, web, and HTTP tools evaluate profile network and domain rules
 in-process. Read-only public lookups through `web_search`, `web_fetch`,
 `x_search`, and GET/HEAD `http_request` use the normal read lane when the
 workspace has network access. Network `on-request` remains useful as policy
-metadata for browser navigation, MCP and other network-capable tools, code or
-shell egress, credential-backed reads, and explicit domain or workspace
+metadata for browser navigation, MCP and other network-capable tools, code
+egress, credential-backed reads, and explicit domain or workspace
 boundaries, but the default local runtime does not turn those decisions into a
 durable approval wait. `data_export` remains an explicit approval class even in
 high-autonomy profiles, and location access always uses a separate
@@ -306,6 +306,17 @@ domain-aware proxy. Therefore a profile with domain-scoped network rules cannot
 run arbitrary shell/code networking unless a domain-aware proxy exists; the
 request fails closed. Full-profile shell egress also depends on the coarse
 administrator shell-network gate.
+
+In a network `on-request` profile, every `run_command` invocation requires
+explicit approval for the command and its potential network access, including
+background commands. Shell text cannot reliably identify networking inside
+scripts, dynamic imports, or child processes, and the macOS sandbox's localhost
+exception can reach a local proxy. Trusted commands, auto-review, command bundles,
+and remembered recurring approvals do not replace this per-invocation decision.
+A profile that also sets approval to `never` cannot run these commands because
+the required consent is unavailable. Approval does not relax administrator
+network restrictions or domain-scoped rules. Use an explicitly enabled network
+profile when autonomous shell networking is intended.
 
 Terminal tabs use the same profile boundary as command tools. A profile that
 does not permit command tools cannot open a new terminal tab. Existing tabs are

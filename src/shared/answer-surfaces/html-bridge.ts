@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SURFACE_ACTION_MAX_PROMPT_CHARS, SURFACE_ACTION_MAX_URL_CHARS } from "./actions";
 
 /**
  * The bridge between an inline HTML answer surface and the app (SurfaceBridgeMessageV1).
@@ -6,9 +7,11 @@ import { z } from "zod";
  * The surface runs on an opaque `cowork-preview://` origin with no network, so the only
  * way it can reach the app is `postMessage`. The app accepts a message only when it
  * comes from that frame's own window, carries the nonce the app sent at mount, and
- * passes the schemas below; everything else is dropped. The frame can ask for three
- * things: a height (so it fits its content), to remember the user's inputs, and to
- * report an error. It cannot run tools, open links or read anything from the app.
+ * passes the schemas below; everything else is dropped. The frame can ask for a height
+ * (so it fits its content), to remember the user's inputs, and to report an error. It
+ * can also ask to send a message or open a link (actions.ts), but only right after the
+ * user clicked inside it, and only through the app's own confirmation. It cannot run
+ * tools or read anything from the app.
  */
 
 export const HTML_SURFACE_BRIDGE_VERSION = 1;
@@ -58,6 +61,18 @@ export const HtmlSurfaceFrameMessageSchema = z.discriminatedUnion("type", [
   envelope("resize", z.object({ height: z.number().finite().nonnegative() }).strict()),
   envelope("state.set", z.object({ state: HtmlSurfaceStateSchema }).strict()),
   envelope("error", z.object({ message: z.string().max(500) }).strict()),
+  envelope(
+    "action",
+    z
+      .object({
+        id: z.number().int().nonnegative().max(1_000_000),
+        action: z.union([
+          z.object({ prompt: z.string().max(SURFACE_ACTION_MAX_PROMPT_CHARS) }).strict(),
+          z.object({ open: z.string().max(SURFACE_ACTION_MAX_URL_CHARS) }).strict(),
+        ]),
+      })
+      .strict(),
+  ),
 ]);
 
 export type HtmlSurfaceFrameMessage = z.infer<typeof HtmlSurfaceFrameMessageSchema>;
@@ -80,6 +95,13 @@ export type HtmlSurfaceHostMessage =
       type: "theme";
       nonce: string;
       payload: { theme: "light" | "dark"; css: string | null };
+    }
+  | {
+      coworkSurface: typeof HTML_SURFACE_BRIDGE_VERSION;
+      type: "action.result";
+      nonce: string;
+      /** ok: the user approved and the app carried it out. */
+      payload: { id: number; ok: boolean };
     };
 
 export function clampSurfaceHeight(height: number): number {
@@ -131,6 +153,8 @@ export const HTML_SURFACE_BOOTSTRAP_SCRIPT = `(function () {
   var autosize = false;
   var lastHeight = -1;
   var listeners = [];
+  var actionSeq = 0;
+  var actionWaiters = {};
   var resolveReady;
   var ready = new Promise(function (resolve) { resolveReady = resolve; });
   function send(type, payload) {
@@ -192,7 +216,25 @@ export const HTML_SURFACE_BOOTSTRAP_SCRIPT = `(function () {
       applyTheme(data.payload.theme, data.payload.css);
       scheduleMeasure();
     }
+    if (data.type === "action.result" && data.payload) {
+      var waiter = actionWaiters[data.payload.id];
+      if (waiter) {
+        delete actionWaiters[data.payload.id];
+        waiter(data.payload.ok === true);
+      }
+    }
   });
+  function requestAction(request) {
+    return new Promise(function (resolve) {
+      var payload = null;
+      if (request && typeof request.prompt === "string") payload = { prompt: request.prompt.slice(0, ${SURFACE_ACTION_MAX_PROMPT_CHARS}) };
+      else if (request && typeof request.open === "string") payload = { open: request.open.slice(0, ${SURFACE_ACTION_MAX_URL_CHARS}) };
+      if (!nonce || !payload || actionSeq >= 1000000) { resolve(false); return; }
+      actionSeq += 1;
+      actionWaiters[actionSeq] = resolve;
+      send("action", { id: actionSeq, action: payload });
+    });
+  }
   // Design-kit helpers (icons, charts, formatting), when the kit was injected first.
   var kit = window.__coworkKit || {};
   try { delete window.__coworkKit; } catch (e) {}
@@ -205,6 +247,7 @@ export const HTML_SURFACE_BOOTSTRAP_SCRIPT = `(function () {
     format: kit.format,
     tween: kit.tween,
     theme: function () { return theme; },
+    action: requestAction,
     state: Object.freeze({
       get: function () { return Object.assign({}, state); },
       set: function (patch) {
@@ -260,5 +303,6 @@ export const HTML_SURFACE_RUNTIME_PROMPT = [
   "- Inline <script> and <style> run in a sandbox with no network: put all code, data, styles and SVG icons inside the document. External URLs, CDNs, fetch and remote images are blocked.",
   "- The frame grows to fit its content; don't set a fixed page height.",
   '- To remember the user\'s inputs across restarts and tell you what they chose, call `cowork.state.set({goal: 50000, plan: "basic"})` (flat keys; numbers, short strings, booleans or string lists). Restore them with `await cowork.ready; const saved = cowork.state.get();`.',
+  '- A button can hand off to you or open a page: `cowork.action({prompt: "Book the 7:30 table for 4"})` sends a message to you, `cowork.action({open: "https://example.com/menu"})` opens an https link in the browser. Call it from a click handler; the app shows the exact message or link and acts only if the user approves. It resolves to true when done. A request that does not follow a click inside the page is ignored.',
   "- Never ask for passwords, card numbers or other secrets in a surface.",
 ].join("\n");

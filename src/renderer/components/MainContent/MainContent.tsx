@@ -496,6 +496,7 @@ import { ParallelGroupFeed } from "../timeline/ParallelGroupFeed";
 import { ActionBlock } from "../timeline/ActionBlock";
 import { TurnHeader } from "../timeline/TurnHeader";
 import { SelectionReplyPopover } from "./SelectionReplyPopover";
+import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
 import {
   forgetRememberedAccessProfileId,
   getAccessProfileIdForPermissionMode,
@@ -622,6 +623,7 @@ interface MainContentProps {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
+      verbatim?: boolean;
     },
   ) => void | boolean | Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -7093,6 +7095,35 @@ function MainContentComponent({
     ],
   );
 
+  // An answer surface's approved action (SurfaceActions): sent like a message the user typed.
+  const handleSurfaceActionPrompt = useCallback(
+    async (text: string) => {
+      if (!task?.id || !permissionSettingsLoaded) throw new Error("No conversation to send to");
+      const messageId =
+        globalThis.crypto?.randomUUID?.() ||
+        `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const result = await onSendMessage(text, undefined, undefined, {
+        interactionMode: selectedInteractionMode,
+        returnOnAccepted: true,
+        messageId,
+        verbatim: true,
+        ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+      });
+      if (result === false) throw new Error("The message was not sent");
+    },
+    [
+      onSendMessage,
+      permissionSettingsLoaded,
+      selectedInteractionMode,
+      task?.id,
+      taskAccessProfileId,
+    ],
+  );
+  const handleSurfaceActionOpen = useCallback(
+    (url: string) => window.electronAPI.openExternal(url),
+    [],
+  );
+
   // Programmatic input updates still need a resize pass.
   useEffect(() => {
     if (!pendingProgrammaticResizeRef.current) return;
@@ -12076,160 +12107,169 @@ function MainContentComponent({
         />
       )}
       {/* Body */}
-      <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
-        {!isBotConversation && (
-          <SelectionReplyPopover
-            containerRef={mainBodyRef}
-            agentName={agentContext.agentName || "CoWork"}
-            onReply={handleReplyToSelection}
-          />
-        )}
-        <div
-          className={`task-content${botRevealed ? "" : " bot-transcript-pending"}`}
-          ref={taskContentRef}
-        >
-          {isBotConversation && task && !remoteSession && (
-            <BotEarlierConversations
-              key={task.id}
-              currentTask={task}
-              botName={botName || "Bot"}
-              botMascot={botMascot}
-              scrollContainerRef={mainBodyRef}
-              loadInitialPage={botEventsLoaded && !hasMoreTimelineHistory}
-              onInitialPageDone={markBotHistoryReady}
-              canLoadMore={
-                botHistoryUnlocked && !hasMoreTimelineHistory && !isLoadingTimelineHistory
-              }
-              currentFirstMessageAt={botConversationFirstMessageAt}
-              renderMarkdown={renderBotHistoryMarkdown}
-              mascotForSender={botMascotForSender}
+      <SurfaceActionProvider
+        scopeKey={task?.id}
+        onSendPrompt={handleSurfaceActionPrompt}
+        onOpenLink={handleSurfaceActionOpen}
+      >
+        <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
+          {!isBotConversation && (
+            <SelectionReplyPopover
+              containerRef={mainBodyRef}
+              agentName={agentContext.agentName || "CoWork"}
+              onReply={handleReplyToSelection}
             />
           )}
-          {/* Always anchor the initial user prompt above the timeline. */}
-          {initialPromptBubble}
-          {isBotConversation && task && (
-            <BotCollaborationHeader
-              task={task}
-              botName={botName || "Bot"}
-              botIcon={botIcon}
-              events={events}
-              childEvents={childEvents}
-              childTasks={childTasks}
-              botConversations={botConversations}
-              onOpenBotConversation={onSelectBotConversation}
-              conversationProjection={conversationProjection}
-            />
-          )}
-          {showLegalWorkflowCard &&
-            (legalWorkflowInvocation.kind === "demand-intake" ? (
-              <LegalDemandIntakePromptCard
-                prompt={trimmedPrompt}
-                onSubmit={(message) => {
-                  onSendMessage(message);
-                  setDismissedLegalWorkflowTaskId(task.id);
-                }}
-                onDismiss={() => setDismissedLegalWorkflowTaskId(task.id)}
+          <div
+            className={`task-content${botRevealed ? "" : " bot-transcript-pending"}`}
+            ref={taskContentRef}
+          >
+            {isBotConversation && task && !remoteSession && (
+              <BotEarlierConversations
+                key={task.id}
+                currentTask={task}
+                botName={botName || "Bot"}
+                botMascot={botMascot}
+                scrollContainerRef={mainBodyRef}
+                loadInitialPage={botEventsLoaded && !hasMoreTimelineHistory}
+                onInitialPageDone={markBotHistoryReady}
+                canLoadMore={
+                  botHistoryUnlocked && !hasMoreTimelineHistory && !isLoadingTimelineHistory
+                }
+                currentFirstMessageAt={botConversationFirstMessageAt}
+                renderMarkdown={renderBotHistoryMarkdown}
+                mascotForSender={botMascotForSender}
               />
-            ) : (
-              <GenericLegalWorkflowPromptCard
-                invocation={legalWorkflowInvocation}
-                onSubmit={(message) => {
-                  onSendMessage(message);
-                  setDismissedLegalWorkflowTaskId(task.id);
-                }}
-                onDismiss={() => setDismissedLegalWorkflowTaskId(task.id)}
+            )}
+            {/* Always anchor the initial user prompt above the timeline. */}
+            {initialPromptBubble}
+            {isBotConversation && task && (
+              <BotCollaborationHeader
+                task={task}
+                botName={botName || "Bot"}
+                botIcon={botIcon}
+                events={events}
+                childEvents={childEvents}
+                childTasks={childTasks}
+                botConversations={botConversations}
+                onOpenBotConversation={onSelectBotConversation}
+                conversationProjection={conversationProjection}
               />
-            ))}
+            )}
+            {showLegalWorkflowCard &&
+              (legalWorkflowInvocation.kind === "demand-intake" ? (
+                <LegalDemandIntakePromptCard
+                  prompt={trimmedPrompt}
+                  onSubmit={(message) => {
+                    onSendMessage(message);
+                    setDismissedLegalWorkflowTaskId(task.id);
+                  }}
+                  onDismiss={() => setDismissedLegalWorkflowTaskId(task.id)}
+                />
+              ) : (
+                <GenericLegalWorkflowPromptCard
+                  invocation={legalWorkflowInvocation}
+                  onSubmit={(message) => {
+                    onSendMessage(message);
+                    setDismissedLegalWorkflowTaskId(task.id);
+                  }}
+                  onDismiss={() => setDismissedLegalWorkflowTaskId(task.id)}
+                />
+              ))}
 
-          {task?.agentConfig?.executionMode === "debug" && <DebugSessionPanel events={events} />}
+            {task?.agentConfig?.executionMode === "debug" && <DebugSessionPanel events={events} />}
 
-          {researchWorkflowEnabled && (
-            <div
-              className="research-mode-badge"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                marginBottom: 8,
-                padding: "3px 10px",
-                borderRadius: 12,
-                fontSize: "0.72rem",
-                fontWeight: 500,
-                color: "var(--color-text-muted, #6b7280)",
-                background: "var(--color-bg-elevated, #f4f3ff)",
-                letterSpacing: "0.02em",
-              }}
-            >
-              <span style={{ fontSize: "0.65rem" }}>&#9679;</span>
-              Research mode
-            </div>
-          )}
-
-          {/* Timeline controls - show right after original prompt */}
-          {!isBotConversation &&
-            (hasNonConversationEvents || isTaskWorking || isTaskFinished) &&
-            (!turnHeadersShown || Boolean(isTaskWorking && continuationStatusChip)) && (
-              <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
-                <div className="timeline-controls-status">
-                  {turnHeadersShown ? null : canToggleCompletedTranscript ? (
-                    <button
-                      type="button"
-                      className="timeline-controls-label timeline-controls-label-button with-duration"
-                      onClick={toggleCompletedTranscriptMode}
-                      aria-expanded={transcriptMode !== "delivery"}
-                      title={
-                        transcriptMode === "delivery"
-                          ? "Show full timeline"
-                          : "Show only final output"
-                      }
-                    >
-                      <span>{workDurationLabel}</span>
-                      <span className="timeline-controls-label-chevron" aria-hidden="true">
-                        <ChevronRight size={14} strokeWidth={2} />
-                      </span>
-                    </button>
-                  ) : liveActivityHeaderVisible ? null : (
-                    <span
-                      className={`timeline-controls-label ${
-                        isTaskWorking || isTaskFinished ? "with-duration" : ""
-                      }`}
-                    >
-                      {workDurationLabel}
-                    </span>
-                  )}
-                  {isTaskWorking && continuationStatusChip && (
-                    <span className="header-continuation-chip" title="Adaptive continuation status">
-                      <span>{continuationStatusChip.window}</span>
-                      {continuationStatusChip.progress && (
-                        <span className="header-continuation-chip-sep">·</span>
-                      )}
-                      {continuationStatusChip.progress && (
-                        <span>{continuationStatusChip.progress}</span>
-                      )}
-                      {continuationStatusChip.loopRisk && (
-                        <span className="header-continuation-chip-sep">·</span>
-                      )}
-                      {continuationStatusChip.loopRisk && (
-                        <span>{continuationStatusChip.loopRisk}</span>
-                      )}
-                    </span>
-                  )}
-                </div>
+            {researchWorkflowEnabled && (
+              <div
+                className="research-mode-badge"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: 8,
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  fontSize: "0.72rem",
+                  fontWeight: 500,
+                  color: "var(--color-text-muted, #6b7280)",
+                  background: "var(--color-bg-elevated, #f4f3ff)",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                <span style={{ fontSize: "0.65rem" }}>&#9679;</span>
+                Research mode
               </div>
             )}
 
-          {/* Replay controls bar — shown when replay mode is active */}
-          {replayControls?.isReplayMode && replayControls.areControlsVisible && (
-            <ReplayControlsBar controls={replayControls} />
-          )}
+            {/* Timeline controls - show right after original prompt */}
+            {!isBotConversation &&
+              (hasNonConversationEvents || isTaskWorking || isTaskFinished) &&
+              (!turnHeadersShown || Boolean(isTaskWorking && continuationStatusChip)) && (
+                <div className={`timeline-controls ${turnHeadersShown ? "with-turn-headers" : ""}`}>
+                  <div className="timeline-controls-status">
+                    {turnHeadersShown ? null : canToggleCompletedTranscript ? (
+                      <button
+                        type="button"
+                        className="timeline-controls-label timeline-controls-label-button with-duration"
+                        onClick={toggleCompletedTranscriptMode}
+                        aria-expanded={transcriptMode !== "delivery"}
+                        title={
+                          transcriptMode === "delivery"
+                            ? "Show full timeline"
+                            : "Show only final output"
+                        }
+                      >
+                        <span>{workDurationLabel}</span>
+                        <span className="timeline-controls-label-chevron" aria-hidden="true">
+                          <ChevronRight size={14} strokeWidth={2} />
+                        </span>
+                      </button>
+                    ) : liveActivityHeaderVisible ? null : (
+                      <span
+                        className={`timeline-controls-label ${
+                          isTaskWorking || isTaskFinished ? "with-duration" : ""
+                        }`}
+                      >
+                        {workDurationLabel}
+                      </span>
+                    )}
+                    {isTaskWorking && continuationStatusChip && (
+                      <span
+                        className="header-continuation-chip"
+                        title="Adaptive continuation status"
+                      >
+                        <span>{continuationStatusChip.window}</span>
+                        {continuationStatusChip.progress && (
+                          <span className="header-continuation-chip-sep">·</span>
+                        )}
+                        {continuationStatusChip.progress && (
+                          <span>{continuationStatusChip.progress}</span>
+                        )}
+                        {continuationStatusChip.loopRisk && (
+                          <span className="header-continuation-chip-sep">·</span>
+                        )}
+                        {continuationStatusChip.loopRisk && (
+                          <span>{continuationStatusChip.loopRisk}</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
-          {conversationFlow}
-          {/* A bot's earlier conversations scroll in above instead. */}
-          {!isBotConversation && (
-            <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />
-          )}
+            {/* Replay controls bar — shown when replay mode is active */}
+            {replayControls?.isReplayMode && replayControls.areControlsVisible && (
+              <ReplayControlsBar controls={replayControls} />
+            )}
+
+            {conversationFlow}
+            {/* A bot's earlier conversations scroll in above instead. */}
+            {!isBotConversation && (
+              <TaskSessionLineageFooter task={task} onSelectTask={onSelectTask} />
+            )}
+          </div>
         </div>
-      </div>
+      </SurfaceActionProvider>
 
       {headerActionError && (
         <div className="task-header-action-error" role="alert">

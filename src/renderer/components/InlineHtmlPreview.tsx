@@ -15,6 +15,8 @@ import {
 } from "../../shared/rich-frame-design-language";
 import { loadSurfaceState, saveSurfaceState } from "../hooks/useAnswerSurfaceState";
 import { useLiveFrameSlot } from "../hooks/useLiveFrameSlot";
+import { toSurfaceActionRequest } from "../../shared/answer-surfaces/actions";
+import { useSurfaceActions } from "./AnswerSurface/SurfaceActions";
 import { HtmlSurfaceBridgeHost, createSurfaceNonce } from "../utils/html-surface-bridge";
 
 type InlineHtmlPreviewVariant = "default" | "frame";
@@ -43,6 +45,24 @@ type InlineHtmlSourcePreviewProps = {
   aspectRatio?: string;
   showChrome?: boolean;
 };
+
+/** Requests a page may make while it is mounted, and cancels after which it may make none. */
+const MAX_PAGE_ACTIONS = 5;
+const MAX_DECLINED_ACTIONS = 3;
+/** Quiet time after a page's request is settled, so it cannot chain dialogs under a click. */
+const PAGE_ACTION_COOLDOWN_MS = 1500;
+
+/**
+ * Whether the user is interacting with the page right now. A click inside a child frame
+ * gives the app window transient activation (a few seconds), which page code cannot fake;
+ * focus alone is not enough, because the frame keeps it long after the click.
+ */
+function userJustClickedInside(frame: HTMLIFrameElement | null): boolean {
+  if (typeof document === "undefined" || !frame || document.activeElement !== frame) return false;
+  const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } })
+    .userActivation;
+  return activation ? activation.isActive : false;
+}
 
 const formatFileSize = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "";
@@ -190,6 +210,11 @@ function HtmlSurfaceFrame({
   const initializedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSaveRef = useRef<(() => void) | null>(null);
+  const actions = useSurfaceActions();
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  // Kept for the frame's whole mount: a reload of its document does not reset it.
+  const actionGuardRef = useRef({ pending: false, asked: 0, declined: 0, quietUntil: 0 });
   const surfaceKey = useMemo(() => htmlSurfaceKey(html), [html]);
 
   useEffect(() => {
@@ -225,10 +250,42 @@ function HtmlSurfaceFrame({
       pendingSaveRef.current = save;
       saveTimerRef.current = setTimeout(save, SAVE_DELAY_MS);
     };
-    return new HtmlSurfaceBridgeHost(() => iframeRef.current?.contentWindow, createSurfaceNonce(), {
-      onResize: (height) => autosize && onSizeChange(height),
-      onState: persist,
-    });
+    const host: HtmlSurfaceBridgeHost = new HtmlSurfaceBridgeHost(
+      () => iframeRef.current?.contentWindow,
+      createSurfaceNonce(),
+      {
+        onResize: (height) => autosize && onSizeChange(height),
+        onState: persist,
+        onAction: (id, action) => {
+          const guard = actionGuardRef.current;
+          const request = toSurfaceActionRequest(action);
+          const ask = actionsRef.current;
+          // Only right after a real click inside this frame, one at a time, a few per
+          // mount, with a pause between them, and not after the user kept cancelling.
+          if (
+            !request ||
+            !ask ||
+            guard.pending ||
+            Date.now() < guard.quietUntil ||
+            guard.asked >= MAX_PAGE_ACTIONS ||
+            guard.declined >= MAX_DECLINED_ACTIONS ||
+            !userJustClickedInside(iframeRef.current)
+          ) {
+            host.actionResult(id, false);
+            return;
+          }
+          guard.pending = true;
+          guard.asked += 1;
+          void ask(request, "page").then((ok) => {
+            guard.pending = false;
+            guard.quietUntil = Date.now() + PAGE_ACTION_COOLDOWN_MS;
+            if (!ok) guard.declined += 1;
+            host.actionResult(id, ok);
+          });
+        },
+      },
+    );
+    return host;
   }, [autosize, onSizeChange, surfaceKey, taskId, url]);
 
   useEffect(() => {

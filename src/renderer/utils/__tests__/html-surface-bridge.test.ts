@@ -63,4 +63,39 @@ describe("HtmlSurfaceBridgeHost", () => {
       "*",
     );
   });
+
+  it("passes page actions to the app and answers them over the bridge", () => {
+    const frame = { postMessage: vi.fn() };
+    const onAction = vi.fn();
+    const host = new HtmlSurfaceBridgeHost(() => frame, nonce, {
+      onResize: vi.fn(),
+      onState: vi.fn(),
+      onAction,
+    });
+    const data = (payload: unknown) => ({
+      source: frame,
+      data: { coworkSurface: 1, nonce, type: "action", payload },
+    });
+    expect(host.handle(data({ id: 1, action: { prompt: "Book it" } }))).toBe(true);
+    expect(onAction).toHaveBeenCalledWith(1, { prompt: "Book it" });
+    // Anything but a prompt or a link is dropped before it reaches the app.
+    expect(host.handle(data({ id: 2, action: { run: "ls" } }))).toBe(false);
+    expect(host.handle(data({ id: 3, action: { prompt: "a", open: "https://a.com" } }))).toBe(
+      false,
+    );
+    host.actionResult(1, true);
+    expect(frame.postMessage).toHaveBeenLastCalledWith(
+      { coworkSurface: 1, type: "action.result", nonce, payload: { id: 1, ok: true } },
+      "*",
+    );
+  });
+
+  it("refuses actions where the view offers none", () => {
+    const { host, frame, message } = setup();
+    expect(host.handle(message("action", { id: 7, action: { open: "https://a.com" } }))).toBe(true);
+    expect(frame.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "action.result", payload: { id: 7, ok: false } }),
+      "*",
+    );
+  });
 });

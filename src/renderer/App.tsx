@@ -6760,9 +6760,12 @@ export function App() {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
+      /** Send exactly this text (an approved answer action), never a rewritten reply. */
+      verbatim?: boolean;
     },
   ) => {
     if (!selectedTaskId) return;
+    const { verbatim = false, ...sendOptions } = options ?? {};
 
     try {
       const sentAt = Date.now();
@@ -6789,17 +6792,16 @@ export function App() {
       const isShellPermissionPause =
         isShellPermissionPauseReason(selectedTask?.awaitingUserInputReasonCode) ||
         isShellPermissionPauseReason(latestAttentionReason);
-      const shellPermissionDecision = isShellPermissionPause
-        ? classifyShellPermissionDecision(message)
-        : "unknown";
+      const shellPermissionDecision =
+        isShellPermissionPause && !verbatim ? classifyShellPermissionDecision(message) : "unknown";
       let nextMessage = message;
-      let nextOptions = options;
+      let nextOptions = options ? sendOptions : undefined;
 
       if (shellPermissionDecision === "enable_shell") {
         nextMessage = "Please continue using the Ask for approval access profile.";
         nextOptions = {
-          ...options,
-          accessProfileId: options?.accessProfileId || BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+          ...sendOptions,
+          accessProfileId: sendOptions.accessProfileId || BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
         };
       } else if (shellPermissionDecision === "continue_without_shell") {
         nextMessage = "Please continue without command tools and use the limited best-effort path.";

@@ -1,3 +1,4 @@
+import { normalizeSurfaceActionUrl, visibleSurfaceText } from "./actions";
 import { isToolDataSource } from "./data";
 import { richEmbedsToPlainText } from "../rich-embeds";
 import {
@@ -185,6 +186,12 @@ function plainLines(
     case "divider":
     case "copy":
       return [];
+    case "button": {
+      // A message button means nothing outside the app; a link is still useful.
+      const link = "open" in node.action ? normalizeSurfaceActionUrl(node.action.open) : null;
+      const label = visibleSurfaceText(text(node.label));
+      return link && label ? [`${label}: ${link.url}`] : [];
+    }
     case "media_list":
       return node.items.map((item) => {
         const detail = item.text ? ` — ${text(item.text)}` : "";

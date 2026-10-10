@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ANSWER_SURFACE_EXAMPLES } from "../../../shared/answer-surfaces/prompt";
 import { AnswerSurfaceBlock } from "../AnswerSurface/AnswerSurface";
+import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
 import { parseAssistantMessageSegments } from "../AssistantMessageContent";
 import { cleanAssistantMessageForDisplay } from "../MainContent/markdown-normalization";
 
@@ -122,6 +123,35 @@ describe("AnswerSurfaceBlock", () => {
     expect(html).toContain("--as-fill:0.4");
     expect(html).toContain('role="progressbar"');
     expect(html).toContain("as-ring-fill");
+  });
+
+  it("renders action buttons, enabled only where the view offers actions", () => {
+    const source = JSON.stringify({
+      type: "stack",
+      children: [
+        { type: "slider", id: "n", label: "People", min: 1, max: 8, default: 4 },
+        { type: "button", label: "Book for {{n}}", action: { prompt: "Book a table for {{n}}" } },
+        { type: "button", label: "Menu", style: "secondary", action: { open: "https://a.com" } },
+      ],
+    });
+    const alone = render({ source });
+    expect(alone).toContain("Book for 4");
+    expect(alone).toContain("as-action-button-secondary");
+    expect(alone.match(/disabled=""/g)?.length).toBe(2);
+    const offered = renderToStaticMarkup(
+      React.createElement(SurfaceActionProvider, {
+        onSendPrompt: () => {},
+        onOpenLink: () => {},
+        children: React.createElement(AnswerSurfaceBlock, {
+          source,
+          surfaceKey: "s1-x-0",
+          closed: true,
+        }),
+      }),
+    );
+    expect(offered).not.toContain('disabled=""');
+    // The message itself is only shown in the app's confirmation, never sent on render.
+    expect(offered).not.toContain("Book a table for 4");
   });
 
   it("does not render invalid blocks", () => {

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron } from "playwright";
+import { launchCoworkDesktop } from "./electron-launch.mjs";
 
 // End-to-end check of the in-app browser workbench in the real Electron app, on a
 // disposable profile against a local fixture site. No model is needed: the
@@ -267,7 +268,7 @@ await fs.writeFile(
 );
 
 try {
-  desktop = await electron.launch({ args: [root], cwd: root, env, timeout: 60000 });
+  desktop = await launchCoworkDesktop(electron, { root, env, timeout: 60000 });
   desktop
     .process()
     .stdout?.on("data", (data) => fs.appendFile(path.join(outputDir, "runtime.log"), data));

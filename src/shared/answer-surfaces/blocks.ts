@@ -1,10 +1,7 @@
-import { expressionIdentifiers } from "./expression";
 import { isToolDataSource } from "./data";
 import { richEmbedsToPlainText } from "../rich-embeds";
 import {
   initialSurfaceState,
-  interpolationExpressions,
-  isContainerNode,
   nodeChildren,
   parseAnswerSurfaceSource,
   walkSurface,
@@ -15,6 +12,7 @@ import {
 } from "./schema";
 import {
   buildSurfaceScope,
+  logicDependence,
   resolveSurfaceLabels,
   resolveSurfaceRows,
   resolveSurfaceValues,
@@ -259,32 +257,6 @@ function plainLines(
     case "callout":
       return [`> ${node.title ? `**${text(node.title)}** ` : ""}${text(node.text)}`];
   }
-}
-
-/** Names whose values only the logic can produce: its outputs and `computed` values using them. */
-function logicDependence(spec: AnswerSurfaceSpec): (value: AnswerSurfaceValue) => boolean {
-  const names = new Set(spec.logic?.outputs ?? []);
-  if (names.size === 0) return () => false;
-  const uses = (expr: string) => {
-    try {
-      return expressionIdentifiers(expr).some((name) => names.has(name));
-    } catch {
-      return false;
-    }
-  };
-  // `computed` values can read logic outputs (and each other) in document order.
-  walkSurface(spec.root, (node) => {
-    if (!isContainerNode(node)) return;
-    for (const [id, expr] of Object.entries(node.computed ?? {})) if (uses(expr)) names.add(id);
-  });
-  return (value) => {
-    if (typeof value === "number") return false;
-    if (typeof value === "string") return interpolationExpressions(value).some(uses);
-    return (
-      Boolean(value.expr && uses(value.expr)) ||
-      (typeof value.value === "string" && interpolationExpressions(value.value).some(uses))
-    );
-  };
 }
 
 /** Says where the missing numbers live, naming data files (tool handles mean nothing here). */

@@ -1,4 +1,4 @@
-import { evaluateExpression, type ExpressionValue } from "./expression";
+import { evaluateExpression, expressionIdentifiers, type ExpressionValue } from "./expression";
 import type { LogicCell, SurfaceLogicOutputs } from "./logic";
 import {
   initialSurfaceState,
@@ -218,11 +218,14 @@ export function formatChartNumber(
 export function lintAnswerSurface(
   spec: AnswerSurfaceSpec,
   logicScope: SurfaceScope = {},
+  options: { skipLogicValues?: boolean } = {},
 ): string[] {
   const scope = buildSurfaceScope(spec, initialSurfaceState(spec), logicScope);
   const problems: string[] = [];
+  // Without a logic run (main, plain text), values computed by the logic are not known.
+  const dependsOnLogic = options.skipLogicValues ? logicDependence(spec) : () => false;
   const check = (value: AnswerSurfaceValue | undefined) => {
-    if (value === undefined) return;
+    if (value === undefined || dependsOnLogic(value)) return;
     if (typeof value === "string") {
       for (const expr of interpolationExpressions(value)) {
         if (evaluateExpression(expr, scope) === null) problems.push(`{{${expr}}} has no value`);
@@ -262,4 +265,30 @@ export function lintAnswerSurface(
     }
   });
   return problems;
+}
+
+/** Names whose values only the logic can produce: its outputs and `computed` values using them. */
+export function logicDependence(spec: AnswerSurfaceSpec): (value: AnswerSurfaceValue) => boolean {
+  const names = new Set(spec.logic?.outputs ?? []);
+  if (names.size === 0) return () => false;
+  const uses = (expr: string) => {
+    try {
+      return expressionIdentifiers(expr).some((name) => names.has(name));
+    } catch {
+      return false;
+    }
+  };
+  // `computed` values can read logic outputs (and each other) in document order.
+  walkSurface(spec.root, (node) => {
+    if (!isContainerNode(node)) return;
+    for (const [id, expr] of Object.entries(node.computed ?? {})) if (uses(expr)) names.add(id);
+  });
+  return (value) => {
+    if (typeof value === "number") return false;
+    if (typeof value === "string") return interpolationExpressions(value).some(uses);
+    return (
+      Boolean(value.expr && uses(value.expr)) ||
+      (typeof value.value === "string" && interpolationExpressions(value.value).some(uses))
+    );
+  };
 }

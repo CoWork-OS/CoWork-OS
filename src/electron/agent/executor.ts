@@ -81,6 +81,11 @@ import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
 import { extractToolDataTable, toolDataHandle, toolDataNote } from "../answer-surfaces/tool-data";
 import { formatAnswerSurfaceChanges } from "../answer-surfaces/answer-surface-changes";
 import { ANSWER_SURFACE_PROMPT } from "../../shared/answer-surfaces/prompt";
+import {
+  findAnswerSurfaceProblems,
+  repairAnswerSurfaces,
+} from "../../shared/answer-surfaces/repair";
+import { hasAnswerSurfaceBlock } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
 import * as fs from "fs";
@@ -9290,6 +9295,75 @@ ${transcript}
     );
   }
 
+  /**
+   * The answer-block repair loop: a ```cowork-ui block that would not render (bad JSON,
+   * schema errors, a cut-off fence) or whose formulas are blank at the defaults goes back
+   * to the model once, with the exact problem; the fix replaces it only when it checks
+   * out, so a failed repair never makes the answer worse. Runs before the answer is shown
+   * and never streams.
+   */
+  private async repairAnswerSurfaceText(text: string): Promise<string> {
+    if (!text || !hasAnswerSurfaceBlock(text)) return text;
+    if (
+      !this.shouldOfferAnswerSurfaces() ||
+      !isFeatureEnabled("COWORK_ANSWER_SURFACE_REPAIR", true)
+    ) {
+      return text;
+    }
+    if (!findAnswerSurfaceProblems(text).length) return text;
+    const outcome = await repairAnswerSurfaces(text, async (prompt) => {
+      const response = await this.createMessageWithTimeout(
+        {
+          model: this.modelId,
+          maxTokens: 6000,
+          system: ANSWER_SURFACE_PROMPT,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+        },
+        45_000,
+        "Answer block repair",
+        undefined,
+        { suppressStreaming: true },
+      );
+      if (response?.usage) {
+        this.updateTracking(
+          response.usage.inputTokens,
+          response.usage.outputTokens,
+          response.usage.cachedTokens,
+        );
+      }
+      return this.extractTextFromLLMContent(response?.content || []);
+    });
+    if (outcome.repaired > 0) {
+      this.emitEvent("log", {
+        message: `Repaired ${outcome.repaired} interactive answer block(s)`,
+      });
+    }
+    for (const reason of outcome.kept) {
+      this.emitEvent("log", {
+        message: `Kept an interactive answer block unrepaired: ${reason.slice(0, 160)}`,
+      });
+    }
+    return outcome.text;
+  }
+
+  /** The repair loop over a model response's text parts (tool calls are left as they are). */
+  private async repairAnswerSurfaceResponse<T extends { content?: Any[] }>(
+    response: T,
+  ): Promise<T> {
+    if (!Array.isArray(response?.content)) return response;
+    let changed = false;
+    const content = await Promise.all(
+      response.content.map(async (item: Any) => {
+        if (item?.type !== "text" || typeof item.text !== "string") return item;
+        const text = await this.repairAnswerSurfaceText(item.text);
+        if (text === item.text) return item;
+        changed = true;
+        return { ...item, text };
+      }),
+    );
+    return changed ? { ...response, content } : response;
+  }
+
   private buildChatOrThinkSystemPrompt(
     isThinkMode: boolean,
     ctx: {
@@ -9462,7 +9536,7 @@ ${transcript}
       const hasUnexecutedToolCall = this.responseLooksLikeUnexecutedToolCall(rawAssistantText);
       const assistantText = hasUnexecutedToolCall
         ? this.buildUnexecutedToolCallChatFallback()
-        : rawAssistantText;
+        : await this.repairAnswerSurfaceText(rawAssistantText);
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;
@@ -9893,6 +9967,8 @@ ${transcript}
     streamOptions?: {
       suppressUnexecutedToolCallText?: boolean;
       fallbackText?: string;
+      /** Internal calls (e.g. repairing an answer block) never stream to the screen. */
+      suppressStreaming?: boolean;
     },
   ): Promise<Any> {
     // Pace model calls while timeline projections in the database worker catch up.
@@ -9910,7 +9986,7 @@ ${transcript}
 
     const effectiveProvider = phaseRouting?.provider ?? this.provider;
     const effectiveModelId = phaseRouting?.modelId ?? this.modelId;
-    const shouldStream = effectiveProvider.type === "azure";
+    const shouldStream = effectiveProvider.type === "azure" && !streamOptions?.suppressStreaming;
     const onStreamProgress: StreamProgressCallback | undefined = shouldStream
       ? this.createLlmStreamingProgressHandler(streamOptions)
       : undefined;
@@ -29899,7 +29975,7 @@ You are continuing a previous conversation. The context from the previous conver
       const hasUnexecutedToolCall = this.responseLooksLikeUnexecutedToolCall(rawAssistantText);
       const assistantText = hasUnexecutedToolCall
         ? this.buildUnexecutedToolCallChatFallback()
-        : rawAssistantText;
+        : await this.repairAnswerSurfaceText(rawAssistantText);
 
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
@@ -34561,6 +34637,10 @@ Return ONLY a JSON object:
             contextLabel: `step:${step.id} ${step.description}`,
             userIntent: `Task: ${this.task.title}\nStep: ${step.description}\n\nUser request/context:\n${this.getExecutionTaskPrompt()}`,
           });
+          // A final answer's interactive blocks are checked and, if broken, repaired once.
+          if (!isVerifyStep && !isPlanVerifyStep && (isLastStep || isSummaryStep)) {
+            response = await this.repairAnswerSurfaceResponse(response);
+          }
 
           // Process response - only stop if we have actual content AND it's end_turn
           // Empty responses should not terminate the loop
@@ -42943,6 +43023,9 @@ Return ONLY a JSON object:
             contextLabel: `follow-up ${iterationCount}`,
             userIntent: `User message:\n${messageWithContext}`,
           });
+          if (response.stopReason === "end_turn" && !responseHasToolUse) {
+            response = await this.repairAnswerSurfaceResponse(response);
+          }
 
           // Process response - don't immediately stop, check for text response first
           let wantsToEnd = response.stopReason === "end_turn";

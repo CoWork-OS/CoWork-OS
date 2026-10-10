@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron } from "playwright";
+import { launchCoworkDesktop } from "./electron-launch.mjs";
 
 // Real macOS acceptance against a disposable profile. Build Electron and React first.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -20,7 +21,7 @@ let desktop;
 let main;
 const checks = [];
 async function launch() {
-  desktop = await electron.launch({ args: [root], cwd: root, env, timeout: 60000 });
+  desktop = await launchCoworkDesktop(electron, { root, env, timeout: 60000 });
   desktop
     .process()
     .stdout?.on("data", (data) => fs.appendFile(path.join(outputDir, "runtime.log"), data));

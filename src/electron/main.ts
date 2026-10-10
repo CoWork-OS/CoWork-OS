@@ -339,7 +339,12 @@ import {
   getDesktopIconImage,
   getDesktopIconPath,
 } from "./branding";
-import { primeMacSafeStorageContext } from "./utils/mac-safe-storage-bootstrap";
+import {
+  keychainMismatchMessage,
+  MOCK_KEYCHAIN_SWITCH,
+  primeMacSafeStorageContext,
+  shouldAdoptNewKeychainKey,
+} from "./utils/mac-safe-storage-bootstrap";
 import { getSafeStorage } from "./utils/safe-storage";
 import {
   keepDirectRunAliveWithoutWindows,
@@ -1395,21 +1400,23 @@ function verifySecureSettingsKeychainIdentity(): boolean {
   const status = repository.verifyKeychainIdentity();
   if (status !== "mismatch") return false;
 
-  if (process.env[ACCEPT_NEW_KEYCHAIN_KEY_ENV] === "1") {
+  const mockKeychain = app.commandLine.hasSwitch(MOCK_KEYCHAIN_SWITCH);
+  if (shouldAdoptNewKeychainKey(process.env[ACCEPT_NEW_KEYCHAIN_KEY_ENV], mockKeychain)) {
     const archived = repository.adoptCurrentKeychainIdentity();
     logger.warn("Adopted the current OS keychain key; unreadable settings were archived.", {
       archived,
     });
     return false;
   }
-  logger.error(
-    `The OS keychain key differs from the one that encrypted existing settings. Settings changes will not be saved until the original keychain access is restored, or relaunch with ${ACCEPT_NEW_KEYCHAIN_KEY_ENV}=1 to archive unreadable settings and continue with the current key.`,
-  );
+  logger.error(keychainMismatchMessage(mockKeychain, ACCEPT_NEW_KEYCHAIN_KEY_ENV));
   return true;
 }
 
 async function notifyKeychainIdentityMismatch(): Promise<void> {
   if (!keychainIdentityMismatch) return;
+  // A mock-keychain launch is a test harness, not the user: logging is enough, and its
+  // advice (adopt the current key) does not apply.
+  if (app.commandLine.hasSwitch(MOCK_KEYCHAIN_SWITCH)) return;
   try {
     await getNotificationService()?.add({
       type: "error",

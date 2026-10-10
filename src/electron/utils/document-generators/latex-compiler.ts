@@ -7,6 +7,7 @@ import type { WorkspacePermissions } from "../../../shared/types";
 import { createSandbox, type ISandbox } from "../../agent/sandbox/sandbox-factory";
 import {
   evaluateWorkspaceFilesystemAccess,
+  preserveLexicalMacAlias,
   resolveAccessControlledPath,
 } from "../../security/access-profile-paths";
 import { promisify } from "node:util";
@@ -49,6 +50,17 @@ const ENGINE_ORDER: LatexEngine[] = ["tectonic", "latexmk", "xelatex", "lualatex
 const COMPILE_TIMEOUT_MS = 120_000;
 const COMPILE_MAX_BUFFER = 1024 * 1024;
 const MAX_DIAGNOSTIC_CHARS = 8_000;
+
+function matchesAuthorizedPath(requestedPath: string, canonicalPath: string): boolean {
+  // macOS exposes /var and /tmp through fixed system aliases. Accept only
+  // those spelling differences; an arbitrary symlink must still invalidate
+  // caller authorization. Execution and publication use canonicalPath.
+  return (
+    requestedPath === canonicalPath ||
+    (process.platform === "darwin" &&
+      preserveLexicalMacAlias(requestedPath, canonicalPath) === requestedPath)
+  );
+}
 
 function isPathInsideWorkspace(targetPath: string, workspacePath: string): boolean {
   const relative = path.relative(path.resolve(workspacePath), path.resolve(targetPath));
@@ -178,7 +190,7 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
     );
     if (
       params.allowExternalPaths &&
-      sourcePath !== path.resolve(workspacePath, params.sourcePath)
+      !matchesAuthorizedPath(path.resolve(workspacePath, params.sourcePath), sourcePath)
     ) {
       throw new Error("LaTeX source path changed after authorization");
     }
@@ -198,7 +210,7 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
           `${path.basename(sourcePath, path.extname(sourcePath))}.pdf`,
         );
     const outputPath = resolveAccessControlledPath(workspacePath, requestedOutputPath);
-    if (params.allowExternalPaths && outputPath !== requestedOutputPath) {
+    if (params.allowExternalPaths && !matchesAuthorizedPath(requestedOutputPath, outputPath)) {
       throw new Error("LaTeX output path changed after authorization");
     }
     if (

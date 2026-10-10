@@ -55,6 +55,10 @@ export class QATools {
           { allowAutoApprove: false },
         ),
       createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "qa"),
+      () =>
+        typeof this.daemon.getEffectiveWorkspaceForTask === "function"
+          ? this.daemon.getEffectiveWorkspaceForTask(this.taskId)
+          : this.workspace,
     );
   }
 

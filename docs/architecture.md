@@ -104,6 +104,12 @@ the encrypted permission-settings manager. Custom profiles can inherit only from
 at least as broad; child tasks, managed sessions, automations, remote dispatch, and worktrees keep
 the same ceiling. Missing or invalid named profiles fail closed as unavailable read-only profiles.
 
+QA server commands require explicit command approval and revalidate current task and administrator
+authority before launch. Their subprocess networking follows the shared administrator and domain
+policy; command approval does not grant on-request networking. Restricted execution requires an
+approved OS sandbox. Offline macOS servers may listen locally under the loopback listener guard,
+which terminates their process group if a non-loopback listener appears.
+
 See [Access Profiles](access-profiles.md) for the product, API, migration, and edge-case contract.
 
 ## Heartbeat V3

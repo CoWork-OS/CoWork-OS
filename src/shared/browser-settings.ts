@@ -49,7 +49,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   agentDownloads: "ask",
   agentUploads: "ask",
   developerMode: false,
-  browserEngine: "webview",
+  browserEngine: "native",
 };
 
 const SEARCH_ENGINES = new Set(["google", "bing", "duckduckgo", "brave", "kagi"]);

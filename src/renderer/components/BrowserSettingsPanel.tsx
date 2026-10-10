@@ -113,8 +113,8 @@ const AGENT_OPTIONS: Array<{ value: BrowserAgentPermission; label: string }> = [
 ];
 
 const ENGINE_OPTIONS: Array<{ value: BrowserEngine; label: string }> = [
-  { value: "webview", label: "Standard" },
-  { value: "native", label: "Native tabs (experimental)" },
+  { value: "native", label: "Native tabs" },
+  { value: "webview", label: "Standard (webview)" },
 ];
 
 /** Settings > Browser: preferences, history, site permissions and developer mode. */

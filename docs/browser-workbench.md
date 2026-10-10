@@ -153,8 +153,8 @@ The workbench keeps its pages loaded when moving between sidebar and fullscreen.
 
 Settings > Browser > Browser engine picks how tab pages are hosted. It applies the next time the browser opens.
 
-- **Standard** (default): each tab is a `<webview>` inside the app window, owned by the renderer. Closing the browser or switching tasks unloads the tabs; reopening restores their URLs (pages reload).
-- **Native tabs (experimental)**: each tab is a `WebContentsView` owned by the main process (`src/electron/browser/browser-tab-views.ts`) and drawn by the window over the tab's area. Pages stay loaded when the browser closes or the task switches, and reopening the tab shows the live page. Up to 24 views are kept; the least recently used hidden ones close and reload from their URL when shown again.
+- **Standard**: each tab is a `<webview>` inside the app window, owned by the renderer. Closing the browser or switching tasks unloads the tabs; reopening restores their URLs (pages reload).
+- **Native tabs** (default): each tab is a `WebContentsView` owned by the main process (`src/electron/browser/browser-tab-views.ts`) and drawn by the window over the tab's area. Pages stay loaded when the browser closes or the task switches, and reopening the tab shows the live page. Up to 24 views are kept; the least recently used hidden ones close and reload from their URL when shown again.
 
 A native view always draws above the app's own interface. To keep overlays usable:
 

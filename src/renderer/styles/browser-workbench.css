@@ -1891,7 +1891,61 @@
 
 /* A pending CoWork approval answered over the tab (same decision as the chat dialog). */
 .browser-workbench-driving.browser-workbench-approval {
-  background: color-mix(in srgb, #8b5cf6 13%, var(--color-bg-elevated));
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 8px 6px 10px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+.browser-workbench-driving > .browser-workbench-approval-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  color: var(--color-text-secondary);
+}
+
+.browser-workbench-approval-title {
+  font-weight: 500;
+}
+
+.browser-workbench-driving.browser-workbench-approval button {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.browser-workbench-driving.browser-workbench-approval button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.browser-workbench-driving.browser-workbench-approval button.is-primary {
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+}
+
+.browser-workbench-driving.browser-workbench-approval button.is-primary:hover {
+  opacity: 0.88;
+}
+
+.browser-workbench-driving.browser-workbench-approval button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline-offset: 1px;
 }
 
 .browser-workbench-driving-label {

@@ -1611,128 +1611,132 @@ button {
 
 .browser-use-approval-overlay {
   align-items: center;
-  background-color: rgba(0, 0, 0, 0.36);
-  backdrop-filter: blur(8px);
 }
 
 .browser-use-approval-card {
-  width: min(92vw, 760px);
+  width: 100%;
+  max-width: 460px;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 14px;
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-subtle);
-  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.24);
+  box-shadow: 0 24px 48px -16px rgba(0, 0, 0, 0.45);
 }
 
 .theme-light .browser-use-approval-card {
   background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.18);
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 24px 48px -16px rgba(15, 23, 42, 0.22);
 }
 
 .browser-use-approval-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 28px 26px 14px;
-  color: var(--color-text-secondary);
+  gap: 8px;
+  padding: 18px 18px 6px;
+  color: var(--color-text-muted);
 }
 
 .browser-use-approval-glyph {
   display: grid;
-  grid-template-columns: repeat(2, 8px);
-  grid-template-rows: repeat(2, 8px);
-  gap: 5px;
-  width: 22px;
-  height: 22px;
+  grid-template-columns: repeat(2, 6px);
+  grid-template-rows: repeat(2, 6px);
+  place-content: center;
+  gap: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  color: var(--color-text-secondary);
 }
 
 .browser-use-approval-glyph span {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  border: 2px solid currentColor;
+  border: 1.5px solid currentColor;
   box-sizing: border-box;
 }
 
 .browser-use-approval-name {
-  font-size: 20px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0;
 }
 
 .browser-use-approval-title {
   margin: 0;
-  padding: 0 26px 26px;
+  padding: 0 18px 16px;
   color: var(--color-text-primary);
-  font-size: 18px;
-  line-height: 1.35;
-  font-weight: 650;
-  letter-spacing: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .browser-use-approval-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 16px 26px 18px;
+  gap: 12px;
+  margin: 0 18px;
+  padding: 12px 0 14px;
   border-top: 1px solid var(--color-border-subtle);
 }
 
 .browser-use-approval-checkbox {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   color: var(--color-text-secondary);
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
 .browser-use-approval-checkbox input {
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   margin: 0;
-  border-radius: 6px;
-  border: 1px solid var(--color-border-strong, var(--color-border-subtle));
-  background: var(--color-bg-elevated);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: transparent;
   cursor: pointer;
   position: relative;
   flex: 0 0 auto;
 }
 
-.theme-light .browser-use-approval-checkbox input {
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.12);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
 .browser-use-approval-checkbox input:checked {
-  border-color: #1f2937;
-  background: #1f2937;
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
 }
 
 .browser-use-approval-checkbox input:checked::after {
   content: "";
   position: absolute;
-  left: 5px;
-  top: 2px;
-  width: 5px;
-  height: 9px;
-  border: solid #ffffff;
-  border-width: 0 2px 2px 0;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border: solid var(--color-bg-primary);
+  border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
+}
+
+.browser-use-approval-checkbox input:focus-visible,
+.browser-use-approval-cancel:focus-visible,
+.browser-use-approval-allow:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline-offset: 2px;
 }
 
 .browser-use-approval-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
   flex: 0 0 auto;
 }
 
@@ -1740,20 +1744,19 @@ button {
 .browser-use-approval-allow {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 0 18px;
-  border-radius: 999px;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
   border: none;
-  font-size: 15px;
-  font-weight: 550;
-  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition:
     background 0.12s ease,
     color 0.12s ease,
-    transform 0.08s ease,
-    filter 0.12s ease;
+    opacity 0.12s ease;
 }
 
 .browser-use-approval-cancel {
@@ -1763,27 +1766,16 @@ button {
 
 .browser-use-approval-cancel:hover {
   color: var(--color-text-primary);
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.theme-dark .browser-use-approval-cancel:hover {
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg-hover);
 }
 
 .browser-use-approval-allow {
-  min-width: 126px;
-  justify-content: center;
-  background: #1f2937;
-  color: #ffffff;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
 }
 
 .browser-use-approval-allow:hover {
-  filter: brightness(1.08);
-}
-
-.browser-use-approval-cancel:active,
-.browser-use-approval-allow:active {
-  transform: scale(0.98);
+  opacity: 0.88;
 }
 
 .browser-use-approval-cancel kbd,
@@ -1791,41 +1783,24 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  border: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 650;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
   line-height: 1;
-  background: rgba(0, 0, 0, 0.08);
+  background: transparent;
   color: inherit;
+  opacity: 0.6;
 }
 
-.browser-use-approval-allow kbd {
-  background: rgba(255, 255, 255, 0.14);
-}
-
-@media (max-width: 640px) {
-  .browser-use-approval-card {
-    width: min(94vw, 480px);
-  }
-
-  .browser-use-approval-header {
-    padding: 22px 20px 12px;
-  }
-
-  .browser-use-approval-title {
-    padding: 0 20px 22px;
-    font-size: 17px;
-  }
-
+@media (max-width: 480px) {
   .browser-use-approval-footer {
     align-items: stretch;
     flex-direction: column;
-    padding: 14px 20px 18px;
   }
 
   .browser-use-approval-actions {

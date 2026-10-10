@@ -122,9 +122,11 @@ export function BrowserApprovalCard({
       role="alertdialog"
       aria-label={title}
     >
-      <ShieldQuestion size={14} aria-hidden="true" />
+      <span className="browser-workbench-approval-icon" aria-hidden="true">
+        <ShieldQuestion size={14} />
+      </span>
       <span>
-        {title}
+        <span className="browser-workbench-approval-title">{title}</span>
         {subject && <span className="browser-workbench-driving-label"> · {subject}</span>}
       </span>
       {choices.map((choice) => (

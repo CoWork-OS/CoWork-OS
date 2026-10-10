@@ -316,6 +316,18 @@
       }
     },
     {
+      "id": "gateway-attachment-destination-boundary-confirmed-fix",
+      "prompt": "Regression guard for Confine inbound attachment persistence and honor workspace write policy across buffer, local and downloaded sources: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "gateway-attachment-destination-boundary",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/gateway/__tests__/router-attachment-boundary.test.ts"
+      }
+    },
+    {
       "id": "harness-read-only-workers-20260914-confirmed-fix",
       "prompt": "Regression guard for Prevent read-only review workers from inheriting parent bypass, shell, write, or external action permissions: replay the original failure class and verify the fix still holds.",
       "assertions": {

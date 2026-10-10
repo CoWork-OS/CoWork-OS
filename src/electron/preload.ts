@@ -2376,13 +2376,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   browserImportDetect: () =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_DETECT) as Promise<BrowserImportDetectResult>,
   browserImportPrepare: (data: BrowserImportPrepareRequest) =>
-    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_PREPARE, data) as Promise<BrowserImportPrepareResult>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BROWSER_IMPORT_PREPARE,
+      data,
+    ) as Promise<BrowserImportPrepareResult>,
   browserImportCommit: (data: {
     workspaceId: string;
     token: string;
     cookies?: boolean;
     passwords?: boolean;
-  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_COMMIT, data) as Promise<BrowserImportCommitResult>,
+  }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.BROWSER_IMPORT_COMMIT,
+      data,
+    ) as Promise<BrowserImportCommitResult>,
   browserImportCancel: (data: { token: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_IMPORT_CANCEL, data) as Promise<{ success: boolean }>,
   browserImportDeleteFile: (data: { token: string }) =>

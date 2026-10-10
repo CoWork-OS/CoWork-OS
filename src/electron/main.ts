@@ -5240,10 +5240,10 @@ if (isMacSafeStorageMigrationWorker) {
       isMainWindowSender: (event) =>
         Boolean(
           mainWindow &&
-            !mainWindow.isDestroyed() &&
-            event?.sender === mainWindow.webContents &&
-            // The app's own top page, not a frame inside it.
-            (!event.senderFrame || event.senderFrame.parent === null),
+          !mainWindow.isDestroyed() &&
+          event?.sender === mainWindow.webContents &&
+          // The app's own top page, not a frame inside it.
+          (!event.senderFrame || event.senderFrame.parent === null),
         ),
       vault: getBrowserVault(),
       external: defaultExternalBrowserDeps(),

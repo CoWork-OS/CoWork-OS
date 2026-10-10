@@ -18,6 +18,9 @@ import {
   TRANSCRIPT_CONTEXT_SECTION_TOKENS,
 } from "./prompt-budgets";
 
+/** Room for the inline-surface guidance and component reference (~19k characters). */
+export const ANSWER_SURFACE_SECTION_TOKENS = 5400;
+
 export interface BuildExecutionPromptParams {
   workspaceId: string;
   workspacePath: string;
@@ -25,6 +28,8 @@ export interface BuildExecutionPromptParams {
   identityPrompt?: string;
   safetyCorePrompt?: string;
   baseInstructionPrompt?: string;
+  /** Inline-surface guidance and the cowork-ui component reference (answer-style tasks). */
+  answerSurfacePrompt?: string;
   inputPolicyPrompt?: string;
   workspaceContextPrompt?: string;
   currentTimePrompt?: string;
@@ -242,6 +247,18 @@ export class ContentBuilder {
             layerKind: "always",
             cacheScope: "session",
           }),
+          // Its own section: inside base_instruction's cap the component reference was cut
+          // off. Callers add ANSWER_SURFACE_SECTION_TOKENS to the total budget with it.
+          makeSection(
+            "answer_surfaces",
+            params.answerSurfacePrompt,
+            ANSWER_SURFACE_SECTION_TOKENS,
+            {
+              required: true,
+              layerKind: "always",
+              cacheScope: "session",
+            },
+          ),
           makeSection("input_policy", params.inputPolicyPrompt, 600, {
             required: true,
             layerKind: "always",

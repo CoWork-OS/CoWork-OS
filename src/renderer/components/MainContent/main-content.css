@@ -6644,6 +6644,54 @@ button.collab-timeline-thought-agent:hover {
   min-height: 160px;
 }
 
+/* A parked frame (see LiveFrameSlots) keeps the space it had and loads again on click. */
+.inline-html-preview .inline-html-frame.inline-html-frame-parked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 160px;
+  padding: 16px;
+  opacity: 1;
+  border: 1px dashed var(--color-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, transparent);
+  color: var(--color-text-muted);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* Once measured, it keeps the frame's exact height so nothing around it moves. */
+.inline-html-preview.inline-html-preview-autosized .inline-html-frame.inline-html-frame-parked {
+  min-height: 0;
+}
+
+.inline-html-preview .inline-html-frame.inline-html-frame-parked:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+  color: var(--color-text);
+}
+
+.inline-html-frame-parked:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.inline-html-frame-parked-title {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-html-frame-parked-note {
+  font-size: 12px;
+}
+
 /* Fixed-height frames: the badge sits under the frame instead of overflowing the wrap. */
 .inline-html-preview-frame:not(.inline-html-preview-autosized):not(.inline-html-preview-sizing)
   .inline-html-frame-wrap:has(> .inline-html-surface-badge) {

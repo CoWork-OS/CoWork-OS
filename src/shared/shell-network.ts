@@ -1,11 +1,10 @@
 /**
  * Conservative classifier for commands that can initiate network egress.
  *
- * This is intentionally a boundary classifier, not a shell parser. A false
- * positive causes an approval prompt, or blocks the command where shell
- * networking is disabled; a false negative would let a command bypass a
- * profile's network policy. Commands that are not recognized remain subject to
- * the normal shell approval and sandbox controls.
+ * This classifier supports early network-policy denials; it cannot prove that
+ * arbitrary code is offline. A false positive may block a command where shell
+ * networking is disabled. ShellTools requires invocation-specific network
+ * consent for every command in on-request profiles, including classifier misses.
  *
  * Arguments that are only data to a command are masked before matching:
  * payloads written to local files, the search patterns of grep-like tools, and

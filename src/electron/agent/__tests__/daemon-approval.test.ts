@@ -330,9 +330,10 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
   it.each([
     ["an ordinary request", false, true],
     ["a PACT business operation (noStandingApproval)", true, false],
+    ["an on-request shell invocation (noStandingApproval)", true, false],
   ])(
     "applies a matching recurring allow only to %s",
-    async (_label, noStandingApproval, usesRecurring) => {
+    async (label, noStandingApproval, usesRecurring) => {
       const previousNodeEnv = process.env.NODE_ENV;
       const previousPromptMode = process.env.COWORK_APPROVAL_PROMPTS;
       const previousVitest = process.env.VITEST;
@@ -388,12 +389,17 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
       } as Any;
 
       try {
+        const shellRequest = label.includes("shell invocation");
         const approved = await AgentDaemon.prototype.requestApproval.call(
           daemonLike,
           "task-pact",
-          "external_service",
-          "Send a change to Example Co.",
-          { tool: "pact_send_message", params: { message: "Cancel order A-1." } },
+          shellRequest ? "run_command" : "external_service",
+          shellRequest
+            ? "Approve this command and its potential network access."
+            : "Send a change to Example Co.",
+          shellRequest
+            ? { tool: "run_command", command: "python3 worker.py", network: true }
+            : { tool: "pact_send_message", params: { message: "Cancel order A-1." } },
           {
             requireExplicitApproval: noStandingApproval,
             allowAutoApprove: !noStandingApproval,
@@ -1431,6 +1437,34 @@ describe("boundary authorization broker", () => {
       expect.any(String),
       expect.objectContaining({ method: "POST", tool: "http_request" }),
       expect.objectContaining({ allowAutoApprove: false }),
+    );
+  });
+
+  it("preserves one-shot network consent through the typed shell broker", async () => {
+    const daemon = {
+      evaluateToolPermission: vi.fn(() => ({ decision: "allow" })),
+      requestApproval: vi.fn(async () => false),
+    } as Any;
+    await expect(
+      AgentDaemon.prototype.authorizeToolAction.call(daemon, "task-shell", {
+        toolName: "run_command",
+        approvalType: "run_command",
+        details: { command: "python3 worker.py", network: true },
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        noStandingApproval: true,
+      }),
+    ).resolves.toBe(false);
+    expect(daemon.requestApproval).toHaveBeenCalledWith(
+      "task-shell",
+      "run_command",
+      expect.any(String),
+      expect.objectContaining({ network: true }),
+      expect.objectContaining({
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        noStandingApproval: true,
+      }),
     );
   });
 

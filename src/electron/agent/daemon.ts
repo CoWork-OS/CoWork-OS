@@ -7624,6 +7624,7 @@ export class AgentDaemon extends EventEmitter {
       allowAutoApprove?: boolean;
       signal?: AbortSignal;
       requireExplicitApproval?: boolean;
+      noStandingApproval?: boolean;
     },
   ): Promise<boolean> {
     if (request.signal?.aborted) throw new Error("Tool authorization cancelled");
@@ -7651,6 +7652,7 @@ export class AgentDaemon extends EventEmitter {
         allowAutoApprove: request.allowAutoApprove,
         signal: request.signal,
         requireExplicitApproval: request.requireExplicitApproval,
+        ...(request.noStandingApproval ? { noStandingApproval: true } : {}),
       },
     );
   }

@@ -12230,8 +12230,10 @@ function MainContentComponent({
             }}
           />
         )}
-        {/* The run's status sits above the composer as its own bar. */}
-        {taskStatusStripEnabled && !isBotConversation && (
+        {/* The run's status sits above the composer as its own bar. The wrapper tucks
+            under the composer with a negative margin, so render it only when the strip
+            shows; an empty wrapper lifts the composer under the footer fade. */}
+        {taskStatusStripEnabled && !isBotConversation && taskStatusStripModel.visible && (
           <div className="composer-status-strip">
             <TaskStatusStrip
               model={taskStatusStripModel}

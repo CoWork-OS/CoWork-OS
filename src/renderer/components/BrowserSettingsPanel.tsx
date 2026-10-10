@@ -247,12 +247,6 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
           onChange={(agentUploads) => update({ agentUploads })}
         />
         <Toggle
-          label="Use the classic browser"
-          description="Temporary fallback to the previous single-tab browser (no tabs, popups as before). Turn it off once the new browser works for you."
-          checked={settings.classicWorkbench}
-          onChange={(classicWorkbench) => update({ classicWorkbench })}
-        />
-        <Toggle
           label="Developer mode"
           description={
             policy?.developerModeLocked

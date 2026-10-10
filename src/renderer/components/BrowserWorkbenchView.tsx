@@ -4,16 +4,13 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  ChevronDown,
   Maximize2,
   MessageSquarePlus,
-  Mic,
   Minimize2,
   Monitor,
   RotateCw,
   Search,
   Smartphone,
-  Square,
   Tablet,
   X,
 } from "lucide-react";
@@ -25,15 +22,8 @@ import type {
   Annotation,
   BrowserAnnotationTargetRef,
   BrowserAnnotationTargetResolveResult,
-  LLMModelInfo,
-  LLMProviderInfo,
-  LLMProviderType,
-  LLMReasoningEffort,
 } from "../../shared/types";
 import { hasHostMethod } from "../host/browser-capabilities";
-import { useVoiceInput } from "../hooks/useVoiceInput";
-import { ModelDropdown } from "./MainContent";
-import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
 import { type BrowserShortcutCommand, matchBrowserShortcut } from "../../shared/browser-shortcuts";
 import { BrowserTabNotice } from "./BrowserWorkbench/BrowserTabNotice";
 import {
@@ -139,19 +129,7 @@ type BrowserWorkbenchViewProps = {
   onExitFullscreen: () => void;
   onStatusChange?: (status: { url?: string; title?: string }) => void;
   onSendMessage?: (message: string, images?: ImageAttachment[]) => Promise<void>;
-  selectedModelLabel?: string;
-  selectedModel?: string;
-  selectedProvider?: LLMProviderType;
-  selectedReasoningEffort?: LLMReasoningEffort;
-  availableModels?: LLMModelInfo[];
-  availableProviders?: LLMProviderInfo[];
-  onModelChange?: (selection: {
-    providerType?: LLMProviderType;
-    modelKey: string;
-    reasoningEffort?: LLMReasoningEffort;
-  }) => void;
   onOpenSettings?: (tab?: BrowserSettingsTab) => void;
-  turnContext?: SpreadsheetTurnContext | null;
   /** The task's pending browser approval, answered over the tab instead of in a dialog. */
   pendingApproval?: ApprovalRequest | null;
   onApprovalRespond?: (approval: ApprovalRequest, action: ApprovalResponseAction) => void;
@@ -277,15 +255,7 @@ export function BrowserWorkbenchView({
   onExitFullscreen,
   onStatusChange,
   onSendMessage,
-  selectedModelLabel,
-  selectedModel,
-  selectedProvider,
-  selectedReasoningEffort,
-  availableModels = [],
-  availableProviders = [],
-  onModelChange,
   onOpenSettings,
-  turnContext,
   pendingApproval,
   onApprovalRespond,
 }: BrowserWorkbenchViewProps) {
@@ -397,10 +367,7 @@ export function BrowserWorkbenchView({
   const [controlledViewport, setControlledViewport] = useState<BrowserViewportOverride | null>(
     null,
   );
-  const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
   const [toolbarNotice, setToolbarNotice] = useState("");
-  const [voiceNotice, setVoiceNotice] = useState("");
   const [annotationDraft, setAnnotationDraft] = useState<BrowserAnnotationDraft | null>(null);
   const [annotationMessage, setAnnotationMessage] = useState("");
   const [annotationSaving, setAnnotationSaving] = useState(false);
@@ -415,7 +382,6 @@ export function BrowserWorkbenchView({
   const [liveAnnotationSaving, setLiveAnnotationSaving] = useState(false);
   const [liveAnnotationError, setLiveAnnotationError] = useState("");
   const [browserAnnotations, setBrowserAnnotations] = useState<Annotation[]>([]);
-  const [turnContextExpanded, setTurnContextExpanded] = useState(false);
   const [browserCursor, setBrowserCursor] = useState<BrowserCursorState>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [snapshotOverlay, setSnapshotOverlay] = useState(false);
@@ -437,17 +403,6 @@ export function BrowserWorkbenchView({
     viewportSize && viewportSize.width > 0 && viewportSize.height > 0 ? viewportSize : null;
   const liveAnnotationOverlayTarget = liveAnnotationTarget || liveAnnotationHover;
   const activeIsYouTube = Boolean(getYouTubeVideoId(activeUrl || urlText));
-  const voiceInput = useVoiceInput({
-    onTranscript: (text) => {
-      setVoiceNotice("");
-      setMessage((current) => (current ? `${current} ${text}` : text));
-    },
-    onError: (nextMessage) => setVoiceNotice(nextMessage),
-    onNotConfigured: () => {
-      setVoiceNotice("Voice input is not configured.");
-      onOpenSettings?.("voice");
-    },
-  });
 
   useEffect(() => {
     onStatusChangeRef.current = onStatusChange;
@@ -1752,9 +1707,7 @@ export function BrowserWorkbenchView({
       const prompt = `About this text from ${action.url || "the page"}:\n\n> ${action.text
         .split("\n")
         .join("\n> ")}\n\n`;
-      if (mode === "fullscreen") {
-        setMessage((current) => (current ? `${current}\n\n${prompt}` : prompt));
-      } else if (onSendMessage) {
+      if (onSendMessage) {
         void onSendMessage(`${prompt}Explain this and tell me what matters here.`);
       }
     } else if (action.kind === "screenshot") {
@@ -1781,19 +1734,6 @@ export function BrowserWorkbenchView({
     });
     return () => unsubscribe?.();
   }, [sessionId, taskId]);
-
-  const handleSend = useCallback(async () => {
-    const trimmed = message.trim();
-    if (!trimmed || !onSendMessage || sending) return;
-    setMessage("");
-    setVoiceNotice("");
-    setSending(true);
-    try {
-      await onSendMessage(trimmed);
-    } finally {
-      setSending(false);
-    }
-  }, [message, onSendMessage, sending]);
 
   const askCurrentYouTubeVideo = useCallback(
     async (questionOverride?: string) => {
@@ -2580,121 +2520,6 @@ export function BrowserWorkbenchView({
                   {annotationSaving ? "Sending..." : "Send to agent"}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {mode === "fullscreen" && onSendMessage && (
-        <div className="spreadsheet-viewer-fullscreen-controls">
-          {turnContext && (
-            <div
-              className={`spreadsheet-viewer-turn-frame ${
-                turnContextExpanded ? "is-expanded" : ""
-              }`}
-            >
-              <button
-                type="button"
-                className="spreadsheet-viewer-turn-header"
-                onClick={() => setTurnContextExpanded((current) => !current)}
-              >
-                <span>{turnContext.statusLabel}</span>
-                <ChevronDown size={18} aria-hidden="true" />
-              </button>
-              {turnContextExpanded && (
-                <div className="spreadsheet-viewer-turn-body">
-                  <p>{turnContext.summary}</p>
-                  {turnContext.secondaryText && (
-                    <p className="spreadsheet-viewer-turn-secondary">{turnContext.secondaryText}</p>
-                  )}
-                  {turnContext.events && turnContext.events.length > 0 && (
-                    <div className="spreadsheet-viewer-turn-events">
-                      {turnContext.events.map((event) => (
-                        <div
-                          key={event.id}
-                          className={`spreadsheet-viewer-turn-event kind-${event.kind} ${
-                            event.tone ? `tone-${event.tone}` : ""
-                          }`}
-                        >
-                          <span className="spreadsheet-viewer-turn-event-text">{event.text}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          <div className="spreadsheet-viewer-composer">
-            {voiceNotice && (
-              <div className="attachment-panel spreadsheet-viewer-attachment-panel">
-                <div className="attachment-error">{voiceNotice}</div>
-              </div>
-            )}
-            <div className="input-container spreadsheet-viewer-composer-input">
-              <div className="input-row">
-                <div className="mention-autocomplete-wrapper">
-                  <textarea
-                    className="input-field input-textarea"
-                    placeholder="Ask for follow-up changes"
-                    value={message}
-                    rows={1}
-                    onChange={(event) => setMessage(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        void handleSend();
-                      }
-                    }}
-                  />
-                </div>
-                <div className="input-actions">
-                  {selectedModel &&
-                  selectedProvider &&
-                  onModelChange &&
-                  availableModels.length > 0 ? (
-                    <ModelDropdown
-                      models={availableModels}
-                      selectedModel={selectedModel}
-                      selectedProvider={selectedProvider}
-                      selectedReasoningEffort={selectedReasoningEffort}
-                      providers={availableProviders}
-                      onModelChange={onModelChange}
-                      onOpenSettings={onOpenSettings}
-                      variant="label"
-                      align="right"
-                    />
-                  ) : selectedModelLabel ? (
-                    <span className="spreadsheet-viewer-composer-model">{selectedModelLabel}</span>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={`voice-input-btn ${voiceInput.state}`}
-                    onClick={() => void voiceInput.toggleRecording()}
-                    disabled={voiceInput.state === "processing" || sending}
-                    title="Voice input"
-                  >
-                    {voiceInput.state === "recording" ? (
-                      <Square size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
-                    ) : (
-                      <Mic size={16} aria-hidden="true" />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className="lets-go-btn lets-go-btn-sm"
-                    onClick={() => void handleSend()}
-                    disabled={!message.trim() || sending}
-                    title="Send message"
-                  >
-                    <ArrowUp size={16} aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="input-below-actions spreadsheet-viewer-composer-actions">
-              <span className="input-status-workspace">Work in a folder</span>
-              <span className="input-status-mode">Execute</span>
-              <span className="input-status-mode">Auto</span>
             </div>
           </div>
         </div>

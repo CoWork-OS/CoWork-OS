@@ -49,6 +49,7 @@ const log = createLogger("MacOSSandbox");
  * Default sandbox options
  */
 const DEFAULT_OPTIONS: Required<SandboxOptions> = {
+  privateDocumentWorkspace: false,
   cwd: process.cwd(),
   timeout: 5 * 60 * 1000, // 5 minutes
   maxOutputSize: 100 * 1024, // 100KB
@@ -166,7 +167,7 @@ export class MacOSSandbox implements ISandbox {
         error: "Network access denied",
       };
     }
-    const toolchain = this.resolveToolchainAccess();
+    const toolchain = this.resolveToolchainAccess(opts.privateDocumentWorkspace);
     this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts, toolchain);
     if (!this.sandboxProfile) {
       return {
@@ -276,7 +277,7 @@ export class MacOSSandbox implements ISandbox {
       throw new Error(`Working directory not allowed: ${cwd}`);
     }
 
-    const toolchain = this.resolveToolchainAccess();
+    const toolchain = this.resolveToolchainAccess(opts.privateDocumentWorkspace);
     this.sandboxProfile = this.generateSandboxProfile(opts.allowNetwork === true, opts, toolchain);
     if (!this.sandboxProfile) {
       throw new Error("macOS sandbox profile unavailable; refusing unsandboxed execution.");
@@ -500,14 +501,26 @@ export class MacOSSandbox implements ISandbox {
    * Cache writes follow the workspace write capability: a read-only profile
    * must not leave anything behind outside its private scratch directory.
    */
-  private resolveToolchainAccess(): MacOSToolchainAccess {
+  private resolveToolchainAccess(privateDocumentWorkspace = false): MacOSToolchainAccess {
     const permissions = this.workspace.permissions;
-    return resolveMacOSToolchainAccess({
+    const access = resolveMacOSToolchainAccess({
       homeDir: this.getHomeDir(),
       env: process.env,
       workspacePath: this.workspace.path,
       allowWrites: permissions.write === true && permissions.accessSandboxMode !== "read-only",
     });
+    if (!privateDocumentWorkspace) return access;
+    return {
+      ...access,
+      readDirs: ["/Library/TeX"],
+      readFiles: ["/usr", "/Library", "/opt"],
+      writeDirs: [],
+      writeFiles: [],
+      creatableDirs: [],
+      gitMarkerCaches: [],
+      env: {},
+      path: "/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    };
   }
 
   private getHomeDir(): string {

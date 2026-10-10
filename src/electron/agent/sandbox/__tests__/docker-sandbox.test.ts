@@ -46,6 +46,18 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
 }
 
 describe("DockerSandbox access-profile enforcement", () => {
+  it("allows disposable document output without weakening ordinary workspace mounts", () => {
+    const sandbox = new DockerSandbox(
+      makeWorkspace({
+        permissions: { ...makeWorkspace().permissions, delete: true },
+      }),
+    );
+    const internals = sandbox as unknown as { buildDockerArgs: (options: object) => string[] };
+    expect(() => internals.buildDockerArgs({})).toThrow("writable workspace mount");
+    const args = internals.buildDockerArgs({ privateDocumentWorkspace: true });
+    expect(args).toContain("none");
+    expect(args.some((arg) => arg.endsWith(":/workspace:rw"))).toBe(true);
+  });
   const fixtureRoots: string[] = [];
   const fixture = () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-docker-policy-"));

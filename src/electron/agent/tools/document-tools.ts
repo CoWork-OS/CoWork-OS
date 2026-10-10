@@ -676,6 +676,7 @@ export class DocumentTools {
       sourcePath,
       outputPath: checkedOutputPath,
       engine: input.engine || "auto",
+      ...(this.workspacePermissions ? { workspacePermissions: this.workspacePermissions } : {}),
       ...(this.requestExternalFileApproval ? { allowExternalPaths: true } : {}),
     });
 

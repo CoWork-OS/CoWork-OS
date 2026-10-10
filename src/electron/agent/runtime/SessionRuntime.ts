@@ -1585,6 +1585,7 @@ export class SessionRuntime {
     deliveryMode?: TaskFollowUpInput["deliveryMode"],
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
+    surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1600,6 +1601,7 @@ export class SessionRuntime {
       ...(senderLabel !== undefined ? { senderLabel } : {}),
       ...(inReplyToMessageId !== undefined ? { inReplyToMessageId } : {}),
       ...(inReplyToTaskId !== undefined ? { inReplyToTaskId } : {}),
+      ...(surfaceOrigin !== undefined ? { surfaceOrigin } : {}),
     });
     this.saveSnapshot();
   }
@@ -4420,6 +4422,10 @@ export class SessionRuntime {
                   receipt.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
               }
             : {}),
+          ...(followUp.surfaceOrigin === undefined &&
+          (receipt.surfaceOrigin === "answer" || receipt.surfaceOrigin === "page")
+            ? { surfaceOrigin: receipt.surfaceOrigin as TaskFollowUpInput["surfaceOrigin"] }
+            : {}),
           ...(followUp.integrationMentions === undefined &&
           Array.isArray(receipt.integrationMentions)
             ? {
@@ -4552,6 +4558,9 @@ export class SessionRuntime {
               quotedAssistantMessage:
                 payload.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
             }
+          : {}),
+        ...(payload.surfaceOrigin === "answer" || payload.surfaceOrigin === "page"
+          ? { surfaceOrigin: payload.surfaceOrigin as TaskFollowUpInput["surfaceOrigin"] }
           : {}),
       });
       pendingMessageIds.add(messageId);

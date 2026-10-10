@@ -497,6 +497,7 @@ import { ActionBlock } from "../timeline/ActionBlock";
 import { TurnHeader } from "../timeline/TurnHeader";
 import { SelectionReplyPopover } from "./SelectionReplyPopover";
 import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
+import type { SurfaceActionOrigin } from "../../../shared/answer-surfaces/actions";
 import {
   forgetRememberedAccessProfileId,
   getAccessProfileIdForPermissionMode,
@@ -624,6 +625,7 @@ interface MainContentProps {
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
       verbatim?: boolean;
+      surfaceOrigin?: "answer" | "page";
     },
   ) => void | boolean | Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -3000,6 +3002,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const quotedAssistantMessage = event.payload?.quotedAssistantMessage as
                   | QuotedAssistantMessage
                   | undefined;
+                const surfaceOrigin = event.payload?.surfaceOrigin;
                 const attachmentNames = extractAttachmentNames(rawMessage);
                 const attachmentMetadata = parseUserMessageAttachmentMetadata(
                   event.payload?.images,
@@ -3011,6 +3014,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message user-message">
+                      {(surfaceOrigin === "answer" || surfaceOrigin === "page") && (
+                        <div className="user-message-surface-origin">
+                          {surfaceOrigin === "page"
+                            ? "Sent from an interactive page"
+                            : "Sent from a button in the answer"}
+                        </div>
+                      )}
                       <UserMessageImageGallery
                         attachments={attachmentMetadata}
                         workspacePath={workspace?.path}
@@ -7097,7 +7107,7 @@ function MainContentComponent({
 
   // An answer surface's approved action (SurfaceActions): sent like a message the user typed.
   const handleSurfaceActionPrompt = useCallback(
-    async (text: string) => {
+    async (text: string, origin: SurfaceActionOrigin) => {
       if (!task?.id || !permissionSettingsLoaded) throw new Error("No conversation to send to");
       const messageId =
         globalThis.crypto?.randomUUID?.() ||
@@ -7107,6 +7117,7 @@ function MainContentComponent({
         returnOnAccepted: true,
         messageId,
         verbatim: true,
+        surfaceOrigin: origin,
         ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
       });
       if (result === false) throw new Error("The message was not sent");

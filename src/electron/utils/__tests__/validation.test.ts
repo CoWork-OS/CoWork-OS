@@ -286,6 +286,14 @@ describe("TaskWorkspaceUpdateSchema", () => {
 });
 
 describe("TaskMessageSchema", () => {
+  it("accepts only known surface-action origins", () => {
+    const base = { taskId: "550e8400-e29b-41d4-a716-446655440000", message: "Book it" };
+    for (const surfaceOrigin of ["answer", "page"]) {
+      expect(TaskMessageSchema.safeParse({ ...base, surfaceOrigin }).success).toBe(true);
+    }
+    expect(TaskMessageSchema.safeParse({ ...base, surfaceOrigin: "agent" }).success).toBe(false);
+  });
+
   it("accepts a quoted assistant message payload", () => {
     const result = TaskMessageSchema.safeParse({
       taskId: "550e8400-e29b-41d4-a716-446655440000",

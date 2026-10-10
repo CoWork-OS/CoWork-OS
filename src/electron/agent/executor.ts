@@ -85,6 +85,16 @@ import {
   findAnswerSurfaceProblems,
   repairAnswerSurfaces,
 } from "../../shared/answer-surfaces/repair";
+import { surfaceOriginNote } from "../../shared/answer-surfaces/actions";
+
+/** The message with its surface-action note (see surfaceOriginNote), if it has one. */
+function withSurfaceOriginNote(
+  text: string,
+  origin: TaskFollowUpInput["surfaceOrigin"] | undefined,
+): string {
+  const note = surfaceOriginNote(origin);
+  return note ? `${text}\n\n${note}` : text;
+}
 import { hasAnswerSurfaceBlock } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
@@ -415,6 +425,7 @@ type TaskExecutorFollowUpOptions = Pick<
   | "senderLabel"
   | "inReplyToMessageId"
   | "inReplyToTaskId"
+  | "surfaceOrigin"
 > & {
   /** Called after transcript and queue state are durably persisted. */
   onAccepted?: () => void | Promise<void>;
@@ -34233,7 +34244,10 @@ Return ONLY a JSON object:
                       inReplyToTaskId: pendingMsg.inReplyToTaskId,
                     },
                   )
-                : `USER UPDATE: ${pendingMsg.message}`;
+                : withSurfaceOriginNote(
+                    `USER UPDATE: ${pendingMsg.message}`,
+                    pendingMsg.surfaceOrigin,
+                  );
               const content = await this.buildUserContent(
                 this.buildQuotedAssistantContextMessage(
                   userUpdate,
@@ -41270,6 +41284,7 @@ Return ONLY a JSON object:
     deliveryMode?: TaskFollowUpInput["deliveryMode"],
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
+    surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
   ): void {
     if (this.shutdownRequested) {
       throw new Error("Task executor is shutting down; follow-up was not queued.");
@@ -41288,6 +41303,7 @@ Return ONLY a JSON object:
       deliveryMode,
       inReplyToMessageId,
       inReplyToTaskId,
+      surfaceOrigin,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
@@ -41384,9 +41400,11 @@ Return ONLY a JSON object:
       | "senderLabel"
       | "inReplyToMessageId"
       | "inReplyToTaskId"
+      | "surfaceOrigin"
     >,
   ): Record<string, string> {
     return {
+      ...(context?.surfaceOrigin ? { surfaceOrigin: context.surfaceOrigin } : {}),
       ...(context?.messageSource ? { messageSource: context.messageSource } : {}),
       ...(context?.messageId ? { messageId: context.messageId } : {}),
       ...(context?.senderTaskId ? { senderTaskId: context.senderTaskId } : {}),
@@ -41996,6 +42014,7 @@ Return ONLY a JSON object:
         | "senderLabel"
         | "inReplyToMessageId"
         | "inReplyToTaskId"
+        | "surfaceOrigin"
       >;
       onAccepted?: () => void | Promise<void>;
       onExecutionAccepted?: () => void | Promise<void>;
@@ -42153,8 +42172,10 @@ Return ONLY a JSON object:
     }
     // Both the chat path and the task path below add this to the message the model sees.
     const answerSurfaceNote = await this.takeAnswerSurfaceChanges();
-    const withAnswerState = (text: string) =>
-      answerSurfaceNote ? `${text}\n\n${answerSurfaceNote}` : text;
+    const withAnswerState = (text: string) => {
+      const noted = withSurfaceOriginNote(text, opts?.messageContext?.surfaceOrigin);
+      return answerSurfaceNote ? `${noted}\n\n${answerSurfaceNote}` : noted;
+    };
     const followUpConversationMessage = this.buildQuotedAssistantContextMessage(
       withAnswerState(executionMessage),
       quotedAssistantMessage,
@@ -42702,7 +42723,10 @@ Return ONLY a JSON object:
                       inReplyToTaskId: pendingMsg.inReplyToTaskId,
                     },
                   )
-                : `USER UPDATE: ${pendingMsg.message}`;
+                : withSurfaceOriginNote(
+                    `USER UPDATE: ${pendingMsg.message}`,
+                    pendingMsg.surfaceOrigin,
+                  );
               const content = await this.buildUserContent(
                 this.buildQuotedAssistantContextMessage(
                   userUpdate,

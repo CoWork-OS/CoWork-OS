@@ -2168,6 +2168,9 @@ function isSupportedFollowUpOptions(options: unknown): boolean {
     "permissionMode",
     "shellAccess",
     "expectedTurnId",
+    // Accepted so approved answer actions can be sent, but not forwarded: the browser
+    // session does not carry the surface-action note (desktop only).
+    "surfaceOrigin",
   ]);
   if (Object.keys(options).some((key) => !allowed.has(key))) return false;
   if (options.returnOnAccepted !== undefined && options.returnOnAccepted !== true) return false;

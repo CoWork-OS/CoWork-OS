@@ -54,7 +54,7 @@ export function SurfaceActionProvider({
 }: {
   /** The conversation the actions belong to; an open request is cancelled when it changes. */
   scopeKey?: string;
-  onSendPrompt: (text: string) => void | Promise<void>;
+  onSendPrompt: (text: string, origin: SurfaceActionOrigin) => void | Promise<void>;
   onOpenLink: (url: string) => void | Promise<void>;
   children: ReactNode;
 }) {
@@ -88,7 +88,7 @@ export function SurfaceActionProvider({
     }
     try {
       if (entry.request.kind === "prompt")
-        await handlersRef.current.onSendPrompt(entry.request.text);
+        await handlersRef.current.onSendPrompt(entry.request.text, entry.origin);
       else await handlersRef.current.onOpenLink(entry.request.url);
       entry.resolve(true);
     } catch {

@@ -447,6 +447,7 @@ export const TaskMessageSchema = z
         truncated: z.boolean().optional(),
       })
       .optional(),
+    surfaceOrigin: z.enum(["answer", "page"]).optional(),
     permissionMode: PermissionModeSchema.optional(),
     shellAccess: z.boolean().optional(),
     accessProfileId: AccessProfileIdSchema.optional(),

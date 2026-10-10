@@ -43,6 +43,8 @@ export interface BrowserGuestAttachDeps {
   isDeveloperMode?: () => boolean;
   /** Save an image from a page into the task workspace (download manager). */
   saveToWorkspace?: (guest: Any, url: string) => void;
+  /** Give the app window keyboard focus (native tab views hold it otherwise). */
+  focusApp?: (guest: Any) => void;
   /** Asks "Leave site?" when a page wants to keep its unsaved changes. */
   unloadGuard?: BrowserUnloadGuard;
 }
@@ -90,6 +92,8 @@ function clampSize(value: unknown, fallback: number): number {
  * commands (Cmd+T, Cmd+W, Cmd+R ...) instead of reaching the page or the app
  * menu; every other key is left alone.
  */
+const FOCUS_CHROME_COMMANDS = new Set(["find", "focus-address", "new-tab"]);
+
 function attachShortcutForwarding(guest: Any, deps: BrowserGuestAttachDeps): void {
   guest.on?.("before-input-event", (event: Any, input: Any) => {
     if (input?.type !== "keyDown") return;
@@ -108,6 +112,9 @@ function attachShortcutForwarding(guest: Any, deps: BrowserGuestAttachDeps): voi
     const owner = deps.manager.findTabOwner(guest.id);
     if (!owner || owner.kind !== "tab") return;
     event.preventDefault?.();
+    // Shortcuts that type into browser UI need the app's keyboard focus, which a native tab
+    // view keeps until told otherwise (a webview shares the app's focus already).
+    if (FOCUS_CHROME_COMMANDS.has(command)) deps.focusApp?.(guest);
     deps.service.sendShortcut(owner, command);
   });
 }

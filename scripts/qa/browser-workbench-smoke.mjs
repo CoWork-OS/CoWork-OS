@@ -11,6 +11,8 @@ import { _electron as electron } from "playwright";
 // workbench is opened through the main-process service, and pages are driven
 // through their guest webContents. Build Electron and React first:
 //   npm run build:electron && npm run build:react && node scripts/qa/browser-workbench-smoke.mjs
+// BROWSER_ENGINE=native runs the same checks on the native tab views (WebContentsView).
+const engine = process.env.BROWSER_ENGINE === "native" ? "native" : "webview";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-browser-qa-"));
 const workspaceDir = path.join(outputDir, "workspace");
@@ -129,11 +131,61 @@ async function guests() {
     webContents
       .getAllWebContents()
       .filter((contents) => !contents.isDestroyed())
-      .filter(
-        (contents) => contents.getType() === "webview" || contents.getURL().includes("/popup"),
-      )
+      // Webview tabs, and native tab views and popups (both report "window"); the app's
+      // own window is the file:// renderer.
+      .filter((contents) => {
+        const url = contents.getURL();
+        return (
+          contents.getType() === "webview" ||
+          (contents.getType() === "window" && /^(https?:|about:blank)/.test(url))
+        );
+      })
       .map((contents) => ({ id: contents.id, type: contents.getType(), url: contents.getURL() })),
   );
+}
+
+/**
+ * A real capture of the app window (macOS). The test driver's screenshots show only the
+ * app's own page, so native tab views (drawn by the window, not the page) need this.
+ */
+async function windowCapture(name) {
+  if (process.platform !== "darwin") return;
+  const sourceId = await desktop.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((window) => window.webContents.getURL().startsWith("file:"))
+      ?.getMediaSourceId(),
+  );
+  if (process.env.QA_DEBUG_VIEWS) {
+    console.log(
+      "DEBUG views",
+      name,
+      JSON.stringify(
+        await desktop.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows().find((w) =>
+            w.webContents.getURL().startsWith("file:"),
+          );
+          return window.contentView.children.map((view) => ({
+            bounds: view.getBounds(),
+            visible: view.getVisible?.(),
+            url: view.webContents?.getURL?.(),
+          }));
+        }),
+      ),
+    );
+  }
+  const windowNumber = Number(String(sourceId || "").split(":")[1]);
+  if (!windowNumber) return;
+  const { execFileSync } = await import("node:child_process");
+  try {
+    execFileSync("screencapture", [
+      "-x",
+      "-o",
+      `-l${windowNumber}`,
+      path.join(outputDir, `${name}.png`),
+    ]);
+  } catch {
+    // Screen recording not allowed for the terminal: skip the capture.
+  }
 }
 
 async function inGuest(id, code) {
@@ -145,18 +197,29 @@ async function inGuest(id, code) {
 
 /** The guest showing exactly this path (and query), e.g. "/page?n=1" but not "/page?n=1-child". */
 async function guestFor(pathAndQuery) {
-  return waitFor(
-    async () =>
-      (await guests()).find((guest) => {
-        try {
-          const url = new URL(guest.url);
-          return `${url.pathname}${url.search}` === pathAndQuery;
-        } catch {
-          return false;
-        }
-      }),
-    `a page at ${pathAndQuery}`,
-  );
+  try {
+    return await waitFor(
+      async () =>
+        (await guests()).find((guest) => {
+          try {
+            const url = new URL(guest.url);
+            return `${url.pathname}${url.search}` === pathAndQuery;
+          } catch {
+            return false;
+          }
+        }),
+      `a page at ${pathAndQuery}`,
+    );
+  } catch (error) {
+    // Name every page there is, to tell a missing page from an unrecognised one.
+    const all = await desktop.evaluate(({ webContents }) =>
+      webContents
+        .getAllWebContents()
+        .filter((contents) => !contents.isDestroyed())
+        .map((contents) => `${contents.getType()} ${contents.getURL().slice(0, 80)}`),
+    );
+    throw new Error(`${error.message} (pages: ${all.join(" | ")})`);
+  }
 }
 
 async function navigateActiveTab(url) {
@@ -230,6 +293,11 @@ try {
     workspaceId: workspace.id,
   });
   assert.ok(task?.id, "task created");
+  await main.evaluate(
+    (browserEngine) => window.electronAPI.saveBrowserSettings({ browserEngine }),
+    engine,
+  );
+  console.log(`Browser engine: ${engine}`);
 
   await step("opens the workbench for a task and registers its first tab", async () => {
     await openWorkbench("Browser QA");
@@ -269,6 +337,8 @@ try {
       },
       { module: workbenchModule, taskId: task.id },
     );
+    await sleep(1500);
+    await windowCapture("window-tab-page");
     assert.equal(tabs.length, 3, `browser_tabs lists ${tabs.length}`);
     return { tabs: tabs.map((tab) => tab.title) };
   });
@@ -278,6 +348,24 @@ try {
     await inGuest(first.id, `document.querySelector("#blank").click(); 1`);
     await guestFor("/page?n=1-child");
     await main.getByRole("tab", { name: /Fixture 1-child/ }).waitFor({ timeout: 10000 });
+    await sleep(1000);
+    await windowCapture("window-new-tab-page");
+  });
+
+  await step("annotating picks the element under the pointer", async () => {
+    // On the native engine the layer sits over a still image of the page.
+    await main.getByRole("tab", { name: /Fixture 1-child/ }).click();
+    await main.getByRole("button", { name: "Annotate page element" }).click();
+    const layer = main.locator(".browser-live-annotation-layer");
+    await layer.waitFor({ timeout: 5000 });
+    await sleep(500);
+    await layer.click({ position: { x: 80, y: 32 } });
+    const meta = main.locator(".browser-live-annotation-meta");
+    await meta.waitFor({ timeout: 8000 });
+    assert.match(await meta.innerText(), /h1/i);
+    await windowCapture("window-annotating");
+    await main.getByRole("button", { name: "Annotate page element" }).click();
+    await waitFor(async () => (await layer.count()) === 0, "annotation mode to end");
   });
 
   await step("a window.open sign-in popup reaches its opener and closes", async () => {
@@ -682,6 +770,8 @@ try {
       await menu.getByText(label, { exact: true }).waitFor();
     }
     await main.screenshot({ path: path.join(outputDir, "toolbar-menu.png") });
+    await sleep(300);
+    await windowCapture("window-menu-open");
     await menu.getByText("Mobile", { exact: true }).click();
     await main.locator(".browser-workbench-size-chip").waitFor({ timeout: 5000 });
     assert.match(await main.locator(".browser-workbench-size-chip").innerText(), /390.844/);
@@ -702,11 +792,28 @@ try {
   });
 
   await step("closing and reopening the workbench restores its tabs", async () => {
+    const before = await guestFor("/page?n=1");
+    const loadedAt = await inGuest(before.id, "window.__loadedAt");
     await main.getByRole("button", { name: "Close browser workbench" }).click();
-    await waitFor(async () => (await guests()).length === 0, "the webviews to close");
+    if (engine === "native") {
+      // Native tab views stay alive (hidden) while the browser is closed.
+      await sleep(500);
+      assert.ok(
+        (await guests()).some((guest) => guest.id === before.id),
+        "page kept alive",
+      );
+    } else {
+      await waitFor(async () => (await guests()).length === 0, "the webviews to close");
+    }
     await openWorkbench("Browser QA");
-    await guestFor("/page?n=1");
+    const after = await guestFor("/page?n=1");
     await guestFor("/page?n=3");
+    if (engine === "native") {
+      await sleep(1500);
+      await windowCapture("window-reopened");
+      assert.equal(after.id, before.id, "same page view reattached");
+      assert.equal(await inGuest(after.id, "window.__loadedAt"), loadedAt, "page not reloaded");
+    }
   });
 
   await step(
@@ -728,7 +835,10 @@ try {
 
   await step("Cmd+Shift+B opens the browser from the task view", async () => {
     await main.getByRole("button", { name: "Close browser workbench" }).click();
-    await waitFor(async () => (await guests()).length === 0, "the webviews to close");
+    await waitFor(
+      async () => (await main.getByLabel("Browser URL").count()) === 0,
+      "the browser to close",
+    );
     await main.locator(".main-header-title").first().click();
     await main.keyboard.press("Meta+Shift+B");
     await main.getByLabel("Browser URL").waitFor({ timeout: 10000 });

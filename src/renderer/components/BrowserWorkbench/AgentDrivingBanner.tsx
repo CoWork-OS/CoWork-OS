@@ -106,6 +106,50 @@ export function AgentDrivingShield({ taskId, sessionId }: { taskId: string; sess
   );
 }
 
+/**
+ * Native tab engine: the page view draws above the app, so there is no shield
+ * over it. The main process stops a click on the page while CoWork acts and
+ * this bar asks whether to take over instead.
+ */
+export function NativeTakeoverBar({ taskId, sessionId }: { taskId: string; sessionId: string }) {
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    setAsking(false);
+    const unsubscribe = window.electronAPI.onBrowserTabViewEvent?.((event) => {
+      if (
+        event.type === "takeover-click" &&
+        event.taskId === taskId &&
+        event.sessionId === sessionId
+      ) {
+        setAsking(true);
+      }
+    });
+    return () => unsubscribe?.();
+  }, [sessionId, taskId]);
+  if (!asking) return null;
+  return (
+    <div className="browser-workbench-driving browser-workbench-driving-ask" role="alert">
+      <Hand size={14} aria-hidden="true" />
+      <span>CoWork is controlling this tab. Take over to use the page yourself.</span>
+      <button
+        type="button"
+        className="is-primary"
+        onClick={() => {
+          setAsking(false);
+          void window.electronAPI
+            .setBrowserWorkbenchPaused?.({ taskId, sessionId, paused: true })
+            .catch(() => undefined);
+        }}
+      >
+        Take over
+      </button>
+      <button type="button" onClick={() => setAsking(false)}>
+        Keep watching
+      </button>
+    </div>
+  );
+}
+
 export function SignInBanner({
   url,
   onDone,

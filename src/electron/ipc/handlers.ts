@@ -1,3 +1,4 @@
+import { closeBrowserTabViewsForTask } from "../browser/browser-tab-views";
 import { ComposerPredictionCoordinator } from "../agent/ComposerPredictionCoordinator";
 import {
   COMPOSER_PREDICTION_CHANNEL,
@@ -5780,6 +5781,8 @@ export async function setupIpcHandlers(
 
     // Cancel the task if it's running
     await agentDaemon.cancelTask(id);
+    // Its in-app browser pages (native tab views stay alive while hidden) go with it.
+    closeBrowserTabViewsForTask(id);
 
     // Best-effort cleanup of on-disk worktree resources before metadata deletion.
     if (existingTask?.worktreePath || existingTask?.worktreeBranch) {

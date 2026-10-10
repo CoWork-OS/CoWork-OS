@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Globe2, Trash2 } from "lucide-react";
 import type {
   BrowserAgentPermission,
+  BrowserEngine,
   BrowserDownloadLocation,
   BrowserSearchEngine,
   BrowserSettings,
@@ -108,6 +109,11 @@ const AGENT_OPTIONS: Array<{ value: BrowserAgentPermission; label: string }> = [
   { value: "ask", label: "Ask each time" },
   { value: "allow", label: "Allow" },
   { value: "block", label: "Block" },
+];
+
+const ENGINE_OPTIONS: Array<{ value: BrowserEngine; label: string }> = [
+  { value: "webview", label: "Standard" },
+  { value: "native", label: "Native tabs (experimental)" },
 ];
 
 /** Settings > Browser: preferences, history, site permissions and developer mode. */
@@ -256,6 +262,13 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
           checked={settings.developerMode}
           disabled={policy?.developerModeLocked}
           onChange={(developerMode) => update({ developerMode })}
+        />
+        <SelectField<BrowserEngine>
+          label="Browser engine"
+          description="Native tabs run each page as its own view in the app window, so pages stay loaded when you close the browser or switch tasks. Menus and overlays show a still image of the page while open. Applies the next time the browser opens."
+          value={settings.browserEngine}
+          options={ENGINE_OPTIONS}
+          onChange={(browserEngine) => update({ browserEngine })}
         />
         {policy && policy.blockedSitePermissions.length > 0 && (
           <p className="settings-description">

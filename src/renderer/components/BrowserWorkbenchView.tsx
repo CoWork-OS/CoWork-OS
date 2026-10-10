@@ -56,10 +56,13 @@ import { useBrowserTabs } from "./BrowserWorkbench/useBrowserTabs";
 import {
   AgentDrivingBanner,
   AgentDrivingShield,
+  NativeTakeoverBar,
   SignInBanner,
   useAgentDriving,
 } from "./BrowserWorkbench/AgentDrivingBanner";
 import { BrowserApprovalCard } from "./BrowserWorkbench/BrowserApprovalCard";
+import { BrowserTabNativeView, type NativeTabCover } from "./BrowserWorkbench/BrowserTabNativeView";
+import { useSurfaceOcclusion } from "./BrowserWorkbench/useSurfaceOcclusion";
 import { ToolbarMenu } from "./BrowserWorkbench/ToolbarMenu";
 import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
 import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
@@ -345,6 +348,19 @@ export function BrowserWorkbenchView({
   const lastAnnotationInspectAtRef = useRef(0);
   const liveAnnotationInspectRequestIdRef = useRef(0);
   const activeUrl = activeTab?.url || "";
+  // Native tab views (Settings > Browser > Browser engine), chosen once settings load and
+  // kept while the workbench is mounted; tabs wait for the choice.
+  const [engine, setEngine] = useState<"native" | "webview" | null>(null);
+  useEffect(() => {
+    if (engine !== null || !browserSettingsLoaded) return;
+    setEngine(
+      browserSettings.browserEngine === "native" &&
+        typeof window.electronAPI?.openBrowserTabView === "function"
+        ? "native"
+        : "webview",
+    );
+  }, [browserSettings.browserEngine, browserSettingsLoaded, engine]);
+  const nativeEngine = engine === "native";
   const title = activeTab?.title || "";
   const isLoading = activeTab?.loading === true;
   const activeUrlRef = useRef(activeUrl);
@@ -708,6 +724,49 @@ export function BrowserWorkbenchView({
       .respondBrowserWorkbenchPermission?.({ requestId, response: choice })
       .catch(() => undefined);
   }, []);
+
+  // Native views outlive their tab components (closing the browser only hides them), so a
+  // tab that is closed or discarded closes its view explicitly.
+  const liveNativeTabIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!nativeEngine) return;
+    const live = new Set(tabs.filter((tab) => !tab.discarded).map((tab) => tab.id));
+    for (const tabId of liveNativeTabIdsRef.current) {
+      if (!live.has(tabId)) {
+        void window.electronAPI
+          .closeBrowserTabView?.({ taskId, sessionId, tabId })
+          .catch(() => undefined);
+      }
+    }
+    liveNativeTabIdsRef.current = live;
+  }, [nativeEngine, sessionId, tabs, taskId]);
+
+  // What covers the active native tab view: it draws above the app, so it is hidden
+  // under full-page overlays and swapped for a still image under menus and annotation.
+  const surfaceOccluded = useSurfaceOcclusion(surfaceRef, nativeEngine);
+  const activeTabCovered =
+    !activeUrl ||
+    Boolean(activeTab.blocked || activeTab.loadError || activeTab.crashed) ||
+    Boolean(annotationDraft) ||
+    pageDialogs.some((dialog) => dialog.tabId === activeTabId) ||
+    screenShareRequests.some((request) => request.tabId === activeTabId);
+  const nativeCover: NativeTabCover = activeTabCovered
+    ? "hide"
+    : liveAnnotationMode || snapshotOverlay || surfaceOccluded
+      ? "freeze"
+      : "none";
+
+  const activePermissionRequest = permissionRequests.find(
+    (request) => request.tabId === activeTabId,
+  );
+  const permissionPrompt = activePermissionRequest ? (
+    <PermissionPrompt
+      key={activePermissionRequest.requestId}
+      request={activePermissionRequest}
+      onRespond={respondToPermission}
+      docked={nativeEngine}
+    />
+  ) : null;
 
   const navigate = useCallback(
     (nextUrl = urlText) => {
@@ -1973,6 +2032,8 @@ export function BrowserWorkbenchView({
       {pendingApproval && onApprovalRespond && (
         <BrowserApprovalCard approval={pendingApproval} onRespond={onApprovalRespond} />
       )}
+      {nativeEngine && <NativeTakeoverBar taskId={taskId} sessionId={sessionId} />}
+      {nativeEngine && permissionPrompt}
       {signInUrl && (
         <SignInBanner
           url={signInUrl}
@@ -2091,8 +2152,37 @@ export function BrowserWorkbenchView({
                 : undefined
             }
           >
-            {tabs.map((tab) =>
-              tab.discarded ? null : (
+            {tabs.map((tab) => {
+              if (tab.discarded || engine === null) return null;
+              const notice = (
+                <BrowserTabNotice
+                  tab={tab}
+                  onRetry={retryActiveTab}
+                  onReloadCrashed={() => reloadCrashedTab(tab.id)}
+                  onGoBack={() => runWebviewCommand("goBack")}
+                  onOpenExternal={(url) => void openUrlExternal(url)}
+                  onOpenAccessSettings={onOpenSettings ? () => onOpenSettings("access") : undefined}
+                />
+              );
+              return nativeEngine ? (
+                <BrowserTabNativeView
+                  key={`${tab.id}:${tab.generation}`}
+                  tab={tab}
+                  active={tab.id === activeTabId}
+                  taskId={taskId}
+                  sessionId={sessionId}
+                  partition={partition}
+                  cover={tab.id === activeTabId ? nativeCover : "hide"}
+                  onUpdate={updateTab}
+                  onStatus={handleTabStatus}
+                  onGuardFailed={handleGuardFailed}
+                  registerHandle={registerTabHandle}
+                  checkUserNavigation={checkUserNavigation}
+                  onFindResult={handleFindResult}
+                >
+                  {notice}
+                </BrowserTabNativeView>
+              ) : (
                 <BrowserTabView
                   key={`${tab.id}:${tab.generation}`}
                   tab={tab}
@@ -2108,19 +2198,10 @@ export function BrowserWorkbenchView({
                   checkUserNavigation={checkUserNavigation}
                   onFindResult={handleFindResult}
                 >
-                  <BrowserTabNotice
-                    tab={tab}
-                    onRetry={retryActiveTab}
-                    onReloadCrashed={() => reloadCrashedTab(tab.id)}
-                    onGoBack={() => runWebviewCommand("goBack")}
-                    onOpenExternal={(url) => void openUrlExternal(url)}
-                    onOpenAccessSettings={
-                      onOpenSettings ? () => onOpenSettings("access") : undefined
-                    }
-                  />
+                  {notice}
                 </BrowserTabView>
-              ),
-            )}
+              );
+            })}
             {screenShareRequests
               .filter((request) => request.tabId === activeTabId)
               .slice(0, 1)
@@ -2137,16 +2218,7 @@ export function BrowserWorkbenchView({
               .map((dialog) => (
                 <PageDialog key={dialog.dialogId} dialog={dialog} onRespond={respondToPageDialog} />
               ))}
-            {permissionRequests
-              .filter((request) => request.tabId === activeTabId)
-              .slice(0, 1)
-              .map((request) => (
-                <PermissionPrompt
-                  key={request.requestId}
-                  request={request}
-                  onRespond={respondToPermission}
-                />
-              ))}
+            {!nativeEngine && permissionPrompt}
             {!activeUrl && !activeTab.blocked && (
               <div className="browser-workbench-newtab-layer">
                 <NewTabPage
@@ -2160,7 +2232,7 @@ export function BrowserWorkbenchView({
                 />
               </div>
             )}
-            {drivingState.driving && !drivingState.pausedByUser && (
+            {!nativeEngine && drivingState.driving && !drivingState.pausedByUser && (
               <AgentDrivingShield taskId={taskId} sessionId={sessionId} />
             )}
             {snapshotOverlay && activeUrl && (
@@ -2173,6 +2245,8 @@ export function BrowserWorkbenchView({
               />
             )}
             {activeUrl &&
+              // Native tabs draw over the app: pins show on the still image while annotating.
+              (!nativeEngine || liveAnnotationMode) &&
               browserAnnotations.map((annotation, index) => {
                 const target = annotation.targetRef as BrowserAnnotationTargetRef;
                 if (target.surfaceType !== "browser" || !target.rect) return null;

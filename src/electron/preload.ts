@@ -2516,6 +2516,42 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
   },
+  // Native tab views (browser engine "native"): the main process owns each tab's page.
+  openBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+    partition: string;
+    activate: boolean;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_TAB_VIEW_OPEN, data) as Promise<BrowserTabViewState>,
+  loadBrowserTabView: (data: { taskId: string; sessionId: string; tabId: string; url: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_TAB_VIEW_LOAD, data) as Promise<{ success: boolean }>,
+  commandBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+    command: BrowserTabViewCommand;
+    args?: Record<string, unknown>;
+  }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_TAB_VIEW_COMMAND, data) as Promise<{
+      success: boolean;
+    }>,
+  layoutBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string | null;
+    bounds: { x: number; y: number; width: number; height: number } | null;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_TAB_VIEW_LAYOUT, data) as Promise<void>,
+  captureBrowserTabView: (data: { taskId: string; sessionId: string; tabId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_TAB_VIEW_CAPTURE, data) as Promise<string | null>,
+  closeBrowserTabView: (data: { taskId: string; sessionId: string; tabId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BROWSER_TAB_VIEW_CLOSE, data) as Promise<void>,
+  onBrowserTabViewEvent: (callback: (event: BrowserTabViewEvent) => void) => {
+    const handler = (_: Any, event: BrowserTabViewEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.BROWSER_TAB_VIEW_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_TAB_VIEW_EVENT, handler);
+  },
   onBrowserWorkbenchScreenShareRequest: (
     callback: (prompt: BrowserWorkbenchScreenSharePrompt) => void,
   ) => {
@@ -5798,6 +5834,10 @@ export interface BrowserWorkbenchTabCommand {
 
 export type BrowserWorkbenchBlockReason = "policy" | "local_preview" | "scheme";
 
+export type BrowserTabViewState = import("./browser/browser-tab-views").BrowserTabViewState;
+export type BrowserTabViewEvent = import("./browser/browser-tab-views").BrowserTabViewEvent;
+export type BrowserTabViewCommand = import("./browser/browser-tab-views").BrowserTabViewCommand;
+
 export interface BrowserWorkbenchScreenSharePrompt {
   requestId: string;
   taskId: string;
@@ -6285,6 +6325,44 @@ export interface ElectronAPI {
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => () => void;
   /** A page asks to share a screen or window: the picker's choices. */
+  /** Native tab views (browser engine "native"); see src/electron/browser/browser-tab-views.ts. */
+  openBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+    partition: string;
+    activate: boolean;
+  }) => Promise<BrowserTabViewState>;
+  loadBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+    url: string;
+  }) => Promise<{ success: boolean }>;
+  commandBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+    command: BrowserTabViewCommand;
+    args?: Record<string, unknown>;
+  }) => Promise<{ success: boolean }>;
+  layoutBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string | null;
+    bounds: { x: number; y: number; width: number; height: number } | null;
+  }) => Promise<void>;
+  captureBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+  }) => Promise<string | null>;
+  closeBrowserTabView: (data: {
+    taskId: string;
+    sessionId: string;
+    tabId: string;
+  }) => Promise<void>;
+  onBrowserTabViewEvent: (callback: (event: BrowserTabViewEvent) => void) => () => void;
   onBrowserWorkbenchScreenShareRequest: (
     callback: (prompt: BrowserWorkbenchScreenSharePrompt) => void,
   ) => () => void;

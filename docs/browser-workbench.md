@@ -149,6 +149,24 @@ The Browser Workbench header and toolbar are functional, not cosmetic:
 
 The workbench keeps its pages loaded when moving between sidebar and fullscreen. Closing the workbench unregisters its tabs from the main process; reopening it restores the tabs' URLs.
 
+## Browser Engine
+
+Settings > Browser > Browser engine picks how tab pages are hosted. It applies the next time the browser opens.
+
+- **Standard** (default): each tab is a `<webview>` inside the app window, owned by the renderer. Closing the browser or switching tasks unloads the tabs; reopening restores their URLs (pages reload).
+- **Native tabs (experimental)**: each tab is a `WebContentsView` owned by the main process (`src/electron/browser/browser-tab-views.ts`) and drawn by the window over the tab's area. Pages stay loaded when the browser closes or the task switches, and reopening the tab shows the live page. Up to 24 views are kept; the least recently used hidden ones close and reload from their URL when shown again.
+
+A native view always draws above the app's own interface. To keep overlays usable:
+
+- the page is hidden under full-page overlays (new tab page, blocked/failed/crashed notices, page dialogs, the screen-share picker, the screenshot annotation editor);
+- the page is swapped for a still image while a menu, popup, dialog or toast overlaps it, and during annotation and element outlines (`useSurfaceOcclusion`, `BrowserTabNativeView`);
+- the permission prompt docks in the strip above the page instead of floating over it;
+- while CoWork drives the tab, a click on the page is stopped in the main process and a "Take over" bar asks instead of the shield over the page. The agent's cursor overlay is not visible over a native page.
+
+Each view is created on the browser partition (prepared first), gets the same guest handling as a webview tab (window-open routing, shortcuts, context menu, history, unload guard) and is registered with the session manager before it loads anything. The renderer reports the tab area's rectangle every frame while the tab is shown. Every native-tab IPC call must come from the app window, with validated ids, an allowlisted command, and only http(s), file or about:blank URLs.
+
+Run the end-to-end check on either engine with `BROWSER_ENGINE=native node scripts/qa/browser-workbench-smoke.mjs`. On macOS it also saves real window captures (`window-*.png`), since the test driver's own screenshots can't show native views.
+
 ## Sidebar And Fullscreen
 
 The right sidebar can be resized by dragging its left edge. The width is persisted globally and reused by other artifact workbenches.

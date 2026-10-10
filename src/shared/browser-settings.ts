@@ -3,6 +3,8 @@
 export type BrowserSearchEngine = "google" | "bing" | "duckduckgo" | "brave" | "kagi";
 export type BrowserDownloadLocation = "system" | "workspace" | "ask";
 export type BrowserAgentPermission = "ask" | "allow" | "block";
+/** "webview": tabs are <webview> elements in the app window; "native": main-process WebContentsViews. */
+export type BrowserEngine = "webview" | "native";
 
 export interface BrowserSettings {
   searchEngine: BrowserSearchEngine;
@@ -22,6 +24,8 @@ export interface BrowserSettings {
   agentUploads: BrowserAgentPermission;
   /** Full DevTools access: Inspect element, and CoWork's page script, storage and trace tools. */
   developerMode: boolean;
+  /** Experimental: native tab views that stay alive when the browser closes. */
+  browserEngine: BrowserEngine;
 }
 
 /** What the organization's admin policy decides for the in-app browser (read-only for users). */
@@ -45,11 +49,13 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   agentDownloads: "ask",
   agentUploads: "ask",
   developerMode: false,
+  browserEngine: "webview",
 };
 
 const SEARCH_ENGINES = new Set(["google", "bing", "duckduckgo", "brave", "kagi"]);
 const DOWNLOAD_LOCATIONS = new Set(["system", "workspace", "ask"]);
 const AGENT_PERMISSIONS = new Set(["ask", "allow", "block"]);
+const BROWSER_ENGINES = new Set(["webview", "native"]);
 
 /** Fill defaults and drop invalid values (settings arrive from storage and the renderer). */
 export function normalizeBrowserSettings(value: unknown): BrowserSettings {
@@ -72,6 +78,7 @@ export function normalizeBrowserSettings(value: unknown): BrowserSettings {
     agentDownloads: pick<BrowserAgentPermission>("agentDownloads", AGENT_PERMISSIONS),
     agentUploads: pick<BrowserAgentPermission>("agentUploads", AGENT_PERMISSIONS),
     developerMode: flag("developerMode"),
+    browserEngine: pick<BrowserEngine>("browserEngine", BROWSER_ENGINES),
   };
 }
 

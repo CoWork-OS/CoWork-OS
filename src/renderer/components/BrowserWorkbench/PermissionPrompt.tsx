@@ -70,14 +70,17 @@ function originLabel(origin: string): string {
 export function PermissionPrompt({
   request,
   onRespond,
+  docked = false,
 }: {
   request: BrowserPermissionPromptRequest;
   onRespond: (requestId: string, choice: BrowserPermissionChoice) => void;
+  /** Native tab engine: shown in the strip above the page instead of floating over it. */
+  docked?: boolean;
 }) {
   const Icon = PERMISSION_ICONS[request.permissions[0]] || Globe2;
   return (
     <div
-      className="browser-workbench-permission"
+      className={`browser-workbench-permission ${docked ? "is-docked" : ""}`}
       role="dialog"
       aria-label="Site permission request"
     >

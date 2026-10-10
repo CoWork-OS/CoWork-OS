@@ -1821,6 +1821,192 @@
   background: color-mix(in srgb, var(--as-accent) 22%, transparent);
 }
 
+/* Action buttons: the click opens the app's confirmation (SurfaceActions). */
+.answer-surface .as-action-button {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  padding: 9px 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.94em;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
+}
+
+.answer-surface .as-action-button-primary {
+  background: var(--as-accent);
+  color: var(--as-on-accent, #fff);
+}
+
+.answer-surface .as-action-button-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--as-accent) 86%, black);
+}
+
+.answer-surface .as-action-button-secondary {
+  border-color: color-mix(in srgb, var(--as-accent) 35%, transparent);
+  background: transparent;
+  color: var(--as-accent-ink);
+}
+
+.answer-surface .as-action-button-secondary:hover:not(:disabled) {
+  background: var(--as-accent-soft);
+}
+
+.answer-surface .as-action-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.answer-surface .as-action-button:focus-visible {
+  outline: 2px solid var(--as-accent);
+  outline-offset: 2px;
+}
+
+.answer-surface .as-action-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.answer-surface .as-action-button .as-icon,
+.answer-surface .as-action-external {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* The confirmation, drawn by the app outside any surface. */
+.as-action-dialog {
+  width: min(460px, calc(100vw - 32px));
+  /* The app's global reset zeroes margins, which would pin the dialog to the corner. */
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-bg-primary);
+  color: var(--color-text);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.as-action-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.as-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 22px 18px;
+}
+
+.as-action-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.as-action-source,
+.as-action-note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.as-action-message {
+  /* Messages are capped (actions.ts) so the whole text is always visible. */
+  max-height: none;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border-left: 3px solid var(--color-accent);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.as-action-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+}
+
+.as-action-host {
+  font-size: 15px;
+}
+
+.as-action-url {
+  max-height: 160px;
+  overflow: auto;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.as-action-warning {
+  color: var(--color-warning, #b45309);
+  font-size: 12px;
+}
+
+.as-action-confirm:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.as-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.as-action-buttons button {
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.as-action-cancel {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.as-action-cancel:hover {
+  background: var(--color-bg-secondary);
+}
+
+/* Monochrome, like the app's question cards, so it reads clearly on every accent. */
+.as-action-confirm {
+  border-color: var(--color-text) !important;
+  background: var(--color-text);
+  color: var(--color-bg-primary);
+}
+
+.as-action-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-text) 86%, var(--color-bg-primary));
+}
+
+.as-action-buttons button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* Chart */
 .answer-surface .as-chart {
   margin: 0;

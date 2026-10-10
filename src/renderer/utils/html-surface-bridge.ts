@@ -13,6 +13,8 @@ export type HtmlSurfaceBridgeCallbacks = {
   onResize: (height: number) => void;
   onState: (state: HtmlSurfaceState) => void;
   onError?: (message: string) => void;
+  /** The page asks for an action; answer with `actionResult(id, ok)`. */
+  onAction?: (id: number, action: unknown) => void;
 };
 
 /** A random nonce for one mounted frame; the frame must echo it on every message. */
@@ -57,7 +59,21 @@ export class HtmlSurfaceBridgeHost {
       case "error":
         this.callbacks.onError?.(message.payload.message);
         return true;
+      case "action":
+        if (this.callbacks.onAction)
+          this.callbacks.onAction(message.payload.id, message.payload.action);
+        else this.actionResult(message.payload.id, false);
+        return true;
     }
+  }
+
+  actionResult(id: number, ok: boolean): void {
+    this.post({
+      coworkSurface: HTML_SURFACE_BRIDGE_VERSION,
+      type: "action.result",
+      nonce: this.nonce,
+      payload: { id, ok },
+    });
   }
 
   init(payload: Extract<HtmlSurfaceHostMessage, { type: "init" }>["payload"]): void {

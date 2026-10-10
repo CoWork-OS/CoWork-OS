@@ -36,11 +36,16 @@ import {
   type SurfaceScope,
 } from "../../../shared/answer-surfaces/runtime";
 import { answerImageCredit } from "../../../shared/answer-surfaces/images";
+import {
+  toSurfaceActionRequest,
+  visibleSurfaceText,
+} from "../../../shared/answer-surfaces/actions";
 import { useAnswerSurfaceState } from "../../hooks/useAnswerSurfaceState";
 import { useSurfaceData, type SurfaceDataState } from "../../hooks/useSurfaceData";
 import { useSurfaceLogic } from "../../hooks/useSurfaceLogic";
 import { useTweenedNumber } from "../../hooks/useTweenedNumber";
 import { SurfaceIcon } from "./AnswerSurfaceIcon";
+import { useSurfaceActions } from "./SurfaceActions";
 import { describeAnswerData } from "../../../shared/answer-surfaces/data";
 import {
   answerImageKey,
@@ -548,6 +553,15 @@ function SurfaceNode({
     }
     case "copy":
       return <SurfaceCopyButton label={node.label} text={text(node.text)} />;
+    case "button":
+      return (
+        <SurfaceActionButton
+          label={visibleSurfaceText(text(node.label))}
+          action={"prompt" in node.action ? { prompt: text(node.action.prompt) } : node.action}
+          style={node.style ?? "primary"}
+          icon={node.icon}
+        />
+      );
     case "divider":
       return <hr className="as-divider" />;
   }
@@ -1173,6 +1187,42 @@ function SurfaceSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+/**
+ * A button that asks the app to send a message or open a link. The click only opens the
+ * app's confirmation, which shows exactly what will happen; outside a conversation view
+ * (no provider) the button is shown but does nothing.
+ */
+function SurfaceActionButton({
+  label,
+  action,
+  style,
+  icon,
+}: {
+  label: string;
+  action: unknown;
+  style: "primary" | "secondary";
+  icon?: string;
+}) {
+  const actions = useSurfaceActions();
+  const request = toSurfaceActionRequest(action);
+  const available = Boolean(actions && request);
+  return (
+    <button
+      type="button"
+      className={`as-action-button as-action-button-${style}`}
+      disabled={!available}
+      title={available ? undefined : "Available in the conversation"}
+      onClick={() => {
+        if (actions && request) void actions(request, "answer");
+      }}
+    >
+      {icon && <SurfaceIcon name={icon} className="as-icon" />}
+      <span>{label}</span>
+      {request?.kind === "open" && <ArrowUpRight className="as-action-external" aria-hidden />}
+    </button>
   );
 }
 

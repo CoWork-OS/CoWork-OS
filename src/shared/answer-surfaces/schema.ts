@@ -6,6 +6,7 @@ import {
   expressionIdentifiers,
   isValidIdentifier,
 } from "./expression";
+import { SurfaceActionSchema, type SurfaceAction } from "./actions";
 import { AnswerSurfaceDataSchema, type AnswerSurfaceData } from "./data";
 import { AnswerSurfaceLogicSchema, type AnswerSurfaceLogic } from "./logic";
 import { normalizeSurfaceIcon } from "./icons";
@@ -282,6 +283,14 @@ export type AnswerSurfaceNode =
       icon?: string;
     }
   | { type: "copy"; label: string; text: string }
+  | {
+      type: "button";
+      label: string;
+      /** Asks the app to send a message or open a link; the user approves it first. */
+      action: SurfaceAction;
+      style?: "primary" | "secondary";
+      icon?: string;
+    }
   | { type: "divider" };
 
 export type AnswerSurfaceNodeType = AnswerSurfaceNode["type"];
@@ -642,6 +651,13 @@ const nodeSchema: z.ZodType<AnswerSurfaceNode> = z.lazy(() =>
       icon,
     }),
     z.object({ type: z.literal("copy"), label: label(60), text: label(4000) }),
+    z.object({
+      type: z.literal("button"),
+      label: label(60),
+      action: SurfaceActionSchema,
+      style: lenient(z.enum(["primary", "secondary"])),
+      icon,
+    }),
     z.object({ type: z.literal("divider") }),
   ]),
 ) as z.ZodType<AnswerSurfaceNode>;
@@ -795,6 +811,9 @@ function validateSemantics(
         break;
       case "copy":
         collectText(node.text);
+        break;
+      case "button":
+        collectText(node.label, "prompt" in node.action ? node.action.prompt : undefined);
         break;
       case "media_list":
         for (const item of node.items) collectText(item.title, item.text, item.meta);

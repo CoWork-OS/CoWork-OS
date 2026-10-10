@@ -3,6 +3,7 @@ import {
   WEB_PREVIEW_CSP,
   createWebPreviewUrl,
   resolveWebPreviewRequest,
+  shouldBlockPreviewFrameNavigation,
 } from "../web-preview-protocol";
 
 describe("web preview protocol", () => {
@@ -76,5 +77,45 @@ describe("web preview token reuse", () => {
     const html = `<p>${Math.random()}</p>`;
     expect(createWebPreviewUrl(html)).toBe(createWebPreviewUrl(html));
     expect(createWebPreviewUrl(`${html} `)).not.toBe(createWebPreviewUrl(html));
+  });
+});
+
+describe("preview frame navigation", () => {
+  const page = "cowork-preview://local/1b4e28ba-2fa1-11d2-883f-0016d3cca427";
+  const base = { isMainFrame: false, currentUrl: page, initiatedByApp: false };
+
+  it("lets a preview reload itself and the app point it at a new preview", () => {
+    expect(shouldBlockPreviewFrameNavigation({ ...base, targetUrl: page })).toBe(false);
+    expect(
+      shouldBlockPreviewFrameNavigation({
+        ...base,
+        initiatedByApp: true,
+        targetUrl: "cowork-preview://local/other",
+      }),
+    ).toBe(false);
+  });
+
+  it("stops a preview from navigating itself anywhere else", () => {
+    for (const targetUrl of [
+      "cowork-preview://local/other",
+      "about:blank",
+      "data:text/html,<p>hi</p>",
+      "https://example.com/",
+    ]) {
+      expect(shouldBlockPreviewFrameNavigation({ ...base, targetUrl }), targetUrl).toBe(true);
+    }
+  });
+
+  it("leaves the app window and other frames alone", () => {
+    expect(
+      shouldBlockPreviewFrameNavigation({ ...base, isMainFrame: true, targetUrl: "about:blank" }),
+    ).toBe(false);
+    expect(
+      shouldBlockPreviewFrameNavigation({
+        ...base,
+        currentUrl: "https://www.youtube.com/embed/x",
+        targetUrl: "https://www.youtube.com/embed/y",
+      }),
+    ).toBe(false);
   });
 });

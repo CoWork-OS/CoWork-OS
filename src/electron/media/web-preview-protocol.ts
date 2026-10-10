@@ -148,6 +148,27 @@ export function resolveWebPreviewRequest(rawUrl: string): Response {
   });
 }
 
+export function isWebPreviewUrl(url: string | undefined | null): boolean {
+  return typeof url === "string" && url.startsWith(`${WEB_PREVIEW_SCHEME}://`);
+}
+
+/**
+ * Whether a frame's navigation must be stopped: a preview page may reload itself, but not
+ * go anywhere else on its own (another preview's URL, about:blank, a data: page), where
+ * the app would hand it the bridge's nonce and saved inputs on load. The app itself may
+ * still point the frame at a new preview.
+ */
+export function shouldBlockPreviewFrameNavigation(details: {
+  isMainFrame: boolean;
+  currentUrl: string | undefined;
+  targetUrl: string;
+  initiatedByApp: boolean;
+}): boolean {
+  if (details.isMainFrame || details.initiatedByApp) return false;
+  if (!isWebPreviewUrl(details.currentUrl)) return false;
+  return details.targetUrl !== details.currentUrl;
+}
+
 /**
  * Registered on the default session only, on purpose: the in-app browser and
  * Canvas partitions cannot resolve cowork-preview:// URLs, so pages there

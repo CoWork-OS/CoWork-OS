@@ -266,11 +266,24 @@ export const HTML_SURFACE_BOOTSTRAP_SCRIPT = `(function () {
   });
   Object.defineProperty(window, "cowork", { value: api, configurable: false, writable: false });
   // The CSP blocks fetch, images and forms but not WebRTC, whose ICE/STUN lookups could
-  // carry typed data out. Removed before any page script runs; with frames blocked there
-  // is no fresh window to recover them from.
-  ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCIceCandidate", "RTCSessionDescription"].forEach(function (name) {
+  // carry typed data out. Removed before any page script runs. A fresh window would bring
+  // them back, so none is allowed: frames and popups are blocked, other preview URLs are
+  // stopped in main, and the page cannot make a blob: document to navigate itself to.
+  // Workers go too, since a worker could mint that blob URL in its own scope.
+  ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCIceCandidate", "RTCSessionDescription", "Worker", "SharedWorker"].forEach(function (name) {
     try { Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false }); } catch (e) {}
   });
+  (function () {
+    var create = URL.createObjectURL;
+    if (typeof create !== "function") return;
+    // Blob URLs for media, fonts and data are fine; ones that would render as a page are not.
+    var safe = /^(?:image\\/(?:png|jpeg|gif|webp|avif|bmp|x-icon)|audio\\/[\\w.+-]+|video\\/[\\w.+-]+|font\\/[\\w.+-]+|text\\/(?:plain|csv)|application\\/(?:json|octet-stream))(?:;.*)?$/i;
+    var guarded = function (object) {
+      if (object instanceof Blob && !safe.test(object.type)) throw new TypeError("This kind of blob URL is not available in answer pages.");
+      return create.call(URL, object);
+    };
+    try { Object.defineProperty(URL, "createObjectURL", { value: guarded, configurable: false, writable: false }); } catch (e) {}
+  })();
   window.addEventListener("error", function (event) {
     send("error", { message: String((event && event.message) || "Script error").slice(0, 500) });
   });
@@ -302,6 +315,7 @@ export const HTML_SURFACE_RUNTIME_PROMPT = [
   "Inline HTML surface runtime:",
   "- Inline <script> and <style> run in a sandbox with no network: put all code, data, styles and SVG icons inside the document. External URLs, CDNs, fetch and remote images are blocked.",
   "- The frame grows to fit its content; don't set a fixed page height.",
+  "- Run everything on the page itself: workers, frames, popups and navigating away are not available.",
   '- To remember the user\'s inputs across restarts and tell you what they chose, call `cowork.state.set({goal: 50000, plan: "basic"})` (flat keys; numbers, short strings, booleans or string lists). Restore them with `await cowork.ready; const saved = cowork.state.get();`.',
   '- A button can hand off to you or open a page: `cowork.action({prompt: "Book the 7:30 table for 4"})` sends a message to you, `cowork.action({open: "https://example.com/menu"})` opens an https link in the browser. Call it from a click handler; the app shows the exact message or link and acts only if the user approves. It resolves to true when done. A request that does not follow a click inside the page is ignored.',
   "- Never ask for passwords, card numbers or other secrets in a surface.",

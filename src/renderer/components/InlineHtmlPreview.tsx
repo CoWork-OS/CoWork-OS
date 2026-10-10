@@ -237,9 +237,16 @@ function HtmlSurfaceFrame({
     };
   }, [designLanguage, html, live, register]);
 
+  // The bridge lives exactly as long as the loaded document: the frame accepts one init,
+  // so a bridge rebuilt with a new nonce would leave the page talking to nobody. What it
+  // calls back into is read from this ref instead.
+  const latestRef = useRef({ autosize, onSizeChange, surfaceKey, taskId });
+  latestRef.current = { autosize, onSizeChange, surfaceKey, taskId };
+
   const bridge = useMemo(() => {
     if (!url) return null;
     const persist = (state: HtmlSurfaceState) => {
+      const { taskId, surfaceKey } = latestRef.current;
       if (!taskId) return;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       const save = () => {
@@ -254,7 +261,10 @@ function HtmlSurfaceFrame({
       () => iframeRef.current?.contentWindow,
       createSurfaceNonce(),
       {
-        onResize: (height) => autosize && onSizeChange(height),
+        onResize: (height) => {
+          const latest = latestRef.current;
+          if (latest.autosize) latest.onSizeChange(height);
+        },
         onState: persist,
         onAction: (id, action) => {
           const guard = actionGuardRef.current;
@@ -286,7 +296,7 @@ function HtmlSurfaceFrame({
       },
     );
     return host;
-  }, [autosize, onSizeChange, surfaceKey, taskId, url]);
+  }, [url]);
 
   useEffect(() => {
     if (!bridge) return;

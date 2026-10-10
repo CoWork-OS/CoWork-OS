@@ -11,8 +11,8 @@ import { _electron as electron } from "playwright";
 // workbench is opened through the main-process service, and pages are driven
 // through their guest webContents. Build Electron and React first:
 //   npm run build:electron && npm run build:react && node scripts/qa/browser-workbench-smoke.mjs
-// BROWSER_ENGINE=native runs the same checks on the native tab views (WebContentsView).
-const engine = process.env.BROWSER_ENGINE === "native" ? "native" : "webview";
+// Runs on the native tab views (WebContentsView) by default; BROWSER_ENGINE=webview runs the same checks on webviews.
+const engine = process.env.BROWSER_ENGINE === "webview" ? "webview" : "native";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-browser-qa-"));
 const workspaceDir = path.join(outputDir, "workspace");

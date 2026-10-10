@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **In-app browser uses native tabs by default**: pages now stay loaded when the browser closes or the task switches. Settings > Browser > Browser engine > Standard (webview) switches back; a choice you already made is kept.
 - **Developer mode for page scripts**: `browser_evaluate`, `browser_storage` and `browser_trace_start`/`browser_trace_stop` are offered to CoWork only with Settings > Browser > Developer mode on, and their first use on a site in a task asks for approval. File uploads by CoWork ask each time by default.
 
 - **macOS terminal installer**: `curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash` installs the released app without the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. Browsers attach the quarantine attribute that drives that dialog for the ad hoc signed build; `curl` does not. The installer verifies the ZIP's size and SHA-512 against the published updater metadata and the app bundle's code signature before copying it into Applications, re-runs as an updater, and refuses Intel Macs and older macOS versions with a pointer to npm. The macOS release smoke test now installs each build's ZIP through it. See [macOS Installation](docs/macos-installation.md).

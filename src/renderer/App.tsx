@@ -277,11 +277,6 @@ const WebArtifactViewer = lazy(() =>
 );
 import { BrowserWorkbenchDock } from "./components/BrowserWorkbench/BrowserWorkbenchDock";
 import { useBrowserSettings } from "./hooks/useBrowserSettings";
-const BrowserWorkbenchClassicView = lazy(() =>
-  import("./components/BrowserWorkbenchClassicView").then((module) => ({
-    default: module.BrowserWorkbenchClassicView,
-  })),
-);
 const BrowserWorkbenchView = lazy(() =>
   import("./components/BrowserWorkbenchView").then((module) => ({
     default: module.BrowserWorkbenchView,
@@ -1451,30 +1446,6 @@ const SelectedTaskWorkspaceView = memo(
         task,
       ],
     );
-    const browserTurnContext = useMemo(
-      () =>
-        visibleBrowserWorkbench
-          ? buildSpreadsheetTurnContext({
-              task,
-              events: spreadsheetEvents,
-              filePath:
-                visibleBrowserWorkbench.currentUrl ||
-                visibleBrowserWorkbench.url ||
-                "browser workbench",
-              isWorking: effectiveSpreadsheetTaskWorking,
-              durationLabel: spreadsheetWorkDuration,
-              turnStartedAt: activeSpreadsheetTurnStartedAt,
-            })
-          : null,
-      [
-        activeSpreadsheetTurnStartedAt,
-        visibleBrowserWorkbench,
-        effectiveSpreadsheetTaskWorking,
-        spreadsheetEvents,
-        spreadsheetWorkDuration,
-        task,
-      ],
-    );
     const computedArtifactRefreshKey = useMemo(() => {
       if (!spreadsheetArtifact) return null;
       let latestTimestamp = 0;
@@ -1568,11 +1539,7 @@ const SelectedTaskWorkspaceView = memo(
       [childEvents, childTasks, replayControls.replayEvents, task],
     );
 
-    const WorkbenchComponent = browserSettings.classicWorkbench
-      ? BrowserWorkbenchClassicView
-      : BrowserWorkbenchView;
     const dockedBrowserApproval =
-      !browserSettings.classicWorkbench &&
       visibleBrowserWorkbench &&
       task &&
       browserApproval?.taskId === task.id &&
@@ -1594,7 +1561,7 @@ const SelectedTaskWorkspaceView = memo(
           slot={browserWorkbenchSlot}
         >
           <Suspense fallback={<ArtifactSidebarFallback />}>
-            <WorkbenchComponent
+            <BrowserWorkbenchView
               taskId={task.id}
               sessionId={visibleBrowserWorkbench.sessionId}
               initialUrl={visibleBrowserWorkbench.url}
@@ -1607,18 +1574,7 @@ const SelectedTaskWorkspaceView = memo(
               onExitFullscreen={showBrowserSidebar}
               onStatusChange={updateBrowserWorkbenchStatus}
               onSendMessage={sendSpreadsheetFullscreenMessage}
-              selectedModelLabel={
-                availableModels.find((model) => model.key === selectedModel)?.displayName ||
-                selectedModel
-              }
-              selectedModel={selectedModel}
-              selectedProvider={selectedProvider}
-              selectedReasoningEffort={selectedReasoningEffort}
-              availableModels={availableModels}
-              availableProviders={availableProviders}
-              onModelChange={onModelChange}
               onOpenSettings={onOpenSettings}
-              turnContext={browserTurnContext}
               pendingApproval={dockedBrowserApproval}
               onApprovalRespond={onBrowserApprovalRespond}
             />

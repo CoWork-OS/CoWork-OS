@@ -22,8 +22,6 @@ export interface BrowserSettings {
   agentUploads: BrowserAgentPermission;
   /** Full DevTools access: Inspect element, and CoWork's page script, storage and trace tools. */
   developerMode: boolean;
-  /** Rollback for one release: the previous single-tab workbench instead of the tabbed one. */
-  classicWorkbench: boolean;
 }
 
 /** What the organization's admin policy decides for the in-app browser (read-only for users). */
@@ -47,7 +45,6 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   agentDownloads: "ask",
   agentUploads: "ask",
   developerMode: false,
-  classicWorkbench: false,
 };
 
 const SEARCH_ENGINES = new Set(["google", "bing", "duckduckgo", "brave", "kagi"]);
@@ -75,7 +72,6 @@ export function normalizeBrowserSettings(value: unknown): BrowserSettings {
     agentDownloads: pick<BrowserAgentPermission>("agentDownloads", AGENT_PERMISSIONS),
     agentUploads: pick<BrowserAgentPermission>("agentUploads", AGENT_PERMISSIONS),
     developerMode: flag("developerMode"),
-    classicWorkbench: flag("classicWorkbench"),
   };
 }
 

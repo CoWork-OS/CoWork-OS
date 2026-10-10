@@ -300,6 +300,13 @@ try {
       if (await toFull.isVisible().catch(() => false)) await toFull.click();
       else await toSidebar.click();
       await sleep(400);
+      if (await toSidebar.isVisible().catch(() => false)) {
+        // Full view is the browser alone: no follow-up box or turn panel over the page.
+        assert.equal(
+          await main.locator(".browser-workbench .spreadsheet-viewer-composer").count(),
+          0,
+        );
+      }
     }
     const marker = await inGuest(first.id, "window.__marker");
     assert.equal(marker, 42, "page state survived mode changes");

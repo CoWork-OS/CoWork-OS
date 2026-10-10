@@ -510,6 +510,17 @@ export class TaskSessionMetadataStore {
     return this.upsert(sessionId, { archivedAt });
   }
 
+  /** Archives every session in one transaction, so a project archive is all or nothing. */
+  archiveMany(sessionIds: string[], archivedAt = Date.now()): number {
+    const unique = Array.from(new Set(sessionIds.map((id) => String(id || "").trim()))).filter(
+      Boolean,
+    );
+    this.db.transaction(() => {
+      for (const sessionId of unique) this.upsert(sessionId, { archivedAt });
+    })();
+    return unique.length;
+  }
+
   unarchive(sessionId: string): TaskSessionMetadata {
     return this.upsert(sessionId, { archivedAt: null });
   }

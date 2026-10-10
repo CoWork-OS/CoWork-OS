@@ -18,6 +18,8 @@ type Any = Record<string, any>;
 const logger = createLogger("SessionRetentionService");
 
 const QUEUED_ATTACHMENT_ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
+// Matches the session lineage cap used by archiveSession.
+const WORKSPACE_ARCHIVE_TASK_LIMIT = 10000;
 
 export interface TaskSessionSummary {
   id: string;
@@ -109,6 +111,27 @@ export class SessionRetentionService {
       metadata: this.metadataRepo.archive(sessionId),
       taskCount: rows.length,
     };
+  }
+
+  /**
+   * Archives every unarchived session in a workspace. The sidebar only holds a
+   * page of a project's sessions, so archiving from its loaded rows would leave
+   * the rest behind.
+   */
+  archiveWorkspaceSessions(
+    workspaceId: string,
+    options: { excludeSources?: Array<NonNullable<Task["source"]>> } = {},
+  ): { sessionCount: number } {
+    const tasks = this.taskRepo.findSidebarSummaries(WORKSPACE_ARCHIVE_TASK_LIMIT, 0, {
+      workspaceId,
+      includeArchivedSessions: false,
+      excludeBotConversations: true,
+      excludeSources: options.excludeSources,
+    });
+    const sessionIds = tasks
+      .filter((task) => !task.parentTaskId)
+      .map((task) => task.sessionId || task.id);
+    return { sessionCount: this.metadataRepo.archiveMany(sessionIds) };
   }
 
   renameSession(sessionId: string, name: string): TaskSessionMetadata {

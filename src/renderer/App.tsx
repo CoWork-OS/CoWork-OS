@@ -703,6 +703,23 @@ function updateTaskPreservingIdentity(
   return changed ? next : tasks;
 }
 
+/** Merges an extra sidebar page into the list, appending tasks it lacked. */
+function appendSidebarTaskPage(tasks: Task[], page: Task[]): Task[] {
+  const mergedPage = mergeSidebarTaskSummariesWithExisting(tasks, page);
+  const mergedById = new Map(mergedPage.map((task) => [task.id, task]));
+  const existingIds = new Set(tasks.map((task) => task.id));
+  let changed = false;
+  const updated = tasks.map((task) => {
+    const merged = mergedById.get(task.id);
+    if (!merged) return task;
+    const next = mergeTaskPreservingIdentity(task, merged);
+    if (next !== task) changed = true;
+    return next;
+  });
+  const fresh = mergedPage.filter((task) => !existingIds.has(task.id));
+  return changed || fresh.length > 0 ? [...updated, ...fresh] : tasks;
+}
+
 type AppView =
   | "home"
   | "automations"
@@ -5682,6 +5699,46 @@ export function App() {
     };
   }, []);
 
+  // Project groups show their own folder's sessions. The global page is shared
+  // by every folder, so a project whose sessions are older than other work can
+  // have none of them there; load each project's newest sessions directly.
+  const SIDEBAR_PROJECT_TASK_LOAD = 100;
+  const sidebarProjectWorkspaceIdsRef = useRef<string[]>([]);
+  // Bumped by every full reload so a slower project fetch cannot re-add a
+  // session that reload just dropped (archived, deleted).
+  const sidebarListGenerationRef = useRef(0);
+  const fetchSidebarProjectTasks = useCallback(
+    async (workspaceIds: readonly string[]): Promise<Task[]> => {
+      // The browser host already lists only its selected folder.
+      const listSidebarTasks = window.electronAPI?.listSidebarTasks;
+      if (isBrowserHost || !listSidebarTasks || workspaceIds.length === 0) return [];
+      const pages = await Promise.allSettled(
+        workspaceIds.map((workspaceId) =>
+          listSidebarTasks({
+            limit: SIDEBAR_PROJECT_TASK_LOAD,
+            offset: 0,
+            prioritizeSidebar: true,
+            excludeBotConversations: true,
+            excludeSources: MAIN_SIDEBAR_EXCLUDED_TASK_SOURCES,
+            workspaceId,
+          }),
+        ),
+      );
+      const loaded: Task[] = [];
+      pages.forEach((result, index) => {
+        if (result.status === "rejected") {
+          console.error("Failed to load project sessions:", result.reason);
+          return;
+        }
+        const workspaceId = workspaceIds[index];
+        loaded.push(...(result.value as Task[]).filter((task) => task.workspaceId === workspaceId));
+      });
+      return loaded;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isBrowserHost],
+  );
+
   const loadTasks = useCallback(async () => {
     setIsInitialTaskListLoading(true);
     const listSidebarTasks = window.electronAPI?.listSidebarTasks ?? window.electronAPI?.listTasks;
@@ -5692,6 +5749,10 @@ export function App() {
       setIsInitialTaskListLoading(false);
       return;
     }
+    const generation = ++sidebarListGenerationRef.current;
+    // Project pages load alongside the global page and replace together, so a
+    // refresh drops archived project sessions without emptying the groups.
+    const projectTasksPromise = fetchSidebarProjectTasks(sidebarProjectWorkspaceIdsRef.current);
     try {
       taskOffsetRef.current = 0;
       sidebarTaskCursorRef.current = null;
@@ -5716,7 +5777,14 @@ export function App() {
         receiveMs: Number(receiveMs.toFixed(1)),
       });
       const loadedTasks = loadedTaskPage.slice(0, INITIAL_TASK_LOAD);
+      const projectTasks = await projectTasksPromise;
+      if (sidebarListGenerationRef.current !== generation) return;
       const loadedTaskIds = new Set(loadedTasks.map((task) => task.id));
+      const pageTasks = [
+        ...loadedTasks,
+        ...projectTasks.filter((task) => !loadedTaskIds.has(task.id)),
+      ];
+      for (const task of pageTasks) loadedTaskIds.add(task.id);
       // Preserve a task that was created while this sidebar request was in
       // flight. The daemon emits task_created before the createTask IPC
       // promise resolves, so the query can legitimately return a page from
@@ -5727,7 +5795,7 @@ export function App() {
           (task.id === selectedTaskIdRef.current || isTaskPossiblyRunning(task.status)),
       );
       const loadedTasksWithInFlight =
-        inFlightTasks.length > 0 ? [...loadedTasks, ...inFlightTasks] : loadedTasks;
+        inFlightTasks.length > 0 ? [...pageTasks, ...inFlightTasks] : pageTasks;
       setTasks((prev) =>
         mergeSidebarInitialPageWithSelectedTask(
           prev,
@@ -5743,9 +5811,33 @@ export function App() {
     } catch (error) {
       console.error("Failed to load tasks:", error);
     } finally {
-      setIsInitialTaskListLoading(false);
+      // A superseded reload leaves the flag to the newer one.
+      if (sidebarListGenerationRef.current === generation) setIsInitialTaskListLoading(false);
     }
-  }, [rendererPerfLoggingEnabled, toSidebarTaskCursor]);
+  }, [fetchSidebarProjectTasks, rendererPerfLoggingEnabled, toSidebarTaskCursor]);
+
+  const handleSidebarProjectWorkspaceIdsChange = useCallback(
+    (workspaceIds: string[]) => {
+      const previous = sidebarProjectWorkspaceIdsRef.current;
+      sidebarProjectWorkspaceIdsRef.current = workspaceIds;
+      const next = new Set(workspaceIds);
+      // A removed project's loaded sessions would otherwise spill into
+      // Recents; reload so only the global page keeps any of them.
+      if (previous.some((id) => !next.has(id))) {
+        void loadTasks();
+        return;
+      }
+      const previousIds = new Set(previous);
+      const added = workspaceIds.filter((id) => !previousIds.has(id));
+      if (added.length === 0) return;
+      const generation = sidebarListGenerationRef.current;
+      void fetchSidebarProjectTasks(added).then((loaded) => {
+        if (loaded.length === 0 || sidebarListGenerationRef.current !== generation) return;
+        setTasks((prev) => appendSidebarTaskPage(prev, loaded));
+      });
+    },
+    [fetchSidebarProjectTasks, loadTasks],
+  );
 
   const loadBotConversations = useCallback(async () => {
     const workspaceId = currentWorkspace?.id;
@@ -5831,21 +5923,7 @@ export function App() {
       });
       const moreTasks = moreTaskPage.slice(0, TASK_LOAD_MORE);
       if (moreTasks.length > 0) {
-        setTasks((prev) => {
-          const mergedPage = mergeSidebarTaskSummariesWithExisting(prev, moreTasks);
-          const mergedById = new Map(mergedPage.map((task) => [task.id, task]));
-          const existingIds = new Set(prev.map((t) => t.id));
-          let changed = false;
-          const updatedPrev = prev.map((task) => {
-            const merged = mergedById.get(task.id);
-            if (!merged) return task;
-            const updated = mergeTaskPreservingIdentity(task, merged);
-            if (updated !== task) changed = true;
-            return updated;
-          });
-          const fresh = mergedPage.filter((task) => !existingIds.has(task.id));
-          return changed || fresh.length > 0 ? [...updatedPrev, ...fresh] : prev;
-        });
+        setTasks((prev) => appendSidebarTaskPage(prev, moreTasks));
         taskOffsetRef.current = offset + moreTasks.length;
         sidebarTaskCursorRef.current = toSidebarTaskCursor(moreTasks.at(-1));
       }
@@ -5973,6 +6051,11 @@ export function App() {
         }
       }
 
+      // Restoring a folder's last task is for app startup. Choosing a folder
+      // from the composer keeps the current view: a new session stays new and
+      // a moved task stays selected, and that folder's pointer tracks it.
+      restoredSelectionWorkspaceRef.current = workspace.id;
+      selectionRestorationSettledWorkspaceRef.current = workspace.id;
       setCurrentWorkspace(workspace);
     },
     [addToast, remoteTaskView, selectedTaskId],
@@ -8391,6 +8474,7 @@ export function App() {
                 onOpenBotMemory={handleOpenBotMemory}
                 onTasksChanged={refreshTaskLists}
                 onLoadMoreTasks={loadMoreTasks}
+                onProjectWorkspaceIdsChange={handleSidebarProjectWorkspaceIdsChange}
                 hasMoreTasks={hasMoreTasks}
                 uiDensity={uiDensity}
               />

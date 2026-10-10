@@ -4,14 +4,38 @@ import {
   explicitCredentialPaths,
 } from "../agent/llm/credential-binding";
 
+/**
+ * Credentials a save keeps when it does not carry a value for them. The Settings form
+ * sends every provider on every save, with `apiKey: key || undefined`, so a key that is
+ * not in the form yet (still loading, or a provider never opened) arrives as an explicit
+ * `undefined`; spreading that over the stored settings erased the saved key. Clearing a
+ * credential goes through the provider's reset (LLM_RESET_PROVIDER_CREDENTIALS) instead.
+ */
+const PRESERVED_CREDENTIAL_KEYS = [
+  "apiKey",
+  "subscriptionToken",
+  "accessToken",
+  "refreshToken",
+  "idToken",
+  "accessKeyId",
+  "secretAccessKey",
+  "sessionToken",
+] as const;
+
 function mergeProviderSettings<T extends object>(incoming?: T, existing?: T): T | undefined {
   if (!incoming && !existing) return undefined;
   if (!incoming) return existing;
   if (!existing) return incoming;
-  return {
+  const merged = {
     ...existing,
     ...incoming,
-  };
+  } as Record<string, unknown>;
+  const stored = existing as Record<string, unknown>;
+  const update = incoming as Record<string, unknown>;
+  for (const key of PRESERVED_CREDENTIAL_KEYS) {
+    if (update[key] === undefined && stored[key] !== undefined) merged[key] = stored[key];
+  }
+  return merged as T;
 }
 
 function cleanString(value: string | undefined): string | undefined {

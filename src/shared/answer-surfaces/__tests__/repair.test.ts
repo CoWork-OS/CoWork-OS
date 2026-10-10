@@ -68,7 +68,7 @@ describe("answer block problems", () => {
 
 describe("repairAnswerSurfaces", () => {
   it("swaps in a fix that checks out and leaves good blocks alone", async () => {
-    const ask = vi.fn(async () => fixedFormula);
+    const ask = vi.fn(async (_prompt: string) => fixedFormula);
     const message = `Plan\n${fence(good)}\n${fence(blankFormula)}`;
     const outcome = await repairAnswerSurfaces(message, ask);
     expect(ask).toHaveBeenCalledTimes(1);
@@ -92,12 +92,12 @@ describe("repairAnswerSurfaces", () => {
   });
 
   it("asks at most twice per answer and never for a healthy one", async () => {
-    const ask = vi.fn(async () => good);
+    const ask = vi.fn(async (_prompt: string) => good);
     const message = [1, 2, 3].map(() => fence('{"type":"nope"}')).join("\n");
     const outcome = await repairAnswerSurfaces(message, ask);
     expect(ask).toHaveBeenCalledTimes(2);
     expect(outcome.repaired).toBe(2);
-    const healthy = vi.fn(async () => good);
+    const healthy = vi.fn(async (_prompt: string) => good);
     expect((await repairAnswerSurfaces(fence(good), healthy)).repaired).toBe(0);
     expect(healthy).not.toHaveBeenCalled();
   });

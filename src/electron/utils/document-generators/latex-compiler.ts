@@ -1,7 +1,16 @@
 import { execFile as execFileCallback } from "node:child_process";
 import * as fs from "node:fs/promises";
+import { constants } from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
+import type { WorkspacePermissions } from "../../../shared/types";
+import { createSandbox, type ISandbox } from "../../agent/sandbox/sandbox-factory";
+import {
+  evaluateWorkspaceFilesystemAccess,
+  resolveAccessControlledPath,
+} from "../../security/access-profile-paths";
 import { promisify } from "node:util";
+import { pipeline } from "node:stream/promises";
 
 const execFile = promisify(execFileCallback);
 
@@ -21,7 +30,8 @@ export type CompileLatexParams = {
   engine?: LatexEngineInput;
   /** Set only after the caller has separately approved each external path. */
   allowExternalPaths?: boolean;
-  execFileImpl?: ExecFileLike;
+  workspacePermissions?: WorkspacePermissions;
+  sandboxFactory?: typeof createSandbox;
 };
 
 export type CompileLatexResult = {
@@ -107,7 +117,15 @@ export async function findLatexEngine(
 function buildLatexCommand(engine: LatexEngine, sourcePath: string, outputDir: string): string[] {
   switch (engine) {
     case "tectonic":
-      return ["--keep-logs", "--keep-intermediates", "--outdir", outputDir, sourcePath];
+      return [
+        "--only-cached",
+        "--untrusted",
+        "--keep-logs",
+        "--keep-intermediates",
+        "--outdir",
+        outputDir,
+        sourcePath,
+      ];
     case "latexmk":
       return [
         // -norc: latexmk otherwise evaluates ./latexmkrc and ./.latexmkrc from
@@ -141,24 +159,34 @@ function buildLatexCommand(engine: LatexEngine, sourcePath: string, outputDir: s
 }
 
 export async function compileLatex(params: CompileLatexParams): Promise<CompileLatexResult> {
-  const workspacePath = path.resolve(params.workspacePath);
-  const execImpl = params.execFileImpl || execFile;
+  const workspacePath = resolveAccessControlledPath(params.workspacePath, params.workspacePath);
+  let sandbox: ISandbox | undefined;
+  let scratchPath: string | undefined;
   let sourcePath = "";
   let pdfPath = "";
   let logPath = "";
 
   try {
-    sourcePath = resolveWorkspacePath(
+    sourcePath = resolveAccessControlledPath(
       workspacePath,
-      params.sourcePath,
-      "sourcePath",
-      params.allowExternalPaths,
+      resolveWorkspacePath(
+        workspacePath,
+        params.sourcePath,
+        "sourcePath",
+        params.allowExternalPaths,
+      ),
     );
+    if (
+      params.allowExternalPaths &&
+      sourcePath !== path.resolve(workspacePath, params.sourcePath)
+    ) {
+      throw new Error("LaTeX source path changed after authorization");
+    }
     if (path.extname(sourcePath).toLowerCase() !== ".tex") {
       throw new Error("sourcePath must point to a .tex file");
     }
 
-    const outputPath = params.outputPath
+    const requestedOutputPath = params.outputPath
       ? resolveWorkspacePath(
           workspacePath,
           params.outputPath,
@@ -169,18 +197,127 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
           path.dirname(sourcePath),
           `${path.basename(sourcePath, path.extname(sourcePath))}.pdf`,
         );
+    const outputPath = resolveAccessControlledPath(workspacePath, requestedOutputPath);
+    if (params.allowExternalPaths && outputPath !== requestedOutputPath) {
+      throw new Error("LaTeX output path changed after authorization");
+    }
+    if (
+      !params.allowExternalPaths &&
+      (!isPathInsideWorkspace(sourcePath, workspacePath) ||
+        !isPathInsideWorkspace(outputPath, workspacePath))
+    ) {
+      throw new Error("Source and output must be inside the workspace (including symlink targets)");
+    }
     if (path.extname(outputPath).toLowerCase() !== ".pdf") {
       throw new Error("outputPath must point to a .pdf file");
     }
 
     pdfPath = outputPath;
     const outputDir = path.dirname(outputPath);
-    const sourceBase = path.basename(sourcePath, ".tex");
-    const compilerPdfPath = path.join(outputDir, `${sourceBase}.pdf`);
+    const sourceBase = path.basename(sourcePath, path.extname(sourcePath));
+    // The interpreter writes only to private scratch. One approved PDF path
+    // must never grant it write access to that path's parent directory.
+    scratchPath = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-latex-"));
+    const compilerPdfPath = path.join(scratchPath, `${sourceBase}.pdf`);
     logPath = path.join(outputDir, `${sourceBase}.log`);
 
     await fs.access(sourcePath);
-    await fs.mkdir(outputDir, { recursive: true });
+    const permissions = params.workspacePermissions;
+    const policyWorkspace = {
+      path: workspacePath,
+      permissions: permissions || {
+        read: true,
+        write: true,
+        delete: true,
+        shell: true,
+        network: false,
+      },
+    };
+    for (const [target, operation] of [
+      [sourcePath, "read"],
+      [pdfPath, "write"],
+    ] as const) {
+      const access = evaluateWorkspaceFilesystemAccess(policyWorkspace, target, operation);
+      if (
+        access.decision !== "allow" &&
+        !(params.allowExternalPaths && access.reason === "outside_workspace")
+      ) {
+        throw new Error(`LaTeX ${operation} access denied: ${access.reason}`);
+      }
+    }
+    const sandboxWorkspace = {
+      id: "latex-compiler",
+      name: "LaTeX compiler",
+      path: scratchPath,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        shell: true,
+        network: false,
+        accessFilesystemScoped: true,
+        accessSandboxMode: "workspace-write" as const,
+        accessNetworkMode: "disabled" as const,
+        accessWorkspaceRoots: [scratchPath],
+        accessFilesystemRules: [
+          ...(permissions?.read === false
+            ? []
+            : [{ path: workspacePath, access: "read" as const }]),
+          ...[...(permissions?.accessWorkspaceRoots || []), ...(permissions?.allowedPaths || [])]
+            .map((root) => resolveAccessControlledPath(workspacePath, root))
+            .filter(
+              (root) =>
+                evaluateWorkspaceFilesystemAccess(policyWorkspace, root, "read").decision ===
+                "allow",
+            )
+            .map((root) => ({ path: root, access: "read" as const })),
+          ...(permissions?.accessFilesystemRules || []).map((rule) => ({
+            path: resolveAccessControlledPath(workspacePath, rule.path),
+            access: rule.access === "write" ? ("read" as const) : rule.access,
+          })),
+        ],
+        ...(permissions?.dockerConfig ? { dockerConfig: permissions.dockerConfig } : {}),
+      },
+    };
+    sandbox = await (params.sandboxFactory || createSandbox)(sandboxWorkspace);
+    if (sandbox.type === "none") {
+      throw new Error(
+        "LaTeX compilation requires an OS process sandbox; refusing unsandboxed execution",
+      );
+    }
+    const execImpl: ExecFileLike = async (command, args, options) => {
+      const result = await sandbox!.execute(command, args, {
+        cwd: options.cwd || scratchPath,
+        timeout: options.timeout,
+        maxOutputSize: options.maxBuffer,
+        allowNetwork: false,
+        privateDocumentWorkspace: true,
+        envPassthrough: ["PATH", "LANG"],
+      });
+      if (result.exitCode !== 0 || result.killed || result.timedOut || result.error) {
+        throw Object.assign(new Error(result.error || "LaTeX sandbox command failed"), {
+          stdout: result.stdout,
+          stderr: result.stderr,
+        });
+      }
+      return result;
+    };
+    // Only the separately approved external source is staged. Its siblings do
+    // not become implicit dependencies with host access.
+    let compilerSourcePath = sourcePath;
+    if (
+      !isPathInsideWorkspace(sourcePath, workspacePath) &&
+      evaluateWorkspaceFilesystemAccess(sandboxWorkspace, sourcePath, "read").decision !== "allow"
+    ) {
+      compilerSourcePath = path.join(scratchPath, path.basename(sourcePath));
+      const source = await fs.open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        await fs.writeFile(compilerSourcePath, await source.readFile());
+      } finally {
+        await source.close();
+      }
+    }
 
     const engine = await findLatexEngine(params.engine || "auto", execImpl);
     if (!engine) {
@@ -196,13 +333,57 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
       };
     }
 
+    // Docker maps the private sandbox workspace to /workspace. Embedded
+    // option/environment values are not rewritten by its argv mapper.
+    const engineOutputDir = sandbox.type === "docker" ? "/workspace" : scratchPath;
+    const resourceEnv: string[] = [];
+    if (engine === "tectonic" && sandbox.type === "macos") {
+      // Tectonic needs its public bundle and format cache even in offline
+      // mode. Stage those resources, not user configuration, and never follow
+      // links from the cache into other host files.
+      const cacheRoot = path.join(os.homedir(), "Library", "Caches", "TectonicProject.Tectonic");
+      const privateCache = path.join(scratchPath, "tectonic-cache");
+      await fs.mkdir(privateCache);
+      for (const resource of ["bundles", "formats"]) {
+        const cached = path.join(cacheRoot, resource);
+        try {
+          if (
+            !(await fs.lstat(cacheRoot)).isDirectory() ||
+            !(await fs.lstat(cached)).isDirectory()
+          ) {
+            throw new Error("Tectonic cache must contain regular resource directories");
+          }
+          await fs.cp(cached, path.join(privateCache, resource), {
+            recursive: true,
+            dereference: false,
+            filter: async (entry) => !(await fs.lstat(entry)).isSymbolicLink(),
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      resourceEnv.push(`TECTONIC_CACHE_DIR=${privateCache}`);
+    }
     let diagnostic = "";
     try {
       const commandResult = await execImpl(
-        engine,
-        buildLatexCommand(engine, sourcePath, outputDir),
+        "/usr/bin/env",
+        [
+          // C locale needs no host locale files (Perl and LuaTeX otherwise
+          // fail inside a restricted macOS process sandbox).
+          "LC_ALL=C",
+          "LC_CTYPE=C",
+          "LANG=C",
+          `TEXMFVAR=${engineOutputDir}`,
+          `TEXMFCACHE=${engineOutputDir}`,
+          ...resourceEnv,
+          "openin_any=a",
+          "openout_any=p",
+          engine,
+          ...buildLatexCommand(engine, path.basename(compilerSourcePath), engineOutputDir),
+        ],
         {
-          cwd: path.dirname(sourcePath),
+          cwd: path.dirname(compilerSourcePath),
           timeout: COMPILE_TIMEOUT_MS,
           maxBuffer: COMPILE_MAX_BUFFER,
         },
@@ -237,8 +418,48 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
       };
     }
 
-    if (compilerPdfPath !== pdfPath) {
-      await fs.rename(compilerPdfPath, pdfPath);
+    if (!(await fs.lstat(compilerPdfPath)).isFile()) {
+      throw new Error("LaTeX output must be a regular file");
+    }
+    await fs.mkdir(outputDir, { recursive: true });
+    if (resolveAccessControlledPath(workspacePath, pdfPath) !== pdfPath) {
+      throw new Error("LaTeX output path changed after authorization");
+    }
+    const output = await fs.open(
+      pdfPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      if (resolveAccessControlledPath(workspacePath, pdfPath) !== pdfPath) {
+        throw new Error("LaTeX output path changed after authorization");
+      }
+      await output.truncate(0);
+      const compiled = await fs.open(compilerPdfPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        if (!(await compiled.stat()).isFile())
+          throw new Error("LaTeX output must be a regular file");
+        await pipeline(compiled.createReadStream(), output.createWriteStream());
+      } finally {
+        await compiled.close();
+      }
+    } finally {
+      await output.close();
+    }
+    // External approval covers the requested PDF, not a sibling log file.
+    logPath = resolveAccessControlledPath(workspacePath, logPath);
+    if (
+      isPathInsideWorkspace(logPath, workspacePath) &&
+      evaluateWorkspaceFilesystemAccess(policyWorkspace, logPath, "write").decision === "allow"
+    ) {
+      const compilerLog = path.join(scratchPath, `${sourceBase}.log`);
+      try {
+        if ((await fs.lstat(compilerLog)).isFile()) await fs.copyFile(compilerLog, logPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    } else {
+      logPath = "";
     }
 
     const stats = await fs.stat(pdfPath);
@@ -261,5 +482,8 @@ export async function compileLatex(params: CompileLatexParams): Promise<CompileL
       error: message,
       diagnostic: message,
     };
+  } finally {
+    sandbox?.cleanup();
+    if (scratchPath) await fs.rm(scratchPath, { recursive: true, force: true });
   }
 }

@@ -84,6 +84,7 @@ const IMAGE_PULL_TIMEOUT_MS = 15 * 60 * 1000;
  * Default sandbox options
  */
 const DEFAULT_OPTIONS: Required<SandboxOptions> = {
+  privateDocumentWorkspace: false,
   cwd: "/workspace",
   timeout: 5 * 60 * 1000, // 5 minutes
   maxOutputSize: 100 * 1024, // 100KB
@@ -668,7 +669,7 @@ export class DockerSandbox implements ISandbox {
       );
     }
     const workspacePath = resolveAccessControlledPath(this.workspace.path, this.workspace.path);
-    if (overlap(workspacePath)) {
+    if (overlap(workspacePath) && !options.privateDocumentWorkspace) {
       throw new Error(
         `Docker sandbox cannot protect current and future .git and .cowork/policy paths in a writable workspace mount: ${hostPath}. Use read-only access or guarded file tools.`,
       );

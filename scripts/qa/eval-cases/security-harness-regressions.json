@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "uncommitted-web-preview-access",
-    "taskId": "uncommitted-web-preview-access"
+    "incident": "csf_9962c722759f2797a5f0725c",
+    "taskId": "csf_9962c722759f2797a5f0725c"
   },
   "categories": [
     {
@@ -301,6 +301,18 @@
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true,
         "executableTest": "src/electron/mcp/client/transports/__tests__/StreamableHttpTransport.test.ts"
+      }
+    },
+    {
+      "id": "csf-9962c722759f2797a5f0725c-confirmed-fix",
+      "prompt": "Regression guard for Confine LaTeX interpreters to restricted filesystem and offline private output: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "csf-9962c722759f2797a5f0725c",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/utils/__tests__/latex-compiler.test.ts"
       }
     },
     {

@@ -26,6 +26,9 @@ export type SandboxType = "macos" | "docker" | "none";
  * Sandbox execution options
  */
 export interface SandboxOptions {
+  /** Internal document interpreter: workspace is a fresh app-owned disposable
+   * directory, with no user toolchain configuration or shared cache grants. */
+  privateDocumentWorkspace?: boolean;
   /** Working directory for command execution */
   cwd?: string;
   /** Command execution timeout in milliseconds */

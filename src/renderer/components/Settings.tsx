@@ -4754,52 +4754,61 @@ export function Settings({
 
       {jevProvider === "typesafe" ? (
         <div style={{ marginTop: "12px" }}>
-          <label className="settings-label">TypeSafe API key</label>
-          <input
-            type="password"
-            className="settings-input"
-            placeholder={
-              jevTypesafeKeyConfigured
-                ? "Stored TypeSafe key configured; enter a replacement"
-                : "TypeSafe API key"
-            }
-            value={jevTypesafeApiKey}
-            onChange={(event) => {
-              setJevTypesafeApiKey(event.target.value);
-              if (event.target.value) {
-                setJevTypesafeKeyConfigured(true);
-                setJevTypesafeClearKey(false);
+          <div className="settings-field">
+            <label htmlFor="jev-typesafe-api-key">TypeSafe API key</label>
+            <input
+              id="jev-typesafe-api-key"
+              type="password"
+              className="settings-input"
+              placeholder={
+                jevTypesafeKeyConfigured
+                  ? "Stored TypeSafe key configured; enter a replacement"
+                  : "TypeSafe API key"
               }
-            }}
-          />
-          {jevTypesafeKeyConfigured && (
-            <button
-              type="button"
-              className="button-secondary"
-              style={{ marginTop: "8px" }}
-              onClick={() => {
-                setJevTypesafeApiKey("");
-                setJevTypesafeKeyConfigured(false);
-                setJevTypesafeClearKey(true);
+              value={jevTypesafeApiKey}
+              onChange={(event) => {
+                setJevTypesafeApiKey(event.target.value);
+                if (event.target.value) {
+                  setJevTypesafeKeyConfigured(true);
+                  setJevTypesafeClearKey(false);
+                }
               }}
-            >
-              Clear saved TypeSafe key
-            </button>
-          )}
-          <label className="settings-label settings-label--spaced">TypeSafe base URL</label>
-          <input
-            className="settings-input"
-            placeholder="https://api.typesafe.ai"
-            value={jevTypesafeBaseUrl}
-            onChange={(event) => setJevTypesafeBaseUrl(event.target.value)}
-          />
-          <label className="settings-label settings-label--spaced">Jev model</label>
-          <input
-            className="settings-input"
-            placeholder="jev-latest"
-            value={jevTypesafeModel}
-            onChange={(event) => setJevTypesafeModel(event.target.value)}
-          />
+            />
+            {jevTypesafeKeyConfigured && (
+              <button
+                type="button"
+                className="button-secondary"
+                style={{ marginTop: "8px" }}
+                onClick={() => {
+                  setJevTypesafeApiKey("");
+                  setJevTypesafeKeyConfigured(false);
+                  setJevTypesafeClearKey(true);
+                }}
+              >
+                Clear saved TypeSafe key
+              </button>
+            )}
+          </div>
+          <div className="settings-field">
+            <label htmlFor="jev-typesafe-base-url">TypeSafe base URL</label>
+            <input
+              id="jev-typesafe-base-url"
+              className="settings-input"
+              placeholder="https://api.typesafe.ai"
+              value={jevTypesafeBaseUrl}
+              onChange={(event) => setJevTypesafeBaseUrl(event.target.value)}
+            />
+          </div>
+          <div className="settings-field">
+            <label htmlFor="jev-typesafe-model">Jev model</label>
+            <input
+              id="jev-typesafe-model"
+              className="settings-input"
+              placeholder="jev-latest"
+              value={jevTypesafeModel}
+              onChange={(event) => setJevTypesafeModel(event.target.value)}
+            />
+          </div>
           <p className="settings-hint">
             See the{" "}
             <a href="https://docs.typesafe.ai/api" target="_blank" rel="noopener noreferrer">

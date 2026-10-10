@@ -62,6 +62,15 @@ export function buildPactIdentityUpdate(input: {
   };
 }
 
+function PactStatus({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span className={`pact-settings-status ${ok ? "is-ok" : "is-off"}`}>
+      <span className="pact-settings-status-dot" aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
 export function PactSettingsLoadFailure({
   message,
   onRetry,
@@ -70,9 +79,9 @@ export function PactSettingsLoadFailure({
   onRetry: () => void;
 }) {
   return (
-    <div className="settings-section" role="alert">
+    <div className="pact-settings pact-settings-failure" role="alert">
       <p className="settings-error">Could not load PACT settings: {message}</p>
-      <button className="settings-button" onClick={onRetry}>
+      <button type="button" className="pact-settings-button" onClick={onRetry}>
         Retry
       </button>
     </div>
@@ -140,41 +149,45 @@ export function PactSettings() {
 
   if (!settings || !status) {
     if (loadError) return <PactSettingsLoadFailure message={loadError} onRetry={initialLoad} />;
-    return <div className="settings-loading">Loading PACT settings...</div>;
+    return <div className="pact-settings pact-settings-loading">Loading PACT settings...</div>;
   }
 
   const providers: PactProviderConfig[] = settings.providers;
   const now = Date.now();
   const activeGrants = grants.filter((grant) => isPactGrantConnected(grant, now));
 
-  return (
-    <div className="googlechat-settings">
-      <div className="settings-section">
-        <h3>PACT business agents</h3>
-        <p className="settings-description">
-          Lets CoWork talk to a business&apos;s own agent for you, with your identity and, when the
-          business offers it, only the account permissions you approve on the business&apos;s own
-          sign-in page. CoWork never sees your password and asks before sending anything that
-          changes your account.
-        </p>
-        <div className="settings-status-row">
-          <span
-            className={`settings-badge status-${status.available ? "connected" : "disconnected"}`}
-          >
-            {status.available
-              ? "Available"
-              : (UNAVAILABLE_LABELS[status.unavailableReason ?? ""] ?? "Unavailable")}
-          </span>
-          <span className="settings-muted">
-            {status.activeGrants} connected permission(s) · {status.pendingAuthorizations} pending
-            sign-in(s)
-          </span>
-        </div>
+  const statusLabel = status.available
+    ? "Available"
+    : (UNAVAILABLE_LABELS[status.unavailableReason ?? ""] ?? "Unavailable");
 
-        <div className="settings-field">
-          <label>
+  return (
+    <div className="pact-settings">
+      <p className="pact-settings-intro">
+        Lets CoWork talk to a business&apos;s own agent for you, with your identity and, when the
+        business offers it, only the account permissions you approve on the business&apos;s own
+        sign-in page. CoWork never sees your password and asks before sending anything that changes
+        your account.
+      </p>
+      <div className="pact-settings-summary">
+        <PactStatus ok={status.available} label={statusLabel} />
+        <span className="pact-settings-muted">
+          {status.activeGrants} connected permission(s) · {status.pendingAuthorizations} pending
+          sign-in(s)
+        </span>
+      </div>
+
+      <section className="pact-settings-section">
+        <div className="pact-settings-row">
+          <div className="pact-settings-row-text">
+            <div className="pact-settings-row-title">Use PACT for business interactions</div>
+            <div className="pact-settings-hint">
+              Talk to a business&apos;s agent when the business offers one.
+            </div>
+          </div>
+          <label className="settings-toggle">
             <input
               type="checkbox"
+              aria-label="Use PACT for business interactions"
               checked={settings.enabled}
               disabled={busy !== null}
               onChange={(event) =>
@@ -182,13 +195,14 @@ export function PactSettings() {
                   window.electronAPI.updatePactSettings({ enabled: event.target.checked }),
                 )
               }
-            />{" "}
-            Use PACT for business interactions
+            />
+            <span className="toggle-slider" />
           </label>
         </div>
-        <div className="settings-field">
-          <label>Preference</label>
+        <div className="pact-settings-field">
+          <label htmlFor="pact-preference">Preference</label>
           <select
+            id="pact-preference"
             className="settings-input"
             value={settings.preference ?? "disabled"}
             disabled={busy !== null || !settings.enabled}
@@ -206,29 +220,29 @@ export function PactSettings() {
               </option>
             ))}
           </select>
-          <div className="settings-hint">
+          <div className="pact-settings-hint">
             A preference never grants permission: every request is still checked, approved and
             consented to.
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h4>Identity</h4>
-        <div className="settings-status-row">
-          <span
-            className={`settings-badge status-${status.identity.ready ? "connected" : "error"}`}
-          >
-            {status.identity.ready ? "Ready" : "Not ready"}
-          </span>
-          <span className="settings-muted">
-            {DEPLOYMENT_LABELS[status.identity.deployment]}
-            {status.identity.reason && !status.identity.ready ? ` · ${status.identity.reason}` : ""}
-          </span>
+      <section className="pact-settings-section">
+        <div className="pact-settings-section-header">
+          <h4>Identity</h4>
+          <PactStatus
+            ok={status.identity.ready}
+            label={status.identity.ready ? "Ready" : "Not ready"}
+          />
         </div>
-        <div className="settings-field">
-          <label>Signer</label>
+        <div className="pact-settings-hint pact-settings-section-note">
+          {DEPLOYMENT_LABELS[status.identity.deployment]}
+          {status.identity.reason && !status.identity.ready ? ` · ${status.identity.reason}` : ""}
+        </div>
+        <div className="pact-settings-field">
+          <label htmlFor="pact-signer">Signer</label>
           <select
+            id="pact-signer"
             className="settings-input"
             value={deployment}
             onChange={(event) => setDeployment(event.target.value as PactIdentityDeployment)}
@@ -244,32 +258,35 @@ export function PactSettings() {
         </div>
         {deployment !== "none" && (
           <>
-            <div className="settings-field">
-              <label>Issuer URL</label>
+            <div className="pact-settings-field">
+              <label htmlFor="pact-issuer">Issuer URL</label>
               <input
+                id="pact-issuer"
                 className="settings-input"
                 value={issuer}
                 placeholder="https://pa.example.com"
                 onChange={(event) => setIssuer(event.target.value)}
               />
-              <div className="settings-hint">
+              <div className="pact-settings-hint">
                 The issuer must serve its public keys at /.well-known/jwks.json.
               </div>
             </div>
             {deployment !== "development" && (
               <>
-                <div className="settings-field">
-                  <label>Signer URL</label>
+                <div className="pact-settings-field">
+                  <label htmlFor="pact-signer-url">Signer URL</label>
                   <input
+                    id="pact-signer-url"
                     className="settings-input"
                     value={signerUrl}
                     placeholder="https://signer.example.com"
                     onChange={(event) => setSignerUrl(event.target.value)}
                   />
                 </div>
-                <div className="settings-field">
-                  <label>Signer credential</label>
+                <div className="pact-settings-field">
+                  <label htmlFor="pact-signer-credential">Signer credential</label>
                   <input
+                    id="pact-signer-credential"
                     className="settings-input"
                     type="password"
                     value={credential}
@@ -281,9 +298,10 @@ export function PactSettings() {
             )}
           </>
         )}
-        <div className="settings-actions">
+        <div className="pact-settings-actions">
           <button
-            className="settings-button settings-button-primary"
+            type="button"
+            className="pact-settings-button pact-settings-button-primary"
             disabled={busy !== null}
             onClick={() =>
               void run(
@@ -311,140 +329,168 @@ export function PactSettings() {
             Save identity
           </button>
         </div>
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h4>Providers</h4>
-        <p className="settings-description">
+      <section className="pact-settings-section">
+        <div className="pact-settings-section-header">
+          <h4>Providers</h4>
+        </div>
+        <div className="pact-settings-hint pact-settings-section-note">
           A provider assigns CoWork an audience when it registers CoWork&apos;s issuer. Add the
           audience it gave you; a business card can never supply it.
-        </p>
-        {status.providers.length === 0 && <div className="settings-hint">No providers yet.</div>}
-        {status.providers.map((provider) => (
-          <div key={provider.origin} className="settings-status-row">
-            <span className={`settings-badge status-${provider.ready ? "connected" : "error"}`}>
-              {provider.ready ? "Ready" : "Not ready"}
-            </span>
-            <span className="settings-muted">
-              {provider.origin}
-              {provider.reason && !provider.ready ? ` · ${provider.reason}` : ""}
-            </span>
-            {providers.some((entry) => entry.origin === provider.origin) && (
-              <button
-                className="settings-button"
-                disabled={busy !== null}
-                onClick={() =>
-                  void run("provider-remove", () =>
-                    window.electronAPI.updatePactSettings({
-                      providers: providers.filter((entry) => entry.origin !== provider.origin),
-                    }),
-                  )
-                }
-              >
-                Remove
-              </button>
-            )}
+        </div>
+        {status.providers.length === 0 ? (
+          <div className="pact-settings-empty">No providers yet.</div>
+        ) : (
+          <ul className="pact-settings-list">
+            {status.providers.map((provider) => (
+              <li key={provider.origin} className="pact-settings-list-row">
+                <div className="pact-settings-row-text">
+                  <div className="pact-settings-mono">{provider.origin}</div>
+                  {provider.reason && !provider.ready && (
+                    <div className="pact-settings-hint">{provider.reason}</div>
+                  )}
+                </div>
+                <PactStatus ok={provider.ready} label={provider.ready ? "Ready" : "Not ready"} />
+                {providers.some((entry) => entry.origin === provider.origin) && (
+                  <button
+                    type="button"
+                    className="pact-settings-button"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void run("provider-remove", () =>
+                        window.electronAPI.updatePactSettings({
+                          providers: providers.filter((entry) => entry.origin !== provider.origin),
+                        }),
+                      )
+                    }
+                  >
+                    Remove
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="pact-settings-inline-form">
+          <div className="pact-settings-field">
+            <label htmlFor="pact-provider-origin">Provider origin</label>
+            <input
+              id="pact-provider-origin"
+              className="settings-input"
+              value={providerOrigin}
+              placeholder="https://provider.example.com"
+              onChange={(event) => setProviderOrigin(event.target.value)}
+            />
           </div>
-        ))}
-        <div className="settings-field">
-          <label>Provider origin</label>
-          <input
-            className="settings-input"
-            value={providerOrigin}
-            placeholder="https://provider.example.com"
-            onChange={(event) => setProviderOrigin(event.target.value)}
-          />
+          <div className="pact-settings-field">
+            <label htmlFor="pact-provider-audience">Assigned audience</label>
+            <input
+              id="pact-provider-audience"
+              className="settings-input"
+              value={providerAudience}
+              onChange={(event) => setProviderAudience(event.target.value)}
+            />
+          </div>
         </div>
-        <div className="settings-field">
-          <label>Assigned audience</label>
-          <input
-            className="settings-input"
-            value={providerAudience}
-            onChange={(event) => setProviderAudience(event.target.value)}
-          />
+        <div className="pact-settings-actions">
+          <button
+            type="button"
+            className="pact-settings-button"
+            disabled={busy !== null || !providerOrigin.trim() || !providerAudience.trim()}
+            onClick={() =>
+              void run(
+                "provider-add",
+                async () => {
+                  await window.electronAPI.updatePactSettings({
+                    providers: [
+                      ...providers.filter((entry) => entry.origin !== providerOrigin.trim()),
+                      { origin: providerOrigin.trim(), audience: providerAudience.trim() },
+                    ],
+                  });
+                  setProviderOrigin("");
+                  setProviderAudience("");
+                },
+                "Provider saved.",
+              )
+            }
+          >
+            Add provider
+          </button>
         </div>
-        <button
-          className="settings-button"
-          disabled={busy !== null || !providerOrigin.trim() || !providerAudience.trim()}
-          onClick={() =>
-            void run(
-              "provider-add",
-              async () => {
-                await window.electronAPI.updatePactSettings({
-                  providers: [
-                    ...providers.filter((entry) => entry.origin !== providerOrigin.trim()),
-                    { origin: providerOrigin.trim(), audience: providerAudience.trim() },
-                  ],
-                });
-                setProviderOrigin("");
-                setProviderAudience("");
-              },
-              "Provider saved.",
-            )
-          }
-        >
-          Add provider
-        </button>
-      </div>
+      </section>
 
-      <div className="settings-section">
-        <h4>Connected businesses</h4>
-        {activeGrants.length === 0 && (
-          <div className="settings-hint">
+      <section className="pact-settings-section">
+        <div className="pact-settings-section-header">
+          <h4>Connected businesses</h4>
+        </div>
+        {activeGrants.length === 0 ? (
+          <div className="pact-settings-empty">
             No business permissions yet. CoWork asks you to sign in with a business the first time a
             request needs access to your account there.
           </div>
+        ) : (
+          <ul className="pact-settings-list">
+            {activeGrants.map((grant) => (
+              <li key={grant.id} className="pact-settings-list-row pact-settings-grant">
+                <div className="pact-settings-row-text">
+                  <div className="pact-settings-row-title">{grant.businessName}</div>
+                  <div className="pact-settings-hint">
+                    Connected {formatDate(grant.createdAt)}
+                    {grant.grantExpiresAt ? ` · expires ${formatDate(grant.grantExpiresAt)}` : ""}
+                  </div>
+                  <ul className="pact-authorization-scopes">
+                    {grant.scopes.map((scope) => (
+                      <li key={scope.id}>
+                        <span className="pact-authorization-scope-description">
+                          {scope.description}
+                        </span>
+                        <span className="pact-authorization-scope-id">{scope.id}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <button
+                  type="button"
+                  className="pact-settings-button pact-settings-button-danger"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    if (
+                      !confirm(
+                        `Disconnect ${grant.businessName}? CoWork deletes its stored permission now. The business is not notified; to revoke it there, use the business's own account settings.`,
+                      )
+                    )
+                      return;
+                    void run(
+                      `disconnect-${grant.id}`,
+                      () => window.electronAPI.disconnectPactGrant({ id: grant.id }),
+                      "Disconnected locally.",
+                    );
+                  }}
+                >
+                  Disconnect
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
-        {activeGrants.map((grant) => (
-          <div key={grant.id} className="settings-field">
-            <div className="settings-status-row">
-              <strong>{grant.businessName}</strong>
-              <span className="settings-muted">
-                connected {formatDate(grant.createdAt)}
-                {grant.grantExpiresAt ? ` · expires ${formatDate(grant.grantExpiresAt)}` : ""}
-              </span>
-            </div>
-            <ul className="pact-authorization-scopes">
-              {grant.scopes.map((scope) => (
-                <li key={scope.id}>
-                  <span className="pact-authorization-scope-description">{scope.description}</span>
-                  <span className="pact-authorization-scope-id">{scope.id}</span>
-                </li>
-              ))}
-            </ul>
-            <button
-              className="settings-button settings-button-danger"
-              disabled={busy !== null}
-              onClick={() => {
-                if (
-                  !confirm(
-                    `Disconnect ${grant.businessName}? CoWork deletes its stored permission now. The business is not notified; to revoke it there, use the business's own account settings.`,
-                  )
-                )
-                  return;
-                void run(
-                  `disconnect-${grant.id}`,
-                  () => window.electronAPI.disconnectPactGrant({ id: grant.id }),
-                  "Disconnected locally.",
-                );
-              }}
-            >
-              Disconnect
-            </button>
-          </div>
-        ))}
         {businesses.length > 0 && (
-          <div className="settings-hint">
+          <div className="pact-settings-hint pact-settings-known">
             Known businesses:{" "}
             {businesses
               .map((business) => `${business.displayName} (${new URL(business.cardUrl).hostname})`)
               .join(", ")}
           </div>
         )}
-      </div>
+      </section>
 
       {message && (
-        <div className={`settings-status ${message.ok ? "success" : "error"}`}>{message.text}</div>
+        <div
+          className={`pact-settings-message ${message.ok ? "is-success" : "is-error"}`}
+          role="status"
+        >
+          {message.text}
+        </div>
       )}
     </div>
   );

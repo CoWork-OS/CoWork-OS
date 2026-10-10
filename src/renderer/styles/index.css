@@ -3464,6 +3464,305 @@ a,
   gap: 6px;
 }
 
+/* PACT settings (PactSettings.tsx), shown in the integration dialog. */
+.pact-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 20px 20px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.pact-settings-loading,
+.pact-settings-failure {
+  padding: 20px;
+  color: var(--color-text-muted);
+}
+
+.pact-settings-failure {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pact-settings-intro {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  text-wrap: pretty;
+}
+
+.pact-settings-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pact-settings-muted,
+.pact-settings-hint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pact-settings-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.pact-settings-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-text-muted);
+}
+
+.pact-settings-status.is-ok .pact-settings-status-dot {
+  background: var(--color-success, #22c55e);
+}
+
+.pact-settings-status.is-off .pact-settings-status-dot {
+  background: var(--color-warning, #f59e0b);
+}
+
+.pact-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.pact-settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pact-settings .pact-settings-section-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.pact-settings-section-note {
+  margin-top: -8px;
+}
+
+.pact-settings-row,
+.pact-settings-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pact-settings-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pact-settings-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.pact-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pact-settings-field > label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+/* Fields keep the Settings-wide 560px width, so forms and their buttons share one right edge. */
+.pact-settings .pact-settings-field .settings-input {
+  width: 100%;
+}
+
+.pact-settings .settings-toggle {
+  flex-shrink: 0;
+}
+
+.pact-settings-inline-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.pact-settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pact-settings-list-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.pact-settings-list-row:first-child {
+  padding-top: 0;
+}
+
+.pact-settings-list-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.pact-settings-grant {
+  align-items: flex-start;
+}
+
+.pact-settings-grant .pact-authorization-scopes {
+  margin: 6px 0 0;
+  gap: 4px;
+}
+
+.pact-settings-grant .pact-authorization-scopes li {
+  position: relative;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  padding-left: 14px;
+  font-size: 12.5px;
+}
+
+.pact-settings-grant .pact-authorization-scopes li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-text-muted);
+}
+
+.pact-settings-mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.pact-settings-empty {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pact-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  max-width: 560px;
+}
+
+.pact-settings-button {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.pact-settings-button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.pact-settings-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pact-settings-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.pact-settings-button-primary {
+  border-color: var(--color-text-primary);
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+}
+
+.pact-settings-button-primary:hover:not(:disabled) {
+  background: var(--color-text-primary);
+  opacity: 0.88;
+}
+
+.pact-settings-button-danger {
+  border-color: transparent;
+  color: var(--color-error, #ef4444);
+}
+
+.pact-settings-button-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 10%, transparent);
+}
+
+.pact-settings-known {
+  margin-top: -2px;
+}
+
+.pact-settings-message {
+  margin-top: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.pact-settings-message.is-success {
+  background: color-mix(in srgb, var(--color-success, #22c55e) 12%, transparent);
+  color: var(--color-text-primary);
+}
+
+.pact-settings-message.is-error {
+  background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent);
+  color: var(--color-text-primary);
+}
+
+@media (max-width: 560px) {
+  .pact-settings-inline-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .pact-evidence-note {
   color: var(--color-text-muted);
   font-size: 12px;
@@ -9760,7 +10059,10 @@ a,
 
 /* Integration settings modal — wider to fit the settings forms */
 .cm-integration-modal {
-  background: var(--color-bg-elevated);
+  /* The elevated colour is translucent in some themes; layer it on the page colour so the
+     settings behind the dialog never show through. */
+  background:
+    linear-gradient(var(--color-bg-elevated), var(--color-bg-elevated)), var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   width: 100%;

@@ -136,7 +136,10 @@ import {
 } from "./remote-command-registry";
 import { normalizeRemoteIncomingCommand } from "./remote-command-normalizer";
 import { gatewaySenderAgentConfig } from "./gateway-sender-identity";
-import { createBackgroundKitPathGuard } from "../security/background-write-guard";
+import {
+  createBackgroundKitPathGuard,
+  evaluateConfinedInternalWrite,
+} from "../security/background-write-guard";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 import { approvalRequestRevisionHash, approvalRevisionMatches } from "../agent/approval-revision";
 export type { RouterConfig } from "./router-helpers";
@@ -1697,6 +1700,9 @@ export class MessageRouter {
     const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const safeChatId = sanitizePathSegment(message.chatId, 120);
     const safeMessageId = sanitizePathSegment(message.messageId, 120);
+    if ([safeChatId, safeMessageId].some((segment) => segment === "." || segment === "..")) {
+      return [];
+    }
 
     const baseDirAbs = path.join(
       workspace.path,
@@ -1709,8 +1715,27 @@ export class MessageRouter {
       safeMessageId,
     );
 
+    let initialWorkspaceRoot: string;
     try {
-      await fs.promises.mkdir(baseDirAbs, { recursive: true });
+      initialWorkspaceRoot = fs.realpathSync.native(workspace.path);
+    } catch {
+      return [];
+    }
+    const assertDestination = (target: string): void => {
+      if (fs.realpathSync.native(workspace.path) !== initialWorkspaceRoot) {
+        throw new Error("Attachment workspace root changed during intake");
+      }
+      const decision = evaluateConfinedInternalWrite({
+        root: workspace.path,
+        confineTo: path.join(".cowork", "inbox", "attachments"),
+        targets: [target],
+        workspace,
+      });
+      if (!decision.allowed) throw new Error(`Attachment destination denied: ${decision.reason}`);
+    };
+    try {
+      assertDestination(baseDirAbs);
+      fs.mkdirSync(baseDirAbs, { recursive: true });
     } catch (error) {
       console.warn("[Router] Failed to create attachment directory:", baseDirAbs, error);
       return [];
@@ -1754,13 +1779,32 @@ export class MessageRouter {
         destAbs = path.join(baseDirAbs, `${stem}-${suffix}${path.extname(fileName)}`);
       }
 
+      // Revalidate after asynchronous downloads, then publish without yielding.
+      // Exclusive creation never overwrites a collision or follows a final link.
+      const publish = (buffer: Buffer): void => {
+        assertDestination(destAbs);
+        const fd = fs.openSync(
+          destAbs,
+          fs.constants.O_WRONLY |
+            fs.constants.O_CREAT |
+            fs.constants.O_EXCL |
+            fs.constants.O_NOFOLLOW,
+          0o600,
+        );
+        try {
+          fs.writeFileSync(fd, buffer);
+        } finally {
+          fs.closeSync(fd);
+        }
+      };
+
       try {
         if (att?.data && Buffer.isBuffer(att.data)) {
           if (att.data.length > MAX_ATTACHMENT_BYTES) {
             console.warn("[Router] Skipping attachment (too large):", att.data.length, "bytes");
             continue;
           }
-          await fs.promises.writeFile(destAbs, att.data);
+          publish(att.data);
           saved.push({
             type,
             absPath: destAbs,
@@ -1776,7 +1820,8 @@ export class MessageRouter {
         // Local file path
         const localPath = url.startsWith("file://") ? url.replace("file://", "") : url;
         if (path.isAbsolute(localPath) && fs.existsSync(localPath)) {
-          await fs.promises.copyFile(localPath, destAbs);
+          assertDestination(destAbs);
+          fs.copyFileSync(localPath, destAbs, fs.constants.COPYFILE_EXCL);
           saved.push({
             type,
             absPath: destAbs,
@@ -1826,7 +1871,7 @@ export class MessageRouter {
               continue;
             }
 
-            await fs.promises.writeFile(destAbs, buf);
+            publish(buf);
             saved.push({
               type,
               absPath: destAbs,

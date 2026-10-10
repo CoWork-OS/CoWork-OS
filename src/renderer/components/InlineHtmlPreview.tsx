@@ -14,6 +14,7 @@ import {
   type RichFrameTheme,
 } from "../../shared/rich-frame-design-language";
 import { loadSurfaceState, saveSurfaceState } from "../hooks/useAnswerSurfaceState";
+import { useLiveFrameSlot } from "../hooks/useLiveFrameSlot";
 import { HtmlSurfaceBridgeHost, createSurfaceNonce } from "../utils/html-surface-bridge";
 
 type InlineHtmlPreviewVariant = "default" | "frame";
@@ -155,6 +156,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
  * scripts run on an opaque origin with no network. The bridge sizes the frame to its
  * content, follows theme changes without a reload, and saves the user's inputs. Where
  * registration is unavailable (the browser host) it falls back to a static srcdoc frame.
+ * Only a few frames are loaded at once (see LiveFrameSlots); a parked one keeps its size
+ * and its saved inputs, and loads again when it is back on screen or clicked.
  */
 function HtmlSurfaceFrame({
   html,
@@ -164,6 +167,8 @@ function HtmlSurfaceFrame({
   autosize,
   taskId,
   onSizeChange,
+  live,
+  onResume,
 }: {
   html: string;
   title: string;
@@ -172,6 +177,8 @@ function HtmlSurfaceFrame({
   autosize: boolean;
   taskId?: string;
   onSizeChange: (height: number | null) => void;
+  live: boolean;
+  onResume: () => void;
 }) {
   const register =
     typeof window === "undefined" ? undefined : window.electronAPI?.registerHtmlSurface;
@@ -182,6 +189,7 @@ function HtmlSurfaceFrame({
   optionsRef.current = designOptions;
   const initializedRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<(() => void) | null>(null);
   const surfaceKey = useMemo(() => htmlSurfaceKey(html), [html]);
 
   useEffect(() => {
@@ -189,6 +197,7 @@ function HtmlSurfaceFrame({
     let cancelled = false;
     setUrl(null);
     setRegistrationFailed(false);
+    if (!live) return;
     // The document is themed for the theme at mount; later changes go over the bridge.
     const { theme, hostBackground } = optionsRef.current;
     register({ html, theme: theme ?? "light", hostBackground, designLanguage })
@@ -201,17 +210,20 @@ function HtmlSurfaceFrame({
     return () => {
       cancelled = true;
     };
-  }, [designLanguage, html, register]);
+  }, [designLanguage, html, live, register]);
 
   const bridge = useMemo(() => {
     if (!url) return null;
     const persist = (state: HtmlSurfaceState) => {
       if (!taskId) return;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
+      const save = () => {
         saveTimerRef.current = null;
+        pendingSaveRef.current = null;
         saveSurfaceState(taskId, surfaceKey, state, summarizeHtmlSurfaceState(state));
-      }, SAVE_DELAY_MS);
+      };
+      pendingSaveRef.current = save;
+      saveTimerRef.current = setTimeout(save, SAVE_DELAY_MS);
     };
     return new HtmlSurfaceBridgeHost(() => iframeRef.current?.contentWindow, createSurfaceNonce(), {
       onResize: (height) => autosize && onSizeChange(height),
@@ -226,11 +238,13 @@ function HtmlSurfaceFrame({
     return () => window.removeEventListener("message", listener);
   }, [bridge]);
 
+  // A frame that is parked or removed saves its last inputs now rather than dropping them.
   useEffect(
     () => () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      pendingSaveRef.current?.();
     },
-    [],
+    [bridge],
   );
 
   useEffect(() => {
@@ -265,6 +279,19 @@ function HtmlSurfaceFrame({
     return () => clearTimeout(timer);
   }, [autosize, onSizeChange, url]);
 
+  if (!live) {
+    return (
+      <button
+        type="button"
+        className="inline-html-frame inline-html-frame-parked"
+        onClick={onResume}
+        aria-label={`Load ${title}`}
+      >
+        <span className="inline-html-frame-parked-title">{title}</span>
+        <span className="inline-html-frame-parked-note">Paused to save memory · click to load</span>
+      </button>
+    );
+  }
   if (!register || registrationFailed) {
     const fallbackHtml = designLanguage ? applyRichFrameDesignLanguage(html, designOptions) : html;
     return (
@@ -392,6 +419,8 @@ export function InlineHtmlSourcePreview({
   const frameDesignOptions = useRichFrameDesignOptions(true);
   const autosize = !style;
   const size = useSurfaceSize(autosize);
+  const [frameWrap, setFrameWrap] = useState<HTMLDivElement | null>(null);
+  const slot = useLiveFrameSlot(frameWrap);
 
   return (
     <div
@@ -401,7 +430,11 @@ export function InlineHtmlSourcePreview({
       {!hideChrome && (
         <InlineHtmlHeader displayTitle={displayTitle} subtitle={isFrame ? "Frame" : "HTML form"} />
       )}
-      <div className="inline-html-frame-wrap">
+      <div
+        className="inline-html-frame-wrap"
+        ref={setFrameWrap}
+        onPointerEnter={slot.live ? slot.activate : undefined}
+      >
         <HtmlSurfaceFrame
           html={htmlContent}
           title={displayTitle}
@@ -410,6 +443,8 @@ export function InlineHtmlSourcePreview({
           autosize={autosize}
           taskId={taskId}
           onSizeChange={size.onSizeChange}
+          live={slot.live}
+          onResume={slot.activate}
         />
       </div>
     </div>
@@ -445,6 +480,8 @@ export function InlineHtmlPreview({
   const previewHtmlContent = result?.htmlContent || "";
   const autosize = !style;
   const size = useSurfaceSize(autosize);
+  const [frameWrap, setFrameWrap] = useState<HTMLDivElement | null>(null);
+  const slot = useLiveFrameSlot(frameWrap);
 
   useEffect(() => {
     let cancelled = false;
@@ -512,7 +549,11 @@ export function InlineHtmlPreview({
             <InlineHtmlHeader displayTitle={displayTitle} subtitle={subtitle} onOpen={handleOpen} />
           )}
 
-          <div className="inline-html-frame-wrap">
+          <div
+            className="inline-html-frame-wrap"
+            ref={setFrameWrap}
+            onPointerEnter={slot.live ? slot.activate : undefined}
+          >
             <HtmlSurfaceFrame
               html={previewHtmlContent}
               title={displayTitle}
@@ -521,6 +562,8 @@ export function InlineHtmlPreview({
               autosize={autosize}
               taskId={taskId}
               onSizeChange={size.onSizeChange}
+              live={slot.live}
+              onResume={slot.activate}
             />
           </div>
         </>

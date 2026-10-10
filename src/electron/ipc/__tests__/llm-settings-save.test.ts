@@ -179,6 +179,48 @@ describe("buildSavedLLMSettings", () => {
     });
   });
 
+  it("keeps stored keys when the Settings form sends them as undefined", () => {
+    // The form sends every provider on each save, with `apiKey: key || undefined`; a key
+    // not in the form yet must not erase the stored one. This goes through the IPC schema
+    // because it is what keeps the explicit undefined.
+    const existingSettings: LLMSettingsData = {
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      anthropic: { apiKey: "existing-anthropic-key" },
+      openrouter: { apiKey: "existing-openrouter-key", model: "openrouter/free" },
+      gemini: { apiKey: "existing-gemini-key" },
+    };
+    const fromForm = LLMSettingsSchema.parse({
+      providerType: "anthropic",
+      modelKey: "sonnet-4-5",
+      anthropic: { apiKey: undefined },
+      openrouter: { apiKey: undefined, model: "openrouter/free", baseUrl: undefined },
+      gemini: { apiKey: undefined, model: undefined },
+    }) as LLMSettingsData;
+
+    const saved = buildSavedLLMSettings(fromForm, existingSettings);
+
+    expect(saved.openrouter?.apiKey).toBe("existing-openrouter-key");
+    expect(saved.anthropic?.apiKey).toBe("existing-anthropic-key");
+    expect(saved.gemini?.apiKey).toBe("existing-gemini-key");
+  });
+
+  it("still replaces a stored key with a new one", () => {
+    const saved = buildSavedLLMSettings(
+      {
+        providerType: "openrouter",
+        modelKey: "openrouter/free",
+        openrouter: { apiKey: "new-key" },
+      },
+      {
+        providerType: "openrouter",
+        modelKey: "openrouter/free",
+        openrouter: { apiKey: "old-key" },
+      },
+    );
+    expect(saved.openrouter?.apiKey).toBe("new-key");
+  });
+
   it("supports an explicit Jev credential clear while preserving omitted credentials", () => {
     const existingSettings: LLMSettingsData = {
       providerType: "typesafe",

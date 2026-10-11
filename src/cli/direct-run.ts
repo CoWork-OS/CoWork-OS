@@ -1493,9 +1493,7 @@ async function pruneSessions(
   args: DirectRunArgs,
 ): Promise<number> {
   const filters = buildSessionRetentionFilters(args);
-  const preview = await sessionRetention.pruneSessions(filters, {
-    dryRun: !args.yes || args.dryRun,
-  });
+  const preview = await sessionRetention.pruneSessions(filters, { dryRun: true });
   if (!args.yes || args.dryRun) {
     writeEvent(
       args,

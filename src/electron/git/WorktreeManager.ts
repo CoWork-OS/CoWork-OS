@@ -306,6 +306,21 @@ export class WorktreeManager {
     const info = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (!info) return;
 
+    await this.cleanupWorktreeResources(info, deleteBranch);
+    await this.worktreeInfoRepo.update(taskId, { status: "cleaned" });
+  }
+
+  /** Cleanup a committed task deletion using metadata captured before its row was removed. */
+  async cleanupDeletedWorktree(info: WorktreeInfo, deleteBranch?: boolean): Promise<void> {
+    await this.cleanupWorktreeResources(info, deleteBranch);
+  }
+
+  private async cleanupWorktreeResources(
+    info: WorktreeInfo,
+    deleteBranch?: boolean,
+  ): Promise<void> {
+    const taskId = info.taskId;
+
     const repoPath = await this.resolveRepoPath(info);
 
     // Remove the worktree
@@ -332,8 +347,6 @@ export class WorktreeManager {
         console.error(`[WorktreeManager] Failed to delete branch ${info.branchName}:`, error);
       }
     }
-
-    await this.worktreeInfoRepo.update(taskId, { status: "cleaned" });
   }
 
   /**

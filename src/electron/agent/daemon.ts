@@ -1323,23 +1323,32 @@ export class AgentDaemon extends EventEmitter {
       new TaskSessionMetadataStore(db),
       new WorkspaceStore(db),
     );
+    const worktreesForCleanup = new Map<
+      string,
+      Awaited<ReturnType<WorktreeManager["getWorktreeInfo"]>>
+    >();
     const result = await sessionRetention.pruneSessions(
       {
         olderThanMs,
         includeArchived: autoPrune.includeArchived === true,
       },
       {
-        deleteTask: async (task) => {
+        prepareTaskDeletion: async (task) => {
           if (!task.worktreePath && !task.worktreeBranch) return;
-          try {
-            await this.worktreeManager.cleanup(task.id, true);
-          } catch (error) {
-            log.warn(`Session auto-prune worktree cleanup failed for ${task.id}:`, error);
-          }
+          worktreesForCleanup.set(task.id, await this.worktreeManager.getWorktreeInfo(task.id));
         },
         // Transcript files and Chronicle captures go with the task (SEC-15). Learned
         // memory is left to memory retention.
         onTaskDeleted: async (task) => {
+          const worktree = worktreesForCleanup.get(task.id);
+          if (worktree) {
+            try {
+              await this.worktreeManager.cleanupDeletedWorktree(worktree, true);
+            } catch (error) {
+              log.warn(`Session auto-prune worktree cleanup failed for ${task.id}:`, error);
+            }
+          }
+          worktreesForCleanup.delete(task.id);
           await MemoryWorkspacePurgeService.purgeTaskFiles({
             taskId: task.id,
             workspacePath: this.workspaceRepo.findById(task.workspaceId)?.path,

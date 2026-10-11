@@ -49,6 +49,7 @@ import {
 } from "./transactional-review-sql";
 import { updateTaskTitleIfUnchanged } from "./task-title-sql";
 import { BUILD_PROMPT_MARKER } from "../../shared/build-task";
+import { isTerminalTaskStatus } from "../../shared/task-status";
 import { purgeTaskDerivedRows } from "../memory/memory-purge-sql";
 import { removeWorkspaceWithHistory } from "./workspace-removal-sql";
 import { deleteWorkspaceMemoriesOlderThan } from "../memory/memory-retention-sql";
@@ -1599,21 +1600,21 @@ export class TaskStore {
       const rows = this.db
         .prepare(`
         SELECT * FROM tasks
-        WHERE session_id = ?
+        WHERE session_id = ? OR (id = ? AND (session_id IS NULL OR session_id = ''))
         ORDER BY created_at ASC
         LIMIT ? OFFSET ?
       `)
-        .all(normalizedSessionId, safeLimit, safeOffset) as Any[];
+        .all(normalizedSessionId, normalizedSessionId, safeLimit, safeOffset) as Any[];
       return rows.map((row) => this.mapRowToTask(row));
     }
 
     const rows = this.db
       .prepare(`
       SELECT * FROM tasks
-      WHERE session_id = ?
+      WHERE session_id = ? OR (id = ? AND (session_id IS NULL OR session_id = ''))
       ORDER BY created_at ASC
     `)
-      .all(normalizedSessionId) as Any[];
+      .all(normalizedSessionId, normalizedSessionId) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -1715,6 +1716,25 @@ export class TaskStore {
        LIMIT ?`,
       [...hits.params, workspaceId, minMatched, limit],
     );
+  }
+
+  /** Guard retention deletion and lineage state under the same SQLite write lock. */
+  deleteIfSessionPrunable(
+    id: string,
+    sessionId: string,
+  ): "deleted" | "missing" | "active" | "pinned" {
+    return this.db
+      .transaction(() => {
+        const task = this.findById(id);
+        if (!task || (task.sessionId || task.id) !== sessionId) return "missing" as const;
+        const lineage = this.findBySessionId(sessionId);
+        const rows = lineage.length > 0 ? lineage : [task];
+        if (rows.some((row) => !isTerminalTaskStatus(row.status))) return "active" as const;
+        if (rows.some((row) => row.pinned === true)) return "pinned" as const;
+        this.delete(id);
+        return "deleted" as const;
+      })
+      .immediate();
   }
 
   /**

@@ -59,6 +59,14 @@ import { BOT_PROFILE_DELETED_EVENT, BOT_PROFILE_UPDATED_EVENT } from "./BotProfi
 import type { BotConversationRosterProjection } from "../../shared/bot-lifecycle";
 
 const SIDEBAR_ITEM_HEIGHT = 32;
+const SESSION_STATE_FILTERS = [
+  ["all", "All"],
+  ["running", "Running"],
+  ["needs-you", "Needs you"],
+] as const satisfies ReadonlyArray<readonly [SidebarSessionFilter, string]>;
+const SESSION_STATE_FILTER_LABELS: Record<SidebarSessionFilter, string> = Object.fromEntries(
+  SESSION_STATE_FILTERS,
+) as Record<SidebarSessionFilter, string>;
 const SIDEBAR_DATE_HEADER_HEIGHT = 40;
 const SIDEBAR_FOCUSED_ITEM_HEIGHT = 32;
 const SIDEBAR_FOCUSED_DATE_HEADER_HEIGHT = 40;
@@ -3216,33 +3224,53 @@ function SidebarComponent({
                         }
                       }}
                     />
-                    {uiDensity === "focused" && (
+                    {isCalm && hasSessionStateFilter && (
+                      <button
+                        type="button"
+                        className="sidebar-search-state-chip"
+                        onClick={() => setSessionStateFilter("all")}
+                        aria-label={`Clear filter: ${SESSION_STATE_FILTER_LABELS[sessionStateFilter]}`}
+                        title="Show all sessions"
+                      >
+                        <span>{SESSION_STATE_FILTER_LABELS[sessionStateFilter]}</span>
+                        <X size={11} strokeWidth={2.4} aria-hidden="true" />
+                      </button>
+                    )}
+                    {(uiDensity === "focused" || isCalm) && (
                       <button
                         type="button"
                         className={`sidebar-panel-icon-btn sidebar-search-filter-btn${showSessionFilters ? " active" : ""}`}
                         onClick={() => setShowSessionFilters((value) => !value)}
                         aria-pressed={showSessionFilters}
-                        aria-label="Filter sessions"
+                        aria-label={
+                          isCalm && sessionStateCounts["needs-you"] > 0
+                            ? `Filter sessions, ${sessionStateCounts["needs-you"]} need you`
+                            : "Filter sessions"
+                        }
                         title="Filter sessions"
                       >
                         <ListFilter size={15} strokeWidth={1.9} />
+                        {isCalm &&
+                          !hasSessionStateFilter &&
+                          sessionStateCounts["needs-you"] > 0 && (
+                            <span className="sidebar-search-filter-badge" aria-hidden="true">
+                              {sessionStateCounts["needs-you"]}
+                            </span>
+                          )}
                       </button>
                     )}
                   </label>
                 </div>
 
+                {/* Calm folds the status filter into the search field's filter
+                    menu below; the other themes keep the row of chips. */}
                 <div
                   className="sidebar-session-state-filters"
                   role="group"
                   aria-label="Session status"
+                  hidden={isCalm}
                 >
-                  {(
-                    [
-                      ["all", "All"],
-                      ["running", "Running"],
-                      ["needs-you", "Needs you"],
-                    ] as const
-                  ).map(([filter, label]) => (
+                  {SESSION_STATE_FILTERS.map(([filter, label]) => (
                     <button
                       key={filter}
                       type="button"
@@ -3281,18 +3309,47 @@ function SidebarComponent({
 
                 {/* Stopped sessions are only hidden in focused density, so the
                     filter panel has nothing to offer elsewhere. */}
-                {uiDensity === "focused" && showSessionFilters && (
+                {(uiDensity === "focused" || isCalm) && showSessionFilters && (
                   <div className="sidebar-session-filter-panel">
-                    <button
-                      type="button"
-                      className={`sidebar-session-filter-option ${showFailedSessions ? "active" : ""}`}
-                      onClick={() => setShowFailedSessions((value) => !value)}
-                      aria-pressed={showFailedSessions}
-                      disabled={failedSessionCount === 0}
-                    >
-                      <span>Show stopped sessions</span>
-                      {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
-                    </button>
+                    {isCalm && (
+                      <div
+                        className="sidebar-session-filter-status"
+                        role="group"
+                        aria-label="Session status"
+                      >
+                        {SESSION_STATE_FILTERS.map(([filter, label]) => (
+                          <button
+                            key={filter}
+                            type="button"
+                            className={`sidebar-session-filter-option ${filter} ${sessionStateFilter === filter ? "active" : ""}`}
+                            aria-pressed={sessionStateFilter === filter}
+                            onClick={() => {
+                              setSessionStateFilter(filter);
+                              setShowSessionFilters(false);
+                            }}
+                          >
+                            <span>{label}</span>
+                            {filter !== "all" && sessionStateCounts[filter] > 0 && (
+                              <span className="sidebar-session-state-count">
+                                {sessionStateCounts[filter]}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {uiDensity === "focused" && (
+                      <button
+                        type="button"
+                        className={`sidebar-session-filter-option ${showFailedSessions ? "active" : ""}`}
+                        onClick={() => setShowFailedSessions((value) => !value)}
+                        aria-pressed={showFailedSessions}
+                        disabled={failedSessionCount === 0}
+                      >
+                        <span>Show stopped sessions</span>
+                        {failedSessionCount > 0 && <span>{failedSessionCount}</span>}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

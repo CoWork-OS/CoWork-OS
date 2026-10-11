@@ -197,7 +197,12 @@ class JiraClient {
     );
   }
 
-  private async requestJson(method: string, path: string, body?: any): Promise<RequestResult> {
+  private async requestJson(
+    method: string,
+    path: string,
+    body?: any,
+    refreshAttempt = 0,
+  ): Promise<RequestResult> {
     const start = Date.now();
     const url = `${this.getBaseUrl()}/${path.replace(/^\//, "")}`;
     const res = await fetch(url, {
@@ -215,9 +220,9 @@ class JiraClient {
     const vendorRequestId =
       res.headers.get("x-arequestid") || res.headers.get("x-request-id") || undefined;
 
-    if (res.status === 401 && this.canRefresh()) {
+    if (res.status === 401 && this.canRefresh() && refreshAttempt < 1) {
       await this.refreshAccessToken();
-      return this.requestJson(method, path, body);
+      return this.requestJson(method, path, body, refreshAttempt + 1);
     }
 
     if (!res.ok) {

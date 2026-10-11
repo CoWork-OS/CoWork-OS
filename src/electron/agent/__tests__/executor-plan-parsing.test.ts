@@ -1543,10 +1543,17 @@ image_generation_contract:
     executor.task.title = "Create CoWork OS infographic";
     executor.task.prompt = prompt;
     executor.task.rawPrompt = prompt;
+    const planningTurnGuidance = vi.spyOn(executor, "buildPlanningTurnGuidancePrompt");
 
     await executor.createPlan();
 
     expect(executor.callLLMWithRetry).toHaveBeenCalled();
+    // Image tasks get no mandatory verification step.
+    const planningSections = String(
+      planningTurnGuidance.mock.calls[0]?.[0]?.planningGuidance || "",
+    );
+    expect(planningSections).toContain("Skip dedicated verification steps");
+    expect(planningSections).not.toContain("Include one final verification step");
     expect(executor.plan.steps).toHaveLength(2);
     expect(
       executor

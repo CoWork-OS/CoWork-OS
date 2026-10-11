@@ -563,6 +563,8 @@ export function isLocalizedCheckStepDescription(description: unknown): boolean {
 export const SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION =
   "Verify the final answer covers every requested item and that each sourced fact in it carries a direct link to an official source fetched in this task.";
 
+const GENERATED_IMAGE_FILE_PATTERN = /\.(?:png|jpe?g|webp|gif)$/i;
+
 /**
  * Severity rules for a verification step. WARN_NON_BLOCKING stays for optional
  * or cosmetic issues; a missed explicit requirement is FAIL_BLOCKING so the
@@ -584,6 +586,11 @@ export function buildVerificationSeverityGuidance(input: {
   if (requestsFileLinks(prompt)) {
     lines.push(
       `- Requested links: the user asked for links to the files. Every requested file must be linked in the final answer; a requested file the answer does not link is FAIL_BLOCKING.`,
+    );
+  }
+  if ((input.createdFiles || []).some((file) => GENERATED_IMAGE_FILE_PATTERN.test(file))) {
+    lines.push(
+      `- Generated images: check an image file only with get_file_info and at most one analyze_image call. An aspect ratio within ±2% of the requested ratio passes (image generators snap to supported sizes). Imperfect text rendered by an image model is WARN_NON_BLOCKING unless the user demanded exact text. Never open desktop apps, take screenshots, or use computer-use tools to inspect a local image file.`,
     );
   }
   if (requestsSourceLinks(prompt)) {

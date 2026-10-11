@@ -1211,12 +1211,15 @@ export class TaskExecutor {
   private simpleImageGenerationAttempted = false;
   private simpleImageGenerationCompleted = false;
   private simpleImageGenerationFailed = false;
+  private mcpImageGenerationAttempted = false;
   private toolUsageEventsSinceDecay = 0;
   private toolSelectionEpoch = 0;
   private availableToolsCacheKey: string | null = null;
   private availableToolsCache: Any[] | null = null;
   private lastAssistantOutput: string | null = null;
   private lastNonVerificationOutput: string | null = null;
+  /** Final answer for a terminal image task ("Created the requested image." + embeds). */
+  private createdImageAnswer: string | null = null;
   private sessionKickoffSummarySettled = false;
   private emittingSessionKickoffSummary = false;
   private readonly toolResultMemoryLimit = 8;
@@ -5490,6 +5493,7 @@ export class TaskExecutor {
     this.lastUserMessage = "";
     this.lastAssistantOutput = null;
     this.lastNonVerificationOutput = null;
+    this.createdImageAnswer = null;
     this.lastAssistantText = null;
     this.explicitChatSummaryBlock = null;
     this.explicitChatSummaryCreatedAt = 0;
@@ -12256,7 +12260,9 @@ ${transcript}
       canonical === "generate_presentation" ||
       canonical === "generate_video" ||
       canonical === "get_video_generation_job" ||
-      canonical === "edit_document"
+      canonical === "edit_document" ||
+      // A connected MCP image tool (e.g. mcp_qwen_generate_image) saves the image file.
+      this.isMcpImageGenerationToolName(toolName)
     );
   }
 
@@ -14070,7 +14076,10 @@ ${transcript}
       }
     }
     if (this.isTerminalImageGenerationTask()) {
-      requiredTools.add(canonicalizeToolNameUtil("generate_image"));
+      // Prefer a connected MCP image tool (local, no network approval); the built-in
+      // generate_image stays available as the fallback if it fails.
+      const mcpImageTool = this.findConnectedMcpImageGenerateTool();
+      requiredTools.add(canonicalizeToolNameUtil(mcpImageTool || "generate_image"));
     }
     const verificationMode = this.resolveVerificationModeForStep(step);
     const verificationStep = this.isVerificationStep(step);
@@ -14285,7 +14294,8 @@ ${transcript}
         requiredTools.has("generate_video") ||
         requiredTools.has("get_video_generation_job") ||
         requiredTools.has("canvas_create") ||
-        requiredTools.has("canvas_push");
+        requiredTools.has("canvas_push") ||
+        Array.from(requiredTools).some((name) => this.isMcpImageGenerationToolName(name));
       const hasSpecializedArtifactExtension = Array.from(requiredExtensions.values()).some(
         (extension) =>
           extension === ".docx" ||
@@ -14636,6 +14646,11 @@ ${transcript}
   }
 
   private buildResultSummary(): string | undefined {
+    // A terminal image task's answer embeds the generated image(s); it wins over any
+    // commentary the model sent alongside the tool call.
+    if (this.simpleImageGenerationCompleted && this.createdImageAnswer) {
+      return this.createdImageAnswer;
+    }
     // Prefer the last non-verification output first so a final "OK" / status-style
     // verification message does not overwrite the actual user-facing answer.
     const candidates = [
@@ -15002,7 +15017,7 @@ ${transcript}
       /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/.test(
         taskText,
       ) ||
-      /\b(create|generate|make|produce|design|render)\s+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)\s+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)[\w-]+\s+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
+      /\b(create|generate|make|produce|design|render)\s+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)\s+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)["“'‘]?(?:\d[\w:.×%/-]*|[\w-]+)["”'’]?,?\s+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
         taskText,
       )
     );
@@ -15033,6 +15048,18 @@ ${transcript}
   private imageTaskExplicitlyRequestsSemanticImageAnalysis(): boolean {
     const taskText = this.getImageGenerationTaskText();
     return /\b(analy[sz]e|verify|review|inspect|compare|critique|check)\b/.test(taskText);
+  }
+
+  /**
+   * An image-generation task (no code/web/edit work alongside) whose user did not
+   * ask for verification. Its plan needs no dedicated verification step: checking
+   * a generated image is subjective and invites desktop-app inspection.
+   */
+  private isImageGenerationTaskWithoutRequestedVerification(): boolean {
+    return (
+      this.isTerminalImageGenerationTask() &&
+      !this.imageTaskExplicitlyRequestsSemanticImageAnalysis()
+    );
   }
 
   private isSimpleImageGenerationTask(): boolean {
@@ -15168,6 +15195,166 @@ ${transcript}
 
   private isSimpleImageGenerationAllowedTool(toolName: string): boolean {
     return canonicalizeToolNameUtil(toolName) === "generate_image";
+  }
+
+  /** Raw MCP tool name with the configured MCP prefix stripped, or null for non-MCP tools. */
+  private getMcpRawToolName(toolName: string): string | null {
+    let prefix = "mcp_";
+    try {
+      prefix = MCPSettingsManager.loadSettings().toolNamePrefix || "mcp_";
+    } catch {
+      // Settings unavailable (e.g. tests); fall back to the default prefix.
+    }
+    const name = String(toolName || "").trim();
+    if (!name.startsWith(prefix) || name.length <= prefix.length) return null;
+    return name.slice(prefix.length);
+  }
+
+  /** MCP tools that generate, edit or fetch an image (e.g. mcp_qwen_generate_image). */
+  private isMcpImageGenerationToolName(toolName: string): boolean {
+    const raw = this.getMcpRawToolName(toolName);
+    return raw !== null && /(^|_)(generate|edit)_image$|(^|_)image_result$/.test(raw);
+  }
+
+  private isMcpImageGenerateToolName(toolName: string): boolean {
+    const raw = this.getMcpRawToolName(toolName);
+    return raw !== null && /(^|_)generate_image$/.test(raw);
+  }
+
+  /** A connected, untried MCP image-generation tool to use as the primary generator. */
+  private findConnectedMcpImageGenerateTool(): string | null {
+    if (this.mcpImageGenerationAttempted) return null;
+    try {
+      for (const tool of this.toolRegistry.getTools() || []) {
+        const name = String((tool as Any)?.name || "");
+        if (this.isMcpImageGenerateToolName(name) && !this.toolFailureTracker?.isDisabled?.(name)) {
+          return name;
+        }
+      }
+    } catch {
+      // Tool catalog unavailable (e.g. tests); fall back to the built-in tool.
+    }
+    return null;
+  }
+
+  /**
+   * An MCP image-generation tool the model can fall back to after the built-in
+   * generate_image failed, or null when none is available or one was already tried.
+   */
+  private findMcpImageGenerationFallbackTool(availableToolNames: Iterable<string>): string | null {
+    if (this.mcpImageGenerationAttempted) return null;
+    for (const name of availableToolNames || []) {
+      if (this.isMcpImageGenerateToolName(name)) return name;
+    }
+    return null;
+  }
+
+  /**
+   * Records a failed image tool call in terminal image-generation mode. Returns null
+   * when the call is not an image-generation call in that mode.
+   */
+  private resolveTerminalImageToolFailure(
+    toolName: string,
+    availableToolNames: Iterable<string>,
+  ): { stopAfterTool: boolean; fallbackHint?: string } | null {
+    if (!this.isTerminalImageGenerationTask()) return null;
+    if (this.isSimpleImageGenerationAllowedTool(toolName)) {
+      this.simpleImageGenerationFailed = true;
+      const fallbackTool = this.findMcpImageGenerationFallbackTool(availableToolNames);
+      if (fallbackTool) {
+        return { stopAfterTool: false, fallbackHint: this.buildMcpImageFallbackHint(fallbackTool) };
+      }
+      return { stopAfterTool: true };
+    }
+    if (this.simpleImageGenerationFailed && this.isMcpImageGenerationToolName(toolName)) {
+      // The MCP fallback failed too: end the task as failed.
+      return { stopAfterTool: true };
+    }
+    return null;
+  }
+
+  private buildMcpImageFallbackHint(toolName: string): string {
+    return `The built-in image generator failed; a local MCP image tool (${toolName}) is available — use it now to generate the requested image. If it reports the image is still generating, call the matching get_image_result tool with the returned job_id.`;
+  }
+
+  /**
+   * True when an MCP tool result reports an image saved to the workspace. The tool
+   * registry's formatMCPResult appends "Saved image: <file>" once it has written the
+   * image and registered it as an artifact; a "still generating" reply has no such line.
+   */
+  private mcpImageToolResultContainsImage(result: unknown): boolean {
+    const savedImagePattern = /(^|\n)Saved image: \S/;
+    if (typeof result === "string") return savedImagePattern.test(result);
+    if (!result || typeof result !== "object") return false;
+    const record = result as Record<string, unknown>;
+    if (record.success === false) return false;
+    return ["result", "output", "text", "content"].some(
+      (key) => typeof record[key] === "string" && savedImagePattern.test(record[key] as string),
+    );
+  }
+
+  /** Workspace files named on the "Saved image: <file>" lines of an MCP tool result. */
+  private extractMcpSavedImageFilenames(result: unknown): string[] {
+    const texts: string[] = [];
+    if (typeof result === "string") {
+      texts.push(result);
+    } else if (result && typeof result === "object") {
+      const record = result as Record<string, unknown>;
+      if (record.success === false) return [];
+      for (const key of ["result", "output", "text", "content"]) {
+        if (typeof record[key] === "string") texts.push(record[key] as string);
+      }
+    }
+    const filenames: string[] = [];
+    for (const text of texts) {
+      for (const match of text.matchAll(/(?:^|\n)Saved image: ([^\n]+)/g)) {
+        const filename = match[1].trim();
+        if (filename) filenames.push(filename);
+      }
+    }
+    return filenames;
+  }
+
+  /** Workspace-relative paths of the images a built-in generate_image call produced. */
+  private extractGeneratedImageFilenames(result: unknown): string[] {
+    const images = (result as { images?: unknown } | null)?.images;
+    if (!Array.isArray(images)) return [];
+    const workspacePath = typeof this.workspace?.path === "string" ? this.workspace.path : "";
+    const filenames: string[] = [];
+    for (const image of images) {
+      const imagePath = typeof image?.path === "string" ? image.path.trim() : "";
+      const filename = typeof image?.filename === "string" ? image.filename.trim() : "";
+      let relativePath = "";
+      if (imagePath && workspacePath && path.isAbsolute(imagePath)) {
+        const candidate = path.relative(workspacePath, imagePath);
+        if (candidate && !candidate.startsWith("..") && !path.isAbsolute(candidate)) {
+          relativePath = candidate.split(path.sep).join("/");
+        }
+      }
+      const resolved = relativePath || filename;
+      if (resolved) filenames.push(resolved);
+    }
+    return filenames;
+  }
+
+  /**
+   * Final answer for a terminal image task: a short confirmation plus a Markdown
+   * embed of each produced image, so the image shows inline in the answer.
+   */
+  private buildCreatedImageAnswer(filenames: string[]): string {
+    const unique = Array.from(new Set(filenames.map((file) => file.trim()).filter(Boolean)));
+    const embeds = unique.map((file) => {
+      const alt =
+        path
+          .basename(file, path.extname(file))
+          .replace(/[-_]+/g, " ")
+          .replace(/[[\]]/g, "")
+          .trim()
+          .slice(0, 60) || "Generated image";
+      const target = /[\s()<>]/.test(file) ? `<${file.replace(/[<>]/g, "")}>` : file;
+      return `![${alt}](${target})`;
+    });
+    return ["Created the requested image.", ...embeds].join("\n\n");
   }
 
   private buildSimpleImageGenerationBlockedToolResult(
@@ -18610,6 +18797,7 @@ ${transcript}
       "- Work from the requested outcome and success criteria; choose the shortest reliable path, validate concrete changes when practical, and stop once the task is genuinely complete.",
       '- Do not ask "Should I proceed?" when the available tool flow already handles approvals or execution.',
       "- Keep the user informed as you work: before a batch of tool calls, and whenever you change approach or learn something that changes the plan, write one or two short sentences saying what you are doing next and why. Do not narrate every individual tool call.",
+      "- When you create or edit an image file, show it in your final answer with Markdown image syntax `![description](relative/path.png)` so it displays inline — don't only link to it.",
       "",
       ...(routing.has("cloud_storage")
         ? [
@@ -19775,7 +19963,11 @@ ${transcript}
     stepKind: "analysis" | "mutation_required" | "verification",
     taskDomain: TaskDomain,
     stepText?: string,
+    nativeGuiIntentText?: string,
   ): Set<string> {
+    // Native GUI intent comes from user-authored text when the caller supplies it,
+    // so the model's own output ("for our launch", "a note") cannot grant desktop tools.
+    const nativeGuiText = nativeGuiIntentText ?? stepText;
     const always = new Set<string>([
       "revise_plan",
       "request_user_input",
@@ -19888,7 +20080,7 @@ ${transcript}
       base.add("write_file");
     }
 
-    const nativeGuiGuard = this.getNativeGuiGuardForStepText(stepText);
+    const nativeGuiGuard = this.getNativeGuiGuardForStepText(nativeGuiText);
     if (nativeGuiGuard.nativeGuiIntent) {
       if (!nativeGuiGuard.explicitShellIntent) {
         analysis.delete("run_command");
@@ -19935,7 +20127,7 @@ ${transcript}
         base.add(toolName);
       }
     }
-    if (hasNativeDesktopGuiIntent(String(stepText || "").toLowerCase())) {
+    if (hasNativeDesktopGuiIntent(String(nativeGuiText || "").toLowerCase())) {
       base.add("open_application");
       base.add("screenshot");
       base.add("click");
@@ -20069,6 +20261,53 @@ ${transcript}
     };
   }
 
+  /**
+   * User-authored text that native desktop GUI intent is read from: the task title,
+   * the user's prompt, their latest message and the step description. Model output
+   * is left out so its wording cannot pull in computer-use tools.
+   */
+  private getNativeGuiIntentText(stepDescription?: string): string {
+    return [this.task?.title, stepDescription, this.getContractPrompt(), this.lastUserMessage]
+      .filter((part) => typeof part === "string" && part.trim().length > 0)
+      .join("\n");
+  }
+
+  /** Built-in or MCP computer-use tools that drive desktop apps (browser tools excluded). */
+  private isDesktopGuiControlTool(tool: Any): boolean {
+    const name = String(tool?.name || "");
+    if (
+      !name.startsWith("browser_") &&
+      name !== "open_url" &&
+      this.isCodeFirstUiBlockedTool(name)
+    ) {
+      return true;
+    }
+    return Array.isArray(tool?.runtime?.capabilityTags) && isMcpComputerUseRuntime(tool.runtime);
+  }
+
+  /**
+   * A step that checks or repairs a deliverable never needs desktop computer use
+   * unless the user's request itself is about a native app; it inspects files with
+   * get_file_info, analyze_image, read_file and similar tools instead.
+   */
+  private shouldExcludeDesktopGuiToolsForStep(
+    step: PlanStep | undefined,
+    isVerificationStepKind: boolean,
+  ): boolean {
+    if (!step) return false;
+    const checksOrRepairsDeliverable =
+      isVerificationStepKind ||
+      isVerificationRepairStepDescription(step.description) ||
+      isVerificationRecheckStepDescription(step.description);
+    if (!checksOrRepairsDeliverable) return false;
+    return !hasNativeDesktopGuiIntent(
+      [this.task?.title, this.getContractPrompt(), this.lastUserMessage]
+        .filter(Boolean)
+        .join("\n")
+        .toLowerCase(),
+    );
+  }
+
   private hasExplicitBotTeamDelegationRequest(context?: string): boolean {
     if (this.task.agentConfig?.botConversation !== true) return false;
     const delegationContext = [context, this.task.title, this.task.prompt, this.lastUserMessage]
@@ -20100,8 +20339,7 @@ ${transcript}
         explicitAppleScriptIntent: false,
       };
     }
-    const stepText = `${this.task.title || ""}\n${step.description || ""}\n${this.getExecutionTaskPrompt()}\n${this.lastUserMessage || ""}\n${this.lastAssistantOutput || ""}`;
-    return this.getNativeGuiGuardForStepText(stepText);
+    return this.getNativeGuiGuardForStepText(this.getNativeGuiIntentText(step.description));
   }
 
   private applyStepScopedToolPolicy(tools: Any[]): Any[] {
@@ -20184,14 +20422,26 @@ ${transcript}
 
     if (this.isSimpleImageGenerationTask()) {
       return retainVerifiedBotMessagingTool(
-        tools.filter((tool) => this.isSimpleImageGenerationAllowedTool(String(tool.name || ""))),
+        tools.filter(
+          (tool) =>
+            this.isSimpleImageGenerationAllowedTool(String(tool.name || "")) ||
+            this.isMcpImageGenerationToolName(String(tool.name || "")),
+        ),
       );
     }
 
     if (this.isTerminalImageGenerationTask()) {
+      const currentStep = this.currentStepId
+        ? this.plan?.steps?.find((candidate) => candidate.id === this.currentStepId)
+        : undefined;
+      const excludeDesktopGuiTools = this.shouldExcludeDesktopGuiToolsForStep(
+        currentStep,
+        !!currentStep && this.isVerificationStepForCompletion(currentStep),
+      );
       return retainVerifiedBotMessagingTool(
         tools.filter((tool) => {
           const name = canonicalizeToolNameUtil(String(tool.name || ""));
+          if (excludeDesktopGuiTools && this.isDesktopGuiControlTool(tool)) return false;
           return (
             name !== "analyze_image" && name !== "read_pdf_visual" && !name.startsWith("task_list_")
           );
@@ -20282,11 +20532,13 @@ ${transcript}
         : this.isVerificationStepForCompletion(step)
           ? "verification"
           : "analysis";
+    const nativeGuiIntentText = this.getNativeGuiIntentText(step.description);
     const allowlist = this.buildStepToolAllowlist(
       stepContract,
       stepKind,
       this.getEffectiveTaskDomain(),
       stepText,
+      nativeGuiIntentText,
     );
     const scoped = tools.filter((tool) => {
       const name = String(tool.name || "");
@@ -20304,6 +20556,12 @@ ${transcript}
     const codeFirstUiScoped = this.isCodeFirstUiTask(stepText)
       ? scoped.filter((tool) => !this.isCodeFirstUiBlockedTool(String(tool.name || "")))
       : scoped;
+    const desktopGuiScoped = this.shouldExcludeDesktopGuiToolsForStep(
+      step,
+      stepKind === "verification",
+    )
+      ? codeFirstUiScoped.filter((tool) => !this.isDesktopGuiControlTool(tool))
+      : codeFirstUiScoped;
 
     const deepWorkBlockedBoost =
       this.task.agentConfig?.deepWorkMode &&
@@ -20313,7 +20571,7 @@ ${transcript}
         : 0;
     const stepCap = stepKind === "mutation_required" ? 56 : stepKind === "verification" ? 32 : 40;
     return this.capToolCount(
-      retainVerifiedBotMessagingTool(codeFirstUiScoped),
+      retainVerifiedBotMessagingTool(desktopGuiScoped),
       stepCap + deepWorkBlockedBoost,
       stepCap + deepWorkBlockedBoost,
     );
@@ -31268,8 +31526,9 @@ You are continuing a previous conversation. The context from the previous conver
       }
     }
     const shouldRequirePlanVerificationStep =
-      this.getEffectiveExecutionMode() === "execute" ||
-      this.getEffectiveExecutionMode() === "debug";
+      (this.getEffectiveExecutionMode() === "execute" ||
+        this.getEffectiveExecutionMode() === "debug") &&
+      !this.isImageGenerationTaskWithoutRequestedVerification();
     const planningGuidance = `
 Canvas policy:
 - Use Live Canvas tools only when the user explicitly asks for a visual artifact, interactive UI, preview, or in-app browse experience.
@@ -35011,6 +35270,7 @@ Return ONLY a JSON object:
           let fatalToolError: unknown;
           let batchSemanticSummary = "";
           let simpleImageGenerationStopAfterTool = false;
+          let mcpImageFallbackHint: string | undefined;
           const mutationStarvationToolGateActive =
             mutationStarvationToolGateIteration > 0 &&
             mutationStarvationToolGateIteration === iterationCount;
@@ -35071,6 +35331,9 @@ Return ONLY a JSON object:
                   const requestedGenerateImage = this.isSimpleImageGenerationAllowedTool(
                     canonicalRequestedToolName,
                   );
+                  const requestedMcpImageTool =
+                    terminalImageGenerationTask &&
+                    this.isMcpImageGenerationToolName(String(content.name || ""));
                   const requestedSemanticImageAnalysis =
                     canonicalRequestedToolName === "analyze_image" ||
                     canonicalRequestedToolName === "read_pdf_visual";
@@ -35085,9 +35348,15 @@ Return ONLY a JSON object:
                       | null = null;
                     if (this.simpleImageGenerationCompleted) {
                       blockReason = "already_completed";
-                    } else if (this.simpleImageGenerationFailed) {
+                    } else if (this.simpleImageGenerationFailed && !requestedMcpImageTool) {
+                      // MCP image tools stay available as the fallback after the
+                      // built-in generator failed.
                       blockReason = "already_failed";
-                    } else if (simpleImageGenerationTask && !requestedGenerateImage) {
+                    } else if (
+                      simpleImageGenerationTask &&
+                      !requestedGenerateImage &&
+                      !requestedMcpImageTool
+                    ) {
                       blockReason = "non_image_tool";
                     } else if (
                       !simpleImageGenerationTask &&
@@ -35121,6 +35390,9 @@ Return ONLY a JSON object:
                     }
                     if (requestedGenerateImage) {
                       this.simpleImageGenerationAttempted = true;
+                    }
+                    if (requestedMcpImageTool) {
+                      this.mcpImageGenerationAttempted = true;
                     }
                   }
 
@@ -35268,6 +35540,10 @@ Return ONLY a JSON object:
                     content.input,
                   )) {
                     requiredToolsAttempted.add(equivalentTool);
+                  }
+                  if (requestedMcpImageTool && stepContract.requiredTools.has("generate_image")) {
+                    // A connected MCP image tool stands in for the built-in generator.
+                    requiredToolsAttempted.add("generate_image");
                   }
 
                   const isExecutionToolCall = this.isExecutionTool(content.name);
@@ -36137,12 +36413,14 @@ Return ONLY a JSON object:
                               reason: "future_artifact_not_materialized_yet",
                             });
                           }
-                          if (
-                            this.isTerminalImageGenerationTask() &&
-                            canonicalContentName === "generate_image"
-                          ) {
-                            this.simpleImageGenerationFailed = true;
+                          const imageToolFailure = this.resolveTerminalImageToolFailure(
+                            content.name,
+                            availableToolNames,
+                          );
+                          if (imageToolFailure?.stopAfterTool) {
                             simpleImageGenerationStopAfterTool = true;
+                          } else if (imageToolFailure?.fallbackHint) {
+                            mcpImageFallbackHint = imageToolFailure.fallbackHint;
                           }
                           this.releaseBatchCreatedPathReservation(
                             batchCreatedPaths,
@@ -36196,7 +36474,12 @@ Return ONLY a JSON object:
                             content.name,
                             (rawOutcome.error as Any)?.message,
                           );
-                          if (pauseReason && !pauseAfterNextAssistantMessage) {
+                          // A denied/failed built-in generate_image with an untried MCP image
+                          // tool available falls back to that tool instead of pausing the task.
+                          const imageFallbackAvailable =
+                            Boolean(mcpImageFallbackHint) &&
+                            canonicalizeToolNameUtil(content.name) === "generate_image";
+                          if (pauseReason && !pauseAfterNextAssistantMessage && !imageFallbackAvailable) {
                             pauseAfterNextAssistantMessage = true;
                             pauseAfterNextAssistantMessageReason = pauseReason;
                           }
@@ -36358,8 +36641,45 @@ Return ONLY a JSON object:
                             simpleImageGenerationStopAfterTool = true;
                             foundNewImage = true;
                             stepSucceededWithFileMutation = true;
-                            this.lastAssistantOutput = "Created the requested image.";
-                            this.lastAssistantText = "Created the requested image.";
+                            const createdImageAnswer = this.buildCreatedImageAnswer(
+                              this.extractGeneratedImageFilenames(result),
+                            );
+                            this.lastAssistantOutput = createdImageAnswer;
+                            this.lastAssistantText = createdImageAnswer;
+                            // Commentary sent alongside the tool call is recorded after the tool
+                            // runs, so keep the image answer separately; buildResultSummary uses it.
+                            this.createdImageAnswer = createdImageAnswer;
+                          }
+                          if (
+                            !this.simpleImageGenerationCompleted &&
+                            this.isTerminalImageGenerationTask() &&
+                            this.isMcpImageGenerationToolName(content.name) &&
+                            this.mcpImageToolResultContainsImage(result)
+                          ) {
+                            // A connected MCP image tool produced the image (a "still
+                            // generating" reply has no saved image and does not count).
+                            this.simpleImageGenerationCompleted = true;
+                            this.simpleImageGenerationFailed = false;
+                            simpleImageGenerationStopAfterTool = true;
+                            foundNewImage = true;
+                            stepSucceededWithFileMutation = true;
+                            if (stepContract.requiredTools.has("generate_image")) {
+                              requiredToolsAttempted.add("generate_image");
+                              requiredToolsSucceeded.add("generate_image");
+                            }
+                            const mcpRequiredName = canonicalizeToolNameUtil(content.name);
+                            if (stepContract.requiredTools.has(mcpRequiredName)) {
+                              requiredToolsAttempted.add(mcpRequiredName);
+                              requiredToolsSucceeded.add(mcpRequiredName);
+                            }
+                            const createdImageAnswer = this.buildCreatedImageAnswer(
+                              this.extractMcpSavedImageFilenames(result),
+                            );
+                            this.lastAssistantOutput = createdImageAnswer;
+                            this.lastAssistantText = createdImageAnswer;
+                            // Commentary sent alongside the tool call is recorded after the tool
+                            // runs, so keep the image answer separately; buildResultSummary uses it.
+                            this.createdImageAnswer = createdImageAnswer;
                           }
                           if (
                             content.name === "browser_navigate" ||
@@ -36608,13 +36928,16 @@ Return ONLY a JSON object:
                           }
                         }
 
-                        if (
-                          !toolSucceeded &&
-                          this.isTerminalImageGenerationTask() &&
-                          canonicalContentName === "generate_image"
-                        ) {
-                          this.simpleImageGenerationFailed = true;
-                          simpleImageGenerationStopAfterTool = true;
+                        if (!toolSucceeded) {
+                          const imageToolFailure = this.resolveTerminalImageToolFailure(
+                            content.name,
+                            availableToolNames,
+                          );
+                          if (imageToolFailure?.stopAfterTool) {
+                            simpleImageGenerationStopAfterTool = true;
+                          } else if (imageToolFailure?.fallbackHint) {
+                            mcpImageFallbackHint = imageToolFailure.fallbackHint;
+                          }
                         }
 
                         // A red test/build run in a diagnostic step is the output the
@@ -36761,7 +37084,14 @@ Return ONLY a JSON object:
                               content.name,
                               result.error || reason,
                             );
-                            if (pauseReason && !pauseAfterNextAssistantMessage) {
+                            const imageFallbackAvailable =
+                              Boolean(mcpImageFallbackHint) &&
+                              canonicalizeToolNameUtil(content.name) === "generate_image";
+                            if (
+                              pauseReason &&
+                              !pauseAfterNextAssistantMessage &&
+                              !imageFallbackAvailable
+                            ) {
                               pauseAfterNextAssistantMessage = true;
                               pauseAfterNextAssistantMessageReason = pauseReason;
                             }
@@ -36871,9 +37201,17 @@ Return ONLY a JSON object:
                 scheduledOutcome.toolResults.some((result) => result.is_error)
               ) {
                 this.simpleImageGenerationFailed = true;
-                simpleImageGenerationStopAfterTool = true;
-                lastToolErrorReason =
-                  lastToolErrorReason || "Tool generate_image failed or was unavailable.";
+                // Keep going while an untried MCP image tool is left to fall back to.
+                const mcpImageFallbackTool = mcpImageFallbackHint
+                  ? null
+                  : this.findMcpImageGenerationFallbackTool(availableToolNames);
+                if (mcpImageFallbackTool) {
+                  mcpImageFallbackHint = this.buildMcpImageFallbackHint(mcpImageFallbackTool);
+                } else if (!mcpImageFallbackHint) {
+                  simpleImageGenerationStopAfterTool = true;
+                  lastToolErrorReason =
+                    lastToolErrorReason || "Tool generate_image failed or was unavailable.";
+                }
               }
               batchSemanticSummary = this.combineBatchSemanticSummaries(scheduledOutcome.batches);
               this.recordSemanticSummary(batchSemanticSummary);
@@ -38330,7 +38668,7 @@ Return ONLY a JSON object:
                   : "The single allowed image-generation attempt failed. Do not retry or use fallback tools; report the failure now."
                 : forceFinalizeWithoutTools
                   ? "Turn budget exhausted for further tool calls. Provide the best possible final response using existing evidence only."
-                  : undefined,
+                  : mcpImageFallbackHint,
             );
 
             if (fatalToolError !== undefined) {

@@ -534,6 +534,23 @@ describe("Messages app intent", () => {
     expect(hasNativeDesktopGuiIntent("Create the report without sending messages.")).toBe(false);
   });
   it.each([
+    "Generate a 16:9 banner for our launch that reads COWORK OS 2.0",
+    "Plan the product launch and open the doc",
+    "Add a provenance note to the README and create the summary",
+    "Add notes in the notes section of the doc and open it",
+  ])("does not infer native GUI use from ordinary prose: %s", (text) => {
+    expect(hasNativeDesktopGuiIntent(text.toLowerCase())).toBe(false);
+  });
+  it.each([
+    "Open Notes and create a note",
+    "Create a note in Notes titled groceries",
+    "Use Apple Notes to create a shopping list",
+    "Launch Xcode and build the project",
+    "Launch the app and click Sign in",
+  ])("recognizes an explicit app request: %s", (text) => {
+    expect(hasNativeDesktopGuiIntent(text.toLowerCase())).toBe(true);
+  });
+  it.each([
     "Open Messages and compose a draft",
     "Create a draft in Messages",
     "Use the Messages app",

@@ -162,6 +162,22 @@ describe("verification severity guidance", () => {
     expect(guidance).not.toContain("Requested links");
   });
 
+  it("limits generated-image checks to file info and one image analysis", () => {
+    const guidance = buildVerificationSeverityGuidance({
+      prompt: "Generate a 16:9 banner that reads COWORK OS 2.0",
+      createdFiles: ["cowork-banner.png"],
+    });
+    expect(guidance).toContain("only with get_file_info and at most one analyze_image call");
+    expect(guidance).toContain("within ±2% of the requested ratio passes");
+    expect(guidance).toContain("WARN_NON_BLOCKING unless the user demanded exact text");
+    expect(guidance).toContain(
+      "Never open desktop apps, take screenshots, or use computer-use tools",
+    );
+    expect(
+      buildVerificationSeverityGuidance({ prompt: "Write notes", createdFiles: ["notes.md"] }),
+    ).not.toContain("Generated images");
+  });
+
   it("keeps only the general severity rule for a plain request", () => {
     const guidance = buildVerificationSeverityGuidance({
       prompt: "Write a short summary of the attached meeting notes.",

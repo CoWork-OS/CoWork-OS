@@ -53,14 +53,14 @@ describe("BrowserTools browser_navigate", () => {
     expect(navigateTool?.input_schema.properties).not.toHaveProperty("proxy_country_code");
   });
 
-  it("advertises Browser Use Cloud options only when Cloud is configured", () => {
+  it("does not advertise unsupported Cloud navigation even when credentials exist", () => {
     vi.spyOn(BrowserUseCloudClient, "resolveApiKey").mockReturnValue("browser-use-key");
 
     const navigateTool = BrowserTools.getToolDefinitions().find(
       (tool) => tool.name === "browser_navigate",
     );
 
-    expect(navigateTool?.input_schema.properties).toHaveProperty("browser_provider");
+    expect(navigateTool?.input_schema.properties).not.toHaveProperty("browser_provider");
   });
 
   it("returns success=false when navigation receives HTTP 4xx/5xx", async () => {
@@ -342,58 +342,6 @@ describe("BrowserTools browser_navigate", () => {
     expect((tools as Any).browserService.navigate).toHaveBeenCalled();
   });
 
-  it("routes explicit Browser Use Cloud navigation through the remote CDP backend", async () => {
-    const browserWorkbenchService = {
-      getSession: vi.fn().mockReturnValue(null),
-      navigate: vi.fn(),
-    };
-    const { tools, daemon } = makeTools(browserWorkbenchService);
-    const cloudSession = {
-      id: "browser-session-1",
-      cdpUrl: "https://cdp.browser-use.example/session?apiKey=secret",
-      liveUrl: "https://live.browser-use.example/session",
-    };
-    (tools as Any).browserUseCloudClient = {};
-    (tools as Any).ensureBrowserUseCloudConfigured = vi.fn().mockImplementation(async () => {
-      (tools as Any).browserService = {
-        navigate: vi.fn().mockResolvedValue({
-          url: "https://example.com",
-          title: "Example Domain",
-          status: 200,
-          isError: false,
-        }),
-        close: vi.fn(),
-      };
-      return cloudSession;
-    });
-
-    const result = await tools.executeTool("browser_navigate", {
-      url: "https://example.com",
-      browser_provider: "browser-use-cloud",
-      proxy_country_code: "us",
-    });
-
-    expect(result).toMatchObject({
-      success: true,
-      browserProvider: "browser-use-cloud",
-      browserUseSession: {
-        id: "browser-session-1",
-        liveUrl: "https://live.browser-use.example/session",
-      },
-    });
-    expect(browserWorkbenchService.navigate).not.toHaveBeenCalled();
-    expect((tools as Any).ensureBrowserUseCloudConfigured).toHaveBeenCalled();
-    expect(daemon.logEvent).toHaveBeenCalledWith(
-      "task-1",
-      "browser_action",
-      expect.objectContaining({
-        action: "navigate",
-        browserProvider: "browser-use-cloud",
-        browserUseSessionId: "browser-session-1",
-      }),
-    );
-  });
-
   it("falls back to local navigation when Browser Use Cloud is requested but unconfigured", async () => {
     const browserWorkbenchService = {
       getSession: vi.fn().mockReturnValue(null),
@@ -452,134 +400,27 @@ describe("BrowserTools browser_navigate", () => {
     expect((tools as Any).ensureBrowserUseCloudConfigured).not.toHaveBeenCalled();
   });
 
-  it("cleans up and retries once when a Browser Use Cloud CDP session is stale", async () => {
-    const { tools } = makeTools({
-      getSession: vi.fn().mockReturnValue(null),
-      navigate: vi.fn(),
-    });
-    const stopBrowserSession = vi.fn().mockResolvedValue({ status: "stopped" });
-    (tools as Any).browserUseCloudClient = {
-      stopBrowserSession,
-    };
-    const sessions = [
-      {
-        id: "browser-session-stale",
-        cdpUrl: "https://cdp.browser-use.example/stale",
-      },
-      {
-        id: "browser-session-fresh",
-        cdpUrl: "https://cdp.browser-use.example/fresh",
-        liveUrl: "https://live.browser-use.example/fresh",
-      },
-    ];
-    (tools as Any).ensureBrowserUseCloudConfigured = vi.fn().mockImplementation(async function () {
-      const session = sessions.shift();
-      (tools as Any).browserUseCloudSession = session;
-      (tools as Any).browserService = {
-        close: vi.fn().mockResolvedValue(undefined),
-        navigate:
-          session?.id === "browser-session-stale"
-            ? vi.fn().mockRejectedValue(new Error("Target closed"))
-            : vi.fn().mockResolvedValue({
-                url: "https://example.com",
-                title: "Example Domain",
-                status: 200,
-                isError: false,
-              }),
-      };
-      return session;
-    });
-
-    const result = await tools.executeTool("browser_navigate", {
-      url: "https://example.com",
-      browser_provider: "browser-use-cloud",
-    });
-
-    expect(result).toMatchObject({
-      success: true,
-      browserUseSession: {
-        id: "browser-session-fresh",
-      },
-    });
-    expect(stopBrowserSession).toHaveBeenCalledWith("browser-session-stale");
-    expect((tools as Any).ensureBrowserUseCloudConfigured).toHaveBeenCalledTimes(2);
-  });
-
-  it("reports Browser Use Cloud navigation cleanup failure and preserves the pending session", async () => {
-    const { tools } = makeTools({
-      getSession: vi.fn().mockReturnValue(null),
-      navigate: vi.fn(),
-    });
-    const stopBrowserSession = vi.fn().mockRejectedValue(new Error("stop failed"));
-    (tools as Any).browserUseCloudClient = {
-      stopBrowserSession,
-    };
-    (tools as Any).ensureBrowserUseCloudConfigured = vi.fn().mockImplementation(async () => {
-      const session = {
-        id: "browser-session-pending",
-        cdpUrl: "https://cdp.browser-use.example/pending",
-      };
-      (tools as Any).browserUseCloudSession = session;
-      (tools as Any).browserService = {
-        close: vi.fn().mockResolvedValue(undefined),
-        navigate: vi.fn().mockRejectedValue(new Error("Target closed")),
-      };
-      return session;
-    });
-
-    const result = await tools.executeTool("browser_navigate", {
-      url: "https://example.com",
-      browser_provider: "browser-use-cloud",
-    });
-
-    expect(result).toMatchObject({
-      success: false,
-      retryable: true,
-      browserUseSession: {
-        id: "browser-session-pending",
-        pendingStop: true,
-      },
-    });
-    expect((tools as Any).browserUseCloudSession?.id).toBe("browser-session-pending");
-  });
-
-  it("starts a new Browser Use Cloud session when create-time screen options change", async () => {
+  it("rejects configured Cloud before creating a paid session or replacing the local browser", async () => {
     const { tools } = makeTools();
-    const createBrowserSession = vi
-      .fn()
-      .mockResolvedValueOnce({
-        id: "browser-session-1",
-        cdpUrl: "https://cdp.browser-use.example/one",
-      })
-      .mockResolvedValueOnce({
-        id: "browser-session-2",
-        cdpUrl: "https://cdp.browser-use.example/two",
-      });
-    const stopBrowserSession = vi.fn().mockResolvedValue({ status: "stopped" });
-    (tools as Any).browserUseCloudClient = {
-      createBrowserSession,
-      stopBrowserSession,
-    };
-
-    await (tools as Any).ensureBrowserUseCloudConfigured({
-      browser_screen_width: 1280,
-      browser_screen_height: 720,
-      allow_resizing: true,
+    const createBrowserSession = vi.fn();
+    const stopBrowserSession = vi.fn();
+    const close = vi.fn().mockResolvedValue(undefined);
+    (tools as Any).browserUseCloudClient = { createBrowserSession, stopBrowserSession };
+    (tools as Any).browserService = { close };
+    const result = await tools.executeTool("browser_navigate", {
+      url: "https://example.com",
+      browser_provider: "browser-use-cloud",
     });
-    await (tools as Any).ensureBrowserUseCloudConfigured({
-      browser_screen_width: 1280,
-      browser_screen_height: 720,
-      allow_resizing: true,
-    });
-    await (tools as Any).ensureBrowserUseCloudConfigured({
-      browser_screen_width: 1440,
-      browser_screen_height: 720,
-      allow_resizing: true,
-    });
-
-    expect(createBrowserSession).toHaveBeenCalledTimes(2);
-    expect(stopBrowserSession).toHaveBeenCalledWith("browser-session-1");
-    expect((tools as Any).browserUseCloudSession?.id).toBe("browser-session-2");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("unavailable under enforced network policy");
+    expect(createBrowserSession).not.toHaveBeenCalled();
+    expect(stopBrowserSession).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    await expect((tools as Any).ensureBrowserUseCloudConfigured({})).rejects.toThrow(
+      "unavailable under enforced network policy",
+    );
+    expect(createBrowserSession).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("stops an active Browser Use Cloud session on browser_close", async () => {

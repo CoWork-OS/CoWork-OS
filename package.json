@@ -204,6 +204,7 @@
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",
+    "@pdf-lib/fontkit": "^1.1.1",
     "@phosphor-icons/react": "^2.1.10",
     "@pydantic/monty": "^0.0.4",
     "@slack/bolt": "^5.1.0",
@@ -326,6 +327,13 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "resources/fonts",
+        "to": "fonts",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "resources/skills",
         "to": "skills",

@@ -1,7 +1,9 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 import { LOCAL_PDF_PARSE_LIMITS, extractPdfPageTextBounded } from "../utils/bounded-pdf-parser";
+
+import { selectPdfEditFont } from "./pdf-edit-font";
 
 type PdfRegionEditInput = {
   sourcePath: string;
@@ -217,14 +219,11 @@ export async function editPdfRegion(input: PdfRegionEditInput): Promise<void> {
     "selected text";
   const replacementText = inferReplacementText(input.instruction, selectionText);
   const fontStyle = inferFontStyle(input.instruction);
-  const font =
-    fontStyle === "italic"
-      ? await pdfBytes.embedFont(StandardFonts.HelveticaOblique)
-      : fontStyle === "bold"
-        ? await pdfBytes.embedFont(StandardFonts.HelveticaBold)
-        : fontStyle === "bold-italic"
-          ? await pdfBytes.embedFont(StandardFonts.HelveticaBoldOblique)
-          : await pdfBytes.embedFont(StandardFonts.Helvetica);
+  const { font, xSkew, syntheticBold } = await selectPdfEditFont(
+    pdfBytes,
+    replacementText,
+    fontStyle,
+  );
 
   const pageSize = page.getSize();
   const x = input.bbox.x * pageSize.width;
@@ -261,9 +260,20 @@ export async function editPdfRegion(input: PdfRegionEditInput): Promise<void> {
       size: fontSize,
       font,
       color: rgb(0, 0, 0),
+      xSkew,
     });
+    if (syntheticBold) {
+      page.drawText(line, {
+        x: textX + fontSize * 0.025,
+        y: lineY,
+        size: fontSize,
+        font,
+        color: rgb(0, 0, 0),
+        xSkew,
+      });
+    }
   }
 
   const output = await pdfBytes.save();
-  await fs.writeFile(input.destPath, output);
+  await fs.writeFile(input.destPath, output, { flag: "wx" });
 }

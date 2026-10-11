@@ -15322,8 +15322,9 @@ ${transcript}
       }
       return { stopAfterTool: true };
     }
-    if (this.simpleImageGenerationFailed && this.isMcpImageGenerationToolName(toolName)) {
-      // The MCP fallback failed too: end the task as failed.
+    if (this.isMcpImageGenerationToolName(toolName)) {
+      // The initial MCP call and the fallback both get one failed attempt.
+      this.simpleImageGenerationFailed = true;
       return { stopAfterTool: true };
     }
     return null;

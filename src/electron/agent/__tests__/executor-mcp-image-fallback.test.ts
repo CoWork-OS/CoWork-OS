@@ -603,6 +603,35 @@ describe("TaskExecutor MCP image-generation fallback", () => {
     expect(step.status).toBe("failed");
   });
 
+  it.each([false, true])(
+    "stops after the initial MCP image call fails (throws=%s)",
+    async (throws) => {
+      const executor = createImageExecutor(
+        [
+          toolUseResponse("mcp_qwen_generate_image", { prompt: "snow leopard" }),
+          toolUseResponse("mcp_qwen_generate_image", { prompt: "retry" }),
+          textResponse("Should not be needed."),
+        ],
+        { mcp_qwen_generate_image: { success: false, error: "Image service unavailable" } },
+      );
+      if (throws)
+        executor.toolRegistry.executeTool = vi.fn(async () => {
+          throw new Error("Image service unavailable");
+        });
+      executor.emitEvent = vi.fn();
+      const step: Any = {
+        id: "1",
+        description: "Generate the requested image.",
+        status: "pending",
+      };
+      await executor.executeStep(step);
+      expect(executedToolNames(executor)).toEqual(["mcp_qwen_generate_image"]);
+      expect(executor.simpleImageGenerationFailed).toBe(true);
+      expect(executor.callLLMWithRetry).toHaveBeenCalledTimes(1);
+      expect(step.status).toBe("failed");
+    },
+  );
+
   it("ends as failed when the MCP fallback also fails", async () => {
     const executor = createImageExecutor(
       [

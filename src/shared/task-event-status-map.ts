@@ -68,7 +68,10 @@ export function getTaskEventStatus(
   type: string,
   payload?: TaskEvent["payload"],
 ): Task["status"] | undefined {
-  if (type === "progress_update" && payload?.message === "Paused - awaiting user input") {
+  // Live renderer events arrive as timeline envelopes that carry the legacy type.
+  const legacyType = typeof payload?.legacyType === "string" ? payload.legacyType : undefined;
+  const progressType = type.startsWith("timeline_") && legacyType ? legacyType : type;
+  if (progressType === "progress_update" && payload?.message === "Paused - awaiting user input") {
     return "paused";
   }
   return type === "task_status" ? payload?.status : TASK_EVENT_STATUS_MAP[type];

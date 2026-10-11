@@ -34393,17 +34393,12 @@ Return ONLY a JSON object:
         // A denial or expired approval ends this attempt. Preserve that decision
         // in the pause reason so a later follow-up does not replay this plan.
         const approvalBlockMessage = this.getApprovalBlockMessage(toolName, message);
-        if (approvalBlockMessage) {
+        // Pending approval still needs the actionable guidance below.
+        if (approvalBlockMessage?.startsWith("Approval for the ")) {
           return approvalBlockMessage;
         }
 
-        const approvalBlocked =
-          lower.includes("approval request timed out") ||
-          /\buser denied\b/.test(lower) ||
-          lower.includes("execution was not approved") ||
-          lower.includes("approval denied") ||
-          lower.includes("requires approval");
-        if (approvalBlocked) {
+        if (lower.includes("requires approval")) {
           if (toolName === "run_applescript") {
             return "Action required: Approve or deny the AppleScript request to continue.";
           }

@@ -63,6 +63,40 @@ describe("GeminiProvider image handling", () => {
   });
 });
 
+describe("GeminiProvider restored tool replay", () => {
+  it("reconstructs function name and thought signature from serialized tool blocks", () => {
+    const provider = Object.create(GeminiProvider.prototype) as Any;
+    provider.toolIdToName = new Map();
+    provider.toolIdToThoughtSignature = new Map();
+    const restored = JSON.parse(
+      JSON.stringify([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "gemini_call",
+              name: "read_file",
+              input: { path: "a.txt" },
+              providerMetadata: {
+                geminiFunctionName: "read_file",
+                geminiThoughtSignature: "sig-1",
+              },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "gemini_call", content: "ok" }],
+        },
+      ]),
+    );
+    const converted = (provider as Any).convertMessages(restored, "gemini-2.5-pro");
+    expect(converted[1].parts[0].functionResponse.name).toBe("read_file");
+    expect(converted[0].parts[0].thoughtSignature).toBe("sig-1");
+  });
+});
+
 describe("GeminiProvider stop reasons", () => {
   it("reports function calls as tool_use even when Gemini says STOP", () => {
     const provider = new GeminiProvider({

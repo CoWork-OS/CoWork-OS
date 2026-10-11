@@ -2042,20 +2042,27 @@ async function restoreBackup(args: DirectRunArgs): Promise<number> {
     );
     return args.dryRun ? 0 : 1;
   }
-  if (parsed.providers)
+  if (parsed.providers) {
+    const restoredProviders = preserveRedactedSecrets(
+      parsed.providers,
+      LLMProviderFactory.loadSettings(),
+    );
     LLMProviderFactory.saveSettings(
-      LLMSettingsSchema.parse(parsed.providers) as ReturnType<
+      LLMSettingsSchema.parse(restoredProviders) as ReturnType<
         typeof LLMProviderFactory.loadSettings
       >,
     );
+  }
   if (parsed.tools)
     BuiltinToolsSettingsManager.saveSettings(validateBuiltinToolsSettings(parsed.tools));
-  if (parsed.mcp)
+  if (parsed.mcp) {
+    const currentMcp = MCPSettingsManager.loadSettings();
     MCPSettingsManager.saveSettings(
-      disableRestoredMcpServers(MCPSettingsSchema.parse(parsed.mcp)) as ReturnType<
-        typeof MCPSettingsManager.loadSettings
-      >,
+      disableRestoredMcpServers(
+        MCPSettingsSchema.parse(preserveRedactedMcpSecrets(parsed.mcp, currentMcp)),
+      ) as ReturnType<typeof MCPSettingsManager.loadSettings>,
     );
+  }
   writeEvent(
     args,
     { type: "backup_restored", input: path.resolve(input), summary },
@@ -2774,6 +2781,135 @@ function redactObject(value: unknown, redact: boolean): unknown {
     }
   }
   return out;
+}
+
+function preserveRedactedSecrets(value: unknown, current: unknown): unknown {
+  if (value === "[redacted]") return current;
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      preserveRedactedSecrets(entry, Array.isArray(current) ? current[index] : undefined),
+    );
+  }
+  if (!value || typeof value !== "object") return value;
+  const currentObject = current && typeof current === "object" ? (current as Any) : {};
+  // A live secret may only stay with the endpoint it was configured for.
+  const endpointKeys = new Set(
+    [...Object.keys(value as Any), ...Object.keys(currentObject)].filter((key) =>
+      /(?:url|endpoint|host)$/i.test(key),
+    ),
+  );
+  const sameEndpoint = [...endpointKeys].every((key) => (value as Any)[key] === currentObject[key]);
+  return Object.fromEntries(
+    Object.entries(value as Any)
+      .filter(([, child]) => child !== "[redacted]" || sameEndpoint)
+      .map(([key, child]) => [key, preserveRedactedSecrets(child, currentObject[key])])
+      .filter(([, restored]) => restored !== undefined),
+  );
+}
+
+const MCP_REDACTED_VALUES = new Set(["[redacted]", "***configured***"]);
+const MCP_AUTH_SECRET_KEYS = ["token", "apiKey", "password", "refreshToken", "clientSecret"];
+
+function isMcpRedactedValue(value: unknown): boolean {
+  return typeof value === "string" && MCP_REDACTED_VALUES.has(value);
+}
+
+function restoreMcpSecretMap(value: unknown, current: unknown): Any {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value as Any;
+  const currentMap: Any =
+    current && typeof current === "object" && !Array.isArray(current) ? current : {};
+  const restored: Any = {};
+  for (const [key, entry] of Object.entries(value as Any)) {
+    if (!isMcpRedactedValue(entry)) {
+      restored[key] = entry;
+      continue;
+    }
+    const currentEntry = (currentMap as Any)[key];
+    if (typeof currentEntry === "string" && !isMcpRedactedValue(currentEntry))
+      restored[key] = currentEntry;
+  }
+  return restored;
+}
+
+function mcpServerSecretCompatibility(
+  backup: Any,
+  current: Any | undefined,
+): {
+  endpoint: boolean;
+  auth: boolean;
+} {
+  if (!backup || typeof backup !== "object" || !current || typeof current !== "object")
+    return { endpoint: false, auth: false };
+  if (backup.transport !== current.transport) return { endpoint: false, auth: false };
+  const endpoint =
+    backup.transport === "stdio"
+      ? backup.command === current.command &&
+        backup.cwd === current.cwd &&
+        JSON.stringify(backup.args) === JSON.stringify(current.args)
+      : backup.url === current.url;
+  return {
+    endpoint,
+    auth: endpoint && backup.auth?.type === current.auth?.type,
+  };
+}
+
+/**
+ * Merge secrets from the live MCP config into a redacted backup by server ID.
+ * A redaction marker is removed when there is no compatible live credential;
+ * it must never reach MCPSettingsManager.saveSettings().
+ */
+function preserveRedactedMcpSecrets(value: unknown, current: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const backup = value as Any;
+  const currentServers =
+    current && typeof current === "object" && Array.isArray((current as Any).servers)
+      ? (current as Any).servers
+      : [];
+  const currentById = new Map<string, Any>(
+    currentServers
+      .filter((server: Any) => server && typeof server.id === "string")
+      .map((server: Any) => [server.id, server]),
+  );
+
+  return {
+    ...backup,
+    servers: Array.isArray(backup.servers)
+      ? backup.servers.map((server: Any) => {
+          if (!server || typeof server !== "object") return server;
+          const live: Any | undefined =
+            typeof server.id === "string" ? currentById.get(server.id) : undefined;
+          const compatibility = mcpServerSecretCompatibility(server, live);
+          const restored = { ...server };
+
+          if (server.auth && typeof server.auth === "object" && !Array.isArray(server.auth)) {
+            const auth = { ...server.auth };
+            const liveAuth = live?.auth;
+            for (const key of MCP_AUTH_SECRET_KEYS) {
+              if (!isMcpRedactedValue(auth[key])) continue;
+              if (
+                compatibility.auth &&
+                typeof liveAuth?.[key] === "string" &&
+                !isMcpRedactedValue(liveAuth[key])
+              )
+                auth[key] = liveAuth[key];
+              else delete auth[key];
+            }
+            restored.auth = auth;
+          }
+          if (Object.prototype.hasOwnProperty.call(server, "env"))
+            restored.env = restoreMcpSecretMap(
+              server.env,
+              compatibility.endpoint ? live?.env : undefined,
+            );
+          if (Object.prototype.hasOwnProperty.call(server, "headers"))
+            restored.headers = restoreMcpSecretMap(
+              server.headers,
+              compatibility.endpoint ? live?.headers : undefined,
+            );
+          return restored;
+        })
+      : backup.servers,
+  };
 }
 
 function sanitizeTasksForBackup(tasks: Task[], includeSensitiveContent: boolean): unknown[] {

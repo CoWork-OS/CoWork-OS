@@ -51,7 +51,7 @@ function buildAppAndLaunch() {
       );
       process.exit(code || 1);
     }
-    launchApp();
+    prepareAndLaunchApp();
   });
 }
 

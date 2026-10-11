@@ -11,6 +11,8 @@ vi.mock("../../utils/pdf-review", async (importOriginal) => {
   return { ...actual, extractPdfReviewData: reviewSpy };
 });
 
+import { PDFDocument } from "pdf-lib";
+
 import { DocumentBuilder } from "../../agent/skills/document";
 import { PdfParseLimitError } from "../../utils/bounded-pdf-parser";
 import { DocumentEditorSessionService } from "../DocumentEditorSessionService";
@@ -52,7 +54,10 @@ describe("DocumentEditorSessionService", () => {
     fs.writeFileSync(latest, Buffer.from("latest"));
 
     const service = new DocumentEditorSessionService(
-      { findAll: () => [makeWorkspace(dir)] } as Any,
+      {
+        findAll: async () => [makeWorkspace(dir)],
+        findById: async () => makeWorkspace(dir),
+      } as Any,
       { findById: vi.fn().mockReturnValue(undefined) } as Any,
       {
         findLatestByPath: vi.fn((artifactPath: string) =>
@@ -86,7 +91,10 @@ describe("DocumentEditorSessionService", () => {
       new PdfParseLimitError("PDF parsing did not finish within 30 seconds"),
     );
     const service = new DocumentEditorSessionService(
-      { findAll: () => [makeWorkspace(dir)] } as Any,
+      {
+        findAll: async () => [makeWorkspace(dir)],
+        findById: async () => makeWorkspace(dir),
+      } as Any,
       { findById: vi.fn().mockReturnValue(undefined) } as Any,
       { findLatestByPath: vi.fn().mockReturnValue(undefined) } as Any,
       {} as Any,
@@ -114,7 +122,10 @@ describe("DocumentEditorSessionService", () => {
       .mockResolvedValue({ id: "child-1", title: "Edit proposal.pdf" });
     const createTask = vi.fn();
     const service = new DocumentEditorSessionService(
-      { findAll: () => [makeWorkspace(dir)] } as Any,
+      {
+        findAll: async () => [makeWorkspace(dir)],
+        findById: async () => makeWorkspace(dir),
+      } as Any,
       { findById: vi.fn().mockReturnValue({ id: "parent-1" }) } as Any,
       {
         findLatestByPath: vi.fn(() => ({
@@ -202,7 +213,10 @@ describe("DocumentEditorSessionService", () => {
       }),
     };
     const service = new DocumentEditorSessionService(
-      { findAll: () => [makeWorkspace(dir)] } as Any,
+      {
+        findAll: async () => [makeWorkspace(dir)],
+        findById: async () => makeWorkspace(dir),
+      } as Any,
       taskRepo as Any,
       { findLatestByPath: vi.fn().mockReturnValue(undefined) } as Any,
       daemon as Any,
@@ -273,7 +287,10 @@ describe("DocumentEditorSessionService", () => {
       edit: vi.fn().mockRejectedValue(new Error("Ghostscript not installed")),
     };
     const service = new DocumentEditorSessionService(
-      { findAll: () => [makeWorkspace(dir)] } as Any,
+      {
+        findAll: async () => [makeWorkspace(dir)],
+        findById: async () => makeWorkspace(dir),
+      } as Any,
       taskRepo as Any,
       { findLatestByPath: vi.fn().mockReturnValue(undefined) } as Any,
       daemon as Any,
@@ -326,5 +343,69 @@ describe("DocumentEditorSessionService", () => {
     expect(editedBytes.equals(originalBytes)).toBe(false);
     const parsed = await parsePdfBuffer(editedBytes);
     expect(parsed.text).toContain("Hello world");
+  });
+  it("allocates beyond the highest existing suffix when versions have gaps", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-version-gap-"));
+    tempDirs.push(dir);
+    const original = path.join(dir, "report.pdf");
+    const latest = path.join(dir, "report-v3.pdf");
+    fs.writeFileSync(original, "original");
+    fs.writeFileSync(latest, "current");
+    const service = new DocumentEditorSessionService(
+      { findAll: async () => [makeWorkspace(dir)] } as Any,
+      {} as Any,
+      { findLatestByPath: async () => undefined } as Any,
+      {} as Any,
+    );
+    expect(await (service as Any).buildNextVersionPath(latest)).toBe(
+      path.join(fs.realpathSync(dir), "report-v4.pdf"),
+    );
+    expect(fs.readFileSync(latest, "utf8")).toBe("current");
+  });
+
+  it("refuses to overwrite a PDF destination created after version allocation", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-pdf-exclusive-"));
+    tempDirs.push(dir);
+    const sourcePath = path.join(dir, "source.pdf");
+    const destPath = path.join(dir, "source-v2.pdf");
+    const pdf = await PDFDocument.create();
+    pdf.addPage([600, 800]);
+    fs.writeFileSync(sourcePath, await pdf.save());
+    fs.writeFileSync(destPath, "existing version");
+    await expect(
+      editPdfRegion({
+        sourcePath,
+        destPath,
+        pageIndex: 0,
+        bbox: { x: 0.1, y: 0.1, w: 0.6, h: 0.3 },
+        instruction: "make italic",
+        selectionText: "Hello",
+      }),
+    ).rejects.toMatchObject({ code: "EEXIST" });
+    expect(fs.readFileSync(destPath, "utf8")).toBe("existing version");
+  });
+
+  it.each([
+    ["İstanbul şehrinde", "make italic"],
+    ["Привет мир", "make bold"],
+    ["你好世界", "make italic"],
+  ])("preserves Unicode text %s in a formatted PDF edit", async (selectionText, instruction) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-pdf-unicode-"));
+    tempDirs.push(dir);
+    const sourcePath = path.join(dir, "source.pdf");
+    const destPath = path.join(dir, "source-v2.pdf");
+    const pdf = await PDFDocument.create();
+    pdf.addPage([600, 800]);
+    fs.writeFileSync(sourcePath, await pdf.save());
+    await editPdfRegion({
+      sourcePath,
+      destPath,
+      pageIndex: 0,
+      bbox: { x: 0.1, y: 0.1, w: 0.6, h: 0.3 },
+      instruction,
+      selectionText,
+    });
+    const parsed = await parsePdfBuffer(fs.readFileSync(destPath));
+    expect(parsed.text).toContain(selectionText);
   });
 });

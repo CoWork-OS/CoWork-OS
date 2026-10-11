@@ -91,6 +91,10 @@ CoWork supports multiple app profiles so one install can keep separate operating
 - workspaces still live outside the app profile, but the profile controls the credentials, automations, channels, and runtime state that operate on those workspaces
 - profile switching is an app-level concern, separate from personality export/import or workspace-kit files
 
+## PDF edit output
+
+PDF region edits use packaged Noto Sans and Noto Sans CJK fonts with fontkit for Unicode text and style variants. Output creation reserves a unique file exclusively; version selection and asynchronous workspace resolution prevent concurrent edits from overwriting an existing result. Font licenses ship with the assets.
+
 ## Access Profiles
 
 Access profiles are task-level policy objects and are separate from app profiles. They combine the

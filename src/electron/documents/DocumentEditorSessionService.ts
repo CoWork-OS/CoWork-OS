@@ -122,14 +122,12 @@ export class DocumentEditorSessionService {
     return assertWorkspaceFilesystemAccess(workspace, filePath, operation, "document path");
   }
 
-  private findWorkspaceById(workspaceId: string): Workspace | undefined {
-    const repository = this.workspaceRepo as Any;
-    if (typeof repository.findById === "function") {
-      return repository.findById(workspaceId) || undefined;
+  private async findWorkspaceById(workspaceId: string): Promise<Workspace | undefined> {
+    if (typeof this.workspaceRepo.findById === "function") {
+      return (await this.workspaceRepo.findById(workspaceId)) || undefined;
     }
-    return typeof repository.findAll === "function"
-      ? repository.findAll().find((workspace: Workspace) => workspace.id === workspaceId)
-      : undefined;
+    const workspaces = await this.workspaceRepo.findAll();
+    return workspaces.find((workspace) => workspace.id === workspaceId);
   }
 
   async listVersions(filePath: string, workspacePath?: string): Promise<DocumentVersionEntry[]> {
@@ -177,7 +175,11 @@ export class DocumentEditorSessionService {
     const versions = await this.listVersions(currentPath);
     const latestPath = versions.length > 0 ? versions[versions.length - 1].path : currentPath;
     const { dir, ext, stem } = normalizeVersionBase(latestPath);
-    const nextVersion = versions.length + 1;
+    const nextVersion =
+      Math.max(
+        versionSortKey(currentPath),
+        ...versions.map((version) => versionSortKey(version.path)),
+      ) + 1;
     return path.join(dir, `${stem}-v${nextVersion}${ext}`);
   }
 
@@ -329,7 +331,7 @@ export class DocumentEditorSessionService {
     const { task, sourcePath, destPath, selection, instruction } = params;
     const stepId = "document_edit:pdf";
     try {
-      const workspace = this.findWorkspaceById(task.workspaceId);
+      const workspace = await this.findWorkspaceById(task.workspaceId);
       if (!workspace) throw new Error("Document workspace not found.");
       await this.ensureDirectPdfAccess(task, workspace, sourcePath, destPath);
       this.agentDaemon.logEvent(task.id, "timeline_step_updated", {
@@ -527,7 +529,7 @@ export class DocumentEditorSessionService {
     }
 
     const workspace =
-      this.findWorkspaceById(session.workspaceId) ||
+      (await this.findWorkspaceById(session.workspaceId)) ||
       (await this.resolveWorkspaceForPath(session.currentPath, session.workspacePath));
     const sourceTask = session.sourceTaskId
       ? await this.taskRepo.findById(session.sourceTaskId)

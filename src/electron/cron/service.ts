@@ -139,6 +139,7 @@ interface CronServiceState {
   running: boolean;
   schedulerStarted: boolean;
   processingOutbox: boolean;
+  lifecycleGeneration: number;
   runningJobIds: Set<string>; // Track currently running jobs
   opLock: Promise<unknown>;
   webhookServer: CronWebhookServer | null;
@@ -174,6 +175,7 @@ export class CronService {
       running: false,
       schedulerStarted: false,
       processingOutbox: false,
+      lifecycleGeneration: 0,
       runningJobIds: new Set(),
       opLock: Promise.resolve(),
       webhookServer: null,
@@ -187,6 +189,7 @@ export class CronService {
   async start(): Promise<void> {
     await this.withLifecycleLock(async () => {
       if (this.state.schedulerStarted) return;
+      this.state.lifecycleGeneration += 1;
       await this.withLock(async () => {
         const { deps, log } = this.getContext();
         if (this.state.schedulerStarted) return;
@@ -263,6 +266,7 @@ export class CronService {
   async stop(): Promise<void> {
     await this.withLifecycleLock(async () => {
       this.state.schedulerStarted = false;
+      this.state.lifecycleGeneration += 1;
       this.stopTimer();
       this.stopOutboxTimer();
 
@@ -646,32 +650,48 @@ export class CronService {
    * Run a job immediately or when due
    */
   async run(id: string, mode: "due" | "force" = "due"): Promise<CronRunResult> {
-    return this.withLock(async () => {
+    const prepared = await this.withLock(async () => {
       const { deps } = this.getContext();
       const store = this.ensureStore();
       const nowMs = deps.nowMs();
 
       const job = store.jobs.find((j) => j.id === id);
       if (!job) {
-        return { ok: true, ran: false, reason: "not-found" };
+        return {
+          job: null as CronJob | null,
+          nowMs,
+          result: { ok: true, ran: false, reason: "not-found" } as CronRunResult,
+        };
       }
 
       if (!job.enabled && mode !== "force") {
-        return { ok: true, ran: false, reason: "disabled" };
+        return {
+          job: null,
+          nowMs,
+          result: { ok: true, ran: false, reason: "disabled" } as CronRunResult,
+        };
       }
 
       const retiredReason = getRetiredCronJobReason(job);
       if (retiredReason) {
-        return { ok: false, error: retiredReason };
+        return { job: null, nowMs, result: { ok: false, error: retiredReason } as CronRunResult };
       }
 
       if (this.state.runningJobIds.has(job.id)) {
-        return { ok: true, ran: false, reason: "already-running" };
+        return {
+          job: null,
+          nowMs,
+          result: { ok: true, ran: false, reason: "already-running" } as CronRunResult,
+        };
       }
 
       const recoveredOutcome = await this.reconcilePersistedTaskOutcome(job, nowMs);
       if (recoveredOutcome && !store.jobs.some((candidate) => candidate.id === job.id)) {
-        return { ok: true, ran: false, reason: "not-found" };
+        return {
+          job: null,
+          nowMs,
+          result: { ok: true, ran: false, reason: "not-found" } as CronRunResult,
+        };
       }
 
       const activeRun = await this.findActivePersistedRun(job);
@@ -688,19 +708,30 @@ export class CronService {
           job.state.nextRunAtMs = this.computeNextFutureRunAtMs(job.schedule, nowMs);
         }
         await this.persist();
-        return { ok: true, ran: false, reason: "already-running" };
+        return {
+          job: null,
+          nowMs,
+          result: { ok: true, ran: false, reason: "already-running" } as CronRunResult,
+        };
       }
 
       if (mode === "due") {
         const nextRun = job.state.nextRunAtMs;
         if (!nextRun || nextRun > nowMs) {
-          return { ok: true, ran: false, reason: "not-due" };
+          return {
+            job: null,
+            nowMs,
+            result: { ok: true, ran: false, reason: "not-due" } as CronRunResult,
+          };
         }
       }
 
       // Execute the job
-      return this.executeJob(job, nowMs);
+      this.state.runningJobIds.add(job.id);
+      return { job, nowMs, result: null };
     });
+    if (!prepared.job) return prepared.result!;
+    return this.executeJob(prepared.job, prepared.nowMs);
   }
 
   // =====================
@@ -1954,11 +1985,14 @@ export class CronService {
 
   private async processOutboxQueue(): Promise<void> {
     if (this.state.processingOutbox) return;
+    if (!this.state.schedulerStarted) return;
     this.state.processingOutbox = true;
+    const generation = this.state.lifecycleGeneration;
 
     try {
       await this.withLock(async () => {
         const { deps, log } = this.getContext();
+        if (!this.state.schedulerStarted || this.state.lifecycleGeneration !== generation) return;
         if (!deps.deliverToChannel) return;
         const store = this.ensureStore();
         const nowMs = deps.nowMs();
@@ -1970,6 +2004,7 @@ export class CronService {
           .slice(0, 10);
 
         for (const entry of dueEntries) {
+          if (!this.state.schedulerStarted || this.state.lifecycleGeneration !== generation) break;
           try {
             await deps.beforeDeliverJob?.(entry.jobId);
           } catch {
@@ -1980,6 +2015,7 @@ export class CronService {
             changed = true;
             continue;
           }
+          if (!this.state.schedulerStarted || this.state.lifecycleGeneration !== generation) break;
           entry.attempts += 1;
           entry.lastAttemptAtMs = nowMs;
           try {
@@ -2037,12 +2073,15 @@ export class CronService {
       });
     } finally {
       this.state.processingOutbox = false;
-      this.armOutboxTimer();
+      if (this.state.schedulerStarted && this.state.lifecycleGeneration === generation) {
+        this.armOutboxTimer();
+      }
     }
   }
 
   private armOutboxTimer(): void {
     this.stopOutboxTimer();
+    if (!this.state.schedulerStarted) return;
     const store = this.ensureStore();
     const nowMs = this.state.deps.nowMs();
     const next = (store.outbox ?? [])

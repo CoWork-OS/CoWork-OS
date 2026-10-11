@@ -465,7 +465,11 @@ export class EmailClient extends EventEmitter {
   private imapSocket?: tls.TLSSocket | net.Socket;
   private connected = false;
   private pollTimer?: NodeJS.Timeout;
+  private checkNewEmailsInFlight?: Promise<void>;
   private lastSeenUid = 0;
+  // A UID that keeps failing is skipped after a few polls so it cannot block newer mail.
+  private static readonly MAX_UID_FETCH_ATTEMPTS = 3;
+  private failedUidAttempts = new Map<number, number>();
   private commandTag = 0;
   // For this simplified IMAP client we allow one in-flight command at a time.
   // currentCallback returns true when the buffered response is complete.
@@ -752,6 +756,16 @@ export class EmailClient extends EventEmitter {
    * Check for new emails
    */
   private async checkNewEmails(): Promise<void> {
+    if (this.checkNewEmailsInFlight) return this.checkNewEmailsInFlight;
+    let guarded!: Promise<void>;
+    guarded = this.checkNewEmailsOnce().finally(() => {
+      if (this.checkNewEmailsInFlight === guarded) this.checkNewEmailsInFlight = undefined;
+    });
+    this.checkNewEmailsInFlight = guarded;
+    return guarded;
+  }
+
+  private async checkNewEmailsOnce(): Promise<void> {
     try {
       // Search for new emails
       const response = await this.imapCommand(`UID SEARCH UID ${this.lastSeenUid + 1}:*`);
@@ -763,19 +777,28 @@ export class EmailClient extends EventEmitter {
           .split(/\s+/)
           .filter((u) => u)
           .map((u) => parseInt(u, 10))
-          .filter((u) => u > this.lastSeenUid);
+          .filter((u) => u > this.lastSeenUid)
+          .sort((a, b) => a - b);
 
         for (const uid of uids) {
           try {
             const email = await this.fetchEmail(uid);
-            if (email) {
-              this.emit("message", email);
-              this.lastSeenUid = Math.max(this.lastSeenUid, uid);
-            }
+            if (!email) break;
+            this.failedUidAttempts.delete(uid);
+            this.emit("message", email);
+            this.lastSeenUid = uid;
           } catch (error) {
             if (this.options.verbose) {
               console.error(`Error fetching email ${uid}:`, error);
             }
+            const attempts = (this.failedUidAttempts.get(uid) ?? 0) + 1;
+            if (attempts < EmailClient.MAX_UID_FETCH_ATTEMPTS) {
+              // Preserve the gap so this UID is retried on the next poll.
+              this.failedUidAttempts.set(uid, attempts);
+              break;
+            }
+            this.failedUidAttempts.delete(uid);
+            this.lastSeenUid = uid;
           }
         }
       }
@@ -810,7 +833,7 @@ export class EmailClient extends EventEmitter {
       if (this.options.verbose) {
         console.error(`Error fetching email ${uid}:`, error);
       }
-      return null;
+      throw error;
     }
   }
 

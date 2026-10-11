@@ -475,4 +475,158 @@ describe("EmailClient MIME parsing", () => {
     expect(socket.destroy).toHaveBeenCalled();
     expect(clientAccess.imapSocket).toBeUndefined();
   });
+
+  it("retries a failed UID instead of advancing past the gap", async () => {
+    const client = new EmailClient({
+      imapHost: "imap.example.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp.example.com",
+      smtpPort: 587,
+      smtpSecure: false,
+      email: "user@example.com",
+      password: "test-password",
+      mailbox: "INBOX",
+      pollInterval: 30000,
+    });
+    const access = getTestAccess(client);
+    access.lastSeenUid = 10;
+    const search = vi.spyOn(access, "imapCommand").mockResolvedValue("* SEARCH 11 12\r\n");
+    const fetch = vi
+      .spyOn(access, "fetchEmail")
+      .mockRejectedValueOnce(new Error("temporary fetch failure"))
+      .mockResolvedValueOnce({
+        id: "12",
+        from: "sender@example.com",
+        to: "user@example.com",
+        subject: "retry",
+        text: "ok",
+        html: "",
+        date: new Date(),
+        attachments: [],
+      });
+    fetch.mockRejectedValueOnce(new Error("later UID not fetched in this poll"));
+
+    await access.checkNewEmails();
+    expect(access.lastSeenUid).toBe(10);
+    await access.checkNewEmails();
+    expect(access.lastSeenUid).toBe(11);
+    expect(fetch).toHaveBeenCalledWith(11);
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it("sorts unordered SEARCH results before advancing the UID cursor", async () => {
+    const client = new EmailClient({
+      imapHost: "imap.example.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp.example.com",
+      smtpPort: 587,
+      smtpSecure: false,
+      email: "user@example.com",
+      password: "test-password",
+      mailbox: "INBOX",
+      pollInterval: 30000,
+    });
+    const access = getTestAccess(client);
+    access.lastSeenUid = 10;
+    vi.spyOn(access, "imapCommand").mockResolvedValue("* SEARCH 12 11\r\n");
+    const fetch = vi
+      .spyOn(access, "fetchEmail")
+      .mockRejectedValueOnce(new Error("UID 11 temporarily unavailable"))
+      .mockResolvedValueOnce({
+        id: "11",
+        from: "a",
+        to: "b",
+        subject: "11",
+        text: "",
+        html: "",
+        date: new Date(),
+        attachments: [],
+      })
+      .mockResolvedValueOnce({
+        id: "12",
+        from: "a",
+        to: "b",
+        subject: "12",
+        text: "",
+        html: "",
+        date: new Date(),
+        attachments: [],
+      });
+
+    await access.checkNewEmails();
+    expect(access.lastSeenUid).toBe(10);
+    await access.checkNewEmails();
+    expect(access.lastSeenUid).toBe(12);
+    expect(fetch.mock.calls.map(([uid]) => uid)).toEqual([11, 11, 12]);
+  });
+
+  it("skips a UID that keeps failing so newer mail is not blocked", async () => {
+    const client = new EmailClient({
+      imapHost: "imap.example.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp.example.com",
+      smtpPort: 587,
+      smtpSecure: false,
+      email: "user@example.com",
+      password: "test-password",
+      mailbox: "INBOX",
+      pollInterval: 30000,
+    });
+    const access = getTestAccess(client);
+    access.lastSeenUid = 10;
+    vi.spyOn(access, "imapCommand").mockResolvedValue("* SEARCH 11 12\r\n");
+    const fetch = vi.spyOn(access, "fetchEmail").mockImplementation(async (uid: number) => {
+      if (uid === 11) throw new Error("IMAP error: NO message unavailable");
+      return {
+        id: String(uid),
+        from: "a",
+        to: "b",
+        subject: String(uid),
+        text: "",
+        html: "",
+        date: new Date(),
+        attachments: [],
+      };
+    });
+
+    await access.checkNewEmails();
+    await access.checkNewEmails();
+    expect(access.lastSeenUid).toBe(10);
+    await access.checkNewEmails();
+    expect(access.lastSeenUid).toBe(12);
+    expect(fetch.mock.calls.map(([uid]) => uid)).toEqual([11, 11, 11, 12]);
+  });
+
+  it("coalesces overlapping email polls into one SEARCH transaction", async () => {
+    const client = new EmailClient({
+      imapHost: "imap.example.com",
+      imapPort: 993,
+      imapSecure: true,
+      smtpHost: "smtp.example.com",
+      smtpPort: 587,
+      smtpSecure: false,
+      email: "user@example.com",
+      password: "test-password",
+      mailbox: "INBOX",
+      pollInterval: 30000,
+    });
+    const access = getTestAccess(client);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const command = vi.spyOn(access, "imapCommand").mockImplementation(async () => {
+      await gate;
+      return "* SEARCH\r\n";
+    });
+    const first = access.checkNewEmails();
+    const second = access.checkNewEmails();
+    expect(command).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(command).toHaveBeenCalledTimes(1);
+  });
 });

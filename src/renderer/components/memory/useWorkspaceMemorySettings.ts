@@ -9,6 +9,7 @@ export interface WorkspaceMemoryStats {
 }
 
 export interface WorkspaceMemorySettingsState {
+  sessions: Array<{ id: string; title: string; parentTaskId: string | null }>;
   settings: WorkspaceMemorySettings | null;
   stats: WorkspaceMemoryStats | null;
   loading: boolean;
@@ -18,7 +19,7 @@ export interface WorkspaceMemorySettingsState {
   clearSummary: MemoryClearSummary | null;
   reload: () => void;
   save: (updates: Partial<WorkspaceMemorySettings>) => Promise<void>;
-  clear: () => Promise<void>;
+  clear: (taskId?: string) => Promise<void>;
 }
 
 const CLEAR_CONFIRM =
@@ -41,6 +42,7 @@ export function useWorkspaceMemorySettings(
   },
 ): WorkspaceMemorySettingsState {
   const [settings, setSettings] = useState<WorkspaceMemorySettings | null>(null);
+  const [sessions, setSessions] = useState<WorkspaceMemorySettingsState["sessions"]>([]);
   const [stats, setStats] = useState<WorkspaceMemoryStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -60,14 +62,18 @@ export function useWorkspaceMemorySettings(
     try {
       setLoading(true);
       setLoadError(null);
-      const [loaded, loadedStats] = await Promise.all([
+      const [loaded, loadedStats, scope] = await Promise.all([
         window.electronAPI.getMemorySettings(workspaceId),
         hasHostMethod("getMemoryStats")
           ? window.electronAPI.getMemoryStats(workspaceId).catch(() => null)
           : null,
+        hasHostMethod("getMemoryClearScope")
+          ? window.electronAPI.getMemoryClearScope(workspaceId)
+          : null,
       ]);
       if (!isCurrent()) return;
       setSettings(loaded);
+      setSessions(scope?.tasks || []);
       setStats(loadedStats);
     } catch (error) {
       if (isCurrent()) setLoadError(errorText(error, "Failed to load memory settings."));
@@ -105,14 +111,31 @@ export function useWorkspaceMemorySettings(
     }
   };
 
-  const clear = async () => {
+  const clear = async (taskId?: string) => {
     if (!workspaceId) return;
     const confirm = callbacks.current.confirm ?? ((message: string) => window.confirm(message));
-    if (!confirm(CLEAR_CONFIRM)) return;
     try {
       setClearing(true);
+      if (!hasHostMethod("getMemoryClearScope"))
+        throw new Error(
+          "Update the app runtime to preview the affected sessions before clearing memory.",
+        );
+      const scope = await window.electronAPI.getMemoryClearScope(workspaceId);
+      if (active.current !== workspaceId) return;
+      const session = taskId ? scope.tasks.find((task) => task.id === taskId) : undefined;
+      if (taskId && !session)
+        throw new Error("This session is no longer in the selected workspace.");
+      const message = session
+        ? `Permanently clear memory attributed to “${session.title}” and its agents? Task history and deliverables stay available. Future messages in this session will stay out of memory.`
+        : `${CLEAR_CONFIRM}\n\nAffected sessions (${scope.tasks.length}, including agents):\n${scope.tasks.map((task) => `• ${task.title} (${task.id.slice(0, 8)})`).join("\n")}\n\nTask history and deliverables stay available. Use the session selector to clear only one workflow.`;
+      if (!confirm(message) || active.current !== workspaceId) return;
       setClearSummary(null);
-      const result = await window.electronAPI.clearMemory(workspaceId);
+      const result = taskId
+        ? await window.electronAPI.clearSessionMemory(workspaceId, taskId)
+        : await window.electronAPI.clearMemory(
+            workspaceId,
+            scope.tasks.map((task) => task.id),
+          );
       if (active.current !== workspaceId) return;
       const lines = describePurgeCounts(result?.counts);
       setClearSummary({
@@ -132,6 +155,7 @@ export function useWorkspaceMemorySettings(
   };
 
   return {
+    sessions,
     settings,
     stats,
     loading,

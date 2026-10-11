@@ -5,6 +5,7 @@ import * as path from "path";
 import * as mammoth from "mammoth";
 import type { Workspace } from "../../../../shared/types";
 import { parsePdfBuffer } from "../../../utils/pdf-parser";
+import { inspectOfficeArtifact } from "../office-artifact-inspection";
 import { SkillTools } from "../skill-tools";
 
 // Render decks with pptxgenjs; the artifact-tool runtime is machine-specific.
@@ -33,6 +34,88 @@ afterEach(() => {
 });
 
 describe("SkillTools document results", () => {
+  it("creates missing confined folders and carries the requested accent into Word and PDF", async () => {
+    const workspace = makeWorkspace();
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    const result = await tools.createDocument({
+      filename: "onboarding/handout",
+      formats: ["docx", "pdf"],
+      accentColor: "#17324D",
+      maxPages: 2,
+      content: [
+        { type: "heading", text: "First week" },
+        { type: "paragraph", text: "Kickoff and access" },
+        { type: "page_break" },
+        { type: "heading", text: "Weekly status" },
+        {
+          type: "table",
+          rows: [
+            ["Owner", "Action"],
+            ["TBD", "Review"],
+          ],
+        },
+      ],
+    });
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(
+      fs.readFileSync(path.join(workspace.path, result.files[0].path)),
+    );
+    const xml = await zip.file("word/document.xml")!.async("string");
+    expect(xml).toContain('w:color w:val="17324D"');
+    expect(xml).toContain("w:pageBreakBefore");
+    expect(
+      await inspectOfficeArtifact(path.join(workspace.path, result.files[0].path), "docx"),
+    ).toMatchObject({
+      explicitPageBreaks: 1,
+      textColors: expect.arrayContaining(["17324D"]),
+      tableCount: 1,
+      renderedPageCount: null,
+    });
+    expect(result.pageCount).toBe(2);
+    expect(
+      (await parsePdfBuffer(fs.readFileSync(path.join(workspace.path, result.files[1].path)))).text,
+    ).toContain("Weekly status");
+  });
+
+  it("inspects saved workbook counts and cached formula errors without executing it", async () => {
+    const workspace = makeWorkspace();
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file(
+      "xl/workbook.xml",
+      '<workbook><sheets><sheet name="Revenue &amp; Costs"/></sheets></workbook>',
+    );
+    zip.file(
+      "xl/worksheets/sheet1.xml",
+      '<worksheet><c r="A1"><f>SUM(B1:B2)</f><v>15</v></c><c r="A2" t="e"><f>1/0</f><v>#DIV/0!</v></c><c r="A3"><f>1+1</f></c></worksheet>',
+    );
+    zip.file("xl/charts/chart1.xml", "<chart/>");
+    const filename = path.join(workspace.path, "book.xlsx");
+    fs.writeFileSync(filename, await zip.generateAsync({ type: "nodebuffer" }));
+    expect(await inspectOfficeArtifact(filename, "xlsx")).toMatchObject({
+      sheetCount: 1,
+      sheetNames: ["Revenue & Costs"],
+      formulaCount: 3,
+      cachedFormulaCount: 2,
+      chartCount: 1,
+      formulaErrors: ["xl/worksheets/sheet1.xml: #DIV/0!"],
+    });
+  });
+
+  it("does not create an unauthorized folder while preparing an artifact", async () => {
+    const workspace = makeWorkspace();
+    workspace.permissions.accessFilesystemRules = [
+      { path: path.join(workspace.path, "denied"), access: "read" },
+    ];
+    const tools = new SkillTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    await expect(
+      tools.createSpreadsheet({
+        filename: "denied/book.xlsx",
+        sheets: [{ name: "Summary", data: [["value", 1]] }],
+      }),
+    ).rejects.toThrow(/profile/i);
+    expect(fs.existsSync(path.join(workspace.path, "denied"))).toBe(false);
+  });
   it("create_document counts the blocks it wrote and reports the ones it could not", async () => {
     const workspace = makeWorkspace();
     const daemon = { logEvent: vi.fn() } as Any;
@@ -132,7 +215,10 @@ describe("SkillTools document results", () => {
       content,
       maxPages: 1,
     });
-    expect(over).toMatchObject({ success: true, pageCount: 2, fittedToMaxPages: false });
+    // A missed page budget fails the call so the step shortens and retries; the file is kept.
+    expect(over).toMatchObject({ success: false, pageCount: 2, fittedToMaxPages: false });
+    expect(over.error).toMatch(/over\.pdf has 2 pages, more than the requested maxPages 1/);
+    expect(fs.existsSync(path.join(workspace.path, "over.pdf"))).toBe(true);
     expect(over.warnings?.join("\n")).toMatch(/The PDF has 2 pages, more than maxPages 1/);
 
     await expect(

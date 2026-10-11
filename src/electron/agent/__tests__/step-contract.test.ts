@@ -15,6 +15,36 @@ import {
 } from "../step-contract";
 
 describe("step-contract path extraction", () => {
+  it("does not require a JSON artifact for planner import/export capabilities", () => {
+    expect(
+      extractArtifactExtensionsFromText(
+        "Build index.html with export/import JSON and local saving",
+      ),
+    ).toEqual([".html"]);
+    expect(
+      extractArtifactExtensionsFromText(
+        "Verify JSON export/import, JSON round-trip and JSON validation",
+      ),
+    ).toEqual([]);
+    expect(
+      extractArtifactExtensionsFromText("Verify JSON export/import and write verification.json"),
+    ).toEqual([".json"]);
+    expect(extractArtifactExtensionsFromText("Write a JSON file with the results")).toEqual([
+      ".json",
+    ]);
+    // Verification steps written by planner lanes in live runs.
+    expect(
+      extractArtifactExtensionsFromText(
+        "Verify: confirm all deliverable files exist, exported non-ASCII JSON satisfies the import byte limit, and recorded browser checks identify any blocked cases.",
+      ),
+    ).toEqual([]);
+    expect(
+      extractArtifactExtensionsFromText(
+        "Verify: pass executable assertions for valid JSON round trips and rejection of malformed imports.",
+      ),
+    ).toEqual([]);
+    expect(extractArtifactExtensionsFromText("Save the results as JSON")).toEqual([".json"]);
+  });
   it("does not treat command snippets as artifact paths", () => {
     const text =
       "Verification: run the app via local server (`python3 -m http.server` or equivalent), then validate interactions.";

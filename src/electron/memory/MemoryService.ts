@@ -41,6 +41,7 @@ import { InFlightWork } from "../utils/in-flight-work";
 import { MemoryObservationService } from "./MemoryObservationService";
 import { MemoryWriteGate, type MemoryWriteOrigin } from "./MemoryWriteGate";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
+import { allowsAutomaticMemoryCapture } from "./memory-capture-policy-sql";
 import { createLogger } from "../utils/logger";
 import { containsNoMemoryDirective } from "./no-memory-directive";
 import { REDACTED_SECRET, redactSecrets } from "./sensitive-content";
@@ -505,7 +506,11 @@ export class MemoryService {
     // The shared hygiene of every memory producer (docs/memory-engine.md §1): `<no-memory>`
     // (in the text or known by the caller), the salience gate, then settings, redaction,
     // privacy and content-hash dedupe below.
-    if (options?.noMemory || containsNoMemoryDirective(content)) {
+    if (
+      options?.noMemory ||
+      containsNoMemoryDirective(content) ||
+      (taskId && this.db && !allowsAutomaticMemoryCapture(this.db, workspaceId, taskId))
+    ) {
       return null;
     }
     if (memoryTextSalience(content)) {

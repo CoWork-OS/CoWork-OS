@@ -4608,7 +4608,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_RECENT, data),
   getMemoryStats: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_STATS, workspaceId),
-  clearMemory: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_CLEAR, workspaceId),
+  clearMemory: (workspaceId: string, expectedTaskIds?: string[]) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MEMORY_CLEAR,
+      expectedTaskIds ? { workspaceId, expectedTaskIds } : workspaceId,
+    ),
+  getMemoryClearScope: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_CLEAR_SCOPE, workspaceId),
+  clearSessionMemory: (workspaceId: string, taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_CLEAR_SESSION, { workspaceId, taskId }),
 
   // Imported Memory APIs
   getImportedMemoryStats: (workspaceId: string) =>
@@ -8636,9 +8644,24 @@ export interface ElectronAPI {
   getMemoryObservationBackfillStatus: () => Promise<MemoryObservationBackfillStatus>;
   getRecentMemories: (data: { workspaceId: string; limit?: number }) => Promise<Memory[]>;
   getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
-  clearMemory: (workspaceId: string) => Promise<{
+  clearMemory: (
+    workspaceId: string,
+    expectedTaskIds?: string[],
+  ) => Promise<{
     success: boolean;
     /** Rows/files removed per memory store (see MemoryWorkspacePurgeService). */
+    counts?: Record<string, number>;
+    errors?: Record<string, string>;
+    notes?: string[];
+  }>;
+  getMemoryClearScope: (
+    workspaceId: string,
+  ) => Promise<{ tasks: Array<{ id: string; title: string; parentTaskId: string | null }> }>;
+  clearSessionMemory: (
+    workspaceId: string,
+    taskId: string,
+  ) => Promise<{
+    success: boolean;
     counts?: Record<string, number>;
     errors?: Record<string, string>;
     notes?: string[];

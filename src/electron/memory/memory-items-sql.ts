@@ -831,13 +831,17 @@ export function purgeTaskMemoryItems(
   db: Database.Database,
   taskId: string,
   purgeDerivedMemory: boolean,
+  preserveExplicitSaves = true,
 ): number {
   if (!tableExists(db, "memory_items")) return 0;
+  const sourceFilter = preserveExplicitSaves
+    ? "AND source IN ('inferred', 'third_party', 'system')"
+    : "";
   const doomed = (
     db
       .prepare(
         `SELECT id FROM memory_items WHERE (scope = 'task' AND scope_ref = ?)
-           OR (? = 1 AND task_id = ? AND source IN ('inferred', 'third_party', 'system'))`,
+           OR (? = 1 AND task_id = ? ${sourceFilter})`,
       )
       .all(taskId, purgeDerivedMemory ? 1 : 0, taskId) as Array<{ id: string }>
   ).map((row) => row.id);
@@ -849,7 +853,7 @@ export function purgeTaskMemoryItems(
     deleted += db
       .prepare(
         `DELETE FROM memory_items
-         WHERE task_id = ? AND source IN ('inferred', 'third_party', 'system')`,
+         WHERE task_id = ? ${sourceFilter}`,
       )
       .run(taskId).changes;
   }

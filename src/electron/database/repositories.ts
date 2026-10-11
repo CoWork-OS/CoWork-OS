@@ -1487,6 +1487,11 @@ export class TaskStore {
         END AS agent_config_multitask_mode,
         CASE
           WHEN agent_config IS NOT NULL AND json_valid(agent_config)
+          THEN json_extract(agent_config, '$.teamWorkItemLane')
+          ELSE NULL
+        END AS agent_config_team_work_item_lane,
+        CASE
+          WHEN agent_config IS NOT NULL AND json_valid(agent_config)
           THEN json_extract(agent_config, '$.collaborativeMode')
           ELSE NULL
         END AS agent_config_collaborative_mode,
@@ -2086,7 +2091,12 @@ export class TaskStore {
       agentConfig.taskOrigin = "build";
     }
     const setBooleanAgentConfig = (
-      key: "videoGenerationMode" | "multitaskMode" | "collaborativeMode" | "autonomousMode",
+      key:
+        | "videoGenerationMode"
+        | "multitaskMode"
+        | "collaborativeMode"
+        | "autonomousMode"
+        | "teamWorkItemLane",
       value: unknown,
     ): void => {
       if (value === null || value === undefined) return;
@@ -2095,6 +2105,7 @@ export class TaskStore {
 
     setBooleanAgentConfig("videoGenerationMode", row.agent_config_video_generation_mode);
     setBooleanAgentConfig("multitaskMode", row.agent_config_multitask_mode);
+    setBooleanAgentConfig("teamWorkItemLane", row.agent_config_team_work_item_lane);
     setBooleanAgentConfig("collaborativeMode", row.agent_config_collaborative_mode);
     setBooleanAgentConfig("autonomousMode", row.agent_config_autonomous_mode);
 

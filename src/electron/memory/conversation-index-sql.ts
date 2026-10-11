@@ -7,6 +7,7 @@ import {
   type FtsQueryMode,
 } from "../database/fts-query";
 import { taskDisablesMemoryCapture } from "./no-memory-directive";
+import { allowsAutomaticMemoryCapture } from "./memory-capture-policy-sql";
 
 /**
  * The conversation index (audit §4 "Copies of the conversation", §8.2 Event Log): the
@@ -496,6 +497,7 @@ export class ConversationIndexStore {
       const text =
         typeof event?.text === "string" ? event.text.slice(0, CONVERSATION_TEXT_MAX_CHARS) : "";
       if (!event?.workspaceId || !event.taskId || !event.eventKey || !text.trim()) continue;
+      if (!allowsAutomaticMemoryCapture(this.db, event.workspaceId, event.taskId)) continue;
       inserted += insert.run(
         event.workspaceId,
         event.taskId,

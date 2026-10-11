@@ -21,4 +21,13 @@ describe("no-memory directives", () => {
     expect(taskDisablesMemoryCapture({ prompt: "Summarize this file" })).toBe(false);
     expect(taskDisablesMemoryCapture(undefined)).toBe(false);
   });
+
+  it("excludes disposable children and explicit retention opt-outs", () => {
+    expect(taskDisablesMemoryCapture({ agentConfig: { retainMemory: false } })).toBe(true);
+    expect(taskDisablesMemoryCapture({ parentTaskId: "parent" })).toBe(true);
+    expect(taskDisablesMemoryCapture({ agentType: "sub" })).toBe(true);
+    expect(
+      taskDisablesMemoryCapture({ parentTaskId: "parent", agentConfig: { retainMemory: true } }),
+    ).toBe(false);
+  });
 });

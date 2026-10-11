@@ -13,6 +13,29 @@ import {
 } from "../worker-role-registry";
 
 describe("worker-role-registry", () => {
+  it("confines public-source research to safe reads without relaxing local researchers", () => {
+    expect(
+      inferWorkerRoleKindFromPrompt(
+        "Investigate ClickUp using current official sources and pricing",
+      ),
+    ).toBe("web_researcher");
+    const config = resolveWorkerRoleAgentConfig("web_researcher", {
+      allowedTools: ["web_fetch", "run_command", "gmail_send_email", "write_file"],
+      shellAccess: true,
+      externalRuntime: {
+        kind: "acpx",
+        agent: "codex",
+        sessionMode: "persistent",
+        outputMode: "json",
+        permissionMode: "approve-all",
+      },
+    });
+    expect(config.allowedTools).toEqual(["web_fetch"]);
+    expect(config.shellAccess).toBe(false);
+    expect(config.externalRuntime).toBeUndefined();
+    expect(config.toolRestrictions).toContain("group:write");
+    expect(resolveWorkerRoleAgentConfig("researcher", {}).readOnlyExecution).toBe(true);
+  });
   it("keeps implementer as the default and verifier read-only", () => {
     expect(resolveDefaultWorkerRoleKind()).toBe("implementer");
 

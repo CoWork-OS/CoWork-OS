@@ -214,7 +214,11 @@ import {
 } from "../runtime/tool-middleware";
 import { evaluateToolPolicyPipeline } from "../runtime/ToolPolicyPipeline";
 import { ToolSearchService } from "../runtime/ToolSearchService";
-import { getWorkerRoleSpec, resolveDelegationWorkerRole } from "../runtime/worker-role-registry";
+import {
+  getWorkerRoleSpec,
+  resolveDelegationWorkerRole,
+  WEB_RESEARCH_TOOLS,
+} from "../runtime/worker-role-registry";
 import {
   TOOL_PROMPT_METADATA_VERSION,
   renderCompactToolDescription,
@@ -2410,6 +2414,14 @@ export class ToolRegistry {
               this.workspace,
             )
           : undefined;
+      if (
+        taskForApproval?.workerRole === "web_researcher" &&
+        !WEB_RESEARCH_TOOLS.includes(context.request.name)
+      ) {
+        throw new Error(
+          `Web researcher cannot execute ${context.request.name}. Only scoped file reads and public web research are allowed.`,
+        );
+      }
       const isHeadlessTask =
         isHeadlessMode() || taskForApproval?.agentConfig?.cli?.owner === "cowork-run";
       const hasExplicitNonInteractiveAuthority =
@@ -2759,7 +2771,8 @@ export class ToolRegistry {
     );
     register(
       "get_file_info",
-      async ({ request }) => this.fileTools.getFileInfo(request.input.path),
+      async ({ request }) =>
+        this.fileTools.getFileInfo(request.input.path, request.input.inspectArtifact === true),
       readParallelSchedulerSpec,
     );
     register(
@@ -4799,7 +4812,8 @@ ${skillDescriptions}`;
     if (name === "list_directory") return await this.fileTools.listDirectory(input.path);
     if (name === "list_directory_with_sizes")
       return await this.fileTools.listDirectoryWithSizes(input.path);
-    if (name === "get_file_info") return await this.fileTools.getFileInfo(input.path);
+    if (name === "get_file_info")
+      return await this.fileTools.getFileInfo(input.path, input.inspectArtifact === true);
     if (name === "rename_file")
       return await this.fileTools.renameFile(input.oldPath, input.newPath);
     if (name === "delete_file") return await this.fileTools.deleteFile(input.path);
@@ -7514,13 +7528,19 @@ ${skillDescriptions}`;
       },
       {
         name: "get_file_info",
-        description: "Get file or directory metadata (size, timestamps, permissions)",
+        description:
+          "Get local file/directory metadata. With inspectArtifact:true, inspect saved XLSX sheet/formula/chart counts, DOCX page-break structure/text colors/tables, or PDF page count without shell dependencies. DOCX rendered pagination is not measured.",
         input_schema: {
           type: "object",
           properties: {
             path: {
               type: "string",
               description: "Path to the file or directory",
+            },
+            inspectArtifact: {
+              type: "boolean",
+              description:
+                "Inspect a local Word, Excel or PDF artifact using built-in parsers. Use before shell dependency probes.",
             },
           },
           required: ["path"],
@@ -7657,6 +7677,7 @@ ${skillDescriptions}`;
           'When the user wants the same document in several formats (an editable Word file and a matching PDF), make ONE create_document call with formats: ["docx","pdf"] so both come from the same content. Do not convert DOCX to PDF with shell tools. ' +
           'With formats, filename is the shared base name (e.g. "Northstar-brief" writes "Northstar-brief.docx" and "Northstar-brief.pdf"); use filenames only when the files need different names. The result lists every written file in files. ' +
           'When the user asks for content on a specific page ("Page 2: ..."), insert a page_break block where that page starts. When the user asks for page numbers, set pageNumbers: true. ' +
+          'Use accentColor for a requested heading/table accent (e.g. "#17324D" for navy); it applies to both Word and PDF. ' +
           "When the user asks for a document of N pages (e.g. 'a two-page brief'), set maxPages: N. " +
           "A PDF that runs longer is laid out again with tighter spacing, type and margins until it fits; the result reports pageCount and fittedToMaxPages, and if it still does not fit, a warning gives the actual page count and the content must be shortened. " +
           "Headings stay on the same page as the content after them, and table header rows repeat on every page a table continues onto.",
@@ -7691,6 +7712,12 @@ ${skillDescriptions}`;
               type: "boolean",
               description:
                 'Print the page number ("N / M") centered in the footer of every page. Use when the user asks for page numbers.',
+            },
+            accentColor: {
+              type: "string",
+              pattern: "^#?[0-9A-Fa-f]{6}$",
+              description:
+                "Heading and table accent in RGB hex, e.g. #17324D for navy. Applies to every requested format.",
             },
             maxPages: {
               type: "integer",
@@ -9523,7 +9550,7 @@ ${skillDescriptions}`;
       {
         name: "run_command",
         description:
-          "Execute a shell command in the workspace directory. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Commands run non-interactively, with no terminal to answer prompts: pass flags such as -y/--yes, --no-input, or git commit -m, and avoid editors and pagers. For anything that runs until stopped (dev servers such as npm run dev or vite, python -m http.server, file watchers, --watch modes), set background: true: the call returns after a short startup window with the process_id and startup output, and the process keeps running; then use process_output to read its output and stop_process to stop it. Without background, such commands block until the timeout and are killed. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing. To read or check the contents of .xlsx, .docx, .pptx, or .pdf files, use parse_document instead of unzipping them or parsing their XML in a script.",
+          "Execute a shell command in the workspace directory. On macOS/Linux prefer python3 for Python scripts; do not assume a python alias exists or retry python after python3 succeeded. Use get_file_info with inspectArtifact:true for saved workbook sheet/formula/chart counts and Word style structure, or parse_document for content and PDF pagination before shell dependency probes. IMPORTANT: Commands run within the active access profile. Additional authority is requested only when the operation requires it. If additional authority is needed, the request identifies that boundary. Use this for installing packages (npm, pip, brew), running build commands, git operations, or terminal commands. Commands run non-interactively, with no terminal to answer prompts: pass flags such as -y/--yes, --no-input, or git commit -m, and avoid editors and pagers. For anything that runs until stopped (dev servers such as npm run dev or vite, python -m http.server, file watchers, --watch modes), set background: true: the call returns after a short startup window with the process_id and startup output, and the process keeps running; then use process_output to read its output and stop_process to stop it. Without background, such commands block until the timeout and are killed. Do not use shell heredocs or echo/printf redirection to create artifact files when write_file or edit_file is available; use file tools for file creation and editing. To read or check the contents of .xlsx, .docx, .pptx, or .pdf files, use parse_document instead of unzipping them or parsing their XML in a script.",
         input_schema: {
           type: "object",
           properties: {
@@ -11394,6 +11421,8 @@ ${skillDescriptions}`;
   }): string {
     const spec = getWorkerRoleSpec(params.workerRole);
     const scopeOutByRole: Record<WorkerRoleKind, string> = {
+      web_researcher:
+        "Read public sources only. Do not mutate files, use accounts, or contact others.",
       researcher: "Do not modify project files or expand into implementation work.",
       implementer: "Do not modify unrelated files or broaden the task beyond the assigned scope.",
       verifier:
@@ -11402,6 +11431,8 @@ ${skillDescriptions}`;
         "Do not reopen broad new research or unrelated implementation unless the supplied evidence is insufficient.",
     };
     const expectedDeliverableByRole: Record<WorkerRoleKind, string> = {
+      web_researcher:
+        "Independent findings with official source URLs, facts, assumptions and inaccessible evidence.",
       researcher:
         "A concise findings report with concrete file paths, commands, risks, and unresolved questions.",
       implementer:
@@ -11412,6 +11443,7 @@ ${skillDescriptions}`;
         "A consolidated artifact or summary that resolves predecessor outputs into one clear recommendation or deliverable.",
     };
     const evidenceRequirementsByRole: Record<WorkerRoleKind, string> = {
+      web_researcher: "Cite source URLs and distinguish documented facts from estimates.",
       researcher:
         "Cite the files, commands, search results, or observations that support each material finding.",
       implementer:
@@ -14182,9 +14214,16 @@ ${skillDescriptions}`;
             },
             worker_role: {
               type: "string",
-              enum: ["auto", "researcher", "implementer", "verifier", "synthesizer"],
+              enum: [
+                "auto",
+                "researcher",
+                "web_researcher",
+                "implementer",
+                "verifier",
+                "synthesizer",
+              ],
               description:
-                'Optional worker role. "auto" infers from the prompt: research/read-only work -> researcher, checks/validation -> verifier, merge/summarize outputs -> synthesizer, everything else -> implementer.',
+                'Optional worker role. "auto" infers from the prompt: local read-only work -> researcher, public web or official-source research -> web_researcher, checks/validation -> verifier, merge/summarize outputs -> synthesizer, everything else -> implementer.',
             },
             runtime: {
               type: "string",
@@ -14256,7 +14295,14 @@ ${skillDescriptions}`;
                   },
                   worker_role: {
                     type: "string",
-                    enum: ["auto", "researcher", "implementer", "verifier", "synthesizer"],
+                    enum: [
+                      "auto",
+                      "researcher",
+                      "web_researcher",
+                      "implementer",
+                      "verifier",
+                      "synthesizer",
+                    ],
                     description:
                       'Optional worker role override. "auto" infers the role from the task prompt.',
                   },

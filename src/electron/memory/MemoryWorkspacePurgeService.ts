@@ -33,7 +33,13 @@ import { stripCuratedKitBlocksOnce } from "./kit-block-strip";
 import { DurableContextService } from "./DurableContextService";
 import { MemoryService } from "./MemoryService";
 import { TranscriptStore, type TranscriptDeletionResult } from "./TranscriptStore";
-import { purgeWorkspaceMemoryRowsOnHost, resolveWorkspacePathOnHost } from "./memory-purge-sql";
+import {
+  listWorkspaceClearScopeOnHost,
+  purgeSessionMemoryRowsOnHost,
+  purgeWorkspaceMemoryRowsOnHost,
+  resolveWorkspacePathOnHost,
+  type ClearScopeTask,
+} from "./memory-purge-sql";
 
 const logger = createLogger("MemoryWorkspacePurgeService");
 
@@ -143,6 +149,41 @@ function errorMessage(error: unknown): string {
 }
 
 export class MemoryWorkspacePurgeService {
+  static async getClearScope(workspaceId: string): Promise<{ tasks: ClearScopeTask[] }> {
+    return { tasks: await listWorkspaceClearScopeOnHost(workspaceId) };
+  }
+
+  /** Explicit session clear preserves task events and deliverables, and stops recapture. */
+  static async purgeSession(
+    workspaceId: string,
+    taskId: string,
+  ): Promise<MemoryWorkspacePurgeResult> {
+    const purged = await purgeSessionMemoryRowsOnHost(workspaceId, taskId);
+    if (!purged) throw new Error("The selected session does not belong to this workspace.");
+    const counts = { ...emptyCounts(), ...purged.counts };
+    const errors: MemoryWorkspacePurgeResult["errors"] = {};
+    for (const task of purged.tasks) {
+      await DurableContextService.deleteTaskConversation(task.id);
+      const files = await this.purgeTaskFiles({
+        taskId: task.id,
+        workspacePath: task.workspacePath,
+        purgeDerivedMemory: true,
+      });
+      counts.transcripts += files.transcripts;
+      counts.chronicleObservations += files.chronicleObservations;
+      if (files.errors.length) errors.transcripts = files.errors.join("; ");
+    }
+    return {
+      success: Object.keys(errors).length === 0,
+      workspaceId,
+      counts,
+      errors,
+      notes: [
+        `Cleared memory for ${purged.tasks.length} session task(s). Task history and deliverables were preserved. Memory capture for this session is off.`,
+      ],
+    };
+  }
+
   /**
    * Remove the file-side memory of a task after its database row was deleted. Each store
    * is failure-isolated; errors are returned (and logged), never thrown.
@@ -216,8 +257,18 @@ export class MemoryWorkspacePurgeService {
     id: string;
     /** The workspace folder; looked up when omitted. */
     path?: string | null;
+    expectedTaskIds?: string[];
   }): Promise<MemoryWorkspacePurgeResult> {
     const workspaceId = workspace.id;
+    if (workspace.expectedTaskIds) {
+      const actual = (await this.getClearScope(workspaceId)).tasks.map((task) => task.id).sort();
+      const expected = [...new Set(workspace.expectedTaskIds)].sort();
+      if (actual.length !== expected.length || actual.some((id, index) => id !== expected[index])) {
+        throw new Error(
+          "The workspace session list changed. Preview the deletion scope again before clearing memory.",
+        );
+      }
+    }
     const workspacePath =
       workspace.path === undefined
         ? await resolveWorkspacePathOnHost(workspaceId).catch(() => null)

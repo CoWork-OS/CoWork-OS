@@ -18,6 +18,23 @@ describe("workbook changes around a command", () => {
     ).toEqual(["/work/out/report.xlsx", "/work/book.xlsm"]);
   });
 
+  it("finds a workbook that a script run by the command saves in a subfolder", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-script-"));
+    await fs.mkdir(path.join(dir, ".cowork", "tmp"), { recursive: true });
+    await fs.mkdir(path.join(dir, "pipeline-review"));
+    await fs.writeFile(
+      path.join(dir, ".cowork", "tmp", "build_pipeline.py"),
+      "from pathlib import Path\np=Path('pipeline-review/pipeline-review.xlsx')\nw.save(p)\n",
+    );
+    const workbook = path.join(dir, "pipeline-review", "pipeline-review.xlsx");
+    await fs.writeFile(workbook, "created by create_spreadsheet");
+
+    const snapshot = await snapshotWorkbooks("python3 .cowork/tmp/build_pipeline.py", dir, [dir]);
+    await fs.writeFile(workbook, "rewritten by openpyxl without cached results");
+
+    expect(await findChangedWorkbooks(snapshot)).toEqual([workbook]);
+  });
+
   it("finds workbooks a command created or changed, and none it left alone", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-changes-"));
     const nested = path.join(dir, "out");

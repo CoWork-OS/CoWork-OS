@@ -161,27 +161,50 @@ export function promptRequiresDirectAnswer(taskTitle: string, taskPrompt: string
   );
 }
 
-const ORCHESTRATION_NODE_PREAMBLE = "You are executing a dependency-aware orchestration node.";
-const ORCHESTRATION_NODE_TASK_MARKER = "\n---\n\nYour task:\n";
-const TEAM_ANALYSES_BLOCK =
-  /=== TEAM MEMBER ANALYSES(?: \([A-Z ]+\))? ===[\s\S]*?=== END OF TEAM MEMBER ANALYSES ===/g;
+const ORCHESTRATION_NODE_PREAMBLE = "you are executing a dependency-aware orchestration node.";
+const ORCHESTRATION_NODE_TASK_MARKER = "\n---\n\nyour task:\n";
+// Callers may lowercase prompts before checking them, so markers match case-insensitively.
+const TEAM_MEMBER_OUTPUT_BLOCK =
+  /=== team member (analyses|results)(?: \([a-z ]+\))? ===[\s\S]*?=== end of team member \1 ===/gi;
+const PREDECESSOR_RESULTS_BLOCK =
+  /=== predecessor results\b[^\n]*===[\s\S]*?=== end of predecessor results ===/gi;
+// Lane prompts built before the delimited block appended predecessors at the end.
+const LEGACY_PREDECESSOR_RESULTS_TAIL = /\n\s*predecessor results:\n[\s\S]*$/i;
 
 /**
  * Remove other agents' outputs quoted into a coordination prompt: dependency
- * outputs prepended to an orchestration node and the team analyses embedded in
- * a synthesis prompt. That material is input to work on, not the user's
- * request, so wording inside it ("decide whether...", "recommended design")
- * must not create obligations for the answer.
+ * outputs prepended to an orchestration node, predecessor results given to an
+ * ordered team lane, and the team analyses or results embedded in a synthesis
+ * prompt. That material is input to work on, not the user's request, so
+ * wording inside it ("decide whether...", "this read-only review...") must not
+ * create obligations or constraints for the current agent.
  */
 export function stripEmbeddedAgentOutputs(prompt: string): string {
   let remaining = String(prompt || "");
-  if (remaining.trimStart().startsWith(ORCHESTRATION_NODE_PREAMBLE)) {
-    const taskIndex = remaining.lastIndexOf(ORCHESTRATION_NODE_TASK_MARKER);
+  if (remaining.trimStart().toLowerCase().startsWith(ORCHESTRATION_NODE_PREAMBLE)) {
+    const taskIndex = remaining.toLowerCase().lastIndexOf(ORCHESTRATION_NODE_TASK_MARKER);
     if (taskIndex >= 0) {
       remaining = remaining.slice(taskIndex + ORCHESTRATION_NODE_TASK_MARKER.length);
     }
   }
-  return remaining.replace(TEAM_ANALYSES_BLOCK, " ");
+  return remaining
+    .replace(TEAM_MEMBER_OUTPUT_BLOCK, " ")
+    .replace(PREDECESSOR_RESULTS_BLOCK, " ")
+    .replace(LEGACY_PREDECESSOR_RESULTS_TAIL, "");
+}
+
+/**
+ * A team synthesis prompt has material to synthesize when it carries member
+ * analyses, ordered-lane results, or dependency outputs prepended by the
+ * orchestration graph. Only a prompt with none of these has nothing to work on.
+ */
+export function teamSynthesisPromptHasMemberOutput(prompt: string): boolean {
+  const text = String(prompt || "");
+  if (/=== team member (?:analyses|results)\b/i.test(text)) return true;
+  return (
+    text.trimStart().toLowerCase().startsWith(ORCHESTRATION_NODE_PREAMBLE) &&
+    /^Dependency \d+ \([^\n]*\) output:\n---\n\s*\S/m.test(text)
+  );
 }
 
 export function promptRequestsDecision(taskTitle: string, taskPrompt: string): boolean {

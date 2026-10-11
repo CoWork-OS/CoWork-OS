@@ -25,6 +25,26 @@ const HIGH_IMPACT_APPROVAL_TYPES = new Set<ApprovalType>([
 
 /** Fits a business scope description (500) plus its id (200), so none is cut in practice. */
 const MAX_REVIEW_PERMISSION_LENGTH = 720;
+/** Long enough for any realistic script; the rest is reported as omitted, never hidden. */
+const MAX_APPROVAL_PREVIEW_LENGTH = 20_000;
+
+/**
+ * The exact content an approval covers, kept line for line: a tool supplies it as
+ * `approvalPreview: { label, text }` in the approval details.
+ */
+function buildApprovalPreview(details: Record<string, unknown> | undefined) {
+  const raw = details?.approvalPreview;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const { label, text } = raw as Record<string, unknown>;
+  if (typeof text !== "string" || !text.trim()) return undefined;
+  const content = text.replace(/\r\n?/g, "\n");
+  const omittedChars = Math.max(0, content.length - MAX_APPROVAL_PREVIEW_LENGTH);
+  return {
+    label: normalizeText(label, 40) || "Content",
+    text: omittedChars > 0 ? content.slice(0, MAX_APPROVAL_PREVIEW_LENGTH) : content,
+    ...(omittedChars > 0 ? { omittedChars } : {}),
+  };
+}
 
 function normalizeText(value: unknown, maxLength = 480): string {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
@@ -161,6 +181,7 @@ export function buildAssistantApprovalRequest(
     : [];
   const permissionsText =
     reviewPermissions.length > 0 ? ` Permissions: ${reviewPermissions.join("; ")}.` : "";
+  const preview = buildApprovalPreview(detailsRecord);
 
   return {
     questions: [
@@ -174,6 +195,7 @@ export function buildAssistantApprovalRequest(
               : ` Consent covers ${taskConsent} until this task ends.`
             : ""
         } Do you want CoWork to continue?`,
+        ...(preview ? { preview } : {}),
         // Deny is first so an accidental Enter/keyboard submission fails
         // closed. The user can explicitly choose Allow once.
         options: [

@@ -89,6 +89,17 @@ export class SkillTools {
     return access.path;
   }
 
+  private async prepareOutputDirectory(outputPath: string): Promise<void> {
+    const parent = await this.assertPathAllowed(
+      path.dirname(outputPath),
+      "write",
+      "artifact folder",
+    );
+    await fs.mkdir(parent, { recursive: true });
+    // Re-evaluate the destination after creating the directory (including symlinks).
+    await this.assertPathAllowed(outputPath, "write", "artifact output");
+  }
+
   /**
    * Create spreadsheet
    */
@@ -147,6 +158,7 @@ export class SkillTools {
       "spreadsheet output",
     );
 
+    await this.prepareOutputDirectory(outputPath);
     const report = await this.spreadsheetBuilder.create(outputPath, sheets);
     const { formulas, warning } = summarizeFormulaReport(report.formulas);
     const warnings = [...report.warnings, ...(warning ? [warning] : [])];
@@ -178,6 +190,7 @@ export class SkillTools {
     filenames?: string[] | Partial<Record<"docx" | "pdf", string>>;
     content: ContentBlockInput[];
     pageNumbers?: boolean;
+    accentColor?: string;
     /** Page budget; the PDF layout is tightened to fit it. */
     maxPages?: number;
   }): Promise<{
@@ -226,6 +239,9 @@ export class SkillTools {
     // The requested names are kept exactly; only a missing extension is added.
     const outputs = resolveDocumentOutputs(input);
     const maxPages = parseMaxPages(input.maxPages);
+    if (input.accentColor !== undefined && !/^#?[0-9a-f]{6}$/i.test(input.accentColor)) {
+      throw new Error("accentColor must be a six-digit RGB hex color, e.g. #17324D.");
+    }
 
     // Check every destination before writing any, so a denied path does not
     // leave one format written without the other.
@@ -246,6 +262,7 @@ export class SkillTools {
       pageCount?: number;
       fittedToMaxPages?: boolean;
     }> = [];
+    for (const outputPath of outputPaths) await this.prepareOutputDirectory(outputPath);
     const reportWarnings: string[] = [];
     let report: DocumentCreateReport | undefined;
     for (const [index, { filename, format }] of outputs.entries()) {
@@ -253,7 +270,7 @@ export class SkillTools {
         outputPaths[index],
         format,
         input.content,
-        { pageNumbers: input.pageNumbers === true, maxPages },
+        { pageNumbers: input.pageNumbers === true, maxPages, accentColor: input.accentColor },
       );
       report ??= fileReport;
       for (const warning of fileReport.warnings) {
@@ -295,8 +312,20 @@ export class SkillTools {
     ];
     const pdf = files.find((file) => file.format === "pdf");
     const writesDocx = files.some((file) => file.format === "docx");
+    // A requested page budget is a requirement, not a preference: a PDF that does not
+    // fit is reported as a failed result (the file is kept for inspection) so the step
+    // shortens the content and writes it again instead of continuing as if it fit.
+    const overPageBudget = pdf?.fittedToMaxPages === false;
     return {
-      success: true,
+      success: !overPageBudget,
+      ...(overPageBudget
+        ? {
+            error:
+              `${pdf.path} has ${pdf.pageCount} pages, more than the requested maxPages ${maxPages}, ` +
+              "even with the tightest readable layout. Shorten the content (trim long paragraphs, " +
+              "list items and table cells, or drop a section) and call create_document again.",
+          }
+        : {}),
       path: files[0].path,
       files,
       contentBlocks: report.renderedBlocks,
@@ -676,6 +705,7 @@ export class SkillTools {
       })),
     );
 
+    await this.prepareOutputDirectory(outputPath);
     const result = await this.presentationBuilder.create(outputPath, slides, {
       title: input.title,
       author: input.author,

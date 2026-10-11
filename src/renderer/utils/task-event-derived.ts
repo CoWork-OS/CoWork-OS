@@ -12,6 +12,14 @@ import type {
   Workspace,
 } from "../../shared/types";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
+
+/** Deferred projections may lag navigation; never attach another task's events to a new title. */
+export function scopeEventsToTask(
+  events: TaskEvent[],
+  taskId: string | null | undefined,
+): TaskEvent[] {
+  return taskId ? events.filter((event) => event.taskId === taskId) : [];
+}
 import {
   buildParallelGroupProjection,
   type ParallelGroupProjectionResult,

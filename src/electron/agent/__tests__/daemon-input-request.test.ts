@@ -171,6 +171,59 @@ describe("AgentDaemon structured input requests", () => {
     );
   });
 
+  it.each([
+    [
+      "a typed reply",
+      { otherText: "Don't install anything; use run_applescript with Pages." },
+      true,
+    ],
+    ["a plain denial", { optionLabel: "Deny" }, false],
+  ])("denies on %s and relays only typed text to the task", async (label, answer, relayed) => {
+    const requestId = `req-approval-reply-${label.replace(/\W+/g, "-")}`;
+    const repo = createInMemoryInputRequestRepo(requestId);
+    const daemonLike = {
+      inputRequestRepo: repo,
+      taskRepo: {
+        findById: vi.fn().mockReturnValue({ id: "task-reply", status: "executing" }),
+      },
+      pendingInputRequests: new Map(),
+      updateTask: vi.fn(),
+      logEvent: vi.fn(),
+      sendMessage: vi.fn().mockResolvedValue({ queued: true }),
+    } as Any;
+    daemonLike.requestUserInput = AgentDaemon.prototype.requestUserInput.bind(daemonLike);
+    daemonLike.relayApprovalReply = AgentDaemon.prototype["relayApprovalReply"].bind(daemonLike);
+
+    const approvalPromise = AgentDaemon.prototype["requestAssistantApproval"].call(
+      daemonLike,
+      "task-reply",
+      "run_command",
+      "Approve this shell command?",
+      { tool: "run_command", command: "brew install --cask libreoffice" },
+      null,
+      "run_command",
+    );
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    await AgentDaemon.prototype.respondToInputRequest.call(daemonLike, {
+      requestId,
+      status: "submitted",
+      answers: { approval_decision: answer },
+    });
+
+    await expect(approvalPromise).resolves.toBe(false);
+    if (relayed) {
+      expect(daemonLike.sendMessage).toHaveBeenCalledWith(
+        "task-reply",
+        expect.stringContaining("Don't install anything; use run_applescript with Pages."),
+        undefined,
+        undefined,
+        { deliveryMode: "follow_up", messageSource: "user" },
+      );
+    } else {
+      expect(daemonLike.sendMessage).not.toHaveBeenCalled();
+    }
+  });
+
   it("rejects the waiting promise when input request is dismissed", async () => {
     const repo = createInMemoryInputRequestRepo("req-dismiss-1");
     const taskRepo = {

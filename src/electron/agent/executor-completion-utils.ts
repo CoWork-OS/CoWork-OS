@@ -2,6 +2,7 @@ import * as path from "path";
 import { isVerificationStepDescription } from "../../shared/plan-utils";
 import { TOOL_GROUPS, type RuntimeToolResultKind } from "../../shared/types";
 import type { CompletionContract } from "./executor-helpers";
+import { stripEmbeddedAgentOutputs } from "./executor-prompt-heuristics-utils";
 import { CANONICAL_ARTIFACT_PATH_REGEX, extractArtifactExtensionsFromText } from "./step-contract";
 import {
   canonicalizeToolName,
@@ -104,7 +105,8 @@ export function parseVerificationProtocolOutcome(
 }
 
 export function normalizePromptForContracts(taskPrompt: string): string {
-  const raw = String(taskPrompt || "");
+  // Other agents' quoted outputs are evidence, not requirements of this task.
+  const raw = stripEmbeddedAgentOutputs(String(taskPrompt || ""));
   if (!raw.trim()) return "";
 
   const withoutStrategy = raw.replace(STRATEGY_CONTEXT_BLOCK_REGEX, "");
@@ -538,7 +540,9 @@ export function buildCompletionGuidancePrompt(opts: {
  * to fix (e.g. "fix the read-only permission", "database is in read-only mode, fix it").
  */
 export function detectReadOnlyConstraint(prompt: string): boolean {
-  const lower = String(prompt || "").toLowerCase();
+  // "This read-only review..." quoted from a predecessor describes that agent,
+  // not a constraint on the agent receiving it.
+  const lower = stripEmbeddedAgentOutputs(String(prompt || "")).toLowerCase();
 
   // A boundary such as "do not access any other files" protects inputs and
   // unrelated workspace content; it does not prohibit an output that the

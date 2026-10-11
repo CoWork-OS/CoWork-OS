@@ -884,7 +884,12 @@ export interface OrchestrationNodeNotification {
   verificationReport?: string;
 }
 
-export type WorkerRoleKind = "researcher" | "implementer" | "verifier" | "synthesizer";
+export type WorkerRoleKind =
+  | "researcher"
+  | "web_researcher"
+  | "implementer"
+  | "verifier"
+  | "synthesizer";
 export type DelegationWorkerRole = WorkerRoleKind | "auto";
 
 export type VerificationVerdict = "PASS" | "FAIL" | "PARTIAL";
@@ -2100,6 +2105,7 @@ export interface TaskStrategySnapshot {
   directResponseMode: DirectResponseMode;
   preflightGates: PreflightGate[];
   workflowMode: WorkflowMode;
+  requiresDelegation?: boolean;
   llmProfileHint?: LlmProfile;
   confidence: number;
   overrides: StrategyOverride[];
@@ -4988,6 +4994,19 @@ export interface RequestUserInputQuestion {
   id: string; // snake_case
   question: string;
   options: RequestUserInputOption[]; // 2..3 options
+  /**
+   * Exact content an approval covers (for example the AppleScript to run), shown verbatim
+   * in a scrollable block. Set only by the main process for approvals; agent questions
+   * never carry one.
+   */
+  preview?: RequestUserInputPreview;
+}
+
+export interface RequestUserInputPreview {
+  label: string;
+  text: string;
+  /** Characters left out when the content was longer than the card shows. */
+  omittedChars?: number;
 }
 
 export interface RequestUserInputArgs {
@@ -8592,6 +8611,8 @@ export const IPC_CHANNELS = {
   MEMORY_GET_RECENT: "memory:getRecent",
   MEMORY_GET_STATS: "memory:getStats",
   MEMORY_CLEAR: "memory:clear",
+  MEMORY_CLEAR_SCOPE: "memory:clearScope",
+  MEMORY_CLEAR_SESSION: "memory:clearSession",
   MEMORY_OBSERVATIONS_SEARCH: "memoryObservations:search",
   MEMORY_OBSERVATIONS_TIMELINE: "memoryObservations:timeline",
   MEMORY_OBSERVATIONS_DETAILS: "memoryObservations:details",

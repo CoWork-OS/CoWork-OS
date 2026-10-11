@@ -33,6 +33,7 @@ const CALLSIGN_LOOKUP = new Set<string>(SUBAGENT_CALLSIGNS);
 /** Short call-sign appended after a sub-agent's name, e.g. "Anansi (explorer)". */
 export const WORKER_ROLE_CALLSIGN: Record<WorkerRoleKind, SubagentCallsign> = {
   researcher: "explorer",
+  web_researcher: "explorer",
   implementer: "builder",
   verifier: "inspector",
   synthesizer: "synthesizer",

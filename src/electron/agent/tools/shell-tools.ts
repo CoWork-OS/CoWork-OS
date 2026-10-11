@@ -515,6 +515,21 @@ function withLongRunningCommandHint(command: string, result: RunCommandResult): 
   return { ...result, hint: LONG_RUNNING_COMMAND_HINT };
 }
 
+export const SHELL_APPLESCRIPT_HINT =
+  "osascript run from the shell cannot reach other apps here (its scripting connection is " +
+  "blocked), so app terms fail to resolve. Use the run_applescript tool for the same script; " +
+  "find it with tool_search if it is not loaded.";
+
+/** A failed shell osascript means app automation, which run_applescript provides. */
+export function withShellAppleScriptHint(
+  command: string,
+  result: RunCommandResult,
+): RunCommandResult {
+  if (result.success !== false || result.hint) return result;
+  if (!/(?:^|[\s;&|(])osascript\b/.test(command)) return result;
+  return { ...result, hint: SHELL_APPLESCRIPT_HINT };
+}
+
 function describeLoopbackViolation(violation: LoopbackListenerViolation): string {
   return (
     `Stopped: the command listened on ${violation.address} (pid ${violation.pid}), which is ` +
@@ -1654,9 +1669,12 @@ export class ShellTools {
     const { cwd, policies, beforeEffect } = await this.authorizeCommand(command, options);
     const workbooks = await snapshotWorkbooks(command, cwd, [cwd, this.workspace.path]);
     const result = await this.runAuthorizedCommand(command, cwd, policies, beforeEffect, options);
-    return withLongRunningCommandHint(
+    return withShellAppleScriptHint(
       command,
-      await this.restoreWorkbookFormulaResults(workbooks, result),
+      withLongRunningCommandHint(
+        command,
+        await this.restoreWorkbookFormulaResults(workbooks, result),
+      ),
     );
   }
 
@@ -1955,7 +1973,9 @@ export class ShellTools {
     }
 
     if (!approved) {
-      throw new Error("User denied command execution");
+      throw new Error(
+        "Command execution was not approved. The request may have been denied by policy, unavailable in this task configuration, expired, or declined by the user; inspect the authorization event for the reason.",
+      );
     }
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled after approval expired");

@@ -147,7 +147,39 @@ const SYNTHESIZER_DENY_LIST = [
   "group:image",
 ];
 
+export const WEB_RESEARCH_TOOLS = [
+  "web_search",
+  "web_fetch",
+  "read_file",
+  "read_files",
+  "list_directory",
+  "glob",
+  "grep",
+  "search_files",
+];
+
 const BUILTIN_WORKER_ROLES: Record<WorkerRoleKind, WorkerRoleSpec> = {
+  web_researcher: {
+    kind: "web_researcher",
+    displayName: "Web Researcher",
+    description: "Read-only investigation of public sources under the inherited network policy.",
+    systemPrompt:
+      "Investigate the assigned public sources using web_search and web_fetch. Cite official URLs and distinguish facts from assumptions or inaccessible sources. Do not write files, contact anyone, sign up, use a browser session, or invoke shell, MCP, connectors or external runtimes. Return a self-contained findings report for the parent to save.",
+    conversationMode: "task",
+    allowUserInput: false,
+    retainMemory: false,
+    llmProfile: "cheap",
+    executionMode: "analyze",
+    toolRestrictions: [
+      ...RESEARCHER_DENY_LIST,
+      "group:destructive",
+      "group:system",
+      "group:memory",
+    ],
+    mutationAllowed: false,
+    completionContract:
+      "Return evidence-backed findings with source URLs and explicit limitations. No implementation claims.",
+  },
   researcher: {
     kind: "researcher",
     displayName: "Researcher",
@@ -245,6 +277,7 @@ export function resolveWorkerRoleKind(value?: string | null): WorkerRoleKind | u
     .toLowerCase();
   if (
     normalized === "researcher" ||
+    normalized === "web_researcher" ||
     normalized === "implementer" ||
     normalized === "verifier" ||
     normalized === "synthesizer"
@@ -273,6 +306,14 @@ export function inferWorkerRoleKindFromPrompt(prompt: string): WorkerRoleKind {
     .trim()
     .toLowerCase();
   if (!normalized) return resolveDefaultWorkerRoleKind();
+  if (
+    /\b(research|investigate|compare|look up|search)\b/i.test(normalized) &&
+    /\b(official sources|public sources|web|online|https?:\/\/|pricing|current sources)\b/i.test(
+      normalized,
+    ) &&
+    !/\b(implement|edit|modify|write_file|build)\b/i.test(normalized)
+  )
+    return "web_researcher";
 
   if (
     /\b(merge|combine|consolidat|synthesi[sz]e|synthesizer|roll\s*up|compare and summarize)\b/i.test(
@@ -350,6 +391,14 @@ export function resolveWorkerRoleAgentConfig(
 ): AgentConfig {
   const spec = getWorkerRoleSpec(workerRole);
   const next: AgentConfig = agentConfig ? { ...agentConfig } : {};
+  if (workerRole === "web_researcher") {
+    const allowed = new Set(WEB_RESEARCH_TOOLS);
+    next.allowedTools = next.allowedTools
+      ? next.allowedTools.filter((name) => allowed.has(name))
+      : [...allowed];
+    next.shellAccess = false;
+    delete next.externalRuntime;
+  }
   if (next.conversationMode === undefined) {
     next.conversationMode = spec.conversationMode;
   }
@@ -402,7 +451,8 @@ export function normalizeWorkerRoleTaskConfig<
   },
 >(task: T): { task: T; changed: boolean } {
   const workerRole = resolveWorkerRoleKind(task.workerRole);
-  if (workerRole !== "researcher") return { task, changed: false };
+  if (workerRole !== "researcher" && workerRole !== "web_researcher")
+    return { task, changed: false };
 
   const agentConfig = resolveWorkerRoleAgentConfig(workerRole, task.agentConfig);
   if (JSON.stringify(agentConfig) === JSON.stringify(task.agentConfig || {})) {

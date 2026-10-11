@@ -4,6 +4,7 @@ import { estimateMessageTokens } from "../agent/context-manager";
 import { DatabaseManager } from "../database/schema";
 import { storeFacade, type AsyncStore } from "../database/statements/store-units";
 import { MemoryFeaturesManager } from "../settings/memory-features-manager";
+import { allowsAutomaticMemoryCapture } from "./memory-capture-policy-sql";
 import {
   DurableContextStore,
   ensureDurableContextSchema,
@@ -228,7 +229,12 @@ export class DurableContextService {
     id?: string | null;
   }): void {
     try {
-      if (!params.workspaceId || !params.taskId) return;
+      if (
+        !params.workspaceId ||
+        !params.taskId ||
+        !this.canCapture(params.workspaceId, params.taskId)
+      )
+        return;
       const text = extractConversationEventText(params.type, params.payload);
       if (!text) return;
       if (this.pendingEvents.length >= INDEX_MAX_PENDING) {
@@ -263,7 +269,9 @@ export class DurableContextService {
     this.flushing = (async () => {
       const facade = this.getConversation()?.facade;
       while (this.pendingEvents.length > 0) {
-        const batch = this.pendingEvents.splice(0, INDEX_FLUSH_BATCH);
+        const batch = this.pendingEvents
+          .splice(0, INDEX_FLUSH_BATCH)
+          .filter((event) => this.canCapture(event.workspaceId, event.taskId));
         if (!facade) continue;
         try {
           await facade.indexEvents(batch);
@@ -494,13 +502,18 @@ export class DurableContextService {
     );
   }
 
+  static canCapture(workspaceId: string, taskId: string): boolean {
+    const db = this.resolveDatabase();
+    return Boolean(db && allowsAutomaticMemoryCapture(db, workspaceId, taskId));
+  }
+
   static async recordHistory(params: {
     workspaceId: string;
     taskId: string;
     messages: LLMMessage[];
     source: string;
   }): Promise<void> {
-    if (!this.isEnabled()) return;
+    if (!this.isEnabled() || !this.canCapture(params.workspaceId, params.taskId)) return;
     const store = this.getStore();
     if (!store) return;
     const incremental = FULL_HISTORY_SOURCES.has(params.source);
@@ -555,7 +568,7 @@ export class DurableContextService {
     contextLabel?: string;
     proactive?: boolean;
   }): Promise<string | null> {
-    if (!this.isEnabled()) return null;
+    if (!this.isEnabled() || !this.canCapture(params.workspaceId, params.taskId)) return null;
     const store = this.getStore();
     if (!store) return null;
     const sourceMessages = (params.removedMessages || [])

@@ -43,6 +43,19 @@ const IMAGE_TOOL_CALL_ONCE =
   "call a connected MCP image tool (e.g. mcp_*_generate_image — it runs locally without extra approval; if it reports the image is still generating, call the matching *_get_image_result) — or generate_image if no MCP image tool is connected — once";
 
 export class TaskStrategyService {
+  static hasExplicitDelegationRequest(text: string): boolean {
+    return String(text || "")
+      .split(/[.!?\n]+/)
+      .some(
+        (clause) =>
+          !/\b(do not|don't|never|without)\b.{0,35}\b(delegat\w*|agents?|subagents?)\b/i.test(
+            clause,
+          ) &&
+          /\b(separate|independent|another|multiple|different|one|two|three)\b.{0,45}\b(?:agents?|sub-?agents?)\b|\b(?:delegate|spawn|orchestrate)\b.{0,60}\b(?:agents?|sub-?agents?|work|research)\b/i.test(
+            clause,
+          ),
+      );
+  }
   private static hasTextToImageGenerationIntent(lower: string): boolean {
     return (
       /\b(draw|paint|illustrate|render|sketch)\b.*\b(in|of|with|a|an|the)\b/.test(lower) ||
@@ -403,6 +416,7 @@ export class TaskStrategyService {
       preflightGates: preflightRequired ? ["preflight_framing"] : [],
       workflowMode:
         route.intent === "workflow" || route.intent === "deep_work" ? route.intent : "none",
+      requiresDelegation: this.hasExplicitDelegationRequest(taskText),
       llmProfileHint,
       confidence: route.confidence,
       overrides: [],

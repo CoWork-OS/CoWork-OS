@@ -15,6 +15,19 @@ const MATCHING_DOCUMENT_FORMATS: MatchingDocumentFormat[] = ["docx", "pdf"];
 const DOCX_REQUEST_PATTERN = /\.docx\b|\bdocx\b|\bword\s+(?:document|doc|file|version|copy)\b/i;
 const PDF_REQUEST_PATTERN = /\.pdf\b|\bpdf\b/i;
 const NAMED_DOCUMENT_PATTERN = /([\w][\w.-]*)\.(docx|pdf)\b/gi;
+/** "a Word document and a PDF, both exactly two pages": one document in two formats. */
+const BOTH_FORMATS_OF_ONE_DOCUMENT_PATTERN =
+  /\b(?:word\s+(?:document|doc|file)|docx)\s+and\s+(?:an?\s+)?pdf\b\s*,?\s*both\b|\bpdf\s+and\s+(?:an?\s+)?(?:editable\s+)?(?:word\s+(?:document|doc|file)|docx)\b\s*,?\s*both\b/i;
+
+/** Wording that asks for the same document as matching DOCX and PDF files. */
+function requestsMatchingDocxPdfWording(text: string): boolean {
+  return (
+    BOTH_FORMATS_OF_ONE_DOCUMENT_PATTERN.test(text) ||
+    (requestsMatchingOutputs(text) &&
+      DOCX_REQUEST_PATTERN.test(text) &&
+      PDF_REQUEST_PATTERN.test(text))
+  );
+}
 
 /** Planning note added to document tasks that ask for matching DOCX/PDF files. */
 export const MATCHING_DOCUMENT_FORMATS_PLAN_HINT = `MATCHING DOCUMENTS:
@@ -67,11 +80,7 @@ function hasSameStemDocumentPair(named: Record<MatchingDocumentFormat, NamedDocu
 export function requestsMatchingDocumentFormats(prompt: string): boolean {
   const text = String(prompt || "");
   if (hasSameStemDocumentPair(collectNamedDocuments(text))) return true;
-  return (
-    requestsMatchingOutputs(text) &&
-    DOCX_REQUEST_PATTERN.test(text) &&
-    PDF_REQUEST_PATTERN.test(text)
-  );
+  return requestsMatchingDocxPdfWording(text);
 }
 
 function escapeRegExp(value: string): string {
@@ -116,10 +125,7 @@ export function resolveMatchingDocumentSiblings(
   if (sameStem) {
     siblingName = sameStem.name;
   } else {
-    const matchingWording =
-      requestsMatchingOutputs(text) &&
-      DOCX_REQUEST_PATTERN.test(text) &&
-      PDF_REQUEST_PATTERN.test(text);
+    const matchingWording = requestsMatchingDocxPdfWording(text);
     if (!matchingWording) return null;
     const targetNamed = named[format].some(
       (entry) => entry.name.toLowerCase() === targetName.toLowerCase(),

@@ -2,6 +2,7 @@
  * Tests for step failure/verification behavior in TaskExecutor.executeStep
  */
 
+import { GENERATED_HANDOFF_STEP_DESCRIPTION } from "../executor-verification-repair-utils";
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -3337,6 +3338,26 @@ relationship_memory:
     }
   });
 
+  it("keeps discovery and native app resolution available to office verification steps", () => {
+    executor = createExecutorWithStubs([], {});
+    executor.task.prompt = "Verify the actual two-page Word handout with Pages.";
+    const step = {
+      id: "verify-office",
+      description: "Verify handout.docx pagination",
+      kind: "verification",
+      status: "pending",
+    };
+    const contract = executor.resolveStepExecutionContract(step);
+    const allowed = executor.buildStepToolAllowlist(
+      contract,
+      "verification",
+      "auto",
+      step.description,
+    );
+    expect(allowed.has("tool_search")).toBe(true);
+    expect(allowed.has("resolve_app_bundle_id")).toBe(true);
+  });
+
   it("keeps read-only constraints when the task also requests a shell command", () => {
     executor = createExecutorWithStubs([], {});
     const request =
@@ -3385,6 +3406,32 @@ relationship_memory:
     expect(contract.mode).toBe("mutation_required");
     expect(contract.requiresMutation).toBe(true);
     expect(Array.from(contract.requiredTools)).toContain("create_spreadsheet");
+  });
+
+  it("fails a required build that the worker role forbids rather than completing an analysis substitute", async () => {
+    executor = createExecutorWithStubs(
+      [textResponse("I am read-only and cannot create index.html. No files were created.")],
+      {},
+    );
+    executor.task.workerRole = "researcher";
+    executor.task.prompt = "Build kickoff-planner/index.html. Create the actual offline app.";
+    executor.task.agentConfig = {
+      readOnlyExecution: true,
+      executionMode: "verified",
+      permissionMode: "plan",
+      toolRestrictions: ["group:write"],
+    };
+    const step = {
+      id: "build",
+      description: "Create kickoff-planner/index.html using write_file.",
+      status: "pending",
+    };
+    expect(executor.resolveStepExecutionContract(step).contractReason).toBe(
+      "mutation_tools_restricted_by_role",
+    );
+    await executor.executeStep(step);
+    expect(step.status).toBe("failed");
+    expect((step as Any).error).toContain("worker role forbids");
   });
 
   it("does not fail descriptive meta steps for mutation when they do not express read-only intent", async () => {
@@ -7119,6 +7166,47 @@ describe("TaskExecutor step loop control", () => {
     });
   });
 
+  it("finalizes a resumed run whose plan ends with failed steps instead of leaving it executing", async () => {
+    const executor = createExecutorWithStubs([], {}) as Any;
+    executor.toolRegistry.cleanup = vi.fn().mockResolvedValue(undefined);
+    executor.plan = {
+      description: "Plan",
+      steps: [{ id: "1", description: "Verify", status: "failed" }],
+    };
+    executor.executePlan = vi
+      .fn()
+      .mockRejectedValue(
+        new Error("Task failed: 3 step(s) failed - Verify: the Word page count is unconfirmed"),
+      );
+    executor.lastAssistantText = "Both files are saved; the Word page count is unconfirmed.";
+    const partial = vi.spyOn(executor, "maybeFinalizeAsPartialSuccess").mockReturnValue(true);
+
+    await expect(executor.resumeAfterPause()).resolves.toBeUndefined();
+
+    expect(partial).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("3 step(s) failed") }),
+    );
+  });
+
+  it("marks a resumed run failed when the error is not a partial result", async () => {
+    const executor = createExecutorWithStubs([], {}) as Any;
+    executor.toolRegistry.cleanup = vi.fn().mockResolvedValue(undefined);
+    executor.plan = {
+      description: "Plan",
+      steps: [{ id: "1", description: "Build", status: "failed" }],
+    };
+    executor.executePlan = vi.fn().mockRejectedValue(new Error("provider exploded"));
+    vi.spyOn(executor, "maybeFinalizeAsPartialSuccess").mockReturnValue(false);
+    vi.spyOn(executor, "maybeFinalizeAsNeedsUserAction").mockReturnValue(false);
+
+    await expect(executor.resumeAfterPause()).resolves.toBeUndefined();
+
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      executor.task.id,
+      expect.objectContaining({ status: "failed", error: "provider exploded" }),
+    );
+  });
+
   describe("verification repair pass", () => {
     const pdfFinding =
       "FAIL_BLOCKING — The PDF has 3 pages, not 2; the open decisions section overflows onto page 3.";
@@ -7227,6 +7315,37 @@ describe("TaskExecutor step loop control", () => {
       expect(executor.getResolvedRecoveredFailureStepIds()).toContain("2");
       executor.executeStep = vi.fn();
       await expect(executor.executePlan()).resolves.toBeUndefined();
+    });
+
+    it("repairs before the generated handoff summary that follows the final verification", async () => {
+      const executor = createBriefPlanExecutor([
+        textResponse(pdfFinding),
+        textResponse(
+          "Tightened the content and regenerated Northstar-brief.pdf; it now has two pages.",
+        ),
+        textResponse("OK"),
+        textResponse(
+          "The brief is saved as Northstar-brief.docx and Northstar-brief.pdf, two pages each.",
+        ),
+      ]);
+      executor.plan.steps.push({
+        id: "3",
+        description: GENERATED_HANDOFF_STEP_DESCRIPTION,
+        kind: "primary",
+        status: "pending",
+      });
+
+      await runPendingSteps(executor);
+
+      expect(executor.plan.steps.map((step: Any) => step.description)).toEqual([
+        "Draft the brief content.",
+        "Verify both files exist and the PDF has exactly two pages with every required section.",
+        "Repair the delivered work so it resolves the blocking issues found by the final check.",
+        "Verify the repaired deliverable against the task requirements and the issues the final check reported.",
+        GENERATED_HANDOFF_STEP_DESCRIPTION,
+      ]);
+      expect(executor.verificationRepairPassesUsed).toBe(1);
+      expect(executor.plan.steps[4].status).toBe("completed");
     });
 
     it("finishes as partial success with the unmet requirement first when the re-check fails", async () => {

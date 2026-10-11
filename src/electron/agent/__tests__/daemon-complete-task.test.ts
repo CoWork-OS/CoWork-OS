@@ -570,6 +570,40 @@ describe("AgentDaemon.completeTask", () => {
     }
   });
 
+  it.each([
+    ["a team synthesis child", "parent-task", "Final handoff: two findings repaired."],
+    ["an interactive chat turn", undefined, undefined],
+  ])(
+    "keeps the result summary of %s chat completion only for child handoff",
+    (_l, parentTaskId, kept) => {
+      const daemonLike = createDaemonLike();
+      daemonLike.taskRepo.findById.mockReturnValue({
+        id: "task-1",
+        title: "Synthesis",
+        status: "executing",
+        workspaceId: "workspace-1",
+        createdAt: Date.now() - 1000,
+        ...(parentTaskId ? { parentTaskId, agentType: "sub" } : {}),
+        agentConfig: {
+          executionMode: "chat",
+          executionModeSource: "user",
+          conversationMode: "chat",
+        },
+      });
+
+      AgentDaemon.prototype.completeTask.call(
+        daemonLike,
+        "task-1",
+        "Final handoff: two findings repaired.",
+      );
+
+      expect(daemonLike.taskRepo.update).toHaveBeenCalledWith(
+        "task-1",
+        expect.objectContaining({ status: "completed", resultSummary: kept }),
+      );
+    },
+  );
+
   it("keeps outputSummary absent when metadata is not provided", () => {
     const daemonLike = createDaemonLike();
 

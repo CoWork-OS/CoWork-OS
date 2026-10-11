@@ -54,9 +54,31 @@ describe("inline approval availability", () => {
       ),
     ).toBe(true);
     expect(canAnswerInlineApproval({ id: "task-plain" } as Any, { headless: false })).toBe(true);
+    expect(
+      canAnswerInlineApproval(
+        {
+          ...desktopTask,
+          parentTaskId: "root",
+          agentConfig: {
+            teamWorkItemLane: true,
+            allowUserInput: true,
+          },
+        } as Any,
+        { headless: false },
+      ),
+    ).toBe(true);
   });
 
   it.each([
+    [
+      "a non-interactive team lane",
+      {
+        ...desktopTask,
+        parentTaskId: "task-parent",
+        agentConfig: { teamWorkItemLane: true, allowUserInput: false },
+      },
+      false,
+    ],
     ["an unknown task", undefined, false],
     ["a headless runtime", desktopTask, true],
     [

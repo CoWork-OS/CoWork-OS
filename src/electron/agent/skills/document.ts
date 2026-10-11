@@ -271,6 +271,8 @@ export function resolveDocumentOutputs(input: {
 }
 
 export interface DocumentOptions {
+  /** Heading and table accent, as a six-digit RGB hex color. */
+  accentColor?: string;
   title?: string;
   author?: string;
   subject?: string;
@@ -454,6 +456,7 @@ class PdfBlockRenderer {
     private readonly fonts: { regular: string; bold: string },
     private readonly metrics: PdfMetrics,
     private readonly codeFont: (text: string) => string,
+    private readonly accentColor = "#000000",
   ) {
     this.baseFontSize = metrics.baseFontSize;
   }
@@ -598,7 +601,9 @@ class PdfBlockRenderer {
         doc
           .font(this.fonts.bold)
           .fontSize(this.headingFontSize(block.level))
+          .fillColor(this.accentColor)
           .text(block.text, { paragraphGap: metrics.headingSpaceBelow });
+        doc.fillColor("#000000");
         break;
       }
 
@@ -665,7 +670,7 @@ class PdfBlockRenderer {
     doc
       .save()
       .lineWidth(strong ? 0.8 : 0.5)
-      .strokeColor(strong ? "#444444" : "#AAAAAA")
+      .strokeColor(strong ? this.accentColor : "#AAAAAA")
       .moveTo(left, y)
       .lineTo(left + this.contentWidth, y)
       .stroke()
@@ -789,6 +794,12 @@ export class DocumentBuilder {
     options: DocumentOptions = {},
   ): Promise<DocumentCreateReport> {
     // Normalize content to always be an array
+    if (options.accentColor !== undefined) {
+      if (!/^#?[0-9a-f]{6}$/i.test(options.accentColor)) {
+        throw new Error("accentColor must be a six-digit RGB hex color, e.g. #17324D.");
+      }
+      options = { ...options, accentColor: options.accentColor.replace(/^#/, "").toUpperCase() };
+    }
     const { blocks, droppedBlocks, requestedBlocks } = this.normalizeContent(content);
     const ext = path.extname(outputPath).toLowerCase();
     const report: DocumentCreateReport = {
@@ -907,7 +918,12 @@ export class DocumentBuilder {
           const headingLevel = this.getHeadingLevel(level);
           children.push(
             new Paragraph({
-              text: block.text,
+              children: [
+                new TextRun({
+                  text: block.text,
+                  ...(options.accentColor ? { color: options.accentColor } : {}),
+                }),
+              ],
               heading: headingLevel,
               spacing: { before: 240, after: 120 },
               // A heading never ends a page apart from the content it introduces.
@@ -971,6 +987,9 @@ export class DocumentBuilder {
                                 new TextRun({
                                   text: cell,
                                   bold: rowIndex === 0,
+                                  ...(rowIndex === 0 && options.accentColor
+                                    ? { color: options.accentColor }
+                                    : {}),
                                   size: textSize,
                                 }),
                               ],
@@ -1129,6 +1148,7 @@ export class DocumentBuilder {
       (text) =>
         // Courier is Latin-1 only; code with other characters uses the Unicode font.
         fontChoice.font && needsUnicodeFont(text) ? fonts.regular : "Courier",
+      options.accentColor ? `#${options.accentColor}` : undefined,
     );
     const warnings = renderer.render(content);
     return { doc, renderer, warnings, pageCount: doc.bufferedPageRange().count };
@@ -1814,7 +1834,20 @@ export class DocumentBuilder {
       compression: "DEFLATE",
       compressionOptions: { level: 9 },
     });
-    await fsPromises.writeFile(outputPath, outputBuffer);
+    // Block edits from the document editor target a freshly allocated version
+    // path, so never clobber another existing file; report it instead of EEXIST.
+    try {
+      await fsPromises.writeFile(outputPath, outputBuffer, {
+        flag: path.resolve(inputPath) === path.resolve(outputPath) ? "w" : "wx",
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return {
+        success: false,
+        message: `Output file already exists: ${path.basename(outputPath)}. Choose a new destPath or edit the source in place.`,
+        sectionsAdded: 0,
+      };
+    }
 
     return {
       success: true,

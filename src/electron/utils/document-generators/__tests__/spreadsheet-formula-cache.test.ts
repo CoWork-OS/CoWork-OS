@@ -50,6 +50,31 @@ async function cachedResults(filePath: string): Promise<Record<string, unknown>>
 const withoutValues = (xml: string) => xml.replace(/<v>[^<]*<\/v>/g, "<v></v>");
 
 describe("restoreXlsxFormulaCaches", () => {
+  it("repairs caches in a workbook with an openpyxl chart without changing its drawing or chart parts", async () => {
+    const zip = await JSZip.loadAsync(await buildOpenpyxlStyleWorkbook());
+    zip.file(
+      "xl/drawings/drawing1.xml",
+      '<wsDr xmlns="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"><oneCellAnchor><graphicFrame><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/></a:graphicData></a:graphic></graphicFrame><clientData/></oneCellAnchor></wsDr>',
+    );
+    zip.file(
+      "xl/drawings/_rels/drawing1.xml.rels",
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="/xl/charts/chart1.xml" Id="rId1"/></Relationships>',
+    );
+    zip.file(
+      "xl/charts/chart1.xml",
+      '<chartSpace xmlns="http://schemas.openxmlformats.org/drawingml/2006/chart"><chart/></chartSpace>',
+    );
+    const file = await writeFixture(await zip.generateAsync({ type: "nodebuffer" }));
+    const before = await readParts(file);
+    const result = await restoreXlsxFormulaCaches(file);
+    expect(result).toMatchObject({ restored: 11, rewritten: true, uncached: [] });
+    const after = await readParts(file);
+    for (const [name, content] of before) {
+      if (!name.startsWith("xl/worksheets/")) expect(after.get(name)).toBe(content);
+    }
+    expect(after.get("xl/worksheets/sheet2.xml")).toContain("<v>225.5</v>");
+  });
+
   it("restores the results openpyxl dropped without touching formulas or formatting", async () => {
     const filePath = await writeFixture(await buildOpenpyxlStyleWorkbook());
     const before = await readParts(filePath);

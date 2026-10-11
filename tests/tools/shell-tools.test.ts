@@ -189,7 +189,7 @@ describe("ShellTools auto-approval", () => {
 
     await expect(
       brokerShellTools.runCommand(SAFE_CMD_1, { cwd: neverWorkspace.path }),
-    ).rejects.toThrow("User denied command execution");
+    ).rejects.toThrow("Command execution was not approved");
     expect(authorizeToolAction).toHaveBeenCalledTimes(1);
     expect(requestApproval).not.toHaveBeenCalled();
     expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
@@ -440,7 +440,7 @@ describe("ShellTools auto-approval", () => {
     expect(first.success).toBe(true);
 
     await expect(shellTools.runCommand("sudo -n true")).rejects.toThrow(
-      "User denied command execution",
+      "Command execution was not approved",
     );
     expect(mockDaemon.requestApproval).toHaveBeenCalledTimes(2);
     expect((mockDaemon.requestApproval as any).mock.calls[1][2]).toBe(
@@ -697,7 +697,9 @@ describe("ShellTools auto-approval", () => {
         expect.objectContaining({ allowNetwork: true }),
       );
       authorizeToolAction.mockResolvedValue(false);
-      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow("User denied command execution");
+      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow(
+        "Command execution was not approved",
+      );
       expect(authorizeToolAction).toHaveBeenLastCalledWith(
         "task-network",
         expect.objectContaining({
@@ -719,7 +721,9 @@ describe("ShellTools auto-approval", () => {
       "does not start a process when network approval is denied: %s",
       async (command) => {
         authorizeToolAction.mockResolvedValue(false);
-        await expect(tools.runCommand(command)).rejects.toThrow("User denied command execution");
+        await expect(tools.runCommand(command)).rejects.toThrow(
+          "Command execution was not approved",
+        );
         expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
       },
     );
@@ -763,7 +767,7 @@ describe("ShellTools auto-approval", () => {
         tools.runCommand(command, {
           env: { HTTPS_PROXY: "http://127.0.0.1:8787" },
         }),
-      ).rejects.toThrow("User denied command execution");
+      ).rejects.toThrow("Command execution was not approved");
       expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
       expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
     });
@@ -851,7 +855,9 @@ describe("ShellTools auto-approval", () => {
       process.env.COWORK_ALLOW_UNSANDBOXED_SHELL = "1";
       sandboxMocks.createSandbox.mockResolvedValue({ type: "none", cleanup: vi.fn() } as never);
       authorizeToolAction.mockResolvedValue(false);
-      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow("User denied command execution");
+      await expect(tools.runCommand(SAFE_CMD_1)).rejects.toThrow(
+        "Command execution was not approved",
+      );
       expect(sandboxMocks.createSandbox).not.toHaveBeenCalled();
       expect(mockShellSessionManager.runCommand).not.toHaveBeenCalled();
     });

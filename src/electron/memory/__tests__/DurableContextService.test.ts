@@ -59,6 +59,81 @@ afterEach(() => {
 });
 
 describeWithNativeDb("DurableContextService", () => {
+  it("excludes runtime history, compaction and indexed events using live task and workspace policy", async () => {
+    enableDurableContext();
+    const db = createDb();
+    db.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, prompt TEXT,
+      raw_prompt TEXT, user_prompt TEXT, parent_task_id TEXT, agent_type TEXT, agent_config TEXT);
+      CREATE TABLE memory_settings (workspace_id TEXT PRIMARY KEY, enabled INTEGER,
+        auto_capture INTEGER, privacy_mode TEXT);`);
+    const insert = db.prepare("INSERT INTO tasks VALUES (?, 'ws-1', ?, NULL, NULL, ?, ?, ?)");
+    insert.run("excluded", "<no-memory> Build a planner", null, "main", "{}");
+    insert.run("child", "Review the planner", "excluded", "sub", '{"retainMemory":true}');
+    insert.run("disposable", "Collect evidence", null, "main", '{"retainMemory":false}');
+    insert.run("ordinary", "Write a brief", null, "main", "{}");
+    for (const taskId of ["excluded", "child", "disposable"]) {
+      await DurableContextService.recordHistory({
+        workspaceId: "ws-1",
+        taskId,
+        source: "runtime_history",
+        messages: [{ role: "user", content: "Private planner requirements" }],
+      });
+      expect(
+        await DurableContextService.recordCompactionSummary({
+          workspaceId: "ws-1",
+          taskId,
+          removedMessages: [{ role: "user", content: "Private planner requirements" }],
+          summaryBlock: "Private planner requirements",
+        }),
+      ).toBeNull();
+      DurableContextService.indexEvent({
+        workspaceId: "ws-1",
+        taskId,
+        type: "user_message",
+        payload: { message: "Private planner requirements" },
+        timestamp: 1,
+      });
+    }
+    expect(await DurableContextService.search({ workspaceId: "ws-1", query: "planner" })).toEqual(
+      [],
+    );
+    expect(
+      await DurableContextService.searchConversation({ workspaceId: "ws-1", query: "planner" }),
+    ).toEqual([]);
+
+    // A switch changed between enqueue and flush must also prevent capture.
+    DurableContextService.indexEvent({
+      workspaceId: "ws-1",
+      taskId: "ordinary",
+      type: "user_message",
+      payload: { message: "Private pipeline requirements" },
+      timestamp: 2,
+    });
+    db.prepare("INSERT INTO memory_settings VALUES ('ws-1', 1, 0, 'normal')").run();
+    await DurableContextService.recordHistory({
+      workspaceId: "ws-1",
+      taskId: "ordinary",
+      source: "runtime_history",
+      messages: [{ role: "user", content: "Private pipeline requirements" }],
+    });
+    expect(
+      await DurableContextService.searchConversation({ workspaceId: "ws-1", query: "pipeline" }),
+    ).toEqual([]);
+    expect(await DurableContextService.search({ workspaceId: "ws-1", query: "pipeline" })).toEqual(
+      [],
+    );
+    db.prepare("UPDATE memory_settings SET auto_capture = 1").run();
+    await DurableContextService.recordHistory({
+      workspaceId: "ws-1",
+      taskId: "ordinary",
+      source: "runtime_history",
+      messages: [{ role: "user", content: "Retained pipeline requirements" }],
+    });
+    expect(
+      await DurableContextService.search({ workspaceId: "ws-1", query: "pipeline" }),
+    ).toHaveLength(1);
+  });
+
   it("records searchable task messages without re-indexing injected memory blocks", async () => {
     enableDurableContext();
     createDb();
@@ -387,7 +462,7 @@ describeWithNativeDb("DurableContextService", () => {
       messages: [...history],
     });
     // Nothing new: the unchanged history is not sent to the store at all.
-    expect(spy).not.toHaveBeenCalled();
+    expect(spy.mock.calls.every(([sql]) => !/^\s*(INSERT|UPDATE|DELETE)/i.test(sql))).toBe(true);
     spy.mockRestore();
 
     // A rewritten history (compaction) is sent whole but duplicates stay single.

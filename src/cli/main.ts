@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { Methods } from "../electron/control-plane/protocol";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -541,6 +542,66 @@ function configCommand(ctx: CommandContext): number {
   return 0;
 }
 
+export async function waitForDaemonReady(
+  child: ReturnType<typeof spawn>,
+  readyFile: string,
+  timeoutMs = 30_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      clearTimeout(timeout);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      resolve(ready);
+    };
+    const onError = () => finish(false);
+    const onExit = () => finish(false);
+    const probe = async () => {
+      if (Date.now() >= deadline) return finish(false);
+      try {
+        const raw = fsSync.readFileSync(readyFile, "utf8");
+        const marker = JSON.parse(raw) as { pid?: number; launcherPid?: number; ready?: boolean };
+        if (
+          marker.ready === true &&
+          typeof marker.pid === "number" &&
+          marker.pid > 0 &&
+          marker.launcherPid === child.pid
+        ) {
+          finish(true);
+        }
+      } catch {
+        // The daemon may still be binding its listener.
+      }
+    };
+    child.once("error", onError);
+    child.once("exit", onExit);
+    const timer = setInterval(probe, 100);
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    void probe();
+  });
+}
+
+async function terminateUnreadyDaemon(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 1000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 async function daemon(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "status";
   if (sub === "status") {
@@ -551,16 +612,41 @@ async function daemon(ctx: CommandContext): Promise<number> {
     return 1;
   }
 
-  const packageRoot = path.resolve(__dirname, "..", "..");
+  let packageRoot = path.resolve(__dirname);
+  while (packageRoot !== path.dirname(packageRoot)) {
+    if (fsSync.existsSync(path.join(packageRoot, "package.json"))) break;
+    packageRoot = path.dirname(packageRoot);
+  }
   const daemonBin = path.join(packageRoot, "bin", "coworkd-node.js");
+  if (!fsSync.existsSync(daemonBin)) {
+    process.stderr.write(`CoWork daemon launcher not found: ${daemonBin}\n`);
+    return 1;
+  }
   const args = ["--print-control-plane-token", ...ctx.parsed.rest.slice(1)];
   if (hasFlag(ctx.parsed, "--background")) {
+    const readyDir = fsSync.mkdtempSync(path.join(os.tmpdir(), "cowork-daemon-ready-"));
+    fsSync.chmodSync(readyDir, 0o700);
+    const readyFile = path.join(readyDir, "ready.json");
     const child = spawn(process.execPath, [daemonBin, ...args], {
       cwd: packageRoot,
       detached: true,
       stdio: "ignore",
-      env: process.env,
+      env: { ...process.env, COWORK_DAEMON_READY_FILE: readyFile },
     });
+    child.once("error", () => {});
+    if (!child.pid) {
+      fsSync.rmSync(readyDir, { recursive: true, force: true });
+      process.stderr.write("Failed to start CoWork daemon: no child process was created.\n");
+      return 1;
+    }
+    const ready = await waitForDaemonReady(child, readyFile);
+    fsSync.rmSync(readyDir, { recursive: true, force: true });
+    if (!ready) {
+      await terminateUnreadyDaemon(child);
+      child.unref();
+      process.stderr.write("CoWork daemon failed to become ready.\n");
+      return 1;
+    }
     child.unref();
     process.stdout.write("Started CoWork daemon in the background.\n");
     process.stdout.write(

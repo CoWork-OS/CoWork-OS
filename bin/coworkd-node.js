@@ -149,7 +149,7 @@ async function main() {
   const node = spawn(process.execPath, [mainPath, ...args], {
     cwd: packageDir,
     stdio: "inherit",
-    env: { ...process.env },
+    env: { ...process.env, COWORK_DAEMON_LAUNCHER_PID: String(process.pid) },
   });
 
   // Forward service-manager and test-harness shutdown to the daemon. Otherwise

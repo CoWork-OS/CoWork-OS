@@ -111,6 +111,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
   private errorHandler: ((error: Error) => void) | null = null;
   private activeAbortControllers = new Set<AbortController>();
   private refreshPromise: Promise<void> | null = null;
+  private readonly responseReleases = new WeakMap<Response, () => void>();
 
   constructor(config: MCPServerConfig) {
     super();
@@ -155,10 +156,17 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
         await this.ensureFreshToken();
         const headers = this.buildHeaders();
         headers[SESSION_HEADER] = sessionId;
-        await this.fetchWithTimeout(this.config.url, {
+        const response = await this.fetchWithTimeout(this.config.url, {
           method: "DELETE",
           headers,
         });
+        try {
+          await response.text();
+        } catch {
+          // Best effort session termination.
+        } finally {
+          this.releaseResponse(response);
+        }
       } catch {
         // Session termination is best-effort. The server may not support DELETE.
       }
@@ -261,6 +269,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     );
 
     if (!this.connected || generation !== this.connectionGeneration) {
+      this.releaseResponse(response);
       throw new Error(
         message.method === "tools/call"
           ? "MCP_TOOL_OUTCOME_UNCONFIRMED: connection changed after submission. Inspect the outcome before retrying."
@@ -274,6 +283,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
 
     if (response.status === 404 && message.method === "tools/call") {
       await response.text().catch(() => undefined);
+      this.releaseResponse(response);
       throw new Error(
         "MCP_TOOL_OUTCOME_UNCONFIRMED: tool request returned 404. Inspect its outcome before retrying; no automatic replay was sent.",
       );
@@ -287,6 +297,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       this.lastInitializeRequest
     ) {
       await response.text().catch(() => undefined);
+      this.releaseResponse(response);
       this.sessionId = null;
       const initializeRequest: JSONRPCRequest = {
         ...this.lastInitializeRequest,
@@ -297,55 +308,61 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       return this.postMessage(message, expectsResponse, false, options);
     }
 
-    const body = await response.text();
-    if (!response.ok) {
-      throw formatHttpError(response.status, response.statusText, body);
-    }
-
-    if (!body.trim()) {
-      if (expectsResponse) {
-        throw new Error(`MCP server accepted ${message.method} without returning a response`);
+    try {
+      if (!response.ok) {
+        const body = await response.text();
+        throw formatHttpError(response.status, response.statusText, body);
       }
-      return undefined;
-    }
+      const body = await this.readResponseBody(response, "id" in message ? message.id : undefined);
 
-    const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    const messages = parseResponseBody(body, contentType);
-    const requestId = "id" in message ? message.id : undefined;
-    let matchedResponse = false;
+      if (!body.text.trim() && body.messages.length === 0) {
+        if (expectsResponse) {
+          throw new Error(`MCP server accepted ${message.method} without returning a response`);
+        }
+        return undefined;
+      }
 
-    for (const incoming of messages) {
-      if (isResponse(incoming) && requestId !== undefined && incoming.id === requestId) {
-        matchedResponse = true;
-        this.rememberNegotiatedProtocol(message, incoming);
-        if (incoming.error) {
+      const messages = body.messages.length
+        ? body.messages
+        : parseResponseBody(body.text, body.contentType);
+      const requestId = "id" in message ? message.id : undefined;
+      let matchedResponse = false;
+
+      for (const incoming of messages) {
+        if (isResponse(incoming) && requestId !== undefined && incoming.id === requestId) {
+          matchedResponse = true;
+          this.rememberNegotiatedProtocol(message, incoming);
+          if (incoming.error) {
+            throw Object.assign(
+              new Error(incoming.error.message || `MCP method failed: ${message.method}`),
+              { code: incoming.error.code, data: incoming.error.data },
+            );
+          }
+          return incoming.result;
+        }
+
+        if (isNotification(incoming) || isResponse(incoming)) {
+          this.messageHandler?.(incoming as StreamableMessage);
+        }
+      }
+
+      if (!expectsResponse && !matchedResponse) {
+        const errorMessage = messages.find((incoming) => isRecord(incoming) && incoming.error);
+        if (errorMessage?.error) {
           throw Object.assign(
-            new Error(incoming.error.message || `MCP method failed: ${message.method}`),
-            { code: incoming.error.code, data: incoming.error.data },
+            new Error(errorMessage.error.message || `MCP method failed: ${message.method}`),
+            { code: errorMessage.error.code, data: errorMessage.error.data },
           );
         }
-        return incoming.result;
+        return undefined;
       }
 
-      if (isNotification(incoming) || isResponse(incoming)) {
-        this.messageHandler?.(incoming as StreamableMessage);
-      }
+      throw new Error(
+        `MCP response for ${message.method} did not include request id ${requestId ?? "unknown"}`,
+      );
+    } finally {
+      this.releaseResponse(response);
     }
-
-    if (!expectsResponse && !matchedResponse) {
-      const errorMessage = messages.find((incoming) => isRecord(incoming) && incoming.error);
-      if (errorMessage?.error) {
-        throw Object.assign(
-          new Error(errorMessage.error.message || `MCP method failed: ${message.method}`),
-          { code: errorMessage.error.code, data: errorMessage.error.data },
-        );
-      }
-      return undefined;
-    }
-
-    throw new Error(
-      `MCP response for ${message.method} did not include request id ${requestId ?? "unknown"}`,
-    );
   }
 
   private buildHeaders(message?: OutgoingMessage): Record<string, string> {
@@ -474,55 +491,59 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
           refresh_token: auth.refreshToken!,
         }).toString(),
       });
-      const body = await response.text();
-      if (!response.ok) {
-        throw formatHttpError(response.status, response.statusText, body);
-      }
-
-      let tokenData: Any;
       try {
-        tokenData = JSON.parse(body);
-      } catch {
-        throw new Error("MCP OAuth token refresh returned invalid JSON");
-      }
+        const body = await response.text();
+        if (!response.ok) {
+          throw formatHttpError(response.status, response.statusText, body);
+        }
 
-      if (
-        typeof tokenData?.access_token !== "string" ||
-        !tokenData.access_token.trim() ||
-        (tokenData.refresh_token !== undefined &&
-          (typeof tokenData.refresh_token !== "string" || !tokenData.refresh_token.trim()))
-      ) {
-        throw new Error("MCP OAuth token refresh did not return an access_token");
-      }
+        let tokenData: Any;
+        try {
+          tokenData = JSON.parse(body);
+        } catch {
+          throw new Error("MCP OAuth token refresh returned invalid JSON");
+        }
 
-      const nextAuth = {
-        ...auth,
-        token: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || auth.refreshToken,
-        expiresAt:
-          typeof tokenData.expires_in === "number"
-            ? Date.now() + tokenData.expires_in * 1000
-            : undefined,
-      };
-      // A manual credential edit during refresh must not be overwritten by its late response.
-      let currentAuth = auth;
-      try {
-        currentAuth = MCPSettingsManager.getServer(this.config.id)?.auth ?? auth;
-      } catch {
-        /* Unavailable settings retain the local flow. */
-      }
-      if (
-        credentialFingerprint(currentAuth) !== credentialFingerprint(auth) ||
-        credentialFingerprint(this.config.auth) !== credentialFingerprint(auth)
-      )
-        throw new Error("MCP credentials changed during token refresh");
-      this.config.auth = nextAuth;
-      recordOAuthRefresh(auth, nextAuth);
+        if (
+          typeof tokenData?.access_token !== "string" ||
+          !tokenData.access_token.trim() ||
+          (tokenData.refresh_token !== undefined &&
+            (typeof tokenData.refresh_token !== "string" || !tokenData.refresh_token.trim()))
+        ) {
+          throw new Error("MCP OAuth token refresh did not return an access_token");
+        }
 
-      try {
-        MCPSettingsManager.updateServer(this.config.id, { auth: nextAuth });
-      } catch {
-        // The in-memory token remains usable if settings persistence is unavailable.
+        const nextAuth = {
+          ...auth,
+          token: tokenData.access_token,
+          refreshToken: tokenData.refresh_token || auth.refreshToken,
+          expiresAt:
+            typeof tokenData.expires_in === "number"
+              ? Date.now() + tokenData.expires_in * 1000
+              : undefined,
+        };
+        // A manual credential edit during refresh must not be overwritten by its late response.
+        let currentAuth = auth;
+        try {
+          currentAuth = MCPSettingsManager.getServer(this.config.id)?.auth ?? auth;
+        } catch {
+          /* Unavailable settings retain the local flow. */
+        }
+        if (
+          credentialFingerprint(currentAuth) !== credentialFingerprint(auth) ||
+          credentialFingerprint(this.config.auth) !== credentialFingerprint(auth)
+        )
+          throw new Error("MCP credentials changed during token refresh");
+        this.config.auth = nextAuth;
+        recordOAuthRefresh(auth, nextAuth);
+
+        try {
+          MCPSettingsManager.updateServer(this.config.id, { auth: nextAuth });
+        } catch {
+          // The in-memory token remains usable if settings persistence is unavailable.
+        }
+      } finally {
+        this.releaseResponse(response);
       }
     })().finally(() => {
       this.refreshPromise = null;
@@ -558,13 +579,19 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       this.config.requestTimeout || this.config.connectionTimeout || 60000,
     );
 
+    let response: Response | undefined;
     try {
       if (signal?.aborted) throw new Error("MCP tool call cancelled");
-      return await fetch(input, {
+      response = await fetch(input, {
         ...init,
         redirect: "manual",
         signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       });
+      this.responseReleases.set(response, () => {
+        clearTimeout(timeout);
+        this.activeAbortControllers.delete(controller);
+      });
+      return response;
     } catch (error: Any) {
       if (signal?.aborted) throw new Error("MCP tool call cancelled");
       if (error?.name === "AbortError") {
@@ -572,8 +599,59 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       }
       throw error;
     } finally {
-      clearTimeout(timeout);
-      this.activeAbortControllers.delete(controller);
+      if (!response) {
+        clearTimeout(timeout);
+        this.activeAbortControllers.delete(controller);
+      }
     }
+  }
+
+  private releaseResponse(response: Response): void {
+    const release = this.responseReleases.get(response);
+    if (release) {
+      this.responseReleases.delete(response);
+      release();
+    }
+  }
+
+  private async readResponseBody(
+    response: Response,
+    requestId?: string | number,
+  ): Promise<{ text: string; messages: Any[]; contentType: string }> {
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.includes("text/event-stream") || !response.body?.getReader) {
+      return { text: await response.text(), messages: [], contentType };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const messages: Any[] = [];
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || "";
+        for (const block of blocks) {
+          for (const parsed of parseSseBody(block)) {
+            messages.push(parsed);
+            // Once the matching response arrives, cancel the open stream. This
+            // resolves the RPC without waiting for an SSE server to close it.
+            if (requestId !== undefined && isResponse(parsed) && parsed.id === requestId) {
+              await reader.cancel();
+              return { text: "", messages, contentType };
+            }
+          }
+        }
+        if (done) break;
+      }
+      // Some fetch implementations deliver the final event in the decoder
+      // buffer alongside `done`, without another separator iteration.
+      messages.push(...parseSseBody(buffer));
+    } finally {
+      reader.releaseLock();
+    }
+    return { text: "", messages, contentType };
   }
 }

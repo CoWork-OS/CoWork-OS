@@ -373,9 +373,12 @@ export class WebSocketTransport extends EventEmitter implements MCPTransport {
     this.connected = false;
     this.stopPingPong();
 
-    // Clear all pending requests
+    // Settle requests before dropping bookkeeping. A close can happen after
+    // the server accepted a mutation, so callers must reconcile rather than
+    // automatically resubmit it.
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
+      pending.reject(new Error("WebSocket connection lost; request outcome is uncertain"));
     }
     this.pendingRequests.clear();
 

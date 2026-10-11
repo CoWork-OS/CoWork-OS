@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { InputSanitizer } from "../agent/security/input-sanitizer";
 import { buildFtsMatchQuery, collapseWhitespace, likeContainsPattern } from "../database/fts-query";
 import { ConversationIndexStore, ensureConversationIndexSchema } from "./conversation-index-sql";
+import { allowsAutomaticMemoryCapture } from "./memory-capture-policy-sql";
 
 /**
  * Durable context storage as synchronous SQL: the store the memory domain's transaction
@@ -318,6 +319,7 @@ export class DurableContextStore {
 
   recordHistory(args: RecordHistoryArgs): void {
     const db = this.db;
+    if (!allowsAutomaticMemoryCapture(db, args.workspaceId, args.taskId)) return;
     const conversationId = this.ensureConversation(args.workspaceId, args.taskId, args.now);
     const insert = db.prepare(`
       INSERT OR IGNORE INTO durable_context_messages (
@@ -384,8 +386,9 @@ export class DurableContextStore {
     }
   }
 
-  recordCompactionSummary(args: RecordCompactionArgs): string {
+  recordCompactionSummary(args: RecordCompactionArgs): string | null {
     const db = this.db;
+    if (!allowsAutomaticMemoryCapture(db, args.workspaceId, args.taskId)) return null;
     const conversationId = this.ensureConversation(args.workspaceId, args.taskId, args.now);
     this.recordHistory({
       workspaceId: args.workspaceId,

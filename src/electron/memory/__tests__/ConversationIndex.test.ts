@@ -43,6 +43,10 @@ function index(
   payload: unknown,
   timestamp = 1_000 + eventCounter,
 ): string {
+  databases
+    .at(-1)!
+    .prepare("INSERT OR IGNORE INTO tasks (id, workspace_id) VALUES (?, ?)")
+    .run(taskId, workspaceId);
   eventCounter += 1;
   const eventId = `${taskId}-e${eventCounter}`;
   DurableContextService.indexEvent({ workspaceId, taskId, type, payload, timestamp, eventId });
@@ -217,6 +221,7 @@ describeWithNativeDb("conversation index", () => {
 
   it("ignores duplicate events and removes rows with task delete and workspace clear", async () => {
     const db = openDb();
+    db.prepare("INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')").run();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       DurableContextService.indexEvent({
         workspaceId: "ws-1",
@@ -265,6 +270,8 @@ describeWithNativeDb("conversation index", () => {
       messages: [{ role: "user", content: "old durable message" }],
     });
 
+    await DurableContextService.flushIndexQueue();
+    db.prepare("DELETE FROM tasks WHERE id = 'gone'").run();
     const pruned = await DurableContextService.pruneConversationRetention({
       retentionDays: 90,
       now,

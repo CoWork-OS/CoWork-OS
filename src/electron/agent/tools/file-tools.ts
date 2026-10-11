@@ -7,6 +7,7 @@ import {
 } from "../../automation/responsibility-task-policy";
 import { getAutomationRuntime } from "../../automation/AutomationRuntime";
 import { readDocumentArchiveBuffer } from "../../security/document-archive";
+import { inspectOfficeArtifact } from "./office-artifact-inspection";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
@@ -2505,7 +2506,10 @@ export class FileTools {
   /**
    * Get file or directory metadata
    */
-  async getFileInfo(relativePath: string): Promise<{
+  async getFileInfo(
+    relativePath: string,
+    inspectArtifact = false,
+  ): Promise<{
     size: number;
     created: string;
     modified: string;
@@ -2513,6 +2517,7 @@ export class FileTools {
     isDirectory: boolean;
     isFile: boolean;
     permissions: string;
+    artifact?: Record<string, unknown>;
   }> {
     if (!relativePath || typeof relativePath !== "string") {
       throw new Error("Invalid path: path must be a non-empty string");
@@ -2526,6 +2531,23 @@ export class FileTools {
     try {
       const stats = await fs.stat(fullPath);
       const permissions = (stats.mode & 0o777).toString(8);
+      let artifact: Record<string, unknown> | undefined;
+      if (inspectArtifact && stats.isFile()) {
+        const extension = path.extname(fullPath).toLowerCase();
+        if (extension === ".xlsx" || extension === ".docx") {
+          artifact = await inspectOfficeArtifact(fullPath, extension.slice(1) as "xlsx" | "docx");
+        } else if (extension === ".pdf") {
+          const result = await this.readPdfFile(fullPath, stats.size, {
+            startChar: 0,
+            maxChars: 1,
+          });
+          artifact = {
+            kind: "pdf",
+            pageCount: result.pdf_extraction.page_count,
+            extraction: result.pdf_extraction,
+          };
+        }
+      }
       return {
         size: stats.size,
         created: stats.birthtime.toISOString(),
@@ -2534,6 +2556,7 @@ export class FileTools {
         isDirectory: stats.isDirectory(),
         isFile: stats.isFile(),
         permissions,
+        ...(artifact ? { artifact } : {}),
       };
     } catch (error) {
       throw new Error(`Failed to get file info: ${(error as Error).message}`);

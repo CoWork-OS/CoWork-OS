@@ -232,6 +232,53 @@ describeWithSqlite("memory purge (SEC-15, LIFE-4)", () => {
     expect(count("SELECT COUNT(*) AS n FROM kg_observations")).toBe(1);
   });
 
+  it("clears one session and its agents while preserving neighboring session history and memory", async () => {
+    const [{ MemoryWorkspacePurgeService }, { MemoryService }] = await Promise.all([
+      import("../MemoryWorkspacePurgeService"),
+      import("../MemoryService"),
+    ]);
+    vi.spyOn(MemoryService, "getDatabase").mockReturnValue(db);
+    const selected = seedTask();
+    const neighbor = seedTask();
+    const child = taskRepo.create({
+      title: "Review",
+      prompt: "Review only",
+      status: "completed",
+      workspaceId: workspace.id,
+      parentTaskId: selected.task.id,
+      agentType: "sub",
+    });
+    const childMemory = insertMemory(child.id, "task");
+    fs.writeFileSync(path.join(workspace.path, "deliverable.txt"), "Keep this deliverable.");
+    expect((await MemoryWorkspacePurgeService.getClearScope(workspace.id)).tasks).toHaveLength(3);
+    const result = await MemoryWorkspacePurgeService.purgeSession(workspace.id, selected.task.id);
+    expect(result.success).toBe(true);
+    expect(count("SELECT COUNT(*) AS n FROM tasks")).toBe(3);
+    expect(
+      count(
+        "SELECT COUNT(*) AS n FROM memories WHERE id IN (?, ?, ?)",
+        selected.derivedMemory,
+        selected.savedMemory,
+        childMemory,
+      ),
+    ).toBe(0);
+    expect(count("SELECT COUNT(*) AS n FROM memories WHERE task_id = ?", neighbor.task.id)).toBe(2);
+    expect(
+      count("SELECT COUNT(*) AS n FROM pending_memory_writes WHERE task_id = ?", selected.task.id),
+    ).toBe(0);
+    expect(
+      count("SELECT COUNT(*) AS n FROM pending_memory_writes WHERE task_id = ?", neighbor.task.id),
+    ).toBe(1);
+    expect(taskRepo.findById(selected.task.id)?.agentConfig?.retainMemory).toBe(false);
+    expect(taskRepo.findById(child.id)?.agentConfig?.retainMemory).toBe(false);
+    expect(fs.readFileSync(path.join(workspace.path, "deliverable.txt"), "utf8")).toBe(
+      "Keep this deliverable.",
+    );
+    await expect(
+      MemoryWorkspacePurgeService.purgeSession("another-workspace", neighbor.task.id),
+    ).rejects.toThrow(/does not belong/);
+  });
+
   it("clears every workspace memory store and reports per-store counts", async () => {
     const [{ MemoryWorkspacePurgeService }, { MemoryService }, curated, durableService] =
       await Promise.all([

@@ -2,7 +2,8 @@
  * Finds the Excel workbooks a shell command created or changed, so their dropped formula results
  * can be restored afterwards (see restoreXlsxFormulaCaches). A snapshot taken before the command
  * records the workbooks in the working folder, the workspace root and any workbook path the
- * command names; comparing it after the command finds the files that are new or modified.
+ * command or a script it runs names; comparing it after the command finds the files that are
+ * new or modified.
  * Folders are listed without recursion and the number of files is bounded, so a snapshot stays
  * cheap enough to take around every command.
  */
@@ -14,6 +15,10 @@ const WORKBOOK_EXTENSIONS = new Set([".xlsx", ".xlsm"]);
 const WORKBOOK_PATH_PATTERN = /[^\s'"`<>|;&()=,]+\.xls[xm](?![\w.])/gi;
 const MAX_TRACKED_WORKBOOKS = 100;
 const MAX_NAMED_WORKBOOKS = 20;
+/** Script files a command runs ("python3 build.py"), whose text may name the workbook it writes. */
+const SCRIPT_PATH_PATTERN = /[^\s'"`<>|;&()=,]+\.(?:py|js|cjs|mjs|ts|rb|sh|r|jl)(?![\w.])/gi;
+const MAX_SCRIPTS_READ = 5;
+const MAX_SCRIPT_BYTES = 256 * 1024;
 
 interface FileStamp {
   mtimeMs: number;
@@ -69,6 +74,34 @@ export function workbookPathsInCommand(command: string, cwd: string): string[] {
   return [...paths];
 }
 
+/**
+ * Workbook paths named inside the script files a command runs. "python3 tmp/build.py" usually
+ * saves to a path written in build.py, not on the command line. Paths in a script are read
+ * relative to the command's working folder, as the script resolves them when run from it.
+ */
+export async function workbookPathsInScripts(command: string, cwd: string): Promise<string[]> {
+  const scripts = new Set<string>();
+  for (const match of command.matchAll(SCRIPT_PATH_PATTERN)) {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(match[0])) continue; // URLs
+    scripts.add(path.resolve(cwd, match[0]));
+    if (scripts.size >= MAX_SCRIPTS_READ) break;
+  }
+  const paths = new Set<string>();
+  for (const script of scripts) {
+    try {
+      const stat = await fs.stat(script);
+      if (!stat.isFile() || stat.size > MAX_SCRIPT_BYTES) continue;
+      for (const workbook of workbookPathsInCommand(await fs.readFile(script, "utf8"), cwd)) {
+        paths.add(workbook);
+        if (paths.size >= MAX_NAMED_WORKBOOKS) return [...paths];
+      }
+    } catch {
+      // An unreadable script names nothing; the folders are still compared.
+    }
+  }
+  return [...paths];
+}
+
 /** Records the workbooks a command could change: in `directories` and named by `command`. */
 export async function snapshotWorkbooks(
   command: string,
@@ -76,7 +109,12 @@ export async function snapshotWorkbooks(
   directories: string[],
 ): Promise<WorkbookSnapshot> {
   const uniqueDirectories = [...new Set(directories.map((directory) => path.resolve(directory)))];
-  const namedPaths = workbookPathsInCommand(command, cwd);
+  const namedPaths = [
+    ...new Set([
+      ...workbookPathsInCommand(command, cwd),
+      ...(await workbookPathsInScripts(command, cwd)),
+    ]),
+  ];
   const candidates = new Set<string>(namedPaths);
   for (const directory of uniqueDirectories) {
     for (const file of await workbooksIn(directory)) candidates.add(file);

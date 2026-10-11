@@ -97,6 +97,30 @@ function createPlanExecutor(response: Any): Any {
 }
 
 describe("TaskExecutor plan parsing", () => {
+  it("requires real delegation before independent research and a fresh final handoff after checks", () => {
+    const executor = createPlanExecutor({ content: [] });
+    const prompt =
+      "Have separate agents investigate each option using official sources. Save a comparison spreadsheet.";
+    executor.task.prompt = prompt;
+    executor.task.rawPrompt = prompt;
+    executor.getContractPrompt = vi.fn().mockReturnValue(prompt);
+    executor.promptRequiresDirectAnswer = vi.fn().mockReturnValue(false);
+    executor.promptRequestsDecision = vi.fn().mockReturnValue(false);
+    executor.promptIsWatchSkipRecommendationTask = vi.fn().mockReturnValue(false);
+    const result = executor.ensureRequiredPlanSteps({
+      steps: [
+        {
+          id: "step-1",
+          description: "Verify the comparison spreadsheet",
+          kind: "verification",
+          status: "pending",
+        },
+      ],
+    });
+    expect(result.steps[0].description).toContain("Use orchestrate_agents");
+    expect(result.steps.at(-1).description).toContain("Summarize completed work");
+    expect(executor.ensureRequiredPlanSteps(result).steps).toHaveLength(result.steps.length);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -190,7 +214,7 @@ describe("TaskExecutor plan parsing", () => {
       ],
     });
 
-    expect(result.steps).toHaveLength(4);
+    expect(result.steps).toHaveLength(5);
     expect(result.steps[3]).toMatchObject({ id: "4", kind: "verification", status: "pending" });
     expect(result.steps[3].description).toContain("direct link to an official source");
     expect((executor as Any).isVerificationStep(result.steps[3])).toBe(true);
@@ -198,7 +222,8 @@ describe("TaskExecutor plan parsing", () => {
 
     // A plan that already ends with a check keeps it as the only one.
     const again = (executor as Any).ensureRequiredPlanSteps(result);
-    expect(again.steps).toHaveLength(4);
+    expect(again.steps).toHaveLength(5);
+    expect(again.steps.at(-1).description).toContain("Summarize completed work");
   });
 
   describe("matching-file requests", () => {
@@ -247,6 +272,7 @@ describe("TaskExecutor plan parsing", () => {
         "primary",
         "primary",
         "verification",
+        "primary",
       ]);
       expect(sanitized.steps[4].description).toBe(northstarPlanSteps[4].description);
       expect((executor as Any).isVerificationStep(sanitized.steps[4])).toBe(true);
@@ -275,7 +301,7 @@ describe("TaskExecutor plan parsing", () => {
         steps: northstarPlanSteps.slice(0, 4),
       });
 
-      expect(result.steps).toHaveLength(5);
+      expect(result.steps).toHaveLength(6);
       expect(result.steps[4]).toMatchObject({ id: "5", kind: "verification", status: "pending" });
       expect(result.steps[4].description).toContain("carry the same content");
       expect((executor as Any).descriptionIndicatesVerification(result.steps[4].description)).toBe(
@@ -283,7 +309,7 @@ describe("TaskExecutor plan parsing", () => {
       );
 
       const again = executor.ensureRequiredPlanSteps(result);
-      expect(again.steps).toHaveLength(5);
+      expect(again.steps).toHaveLength(6);
     });
 
     it("does not add a second check after the plan's own Portuguese check", () => {
@@ -294,7 +320,7 @@ describe("TaskExecutor plan parsing", () => {
         steps: northstarPlanSteps,
       });
 
-      expect(sanitized.steps).toHaveLength(5);
+      expect(sanitized.steps).toHaveLength(6);
     });
 
     it("adds no file check to a single-file request", () => {
@@ -1857,7 +1883,7 @@ image_generation_contract:
 
     await executor.createPlan();
 
-    expect(executor.plan?.steps?.length).toBe(3);
+    expect(executor.plan?.steps?.length).toBe(4);
     expect(executor.plan.steps[0].description).toContain("Research the competition constraints");
     expect(executor.plan.steps[1].description).toContain("Build and save a prototype");
     expect(executor.plan.steps[2].kind).toBe("verification");
@@ -2343,7 +2369,7 @@ relationship_memory:
 
     await executor.createPlan();
 
-    expect(executor.plan?.steps?.length).toBe(2);
+    expect(executor.plan?.steps?.length).toBe(3);
     expect(executor.plan.steps[0].description).toContain("Create app shell in canvas");
     expect(executor.plan.steps[1].kind).toBe("verification");
   });

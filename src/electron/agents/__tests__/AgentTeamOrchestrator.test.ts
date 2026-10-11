@@ -7,6 +7,8 @@ import type {
   Task,
   UpdateAgentTeamItemRequest,
 } from "../../../shared/types";
+import { detectReadOnlyConstraint } from "../../agent/executor-completion-utils";
+import { teamSynthesisPromptHasMemberOutput } from "../../agent/executor-prompt-heuristics-utils";
 import { LLMProviderFactory } from "../../agent/llm/provider-factory";
 
 vi.mock("electron", () => ({
@@ -136,6 +138,105 @@ function mockProfileRouting(
 }
 
 describe("AgentTeamOrchestrator", () => {
+  it("executes build, independent review, and integration sequentially with writable and read-only roles", async () => {
+    mockProfileRouting(false);
+    const now = Date.now();
+    const team = {
+      id: "exec-team",
+      workspaceId: "ws",
+      name: "Delivery",
+      leadAgentRoleId: "builder",
+      maxParallelAgents: 3,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    } as AgentTeam;
+    const run = {
+      id: "exec-run",
+      teamId: team.id,
+      rootTaskId: "root",
+      status: "running",
+      collaborativeMode: true,
+      startedAt: now,
+    } as AgentTeamRun;
+    const { collaborativeExecutionLanes } = await import("../collaborative-execution");
+    const items = collaborativeExecutionLanes("builder", "reviewer").map((lane, index) => ({
+      ...lane,
+      id: `item-${index}`,
+      teamRunId: run.id,
+      status: "todo",
+      sortOrder: (index + 1) * 10,
+      createdAt: now,
+      updatedAt: now,
+    })) as AgentTeamItem[];
+    const root = {
+      id: "root",
+      title: "Planner",
+      prompt: "<no-memory> Build local planner",
+      workspaceId: "ws",
+      status: "executing",
+      agentConfig: { executionMode: "execute" },
+      createdAt: now,
+      updatedAt: now,
+    } as Task;
+    const tasks = new Map([[root.id, root]]);
+    const createChildTask = vi.fn(async (params: Any) => {
+      const child = {
+        ...params,
+        id: `child-${tasks.size}`,
+        status: "executing",
+        createdAt: now,
+        updatedAt: now,
+      } as Task;
+      tasks.set(child.id, child);
+      return child;
+    });
+    const repos = makeRepos({ team, run, items });
+    const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+    const orch = new AgentTeamOrchestrator(
+      {
+        getDatabase: () => ({}) as Any,
+        getTaskById: async (id: string) => tasks.get(id),
+        createChildTask,
+        cancelTask: async () => {},
+      },
+      repos,
+    );
+    for (const [index, role] of ["implementer", "verifier", "implementer"].entries()) {
+      await orch.tickRun(run.id, "dispatch");
+      expect(createChildTask).toHaveBeenCalledTimes(index + 1);
+      const call = createChildTask.mock.calls[index][0];
+      expect(call.workerRole).toBe(role);
+      expect(call.agentConfig.retainMemory).toBe(false);
+      expect(call.prompt).not.toContain("TASK FOR INDEPENDENT ANALYSIS");
+      expect(call.prompt).toContain("Complete only this checklist item");
+      expect(call.prompt.indexOf("YOUR CHECKLIST ITEM")).toBeLessThan(
+        call.prompt.indexOf("ROOT TASK CONTEXT"),
+      );
+      if (index > 0) expect(call.prompt).toContain("Actual files: kickoff-planner/index.html");
+      if (index === 2) {
+        // The reviewer's read-only account is evidence for integration, not its constraint.
+        expect(call.prompt).toContain("This read-only review did not execute tests.");
+        expect(call.prompt).toContain("=== END OF PREDECESSOR RESULTS ===");
+        expect(call.prompt).toContain("You are authorized to edit the deliverable files");
+        expect(detectReadOnlyConstraint(call.prompt)).toBe(false);
+        expect(detectReadOnlyConstraint(call.prompt.toLowerCase())).toBe(false);
+      }
+      await orch.tickRun(run.id, "still-running");
+      expect(createChildTask).toHaveBeenCalledTimes(index + 1);
+      const item = repos.itemRepo.listByRun(run.id).find((item) => item.status === "in_progress")!;
+      tasks.get(item.sourceTaskId!)!.status = "completed";
+      repos.itemRepo.update({
+        id: item.id,
+        status: "done",
+        resultSummary:
+          index === 1
+            ? "VERDICT: PARTIAL\nActual files: kickoff-planner/index.html. This read-only review did not execute tests. No files were created, modified, or deleted during this review."
+            : "Actual files: kickoff-planner/index.html; verified locally",
+      });
+    }
+  });
+
   it("spawns with team defaults and sets bypassQueue=false", async () => {
     mockProfileRouting(false);
 
@@ -1026,6 +1127,133 @@ describe("AgentTeamOrchestrator", () => {
       for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
     },
   );
+
+  describe("execution-team synthesis", () => {
+    function makeExecutionSynthesis(suffix: string) {
+      const fixture = makeSynthesisFixture(`exec-${suffix}`);
+      fixture.rootTask.agentConfig = { executionMode: "execute", collaborativeMode: true };
+      const lanes: AgentTeamItem[] = [
+        [
+          "Build the requested deliverable",
+          "Created kickoff-planner/index.html; focus fix blocked.",
+        ],
+        [
+          "Review the completed deliverable",
+          "VERDICT: PARTIAL. The focus fix is present in app.js.",
+        ],
+        ["Integrate review findings", "Updated DESIGN.md; announcement issue remains open."],
+      ].map(([title, resultSummary], index) => ({
+        ...fixture.item,
+        id: `${fixture.item.id}-${index}`,
+        title,
+        resultSummary,
+        sortOrder: index + 1,
+      }));
+      return { ...fixture, lanes };
+    }
+
+    async function makeOrchestrator(
+      fixture: ReturnType<typeof makeExecutionSynthesis>,
+      graph?: { append: ReturnType<typeof vi.fn>; nodes: Any[] },
+    ) {
+      const repos = makeRepos({ team: fixture.team, run: fixture.run, items: fixture.lanes });
+      const { AgentTeamOrchestrator } = await import("../AgentTeamOrchestrator");
+      const graphRun = { id: `graph-${fixture.run.id}`, status: "running" };
+      const orch = new AgentTeamOrchestrator(
+        {
+          getDatabase: () => ({}) as Any,
+          getTaskById: async (taskId: string) => fixture.tasksById.get(taskId),
+          createChildTask: fixture.createChildTask,
+          cancelTask: async () => {},
+          ...(graph
+            ? {
+                appendOrchestrationGraphNodes: graph.append as Any,
+                findOrchestrationGraphByTeamRunId: (async () => ({
+                  run: graphRun,
+                  nodes: graph.nodes,
+                  edges: [],
+                })) as Any,
+              }
+            : {}),
+        },
+        repos,
+      );
+      vi.spyOn((orch as Any).thoughtRepo, "listByRun").mockReturnValue([]);
+      return orch;
+    }
+
+    it("embeds ordered lane results when no graph dependency supplies them", async () => {
+      const fixture = makeExecutionSynthesis("direct");
+      const orch = await makeOrchestrator(fixture);
+
+      await (orch as Any).transitionToSynthesizePhase(
+        fixture.run,
+        fixture.team,
+        fixture.rootTask,
+        fixture.lanes,
+      );
+
+      const prompt = String(fixture.createChildTask.mock.calls[0][0].prompt);
+      expect(prompt).toContain("=== TEAM MEMBER RESULTS (COMPLETE) ===");
+      expect(prompt).toContain("The focus fix is present in app.js.");
+      expect(prompt).toContain("announcement issue remains open");
+      expect(prompt).toContain("Later work items supersede earlier claims");
+      expect(prompt).not.toContain("independent analysis");
+      expect(teamSynthesisPromptHasMemberOutput(prompt)).toBe(true);
+      for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+    });
+
+    it("relies on graph dependency outputs instead of duplicating lane results", async () => {
+      const fixture = makeExecutionSynthesis("graph");
+      const nodes = fixture.lanes.map((lane, index) => ({
+        id: `node-${index}`,
+        teamRunId: fixture.run.id,
+        teamItemId: lane.id,
+      }));
+      const append = vi.fn(async (input: Any) => ({
+        run: { id: "graph", status: "running" },
+        nodes: [
+          ...nodes,
+          { id: "node-synthesis", teamItemId: input.nodes[0].key, status: "pending" },
+        ],
+        edges: [],
+      }));
+      const orch = await makeOrchestrator(fixture, { append, nodes });
+
+      await (orch as Any).transitionToSynthesizePhase(
+        fixture.run,
+        fixture.team,
+        fixture.rootTask,
+        fixture.lanes,
+      );
+
+      const appended = append.mock.calls[0][0] as Any;
+      expect(appended.edges).toHaveLength(3);
+      const prompt = String(appended.nodes[0].prompt);
+      expect(prompt).not.toContain("=== TEAM MEMBER RESULTS");
+      expect(prompt).toContain("ALL work item results are provided IN FULL in this prompt");
+      expect(fixture.createChildTask).not.toHaveBeenCalled();
+      for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+    });
+
+    it("keeps lane results in the compacted retry", async () => {
+      const fixture = makeExecutionSynthesis("compact");
+      const orch = await makeOrchestrator(fixture);
+
+      await (orch as Any).transitionToSynthesizePhaseCompact(
+        fixture.run,
+        fixture.team,
+        fixture.rootTask,
+        fixture.lanes,
+      );
+
+      const prompt = String(fixture.createChildTask.mock.calls[0][0].prompt);
+      expect(prompt).toContain("=== TEAM MEMBER RESULTS (COMPACTED) ===");
+      expect(prompt).toContain("The focus fix is present in app.js.");
+      expect(prompt).not.toContain("No team member analyses were captured.");
+      for (const timer of (orch as Any).synthesisWatchdogTimers.values()) clearTimeout(timer);
+    });
+  });
 
   it("marks synthesis blocked without spawning when the graph run was cancelled", async () => {
     const { team, run, item, rootTask, tasksById, createChildTask } =

@@ -3140,6 +3140,43 @@ a,
   text-wrap: pretty;
 }
 
+/* Exact content an approval covers (for example an AppleScript), shown verbatim. */
+.input-request-preview {
+  margin: 0 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.input-request-preview-label {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.input-request-preview-text {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--color-text-primary);
+}
+
+.input-request-preview-note {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+}
+
 .input-request-options {
   display: flex;
   flex-direction: column;

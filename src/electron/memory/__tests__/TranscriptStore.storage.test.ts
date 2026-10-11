@@ -61,6 +61,13 @@ async function writeLegacySpan(
 }
 
 async function indexMessage(workspaceId: string, taskId: string, message: string): Promise<void> {
+  // The live capture policy indexes only tasks the database knows in that workspace.
+  databases
+    .at(-1)
+    ?.prepare(
+      `INSERT OR IGNORE INTO tasks (id, workspace_id, status, created_at) VALUES (?, ?, 'completed', ?)`,
+    )
+    .run(taskId, workspaceId, Date.now());
   DurableContextService.indexEvent({
     workspaceId,
     taskId,
@@ -252,6 +259,8 @@ describeWithNativeDb("TranscriptStore deletion and retention", () => {
       await indexMessage("w1", taskId, taskId);
       await writeLegacySpan(db, workspacePath, taskId, taskId);
     }
+    // Deleted after its events were indexed.
+    db.prepare(`DELETE FROM tasks WHERE id = 'deleted-task'`).run();
     // A span file for a task this database never knew about, recently written.
     await fs.writeFile(spanFile(workspacePath, "foreign-task"), "{}\n");
     // A stale lock with no matching task.

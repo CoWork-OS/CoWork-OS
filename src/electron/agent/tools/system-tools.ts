@@ -1084,11 +1084,13 @@ export class SystemTools {
     const approved = await this.daemon.requestApproval(
       this.taskId,
       "run_applescript",
-      "Run AppleScript",
+      "Run the AppleScript shown below.",
       {
         script: normalizedScript,
         scriptLength: normalizedScript.length,
         normalized: modified,
+        // The card shows exactly what will run, so the user can review it before approving.
+        approvalPreview: { label: "AppleScript", text: normalizedScript },
       },
     );
 

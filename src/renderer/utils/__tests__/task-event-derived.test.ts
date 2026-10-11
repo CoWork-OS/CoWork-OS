@@ -6,6 +6,7 @@ import {
 } from "../../perf-fixtures/task-surface-failure-storm.fixture";
 import {
   deriveToolUsage,
+  scopeEventsToTask,
   deriveSharedTaskEventUiState,
   reconcileBotConversationSharedTaskEventUi,
 } from "../task-event-derived";
@@ -28,6 +29,22 @@ function makeEvent(
 }
 
 describe("deriveToolUsage", () => {
+  it("drops a previous session's deferred commands immediately on navigation", () => {
+    const previous = makeEvent("pipeline-command", 1, "tool_call", {
+      tool: "run_command",
+      input: { command: "python3 build_pipeline.py" },
+    });
+    const next = makeEvent(
+      "onboarding-command",
+      2,
+      "tool_call",
+      { tool: "create_document" },
+      { taskId: "task-2" },
+    );
+    expect(scopeEventsToTask([previous, next], "task-2")).toEqual([next]);
+    expect(scopeEventsToTask([previous], "task-2")).toEqual([]);
+    expect(scopeEventsToTask([previous], null)).toEqual([]);
+  });
   it("counts each command execution once despite its shell detail and duplicate receipt", () => {
     const events = [
       makeEvent("call-1", 1, "tool_call", {

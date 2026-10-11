@@ -133,6 +133,15 @@ describe("TaskExecutor command execution requirement detection", () => {
       (TaskExecutor as Any).prototype.getApprovalBlockMessage.call(
         fakeThis,
         "run_command",
+        "Command execution was not approved. The request may have been denied by policy, unavailable in this task configuration, expired, or declined by the user; inspect the authorization event for the reason.",
+      ),
+    ).toBe(
+      "Approval for the shell command was denied, so it was not executed. Approve it and retry if you want the action to run.",
+    );
+    expect(
+      (TaskExecutor as Any).prototype.getApprovalBlockMessage.call(
+        fakeThis,
+        "run_command",
         "approval request timed out",
       ),
     ).toBe("Approval for the shell command timed out before it could run. No action was taken.");

@@ -4,6 +4,21 @@ import { TaskStrategyService } from "../TaskStrategyService";
 import { makeRoute } from "./task-strategy-test-fixtures";
 
 describe("TaskStrategyService execution-mode routing", () => {
+  it("preserves an explicit independent-agent requirement in research strategy", () => {
+    const prompt =
+      "Prepare a decision brief. Have separate agents investigate each option using current official sources, then reconcile their findings.";
+    const strategy = TaskStrategyService.derive(
+      IntentRouter.route("Decision brief", prompt),
+      undefined,
+      { prompt },
+    );
+    expect(strategy.snapshot.requiresDelegation).toBe(true);
+    expect(
+      TaskStrategyService.hasExplicitDelegationRequest(
+        "Do not spawn agents. Research this yourself.",
+      ),
+    ).toBe(false);
+  });
   it.each([
     "Could you recommend an approach after you search the source records?",
     "How should I approach this issue? Find supporting precedents in the source records.",

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   observe: vi.fn(),
   observeFeedback: vi.fn(),
   capture: vi.fn(async () => null),
+  canCapture: vi.fn(() => true),
 }));
 
 vi.mock("../../awareness/AwarenessService", () => ({
@@ -23,6 +24,9 @@ vi.mock("../../memory/AdaptiveStyleEngine", () => ({
 }));
 vi.mock("../../memory/MemoryService", () => ({
   MemoryService: { capture: mocks.capture },
+}));
+vi.mock("../../memory/DurableContextService", () => ({
+  DurableContextService: { canCapture: mocks.canCapture },
 }));
 
 import { AgentDaemon } from "../daemon";
@@ -46,7 +50,10 @@ const capture = (daemon: Any, type: string, payload: Record<string, unknown>) =>
   (AgentDaemon.prototype as Any).captureToMemory.call(daemon, "task-1", type, payload);
 
 describe("captureToMemory and gateway senders (SEC-16)", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.canCapture.mockReturnValue(true);
+  });
 
   it("learns from the owner's own messages", async () => {
     await capture(daemonFor({}), "user_message", {
@@ -59,6 +66,13 @@ describe("captureToMemory and gateway senders (SEC-16)", () => {
     );
     expect(mocks.captureConversation).toHaveBeenCalledTimes(2);
     expect(mocks.observe).toHaveBeenCalledTimes(2);
+  });
+
+  it("captures nothing when the live memory policy refuses capture", async () => {
+    mocks.canCapture.mockReturnValue(false);
+    await capture(daemonFor({}), "user_message", { message: "Call me Sam" });
+    expect(mocks.captureConversation).not.toHaveBeenCalled();
+    expect(mocks.observe).not.toHaveBeenCalled();
   });
 
   it("ignores a third party's DM for the profile and style", async () => {

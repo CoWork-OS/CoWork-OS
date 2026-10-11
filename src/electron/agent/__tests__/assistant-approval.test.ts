@@ -189,3 +189,33 @@ it("offers a chat-scoped consent for read-only web access in a bot chat", () => 
     buildAssistantApprovalRequest("network_access", "x", {}).questions[0].options[1].label,
   ).toBe("Allow once");
 });
+
+describe("approval content preview", () => {
+  const script = 'tell application "Pages"\r\n  count of pages of front document\r\nend tell';
+
+  it("shows the exact script, line for line, on the approval question", () => {
+    const question = buildAssistantApprovalRequest("run_applescript", "Run AppleScript", {
+      script,
+      approvalPreview: { label: "AppleScript", text: script },
+    }).questions[0];
+    expect(question.preview).toEqual({
+      label: "AppleScript",
+      text: 'tell application "Pages"\n  count of pages of front document\nend tell',
+    });
+  });
+
+  it("reports the length it leaves out of a very long script", () => {
+    const long = "x".repeat(20_050);
+    const question = buildAssistantApprovalRequest("run_applescript", "Run AppleScript", {
+      approvalPreview: { label: "AppleScript", text: long },
+    }).questions[0];
+    expect(question.preview?.text).toHaveLength(20_000);
+    expect(question.preview?.omittedChars).toBe(50);
+  });
+
+  it("adds no preview when the tool supplies none", () => {
+    const question = buildAssistantApprovalRequest("run_command", "Run", { command: "ls" })
+      .questions[0];
+    expect(question.preview).toBeUndefined();
+  });
+});

@@ -41,7 +41,13 @@ import { spawn } from "node:child_process";
 import { createSandbox } from "../../sandbox/sandbox-factory";
 import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
-import { ShellTools, LONG_RUNNING_COMMAND_HINT, looksLikeLongRunningCommand } from "../shell-tools";
+import {
+  ShellTools,
+  LONG_RUNNING_COMMAND_HINT,
+  SHELL_APPLESCRIPT_HINT,
+  looksLikeLongRunningCommand,
+  withShellAppleScriptHint,
+} from "../shell-tools";
 import {
   MAX_BACKGROUND_PROCESSES_PER_TASK,
   getBackgroundProcessManager,
@@ -239,7 +245,7 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     const { shellTools, daemon, taskId } = newShellTools(createDaemon(false));
 
     await expect(shellTools.startBackgroundCommand(TICKER, { cwd: workspacePath })).rejects.toThrow(
-      "User denied command execution",
+      "Command execution was not approved",
     );
 
     expect(daemon.requestApproval).toHaveBeenCalledWith(
@@ -258,7 +264,7 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     const { shellTools, taskId } = newShellTools(daemon);
 
     await expect(shellTools.startBackgroundCommand(TICKER, { cwd: workspacePath })).rejects.toThrow(
-      "User denied command execution",
+      "Command execution was not approved",
     );
     expect(authorizeToolAction).toHaveBeenCalledWith(
       taskId,
@@ -419,7 +425,7 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     const tools = new ShellTools(workspace, createDaemon(false) as unknown as AgentDaemon, taskId);
     await expect(
       tools.startBackgroundCommand("python3 worker.py", { startupWaitMs: 0 }),
-    ).rejects.toThrow("User denied command execution");
+    ).rejects.toThrow("Command execution was not approved");
     expect(getBackgroundProcessManager().list(taskId)).toEqual([]);
   });
 
@@ -534,5 +540,24 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     ])("classifies %s as long-running=%s", (command, expected) => {
       expect(looksLikeLongRunningCommand(command)).toBe(expected);
     });
+  });
+});
+
+describe("withShellAppleScriptHint", () => {
+  const failed = { success: false, stdout: "", stderr: "syntax error (-2741)", exitCode: 1 };
+
+  it("points a failed shell osascript at run_applescript", () => {
+    const command = `osascript -e 'tell application "Pages"' -e 'end tell'`;
+    expect(withShellAppleScriptHint(command, failed as Any).hint).toBe(SHELL_APPLESCRIPT_HINT);
+    expect(withShellAppleScriptHint(`command -v brew; osascript -e 'x'`, failed as Any).hint).toBe(
+      SHELL_APPLESCRIPT_HINT,
+    );
+  });
+
+  it("leaves successful and unrelated commands alone", () => {
+    expect(
+      withShellAppleScriptHint("osascript -e 'x'", { ...failed, success: true } as Any).hint,
+    ).toBeUndefined();
+    expect(withShellAppleScriptHint("node build.js", failed as Any).hint).toBeUndefined();
   });
 });

@@ -67,7 +67,7 @@ function run(db: Database.Database, sql: string, ...params: unknown[]): number {
 export function purgeTaskDerivedRows(
   db: Database.Database,
   taskId: string,
-  options: { purgeDerivedMemory?: boolean } = {},
+  options: { purgeDerivedMemory?: boolean; preserveExplicitSaves?: boolean } = {},
 ): TaskDerivedPurgeCounts {
   const purgeDerivedMemory = options.purgeDerivedMemory === true;
   const counts: TaskDerivedPurgeCounts = {
@@ -86,12 +86,13 @@ export function purgeTaskDerivedRows(
   if (purgeDerivedMemory && tableExists(db, "memories")) {
     const hasObservationMetadata = tableExists(db, "memory_observation_metadata");
     const keptOrigins = TASK_DELETE_KEPT_ORIGINS.map((origin) => `'${origin}'`).join(", ");
-    const keptClause = hasObservationMetadata
-      ? `AND NOT EXISTS (
+    const keptClause =
+      hasObservationMetadata && options.preserveExplicitSaves !== false
+        ? `AND NOT EXISTS (
            SELECT 1 FROM memory_observation_metadata kept
            WHERE kept.memory_id = memories.id AND kept.origin IN (${keptOrigins})
          )`
-      : "";
+        : "";
     const derivedIds = `SELECT id FROM memories WHERE task_id = ? ${keptClause}`;
     if (tableExists(db, "memory_embeddings")) {
       run(db, `DELETE FROM memory_embeddings WHERE memory_id IN (${derivedIds})`, taskId);
@@ -218,7 +219,12 @@ export function purgeTaskDerivedRows(
 
   // memory_items: task-scoped items always; with purgeDerivedMemory also items inferred from
   // the task. User-stated and curated items keep living with their task link cleared.
-  counts.memoryItems = purgeTaskMemoryItems(db, taskId, purgeDerivedMemory);
+  counts.memoryItems = purgeTaskMemoryItems(
+    db,
+    taskId,
+    purgeDerivedMemory,
+    options.preserveExplicitSaves !== false,
+  );
 
   // LIFE-4: these columns reference tasks(id) without ON DELETE on older databases.
   if (tableExists(db, "dreaming_runs")) {
@@ -363,6 +369,159 @@ export function purgeWorkspaceMemoryRows(
     }
   })();
   return counts;
+}
+
+export interface ClearScopeTask {
+  id: string;
+  title: string;
+  parentTaskId: string | null;
+}
+
+/** Every session task in the workspace, newest first: what a workspace clear affects. */
+export function listWorkspaceClearScope(
+  db: Database.Database,
+  workspaceId: string,
+): ClearScopeTask[] {
+  return db
+    .prepare(
+      "SELECT id, title, parent_task_id AS parentTaskId FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC",
+    )
+    .all(workspaceId) as ClearScopeTask[];
+}
+
+export interface SessionMemoryRowPurge {
+  /** The session root and its descendants, with each task's workspace folder. */
+  tasks: Array<{ id: string; workspacePath: string | null }>;
+  counts: Pick<
+    TaskDerivedPurgeCounts,
+    | "memories"
+    | "durableContext"
+    | "knowledgeGraph"
+    | "playbookEvidence"
+    | "playbookEntries"
+    | "suggestions"
+    | "memoryItems"
+  > &
+    Pick<WorkspaceMemoryRowPurgeCounts, "curatedEntries" | "dreaming" | "pendingMemoryWrites">;
+}
+
+/**
+ * Clear the memory rows of one session family (the task and its descendants) in one
+ * transaction, and turn off capture for each of those tasks so a resumed session does not
+ * recreate them. Task rows, task events and deliverables are kept. Returns null when the
+ * task does not belong to the workspace.
+ */
+export function purgeSessionMemoryRows(
+  db: Database.Database,
+  workspaceId: string,
+  taskId: string,
+  invalidateTaskRowReads: (db: Database.Database) => void,
+): SessionMemoryRowPurge | null {
+  const root = db
+    .prepare("SELECT id FROM tasks WHERE id = ? AND workspace_id = ?")
+    .get(taskId, workspaceId);
+  if (!root) return null;
+  const family = db
+    .prepare(
+      `WITH RECURSIVE family(id) AS (
+        SELECT id FROM tasks WHERE id = ?
+        UNION SELECT child.id FROM tasks child JOIN family ON child.parent_task_id = family.id
+      )
+      SELECT tasks.id, tasks.agent_config AS agentConfig, workspaces.path AS workspacePath
+      FROM tasks JOIN family ON tasks.id = family.id
+      LEFT JOIN workspaces ON workspaces.id = tasks.workspace_id`,
+    )
+    .all(taskId) as Array<{ id: string; agentConfig: string | null; workspacePath: string | null }>;
+  const counts: SessionMemoryRowPurge["counts"] = {
+    memories: 0,
+    curatedEntries: 0,
+    durableContext: 0,
+    knowledgeGraph: 0,
+    dreaming: 0,
+    playbookEvidence: 0,
+    playbookEntries: 0,
+    suggestions: 0,
+    memoryItems: 0,
+    pendingMemoryWrites: 0,
+  };
+  db.transaction(() => {
+    for (const task of family) {
+      let config: Record<string, unknown> = {};
+      try {
+        config = JSON.parse(task.agentConfig || "{}");
+      } catch {
+        // Exclusion still persists for malformed legacy configuration.
+      }
+      const excluded = JSON.stringify({ ...config, retainMemory: false });
+      db.prepare("UPDATE tasks SET agent_config = ? WHERE id = ?").run(excluded, task.id);
+      if (tableExists(db, "pending_memory_writes")) {
+        counts.pendingMemoryWrites += run(
+          db,
+          "DELETE FROM pending_memory_writes WHERE task_id = ?",
+          task.id,
+        );
+      }
+      if (tableExists(db, "curated_memory_entries")) {
+        counts.curatedEntries += run(
+          db,
+          "DELETE FROM curated_memory_entries WHERE task_id = ?",
+          task.id,
+        );
+      }
+      if (tableExists(db, "dreaming_runs")) {
+        if (tableExists(db, "dreaming_candidates")) {
+          counts.dreaming += run(
+            db,
+            "DELETE FROM dreaming_candidates WHERE run_id IN (SELECT id FROM dreaming_runs WHERE source_task_id = ?)",
+            task.id,
+          );
+        }
+        counts.dreaming += run(db, "DELETE FROM dreaming_runs WHERE source_task_id = ?", task.id);
+      }
+      const removed = purgeTaskDerivedRows(db, task.id, {
+        purgeDerivedMemory: true,
+        preserveExplicitSaves: false,
+      });
+      for (const field of [
+        "memories",
+        "durableContext",
+        "knowledgeGraph",
+        "playbookEvidence",
+        "playbookEntries",
+        "suggestions",
+        "memoryItems",
+      ] as const) {
+        counts[field] += removed[field];
+      }
+    }
+  })();
+  invalidateTaskRowReads(db);
+  return {
+    tasks: family.map(({ id, workspacePath }) => ({ id, workspacePath })),
+    counts,
+  };
+}
+
+/** `listWorkspaceClearScope` on the host connection; throws when memory is unavailable. */
+export async function listWorkspaceClearScopeOnHost(
+  workspaceId: string,
+): Promise<ClearScopeTask[]> {
+  const { MemoryService } = await import("./MemoryService");
+  const db = MemoryService.getDatabase();
+  if (!db) throw new Error("Memory database is unavailable; deletion scope cannot be determined.");
+  return listWorkspaceClearScope(db, workspaceId);
+}
+
+/** `purgeSessionMemoryRows` on the host connection; throws when memory is unavailable. */
+export async function purgeSessionMemoryRowsOnHost(
+  workspaceId: string,
+  taskId: string,
+): Promise<SessionMemoryRowPurge | null> {
+  const { MemoryService } = await import("./MemoryService");
+  const { invalidateTaskRowReads } = await import("../database/repositories");
+  const db = MemoryService.getDatabase();
+  if (!db) throw new Error("Memory database is unavailable.");
+  return purgeSessionMemoryRows(db, workspaceId, taskId, invalidateTaskRowReads);
 }
 
 /**

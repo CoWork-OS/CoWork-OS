@@ -319,6 +319,11 @@ describe("memory domain on the host and in the database worker", () => {
       suppressed: [...(await MemoryObservationService.suppressedIds(["mem-plan", "mem-old"]))],
     };
 
+    // The live capture policy records history only for tasks the database knows.
+    db.prepare(
+      `INSERT INTO tasks (id, title, prompt, status, workspace_id, created_at, updated_at)
+       VALUES ('task-1', 'Release', 'Where is the release checklist?', 'completed', 'ws', ?, ?)`,
+    ).run(start, start);
     DurableContextService.setDatabaseForTests(db);
     await DurableContextService.recordHistory({
       workspaceId: "ws",

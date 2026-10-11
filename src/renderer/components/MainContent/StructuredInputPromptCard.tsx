@@ -340,6 +340,22 @@ export function StructuredInputPromptCard({
           onResponsibilityActionReviewStateChange={onResponsibilityActionReviewStateChange}
         />
         <div className="input-request-title">{activeQuestion.question}</div>
+        {activeQuestion.preview && (
+          <figure className="input-request-preview">
+            <figcaption className="input-request-preview-label">
+              {activeQuestion.preview.label}
+            </figcaption>
+            <pre className="input-request-preview-text" tabIndex={0}>
+              <code>{activeQuestion.preview.text}</code>
+            </pre>
+            {activeQuestion.preview.omittedChars ? (
+              <p className="input-request-preview-note">
+                {activeQuestion.preview.omittedChars.toLocaleString()} more characters are not
+                shown. Deny if you need to see all of it.
+              </p>
+            ) : null}
+          </figure>
+        )}
         <div
           className="input-request-options"
           role="radiogroup"

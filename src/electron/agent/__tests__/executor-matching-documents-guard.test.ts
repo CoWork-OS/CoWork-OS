@@ -297,6 +297,19 @@ describe("matching document helpers", () => {
     expect(requestsMatchingDocumentFormats("Build budget.xlsx and a matching budget.pdf")).toBe(
       false,
     );
+    // One handout delivered in two formats with a shared requirement (live onboarding run).
+    const handout =
+      "Deliver an editable Word document and a PDF, both exactly two pages, in a folder named project-manager-onboarding.";
+    expect(requestsMatchingDocumentFormats(handout)).toBe(true);
+    expect(
+      resolveMatchingDocumentSiblings(handout, {
+        filename: "project-manager-onboarding/handout.pdf",
+        format: "pdf",
+      }),
+    ).toEqual([{ filename: "project-manager-onboarding/handout.docx", format: "docx" }]);
+    expect(
+      requestsMatchingDocumentFormats("Send a Word document and a spreadsheet, both by Friday."),
+    ).toBe(false);
   });
 
   it("derives the paired file from the prompt or the target name", () => {

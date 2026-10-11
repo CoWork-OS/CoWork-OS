@@ -10155,7 +10155,13 @@ function MainContentComponent({
   const hasActiveStructuredInputRequest = Boolean(
     task &&
     inputRequest &&
-    inputRequest.taskId === task.id &&
+    (inputRequest.taskId === task.id ||
+      childTasks.some(
+        (child) =>
+          child.id === inputRequest.taskId &&
+          child.parentTaskId === task.id &&
+          child.agentConfig?.teamWorkItemLane === true,
+      )) &&
     onSubmitInputRequest &&
     onDismissInputRequest,
   );

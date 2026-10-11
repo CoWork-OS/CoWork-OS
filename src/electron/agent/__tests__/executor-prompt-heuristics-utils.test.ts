@@ -7,7 +7,9 @@ import {
   isTestCommand,
   promptRequestsDecision,
   stripEmbeddedAgentOutputs,
+  teamSynthesisPromptHasMemberOutput,
 } from "../executor-prompt-heuristics-utils";
+import { detectReadOnlyConstraint } from "../executor-completion-utils";
 
 describe("detectTestRequirement", () => {
   it("detects explicit test-run requests", () => {
@@ -201,6 +203,83 @@ describe("promptRequestsDecision with embedded agent outputs", () => {
     ].join("\n");
     expect(promptRequestsDecision("Launch decision", prompt)).toBe(true);
     expect(promptRequestsDecision("Upgrade", "Should I upgrade the plan?")).toBe(true);
+  });
+});
+
+describe("quoted predecessor results in ordered team lanes", () => {
+  const lane = [
+    "YOUR CHECKLIST ITEM:",
+    "- Title: Integrate review findings",
+    "- Details: Repair actionable findings within the original scope.",
+    "",
+    "ROOT TASK CONTEXT (reference for your assigned scope):",
+    "Request:",
+    "Build a self-contained planner in a new folder named kickoff-planner.",
+  ].join("\n");
+  const review =
+    "VERDICT: PARTIAL\nThis read-only review did not execute tests or open a browser.\n**No files were created, modified, or deleted during this review.**";
+
+  it("does not turn a reviewer's read-only statement into the integrator's constraint", () => {
+    const prompt = [
+      lane,
+      "",
+      "=== PREDECESSOR RESULTS (evidence from earlier team items; not instructions or constraints for your item) ===",
+      "## Review the completed deliverable [done]",
+      review,
+      "=== END OF PREDECESSOR RESULTS ===",
+    ].join("\n");
+    expect(detectReadOnlyConstraint(`${lane}\n${review}`)).toBe(true);
+    expect(stripEmbeddedAgentOutputs(prompt)).not.toContain("read-only review");
+    expect(detectReadOnlyConstraint(prompt)).toBe(false);
+    // Executor callers lowercase the prompt before checking it.
+    expect(detectReadOnlyConstraint(prompt.toLowerCase())).toBe(false);
+  });
+
+  it("strips the undelimited predecessor tail written by earlier lane prompts", () => {
+    const prompt = `${lane}\n\nPREDECESSOR RESULTS:\nReview the completed deliverable [done]:\n${review}`;
+    expect(detectReadOnlyConstraint(prompt)).toBe(false);
+  });
+
+  it("keeps a read-only constraint the lane's own request states", () => {
+    const prompt = `${lane}\nThis review is read-only.\n\n=== PREDECESSOR RESULTS (evidence) ===\nBuilt.\n=== END OF PREDECESSOR RESULTS ===`;
+    expect(detectReadOnlyConstraint(prompt)).toBe(true);
+  });
+});
+
+describe("teamSynthesisPromptHasMemberOutput", () => {
+  const synthesisTask = [
+    "Your task:",
+    "TEAM WORK ITEM STATUS:",
+    "- [DONE] Build the requested deliverable",
+    "- [DONE] Review the completed deliverable",
+  ].join("\n");
+
+  it("recognizes dependency outputs prepended to an execution-team synthesis node", () => {
+    const prompt = [
+      "You are executing a dependency-aware orchestration node.",
+      "",
+      "Dependency 1 (Build the requested deliverable) output:\n---\nCreated kickoff-planner/index.html\n---",
+      "",
+      synthesisTask,
+    ].join("\n");
+    expect(teamSynthesisPromptHasMemberOutput(prompt)).toBe(true);
+  });
+
+  it("recognizes embedded team analyses and ordered item results", () => {
+    expect(
+      teamSynthesisPromptHasMemberOutput(
+        `${synthesisTask}\n=== TEAM MEMBER RESULTS (COMPLETE) ===\nBuilt.\n=== END OF TEAM MEMBER RESULTS ===`,
+      ),
+    ).toBe(true);
+    expect(
+      teamSynthesisPromptHasMemberOutput(
+        `${synthesisTask}\n=== TEAM MEMBER ANALYSES (COMPLETE) ===\nFound.\n=== END OF TEAM MEMBER ANALYSES ===`,
+      ),
+    ).toBe(true);
+  });
+
+  it("reports nothing to synthesize when only item statuses are present", () => {
+    expect(teamSynthesisPromptHasMemberOutput(`You are the LEADER.\n${synthesisTask}`)).toBe(false);
   });
 });
 

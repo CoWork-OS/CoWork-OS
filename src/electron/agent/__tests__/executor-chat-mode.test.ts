@@ -1585,6 +1585,90 @@ describe("TaskExecutor chat mode", () => {
     ]);
     expect(executor.finalizeTaskBestEffort).toHaveBeenCalledWith("summary");
   });
+
+  function makeSynthesisExecutor() {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-team-synthesis",
+      title: "Synthesis",
+      prompt: "",
+      parentTaskId: "parent-1",
+      createdAt: Date.now(),
+      agentType: "sub",
+      agentConfig: { executionMode: "chat", conversationMode: "chat", maxTokens: 16000 },
+    };
+    executor.daemon = { updateTaskStatus: vi.fn(), updateTask: vi.fn() };
+    executor.emitEvent = vi.fn();
+    executor.getRoleContextPrompt = vi.fn().mockReturnValue("");
+    executor.buildUserContent = vi.fn().mockResolvedValue("Synthesis prompt");
+    executor.runTextTurnKernel = vi.fn().mockResolvedValue({
+      assistantText: "Final handoff.",
+      messages: [],
+    });
+    executor.updateConversationHistory = vi.fn();
+    executor.buildResultSummary = vi.fn().mockReturnValue("");
+    executor.finalizeTaskBestEffort = vi.fn();
+    return executor;
+  }
+
+  const synthesisTask = [
+    "Your task:",
+    'You are the LEADER of team "Delivery".',
+    "TEAM WORK ITEM STATUS:",
+    "- [DONE] Build the requested deliverable",
+    "- [DONE] Review the completed deliverable",
+    "- [DONE] Integrate review findings",
+  ].join("\n");
+
+  it("synthesizes execution-team dependency outputs instead of reporting no analyses", async () => {
+    const executor = makeSynthesisExecutor();
+    const prompt = [
+      "You are executing a dependency-aware orchestration node.",
+      "",
+      "Dependency 1 (Build the requested deliverable) output:\n---\nCreated kickoff-planner/index.html.\n---",
+      "Dependency 2 (Review the completed deliverable) output:\n---\nVERDICT: PARTIAL\n---",
+      "",
+      synthesisTask,
+      "x".repeat(2000),
+    ].join("\n");
+
+    await (TaskExecutor as Any).prototype.handleSubAgentChatMode.call(executor, prompt);
+
+    expect(executor.runTextTurnKernel).toHaveBeenCalledTimes(1);
+    expect(executor.emitEvent).toHaveBeenCalledWith("assistant_message", {
+      message: "Final handoff.",
+    });
+  });
+
+  it.each([
+    ["hands a child synthesis answer to the parent", "parent-1", "Final handoff."],
+    ["keeps no summary for an interactive chat turn", undefined, "Chat turn completed"],
+  ])("%s when a chat task finishes", (_label, parentTaskId, expected) => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "chat-task", parentTaskId, agentConfig: { executionMode: "chat" } };
+    executor.getEffectiveExecutionMode = () => "chat";
+    executor.stopProgressJournal = vi.fn();
+    executor.saveConversationSnapshot = vi.fn();
+    executor.applyRuntimeTaskProjectionToTask = () => ({});
+    executor.closeAcpxRuntimeSession = vi.fn().mockResolvedValue(undefined);
+    executor.daemon = { completeTask: vi.fn().mockResolvedValue(undefined) };
+
+    (TaskExecutor as Any).prototype.finalizeTaskBestEffort.call(executor, "Final handoff.");
+
+    expect(executor.daemon.completeTask).toHaveBeenCalledWith("chat-task", expected, {});
+    expect(executor.task.resultSummary).toBe(parentTaskId ? "Final handoff." : undefined);
+  });
+
+  it("skips the model only when a team synthesis has no member output", async () => {
+    const executor = makeSynthesisExecutor();
+
+    await (TaskExecutor as Any).prototype.handleSubAgentChatMode.call(executor, synthesisTask);
+
+    expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
+    expect(executor.emitEvent).toHaveBeenCalledWith("assistant_message", {
+      message: expect.stringContaining("did not produce any analyses"),
+    });
+  });
 });
 
 describe("TaskExecutor answer-first workspace grounding", () => {

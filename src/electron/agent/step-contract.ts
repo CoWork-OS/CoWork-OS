@@ -109,7 +109,9 @@ export function extractArtifactExtensionsFromText(text: string): string[] {
   const matches = normalized.match(CANONICAL_ARTIFACT_EXTENSION_REGEX_GLOBAL);
   if (matches) {
     for (const token of matches) {
-      const extension = normalizeWithLeadingDot(path.extname(token));
+      // The regex returns the extension token itself (".html"), not a path.
+      // path.extname(".html") is empty because Node treats it as a dotfile.
+      const extension = normalizeWithLeadingDot(token);
       if (extension && CANONICAL_ARTIFACT_EXTENSION_SET.has(extension.slice(1))) {
         extensions.add(extension);
       }
@@ -121,7 +123,21 @@ export function extractArtifactExtensionsFromText(text: string): string[] {
   if (/\bdocx\b|\bword document\b/.test(normalized)) extensions.add(".docx");
   if (/\bcsv\b/.test(normalized)) extensions.add(".csv");
   if (/\bjsonl\b/.test(normalized)) extensions.add(".jsonl");
-  if (/\bjson\b/.test(normalized)) extensions.add(".json");
+  // App capabilities and checks do not request a separately created JSON file.
+  // Explicit .json paths were collected above and remain authoritative.
+  // Neither does JSON described as data the app handles ("valid JSON round trips",
+  // "exported non-ASCII JSON satisfies the import limit").
+  const jsonOutputText = normalized
+    .replace(/\b(?:export\s*(?:\/|and)\s*import|import\s*(?:\/|and)\s*export)\s+json\b/g, " ")
+    .replace(
+      /\bjson\s+(?:export\s*(?:\/|and)\s*import|import\s*(?:\/|and)\s*export|round[- ]trips?|transfers?|handling|validation|imports?|exports?|parsing)\b/g,
+      " ",
+    )
+    .replace(
+      /\b(?:exported|imported|valid|invalid|malformed|parsed|serialized|corrupt|stored)\s+(?:[\w-]+\s+)?json\b/g,
+      " ",
+    );
+  if (/\bjson\b/.test(jsonOutputText)) extensions.add(".json");
   if (/\bxlsx\b|\bexcel\b|\bspreadsheet\b/.test(normalized)) extensions.add(".xlsx");
   if (/\bpptx\b|\bslides?\b|\bpowerpoint\b/.test(normalized)) extensions.add(".pptx");
   if (/\bpdf\b/.test(normalized)) extensions.add(".pdf");

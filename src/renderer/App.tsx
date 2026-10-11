@@ -208,8 +208,11 @@ import {
 } from "./utils/renderer-perf";
 import {
   deriveSharedTaskEventUiState,
+  scopeEventsToTask,
   type SharedTaskEventUiState,
 } from "./utils/task-event-derived";
+import { deferredInputForSelectedTask } from "./utils/deferred-task-input";
+import { reconcilePendingInputRequests } from "./utils/pending-input-requests";
 import { isTaskActivelyWorking } from "./utils/task-working-state";
 import { deriveReplayTaskSnapshot } from "./utils/task-replay-state";
 import {
@@ -1723,6 +1726,7 @@ const SelectedTaskWorkspaceView = memo(
           <div className="selected-workspace-main-row">
             <Suspense fallback={<TaskViewSkeleton />}>
               <MainContent
+                key={task?.id || "empty"}
                 headerPlacement="title-bar"
                 rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
                 task={task}
@@ -4170,28 +4174,38 @@ export function App() {
       });
   }, []);
 
-  useEffect(() => {
+  // Live events keep input cards current; this re-sync from the main process repairs a
+  // missed event (for example after a renderer reload) and drops cards answered elsewhere.
+  const resyncPendingInputRequests = useCallback(async () => {
     if (!window.electronAPI?.listInputRequests) return;
-    let cancelled = false;
-    window.electronAPI
-      .listInputRequests({ limit: 200, offset: 0, status: "pending" })
-      .then((requests) => {
-        if (cancelled) return;
-        pendingInputRequestsRef.current.clear();
-        for (const request of requests || []) {
-          if (request?.id) {
-            pendingInputRequestsRef.current.set(request.id, request);
-          }
-        }
-        syncPendingInputRequests();
-      })
-      .catch((error) => {
-        console.error("Failed to load pending input requests:", error);
+    const startedAt = Date.now();
+    try {
+      const requests = await window.electronAPI.listInputRequests({
+        limit: 200,
+        offset: 0,
+        status: "pending",
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      pendingInputRequestsRef.current = reconcilePendingInputRequests(
+        requests || [],
+        pendingInputRequestsRef.current,
+        startedAt,
+      );
+      syncPendingInputRequests();
+    } catch (error) {
+      console.error("Failed to load pending input requests:", error);
+    }
+  }, [syncPendingInputRequests]);
+
+  // Also on every session switch: opening a session shows its current requests.
+  useEffect(() => {
+    void resyncPendingInputRequests();
+  }, [resyncPendingInputRequests, selectedTaskId]);
+
+  useEffect(() => {
+    const onFocus = () => void resyncPendingInputRequests();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [resyncPendingInputRequests]);
 
   // Subscribe to live remote task events when viewing a remote task
   useEffect(() => {
@@ -6628,7 +6642,11 @@ export function App() {
   const deferredEvents = useDeferredValue(events);
   const selectedTaskUsesLiveProjection =
     !replayControls.isReplayMode && isTaskPossiblyRunning(selectedTask?.status);
-  const projectedTaskEvents = selectedTaskUsesLiveProjection ? deferredEvents : events;
+  const projectedTaskEvents = useMemo(
+    () =>
+      scopeEventsToTask(selectedTaskUsesLiveProjection ? deferredEvents : events, selectedTask?.id),
+    [selectedTaskUsesLiveProjection, deferredEvents, events, selectedTask?.id],
+  );
   const sharedTaskEventUi = useMemo(
     () =>
       measureRendererPerf("App.sharedTaskEventUi", rendererPerfLoggingEnabled, () =>
@@ -6733,11 +6751,19 @@ export function App() {
     if (remoteTaskView) return null;
     if (!selectedTaskId) return null;
     const candidates = pendingInputRequests.filter(
-      (request) => request.taskId === selectedTaskId && request.status === "pending",
+      (request) =>
+        request.status === "pending" &&
+        (request.taskId === selectedTaskId ||
+          childTasks.some(
+            (child) =>
+              child.id === request.taskId &&
+              child.parentTaskId === selectedTaskId &&
+              child.agentConfig?.teamWorkItemLane === true,
+          )),
     );
     if (candidates.length === 0) return null;
     return [...candidates].sort((a, b) => b.requestedAt - a.requestedAt)[0];
-  }, [pendingInputRequests, selectedTaskId, remoteTaskView]);
+  }, [pendingInputRequests, selectedTaskId, remoteTaskView, childTasks]);
 
   const clearRemoteTaskView = useCallback(() => {
     remoteTaskOpenRequestSeqRef.current += 1;
@@ -7268,7 +7294,7 @@ export function App() {
   const titleBarBrowserTaskId = showTitleBarTerminalToggle ? selectedTask?.id : undefined;
   const visibleRightPanelInput = effectiveRightCollapsed
     ? EMPTY_RIGHT_PANEL_INPUT
-    : deferredRightPanelInput;
+    : deferredInputForSelectedTask(deferredRightPanelInput, rightPanelInput);
 
   const handleRightSidebarToggle = useCallback(() => {
     const startedAtMs = typeof performance !== "undefined" ? performance.now() : null;

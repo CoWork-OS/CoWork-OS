@@ -49,6 +49,8 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 export interface WorkspaceMemorySectionProps {
+  sessions?: Array<{ id: string; title: string; parentTaskId: string | null }>;
+  onClearSession?: (taskId: string) => void;
   settings: WorkspaceMemorySettings | null;
   loadError: string | null;
   saving: boolean;
@@ -58,6 +60,41 @@ export interface WorkspaceMemorySectionProps {
   onSave: (updates: Partial<WorkspaceMemorySettings>) => void;
   onClear: () => void;
   onRetry: () => void;
+}
+
+function SessionMemoryClear(props: WorkspaceMemorySectionProps) {
+  const [selectedSession, setSelectedSession] = useState("");
+  return (
+    <SettingsRow
+      label="Clear one session's memory"
+      hint="Includes its agents. Keeps task history and files, and turns memory capture off for this session."
+    >
+      <select
+        aria-label="Session memory scope"
+        className="settings-select"
+        value={selectedSession}
+        onChange={(event) => setSelectedSession(event.target.value)}
+        disabled={props.clearing}
+      >
+        <option value="">Choose a session</option>
+        {(props.sessions || [])
+          .filter((session) => !session.parentTaskId)
+          .map((session) => (
+            <option key={session.id} value={session.id}>
+              {session.title} ({session.id.slice(0, 8)})
+            </option>
+          ))}
+      </select>
+      <button
+        type="button"
+        className="settings-button settings-button-danger"
+        disabled={!selectedSession || !props.canDelete || props.clearing || props.saving}
+        onClick={() => props.onClearSession?.(selectedSession)}
+      >
+        Clear session memory
+      </button>
+    </SettingsRow>
+  );
 }
 
 /** "This workspace": use memory, learn from chats, strict privacy, history, clear. */
@@ -132,6 +169,7 @@ export function WorkspaceMemorySection(props: WorkspaceMemorySectionProps) {
           ))}
         </select>
       </SettingsRow>
+      {props.sessions && props.onClearSession && <SessionMemoryClear {...props} />}
       <SettingsRow
         label="Clear this workspace's memory"
         hint="Deletes this workspace's memories for good. Facts about you are cleared in What CoWork knows."
@@ -548,6 +586,8 @@ export function MemorySettingsTab(props: MemorySettingsTabProps) {
             saving={memory.saving}
             clearing={memory.clearing}
             clearSummary={memory.clearSummary}
+            sessions={memory.sessions}
+            onClearSession={(taskId) => void memory.clear(taskId)}
             canDelete={props.canDelete}
             onSave={(updates) => void memory.save(updates)}
             onClear={() => void memory.clear()}

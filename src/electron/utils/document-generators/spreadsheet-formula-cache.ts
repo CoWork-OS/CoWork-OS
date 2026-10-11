@@ -12,7 +12,7 @@ import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { readDocumentArchiveBuffer } from "../../security/document-archive";
+import { loadDocumentArchive, readDocumentArchiveBuffer } from "../../security/document-archive";
 import { findDateFormattedTextCells } from "./spreadsheet-cells";
 import { computeWorkbookFormulaResults, type UncachedFormula } from "./spreadsheet-formulas";
 
@@ -188,7 +188,7 @@ export async function restoreXlsxFormulaCaches(
 ): Promise<FormulaCacheRestoreResult> {
   const before = await fs.stat(filePath);
   const buffer = await readDocumentArchiveBuffer(filePath);
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await loadDocumentArchive(buffer);
   const parts = await worksheetParts(zip);
 
   const missingByPart = new Map<string, Set<string>>();
@@ -199,7 +199,19 @@ export async function restoreXlsxFormulaCaches(
   }
 
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  // ExcelJS cannot reconcile some valid openpyxl chart drawings. Cell computation
+  // needs no charts, drawings, or media. Use a stripped in-memory input, while
+  // retaining every original non-cell part in the output archive below.
+  const calculationZip = new JSZip();
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (!entry.dir && !/^xl\/(?:drawings|charts|media)\//.test(name)) {
+      calculationZip.file(name, await entry.async("nodebuffer"), { createFolders: false });
+    }
+  }
+  const calculationBuffer = await calculationZip.generateAsync({ type: "nodebuffer" });
+  await workbook.xlsx.load(calculationBuffer as unknown as ExcelJS.Buffer, {
+    ignoreNodes: ["drawing"],
+  });
   const dateFormattedText = workbook.worksheets.flatMap((sheet) =>
     findDateFormattedTextCells(sheet).map((address) => `${sheet.name}!${address}`),
   );

@@ -44,7 +44,9 @@ export function canAnswerInlineApproval(
   if (!task || runtime.headless) return false;
   const agentConfig = task.agentConfig;
   if (agentConfig?.cli?.owner === "cowork-run") return false;
-  if (task.parentTaskId) return false;
+  // Only orchestrator-owned team lanes have a desktop consent surface in the
+  // parent chat. Disposable helpers and automated children remain fail closed.
+  if (task.parentTaskId && agentConfig?.teamWorkItemLane !== true) return false;
   if (agentConfig?.gatewayContext) return false;
   if (isAutomatedTaskLike(task)) return false;
   return allowsHardBlockerHumanInput(resolveHumanInputPolicy({ agentConfig }));

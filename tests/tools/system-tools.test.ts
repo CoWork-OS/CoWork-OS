@@ -131,6 +131,13 @@ describe("SystemTools - run_applescript", () => {
 
       expect(result.success).toBe(true);
       expect(result.result).toBe(expectedOutput);
+      // The approval card shows the exact script that runs.
+      expect(mockDaemon.requestApproval).toHaveBeenCalledWith(
+        "test-task-id",
+        "run_applescript",
+        "Run the AppleScript shown below.",
+        expect.objectContaining({ approvalPreview: { label: "AppleScript", text: script } }),
+      );
       expect(mockDaemon.logEvent).toHaveBeenCalledWith("test-task-id", "tool_call", {
         tool: "run_applescript",
         scriptLength: script.length,

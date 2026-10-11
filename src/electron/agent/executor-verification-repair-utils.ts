@@ -25,6 +25,14 @@ const MAX_FINDINGS_CHARS = 1500;
 export const VERIFICATION_REPAIR_STEP_DESCRIPTION =
   "Repair the delivered work so it resolves the blocking issues found by the final check.";
 
+/** The user-facing summary step appended after a plan's final verification. */
+export const GENERATED_HANDOFF_STEP_DESCRIPTION =
+  "Summarize completed work for the user. Link every requested deliverable that actually exists. Use the completed checks and actual artifact metadata to report the final outcome, page or sheet counts, and remaining limitations. Replace stale intermediate statements about pending checks. Do not modify files or repeat completed work.";
+
+export function isGeneratedHandoffStep(step: { description?: unknown }): boolean {
+  return String(step?.description || "").startsWith("Summarize completed work for the user.");
+}
+
 export const VERIFICATION_RECHECK_STEP_DESCRIPTION =
   "Verify the repaired deliverable against the task requirements and the issues the final check reported.";
 
@@ -52,7 +60,9 @@ export function mentionsOfficeArtifact(texts: Array<string | null | undefined>):
 export function buildOfficeArtifactVerificationGuidance(): string {
   return (
     `- To check .xlsx, .xlsm, .docx, .pptx, or .pdf files, read them with parse_document. It reports cell values with their stored type (text, number, date), formulas with saved results, number formats, and PDF page counts; treat its output as the source of truth.\n` +
-    `- Do not unzip the file or parse its XML with a custom script. If another script's result disagrees with parse_document, trust parse_document and quote it as evidence.\n`
+    `- Do not unzip the file or parse its XML with a custom script. If another script's result disagrees with parse_document, trust parse_document and quote it as evidence.\n` +
+    `- Use get_file_info with inspectArtifact:true for saved sheet/formula/chart counts, DOCX colors/tables/page breaks, and PDF page count before probing Python dependencies. Reuse executable names proven successful earlier; python3 availability does not imply a python alias.\n` +
+    `- A DOCX page break is not proof of rendered pagination. When an exact Word page count is required, check a compatible renderer. Tools not currently visible may be deferred: use tool_search to discover them before claiming they are disabled or requesting settings changes. On macOS, resolve_app_bundle_id can discover Pages without reading /Applications; an approved run_applescript workflow can open only this document, export a local PDF, and close it without saving. Inspect the exported PDF for page count. Preserve the editable original and distinguish that renderer's result from the separately generated PDF.\n`
   );
 }
 

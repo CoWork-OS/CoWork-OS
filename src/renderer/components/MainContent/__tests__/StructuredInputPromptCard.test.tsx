@@ -91,3 +91,24 @@ describe("StructuredInputPromptCard keyboard shortcuts", () => {
     expect(keyEventFromModalDialog(null)).toBe(false);
   });
 });
+
+describe("StructuredInputPromptCard approval preview", () => {
+  it("shows the exact content an approval covers and what it leaves out", () => {
+    const withPreview = request("approval_decision", ["Deny", "Allow once"]);
+    withPreview.questions[0].preview = {
+      label: "AppleScript",
+      text: 'tell application "Pages"\n  count of pages of front document\nend tell',
+      omittedChars: 1200,
+    };
+    const html = renderToStaticMarkup(
+      createElement(StructuredInputPromptCard, {
+        request: withPreview,
+        onSubmit: vi.fn(),
+        onDismiss: vi.fn(),
+      }),
+    );
+    expect(html).toContain("AppleScript");
+    expect(html).toContain("count of pages of front document\nend tell");
+    expect(html).toContain("1,200 more characters are not");
+  });
+});

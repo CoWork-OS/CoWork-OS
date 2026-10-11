@@ -4,6 +4,40 @@ import { AgentDaemon } from "../daemon";
 import { PermissionSettingsManager } from "../../security/permission-settings-manager";
 
 describe("AgentDaemon.createChildTask", () => {
+  it.each([true, false])(
+    "relays bounded web research asks only for interactive parents (%s)",
+    async (interactive) => {
+      const parent = {
+        id: "parent",
+        status: "executing",
+        agentConfig: { allowUserInput: interactive },
+      };
+      const taskRepo = {
+        findById: vi.fn(() => parent),
+        update: vi.fn(),
+        create: vi.fn((task: Any) => ({ id: "child", ...task })),
+      };
+      const daemonLike = {
+        taskRepo,
+        startTask: vi.fn(),
+        ensureCollaborativeRunForParentTask: vi.fn(),
+      } as Any;
+      const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+        title: "Official research",
+        prompt: "Research public pricing",
+        workspaceId: "ws",
+        parentTaskId: "parent",
+        agentType: "sub",
+        workerRole: "web_researcher",
+      });
+      expect(child.agentConfig.teamWorkItemLane === true).toBe(interactive);
+      expect(child.agentConfig.allowUserInput).toBe(interactive);
+      expect(child.agentConfig.allowedTools).toContain("web_fetch");
+      expect(child.agentConfig.allowedTools).not.toContain("run_command");
+      expect(child.agentConfig.shellAccess).toBe(false);
+    },
+  );
+
   it.each([false, undefined, true])(
     "inherits parent channel sender evidence without child override (%s)",
     async (owner) => {

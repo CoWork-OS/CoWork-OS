@@ -1,3 +1,7 @@
+import {
+  collaborativeExecutionLanes,
+  isCollaborativeExecutionTask,
+} from "../agents/collaborative-execution";
 import { closeBrowserTabViewsForTask } from "../browser/browser-tab-views";
 import { ComposerPredictionCoordinator } from "../agent/ComposerPredictionCoordinator";
 import {
@@ -4984,6 +4988,16 @@ export async function setupIpcHandlers(
                 title: lanes[i].title,
                 description: lanes[i].description,
                 ownerAgentRoleId: owner?.id,
+                status: "todo",
+                sortOrder: (i + 1) * 10,
+              });
+            }
+          } else if (isCollaborativeExecutionTask(task)) {
+            const reviewer = members.find((member) => member.id !== leader.id) || leader;
+            for (const [i, lane] of collaborativeExecutionLanes(leader.id, reviewer.id).entries()) {
+              await teamItemRepo.create({
+                teamRunId: run.id,
+                ...lane,
                 status: "todo",
                 sortOrder: (i + 1) * 10,
               });
@@ -13408,12 +13422,48 @@ function setupMemoryHandlers(
   });
 
   // Clear all memories for a workspace
+  ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR_SCOPE, async (_, rawWorkspaceId: unknown) => {
+    const workspaceId = validateInput(WorkspaceIdSchema, rawWorkspaceId, "workspace id");
+    return MemoryWorkspacePurgeService.getClearScope(workspaceId);
+  });
+  ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR_SESSION, async (_, input: unknown) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_CLEAR_SESSION, RATE_LIMIT_CONFIGS.limited);
+    if (!input || typeof input !== "object")
+      throw new Error("A workspace and session are required.");
+    const { workspaceId: rawWorkspaceId, taskId: rawTaskId } = input as Record<string, unknown>;
+    const workspaceId = validateInput(WorkspaceIdSchema, rawWorkspaceId, "workspace id");
+    const taskId = validateInput(
+      z
+        .string()
+        .min(1)
+        .max(200)
+        .regex(/^[A-Za-z0-9_-]+$/),
+      rawTaskId,
+      "session id",
+    );
+    return MemoryWorkspacePurgeService.purgeSession(workspaceId, taskId);
+  });
   ipcMain.handle(IPC_CHANNELS.MEMORY_CLEAR, async (_, rawWorkspaceId: unknown) => {
     checkRateLimit(IPC_CHANNELS.MEMORY_CLEAR, RATE_LIMIT_CONFIGS.limited);
     try {
-      const workspaceId = validateInput(WorkspaceIdSchema, rawWorkspaceId, "workspace id");
+      const input =
+        typeof rawWorkspaceId === "object" && rawWorkspaceId !== null
+          ? (rawWorkspaceId as Record<string, unknown>)
+          : null;
+      const workspaceId = validateInput(
+        WorkspaceIdSchema,
+        input ? input.workspaceId : rawWorkspaceId,
+        "workspace id",
+      );
+      const expectedTaskIds = input
+        ? validateInput(
+            z.array(z.string().min(1).max(200)).max(100000),
+            input.expectedTaskIds,
+            "previewed session ids",
+          )
+        : undefined;
       // Every memory store for the workspace, with per-store counts for the UI.
-      return await MemoryWorkspacePurgeService.purgeWorkspace({ id: workspaceId });
+      return await MemoryWorkspacePurgeService.purgeWorkspace({ id: workspaceId, expectedTaskIds });
     } catch (error) {
       logger.error("[Memory] Failed to clear:", error);
       throw error;

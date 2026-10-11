@@ -1126,8 +1126,8 @@ html.visual-calm .calm-sidebar .sidebar-search-filter-btn {
 
 html.visual-calm .calm-sidebar .sidebar-search-filter-badge {
   position: absolute;
-  top: -3px;
-  right: -3px;
+  top: 0;
+  right: 0;
   display: inline-grid;
   place-items: center;
   min-width: 15px;

@@ -507,6 +507,174 @@ describe("BrowserWorkspaceFiles", () => {
     }
   });
 
+  it("keeps committed byte and file quotas after sequential uploads and service restart", async () => {
+    workspace.permissions.write = true;
+    const limits = { maxWorkspaceCommittedUploadBytes: 4, maxWorkspaceCommittedUploadFiles: 2 };
+    const first = await startDownloadServer(createService(limits));
+    try {
+      expect(
+        (await postUpload(first.url, workspace.id, "first.bin", Buffer.from("1234"))).status,
+      ).toBe(201);
+      expect(
+        (await postUpload(first.url, workspace.id, "overflow.bin", Buffer.from("5"))).status,
+      ).toBe(429);
+    } finally {
+      await closeServer(first.server);
+    }
+    const restarted = await startDownloadServer(createService(limits));
+    try {
+      expect(
+        (await postUpload(restarted.url, workspace.id, "restart.bin", Buffer.from("5"))).status,
+      ).toBe(429);
+      expect(
+        (await postUpload(restarted.url, workspace.id, "empty.bin", Buffer.alloc(0))).status,
+      ).toBe(201);
+      expect(
+        (await postUpload(restarted.url, workspace.id, "inode-overflow.bin", Buffer.alloc(0)))
+          .status,
+      ).toBe(429);
+      expect((await fs.readdir(workspaceRoot)).sort()).toEqual(["empty.bin", "first.bin"]);
+    } finally {
+      await closeServer(restarted.server);
+    }
+  });
+
+  it("keeps quota across workspace IDs, directory renames, and deletion of committed files", async () => {
+    workspace.permissions.write = true;
+    const options = { maxWorkspaceCommittedUploadBytes: 4 };
+    const server = await startDownloadServer(createService(options));
+    try {
+      expect(
+        (await postUpload(server.url, workspace.id, "first.bin", Buffer.from("1234"))).status,
+      ).toBe(201);
+      expect(
+        (await postUpload(server.url, workspace.id, "first.bin", Buffer.from("1234"))).status,
+      ).toBe(409);
+      expect((await postDownload(server.url, workspace.id, "first.bin")).status).toBe(200);
+      workspace.id = "alias-workspace";
+      expect(
+        (await postUpload(server.url, workspace.id, "alias.bin", Buffer.from("5"))).status,
+      ).toBe(429);
+      const renamed = path.join(tempRoot, "renamed-workspace");
+      await fs.rename(workspace.path, renamed);
+      workspace.path = renamed;
+      await fs.unlink(path.join(renamed, "first.bin"));
+      expect(
+        (await postUpload(server.url, workspace.id, "after-delete.bin", Buffer.from("5"))).status,
+      ).toBe(429);
+      expect(await fs.readdir(renamed)).toEqual([]);
+    } finally {
+      await closeServer(server.server);
+    }
+  });
+
+  it("refunds a cleaned failure and unused chunked reservation while preserving legitimate uploads", async () => {
+    workspace.permissions.write = true;
+    const server = await startDownloadServer(
+      createService({ maxUploadBytes: 4, maxWorkspaceCommittedUploadBytes: 4 }),
+    );
+    try {
+      expect(
+        (await postChunkedUpload(server.url, workspace.id, "too-large.bin", Buffer.from("12345")))
+          .status,
+      ).toBe(413);
+      expect(await fs.readdir(workspaceRoot)).toEqual([]);
+      expect(
+        (await postChunkedUpload(server.url, workspace.id, "chunked.bin", Buffer.from("12")))
+          .status,
+      ).toBe(201);
+      expect(
+        (await postUpload(server.url, workspace.id, "ordinary.bin", Buffer.from("34"))).status,
+      ).toBe(201);
+      expect(
+        (await postUpload(server.url, workspace.id, "overflow.bin", Buffer.from("5"))).status,
+      ).toBe(429);
+      expect(await fs.readFile(path.join(workspaceRoot, "chunked.bin"), "utf8")).toBe("12");
+      expect(await fs.readFile(path.join(workspaceRoot, "ordinary.bin"), "utf8")).toBe("34");
+    } finally {
+      await closeServer(server.server);
+    }
+  });
+
+  it("retains durable charges when staging cleanup cannot be confirmed", async () => {
+    workspace.permissions.write = true;
+    const options = serviceOptions({ maxUploadBytes: 4, maxWorkspaceCommittedUploadBytes: 4 });
+    const files = new (class extends BrowserWorkspaceFiles {
+      protected override async unlinkUploadFile() {
+        throw new Error("Removal failed");
+      }
+    })(options);
+    const server = await startDownloadServer(files);
+    try {
+      expect(
+        (await postChunkedUpload(server.url, workspace.id, "failed.bin", Buffer.from("12345")))
+          .status,
+      ).toBe(413);
+      expect(await fs.readdir(workspaceRoot)).toHaveLength(1);
+    } finally {
+      await closeServer(server.server);
+    }
+    const restarted = await startDownloadServer(createService(options));
+    try {
+      expect(
+        (await postUpload(restarted.url, workspace.id, "new.bin", Buffer.from("1"))).status,
+      ).toBe(429);
+    } finally {
+      await closeServer(restarted.server);
+    }
+  });
+
+  it.each(["admission", "write", "commit"])(
+    "rejects insufficient free space at %s and removes owned files",
+    async (boundary) => {
+      workspace.permissions.write = true;
+      let checks = 0;
+      const failAt = { admission: 1, write: 2, commit: 3 }[boundary];
+      const files = new (class extends BrowserWorkspaceFiles {
+        protected override async getUploadFreeBytes() {
+          checks += 1;
+          return checks >= failAt ? 0n : 1000n;
+        }
+      })(serviceOptions({ minUploadFreeBytes: 100 }));
+      const server = await startDownloadServer(files);
+      try {
+        expect(
+          (await postUpload(server.url, workspace.id, "low-disk.bin", Buffer.from("1234"))).status,
+        ).toBe(503);
+        expect(await fs.readdir(workspaceRoot)).toEqual([]);
+      } finally {
+        await closeServer(server.server);
+      }
+      const recovered = await startDownloadServer(
+        createService({ maxWorkspaceCommittedUploadBytes: 4 }),
+      );
+      try {
+        expect(
+          (await postUpload(recovered.url, workspace.id, "recovered.bin", Buffer.from("1234")))
+            .status,
+        ).toBe(201);
+      } finally {
+        await closeServer(recovered.server);
+      }
+    },
+  );
+
+  it("refuses upload targets inside its authority store even in a writable enclosing workspace", async () => {
+    workspace.permissions.write = true;
+    const directory = path.join(workspaceRoot, "authority");
+    await fs.mkdir(directory);
+    const server = await startDownloadServer(createService({ uploadQuotaDirectory: directory }));
+    try {
+      expect(
+        (await postUpload(server.url, workspace.id, "authority/quota.json", Buffer.from("{}")))
+          .status,
+      ).toBe(403);
+      expect(await fs.readdir(directory)).toEqual([]);
+    } finally {
+      await closeServer(server.server);
+    }
+  });
+
   it("requires an explicit create-only precondition and never overwrites existing files", async () => {
     workspace.permissions.write = true;
     await fs.writeFile(path.join(workspaceRoot, "existing.txt"), "original");
@@ -949,6 +1117,7 @@ describe("BrowserWorkspaceFiles", () => {
       ...options
     } = overrides;
     return {
+      uploadQuotaDirectory: path.join(tempRoot, "upload-quota"),
       resolveWorkspace: () => workspace,
       getCapabilities: () => ({
         "files.read": { available: capabilitiesAvailable },

@@ -6607,9 +6607,12 @@ function MainContentComponent({
   // Close workspace dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      // The folder menu renders in a portal on <body>, outside the container.
+      const target = e.target as Node;
       if (
         workspaceDropdownRef.current &&
-        !workspaceDropdownRef.current.contains(e.target as Node)
+        !workspaceDropdownRef.current.contains(target) &&
+        !(target instanceof Element && target.closest(".workspace-dropdown"))
       ) {
         setShowWorkspaceDropdown(false);
       }
@@ -10708,6 +10711,7 @@ function MainContentComponent({
                               : undefined
                           }
                           onRemove={handleWorkspaceRemove}
+                          onClose={() => setShowWorkspaceDropdown(false)}
                         />
                       )}
                     </div>
@@ -10871,6 +10875,7 @@ function MainContentComponent({
                                   : undefined
                               }
                               onRemove={handleWorkspaceRemove}
+                              onClose={() => setShowWorkspaceDropdown(false)}
                             />
                           )}
                         </div>
@@ -11347,6 +11352,7 @@ function MainContentComponent({
                           canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
                         }
                         onRemove={handleWorkspaceRemove}
+                        onClose={() => setShowWorkspaceDropdown(false)}
                       />
                     )}
                   </div>
@@ -12840,6 +12846,7 @@ function MainContentComponent({
                       canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
                     }
                     onRemove={handleWorkspaceRemove}
+                    onClose={() => setShowWorkspaceDropdown(false)}
                   />
                 )}
               </div>
@@ -13007,6 +13014,7 @@ function MainContentComponent({
                         canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
                       }
                       onRemove={handleWorkspaceRemove}
+                      onClose={() => setShowWorkspaceDropdown(false)}
                     />
                   )}
                 </div>

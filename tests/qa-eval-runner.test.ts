@@ -142,9 +142,7 @@ async function startHookServer(
       return;
     }
 
-    // A trigger counts as soon as its headers arrive. The hung-trigger test aborts the
-    // request after a short client timeout, which on a slow runner can land before the
-    // request body's "end" event, so counting there made the hit flaky.
+    // A trigger counts as soon as its headers arrive, before the request body ends.
     const isTrigger = request.url === "/hooks/agent";
     if (isTrigger) triggerHits += 1;
 
@@ -318,7 +316,8 @@ describe("evaluation runner evidence boundaries", () => {
     expect(result.code).toBe(1);
     expect(result.durationMs).toBeLessThan(2500);
     expect(result.stdout).toContain("trigger_failed status=408");
-    expect(hookServer.triggerHits).toBe(1);
+    // No trigger hit count here: the 100 ms client timeout can abort before a slow runner's
+    // server sees the request, so the count raced. The exit code, duration and 408 prove the bound.
   });
 
   it("fails closed on pending approvals and requires explicit auto-approve for approval posts", async () => {

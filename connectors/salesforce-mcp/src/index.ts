@@ -170,6 +170,7 @@ class SalesforceClient {
     path: string,
     body?: any,
     absolutePath = false,
+    refreshAttempt = 0,
   ): Promise<RequestResult> {
     const start = Date.now();
 
@@ -188,9 +189,9 @@ class SalesforceClient {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (res.status === 401 && this.canRefresh()) {
+    if (res.status === 401 && this.canRefresh() && refreshAttempt < 1) {
       await this.refreshAccessToken();
-      return this.requestJson(method, path, body, absolutePath);
+      return this.requestJson(method, path, body, absolutePath, refreshAttempt + 1);
     }
 
     const durationMs = Date.now() - start;

@@ -826,6 +826,24 @@ async function main(): Promise<void> {
     console.log("[Daemon] Control Plane disabled (skipping auto-start)");
   }
 
+  const readinessFile = process.env.COWORK_DAEMON_READY_FILE?.trim();
+  if (readinessFile && startedControlPlane?.server?.isRunning) {
+    try {
+      await fs.writeFile(
+        readinessFile,
+        JSON.stringify({
+          pid: process.pid,
+          launcherPid: Number(process.env.COWORK_DAEMON_LAUNCHER_PID) || undefined,
+          ready: true,
+          updatedAt: Date.now(),
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+    } catch (error) {
+      console.warn("[Daemon] Failed to write readiness marker:", error);
+    }
+  }
+
   if (isBrowserWebEnabled()) {
     if (!startedControlPlane?.server?.isRunning) {
       console.warn(

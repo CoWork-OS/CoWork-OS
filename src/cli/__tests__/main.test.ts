@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { EventEmitter } from "node:events";
 import { ControlPlaneClient } from "../control-plane-client";
-import { main, parseArgs, parseInteractiveCommand } from "../main";
+import { main, parseArgs, parseInteractiveCommand, waitForDaemonReady } from "../main";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -66,6 +70,55 @@ describe("CLI argument parsing", () => {
     expect(parsed.rest).toEqual(["inspect the repo"]);
     expect(parsed.flags.get("--access-profile")).toBe("full_access");
     expect(parsed.flags.get("--permission-mode")).toBe("default");
+  });
+});
+
+describe("daemon readiness handshake", () => {
+  it.each(["exit", "error"])("fails promptly when the launcher emits %s", async (event) => {
+    const child = new EventEmitter();
+    const pending = waitForDaemonReady(child as never, "missing-readiness-file", 1000);
+    child.emit(event, event === "error" ? new Error("startup failed") : 1);
+    await expect(pending).resolves.toBe(false);
+    expect(child.listenerCount("exit")).toBe(0);
+    expect(child.listenerCount("error")).toBe(0);
+  });
+
+  it("times out without leaving launcher listeners attached", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new EventEmitter();
+      const pending = waitForDaemonReady(child as never, "missing-readiness-file", 1000);
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(pending).resolves.toBe(false);
+      expect(child.listenerCount("exit")).toBe(0);
+      expect(child.listenerCount("error")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a readiness marker from another process and accepts the matching child", async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ready-")), "ready.json");
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      exitCode: null;
+      signalCode: null;
+    };
+    child.pid = 4242;
+    child.exitCode = null;
+    child.signalCode = null;
+    fs.writeFileSync(file, JSON.stringify({ pid: 7001, launcherPid: 7, ready: true }));
+    let settled = false;
+    const pending = waitForDaemonReady(child as never, file).then((ready) => {
+      settled = true;
+      return ready;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(settled).toBe(false);
+    fs.writeFileSync(file, JSON.stringify({ pid: 7001, launcherPid: 4242, ready: true }));
+    await expect(pending).resolves.toBe(true);
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
   });
 });
 

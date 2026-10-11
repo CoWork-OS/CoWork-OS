@@ -1,0 +1,28 @@
+{
+  "id": "security-harness-regressions-2026-05-14",
+  "title": "Security harness regression coverage",
+  "source": {
+    "incident": "subprocess-network-grants",
+    "taskId": "subprocess-network-grants"
+  },
+  "categories": [
+    {
+      "id": "subprocess-network-grants-confirmed-fix",
+      "prompt": "Regression guard for Pass invocation-local network authorization through foreground and background shell execution while retaining the verification-command cache. Administrator denial remains authoritative, and execute_code does not inherit an on-request shell network grant. Use readable live sandbox fixtures; non-loopback listener checks require explicit opt-in.: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "subprocess-network-grants",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/security/__tests__/subprocess-network-policy.test.ts"
+      }
+    }
+  ],
+  "metrics": [
+    "confirmed_security_findings_without_proof",
+    "mission_control_security_finding_dedupe_rate",
+    "security_eval_coverage_for_confirmed_fixes"
+  ],
+  "notes": "Generated and maintained by npm run qa:security:harness -- --confirmed-fix."
+}

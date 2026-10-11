@@ -277,6 +277,20 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     expect(daemon.requestApproval).not.toHaveBeenCalled();
   });
 
+  it("allows approved on-request background commands in full filesystem access", async () => {
+    const workspace = createWorkspace();
+    workspace.permissions.accessNetworkMode = "on-request";
+    const taskId = `task-${randomUUID()}`;
+    taskIds.push(taskId);
+    const daemon = createDaemon();
+    const shellTools = new ShellTools(workspace, daemon as unknown as AgentDaemon, taskId);
+    const result = await shellTools.startBackgroundCommand("printf local", { cwd: workspacePath });
+    expect(result.success).toBe(true);
+    expect(result.sandbox).toBe("none");
+    expect(daemon.requestApproval).toHaveBeenCalledOnce();
+    expect(createSandbox).not.toHaveBeenCalled();
+  });
+
   it("keeps guardrail-blocked commands blocked", async () => {
     vi.mocked(GuardrailManager.isCommandBlocked).mockReturnValue({
       blocked: true,

@@ -107,7 +107,7 @@ the same ceiling. Missing or invalid named profiles fail closed as unavailable r
 
 QA server commands require explicit command approval and revalidate current task and administrator
 authority before launch. Their subprocess networking follows the shared administrator and domain
-policy; command approval does not grant on-request networking. Restricted execution requires an
+policy; on-request networking requires a grant bound to the specific invocation and never overrides administrator denial. The grant is not inherited by another shell invocation or execute_code. Restricted execution requires an
 approved OS sandbox. Offline macOS servers may listen locally under the loopback listener guard,
 which terminates their process group if a non-loopback listener appears.
 

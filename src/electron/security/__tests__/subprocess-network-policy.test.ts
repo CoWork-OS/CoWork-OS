@@ -36,4 +36,39 @@ describe("subprocess network authority", () => {
       ),
     ).toBe(false);
   });
+  it("denies on-request networking even with unrestricted administrator policy", () => {
+    expect(
+      canEnableSubprocessNetwork({ ...permissions, accessNetworkMode: "on-request" }, policy()),
+    ).toBe(false);
+    expect(canEnableSubprocessNetwork({ ...permissions, network: false }, policy())).toBe(false);
+    expect(
+      canEnableSubprocessNetwork({ ...permissions, accessNetworkMode: "enabled" }, policy()),
+    ).toBe(true);
+  });
+  it("allows an invocation-local grant only within unrestricted network authority", () => {
+    const requested = { ...permissions, accessNetworkMode: "on-request" as const };
+    expect(canEnableSubprocessNetwork(requested, policy(), true)).toBe(true);
+    expect(canEnableSubprocessNetwork(requested, policy())).toBe(false);
+    for (const network of [
+      { allowShellNetwork: false },
+      { defaultAction: "deny" },
+      { allowedDomains: ["example.com"] },
+      { blockedDomains: ["example.com"] },
+    ]) {
+      expect(canEnableSubprocessNetwork(requested, policy(network), true)).toBe(false);
+    }
+    expect(canEnableSubprocessNetwork({ ...requested, network: false }, policy(), true)).toBe(
+      false,
+    );
+    expect(
+      canEnableSubprocessNetwork({ ...requested, accessNetworkMode: "disabled" }, policy(), true),
+    ).toBe(false);
+    expect(
+      canEnableSubprocessNetwork(
+        { ...requested, accessDomainRules: [{ pattern: "example.com", access: "allow" }] },
+        policy(),
+        true,
+      ),
+    ).toBe(false);
+  });
 });

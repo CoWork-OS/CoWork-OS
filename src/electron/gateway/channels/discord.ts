@@ -378,6 +378,7 @@ export class DiscordAdapter implements ChannelAdapter {
       chatId: interaction.channelId!,
       messageId: interaction.message.id,
       data: customId,
+      isGroup: interaction.inGuild(),
       threadId: interaction.channel?.isThread() ? interaction.channelId! : undefined,
       raw: interaction,
     };

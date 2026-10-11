@@ -492,7 +492,7 @@ export function WebhookChannelSettings({
               onClick={handleGeneratePairingCode}
               disabled={generatingCode}
             >
-              {generatingCode ? "Generating..." : "Generate pairing code"}
+              {generatingCode ? "Generating..." : "Generate DM pairing code"}
             </button>
             {pairingCode && (
               <PairingCodeDisplay
@@ -532,7 +532,7 @@ export function WebhookChannelSettings({
                     )
                   }
                 >
-                  Revoke
+                  Revoke All Access
                 </button>
               </div>
             ))}

@@ -17,7 +17,8 @@ suite("durable channel decision bindings", () => {
    CREATE TABLE agent_roles (id TEXT PRIMARY KEY, is_active INTEGER, capabilities TEXT, tool_restrictions TEXT);
    CREATE TABLE channel_sessions (id TEXT PRIMARY KEY, channel_id TEXT, chat_id TEXT, workspace_id TEXT, task_id TEXT, context TEXT);
    CREATE TABLE channels (id TEXT PRIMARY KEY, type TEXT, enabled INTEGER, config TEXT, security_config TEXT);
-   CREATE TABLE channel_users (channel_id TEXT, channel_user_id TEXT, allowed INTEGER);
+   CREATE TABLE context_policies (channel_id TEXT, context_type TEXT, security_mode TEXT, tool_restrictions TEXT);
+    CREATE TABLE channel_users (channel_id TEXT, channel_user_id TEXT, allowed_dm INTEGER);
    INSERT INTO workspaces VALUES ('ws','{"write":true}');
    INSERT INTO agent_roles VALUES ('bot',1,'[]','{}');
    INSERT INTO tasks VALUES ('root','ws','bot',NULL,'{"gatewayContext":"private"}','blocked'), ('child','ws',NULL,'root','{}','blocked');
@@ -113,7 +114,7 @@ suite("durable channel decision bindings", () => {
     "INSERT INTO workspace_permission_rules VALUES ('revoked','ws','deny')",
     "UPDATE channels SET enabled = 0",
     'UPDATE channels SET config = \'{"tenant":"changed"}\'',
-    "UPDATE channel_users SET allowed = 0 WHERE channel_user_id = 'actor'",
+    "UPDATE channel_users SET allowed_dm = 0 WHERE channel_user_id = 'actor'",
     "UPDATE channel_sessions SET chat_id = 'moved'",
     "UPDATE tasks SET parent_task_id = NULL WHERE id = 'child'",
     "UPDATE agent_roles SET is_active = 0",
@@ -123,6 +124,31 @@ suite("durable channel decision bindings", () => {
     db.exec(sql);
     expect(() => store.claim(callback(route.id), now + 1)).toThrow();
     expect(store.get(route.id)?.state).toBe("sent");
+  });
+  it("does not accept an aggregate/group grant for a revoked DM", () => {
+    const route = sent();
+    db.exec(
+      "ALTER TABLE channel_users ADD COLUMN allowed INTEGER DEFAULT 1; ALTER TABLE channel_users ADD COLUMN allowed_group INTEGER DEFAULT 1; UPDATE channel_users SET allowed_dm = 0 WHERE channel_user_id = 'actor'",
+    );
+    expect(() => store.claim(callback(route.id), now + 1)).toThrow(/not authorized/);
+  });
+  it("evaluates open DM policy without a durable grant and fences policy changes", () => {
+    db.exec(
+      "UPDATE channel_users SET allowed_dm = 0; INSERT INTO context_policies VALUES ('channel', 'dm', 'open', '[]')",
+    );
+    const route = sent();
+    db.exec(
+      "UPDATE context_policies SET security_mode = 'pairing'; UPDATE channel_users SET allowed_dm = 1",
+    );
+    expect(() => store.claim(callback(route.id), now + 1)).toThrow();
+  });
+  it("evaluates current configured DM allowlist membership", () => {
+    db.exec(
+      `UPDATE channel_users SET allowed_dm = 0; INSERT INTO context_policies VALUES ('channel', 'dm', 'allowlist', '[]'); UPDATE channels SET security_config = '{"allowedUsers":["actor"]}'`,
+    );
+    const route = sent();
+    db.exec("UPDATE channels SET security_config = '{}'");
+    expect(() => store.claim(callback(route.id), now + 1)).toThrow(/not authorized/);
   });
   it("uses the stored approval deadline and refuses expiry", () => {
     const route = sent();
@@ -192,7 +218,7 @@ suite("durable channel decision bindings", () => {
     "UPDATE channels SET enabled=0",
     `UPDATE channels SET config='{"ownerUserIds":[]}'`,
     `UPDATE channels SET security_config='{"mode":"revoked"}'`,
-    "UPDATE channel_users SET allowed=0 WHERE channel_user_id='actor'",
+    "UPDATE channel_users SET allowed_dm=0 WHERE channel_user_id='actor'",
     "UPDATE channel_sessions SET chat_id='moved'",
     "UPDATE tasks SET parent_task_id=NULL WHERE id='child'",
     "UPDATE tasks SET status='cancelled' WHERE id='child'",
@@ -254,7 +280,8 @@ suite("channel resolution transaction guard", () => {
     CREATE TABLE agent_roles (id TEXT PRIMARY KEY, is_active INTEGER, capabilities TEXT, tool_restrictions TEXT);
     CREATE TABLE channel_sessions (id TEXT PRIMARY KEY, channel_id TEXT, chat_id TEXT, workspace_id TEXT, task_id TEXT, context TEXT);
     CREATE TABLE channels (id TEXT PRIMARY KEY, type TEXT, enabled INTEGER, config TEXT, security_config TEXT);
-    CREATE TABLE channel_users (channel_id TEXT, channel_user_id TEXT, allowed INTEGER);
+    CREATE TABLE context_policies (channel_id TEXT, context_type TEXT, security_mode TEXT, tool_restrictions TEXT);
+    CREATE TABLE channel_users (channel_id TEXT, channel_user_id TEXT, allowed_dm INTEGER);
     INSERT INTO workspaces VALUES ('ws','{}'); INSERT INTO agent_roles VALUES ('bot',1,'[]','{}');
     INSERT INTO tasks VALUES ('root','ws','bot',NULL,'{"gatewayContext":"private"}','blocked');
     INSERT INTO channels VALUES ('channel','slack',1,'{}','{}');
@@ -312,7 +339,7 @@ suite("channel resolution transaction guard", () => {
       if (change === "owner-config")
         db.prepare("UPDATE channels SET config = ?").run('{"ownerUserIds":[]}');
       if (change === "enabled") db.exec("UPDATE channels SET enabled = 0");
-      if (change === "actor") db.exec("UPDATE channel_users SET allowed = 0");
+      if (change === "actor") db.exec("UPDATE channel_users SET allowed_dm = 0");
       if (change === "workspace")
         db.prepare("UPDATE workspaces SET permissions = ?").run('{"write":false}');
       if (change === "bot") db.exec("UPDATE agent_roles SET is_active = 0");

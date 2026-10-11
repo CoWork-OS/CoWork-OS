@@ -388,7 +388,7 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
               onClick={handleGeneratePairingCode}
               disabled={generatingCode}
             >
-              {generatingCode ? "Generating..." : "Generate pairing code"}
+              {generatingCode ? "Generating..." : "Generate DM pairing code"}
             </button>
             {pairingCode && (
               <PairingCodeDisplay
@@ -438,7 +438,7 @@ export function FeishuSettings({ onStatusChange }: FeishuSettingsProps) {
                   className="settings-button settings-button-danger"
                   onClick={() => handleRevokeAccess(user.channelUserId)}
                 >
-                  Revoke
+                  Revoke All Access
                 </button>
               </div>
             ))}

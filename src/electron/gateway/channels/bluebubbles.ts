@@ -375,6 +375,15 @@ export class BlueBubblesAdapter implements ChannelAdapter {
       return;
     }
 
+    // Native chat GUIDs encode DM ('-') versus group ('+'). Do not guess an
+    // admission policy when a server supplies an unknown chat representation.
+    const contextMarker = /^[^;]+;([+-]);[^;]+$/.exec(bbMessage.chatGuid)?.[1];
+    if (!contextMarker) {
+      this.handleError(new Error("BlueBubbles message has an unknown chat context"), "chatContext");
+      return;
+    }
+    const isGroup = contextMarker === "+";
+
     // Check for duplicates
     if (this.config.deduplicationEnabled && this.isMessageProcessed(bbMessage.guid)) {
       console.log(`Skipping duplicate BlueBubbles message ${bbMessage.guid}`);
@@ -418,6 +427,7 @@ export class BlueBubblesAdapter implements ChannelAdapter {
       userId: bbMessage.handle?.address || String(bbMessage.handleId),
       userName,
       chatId: bbMessage.chatGuid,
+      isGroup,
       text: bbMessage.text,
       timestamp: new Date(bbMessage.dateCreated),
       ...(isFromMe ? { direction: "outgoing_user" as const, ingestOnly: true } : {}),

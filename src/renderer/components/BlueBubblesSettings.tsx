@@ -629,7 +629,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
 
       {securityMode === "pairing" && (
         <div className="settings-section">
-          <h4>Generate Pairing Code</h4>
+          <h4>Generate DM Pairing Code</h4>
           <p className="settings-description">
             Generate a one-time code for a user to enter in iMessage to gain access.
           </p>
@@ -646,7 +646,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
               onClick={handleGeneratePairingCode}
               disabled={generatingCode}
             >
-              {generatingCode ? "Generating..." : "Generate Code"}
+              {generatingCode ? "Generating..." : "Generate DM Code"}
             </button>
           )}
         </div>
@@ -693,7 +693,7 @@ export function BlueBubblesSettings({ onStatusChange }: BlueBubblesSettingsProps
                     className="button-small button-danger"
                     onClick={() => handleRevokeAccess(user.channelUserId)}
                   >
-                    Revoke
+                    Revoke All Access
                   </button>
                 )}
               </div>

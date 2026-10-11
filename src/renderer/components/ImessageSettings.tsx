@@ -542,7 +542,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
               </div>
             ) : (
               <button className="settings-button" onClick={handleGeneratePairingCode}>
-                Generate Pairing Code
+                Generate DM Pairing Code
               </button>
             )}
           </div>
@@ -633,7 +633,7 @@ export function ImessageSettings({ onStatusChange }: ImessageSettingsProps) {
                   className="settings-button small danger"
                   onClick={() => handleRevokeAccess(user.channelUserId)}
                 >
-                  Revoke
+                  Revoke All Access
                 </button>
               </div>
             ))}

@@ -16,7 +16,7 @@ import * as crypto from "crypto";
 import type Database from "better-sqlite3";
 import { ChannelUser, Channel } from "../database/repositories";
 import { IncomingMessage } from "./channels/types";
-import { pairingMutex, IdempotencyManager } from "../security/concurrency";
+import { pairingMutex } from "../security/concurrency";
 import { ContextPolicyManager } from "./context-policy-repository-facades";
 import { ContextType, SecurityMode } from "../../shared/types";
 
@@ -39,15 +39,13 @@ export interface PairingResult {
 
 export class SecurityManager {
   private userRepo: ChannelUserRepository;
-  private pairingIdempotency: IdempotencyManager;
   private contextPolicyManager: ContextPolicyManager;
 
   // Channels that don't support group chats - always use DM context
-  private static readonly DM_ONLY_CHANNELS = ["email", "imessage", "bluebubbles"];
+  private static readonly DM_ONLY_CHANNELS = ["email"];
 
   constructor(db: Database.Database) {
     this.userRepo = new ChannelUserRepository(db);
-    this.pairingIdempotency = new IdempotencyManager(5 * 60 * 1000); // 5 min TTL
     this.contextPolicyManager = new ContextPolicyManager(db);
   }
 
@@ -58,17 +56,11 @@ export class SecurityManager {
     return this.contextPolicyManager;
   }
 
-  /**
-   * Check if a message sender is allowed to interact
-   * Supports per-context (DM vs group) security policies
-   */
-  async checkAccess(
+  resolveContextType(
     channel: Channel,
     message: IncomingMessage,
-    isGroup?: boolean,
-  ): Promise<AccessCheckResult> {
-    const securityConfig = channel.securityConfig;
-
+    isGroup = message.isGroup,
+  ): ContextType {
     // Determine context type
     // Priority: 1) Explicit isGroup parameter, 2) Channel type check, 3) Inference from IDs
     let contextType: ContextType;
@@ -85,6 +77,22 @@ export class SecurityManager {
       contextType = message.chatId !== message.userId ? "group" : "dm";
     }
 
+    return contextType;
+  }
+
+  /**
+   * Check if a message sender is allowed to interact
+   * Supports per-context (DM vs group) security policies
+   */
+  async checkAccess(
+    channel: Channel,
+    message: IncomingMessage,
+    isGroup?: boolean,
+  ): Promise<AccessCheckResult> {
+    const securityConfig = channel.securityConfig;
+
+    const contextType = this.resolveContextType(channel, message, isGroup);
+
     // Get context-specific policy (creates default if doesn't exist)
     const contextPolicy = await this.contextPolicyManager.getPolicy(channel.id, contextType);
 
@@ -97,18 +105,24 @@ export class SecurityManager {
     const deniedTools = contextPolicy.toolRestrictions || [];
 
     // Get or create user record (refreshing a changed display name) in one unit
-    let user = await this.userRepo.findOrCreateByChannelUser({
+    const storedUser = await this.userRepo.findOrCreateByChannelUser({
       channelId: channel.id,
       channelUserId: message.userId,
       displayName: message.userName,
-      allowed: mode === "open", // Auto-allow in open mode
+      allowed: false, // Open access is policy, never a durable admission grant
     });
+
+    const user = {
+      ...storedUser,
+      allowed:
+        contextType === "dm" ? storedUser.allowedDm === true : storedUser.allowedGroup === true,
+    };
 
     // Check based on security mode
     switch (mode) {
       case "open":
         // Everyone is allowed
-        return { allowed: true, user, contextType, deniedTools };
+        return { allowed: true, user: { ...user, allowed: true }, contextType, deniedTools };
 
       case "allowlist": {
         // Check if user is in allowlist
@@ -118,8 +132,7 @@ export class SecurityManager {
         // Check if user ID is in config allowlist
         const allowedUsers = securityConfig.allowedUsers || [];
         if (allowedUsers.includes(message.userId)) {
-          // Add to allowed users
-          await this.userRepo.update(user.id, { allowed: true });
+          // The configured list is live policy, not a durable pairing grant.
           return {
             allowed: true,
             user: { ...user, allowed: true },
@@ -169,19 +182,23 @@ export class SecurityManager {
     channel: Channel,
     _userId?: string,
     _displayName?: string,
+    contextType: ContextType = "dm",
   ): Promise<string> {
     // Channel users are read and written through the async storage facade, so share the
     // verification lock: generating a code must not interleave with a verification.
     return await pairingMutex.withLock(`pairing:verify:${channel.id}`, () =>
-      this.createPendingPairingCode(channel),
+      this.createPendingPairingCode(channel, contextType),
     );
   }
 
-  private async createPendingPairingCode(channel: Channel): Promise<string> {
-    // Clear any stale or existing pending entries so only the newest code remains.
-    await this.userRepo.deletePendingByChannel(channel.id);
+  private async createPendingPairingCode(
+    channel: Channel,
+    contextType: ContextType,
+  ): Promise<string> {
+    // Keep only the newest code for this context; the other context is independent.
+    await this.userRepo.deletePendingByChannel(channel.id, contextType);
 
-    // Generate code (synchronous operation, but we track idempotency)
+    // Generate a code for this context
     const code = this.createPairingCode();
     const ttl = channel.securityConfig.pairingCodeTTL || 300; // 5 minutes default
     const expiresAt = Date.now() + ttl * 1000;
@@ -195,6 +212,7 @@ export class SecurityManager {
       channelUserId: placeholderId,
       displayName: "Pending User",
       allowed: false,
+      pairingContext: contextType,
       pairingCode: code,
       pairingExpiresAt: expiresAt,
     });
@@ -205,45 +223,19 @@ export class SecurityManager {
   /**
    * Verify a pairing code
    * Looks up the code across all users in the channel and grants access to the caller
-   * Uses idempotency to prevent double-verification race conditions
+   * Uses serialization to prevent double-verification race conditions
    */
-  async verifyPairingCode(channel: Channel, userId: string, code: string): Promise<PairingResult> {
-    // Generate idempotency key for this verification attempt
-    const idempotencyKey = IdempotencyManager.generateKey(
-      "pairing:verify",
-      channel.id,
-      userId,
-      code.toUpperCase(),
+  async verifyPairingCode(
+    channel: Channel,
+    userId: string,
+    code: string,
+    contextType: ContextType = "dm",
+  ): Promise<PairingResult> {
+    // Serialization plus the persisted scoped grant makes repeats safe. Do not cache
+    // successful authorization: a revocation must take effect on the next attempt.
+    return pairingMutex.withLock(`pairing:verify:${channel.id}`, () =>
+      this.doVerifyPairingCode(channel, userId, code, contextType),
     );
-
-    // Check if this exact verification is already in progress or completed
-    const existing = this.pairingIdempotency.check(idempotencyKey);
-    if (existing.exists && existing.status === "completed") {
-      return existing.result as PairingResult;
-    }
-
-    // Use mutex to ensure only one verification happens at a time per channel
-    const mutexKey = `pairing:verify:${channel.id}`;
-
-    return await pairingMutex.withLock(mutexKey, async () => {
-      // Double-check idempotency after acquiring lock
-      const recheck = this.pairingIdempotency.check(idempotencyKey);
-      if (recheck.exists && recheck.status === "completed") {
-        return recheck.result as PairingResult;
-      }
-
-      // Start tracking this operation
-      this.pairingIdempotency.start(idempotencyKey);
-
-      try {
-        const result = await this.doVerifyPairingCode(channel, userId, code);
-        this.pairingIdempotency.complete(idempotencyKey, result);
-        return result;
-      } catch (error) {
-        this.pairingIdempotency.fail(idempotencyKey, error);
-        throw error;
-      }
-    });
   }
 
   /**
@@ -258,10 +250,14 @@ export class SecurityManager {
     channel: Channel,
     userId: string,
     code: string,
+    contextType: ContextType,
   ): Promise<PairingResult> {
     // First check if user is already allowed
     const existingUser = await this.userRepo.findByChannelUserId(channel.id, userId);
-    if (existingUser?.allowed) {
+    if (
+      existingUser &&
+      (contextType === "dm" ? existingUser.allowedDm : existingUser.allowedGroup)
+    ) {
       return { success: true, user: existingUser };
     }
 
@@ -284,7 +280,11 @@ export class SecurityManager {
     }
 
     // Look up the pairing code across all users in the channel
-    const codeOwner = await this.userRepo.findByPairingCode(channel.id, code.toUpperCase());
+    const codeOwner = await this.userRepo.findByPairingCode(
+      channel.id,
+      code.toUpperCase(),
+      contextType,
+    );
 
     if (!codeOwner) {
       // Code not found - increment attempts on the requesting user if they exist
@@ -324,6 +324,7 @@ export class SecurityManager {
       } else {
         // Clear expired code for real users
         await this.userRepo.update(codeOwner.id, {
+          pairingContext: undefined,
           pairingCode: undefined,
           pairingExpiresAt: undefined,
         });
@@ -335,7 +336,8 @@ export class SecurityManager {
     if (existingUser) {
       // Update existing user to be allowed
       await this.userRepo.update(existingUser.id, {
-        allowed: true,
+        ...(contextType === "dm" ? { allowedDm: true } : { allowedGroup: true }),
+        pairingContext: undefined,
         pairingCode: undefined,
         pairingExpiresAt: undefined,
         pairingAttempts: 0,
@@ -347,6 +349,7 @@ export class SecurityManager {
           await this.userRepo.delete(codeOwner.id);
         } else {
           await this.userRepo.update(codeOwner.id, {
+            pairingContext: undefined,
             pairingCode: undefined,
             pairingExpiresAt: undefined,
           });
@@ -362,29 +365,41 @@ export class SecurityManager {
   /**
    * Revoke a user's access
    */
-  async revokeAccess(channelId: string, userId: string): Promise<void> {
-    const user = await this.userRepo.findByChannelUserId(channelId, userId);
-    if (user) {
-      await this.userRepo.update(user.id, { allowed: false });
-    }
+  async revokeAccess(
+    channelId: string,
+    userId: string,
+    contextType: ContextType | "both" = "both",
+  ): Promise<void> {
+    await pairingMutex.withLock(`pairing:verify:${channelId}`, async () => {
+      const user = await this.userRepo.findByChannelUserId(channelId, userId);
+      if (user)
+        await this.userRepo.update(user.id, {
+          ...(contextType !== "group" ? { allowedDm: false } : {}),
+          ...(contextType !== "dm" ? { allowedGroup: false } : {}),
+        });
+    });
   }
 
-  /**
-   * Grant a user access directly (for allowlist management)
-   */
-  async grantAccess(channelId: string, userId: string, displayName?: string): Promise<void> {
-    let user = await this.userRepo.findByChannelUserId(channelId, userId);
-
-    if (user) {
-      await this.userRepo.update(user.id, { allowed: true });
-    } else if (displayName) {
-      await this.userRepo.create({
+  /** Grant a user access in the selected context (legacy callers default to DM). */
+  async grantAccess(
+    channelId: string,
+    userId: string,
+    displayName?: string,
+    contextType: ContextType | "both" = "dm",
+  ): Promise<void> {
+    await pairingMutex.withLock(`pairing:verify:${channelId}`, async () => {
+      const existing = await this.userRepo.findByChannelUserId(channelId, userId);
+      const user = await this.userRepo.findOrCreateByChannelUser({
         channelId,
         channelUserId: userId,
-        displayName,
-        allowed: true,
+        displayName: displayName || existing?.displayName || userId,
+        allowed: false,
       });
-    }
+      await this.userRepo.update(user.id, {
+        ...(contextType !== "group" ? { allowedDm: true } : {}),
+        ...(contextType !== "dm" ? { allowedGroup: true } : {}),
+      });
+    });
   }
 
   /**

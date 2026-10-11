@@ -3849,12 +3849,35 @@ contextBridge.exposeInMainWorld("electronAPI", {
     >,
   sendGatewayTestMessage: (data: { channelType: string; channelDbId?: string; chatId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_SEND_TEST_MESSAGE, data) as Promise<{ ok: boolean }>,
-  grantGatewayAccess: (channelId: string, userId: string, displayName?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, { channelId, userId, displayName }),
-  revokeGatewayAccess: (channelId: string, userId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, { channelId, userId }),
-  generateGatewayPairing: (channelId: string, userId: string, displayName?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, { channelId, userId, displayName }),
+  grantGatewayAccess: (
+    channelId: string,
+    userId: string,
+    displayName?: string,
+    contextType?: ContextTypeValue | "both",
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, {
+      channelId,
+      userId,
+      displayName,
+      contextType,
+    }),
+  revokeGatewayAccess: (
+    channelId: string,
+    userId: string,
+    contextType?: ContextTypeValue | "both",
+  ) => ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, { channelId, userId, contextType }),
+  generateGatewayPairing: (
+    channelId: string,
+    userId: string,
+    displayName?: string,
+    contextType?: ContextTypeValue,
+  ) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, {
+      channelId,
+      userId,
+      displayName,
+      contextType,
+    }),
 
   // Gateway event listener
   onGatewayMessage: (callback: (data: Any) => void) => {
@@ -7459,12 +7482,22 @@ export interface ElectronAPI {
     channelDbId?: string;
     chatId: string;
   }) => Promise<{ ok: boolean }>;
-  grantGatewayAccess: (channelId: string, userId: string, displayName?: string) => Promise<void>;
-  revokeGatewayAccess: (channelId: string, userId: string) => Promise<void>;
+  grantGatewayAccess: (
+    channelId: string,
+    userId: string,
+    displayName?: string,
+    contextType?: ContextTypeValue | "both",
+  ) => Promise<void>;
+  revokeGatewayAccess: (
+    channelId: string,
+    userId: string,
+    contextType?: ContextTypeValue | "both",
+  ) => Promise<void>;
   generateGatewayPairing: (
     channelId: string,
     userId: string,
     displayName?: string,
+    contextType?: ContextTypeValue,
   ) => Promise<string>;
   onGatewayMessage: (callback: (data: Any) => void) => () => void;
   onGatewayUsersUpdated: (

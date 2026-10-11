@@ -168,10 +168,27 @@ export class ChannelDecisionStore {
       !session.task_id
     )
       throw new Error("Channel session scope changed");
+    // Decision cards belong to private owner sessions. A group grant must never
+    // authorize a private approval after DM access has been revoked.
+    const dmPolicy = this.db
+      .prepare(
+        "SELECT security_mode, tool_restrictions FROM context_policies WHERE channel_id = ? AND context_type = 'dm'",
+      )
+      .get(session.channel_id) as
+      | { security_mode: string; tool_restrictions: string | null }
+      | undefined;
+    const dmMode = dmPolicy?.security_mode ?? "pairing";
     const sender = this.db
-      .prepare("SELECT allowed FROM channel_users WHERE channel_id = ? AND channel_user_id = ?")
-      .get(session.channel_id, actorId) as { allowed: number } | undefined;
-    if (sender?.allowed !== 1) throw new Error("Channel requester is not authorized");
+      .prepare("SELECT allowed_dm FROM channel_users WHERE channel_id = ? AND channel_user_id = ?")
+      .get(session.channel_id, actorId) as { allowed_dm: number } | undefined;
+    const channelSecurity = parse(session.security_config) as { allowedUsers?: string[] } | null;
+    const authorized =
+      dmMode === "open" ||
+      ((dmMode === "pairing" || dmMode === "allowlist") && sender?.allowed_dm === 1) ||
+      (dmMode === "allowlist" &&
+        Array.isArray(channelSecurity?.allowedUsers) &&
+        channelSecurity.allowedUsers.includes(actorId));
+    if (!authorized) throw new Error("Channel requester is not authorized");
     const lineage: Array<{ id: string; bot: string | null; config: unknown }> = [];
     let current: typeof task = task;
     while (current && lineage.length < 32 && !lineage.some((entry) => entry.id === current?.id)) {
@@ -262,6 +279,7 @@ export class ChannelDecisionStore {
         lineage,
         bots,
         channelSecurity: parse(session.security_config),
+        dmPolicy: { securityMode: dmMode, toolRestrictions: dmPolicy?.tool_restrictions ?? null },
         channelConfigHash: hash(session.channel_config),
       }),
     };

@@ -399,7 +399,7 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
               onClick={handleGeneratePairingCode}
               disabled={generatingCode}
             >
-              {generatingCode ? "Generating..." : "Generate pairing code"}
+              {generatingCode ? "Generating..." : "Generate DM pairing code"}
             </button>
             {pairingCode && (
               <PairingCodeDisplay
@@ -449,7 +449,7 @@ export function WeComSettings({ onStatusChange }: WeComSettingsProps) {
                   className="settings-button settings-button-danger"
                   onClick={() => handleRevokeAccess(user.channelUserId)}
                 >
-                  Revoke
+                  Revoke All Access
                 </button>
               </div>
             ))}

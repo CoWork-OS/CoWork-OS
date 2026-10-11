@@ -439,9 +439,9 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
 
           {selectedChannel.securityMode === "pairing" && (
             <div className="settings-section">
-              <h4>Generate Pairing Code</h4>
+              <h4>Generate DM Pairing Code</h4>
               <button className="button-secondary" onClick={handleGeneratePairingCode}>
-                Generate Code
+                Generate DM Code
               </button>
               {pairingCode && (
                 <div className="pairing-code-display">
@@ -502,7 +502,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
                         className="button-small button-danger"
                         onClick={() => handleRevokeAccess(user.channelUserId)}
                       >
-                        Revoke
+                        Revoke All Access
                       </button>
                     )}
                   </div>

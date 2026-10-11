@@ -1999,17 +1999,20 @@ export const GrantAccessSchema = z.object({
   channelId: z.string().uuid(),
   userId: z.string().min(1).max(100),
   displayName: z.string().max(MAX_TITLE_LENGTH).optional(),
+  contextType: z.enum(["dm", "group", "both"]).default("dm"),
 });
 
 export const RevokeAccessSchema = z.object({
   channelId: z.string().uuid(),
   userId: z.string().min(1).max(100),
+  contextType: z.enum(["dm", "group", "both"]).default("both"),
 });
 
 export const GeneratePairingSchema = z.object({
   channelId: z.string().uuid(),
   userId: z.string().max(100).optional(),
   displayName: z.string().max(MAX_TITLE_LENGTH).optional(),
+  contextType: z.enum(["dm", "group"]).default("dm"),
 });
 
 // ============ ID Schemas (for simple string ID params) ============

@@ -433,6 +433,18 @@
         "requiresProofArtifact": true,
         "executableTest": "src/electron/agent/tools/__tests__/web-preview-tools.test.ts"
       }
+    },
+    {
+      "id": "csf-2d4bf24695b6318be913c87c-confirmed-fix",
+      "prompt": "Regression guard for Gateway DM and group admission grants, pairing codes, and revocation are context-scoped; legacy ambiguous grants fail closed.: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "csf-2d4bf24695b6318be913c87c",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/gateway/__tests__/security-context-admission.test.ts"
+      }
     }
   ],
   "metrics": [

@@ -580,7 +580,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
               </div>
             ) : (
               <button className="settings-button" onClick={handleGeneratePairingCode}>
-                Generate Pairing Code
+                Generate DM Pairing Code
               </button>
             )}
           </div>
@@ -697,7 +697,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
                   className="settings-button small danger"
                   onClick={() => handleRevokeAccess(user.channelUserId)}
                 >
-                  Revoke
+                  Revoke All Access
                 </button>
               </div>
             ))}

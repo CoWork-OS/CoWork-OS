@@ -103,6 +103,28 @@ describe("PermissionSettingsManager", () => {
     });
   };
 
+  it("retains distinct HTTP effects through profile save and reload", () => {
+    statefulStore({ version: 2, defaultMode: "default", rules: [] });
+    const base = { kind: "domain" as const, domain: "api.example.com", toolName: "http_request" };
+    const read = {
+      ...base,
+      effectClass: "network_read" as const,
+      http: { method: "GET", hasBody: false, hasCustomHeaders: false },
+    };
+    const write = {
+      ...base,
+      effectClass: "data_export" as const,
+      http: { method: "POST", hasBody: true, hasCustomHeaders: false },
+    };
+    PermissionSettingsManager.appendRule({ source: "profile", effect: "allow", scope: read });
+    PermissionSettingsManager.appendRule({ source: "profile", effect: "allow", scope: write });
+    PermissionSettingsManager.clearCache();
+    expect(PermissionSettingsManager.loadSettings().rules.map((rule) => rule.scope)).toEqual([
+      read,
+      write,
+    ]);
+  });
+
   it("appends deduplicated profile rules and persists them", () => {
     statefulStore({
       version: 1,

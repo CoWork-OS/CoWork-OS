@@ -599,6 +599,11 @@ export class WebFetchTools {
     });
 
     try {
+      // JSON tool inputs are not guaranteed to conform to the TypeScript
+      // signature. Native fetch can coerce arrays into mutating HTTP methods.
+      if (typeof method !== "string") {
+        throw new Error("HTTP method must be a string.");
+      }
       const normalizedUrl = this.normalizeHttpRequestUrl(url);
 
       // Validate URL

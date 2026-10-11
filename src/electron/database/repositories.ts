@@ -4849,7 +4849,14 @@ export class WorkspacePermissionRuleStore {
         : "domain" in rule.scope
           ? rule.scope.domain || null
           : null,
-      JSON.stringify(rule.metadata ?? {}),
+      JSON.stringify({
+        ...rule.metadata,
+        permissionScopeConstraints: {
+          effectClass: rule.scope.effectClass,
+          http: rule.scope.http,
+          ...("toolPrefix" in rule.scope ? { toolPrefix: rule.scope.toolPrefix } : {}),
+        },
+      }),
       now,
       now,
     );
@@ -4926,13 +4933,31 @@ export class WorkspacePermissionRuleStore {
         break;
     }
 
+    const metadata = safeJsonParse<Record<string, Any>>(
+      row.metadata_json,
+      {},
+      "workspacePermissionRule.metadata",
+    );
+    const constraints = metadata.permissionScopeConstraints;
+    // Internal scope storage must not alter the caller-visible rule metadata.
+    delete metadata.permissionScopeConstraints;
+    if (constraints && typeof constraints === "object") {
+      scope = {
+        ...scope,
+        ...(constraints.effectClass !== undefined ? { effectClass: constraints.effectClass } : {}),
+        ...(constraints.http !== undefined ? { http: constraints.http } : {}),
+        ...(scope.kind === "domain" && constraints.toolPrefix
+          ? { toolPrefix: constraints.toolPrefix }
+          : {}),
+      };
+    }
     return {
       id: row.id,
       workspaceId: row.workspace_id,
       source: "workspace_db",
       effect: row.effect,
       scope,
-      metadata: safeJsonParse(row.metadata_json, {}, "workspacePermissionRule.metadata"),
+      metadata,
       createdAt: row.created_at,
     };
   }

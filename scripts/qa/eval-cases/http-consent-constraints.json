@@ -1,0 +1,28 @@
+{
+  "id": "security-harness-regressions-2026-05-14",
+  "title": "Security harness regression coverage",
+  "source": {
+    "incident": "http-consent-constraints",
+    "taskId": "http-consent-constraints"
+  },
+  "categories": [
+    {
+      "id": "http-consent-constraints-confirmed-fix",
+      "prompt": "Regression guard for A saved read approval could lose method, body, header, or credential constraints and authorize a stronger HTTP effect. Preserve those constraints through rules, storage, manifests, and permission evaluation; reject malformed HTTP methods and distinguish read and write effects.: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "http-consent-constraints",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/runtime/__tests__/permission-effect-scopes.test.ts"
+      }
+    }
+  ],
+  "metrics": [
+    "confirmed_security_findings_without_proof",
+    "mission_control_security_finding_dedupe_rate",
+    "security_eval_coverage_for_confirmed_fixes"
+  ],
+  "notes": "Generated and maintained by npm run qa:security:harness -- --confirmed-fix."
+}

@@ -118,6 +118,34 @@ describe("workspace-permission-manifest", () => {
   });
 });
 
+it("retains distinct HTTP effects in manifest storage", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-permission-effects-"));
+  tempDirs.push(dir);
+  const scopes: PermissionRuleScope[] = [
+    {
+      kind: "domain",
+      domain: "api.example.com",
+      toolName: "http_request",
+      effectClass: "network_read",
+      http: { method: "GET", hasBody: false, hasCustomHeaders: false },
+    },
+    {
+      kind: "domain",
+      domain: "api.example.com",
+      toolName: "http_request",
+      effectClass: "data_export",
+      http: { method: "POST", hasBody: true, hasCustomHeaders: false },
+    },
+  ];
+  for (const scope of scopes) {
+    expect(
+      appendWorkspacePermissionManifestRule(dir, { source: "session", effect: "allow", scope })
+        .success,
+    ).toBe(true);
+  }
+  expect(loadWorkspacePermissionManifest(dir).rules.map((rule) => rule.scope)).toEqual(scopes);
+});
+
 describe("filterTrustedManifestRules", () => {
   const runCommandScope = { kind: "tool", toolName: "run_command" } as const;
 

@@ -1043,30 +1043,44 @@ export type PermissionRuleSource =
 
 export type PermissionPersistenceDestination = "session" | "workspace" | "profile" | "recurring";
 
-export type PermissionRuleScope =
-  | {
-      kind: "tool";
-      toolName: string;
-    }
-  | {
-      kind: "domain";
-      domain: string;
-      toolName?: string;
-      toolPrefix?: string;
-    }
-  | {
-      kind: "path";
-      path: string;
-      toolName?: string;
-    }
-  | {
-      kind: "command_prefix";
-      prefix: string;
-    }
-  | {
-      kind: "mcp_server";
-      serverName: string;
-    };
+export type PermissionEffectClass =
+  | "ordinary"
+  | "network_read"
+  | "data_export"
+  | "protected_credential";
+
+export type PermissionScopeConstraints = {
+  /** Missing only on legacy rules; never authorizes exports or credentials. */
+  effectClass?: PermissionEffectClass;
+  http?: { method: string; hasBody: boolean; hasCustomHeaders: boolean; credentialId?: string };
+};
+
+export type PermissionRuleScope = PermissionScopeConstraints &
+  (
+    | {
+        kind: "tool";
+        toolName: string;
+      }
+    | {
+        kind: "domain";
+        domain: string;
+        toolName?: string;
+        toolPrefix?: string;
+      }
+    | {
+        kind: "path";
+        path: string;
+        toolName?: string;
+      }
+    | {
+        kind: "command_prefix";
+        prefix: string;
+      }
+    | {
+        kind: "mcp_server";
+        serverName: string;
+      }
+  );
 
 export interface PermissionRule {
   id?: string;

@@ -1,3 +1,4 @@
+import { isReadOnlyHttpRequestInput } from "../security/http-permission-context";
 import { mcpConfigurationCurrent } from "../../mcp/configuration-authority";
 import { MCPEventService } from "../../mcp/events/MCPEventService";
 import { snapshotToolInput } from "./tool-input-snapshot";
@@ -1795,20 +1796,7 @@ export class ToolRegistry {
   }
 
   private isReadOnlyHttpRequestInput(input: Any): boolean {
-    const method =
-      typeof input?.method === "string" && input.method.trim().length > 0
-        ? input.method.trim().toUpperCase()
-        : "GET";
-    const hasBody = typeof input?.body === "string" && input.body.trim().length > 0;
-    const headers =
-      input?.headers && typeof input.headers === "object" && !Array.isArray(input.headers)
-        ? Object.keys(input.headers as Record<string, unknown>)
-        : [];
-    const loweredHeaders = headers.map((header) => header.toLowerCase());
-    const customHeaders = loweredHeaders.filter(
-      (header) => !["accept", "accept-language", "user-agent"].includes(header),
-    );
-    return (method === "GET" || method === "HEAD") && !hasBody && customHeaders.length === 0;
+    return isReadOnlyHttpRequestInput(input);
   }
 
   private getExternalFilesystemBoundary(

@@ -20,6 +20,14 @@ export function normalizeServerName(input: string): string {
 }
 
 export function normalizePermissionScope(scope: PermissionRuleScope): PermissionRuleScope {
+  return {
+    ...normalizePermissionScopeTarget(scope),
+    ...(scope.effectClass !== undefined ? { effectClass: scope.effectClass } : {}),
+    ...(scope.http !== undefined ? { http: scope.http } : {}),
+  };
+}
+
+function normalizePermissionScopeTarget(scope: PermissionRuleScope): PermissionRuleScope {
   switch (scope.kind) {
     case "domain":
       return {
@@ -56,6 +64,20 @@ export function normalizePermissionScope(scope: PermissionRuleScope): Permission
 }
 
 export function permissionScopeFingerprint(scope: PermissionRuleScope): string {
+  const target = permissionScopeTargetFingerprint(scope);
+  return scope.effectClass === undefined && scope.http === undefined
+    ? target
+    : JSON.stringify([
+        target,
+        scope.effectClass ?? null,
+        scope.http?.method ?? null,
+        scope.http?.hasBody ?? null,
+        scope.http?.hasCustomHeaders ?? null,
+        scope.http?.credentialId ?? null,
+      ]);
+}
+
+function permissionScopeTargetFingerprint(scope: PermissionRuleScope): string {
   const normalized = normalizePermissionScope(scope);
   switch (normalized.kind) {
     case "domain": {
@@ -84,6 +106,15 @@ export function permissionRuleFingerprint(rule: Pick<PermissionRule, "effect" | 
 }
 
 export function summarizePermissionScope(scope: PermissionRuleScope): string {
+  const target = summarizePermissionScopeTarget(scope);
+  if (!scope.effectClass) return target;
+  const context = scope.http
+    ? `, ${scope.http.method}${scope.http.hasBody ? " with body" : " without body"}${scope.http.hasCustomHeaders ? ", custom headers" : ""}${scope.http.credentialId ? `, credential ${scope.http.credentialId}` : ""}`
+    : "";
+  return `${target} (${scope.effectClass}${context})`;
+}
+
+function summarizePermissionScopeTarget(scope: PermissionRuleScope): string {
   const normalized = normalizePermissionScope(scope);
   switch (normalized.kind) {
     case "domain":

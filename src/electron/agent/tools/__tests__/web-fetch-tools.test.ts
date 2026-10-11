@@ -661,6 +661,22 @@ describe("WebFetchTools", () => {
   });
 
   describe("httpRequest", () => {
+    it.each([
+      { method: ["DELETE"] },
+      { method: ["POST"] },
+      { method: 123 },
+      { method: true },
+      { method: null },
+    ])("rejects non-string method %j before transport", async ({ method }) => {
+      const result = await webFetchTools.httpRequest({
+        url: "https://example.com",
+        method: method as Any,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("HTTP method must be a string.");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("should block disallowed domains for raw http requests", async () => {
       vi.spyOn(GuardrailManager, "isDomainAllowed").mockReturnValue(false);
 

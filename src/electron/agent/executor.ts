@@ -36479,7 +36479,11 @@ Return ONLY a JSON object:
                           const imageFallbackAvailable =
                             Boolean(mcpImageFallbackHint) &&
                             canonicalizeToolNameUtil(content.name) === "generate_image";
-                          if (pauseReason && !pauseAfterNextAssistantMessage && !imageFallbackAvailable) {
+                          if (
+                            pauseReason &&
+                            !pauseAfterNextAssistantMessage &&
+                            !imageFallbackAvailable
+                          ) {
                             pauseAfterNextAssistantMessage = true;
                             pauseAfterNextAssistantMessageReason = pauseReason;
                           }

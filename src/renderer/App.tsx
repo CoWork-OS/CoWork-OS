@@ -26,6 +26,12 @@ import { useTaskDuration } from "./hooks/useTaskDuration";
 import { useComposerDraft } from "./hooks/useComposerDraft";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+import {
+  EMPTY_HOME_SESSIONS,
+  buildHomeSessions,
+  sameHomeSessions,
+  type HomeSessions,
+} from "./utils/home-sessions";
 import { SidebarRail } from "./components/sidebar/SidebarRail";
 import { TITLE_BAR_CONTEXT_SLOT_ID } from "./utils/title-bar-slot";
 import { useMainColumnRightEdge } from "./hooks/useMainColumnRightEdge";
@@ -770,6 +776,7 @@ type SideChatState = {
 
 type SelectedTaskWorkspaceViewProps = {
   task: Task | undefined;
+  homeSessions: HomeSessions;
   selectedTaskId: string | null;
   workspace: Workspace | null;
   replayControls: ReplayControls;
@@ -958,6 +965,7 @@ function getInputRequestsSignature(inputRequests: InputRequest[]): string {
 const SelectedTaskWorkspaceView = memo(
   function SelectedTaskWorkspaceView({
     task,
+    homeSessions,
     selectedTaskId,
     workspace,
     replayControls,
@@ -1753,6 +1761,7 @@ const SelectedTaskWorkspaceView = memo(
                 onSelectBotConversation={onSelectBotConversation}
                 onNewBotConversation={onNewBotConversation}
                 onSelectTask={onSelectTask}
+                homeSessions={homeSessions}
                 onSendMessage={onSendMessage}
                 onStartOnboarding={onStartOnboarding}
                 onStartFreshSession={onStartFreshSession}
@@ -2372,6 +2381,14 @@ export function App() {
         : undefined),
     [botConversationTasks, remoteTaskView, tasks, selectedTaskId],
   );
+  // Only the home screen lists sessions; keep the reference stable across task updates
+  // that don't change what it shows, so the memoized workspace view doesn't re-render.
+  const homeSessionsRef = useRef<HomeSessions>(EMPTY_HOME_SESSIONS);
+  const homeSessions = useMemo(() => {
+    const next = selectedTask ? EMPTY_HOME_SESSIONS : buildHomeSessions(tasks);
+    if (!sameHomeSessions(homeSessionsRef.current, next)) homeSessionsRef.current = next;
+    return homeSessionsRef.current;
+  }, [selectedTask, tasks]);
   const selectedBotConversationProjection = useMemo(
     () =>
       selectedTask?.agentConfig?.botConversation && !remoteTaskView
@@ -8761,6 +8778,7 @@ export function App() {
               ) : (
                 <SelectedTaskWorkspaceView
                   task={selectedTask}
+                  homeSessions={homeSessions}
                   selectedTaskId={selectedTaskId}
                   workspace={currentWorkspace}
                   onViewRoutine={(routineId) => {

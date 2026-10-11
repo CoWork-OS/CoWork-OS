@@ -430,6 +430,8 @@ import {
 import { buildSlashSkillPrompt } from "../skill-parameter-utils";
 import { DocumentAwareFileModal } from "../DocumentAwareFileModal";
 import { ThemeIcon } from "../ThemeIcon";
+import { CalmHomeSessions } from "../calm/CalmHomeSessions";
+import { EMPTY_HOME_SESSIONS, type HomeSessions } from "../../utils/home-sessions";
 import { IntegrationMentionIcon } from "../IntegrationMentionIcon";
 import {
   PromptComposerInput,
@@ -452,6 +454,7 @@ import {
   SlidersIcon,
   UsersIcon,
   ZapIcon,
+  type IconProps,
 } from "../LineIcons";
 
 const INBOX_AGENT_MENTION_ID = "builtin:inbox-agent";
@@ -590,6 +593,8 @@ interface MainContentProps {
   onSelectChildTask?: (taskId: string) => void;
   onOpenChildAgentSidebar?: (taskId: string) => void;
   onSelectTask?: (taskId: string | null) => void;
+  /** Sessions the Calm home lists under the composer (empty while a task is open). */
+  homeSessions?: HomeSessions;
   botConversations?: Task[];
   isLoadingBotConversations?: boolean;
   conversationProjection?: BotConversationProjection | null;
@@ -3988,10 +3993,34 @@ const TypewriterPlaceholder = memo(function TypewriterPlaceholder({
 let calmSuggestionCardsCache: FocusedCard[] | null = null;
 function getCalmSuggestionCards(): FocusedCard[] {
   calmSuggestionCardsCache ??= pickFocusedCards(
-    FOCUSED_CARD_POOL.filter((card) => card.action.type === "prompt"),
+    // Task starters only: their titles are verbs ("Draft an email"), which reads as one
+    // set; the "I can …" discover cards stay in the quick-start grid.
+    FOCUSED_CARD_POOL.filter((card) => card.action.type === "prompt" && card.category === "task"),
     8,
   );
   return calmSuggestionCardsCache;
+}
+
+const FOCUSED_CARD_ICONS: Record<string, (props: IconProps) => React.ReactElement> = {
+  edit: EditIcon,
+  search: SearchIcon,
+  chart: ChartIcon,
+  folder: FolderIcon,
+  zap: ZapIcon,
+  message: MessageIcon,
+  clipboard: ClipboardIcon,
+  filetext: FileTextIcon,
+  code: CodeIcon,
+  globe: GlobeIcon,
+  book: BookIcon,
+  calendar: CalendarIcon,
+  sliders: SlidersIcon,
+  shield: ShieldIcon,
+};
+
+function renderFocusedCardIcon(iconName: string, size: number): React.ReactElement {
+  const Icon = FOCUSED_CARD_ICONS[iconName] ?? ZapIcon;
+  return <Icon size={size} />;
 }
 
 function MainContentComponent({
@@ -4005,6 +4034,7 @@ function MainContentComponent({
   onSelectChildTask,
   onOpenChildAgentSidebar,
   onSelectTask,
+  homeSessions = EMPTY_HOME_SESSIONS,
   botConversations = [],
   isLoadingBotConversations = false,
   conversationProjection = null,
@@ -4417,7 +4447,6 @@ function MainContentComponent({
   );
   const isBrowserHost = window.coworkBrowserHost === true;
   const isCalm = useIsCalmTheme();
-  const [showAllCalmChips, setShowAllCalmChips] = useState(false);
   // Picked once per app session so the chips don't reshuffle on every visit.
   const calmSuggestionCards = useMemo(getCalmSuggestionCards, []);
 
@@ -10213,39 +10242,36 @@ function MainContentComponent({
     ? `Hi ${agentContext.userName}, how can I help?`
     : agentContext.getMessage("welcomeSubtitle");
 
-  const renderCalmSuggestionChips = () => {
-    const visible = showAllCalmChips ? calmSuggestionCards : calmSuggestionCards.slice(0, 3);
-    return (
-      <div className="calm-chips" aria-label="Suggestions">
-        {visible.map((card) => (
-          <button
-            key={card.id}
-            type="button"
-            className="calm-chip"
-            title={card.desc}
-            onClick={() => {
-              if (card.action.type === "prompt") handleQuickAction(card.action.prompt);
-              else onOpenSettings?.(card.action.tab);
-              promptInputRef.current?.focus();
-            }}
-          >
-            {card.title}
-          </button>
-        ))}
-        {calmSuggestionCards.length > 3 && (
-          <button
-            type="button"
-            className="calm-chip calm-chip-more"
-            onClick={() => setShowAllCalmChips((value) => !value)}
-            aria-label={showAllCalmChips ? "Show fewer suggestions" : "Show more suggestions"}
-            aria-expanded={showAllCalmChips}
-          >
-            {showAllCalmChips ? "Less" : "…"}
-          </button>
-        )}
-      </div>
-    );
-  };
+  // Three starters and one way into the full gallery; the gallery replaces the old
+  // inline "…" expansion and the separate "See how people use" link.
+  const renderCalmSuggestionChips = () => (
+    <div className="calm-chips" aria-label="Suggestions">
+      {calmSuggestionCards.slice(0, 3).map((card) => (
+        <button
+          key={card.id}
+          type="button"
+          className="calm-chip"
+          title={card.desc}
+          onClick={() => {
+            if (card.action.type === "prompt") handleQuickAction(card.action.prompt);
+            else onOpenSettings?.(card.action.tab);
+            promptInputRef.current?.focus();
+          }}
+        >
+          <span className="calm-chip-icon">{renderFocusedCardIcon(card.iconName, 15)}</span>
+          {card.title}
+        </button>
+      ))}
+      <button
+        type="button"
+        className="calm-chip calm-chip-more"
+        onClick={() => setUseCasesOpen(true)}
+        title="See how people use CoWork OS"
+      >
+        More ideas
+      </button>
+    </div>
+  );
 
   if (!task) {
     return (
@@ -10372,22 +10398,6 @@ function MainContentComponent({
               {uiDensity === "focused" ? (
                 <div className="quick-start-grid focused-cards">
                   {focusedCards.map((card) => {
-                    const iconMap: Record<string, React.ReactNode> = {
-                      edit: <EditIcon size={22} />,
-                      search: <SearchIcon size={22} />,
-                      chart: <ChartIcon size={22} />,
-                      folder: <FolderIcon size={22} />,
-                      zap: <ZapIcon size={22} />,
-                      message: <MessageIcon size={22} />,
-                      clipboard: <ClipboardIcon size={22} />,
-                      filetext: <FileTextIcon size={22} />,
-                      code: <CodeIcon size={22} />,
-                      globe: <GlobeIcon size={22} />,
-                      book: <BookIcon size={22} />,
-                      calendar: <CalendarIcon size={22} />,
-                      sliders: <SlidersIcon size={22} />,
-                      shield: <ShieldIcon size={22} />,
-                    };
                     const handleClick = () => {
                       if (card.action.type === "prompt") {
                         handleQuickAction(card.action.prompt);
@@ -10405,7 +10415,7 @@ function MainContentComponent({
                         <ThemeIcon
                           className="quick-start-icon"
                           emoji={card.emoji}
-                          icon={iconMap[card.iconName] || <ZapIcon size={22} />}
+                          icon={renderFocusedCardIcon(card.iconName, 22)}
                         />
                         <span className="quick-start-title">{card.title}</span>
                         <span className="quick-start-desc">{card.desc}</span>
@@ -10658,20 +10668,49 @@ function MainContentComponent({
                   >
                     <Plus size={24} aria-hidden="true" />
                   </button>
+                  {/* Calm groups the composer by role: what the task works on (files,
+                      folder, options) on the left; how it runs (mode, access, model)
+                      on the right. */}
                   {isCalm && (
-                    <>
-                      <CalmModeToggle
-                        selection={displayedInteractionMode}
-                        onChange={setInteractionMode}
-                      />
-                      {isBrowserHost ? (
-                        <div ref={calmAccessMenuRef}>
-                          <CalmAccessMenu access={calmAccess} placement="up" />
-                        </div>
-                      ) : (
-                        <CalmAccessMenu access={calmAccess} placement="up" />
+                    <div
+                      className="workspace-dropdown-container calm-composer-folder"
+                      ref={workspaceDropdownRef}
+                    >
+                      <button
+                        type="button"
+                        className="calm-folder-button"
+                        onClick={handleWorkspaceDropdownToggle}
+                        aria-haspopup="menu"
+                        aria-expanded={showWorkspaceDropdown}
+                        title={
+                          isBrowserHost
+                            ? workspace?.name || "Select project"
+                            : getWorkspaceStatusFolderLabel(workspace)
+                        }
+                      >
+                        <FolderIcon size={15} />
+                        <span className="calm-folder-label">
+                          {isBrowserHost
+                            ? workspace?.name || "Select project"
+                            : getWorkspaceStatusFolderLabel(workspace)}
+                        </span>
+                        <ChevronDown size={12} aria-hidden="true" />
+                      </button>
+                      {showWorkspaceDropdown && (
+                        <WorkspaceDropdownMenu
+                          workspaces={workspacesList}
+                          currentWorkspaceId={workspace?.id}
+                          onSelect={handleWorkspaceSelect}
+                          onSelectNewFolder={handleSelectNewFolder}
+                          onUseTempWorkspace={
+                            canSwitchToTempWorkspace
+                              ? () => void handleUseTempWorkspace()
+                              : undefined
+                          }
+                          onRemove={handleWorkspaceRemove}
+                        />
                       )}
-                    </>
+                    </div>
                   )}
                   <div className="permission-dropdown-container" ref={permissionDropdownRef}>
                     <button
@@ -11006,6 +11045,21 @@ function MainContentComponent({
                   )}
                 </div>
                 <div className="input-right-actions">
+                  {isCalm && (
+                    <>
+                      <CalmModeToggle
+                        selection={displayedInteractionMode}
+                        onChange={setInteractionMode}
+                      />
+                      {isBrowserHost ? (
+                        <div ref={calmAccessMenuRef}>
+                          <CalmAccessMenu access={calmAccess} placement="up" />
+                        </div>
+                      ) : (
+                        <CalmAccessMenu access={calmAccess} placement="up" />
+                      )}
+                    </>
+                  )}
                   {uiDensity === "focused" ? (
                     <>
                       {(collaborativeModeEnabled || clarifyingCheckinsEnabled) && (
@@ -11251,7 +11305,7 @@ function MainContentComponent({
                 </div>
               </div>
             </div>
-            {(uiDensity === "focused" || isCalm) && (
+            {uiDensity === "focused" && !isCalm && (
               <div className="input-status-text welcome-input-status">
                 <div className="input-status-left">
                   <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
@@ -11298,7 +11352,7 @@ function MainContentComponent({
                   </div>
                 </div>
                 <div className="input-status-right">
-                  <div className="input-status-mode-wrap" ref={modeDropdownRef} hidden={isCalm}>
+                  <div className="input-status-mode-wrap" ref={modeDropdownRef}>
                     <InteractionModePicker
                       selection={displayedInteractionMode}
                       open={showModeDropdown}
@@ -11447,7 +11501,15 @@ function MainContentComponent({
                 </div>
               </div>
             )}
-            {isCalm && renderCalmSuggestionChips()}
+            {isCalm &&
+              (homeSessions.needsYou.length > 0 || homeSessions.recent.length > 0 ? (
+                <CalmHomeSessions
+                  sessions={homeSessions}
+                  onSelect={(taskId) => onSelectTask?.(taskId)}
+                />
+              ) : (
+                renderCalmSuggestionChips()
+              ))}
             {isCalm && (
               <CalmBriefingCard
                 workspaceId={workspace?.id}
@@ -11455,13 +11517,15 @@ function MainContentComponent({
               />
             )}
             {renderWelcomeTaskSuggestions()}
-            <button
-              type="button"
-              className="use-cases-link use-cases-welcome-link"
-              onClick={() => setUseCasesOpen(true)}
-            >
-              See how people use CoWork OS
-            </button>
+            {!isCalm && (
+              <button
+                type="button"
+                className="use-cases-link use-cases-welcome-link"
+                onClick={() => setUseCasesOpen(true)}
+              >
+                See how people use CoWork OS
+              </button>
+            )}
           </div>
         </div>
 

@@ -253,9 +253,10 @@ html.visual-calm .calm-send-button:not(:disabled):hover {
 html.visual-calm .calm-greeting {
   font-family: var(--calm-font-display);
   font-weight: 400;
-  font-size: clamp(28px, 3vw, 36px);
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+  font-size: clamp(30px, 3vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -0.018em;
+  text-wrap: balance;
   color: var(--calm-text);
   text-align: center;
   margin: 0;
@@ -459,8 +460,9 @@ html.visual-calm .calm-topbar-button-label {
   max-width: 180px;
 }
 
+/* Monochrome by default; only Full access earns a colour. */
 html.visual-calm .calm-access-button {
-  color: var(--calm-success);
+  color: var(--calm-text-secondary);
   -webkit-app-region: no-drag;
 }
 
@@ -481,32 +483,240 @@ html.visual-calm .calm-task .main-header > .calm-topbar {
 
 /* ---------- Welcome (Home) ---------- */
 
-html.visual-calm .calm-welcome {
-  isolation: isolate;
-}
-
-html.visual-calm .calm-welcome::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(60% 45% at 12% 105%, var(--calm-sky), transparent 70%),
-    radial-gradient(50% 40% at 95% -5%, var(--calm-sky-2), transparent 70%);
-}
-
+/* Home is a flat page: one headline, one composer, one row of starters.
+   The column sits a little above centre (the 14vh bottom padding), where the
+   eye lands first. */
 html.visual-calm .calm-welcome .welcome-view {
-  padding: 24px 32px 12vh;
+  padding: 24px 32px 14vh;
 }
 
 html.visual-calm .calm-welcome .welcome-content {
-  max-width: 720px;
+  max-width: 680px;
   font-family: var(--font-ui);
+  animation: calm-home-in 0.42s var(--calm-ease) both;
 }
 
+@keyframes calm-home-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.visual-calm .calm-welcome .welcome-content {
+    animation: none;
+  }
+}
+
+/* The headline may run a little wider than the composer so a typical
+   greeting sets on one line; longer ones wrap into balanced lines. */
 html.visual-calm .calm-hero {
-  margin-bottom: 26px;
+  margin: 0 -48px 30px;
+}
+
+/* Home composer as a writing surface: a roomy three-line field above one
+   control row. */
+html.visual-calm .calm-welcome .welcome-input-container {
+  padding: 10px 10px 10px;
+}
+
+/* Writing starts at the top-left like a document: the field, the rotating
+   placeholder and the caret all sit on the first line rather than the
+   bottom-anchored single-line layout the other composers use. */
+html.visual-calm .calm-welcome .cli-input-wrapper {
+  min-height: 84px;
+  padding: 8px 10px 0;
+  align-items: stretch;
+}
+
+html.visual-calm .calm-welcome .cli-input-wrapper > .mention-autocomplete-wrapper {
+  align-items: flex-start;
+}
+
+html.visual-calm .calm-welcome .cli-input-wrapper .prompt-composer-input {
+  align-self: flex-start;
+}
+
+html.visual-calm .calm-welcome .cli-rotating-placeholder {
+  top: 0;
+  transform: none;
+}
+
+html.visual-calm .calm-main.calm-welcome .cli-input,
+html.visual-calm .calm-main.calm-welcome .cli-rotating-placeholder,
+html.visual-calm .calm-main.calm-welcome .welcome-input {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+html.visual-calm .calm-welcome .welcome-input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+html.visual-calm .calm-welcome .input-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Folder pill: the project the task works in, inside the composer. */
+html.visual-calm
+  .calm-main
+  .welcome-input-footer
+  .workspace-dropdown-container.calm-composer-folder {
+  display: block;
+}
+
+html.visual-calm .calm-folder-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  max-width: 220px;
+  padding: 0 10px 0 9px;
+  border: 1px solid var(--calm-border);
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text-secondary);
+  font: 500 13px/1 var(--font-ui);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+html.visual-calm .calm-folder-button:hover,
+html.visual-calm .calm-folder-button[aria-expanded="true"] {
+  color: var(--calm-text);
+  background: var(--calm-surface-muted);
+  border-color: var(--calm-border-strong);
+}
+
+html.visual-calm .calm-folder-button > svg {
+  flex-shrink: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-folder-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Home work list ----------
+   Sessions waiting on you, then recent ones: hairline-separated rows in the
+   composer's column, like a quiet inbox. */
+html.visual-calm .calm-home-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  margin-top: 44px;
+  text-align: left;
+}
+
+html.visual-calm .calm-home-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 0 12px;
+  font: 500 12px/1.4 var(--font-ui);
+  letter-spacing: 0.02em;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-home-group-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+html.visual-calm .calm-home-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+html.visual-calm .calm-home-list > li + li {
+  border-top: 1px solid var(--calm-border);
+}
+
+html.visual-calm .calm-home-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text);
+  font: 400 14px/1.3 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+/* Hovered rows lift into a filled chip, so the hairlines beside them hide. */
+html.visual-calm .calm-home-row:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-home-list > li:hover,
+html.visual-calm .calm-home-list > li:hover + li {
+  border-top-color: transparent;
+}
+
+html.visual-calm .calm-home-row-mark {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--calm-border-strong);
+}
+
+html.visual-calm .calm-home-row.attention .calm-home-row-mark {
+  background: var(--calm-warning-text);
+  box-shadow: 0 0 0 3px var(--calm-warning-bg);
+}
+
+html.visual-calm .calm-home-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The dot and the count already carry the colour; the reason stays quiet. */
+html.visual-calm .calm-home-row-reason {
+  flex-shrink: 0;
+  color: var(--calm-text-secondary);
+  font-size: 12.5px;
+}
+
+html.visual-calm .calm-home-row-time {
+  flex-shrink: 0;
+  min-width: 34px;
+  text-align: right;
+  color: var(--calm-text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Composer: one calm pill. The model, access and folder controls live in the
@@ -518,6 +728,32 @@ html.visual-calm .calm-main .input-container {
   border-radius: 26px;
   box-shadow: var(--calm-shadow-pop);
   padding: 6px 8px;
+}
+
+/* Home composer: a hairline and a low, wide shadow instead of the floating
+   popover shadow, so it reads as part of the page. */
+html.visual-calm .calm-welcome .welcome-input-container {
+  border-color: var(--calm-border-strong);
+  border-radius: 24px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px -12px rgba(15, 23, 42, 0.1);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+html.visual-calm .calm-welcome .welcome-input-container:focus-within {
+  border-color: color-mix(in srgb, var(--calm-text) 22%, transparent);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.05),
+    0 16px 40px -14px rgba(15, 23, 42, 0.16);
+}
+
+html.visual-calm:not(.theme-light) .calm-welcome .welcome-input-container {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset,
+    0 16px 40px -16px rgba(0, 0, 0, 0.6);
 }
 
 html.visual-calm .calm-main .input-container {
@@ -654,17 +890,22 @@ html.visual-calm .calm-chips {
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
-  margin-top: 22px;
+  margin-top: 28px;
 }
 
 html.visual-calm .calm-chip {
   appearance: none;
-  padding: 7px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px 0 12px;
   border-radius: var(--calm-radius-pill);
   border: 1px solid var(--calm-border);
-  background: var(--calm-surface);
+  background: transparent;
   color: var(--calm-text-secondary);
-  font: 500 13px var(--font-ui);
+  font: 500 13px/1 var(--font-ui);
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background 0.15s ease,
@@ -672,14 +913,30 @@ html.visual-calm .calm-chip {
     border-color 0.15s ease;
 }
 
+html.visual-calm .calm-chip-icon {
+  display: inline-flex;
+  color: var(--calm-text-muted);
+  transition: color 0.15s ease;
+}
+
 html.visual-calm .calm-chip:hover {
   color: var(--calm-text);
+  background: var(--calm-surface-muted);
   border-color: var(--calm-border-strong);
 }
 
+html.visual-calm .calm-chip:hover .calm-chip-icon {
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-chip:active {
+  transform: translateY(0.5px);
+}
+
 html.visual-calm .calm-chip-more {
-  padding: 7px 12px;
-  letter-spacing: 1px;
+  padding: 0 14px;
+  border-color: transparent;
+  color: var(--calm-text-muted);
 }
 
 /* Next actions: quieter list below the chips. */
@@ -727,6 +984,269 @@ html.visual-calm .calm-sidebar .cli-task-item {
 html.visual-calm .calm-sidebar .cli-task-item.active,
 html.visual-calm .calm-sidebar .cli-task-item.selected {
   background: var(--calm-surface-muted);
+}
+
+/* Icon column: every session carries a mark on the same 16px column as the
+   New session "+" and the search glyph, so titles start on one line whether
+   or not a session has a status. Idle sessions get a faint dot; sessions
+   waiting on you get the warm dot the home list uses. */
+html.visual-calm .calm-sidebar .cli-task-status {
+  justify-content: center;
+}
+
+html.visual-calm .calm-sidebar .cli-session-indicator-invisible,
+html.visual-calm .calm-sidebar .cli-task-status:empty::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border: none;
+  border-radius: 50%;
+  background: var(--calm-border-strong);
+  opacity: 1;
+}
+
+html.visual-calm .calm-sidebar .cli-task-status.failed:empty::before {
+  background: currentColor;
+  opacity: 0.6;
+}
+
+html.visual-calm .calm-sidebar .cli-session-indicator-awaiting {
+  width: 6px;
+  height: 6px;
+  border: none;
+  background: var(--calm-warning-text);
+  box-shadow: 0 0 0 3px var(--calm-warning-bg);
+  opacity: 1;
+}
+
+html.visual-calm .calm-sidebar .cli-session-indicator-active {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+}
+
+html.visual-calm .calm-sidebar .cli-task-activity.needs-you {
+  color: var(--calm-text-secondary);
+}
+
+/* Titles use the full row. The session menu overlays the row's end on hover
+   (the title's fade widens beneath it) instead of reserving a blank 22px
+   slot on every row. Parent rows keep the reserved slot so their chevron
+   never sits under the menu. */
+html.visual-calm .calm-sidebar .cli-task-title-row {
+  position: relative;
+}
+
+html.visual-calm .calm-sidebar .cli-task-title-row:not(:has(.cli-collapse-btn)) .cli-task-actions {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+html.visual-calm .calm-sidebar .cli-task-item:hover .cli-task-title--faded,
+html.visual-calm .calm-sidebar .cli-task-item:focus-within .cli-task-title--faded {
+  --sidebar-title-fade-width: 44px;
+}
+
+/* Day and section labels are quiet; their collapse chevron appears on hover,
+   or stays when a group is collapsed so the folded state is visible. */
+html.visual-calm .calm-sidebar .sidebar-date-group-toggle svg {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+html.visual-calm .calm-sidebar .sidebar-date-group-toggle:hover svg,
+html.visual-calm .calm-sidebar .sidebar-date-group-toggle:focus-visible svg,
+html.visual-calm .calm-sidebar .sidebar-date-group-toggle[aria-expanded="false"] svg {
+  opacity: 1;
+}
+
+/* Ink, not accent: the panel stays black and white like the rest of calm. */
+html.visual-calm .calm-sidebar .sidebar-panel-row > svg.sidebar-panel-new-icon {
+  color: var(--calm-text);
+}
+
+/* An empty filter bucket needs no "0". */
+html.visual-calm .calm-sidebar .sidebar-session-state-count.is-zero {
+  display: none;
+}
+
+/* Search and status filter share one field: an active filter shows as a
+   removable chip inside it, and the filter button carries the "needs you"
+   count while the list is unfiltered. */
+html.visual-calm .calm-sidebar .sidebar-search-state-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px 0 8px;
+  border: none;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+  font: 500 12px/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+html.visual-calm .calm-sidebar .sidebar-search-state-chip:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-sidebar .sidebar-search-state-chip > svg {
+  color: var(--calm-text-muted);
+}
+
+/* With a filter applied the field reads as a token field: the chip sits
+   right after the magnifier and the placeholder steps aside. */
+html.visual-calm .calm-sidebar .sidebar-sessions-search:has(.sidebar-search-state-chip) {
+  gap: 6px;
+}
+
+html.visual-calm .calm-sidebar .sidebar-search-state-chip {
+  order: -1;
+}
+
+html.visual-calm .calm-sidebar .sidebar-sessions-search > svg {
+  order: -2;
+}
+
+html.visual-calm
+  .calm-sidebar
+  .sidebar-sessions-search:has(.sidebar-search-state-chip)
+  input::placeholder {
+  color: transparent;
+}
+
+html.visual-calm .calm-sidebar .sidebar-search-filter-btn {
+  position: relative;
+}
+
+html.visual-calm .calm-sidebar .sidebar-search-filter-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-warning-text);
+  box-shadow: 0 0 0 2px var(--calm-surface);
+  color: var(--calm-ink-contrast);
+  font: 600 9.5px/1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The filter menu opens under the field as a short list, not a chip row. */
+html.visual-calm .calm-sidebar .sidebar-session-filter-panel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  margin: 6px 0 2px;
+  padding: 4px;
+  border: 1px solid var(--calm-border);
+  border-radius: 10px;
+  background: var(--calm-surface);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .calm-sidebar .sidebar-session-filter-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+html.visual-calm .calm-sidebar .sidebar-session-filter-status:not(:last-child) {
+  padding-bottom: 4px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--calm-border);
+}
+
+html.visual-calm .calm-sidebar .sidebar-session-filter-option {
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--calm-text-secondary);
+  font-size: 13px;
+}
+
+html.visual-calm .calm-sidebar .sidebar-session-filter-option:hover {
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-sidebar .sidebar-session-filter-option.active {
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+  font-weight: 600;
+}
+
+/* "Show stopped sessions" is a toggle, not a status: it shows a check when
+   on rather than the selected-status fill. */
+html.visual-calm
+  .calm-sidebar
+  .sidebar-session-filter-status
+  ~ .sidebar-session-filter-option.active {
+  background: transparent;
+  font-weight: 500;
+}
+
+html.visual-calm
+  .calm-sidebar
+  .sidebar-session-filter-status
+  ~ .sidebar-session-filter-option.active:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm
+  .calm-sidebar
+  .sidebar-session-filter-status
+  ~ .sidebar-session-filter-option::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  margin-left: 8px;
+}
+
+html.visual-calm
+  .calm-sidebar
+  .sidebar-session-filter-status
+  ~ .sidebar-session-filter-option.active::after {
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")
+    center / 12px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")
+    center / 12px no-repeat;
+}
+
+html.visual-calm
+  .calm-sidebar
+  .sidebar-session-filter-status
+  ~ .sidebar-session-filter-option
+  > span:first-child {
+  flex: 1;
+  text-align: left;
+}
+
+html.visual-calm
+  .calm-sidebar
+  .sidebar-session-filter-option.needs-you
+  .sidebar-session-state-count {
+  color: var(--calm-warning-text);
+}
+
+/* Notices wrap to a second line rather than truncating mid-word. */
+html.visual-calm .calm-sidebar .sidebar-notice-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: 1.3;
 }
 
 /* ---------- Library / Build views ---------- */
@@ -1332,6 +1852,10 @@ html.visual-calm .calm-task .main-header > .calm-topbar {
     padding: 16px 16px 8vh;
   }
 
+  html.visual-calm .calm-hero {
+    margin-inline: 0;
+  }
+
   /* Header controls move under the title instead of squeezing it. */
   html.visual-calm .calm-task .main-header {
     flex-wrap: wrap;
@@ -1558,6 +2082,51 @@ html.visual-calm .calm-access-menu .calm-access-button {
   width: 34px;
   height: 34px;
   border-radius: 50%;
+}
+
+/* ---------- Inset canvas ----------
+   The window frame (title bar, rail, sidebar, right panel) is one flat
+   surface, and the main view sits on it as a rounded card: Linear's layout,
+   where the content is the only raised thing on screen. */
+html.visual-calm .app-layout > .sidebar.sidebar-panel {
+  border: 0;
+  border-radius: 0;
+}
+
+html.visual-calm .app .app-layout > .selected-workspace-view,
+html.visual-calm .app .app-layout > .main-content,
+html.visual-calm .app .app-layout-settings > .settings-page {
+  margin: 0 8px 8px 0;
+  border: 1px solid var(--calm-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--calm-page);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 16px -8px rgba(15, 23, 42, 0.06);
+}
+
+html.visual-calm:not(.theme-light) .app .app-layout > .selected-workspace-view,
+html.visual-calm:not(.theme-light) .app .app-layout > .main-content,
+html.visual-calm:not(.theme-light) .app .app-layout-settings > .settings-page {
+  box-shadow: none;
+}
+
+/* Settings sets height: 100%, which would push its bottom margin off-screen;
+   let the row stretch it instead. */
+html.visual-calm .app .app-layout-settings > .settings-page {
+  height: auto;
+}
+
+/* The card draws the edge, so the view inside it drops its own hairlines. */
+html.visual-calm
+  .app
+  .app-layout
+  > .selected-workspace-view
+  > .selected-workspace-main-row
+  > .main-content {
+  border: 0;
+  border-radius: 0;
 }
 
 /* ---------- Side rails ----------

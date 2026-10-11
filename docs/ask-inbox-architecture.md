@@ -4,19 +4,19 @@ Ask Inbox is the mailbox-specific agentic question surface inside Inbox Agent. I
 
 The current implementation has two entry points:
 
-- the left Inbox Agent **Ask your mailbox...** quick launcher
+- the **Ask** tab composer (and its example questions) in the Inbox Agent side panel
 - `@Inbox` / `@inbox ...` from the main composer
 
-Both routes open Inbox Agent, switch the right sidebar to the **Ask Inbox** tab, and run the question there.
+Both routes open Inbox Agent, show the side panel on the **Ask** tab, and run the question there.
 
 ## Product Model
 
-Ask Inbox sits in the right Inbox Agent sidebar beside **Agent Rail**:
+Ask Inbox sits in the right Inbox Agent side panel beside the **Agent** tab:
 
-| Tab        | Purpose                                                                                               |
-| ---------- | ----------------------------------------------------------------------------------------------------- |
-| Agent Rail | Thread actions, cleanup, follow-up, compose, commitments, snippets, handoff, and thread intelligence. |
-| Ask Inbox  | Mailbox questions, live agentic steps, final answers, and matched email evidence.                     |
+| Tab   | Purpose                                                                                          |
+| ----- | ------------------------------------------------------------------------------------------------ |
+| Agent | Next step, thread actions, suggestions, commitments, snippets, handoff, and thread intelligence. |
+| Ask   | Mailbox questions, live agentic steps, final answers, and matched email evidence.                |
 
 The left ask field remains a quick launcher. It does not own answer presentation. Submitting a question:
 
@@ -124,7 +124,7 @@ It does not silently send, archive, trash, mark done, bulk mutate, or create des
 
 Core files:
 
-- `src/renderer/components/InboxAgentPanel.tsx` — Agent Rail / Ask Inbox tabs, launcher behavior, transcript, step timeline, evidence list, right-sidebar composer
+- `src/renderer/components/InboxAgentPanel.tsx` — Agent / Ask tabs, transcript, step timeline, evidence list, side-panel composer (styles in `inbox-agent.css`)
 - `src/electron/mailbox/MailboxService.ts` — ask orchestration, action-intent handling, progress emission, answer generation, provider adapters
 - `src/electron/mailbox/MailboxAgentSearchService.ts` — query planning, hybrid retrieval, candidate merge/rerank, attachment-aware evidence
 - `src/shared/mailbox.ts` — `MailboxAskInput`, `MailboxAskResult`, `MailboxAskRunEvent`

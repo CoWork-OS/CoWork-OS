@@ -780,7 +780,7 @@ Ask Inbox is the mailbox-specific agentic question surface inside Inbox Agent. T
 
 Implementation boundaries:
 
-- `src/renderer/components/InboxAgentPanel.tsx` owns the right-sidebar `Agent Rail` / `Ask Inbox` tabs, the left ask launcher behavior, the Ask Inbox transcript, live step timeline, matched email rows, and pinned Ask composer.
+- `src/renderer/components/InboxAgentPanel.tsx` owns the side-panel `Agent` / `Ask` tabs (styles in `inbox-agent.css`), the Ask transcript, live step timeline, matched email rows, and pinned Ask composer.
 - `src/electron/mailbox/MailboxService.ts` owns `askMailbox()`, action-intent classification, progress emission, provider search adapters, answer generation, and safe draft creation paths.
 - `src/electron/mailbox/MailboxAgentSearchService.ts` owns query planning, local FTS retrieval, semantic mailbox retrieval, provider-result normalization, attachment-aware search, shortlist/read/rerank behavior, and no-evidence answers.
 - `src/shared/mailbox.ts` owns `MailboxAskInput`, `MailboxAskResult`, and `MailboxAskRunEvent`.

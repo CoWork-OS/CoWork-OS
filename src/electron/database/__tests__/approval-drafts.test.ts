@@ -31,7 +31,8 @@ suite("trusted approval draft revisions", () => {
     CREATE TABLE agent_roles (id TEXT PRIMARY KEY, is_active INTEGER, capabilities TEXT, tool_restrictions TEXT);
     CREATE TABLE channel_sessions (id TEXT PRIMARY KEY, channel_id TEXT, chat_id TEXT, workspace_id TEXT, task_id TEXT, context TEXT);
     CREATE TABLE channels (id TEXT PRIMARY KEY, type TEXT, enabled INTEGER, config TEXT, security_config TEXT);
-    CREATE TABLE channel_users (channel_id TEXT, channel_user_id TEXT, allowed INTEGER);
+    CREATE TABLE context_policies (channel_id TEXT, context_type TEXT, security_mode TEXT, tool_restrictions TEXT);
+CREATE TABLE channel_users (channel_id TEXT, channel_user_id TEXT, allowed_dm INTEGER);
     INSERT INTO tasks VALUES ('task','ws','bot',NULL,'{"gatewayContext":"private"}','blocked');
     INSERT INTO agent_roles VALUES ('bot',1,'[]','{}');
     INSERT INTO channels VALUES ('channel','slack',1,'{}','{}');

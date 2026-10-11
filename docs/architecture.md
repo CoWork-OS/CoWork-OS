@@ -113,6 +113,10 @@ which terminates their process group if a non-loopback listener appears.
 
 See [Access Profiles](access-profiles.md) for the product, API, migration, and edge-case contract.
 
+## Gateway context admission
+
+Gateway authorization grants bind the channel, sender, and DM or group context. Pairing codes are context-specific, revocation removes the corresponding context grant, and ambiguous legacy grants fail closed. Channel settings expose DM and group access independently; an owner or approval decision in one context does not authorize another.
+
 ## Heartbeat V3
 
 Heartbeat v3 is the default background automation architecture.

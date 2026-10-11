@@ -6726,7 +6726,12 @@ export class MessageRouter {
     const channel = await this.getChannelForAdapter(adapter);
     if (!channel) return;
 
-    const result = await this.securityManager.verifyPairingCode(channel, message.userId, code);
+    const result = await this.securityManager.verifyPairingCode(
+      channel,
+      message.userId,
+      code,
+      this.securityManager.resolveContextType(channel, message),
+    );
 
     if (result.success) {
       await adapter.sendMessage({
@@ -9371,6 +9376,7 @@ Node.js: \`${nodeVersion}\`
       // Without this, any user in a group could press buttons even if they aren't authorized.
       const syntheticMessage: IncomingMessage = {
         messageId: query.messageId,
+        isGroup: query.isGroup,
         channel: adapter.type,
         userId: query.userId,
         userName: query.userName,

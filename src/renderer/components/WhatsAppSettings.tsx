@@ -783,12 +783,12 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
 
       {securityMode === "pairing" && (
         <div className="settings-section">
-          <h4>Generate Pairing Code</h4>
+          <h4>Generate DM Pairing Code</h4>
           <p className="settings-description">
             Generate a one-time code for a user to enter in WhatsApp to gain access.
           </p>
           <button className="button-secondary" onClick={handleGeneratePairingCode}>
-            Generate Code
+            Generate DM Code
           </button>
           {pairingCode && (
             <div className="pairing-code-display">
@@ -904,7 +904,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
                     className="button-small button-danger"
                     onClick={() => handleRevokeAccess(user.channelUserId)}
                   >
-                    Revoke
+                    Revoke All Access
                   </button>
                 )}
               </div>

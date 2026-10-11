@@ -9289,6 +9289,8 @@ export async function setupIpcHandlers(
       displayName: u.displayName,
       username: u.username,
       allowed: u.allowed,
+      allowedDm: u.allowedDm,
+      allowedGroup: u.allowedGroup,
       lastSeenAt: u.lastSeenAt,
     }));
   });
@@ -9319,13 +9321,18 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GRANT_ACCESS, async (_, data) => {
     if (!gateway) throw new Error("Gateway not initialized");
     const validated = validateInput(GrantAccessSchema, data, "grant access");
-    await gateway.grantUserAccess(validated.channelId, validated.userId, validated.displayName);
+    await gateway.grantUserAccess(
+      validated.channelId,
+      validated.userId,
+      validated.displayName,
+      validated.contextType,
+    );
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_REVOKE_ACCESS, async (_, data) => {
     if (!gateway) throw new Error("Gateway not initialized");
     const validated = validateInput(RevokeAccessSchema, data, "revoke access");
-    await gateway.revokeUserAccess(validated.channelId, validated.userId);
+    await gateway.revokeUserAccess(validated.channelId, validated.userId, validated.contextType);
   });
 
   ipcMain.handle(IPC_CHANNELS.GATEWAY_GENERATE_PAIRING, async (_, data) => {
@@ -9335,6 +9342,7 @@ export async function setupIpcHandlers(
       validated.channelId,
       validated.userId,
       validated.displayName,
+      validated.contextType,
     );
   });
 

@@ -1916,26 +1916,36 @@ export class ChannelGateway {
     channelId: string,
     userId?: string,
     displayName?: string,
+    contextType: "dm" | "group" = "dm",
   ): Promise<string> {
     const channel = await this.channelRepo.findById(channelId);
     if (!channel) {
       throw new Error("Channel not found");
     }
-    return this.securityManager.generatePairingCode(channel, userId, displayName);
+    return this.securityManager.generatePairingCode(channel, userId, displayName, contextType);
   }
 
   /**
    * Grant access to a user
    */
-  async grantUserAccess(channelId: string, userId: string, displayName?: string): Promise<void> {
-    await this.securityManager.grantAccess(channelId, userId, displayName);
+  async grantUserAccess(
+    channelId: string,
+    userId: string,
+    displayName?: string,
+    contextType: "dm" | "group" | "both" = "dm",
+  ): Promise<void> {
+    await this.securityManager.grantAccess(channelId, userId, displayName, contextType);
   }
 
   /**
    * Revoke user access
    */
-  async revokeUserAccess(channelId: string, userId: string): Promise<void> {
-    await this.securityManager.revokeAccess(channelId, userId);
+  async revokeUserAccess(
+    channelId: string,
+    userId: string,
+    contextType: "dm" | "group" | "both" = "both",
+  ): Promise<void> {
+    await this.securityManager.revokeAccess(channelId, userId, contextType);
   }
 
   /**

@@ -5418,7 +5418,11 @@ export interface ChannelUser {
   channelUserId: string;
   displayName: string;
   username?: string;
+  /** Display aggregate only; authorization must use the context-specific grants. */
   allowed: boolean;
+  allowedDm?: boolean;
+  allowedGroup?: boolean;
+  pairingContext?: "dm" | "group";
   pairingCode?: string;
   pairingAttempts: number;
   pairingExpiresAt?: number;
@@ -5734,8 +5738,8 @@ export class ChannelUserStore {
     };
 
     const stmt = this.db.prepare(`
-      INSERT INTO channel_users (id, channel_id, channel_user_id, display_name, username, allowed, pairing_code, pairing_attempts, pairing_expires_at, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO channel_users (id, channel_id, channel_user_id, display_name, username, allowed, allowed_dm, allowed_group, pairing_context, pairing_code, pairing_attempts, pairing_expires_at, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -5744,7 +5748,10 @@ export class ChannelUserStore {
       newUser.channelUserId,
       newUser.displayName,
       newUser.username || null,
-      newUser.allowed ? 1 : 0,
+      newUser.allowedDm || newUser.allowedGroup ? 1 : 0,
+      newUser.allowedDm ? 1 : 0,
+      newUser.allowedGroup ? 1 : 0,
+      newUser.pairingContext || null,
       newUser.pairingCode || null,
       newUser.pairingAttempts,
       newUser.pairingExpiresAt || null,
@@ -5752,7 +5759,7 @@ export class ChannelUserStore {
       newUser.lastSeenAt,
     );
 
-    return newUser;
+    return { ...newUser, allowed: !!(newUser.allowedDm || newUser.allowedGroup) };
   }
 
   update(id: string, updates: Partial<ChannelUser>): void {
@@ -5771,21 +5778,41 @@ export class ChannelUserStore {
       fields.push("allowed = ?");
       values.push(updates.allowed ? 1 : 0);
     }
-    if (updates.pairingCode !== undefined) {
+    if (updates.allowedDm !== undefined || updates.allowedGroup !== undefined) {
+      fields.push(
+        "allowed_dm = COALESCE(?, allowed_dm)",
+        "allowed_group = COALESCE(?, allowed_group)",
+      );
+      values.push(
+        updates.allowedDm === undefined ? null : Number(updates.allowedDm),
+        updates.allowedGroup === undefined ? null : Number(updates.allowedGroup),
+      );
+      // Evaluate against the old row and supplied changes in the same statement.
+      fields.push("allowed = (COALESCE(?, allowed_dm) = 1 OR COALESCE(?, allowed_group) = 1)");
+      values.push(
+        updates.allowedDm === undefined ? null : Number(updates.allowedDm),
+        updates.allowedGroup === undefined ? null : Number(updates.allowedGroup),
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "pairingContext")) {
+      fields.push("pairing_context = ?");
+      values.push(updates.pairingContext ?? null);
+    }
+    if (Object.prototype.hasOwnProperty.call(updates, "pairingCode")) {
       fields.push("pairing_code = ?");
-      values.push(updates.pairingCode);
+      values.push(updates.pairingCode ?? null);
     }
     if (updates.pairingAttempts !== undefined) {
       fields.push("pairing_attempts = ?");
       values.push(updates.pairingAttempts);
     }
-    if (updates.pairingExpiresAt !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(updates, "pairingExpiresAt")) {
       fields.push("pairing_expires_at = ?");
-      values.push(updates.pairingExpiresAt);
+      values.push(updates.pairingExpiresAt ?? null);
     }
-    if (updates.lockoutUntil !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(updates, "lockoutUntil")) {
       fields.push("lockout_until = ?");
-      values.push(updates.lockoutUntil);
+      values.push(updates.lockoutUntil ?? null);
     }
     if (updates.lastSeenAt !== undefined) {
       fields.push("last_seen_at = ?");
@@ -5864,14 +5891,15 @@ export class ChannelUserStore {
   /**
    * Delete all pending pairing entries for a channel (valid or expired).
    */
-  deletePendingByChannel(channelId: string): number {
+  deletePendingByChannel(channelId: string, contextType?: "dm" | "group"): number {
     const stmt = this.db.prepare(`
       DELETE FROM channel_users
       WHERE channel_id = ?
         AND allowed = 0
         AND channel_user_id LIKE 'pending_%'
+        AND (? IS NULL OR pairing_context = ?)
     `);
-    const result = stmt.run(channelId);
+    const result = stmt.run(channelId, contextType ?? null, contextType ?? null);
     return result.changes;
   }
 
@@ -5894,11 +5922,17 @@ export class ChannelUserStore {
     return result.changes;
   }
 
-  findByPairingCode(channelId: string, pairingCode: string): ChannelUser | undefined {
+  findByPairingCode(
+    channelId: string,
+    pairingCode: string,
+    contextType: "dm" | "group" = "dm",
+  ): ChannelUser | undefined {
     const stmt = this.db.prepare(
-      "SELECT * FROM channel_users WHERE channel_id = ? AND UPPER(pairing_code) = UPPER(?)",
+      "SELECT * FROM channel_users WHERE channel_id = ? AND UPPER(pairing_code) = UPPER(?) AND pairing_context = ?",
     );
-    const row = stmt.get(channelId, pairingCode) as Record<string, unknown> | undefined;
+    const row = stmt.get(channelId, pairingCode, contextType) as
+      | Record<string, unknown>
+      | undefined;
     return row ? this.mapRowToUser(row) : undefined;
   }
 
@@ -5909,7 +5943,13 @@ export class ChannelUserStore {
       channelUserId: row.channel_user_id as string,
       displayName: row.display_name as string,
       username: (row.username as string) || undefined,
-      allowed: row.allowed === 1,
+      allowed: row.allowed_dm === 1 || row.allowed_group === 1,
+      allowedDm: row.allowed_dm === 1,
+      allowedGroup: row.allowed_group === 1,
+      pairingContext:
+        row.pairing_context === "dm" || row.pairing_context === "group"
+          ? row.pairing_context
+          : undefined,
       pairingCode: (row.pairing_code as string) || undefined,
       pairingAttempts: row.pairing_attempts as number,
       pairingExpiresAt: (row.pairing_expires_at as number) || undefined,

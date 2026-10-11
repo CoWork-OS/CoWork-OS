@@ -937,6 +937,7 @@ export class TelegramAdapter implements ChannelAdapter {
       chatId: query.message.chat.id.toString(),
       messageId: query.message.message_id.toString(),
       data: query.data,
+      isGroup: query.message.chat.type !== "private",
       threadId: (query.message as { message_thread_id?: number }).message_thread_id?.toString(),
       raw: ctx,
     };

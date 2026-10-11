@@ -4287,6 +4287,31 @@ export class DatabaseManager {
       // Column already exists, ignore
     }
 
+    // Admission provenance cannot be recovered from the legacy global flag.
+    // Preserve user IDs/FKs, but require fresh context-specific grants and codes.
+    this.db.transaction(() => {
+      const columns = this.db.pragma("table_info(channel_users)") as Array<{
+        name: string;
+      }>;
+      const names = new Set(columns.map((column) => column.name));
+      const legacy =
+        !names.has("allowed_dm") || !names.has("allowed_group") || !names.has("pairing_context");
+      if (!names.has("allowed_dm"))
+        this.db.exec("ALTER TABLE channel_users ADD COLUMN allowed_dm INTEGER NOT NULL DEFAULT 0");
+      if (!names.has("allowed_group"))
+        this.db.exec(
+          "ALTER TABLE channel_users ADD COLUMN allowed_group INTEGER NOT NULL DEFAULT 0",
+        );
+      if (!names.has("pairing_context"))
+        this.db.exec(
+          "ALTER TABLE channel_users ADD COLUMN pairing_context TEXT CHECK (pairing_context IN ('dm', 'group'))",
+        );
+      if (legacy)
+        this.db.exec(
+          "UPDATE channel_users SET allowed = 0, allowed_dm = 0, allowed_group = 0, pairing_code = NULL, pairing_expires_at = NULL, pairing_context = NULL",
+        );
+    })();
+
     // ============ Secure Settings Table ============
     // All settings are encrypted using OS keychain (Electron safeStorage)
     // Only this app can decrypt the values

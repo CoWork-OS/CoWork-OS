@@ -9638,6 +9638,8 @@ export interface ChannelUserData {
   displayName: string;
   username?: string;
   allowed: boolean;
+  allowedDm?: boolean;
+  allowedGroup?: boolean;
   lastSeenAt: number;
 }
 

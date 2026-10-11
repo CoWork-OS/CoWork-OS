@@ -124,6 +124,8 @@ export type ChannelDecisionHandler = (event: ChannelDecisionEvent) => void | Pro
  * Callback query from inline keyboard button press
  */
 export interface CallbackQuery {
+  /** Adapter-resolved context; IDs alone are ambiguous on platforms such as Discord. */
+  isGroup?: boolean;
   /** Unique callback query ID */
   id: string;
   /** User who pressed the button */

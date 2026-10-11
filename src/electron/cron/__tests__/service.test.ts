@@ -900,6 +900,29 @@ describe("CronService", () => {
   });
 
   describe("run", () => {
+    it("does not hold the operation lock while a manual run waits for task creation", async () => {
+      let resolveCreateTask: (value: { id: string }) => void = () => {};
+      const createTask = vi.fn(
+        () => new Promise<{ id: string }>((resolve) => (resolveCreateTask = resolve)),
+      ) as CronServiceDeps["createTask"] & ReturnType<typeof vi.fn>;
+      service = createService({ createTask });
+      await service.start();
+      await service.add({
+        name: "Manual lock test",
+        enabled: true,
+        workspaceId: "ws-1",
+        taskPrompt: "wait",
+        schedule: { kind: "every", everyMs: 60_000 },
+      });
+
+      const runPromise = service.run("job-1", "force");
+      await vi.waitFor(() => expect(createTask).toHaveBeenCalled());
+      const listPromise = service.list({ includeDisabled: true });
+      await expect(listPromise).resolves.toHaveLength(1);
+      resolveCreateTask({ id: "task-manual-lock" });
+      await runPromise;
+    });
+
     it("should run a job and create a task", async () => {
       service = createService({ nowMs: () => 1000000 });
       await service.start();
@@ -1643,6 +1666,82 @@ describe("CronService", () => {
 
       const job = await service.get("job-1");
       expect(job).toBeNull();
+    });
+  });
+
+  describe("outbox lifecycle fencing", () => {
+    async function startWithQueuedOutbox(
+      deliverToChannel: CronServiceDeps["deliverToChannel"],
+      count = 1,
+    ) {
+      service = createService({ deliverToChannel });
+      await service.start();
+      await service.add({
+        name: "Outbox lifecycle",
+        enabled: true,
+        workspaceId: "ws-1",
+        taskPrompt: "outbox",
+        schedule: { kind: "every", everyMs: 60_000 },
+      });
+      const job = await service.get("job-1");
+      for (let index = 0; index < count; index += 1) {
+        (service as Any).enqueueOutboxEntry({
+          job,
+          runAtMs: 1000000 + index,
+          status: "ok",
+          channelType: "telegram",
+          channelId: `channel-${index}`,
+          idempotencyKey: `outbox-${index}`,
+          attemptImmediately: true,
+        });
+      }
+      return service;
+    }
+
+    it("does not rearm after stop during a failing in-flight delivery", async () => {
+      let rejectDelivery: (error: Error) => void = () => {};
+      const delivery = vi.fn(
+        () => new Promise<void>((_resolve, reject) => (rejectDelivery = reject)),
+      ) as CronServiceDeps["deliverToChannel"] & ReturnType<typeof vi.fn>;
+      await startWithQueuedOutbox(delivery);
+      const processing = (service as Any).processOutboxQueue();
+      await vi.waitFor(() => expect(delivery).toHaveBeenCalledOnce());
+      await service.stop();
+      rejectDelivery(new Error("fixture failure"));
+      await processing;
+      expect((service as Any).state.outboxTimer).toBeNull();
+    });
+
+    it("does not send a queued entry after stop while processing waits on the lock", async () => {
+      const delivery = vi.fn().mockResolvedValue(undefined) as CronServiceDeps["deliverToChannel"] &
+        ReturnType<typeof vi.fn>;
+      await startWithQueuedOutbox(delivery);
+      let releaseLock: () => void = () => {};
+      const lockGate = new Promise<void>((resolve) => (releaseLock = resolve));
+      const lock = (service as Any).withLock(async () => lockGate);
+      const processing = (service as Any).processOutboxQueue();
+      await service.stop();
+      releaseLock();
+      await lock;
+      await processing;
+      expect(delivery).not.toHaveBeenCalled();
+    });
+
+    it("does not send the second queued entry when stop occurs during the first", async () => {
+      let resolveFirst: () => void = () => {};
+      const delivery = vi.fn((input: Any) => {
+        if (input.channelId === "channel-0") {
+          return new Promise<void>((resolve) => (resolveFirst = resolve));
+        }
+        return Promise.resolve();
+      }) as CronServiceDeps["deliverToChannel"] & ReturnType<typeof vi.fn>;
+      await startWithQueuedOutbox(delivery, 2);
+      const processing = (service as Any).processOutboxQueue();
+      await vi.waitFor(() => expect(delivery).toHaveBeenCalledOnce());
+      await service.stop();
+      resolveFirst();
+      await processing;
+      expect(delivery).toHaveBeenCalledTimes(1);
     });
   });
 

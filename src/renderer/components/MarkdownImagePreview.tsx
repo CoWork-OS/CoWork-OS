@@ -6,6 +6,8 @@ type MarkdownImagePreviewProps = {
   alt?: string;
   title?: string;
   workspacePath?: string;
+  /** Render nothing (instead of a loading/error note) until the image is ready. */
+  quiet?: boolean;
 };
 
 const REMOTE_IMAGE_RE = /^https?:\/\//i;
@@ -22,7 +24,13 @@ function normalizeFileSrc(src: string): string {
       return rawPath.replace(/^\/([a-zA-Z]:\/)/, "$1").split(/[?#]/)[0];
     }
   }
-  return src.split(/[?#]/)[0];
+  // Markdown renderers percent-encode destinations (e.g. spaces -> %20); decode relative paths.
+  const withoutQuery = src.split(/[?#]/)[0];
+  try {
+    return decodeURIComponent(withoutQuery);
+  } catch {
+    return withoutQuery;
+  }
 }
 
 function isLocalImageSrc(src: string): boolean {
@@ -37,6 +45,7 @@ export function MarkdownImagePreview({
   alt = "",
   title,
   workspacePath,
+  quiet = false,
 }: MarkdownImagePreviewProps) {
   const trimmedSrc = src.trim();
   const localPath = useMemo(
@@ -94,6 +103,7 @@ export function MarkdownImagePreview({
   const label = title || alt || fileName || localPath || "Image";
 
   if (!trimmedSrc) return null;
+  if (quiet && (loading || error || !displaySrc)) return null;
 
   return (
     <>

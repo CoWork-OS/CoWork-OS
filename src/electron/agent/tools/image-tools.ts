@@ -216,7 +216,7 @@ Providers/models:
   openai/gpt-image-2, Recraft, Seedream, Qwen, and Nano Banana
 - Gemini: nano-banana-2 (gemini-3.1-flash-image-preview), gemini-image-pro, gemini-image-fast
 
-The generated images are saved to the workspace folder.`,
+The generated images are saved to the workspace folder. In your final answer, show each generated image inline with Markdown image syntax \`![short description](<filename>)\` using the returned workspace-relative filename; don't only link to it.`,
         input_schema: {
           type: "object",
           properties: {

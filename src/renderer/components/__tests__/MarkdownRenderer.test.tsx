@@ -48,3 +48,50 @@ describe("MarkdownRenderer file links", () => {
     expect(markup).not.toContain('src="/private/');
   });
 });
+
+describe("MarkdownRenderer workspace image links", () => {
+  const renderMarkdown = (markdown: string, markdownComponents: unknown = components) =>
+    renderToStaticMarkup(
+      React.createElement(MarkdownRenderer, {
+        children: markdown,
+        components: markdownComponents,
+      }),
+    );
+
+  it("adds an inline thumbnail after a link to a workspace image", () => {
+    const markup = renderMarkdown("Saved [the image](qwen-image.png).");
+    expect(markup).toContain("Click to preview");
+    expect(markup).toContain("markdown-image-link-preview");
+  });
+
+  it("does not add thumbnails for non-image or remote links", () => {
+    expect(renderMarkdown("[report](report.pdf)")).not.toContain("markdown-image-link-preview");
+    expect(renderMarkdown("[logo](https://example.com/logo.png)")).not.toContain(
+      "markdown-image-link-preview",
+    );
+    expect(renderMarkdown("[vector](logo.svg)")).not.toContain("markdown-image-link-preview");
+  });
+
+  it("can disable link thumbnails for compact event titles", () => {
+    const titleComponents = buildMarkdownComponents({
+      workspacePath: "/private/tmp/qa",
+      onOpenViewer: () => {},
+      inlineImageLinks: false,
+    });
+    const markup = renderMarkdown("Created [image](qwen-image.png)", titleComponents);
+    expect(markup).toContain("Click to preview");
+    expect(markup).not.toContain("markdown-image-link-preview");
+  });
+
+  it("keeps ![]() image embeds rendering through the image preview only", () => {
+    const markup = renderMarkdown("![Sunset](sunset.png)");
+    expect(markup).toContain("markdown-image-preview");
+    expect(markup).not.toContain("markdown-image-link-preview");
+  });
+
+  it("decodes percent-encoded relative file links", () => {
+    const markup = renderMarkdown("[my image](<my image.png>)");
+    expect(markup).toContain('href="my%20image.png"');
+    expect(markup).toContain('title="my image.png');
+  });
+});

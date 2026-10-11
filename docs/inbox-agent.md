@@ -6,7 +6,7 @@ The current product shape is:
 
 - **Classic inbox remains available** as the familiar three-pane mailbox.
 - **Today mode is the agent-first working mode** for deciding what needs attention now.
-- **Agent Rail and Ask Inbox share the right sidebar** so thread actions, mailbox questions, live agent steps, answers, and evidence stay close to the message.
+- **Agent and Ask share the right side panel** so thread actions, mailbox questions, live agent steps, answers, and evidence stay close to the message. The panel can be hidden from the reader toolbar; in narrow windows it slides over the reader.
 - **`@Inbox` from the main composer routes mailbox questions into Inbox Agent** without starting a normal task run.
 - **Provider state is authoritative** for read/unread and supported server actions; the local database is the cache plus agent metadata.
 
@@ -40,23 +40,22 @@ Inbox Agent helps you move from "read everything" to "act on what matters":
 
 ## Core Surfaces
 
-| Surface                 | Current Behavior                                                                                                                                                      |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Classic mode            | Three-pane mailbox with filters, thread list, detail pane, and Agent Rail.                                                                                            |
-| Today mode              | Groups current threads into `Needs action`, `Happening today`, `Good to know`, and `More to browse`.                                                                  |
-| Inbox pulse             | Shows unread, needs-reply, suggested-action, and open-commitment counts.                                                                                              |
-| View filters            | Switch between `Inbox`, `Sent`, and `All`.                                                                                                                            |
-| Category filters        | Filter by priority, calendar, follow-up, promotions, updates, and saved views.                                                                                        |
-| Domain filters          | Filter by domains such as travel, packages, receipts, bills, newsletters, shopping, work, and all domains.                                                            |
-| Sort controls           | Toggle between `Recent` and `Priority`.                                                                                                                               |
-| Thread cards            | Show sender, subject, snippet, account, message count, priority/cleanup chips, attachment chips, and stronger unread styling.                                         |
-| Thread detail           | Shows subject, participants, provider/account chips, AI summary, manual compose, editable AI draft, attachments, received/sent messages, and commitments.             |
-| Agent Rail              | Cleanup, follow-up, reply, forward, mark done, prep thread, extract todos, schedule, refresh intel, handoff, quick replies, snippets, automations, and quick actions. |
-| Ask Inbox               | Right-sidebar chat for mailbox questions. Shows the question, live agentic steps, final answer, and matched email evidence with source labels.                        |
-| Sender cleanup          | Ranks noisy senders by recent volume, cleanup candidates, read/action rate signals, and estimated weekly reduction.                                                   |
-| Client readiness        | Shows provider backends, capabilities, folders, labels, identities, signatures, compose drafts, queued actions, failed actions, and sync health.                      |
-| Mission Control handoff | Turns a thread into a company issue with mailbox evidence and an operator wake-up.                                                                                    |
-| Research rail           | Shows contact identity, linked channels, relationship timeline, recent subjects, and preferred channel hints.                                                         |
+| Surface                 | Current Behavior                                                                                                                                                       |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Classic mode            | One canvas split into the thread list, the reader, and the Agent side panel.                                                                                           |
+| Today mode              | Groups current threads into `Needs action`, `Happening today`, `Good to know`, and `More to browse`.                                                                   |
+| Focus filters           | Pills under the category tabs for unread, to-reply, suggested-action, and open-commitment counts; only non-zero (or active) ones show. Click to filter.                |
+| Mailbox menu            | The list title (`Inbox ▾`) switches between `Inbox`, `Sent`, and `All mail`, and between accounts when more than one is connected.                                     |
+| Category filters        | Filter by priority, calendar, follow-up, promotions, updates, and saved views.                                                                                         |
+| Display options         | The sliders button holds sort (`Recent` / `Priority`), topic filters (travel, packages, receipts, bills, newsletters, shopping, work), and Reclassify backlog.         |
+| Thread rows             | Sender, message count, time, subject, and snippet, with an unread dot and quiet tags (needs reply, high/critical, sensitive, cleanup, attachments, account).           |
+| Reader                  | Toolbar actions (archive, trash, read state, snooze, mark done, reply, forward, Draft reply), summary, compose, AI draft, attachments, and the conversation.           |
+| Agent tab               | Next step, prep thread, extract todos, schedule, refresh intel, handoff, rules, auto-forward, label similar, suggestions, commitments, quick replies, and automations. |
+| Ask Inbox               | Right-sidebar chat for mailbox questions. Shows the question, live agentic steps, final answer, and matched email evidence with source labels.                         |
+| Sender cleanup          | Ranks noisy senders by recent volume, cleanup candidates, read/action rate signals, and estimated weekly reduction.                                                    |
+| Sync status             | The list footer shows sync state; open it for accounts, folders, drafts, queued and failed actions, capabilities, provider backends, and Sync now.                     |
+| Mission Control handoff | Turns a thread into a company issue with mailbox evidence and an operator wake-up.                                                                                     |
+| Research rail           | Shows contact identity, linked channels, relationship timeline, recent subjects, and preferred channel hints.                                                          |
 
 ## Normal Email Client Actions
 
@@ -119,10 +118,10 @@ See [Composer Mentions](composer-mentions.md) for the shared `@` autocomplete be
 
 The right Inbox Agent sidebar has two tabs:
 
-- **Agent Rail** for actions on the selected thread
-- **Ask Inbox** for mailbox questions, live steps, answers, and evidence
+- **Agent** for actions on the selected thread
+- **Ask** for mailbox questions, live steps, answers, and evidence
 
-The left **Ask your mailbox...** field is a quick launcher. Submitting it creates a run, switches the right sidebar to **Ask Inbox**, appends the question, and streams run progress. Ask Inbox also has its own composer pinned at the bottom so follow-up questions can continue in the same mailbox context.
+Submitting a question in the **Ask** composer (or picking an example question) creates a run, appends the question, and streams run progress. The composer stays pinned at the bottom so follow-up questions continue in the same mailbox context.
 
 Ask Inbox runs are session-local for now. They are not persisted across app restarts.
 
@@ -239,7 +238,7 @@ Every meaningful mailbox action emits a normalized mailbox event. Events current
 1. Open Inbox Agent and let cached mail appear immediately.
 2. Use Classic mode for a familiar thread list or Today mode for the agent-first action lanes.
 3. Filter by view, category, saved view, domain, account, or search.
-4. Open a thread and review summary, message content, attachments, commitments, and the Agent Rail.
+4. Open a thread and review summary, message content, attachments, commitments, and the Agent tab.
 5. Use `Reply`, `Reply all`, or `Forward` for normal manual email.
 6. Use `Prep thread` or `Draft a reply with AI` when you want agent help, then edit the generated draft before sending.
 7. Use `Mark done` when you handled the email elsewhere and want it removed from Needs reply/Open commitments.

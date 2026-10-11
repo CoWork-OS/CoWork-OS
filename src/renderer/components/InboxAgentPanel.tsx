@@ -5,23 +5,36 @@ import remarkGfm from "remark-gfm";
 import {
   AlertCircle,
   Archive,
+  ArrowRight,
+  ArrowUp,
   Calendar,
+  Check,
   CheckSquare,
   ChevronDown,
   Clock,
   Forward,
   Inbox,
+  ListChecks,
   MailSearch,
   MailOpen,
   Mic,
   MicOff,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Paperclip,
   RefreshCcw,
   Reply,
+  ReplyAll,
+  Search,
   Send,
+  SlidersHorizontal,
   Sparkles,
+  Tag,
   Trash2,
   User,
   X,
+  Zap,
 } from "lucide-react";
 import {
   MailboxActionProposal,
@@ -57,6 +70,7 @@ import {
   measureEmailContentWidth,
 } from "../utils/email-html-layout";
 import { normalizeEmailExternalWebUrl, sanitizeEmailHtml } from "../utils/email-html-sanitize";
+import "./inbox-agent.css";
 
 type QueueMode = "cleanup" | "follow_up" | null;
 type RightRailTab = "agent_rail" | "ask_inbox";
@@ -67,6 +81,7 @@ const MAILBOX_AUTO_SYNC_INTERVAL_MS = 2 * 60 * 1000;
 const MAILBOX_AUTO_SYNC_LIMIT = 25;
 const MAILBOX_CLASSIFICATION_WARNING_KEY = "mailboxClassificationWarningAcknowledged";
 const MAILBOX_SERVER_ACTION_WARNING_KEY = "mailboxServerActionWarningAcknowledged";
+const MAILBOX_AGENT_RAIL_OPEN_KEY = "mailboxAgentRailOpen";
 const ALL_MAILBOX_ACCOUNTS_FILTER = "__all__";
 
 function createMailboxAskRunId(): string {
@@ -511,46 +526,22 @@ function EmailHtmlBody({ html }: { html: string }) {
     />
   );
 }
-
 function Avatar({ name, email, size = 32 }: { name?: string; email?: string; size?: number }) {
   const letters = initials(name, email);
   const hue = (name || email || "").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
   return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: `hsl(${hue}, 55%, 42%)`,
-        display: "grid",
-        placeItems: "center",
-        fontSize: size * 0.34,
-        fontWeight: 700,
-        color: "#fff",
-        flexShrink: 0,
-        letterSpacing: "0.02em",
-      }}
+    <span
+      className="ibx-avatar"
+      aria-hidden
+      style={{ "--ibx-hue": hue, "--ibx-avatar-size": `${size}px` } as CSSProperties}
     >
       {letters}
-    </div>
+    </span>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        fontSize: "0.7rem",
-        fontWeight: 700,
-        letterSpacing: "0.1em",
-        textTransform: "uppercase",
-        color: "var(--color-text-muted)",
-        marginBottom: "10px",
-      }}
-    >
-      {children}
-    </div>
-  );
+  return <div className="ibx-label">{children}</div>;
 }
 
 function ActionBtn({
@@ -558,61 +549,27 @@ function ActionBtn({
   icon,
   label,
   variant = "default",
+  size = "md",
   disabled,
   title,
 }: {
   onClick: () => void;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   label: string;
-  variant?: "default" | "primary" | "danger";
+  variant?: "default" | "primary" | "danger" | "ghost";
+  size?: "sm" | "md";
   disabled?: boolean;
   title?: string;
 }) {
-  const [hovered, setHovered] = useState(false);
-
-  const styles: Record<string, CSSProperties> = {
-    default: {
-      background: hovered ? "var(--color-bg-hover)" : "var(--color-bg-secondary)",
-      border: "1px solid var(--color-border)",
-      color: "var(--color-text-primary)",
-    },
-    primary: {
-      background: hovered
-        ? "var(--color-accent-hover, var(--color-accent))"
-        : "var(--color-accent)",
-      border: "1px solid var(--color-accent)",
-      color: "var(--color-accent-contrast, #fff)",
-    },
-    danger: {
-      background: hovered ? "rgba(248,113,113,0.18)" : "rgba(248,113,113,0.1)",
-      border: "1px solid rgba(248,113,113,0.25)",
-      color: "var(--inbox-critical-text, #fb7185)",
-    },
-  };
-
+  const className = [
+    "ibx-btn",
+    variant !== "default" ? `ibx-btn--${variant}` : "",
+    size === "sm" ? "ibx-btn--sm" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
-        padding: "8px 14px",
-        borderRadius: "var(--radius-md, 10px)",
-        fontSize: "0.82rem",
-        fontWeight: 600,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-        transition: "all 0.15s ease",
-        whiteSpace: "nowrap",
-        fontFamily: "var(--font-ui)",
-        ...styles[variant],
-      }}
-    >
+    <button type="button" className={className} onClick={onClick} disabled={disabled} title={title}>
       {icon}
       {label}
     </button>
@@ -625,65 +582,164 @@ function IconBtn({
   title,
   active,
   disabled,
-  size = 32,
+  className,
 }: {
   onClick: () => void;
   icon: React.ReactNode;
   title?: string;
   active?: boolean;
   disabled?: boolean;
-  size?: number;
+  className?: string;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const interactive = !disabled;
-  const buttonStyle: CSSProperties = {
-    width: size,
-    height: size,
-    borderRadius: "var(--radius-sm, 8px)",
-    display: "grid",
-    placeItems: "center",
-    border: active ? "1px solid var(--color-accent)" : "1px solid var(--color-border)",
-    background: active
-      ? "var(--color-accent-subtle)"
-      : hovered && interactive
-        ? "var(--color-bg-hover)"
-        : "var(--color-bg-secondary)",
-    color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.45 : 1,
-    transition: "all 0.15s ease",
-    flexShrink: 0,
-    ...(disabled && title ? { pointerEvents: "none" as const } : {}),
-  };
-
   const button = (
     <button
       type="button"
+      className={["ibx-icon-btn", active ? "is-active" : "", className || ""]
+        .filter(Boolean)
+        .join(" ")}
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       title={disabled ? undefined : title}
       aria-label={title}
-      onMouseEnter={() => {
-        if (interactive) setHovered(true);
-      }}
-      onMouseLeave={() => {
-        if (interactive) setHovered(false);
-      }}
-      style={buttonStyle}
     >
       {icon}
     </button>
   );
 
+  // Disabled buttons swallow hover, so the tooltip explaining why lives on a wrapper.
   if (disabled && title) {
     return (
-      <span title={title} style={{ display: "inline-flex", lineHeight: 0, cursor: "not-allowed" }}>
+      <span className="ibx-icon-btn-wrap" title={title}>
         {button}
       </span>
     );
   }
 
   return button;
+}
+
+function RailAction({
+  onClick,
+  icon,
+  label,
+  disabled,
+  title,
+}: {
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="ibx-action"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+/** Anchored menu that closes on outside click, Escape, or when a child calls `close`. */
+function Popover({
+  trigger,
+  children,
+  align = "end",
+  placement = "down",
+  className,
+  anchorClassName,
+}: {
+  trigger: (state: { open: boolean; toggle: () => void }) => React.ReactNode;
+  children: (close: () => void) => React.ReactNode;
+  align?: "start" | "end";
+  placement?: "down" | "up";
+  className?: string;
+  anchorClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!anchorRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const close = () => setOpen(false);
+  return (
+    <div
+      ref={anchorRef}
+      className={["ibx-pop-anchor", anchorClassName || ""].filter(Boolean).join(" ")}
+    >
+      {trigger({ open, toggle: () => setOpen((current) => !current) })}
+      {open && (
+        <div
+          className={[
+            "ibx-pop",
+            `ibx-pop--${align}`,
+            placement === "up" ? "ibx-pop--up" : "",
+            className || "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {children(close)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  label,
+  onSelect,
+  checked,
+  icon,
+  meta,
+  disabled,
+  title,
+}: {
+  label: string;
+  onSelect: () => void;
+  checked?: boolean;
+  icon?: React.ReactNode;
+  meta?: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="ibx-menu-item"
+      role={checked === undefined ? "menuitem" : "menuitemradio"}
+      aria-checked={checked === undefined ? undefined : checked}
+      onClick={onSelect}
+      disabled={disabled}
+      title={title}
+    >
+      {checked !== undefined && (
+        <span className="ibx-menu-check">{checked ? <Check size={14} /> : null}</span>
+      )}
+      {icon}
+      <span className="ibx-menu-item-label">{label}</span>
+      {meta !== undefined && <span className="ibx-menu-item-meta">{meta}</span>}
+    </button>
+  );
 }
 
 export type InboxAgentPanelProps = {
@@ -723,14 +779,21 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [threadSortOrder, setThreadSortOrder] = useState<ThreadSortOrder>("recent");
   const [mailboxView, setMailboxView] = useState<ThreadMailboxView>("inbox");
   const [inboxMode, setInboxMode] = useState<InboxMode>("classic");
-  const [clientReadinessOpen, setClientReadinessOpen] = useState(false);
-  const [clientReadinessFocused, setClientReadinessFocused] = useState(false);
   const [domainFilter, setDomainFilter] = useState<DomainFilter>("all");
-  const [domainFiltersOpen, setDomainFiltersOpen] = useState(false);
   const [askQuery, setAskQuery] = useState("");
   const [askInboxQuery, setAskInboxQuery] = useState("");
   const [askInboxRuns, setAskInboxRuns] = useState<AskInboxRun[]>([]);
   const [rightRailTab, setRightRailTab] = useState<RightRailTab>("agent_rail");
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [compactLayout, setCompactLayout] = useState(false);
+  const [compactRailOpen, setCompactRailOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(MAILBOX_AGENT_RAIL_OPEN_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
   const [askBusy, setAskBusy] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(ALL_MAILBOX_ACCOUNTS_FILTER);
   const [googleWorkspaceEnabled, setGoogleWorkspaceEnabled] = useState(false);
@@ -1271,6 +1334,33 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       clearUnreadFilterRetainedThread({ removeFromList: true });
     }
   }, [focusFilter, selectedThreadId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MAILBOX_AGENT_RAIL_OPEN_KEY, railOpen ? "1" : "0");
+    } catch {
+      // Storage can be unavailable (private profile); the panel still toggles for this session.
+    }
+  }, [railOpen]);
+
+  useEffect(() => {
+    if (!compactLayout || !compactRailOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCompactRailOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [compactLayout, compactRailOpen]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCompactLayout(entry.contentRect.width < 940);
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!searchExpanded) return;
@@ -2171,6 +2261,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     if (!q) return;
     const runId = createMailboxAskRunId();
     setRightRailTab("ask_inbox");
+    setRailOpen(true);
+    setCompactRailOpen(true);
     setAskInboxRuns((runs) => [
       ...runs.slice(-7),
       {
@@ -2443,144 +2535,47 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     selectedBulkThreadIds.join("|"),
   ]);
 
-  const incomingMessages = useMemo(
-    () => sortedThreadMessages.filter((message) => message.direction === "incoming"),
-    [sortedThreadMessages],
-  );
-
-  const outgoingMessages = useMemo(
-    () => sortedThreadMessages.filter((message) => message.direction === "outgoing"),
-    [sortedThreadMessages],
-  );
-
-  const messageSections = useMemo(() => {
-    if (!selectedThread) return [];
-
-    const sections: Array<{
-      title: string;
-      messages: MailboxThreadDetail["messages"];
-    }> = [];
-
-    const pushSection = (title: string, messages: MailboxThreadDetail["messages"]) => {
-      if (messages.length > 0) sections.push({ title, messages });
-    };
-
-    if (mailboxView === "sent") {
-      pushSection("Sent Emails", outgoingMessages);
-      pushSection("Received Emails", incomingMessages);
-    } else {
-      pushSection("Received Emails", incomingMessages);
-      pushSection("Sent Emails", outgoingMessages);
-    }
-
-    if (!sections.length && selectedThread.messages.length > 0) {
-      sections.push({
-        title: mailboxView === "sent" ? "Sent Emails" : "Received Emails",
-        messages: selectedThread.messages,
-      });
-    }
-
-    return sections;
-  }, [incomingMessages, mailboxView, outgoingMessages, selectedThread]);
-
-  const renderMessageCard = (message: MailboxThreadDetail["messages"][number]) => {
+  const renderMessage = (message: MailboxThreadDetail["messages"][number]) => {
     const isOutgoing = message.direction === "outgoing";
-    const hasHtml = Boolean(message.bodyHtml);
     const bodyText = getMailboxMessageDisplayText(message);
     const nonEmptyLines = bodyText.split("\n").filter((line) => line.trim().length > 0);
     const renderCompactText =
       bodyText.trim().length > 0 && bodyText.length <= 280 && nonEmptyLines.length <= 4;
-
-    const messageHeader = (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          marginBottom: hasHtml ? "8px" : "5px",
-        }}
-      >
-        {!isOutgoing && (
-          <Avatar name={message.from?.name} email={message.from?.email} size={hasHtml ? 24 : 28} />
-        )}
-        <strong
-          style={{
-            fontSize: "0.78rem",
-            color: isOutgoing ? "var(--color-accent)" : "var(--color-text-secondary)",
-          }}
-        >
-          {isOutgoing ? "You" : message.from?.name || message.from?.email || "Unknown"}
-        </strong>
-        <span
-          style={{
-            fontSize: "0.68rem",
-            color: "var(--color-text-muted)",
-            flexShrink: 0,
-            marginLeft: "auto",
-          }}
-        >
-          {formatTime(message.receivedAt)}
-        </span>
-      </div>
-    );
-
-    if (hasHtml && !renderCompactText) {
-      return (
-        <article key={message.id} style={{ marginBottom: "14px" }}>
-          {messageHeader}
-          <div
-            style={{
-              border: "1px solid var(--color-border-subtle)",
-              borderRadius: "var(--radius-lg, 14px)",
-              overflow: "hidden",
-              background: "#fff",
-            }}
-          >
-            <EmailHtmlBody html={message.bodyHtml!} />
-          </div>
-        </article>
-      );
-    }
+    const showHtml = Boolean(message.bodyHtml) && !renderCompactText;
+    const senderName = isOutgoing ? "You" : message.from?.name || message.from?.email || "Unknown";
+    const senderEmail = !isOutgoing && message.from?.name ? message.from?.email : "";
 
     return (
-      <article
-        key={message.id}
-        style={{
-          marginBottom: "12px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: isOutgoing ? "flex-end" : "stretch",
-        }}
-      >
-        {messageHeader}
-        <div
-          style={{
-            alignSelf: isOutgoing ? "flex-end" : "flex-start",
-            maxWidth: isOutgoing ? "min(72ch, 100%)" : "min(72ch, calc(100% - 36px))",
-            width: "fit-content",
-            marginLeft: isOutgoing ? 0 : "36px",
-            padding: bodyText.length <= 80 && !bodyText.includes("\n") ? "8px 12px" : "10px 13px",
-            borderRadius: isOutgoing
-              ? "var(--radius-md, 10px) var(--radius-sm, 8px) var(--radius-md, 10px) var(--radius-md, 10px)"
-              : "var(--radius-sm, 8px) var(--radius-md, 10px) var(--radius-md, 10px) var(--radius-md, 10px)",
-            background: isOutgoing ? "var(--color-accent-subtle)" : "var(--color-bg-elevated)",
-            border: `1px solid ${isOutgoing ? "rgba(124, 92, 191, 0.24)" : "var(--color-border-subtle)"}`,
-            boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.84rem",
-              lineHeight: bodyText.length <= 80 && !bodyText.includes("\n") ? 1.45 : 1.6,
-              color: "var(--color-text-primary)",
-              whiteSpace: "pre-wrap",
-              overflowWrap: "break-word",
-              wordBreak: "break-word",
-            }}
-          >
-            {bodyText}
+      <article key={message.id} className="ibx-message">
+        <div className="ibx-message-head">
+          <Avatar
+            name={
+              isOutgoing
+                ? selectedThreadAccount?.displayName || message.from?.name
+                : message.from?.name
+            }
+            email={
+              isOutgoing
+                ? selectedThreadAccount?.address || message.from?.email
+                : message.from?.email
+            }
+            size={30}
+          />
+          <div className="ibx-message-from" title={message.from?.email || undefined}>
+            <strong>{senderName}</strong>
+            {senderEmail}
           </div>
+          <time className="ibx-message-time" title={formatFullTime(message.receivedAt)}>
+            {formatTime(message.receivedAt)}
+          </time>
         </div>
+        {showHtml ? (
+          <div className="ibx-message-html">
+            <EmailHtmlBody html={message.bodyHtml!} />
+          </div>
+        ) : (
+          <div className="ibx-message-text">{bodyText}</div>
+        )}
       </article>
     );
   };
@@ -2592,197 +2587,72 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     const displayError = run.error || run.result?.error;
 
     return (
-      <div key={run.runId} style={{ display: "grid", gap: "10px", marginBottom: "16px" }}>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <div
-            style={{
-              maxWidth: "92%",
-              padding: "9px 11px",
-              borderRadius:
-                "var(--radius-md, 10px) var(--radius-sm, 8px) var(--radius-md, 10px) var(--radius-md, 10px)",
-              background: "var(--color-accent-subtle)",
-              border: "1px solid rgba(124, 92, 191, 0.24)",
-              color: "var(--color-text-primary)",
-              fontSize: "0.8rem",
-              lineHeight: 1.45,
-              overflowWrap: "break-word",
-            }}
-          >
-            {run.query}
-          </div>
-        </div>
+      <div key={run.runId} className="ibx-ask-run">
+        <div className="ibx-ask-q">{run.query}</div>
 
-        <div
-          style={{
-            border: "1px solid var(--color-border-subtle)",
-            borderRadius: "var(--radius-md, 10px)",
-            background: "var(--color-bg-secondary)",
-            padding: "10px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "8px",
-            }}
-          >
-            <span
-              style={{
-                fontSize: "0.68rem",
-                fontWeight: 800,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                color: "var(--color-text-muted)",
-              }}
-            >
-              Steps
-            </span>
-            <span
-              style={{
-                fontSize: "0.68rem",
-                color: run.status === "error" ? "var(--color-error)" : "var(--color-text-muted)",
-              }}
-            >
-              {run.status === "running" ? "Running" : run.status === "error" ? "Stopped" : "Done"}
-            </span>
+        <div className="ibx-steps">
+          <div className="ibx-steps-head">
+            {run.status === "running" ? (
+              <RefreshCcw size={12} className="ibx-spin" />
+            ) : (
+              <Sparkles size={12} />
+            )}
+            {run.status === "running"
+              ? "Searching your mailbox"
+              : run.status === "error"
+                ? "Stopped"
+                : `Searched in ${stepEvents.length || 1} step${stepEvents.length === 1 ? "" : "s"}`}
           </div>
           {stepEvents.length ? (
-            <div style={{ display: "grid", gap: "7px", marginTop: "9px" }}>
-              {stepEvents.map((event) => (
-                <div
-                  key={`${event.runId}-${event.stepId}-${event.timestamp}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "14px minmax(0, 1fr)",
-                    gap: "8px",
-                    alignItems: "start",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      marginTop: 5,
-                      borderRadius: "999px",
-                      background:
-                        event.status === "error"
-                          ? "var(--color-error)"
-                          : event.status === "done"
-                            ? "var(--color-accent)"
-                            : "var(--color-text-muted)",
-                      boxShadow:
-                        event.status === "running" ? "0 0 0 3px rgba(124, 92, 191, 0.12)" : "none",
-                    }}
-                  />
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: "0.76rem",
-                        fontWeight: 700,
-                        color: "var(--color-text-primary)",
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      {event.label}
-                    </div>
-                    {event.detail && (
-                      <div
-                        style={{
-                          fontSize: "0.7rem",
-                          color: "var(--color-text-muted)",
-                          lineHeight: 1.4,
-                          marginTop: "2px",
-                          overflowWrap: "break-word",
-                        }}
-                      >
-                        {event.detail}
-                      </div>
-                    )}
-                  </div>
+            stepEvents.map((event) => (
+              <div key={`${event.runId}-${event.stepId}-${event.timestamp}`} className="ibx-step">
+                <span
+                  className={`ibx-step-dot ${
+                    event.status === "error"
+                      ? "is-error"
+                      : event.status === "done"
+                        ? "is-done"
+                        : "is-running"
+                  }`}
+                />
+                <div>
+                  <div className="ibx-step-label">{event.label}</div>
+                  {event.detail && <div className="ibx-step-detail">{event.detail}</div>}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))
           ) : (
-            <div
-              style={{ marginTop: "8px", fontSize: "0.72rem", color: "var(--color-text-muted)" }}
-            >
-              Starting mailbox search…
+            <div className="ibx-step">
+              <span className="ibx-step-dot is-running" />
+              <div className="ibx-step-label">Starting mailbox search…</div>
             </div>
           )}
         </div>
 
-        {(answer || displayError || run.status === "done") && (
-          <div
-            style={{
-              border: "1px solid var(--color-border-subtle)",
-              borderRadius: "var(--radius-md, 10px)",
-              background: "var(--color-bg-elevated)",
-              padding: "10px 11px",
-            }}
-          >
-            {displayError ? (
-              <div style={{ fontSize: "0.78rem", color: "var(--color-error)", lineHeight: 1.5 }}>
-                {displayError}
-              </div>
-            ) : answer ? (
-              <div
-                className="markdown-content"
-                style={{ "--color-text": "var(--color-text-primary)" } as CSSProperties}
+        {(answer || displayError || run.status === "done") &&
+          (displayError ? (
+            <div className="ibx-answer-error">{displayError}</div>
+          ) : answer ? (
+            <div className="ibx-answer">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children }) => (
+                    <a href={href} onClick={(event) => event.preventDefault()}>
+                      {children}
+                    </a>
+                  ),
+                }}
               >
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    p: ({ children }) => (
-                      <p style={{ margin: "0 0 7px", fontSize: "0.8rem", lineHeight: 1.55 }}>
-                        {children}
-                      </p>
-                    ),
-                    strong: ({ children }) => (
-                      <strong style={{ color: "var(--color-text-primary)", fontWeight: 700 }}>
-                        {children}
-                      </strong>
-                    ),
-                    code: ({ children }) => (
-                      <code
-                        style={{
-                          fontFamily: "var(--font-ui)",
-                          fontSize: "0.95em",
-                          background: "transparent",
-                          padding: 0,
-                          color: "var(--color-text-primary)",
-                        }}
-                      >
-                        {children}
-                      </code>
-                    ),
-                    a: ({ href, children }) => (
-                      <a
-                        href={href}
-                        onClick={(event) => event.preventDefault()}
-                        style={{ color: "var(--color-accent)", textDecoration: "none" }}
-                      >
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {answer}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <div
-                style={{ fontSize: "0.78rem", color: "var(--color-text-muted)", lineHeight: 1.5 }}
-              >
-                No direct answer found from the mailbox evidence.
-              </div>
-            )}
-          </div>
-        )}
+                {answer}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <div className="ibx-hint">No direct answer found from the mailbox evidence.</div>
+          ))}
 
         {!!results.length && (
-          <div style={{ display: "grid", gap: "7px" }}>
+          <div>
             <SectionLabel>Matched emails</SectionLabel>
             {results.map((result, index) => {
               const sender = result.thread.participants[0];
@@ -2790,111 +2660,23 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               const sourceLabel = result.searchSources?.length
                 ? result.searchSources.map((source) => source.replace(/_/g, " ")).join(" · ")
                 : "mailbox search";
+              const snippet = result.evidenceSnippets?.[0] || result.snippet;
               return (
                 <button
                   key={`${run.runId}-${result.thread.id}-${index}`}
                   type="button"
+                  className={`ibx-result ${active ? "is-active" : ""}`}
                   onClick={() => openThread(result.thread)}
-                  style={{
-                    width: "100%",
-                    border: `1px solid ${active ? "rgba(124, 92, 191, 0.34)" : "var(--color-border-subtle)"}`,
-                    borderRadius: "var(--radius-sm, 8px)",
-                    background: active ? "var(--color-accent-subtle)" : "var(--color-bg-secondary)",
-                    color: "var(--color-text-secondary)",
-                    padding: "8px 9px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontFamily: "var(--font-ui)",
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr)",
-                    gap: "3px",
-                    boxSizing: "border-box",
-                  }}
                 >
-                  <span
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "28px minmax(0, 1fr) auto",
-                      alignItems: "baseline",
-                      gap: "8px",
-                      minWidth: 0,
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: "var(--color-text-primary)",
-                        fontSize: "0.72rem",
-                        fontWeight: 800,
-                        textAlign: "right",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {index + 1}.
-                    </span>
-                    <strong
-                      style={{
-                        color: "var(--color-text-primary)",
-                        fontSize: "0.74rem",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        minWidth: 0,
-                      }}
-                    >
-                      {result.thread.subject || "Untitled email"}
-                    </strong>
-                    <span
-                      style={{
-                        fontSize: "0.66rem",
-                        color: "var(--color-text-muted)",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {formatTime(result.thread.lastMessageAt)}
-                    </span>
+                  <span className="ibx-result-index">{index + 1}</span>
+                  <span className="ibx-result-top">
+                    <strong>{result.thread.subject || "Untitled email"}</strong>
+                    <span>{formatTime(result.thread.lastMessageAt)}</span>
                   </span>
-                  <span
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "28px minmax(0, 1fr)",
-                      gap: "8px",
-                      minWidth: 0,
-                      fontSize: "0.68rem",
-                      color: "var(--color-text-muted)",
-                    }}
-                  >
-                    <span />
-                    <span
-                      style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                    >
-                      {sender?.name || sender?.email || "Unknown sender"} · {sourceLabel}
-                    </span>
+                  <span className="ibx-result-sub">
+                    {sender?.name || sender?.email || "Unknown sender"} · {sourceLabel}
                   </span>
-                  {(result.evidenceSnippets?.[0] || result.snippet) && (
-                    <span
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "28px minmax(0, 1fr)",
-                        gap: "8px",
-                        minWidth: 0,
-                        fontSize: "0.68rem",
-                        color: "var(--color-text-secondary)",
-                        lineHeight: 1.35,
-                      }}
-                    >
-                      <span />
-                      <span
-                        style={{
-                          display: "-webkit-box",
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: "vertical",
-                          overflow: "hidden",
-                        }}
-                      >
-                        {result.evidenceSnippets?.[0] || result.snippet}
-                      </span>
-                    </span>
-                  )}
+                  {snippet && <span className="ibx-result-snippet">{snippet}</span>}
                 </button>
               );
             })}
@@ -2904,3450 +2686,2165 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     );
   };
 
+  const askInboxExamples = [
+    "What needs my reply today?",
+    "Any bills or payments due soon?",
+    "Who am I waiting on?",
+  ];
+
   const renderAskInbox = () => (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div
-        ref={askInboxScrollRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          padding: "14px 14px 10px",
-        }}
-      >
-        {askInboxRuns.length ? (
-          askInboxRuns.map((run) => renderAskInboxRun(run))
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              placeItems: "center",
-              gap: "10px",
-              minHeight: "100%",
-              color: "var(--color-text-muted)",
-              textAlign: "center",
-              padding: "28px 16px",
-            }}
-          >
-            <Sparkles size={30} strokeWidth={1.25} />
-            <div style={{ fontSize: "0.82rem", lineHeight: 1.5 }}>
-              Ask about payments, follow-ups, statements, people, or anything in your inbox.
+    <div className="ibx-ask">
+      <div ref={askInboxScrollRef} className="ibx-scroll">
+        <div className="ibx-ask-log">
+          {askInboxRuns.length ? (
+            askInboxRuns.map((run) => renderAskInboxRun(run))
+          ) : (
+            <div className="ibx-ask-intro">
+              <p>
+                Ask about payments, follow-ups, statements, people, or anything else in your
+                mailbox. Answers cite the emails they come from.
+              </p>
+              <div className="ibx-ask-suggestions">
+                {askInboxExamples.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    className="ibx-action"
+                    disabled={askBusy}
+                    onClick={() => {
+                      setAskInboxQuery(example);
+                      void runMailboxAsk(example);
+                    }}
+                  >
+                    <ArrowRight size={14} />
+                    <span>{example}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <form
+        className="ibx-ask-form"
         onSubmit={(event) => {
           event.preventDefault();
           void runMailboxAsk(askInboxQuery);
         }}
-        style={{
-          padding: "10px 12px 12px",
-          borderTop: "1px solid var(--color-border-subtle)",
-          background: "var(--color-bg-elevated)",
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) 34px",
-          gap: "8px",
-          alignItems: "end",
-        }}
       >
-        <textarea
-          value={askInboxQuery}
-          onChange={(event) => setAskInboxQuery(event.target.value)}
-          placeholder="Ask your inbox…"
-          rows={2}
-          style={{
-            width: "100%",
-            boxSizing: "border-box",
-            minHeight: 38,
-            maxHeight: 92,
-            resize: "vertical",
-            borderRadius: "var(--radius-sm, 8px)",
-            border: "1px solid var(--color-border)",
-            background: "var(--color-bg-input)",
-            color: "var(--color-text-primary)",
-            padding: "8px 10px",
-            fontSize: "0.78rem",
-            fontFamily: "var(--font-ui)",
-            lineHeight: 1.4,
-            outline: "none",
-          }}
-        />
-        <button
-          type="submit"
-          disabled={askBusy || !askInboxQuery.trim()}
-          aria-label="Ask inbox"
-          title="Ask inbox"
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: "var(--radius-sm, 8px)",
-            border: "1px solid var(--color-border-subtle)",
-            background:
-              askBusy || !askInboxQuery.trim()
-                ? "var(--color-bg-secondary)"
-                : "var(--color-accent)",
-            color: askBusy || !askInboxQuery.trim() ? "var(--color-text-muted)" : "#fff",
-            display: "grid",
-            placeItems: "center",
-            cursor: askBusy || !askInboxQuery.trim() ? "not-allowed" : "pointer",
-            padding: 0,
-          }}
-        >
-          {askBusy ? (
-            <RefreshCcw size={14} style={{ animation: "spin 1s linear infinite" }} />
-          ) : (
-            <Send size={14} />
-          )}
-        </button>
+        <div className="ibx-ask-box">
+          <textarea
+            value={askInboxQuery}
+            onChange={(event) => setAskInboxQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                void runMailboxAsk(askInboxQuery);
+              }
+            }}
+            placeholder="Ask your inbox…"
+            aria-label="Ask your inbox"
+            rows={2}
+          />
+          <button
+            type="submit"
+            className="ibx-send"
+            disabled={askBusy || !askInboxQuery.trim()}
+            aria-label="Ask inbox"
+            title="Ask inbox"
+          >
+            {askBusy ? <RefreshCcw size={14} className="ibx-spin" /> : <ArrowUp size={15} />}
+          </button>
+        </div>
       </form>
     </div>
   );
 
   // ─── render ───────────────────────────────────────────────────────────────
 
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "340px minmax(0, 1fr) 340px",
-        gap: "12px",
-        padding: "16px",
-        paddingTop: "40px",
-        height: "100%",
-        minHeight: 0,
-        width: "100%",
-        maxWidth: "100%",
-        boxSizing: "border-box",
-        overflow: "hidden",
-      }}
-    >
-      {/* ── LEFT: Thread List ──────────────────────────────────────────── */}
-      <section
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          border: "1px solid var(--color-border)",
-          borderRadius: "var(--radius-xl, 18px)",
-          background: "var(--color-bg-elevated)",
-          boxShadow: "var(--shadow-md)",
-          minHeight: 0,
-          minWidth: 0,
-          width: "100%",
-          maxWidth: "100%",
-          overflow: "hidden",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            padding: "12px 14px 10px",
-            borderBottom: "1px solid var(--color-border-subtle)",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "30px minmax(0, 1fr) auto",
-              alignItems: "center",
-              columnGap: "9px",
-              marginBottom: "12px",
-            }}
-          >
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: "var(--radius-sm, 8px)",
-                display: "grid",
-                placeItems: "center",
-                background: "var(--color-accent-subtle)",
-                color: "var(--color-accent)",
-              }}
-            >
-              <Inbox size={15} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: "0.88rem",
-                  fontWeight: 750,
-                  color: "var(--color-text-primary)",
-                  lineHeight: 1.12,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                Inbox Agent
-              </div>
-              <div
-                title={status?.statusLabel || "Mailbox intelligence"}
-                style={{
-                  fontSize: "0.66rem",
-                  color: "var(--color-text-muted)",
-                  marginTop: "3px",
-                  lineHeight: 1.25,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {status?.statusLabel || "Mailbox intelligence"}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: "5px", justifySelf: "end" }}>
-              <IconBtn
-                onClick={() => void syncMailboxWithProgress()}
-                icon={
-                  <RefreshCcw
-                    size={13}
-                    style={busy ? { animation: "spin 1s linear infinite" } : {}}
-                  />
-                }
-                title="Sync mailbox"
-                size={30}
-              />
-              <IconBtn
-                onClick={() => void reclassifyMailboxBackfill()}
-                icon={<Sparkles size={13} />}
-                title="Reclassify backlog"
-                disabled={busy || !status?.accounts[0]?.id}
-                size={30}
-              />
-            </div>
-          </div>
+  const folderLabel =
+    mailboxView === "sent" ? "Sent" : mailboxView === "all" ? "All mail" : "Inbox";
+  const unreadTotal = digest?.unreadCount ?? status?.unreadCount ?? 0;
+  const focusLabels: Record<NonNullable<FocusFilter>, string> = {
+    unread: "Unread",
+    needsReply: "To reply",
+    queue: "Suggested",
+    commitments: "Commitments",
+  };
+  const visibleFocusCards = pulseCards.filter((card) => card.value > 0 || focusFilter === card.id);
+  const troubledQueuedActions = (mailboxClientState?.queuedActions || []).filter(
+    (action) => action.status === "failed" || action.status === "outcome_unknown",
+  );
+  const syncPhase = status?.syncProgress?.phase;
+  const statusTone: "ok" | "syncing" | "warn" | "error" =
+    syncPhase === "error"
+      ? "error"
+      : status?.accounts.some((account) => account.status === "disconnected")
+        ? "error"
+        : troubledQueuedActions.length ||
+            status?.accounts.some((account) => account.status === "degraded") ||
+            (status && status.accounts.length === 0)
+          ? "warn"
+          : status?.syncInFlight || (syncPhase && syncPhase !== "done")
+            ? "syncing"
+            : "ok";
+  const statusText =
+    status?.syncInFlight && status.syncProgress?.label && syncPhase !== "error"
+      ? status.syncProgress.label
+      : troubledQueuedActions.length && statusTone === "warn"
+        ? `${troubledQueuedActions.length} mailbox action${
+            troubledQueuedActions.length === 1 ? "" : "s"
+          } need attention`
+        : status?.statusLabel || "Mailbox intelligence";
+  const showClassificationNotice = Boolean(
+    status &&
+    !classificationWarningAcknowledged &&
+    (status.classificationPendingCount > 0 || !status.lastSyncedAt),
+  );
+  const selectedThreadReadAction =
+    selectedThread && selectedThread.unreadCount > 0 ? "mark_read" : "mark_unread";
+  const nextStepText = selectedThread
+    ? selectedThread.summary?.suggestedNextAction ||
+      (selectedThread.drafts[0]
+        ? "Review the draft, then send or discard."
+        : selectedThread.needsReply
+          ? "Draft a response and check the commitments."
+          : selectedThreadOpenCommitments.length
+            ? "Mark done when these commitments are already handled."
+            : "Review the thread and decide whether it can be archived.")
+    : "";
+  const summaryText = selectedThread?.summary
+    ? stripMailboxSummaryHtmlArtifacts(selectedThread.summary.summary).trim()
+    : "";
+  const suggestedThreadProposals =
+    selectedThread?.proposals.filter((proposal) => proposal.status === "suggested") || [];
+  const replyBlockedReason =
+    selectedThread && !canSelectedThread("send") ? selectedThreadCapabilityReason : undefined;
+  const forwardBlockedReason =
+    selectedThread && !canSelectedThread("forward") ? selectedThreadCapabilityReason : undefined;
+  const contactStats = selectedThread?.contactMemory
+    ? [
+        selectedThread.contactMemory.totalThreads
+          ? `${selectedThread.contactMemory.totalThreads} thread${selectedThread.contactMemory.totalThreads === 1 ? "" : "s"}`
+          : null,
+        selectedThread.contactMemory.totalMessages
+          ? `${selectedThread.contactMemory.totalMessages} messages`
+          : null,
+        typeof selectedThread.contactMemory.averageResponseHours === "number"
+          ? `${selectedThread.contactMemory.averageResponseHours.toFixed(1)}h avg response`
+          : null,
+      ].filter((entry): entry is string => Boolean(entry))
+    : [];
 
-          <div
-            style={{
-              display: "grid",
-              gap: "6px",
-              marginBottom: "10px",
-              padding: "7px",
-              borderRadius: "var(--radius-md, 10px)",
-              border: "1px solid var(--color-border-subtle)",
-              background: "var(--color-bg-secondary)",
-            }}
-          >
-            <div
-              role="tablist"
-              aria-label="Inbox mode"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                flexWrap: "wrap",
-              }}
-            >
-              {[
-                { id: "classic" as const, label: "Classic" },
-                { id: "today" as const, label: "Today" },
-              ].map((mode) => {
-                const active = inboxMode === mode.id;
-                return (
+  const railVisible = compactLayout ? compactRailOpen : railOpen;
+  const toggleRail = () =>
+    compactLayout ? setCompactRailOpen((current) => !current) : setRailOpen((current) => !current);
+
+  const draftWithAi = () => {
+    if (!selectedThread) return;
+    void runAction(async () => {
+      await generateDraftForThread(selectedThread.id, {
+        tone: "concise",
+        includeAvailability: true,
+        manual: true,
+      });
+      await loadThread(selectedThread.id);
+    });
+  };
+
+  const dismissQueueProposal = (proposal: MailboxActionProposal) =>
+    void runAction(async () => {
+      await window.electronAPI.applyMailboxAction({
+        proposalId: proposal.id,
+        threadId: proposal.threadId,
+        type: "dismiss_proposal",
+      });
+      if (queueMode) {
+        const result = await window.electronAPI.reviewMailboxBulkAction({
+          type: queueMode,
+          limit: 20,
+        });
+        setQueueProposals(result.proposals);
+      }
+      await loadStatus();
+    });
+
+  const renderInboxSection = () => (
+    <>
+      {queueMode && (
+        <section className="ibx-section">
+          <div className="ibx-section-head">
+            <SectionLabel>
+              {queueMode === "cleanup" ? "Cleanup suggestions" : "Follow-up suggestions"}
+            </SectionLabel>
+            <span className="ibx-count">{queueProposals.length}</span>
+          </div>
+          {queueProposals.length === 0 ? (
+            <div className="ibx-hint">No suggested actions right now.</div>
+          ) : (
+            queueProposals.map((proposal) => (
+              <div key={proposal.id} className="ibx-item">
+                <div className="ibx-item-title">{proposal.title}</div>
+                <div className="ibx-item-text">{proposal.reasoning}</div>
+                <div className="ibx-item-actions">
+                  <ActionBtn
+                    onClick={() => void handleApplyProposal(proposal)}
+                    label={proposalActionLabel(proposal)}
+                    variant="primary"
+                    size="sm"
+                    disabled={busy}
+                  />
+                  <ActionBtn
+                    onClick={() => dismissQueueProposal(proposal)}
+                    label="Dismiss"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                  />
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+      )}
+
+      <section className="ibx-section">
+        <SectionLabel>Inbox</SectionLabel>
+        <div className="ibx-action-grid">
+          <RailAction
+            onClick={() => void reviewQueue("cleanup")}
+            icon={<Trash2 size={14} />}
+            label="Review cleanup"
+            disabled={busy}
+          />
+          <RailAction
+            onClick={() => void reviewQueue("follow_up")}
+            icon={<Reply size={14} />}
+            label="Review follow-ups"
+            disabled={busy}
+          />
+        </div>
+      </section>
+
+      {!!senderCleanupDigest?.senders.length && (
+        <section className="ibx-section">
+          <SectionLabel>Noisiest senders</SectionLabel>
+          <div className="ibx-list-rows">
+            {senderCleanupDigest.senders.slice(0, 4).map((sender) => (
+              <button
+                key={sender.email}
+                type="button"
+                className="ibx-list-row"
+                onClick={() => {
+                  const first = sender.threads[0];
+                  if (first) setSelectedThreadId(first.id);
+                }}
+              >
+                <span>
+                  <span className="ibx-list-row-title">{sender.name || sender.email}</span>
+                  <span className="ibx-list-row-sub">
+                    {sender.threadCount} threads · {sender.cleanupCandidateCount} to clean up
+                  </span>
+                </span>
+                <span className="ibx-list-row-value">−{sender.estimatedWeeklyReduction}/wk</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+
+  return (
+    <div className="ibx">
+      <div
+        ref={canvasRef}
+        className={[
+          "ibx-canvas",
+          compactLayout ? "is-compact" : railVisible ? "" : "is-rail-closed",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {/* ── LEFT: Thread list ─────────────────────────────────────────── */}
+        <section className="ibx-pane" aria-label="Threads">
+          <header className="ibx-list-head">
+            <div className="ibx-list-titlebar">
+              <Popover
+                align="start"
+                trigger={({ open, toggle }) => (
+                  <button
+                    type="button"
+                    className="ibx-title-btn"
+                    onClick={toggle}
+                    aria-haspopup="menu"
+                    aria-expanded={open}
+                    title="Switch mailbox"
+                  >
+                    <h1>{folderLabel}</h1>
+                    <ChevronDown size={14} />
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <div className="ibx-pop-section" role="group" aria-label="Mailbox folder">
+                      {[
+                        { id: "inbox" as const, label: "Inbox" },
+                        { id: "sent" as const, label: "Sent" },
+                        { id: "all" as const, label: "All mail" },
+                      ].map((view) => (
+                        <MenuItem
+                          key={view.id}
+                          label={view.label}
+                          checked={mailboxView === view.id}
+                          onSelect={() => {
+                            setMailboxView(view.id);
+                            void loadThreads({ mailboxView: view.id });
+                            close();
+                          }}
+                        />
+                      ))}
+                    </div>
+                    {mailboxAccounts.length > 1 && (
+                      <div className="ibx-pop-section" role="group" aria-label="Mailbox account">
+                        <div className="ibx-pop-title">Account</div>
+                        {[
+                          { id: ALL_MAILBOX_ACCOUNTS_FILTER, label: "All accounts" },
+                          ...mailboxAccounts.map((account) => ({
+                            id: account.id,
+                            label: formatMailboxAccountLabel(account),
+                          })),
+                        ].map((option) => (
+                          <MenuItem
+                            key={option.id}
+                            label={option.label}
+                            checked={selectedAccountId === option.id}
+                            onSelect={() => {
+                              setSelectedAccountId(option.id);
+                              void loadThreads({ accountId: option.id });
+                              close();
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </Popover>
+              {unreadTotal > 0 && (
+                <span className="ibx-title-count" title={`${unreadTotal} unread`}>
+                  {unreadTotal}
+                </span>
+              )}
+              <span className="ibx-titlebar-spacer" />
+              <div className="ibx-segmented" role="tablist" aria-label="Inbox mode">
+                {[
+                  { id: "classic" as const, label: "Classic" },
+                  { id: "today" as const, label: "Today" },
+                ].map((mode) => (
                   <button
                     key={mode.id}
                     type="button"
                     role="tab"
-                    aria-selected={active}
+                    aria-selected={inboxMode === mode.id}
                     onClick={() => setInboxMode(mode.id)}
-                    style={{
-                      minHeight: 25,
-                      padding: "3px 9px",
-                      borderRadius: "999px",
-                      border: active
-                        ? "1px solid var(--color-accent)"
-                        : "1px solid var(--color-border-subtle)",
-                      background: active
-                        ? "var(--color-accent-subtle)"
-                        : "var(--color-bg-elevated)",
-                      color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-                      fontSize: "0.66rem",
-                      fontWeight: active ? 750 : 600,
-                      cursor: "pointer",
-                      fontFamily: "var(--font-ui)",
-                      whiteSpace: "nowrap",
-                    }}
                   >
                     {mode.label}
                   </button>
-                );
-              })}
-            </div>
-            <div
-              role="tablist"
-              aria-label="Mailbox folder"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                flexWrap: "wrap",
-              }}
-            >
-              {[
-                { id: "inbox" as const, label: "Inbox" },
-                { id: "sent" as const, label: "Sent" },
-                { id: "all" as const, label: "All" },
-              ].map((view) => {
-                const active = mailboxView === view.id;
-                return (
-                  <button
-                    key={view.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => {
-                      setMailboxView(view.id);
-                      void loadThreads({ mailboxView: view.id });
-                    }}
-                    style={{
-                      minHeight: 25,
-                      padding: "3px 9px",
-                      borderRadius: "999px",
-                      fontSize: "0.66rem",
-                      fontWeight: active ? 750 : 600,
-                      border: active
-                        ? "1px solid var(--color-accent)"
-                        : "1px solid var(--color-border-subtle)",
-                      background: active
-                        ? "var(--color-accent-subtle)"
-                        : "var(--color-bg-elevated)",
-                      color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-                      cursor: "pointer",
-                      transition: "background 0.12s ease, border-color 0.12s ease",
-                      fontFamily: "var(--font-ui)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {view.label}
-                  </button>
-                );
-              })}
+                ))}
+              </div>
+              <IconBtn
+                onClick={() => void syncMailboxWithProgress()}
+                icon={<RefreshCcw size={14} className={busy ? "ibx-spin" : undefined} />}
+                title="Sync mailbox"
+              />
+              <Popover
+                trigger={({ open, toggle }) => (
+                  <IconBtn
+                    onClick={toggle}
+                    icon={<SlidersHorizontal size={14} />}
+                    title="Display options"
+                    active={open || threadSortOrder !== "recent" || domainFilter !== "all"}
+                  />
+                )}
+              >
+                {() => (
+                  <>
+                    <div className="ibx-pop-section">
+                      <div className="ibx-pop-title">Sort</div>
+                      <div className="ibx-pop-body">
+                        <div
+                          className="ibx-segmented ibx-segmented--block"
+                          role="group"
+                          aria-label="Sort threads"
+                        >
+                          {[
+                            { id: "recent" as const, label: "Recent" },
+                            { id: "priority" as const, label: "Priority" },
+                          ].map((sort) => (
+                            <button
+                              key={sort.id}
+                              type="button"
+                              aria-pressed={threadSortOrder === sort.id}
+                              onClick={() => {
+                                setThreadSortOrder(sort.id);
+                                void loadThreads({ sortBy: sort.id });
+                              }}
+                            >
+                              {sort.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="ibx-pop-section">
+                      <div className="ibx-pop-title">Topic</div>
+                      <div className="ibx-pop-body">
+                        <div className="ibx-chip-row" aria-label="Filter by domain">
+                          {domainFilters.map((filter) => (
+                            <button
+                              key={filter.id}
+                              type="button"
+                              className="ibx-chip"
+                              aria-pressed={domainFilter === filter.id}
+                              onClick={() => {
+                                setDomainFilter(filter.id);
+                                void loadThreads({ domainFilter: filter.id });
+                              }}
+                            >
+                              {filter.id === "all" ? "Any" : filter.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="ibx-pop-section">
+                      <MenuItem
+                        label="Reclassify backlog"
+                        icon={<Sparkles size={14} />}
+                        onSelect={() => void reclassifyMailboxBackfill()}
+                        disabled={busy || !status?.accounts[0]?.id}
+                        title="Re-run AI triage on threads already in the mailbox"
+                      />
+                    </div>
+                  </>
+                )}
+              </Popover>
             </div>
 
-            {mailboxAccounts.length > 1 && (
-              <div style={{ position: "relative", width: "100%" }}>
-                <select
-                  aria-label="Mailbox account"
-                  value={selectedAccountId}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    setSelectedAccountId(next);
-                    void loadThreads({ accountId: next });
-                  }}
-                  style={{
-                    width: "100%",
-                    margin: 0,
-                    minHeight: 25,
-                    padding: "3px 28px 3px 9px",
-                    borderRadius: "999px",
-                    border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-elevated)",
-                    fontSize: "0.66rem",
-                    fontWeight: 600,
-                    fontFamily: "var(--font-ui)",
-                    color: "var(--color-text-secondary)",
-                    cursor: "pointer",
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                    MozAppearance: "none",
-                    boxSizing: "border-box",
-                    lineHeight: 1.25,
+            <div className="ibx-search">
+              <Search size={14} />
+              <input
+                ref={searchInputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void loadThreads({ query: e.currentTarget.value });
+                  if (e.key === "Escape" && query) {
+                    setQuery("");
+                    void loadThreads({ query: "" });
+                  }
+                }}
+                placeholder="Search mail"
+                aria-label="Search threads"
+              />
+              <IconBtn
+                onClick={() => void voice.toggleRecording()}
+                icon={voice.state === "recording" ? <MicOff size={13} /> : <Mic size={13} />}
+                title={voice.state === "recording" ? "Stop recording" : "Voice search"}
+                className={voice.state === "recording" ? "is-recording" : undefined}
+              />
+            </div>
+
+            <div className="ibx-tabs" role="tablist" aria-label="Filter by category">
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  role="tab"
+                  className="ibx-tab"
+                  aria-selected={category === cat.id}
+                  onClick={() => {
+                    setCategory(cat.id as Any);
+                    void loadThreads({ category: cat.id });
                   }}
                 >
-                  <option value={ALL_MAILBOX_ACCOUNTS_FILTER}>All accounts</option>
-                  {mailboxAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {formatMailboxAccountLabel(account)}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={13}
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    right: "9px",
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    pointerEvents: "none",
-                    color: "var(--color-text-muted)",
-                  }}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Inbox pulse */}
-          <div
-            style={{
-              marginBottom: "8px",
-              padding: "6px",
-              borderRadius: "var(--radius-md, 12px)",
-              background: "var(--color-bg-elevated)",
-              border: "1px solid var(--color-border-subtle)",
-              boxShadow: "var(--shadow-sm)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px",
-                marginBottom: "6px",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontSize: "0.62rem",
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: "var(--color-text-muted)",
-                    marginBottom: "0",
-                  }}
-                >
-                  Inbox pulse
-                </div>
-              </div>
+                  {cat.label}
+                </button>
+              ))}
             </div>
+          </header>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gap: "4px",
-              }}
-            >
-              {pulseCards.map((card) => {
+          {visibleFocusCards.length > 0 && (
+            <div className="ibx-focus-row" role="group" aria-label="Focus filters">
+              {visibleFocusCards.map((card) => {
                 const active = focusFilter === card.id;
-                const filterable =
-                  card.id === "unread" ||
-                  card.id === "needsReply" ||
-                  card.id === "queue" ||
-                  card.id === "commitments";
                 return (
                   <button
+                    key={card.id}
                     type="button"
-                    key={card.label}
+                    className="ibx-focus"
+                    aria-pressed={active}
                     onClick={() => {
-                      if (!filterable) return;
-                      const nextFocus = focusFilter === card.id ? null : card.id;
+                      const nextFocus = active ? null : card.id;
                       setFocusFilter(nextFocus);
                       void loadThreads({ focusFilter: nextFocus });
                     }}
-                    style={{
-                      appearance: "none",
-                      WebkitAppearance: "none",
-                      minHeight: 54,
-                      borderRadius: "var(--radius-sm, 8px)",
-                      background: active ? "var(--color-bg-secondary)" : "var(--color-bg-elevated)",
-                      border: `1px solid ${active ? "var(--color-text-primary)" : "var(--color-border-subtle)"}`,
-                      textAlign: "left" as const,
-                      cursor: filterable ? "pointer" : "default",
-                      fontFamily: "var(--font-ui)",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "center",
-                      gap: "3px",
-                      width: "100%",
-                      minWidth: 0,
-                      boxSizing: "border-box",
-                      padding: "6px 6px 5px",
-                      boxShadow: active ? "0 0 0 1px var(--color-text-primary) inset" : "none",
-                    }}
-                    aria-pressed={active}
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        justifyContent: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "1.55rem",
-                          fontWeight: 800,
-                          color: "var(--color-text-primary)",
-                          lineHeight: 1,
-                          letterSpacing: "-0.04em",
-                        }}
-                      >
-                        {card.value}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.58rem",
-                        color: "var(--color-text-muted)",
-                        fontWeight: 700,
-                        lineHeight: 1.05,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        textAlign: "center",
-                      }}
-                    >
-                      {card.label}
-                    </div>
+                    <strong>{card.value}</strong>
+                    {card.id === "commitments" && card.value === 1
+                      ? "Commitment"
+                      : focusLabels[card.id]}
                   </button>
                 );
               })}
             </div>
-          </div>
+          )}
 
-          {mailboxClientState && (
-            <div
-              style={{
-                marginBottom: "8px",
-                padding: clientReadinessOpen ? "9px 10px" : "8px 10px",
-                borderRadius: "var(--radius-md, 12px)",
-                background: clientReadinessOpen
-                  ? "var(--color-bg-elevated)"
-                  : "var(--color-bg-secondary)",
-                border: `1px solid ${clientReadinessFocused ? "rgba(124, 92, 191, 0.32)" : "var(--color-border-subtle)"}`,
-                boxShadow: clientReadinessFocused ? "0 0 0 2px rgba(124, 92, 191, 0.10)" : "none",
-                transition: "border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setClientReadinessOpen((current) => !current)}
-                onFocus={() => setClientReadinessFocused(true)}
-                onBlur={() => setClientReadinessFocused(false)}
-                aria-expanded={clientReadinessOpen}
-                style={{
-                  width: "100%",
-                  border: "none",
-                  background: "transparent",
-                  padding: 0,
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) auto",
-                  alignItems: "center",
-                  gap: "10px",
-                  cursor: "pointer",
-                  fontFamily: "var(--font-ui)",
-                  textAlign: "left",
-                  outline: "none",
-                }}
-              >
-                <span style={{ minWidth: 0, paddingLeft: "4px", overflow: "visible" }}>
-                  <span
-                    style={{
-                      display: "block",
-                      fontSize: "0.66rem",
-                      fontWeight: 800,
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: "var(--color-text-muted)",
-                      lineHeight: 1.1,
-                    }}
-                  >
-                    Client readiness
-                  </span>
-                  {!clientReadinessOpen && (
-                    <span
-                      style={{
-                        display: "block",
-                        marginTop: "4px",
-                        fontSize: "0.74rem",
-                        color: "var(--color-text-muted)",
-                        paddingLeft: "1px",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        lineHeight: 1.2,
-                      }}
-                    >
-                      {replacementReadiness.accountCount || 0} accounts ·{" "}
-                      {replacementReadiness.folderCount || 0} folders ·{" "}
-                      {replacementReadiness.queued} queued
-                    </span>
-                  )}
-                </span>
-                <span
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "999px",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    background: clientReadinessOpen
-                      ? "var(--color-bg-secondary)"
-                      : "var(--color-bg-elevated)",
-                    border: "1px solid var(--color-border-subtle)",
-                    color: "var(--color-text-muted)",
-                  }}
-                >
-                  <ChevronDown
-                    size={13}
-                    style={{
-                      display: "block",
-                      color: "currentColor",
-                      transform: clientReadinessOpen ? "rotate(180deg)" : "rotate(0deg)",
-                      transition: "transform 0.15s ease",
-                    }}
+          {showClassificationNotice && status && (
+            <div className="ibx-notice" role="status">
+              <Sparkles size={14} />
+              <div className="ibx-notice-body">
+                <strong>AI triage is on</strong>
+                {status.classificationPendingCount > 0
+                  ? ` · ${status.classificationPendingCount} queued`
+                  : ""}
+                <br />
+                Uses your configured model and API credits.
+              </div>
+              <IconBtn
+                onClick={acknowledgeMailboxClassificationWarning}
+                icon={<X size={13} />}
+                title="Dismiss"
+              />
+            </div>
+          )}
+
+          <div className="ibx-scroll">
+            <div className={`ibx-list ${selectedThreadIds.length ? "has-selection" : ""}`}>
+              {displayedThreads.length === 0 && !busy && (
+                <div className="ibx-empty">
+                  <Inbox size={28} strokeWidth={1.4} />
+                  <div className="ibx-empty-title">
+                    {status && status.accounts.length === 0
+                      ? "No mailbox connected"
+                      : query.trim() || focusFilter || category !== "all" || domainFilter !== "all"
+                        ? "Nothing matches"
+                        : "You're all caught up"}
+                  </div>
+                  <div className="ibx-empty-text">
+                    {status && status.accounts.length === 0
+                      ? "Connect AgentMail, Gmail, or the Email channel in Settings → Integrations, then sync."
+                      : query.trim() || focusFilter || category !== "all" || domainFilter !== "all"
+                        ? "Try a different filter or search."
+                        : activeAccount
+                          ? "No threads yet for this account. Sync to pull in new mail."
+                          : "No threads yet. Sync to pull in new mail."}
+                  </div>
+                  <ActionBtn
+                    onClick={() => void syncMailboxWithProgress()}
+                    icon={<RefreshCcw size={13} />}
+                    label="Sync now"
+                    size="sm"
                   />
-                </span>
-              </button>
-              {clientReadinessOpen && (
-                <>
-                  <div style={{ display: "grid", gap: "5px", marginTop: "7px" }}>
-                    {[
-                      { label: "Accounts", value: replacementReadiness.accountCount || 0 },
-                      { label: "Folders", value: replacementReadiness.folderCount || 0 },
-                      { label: "Drafts", value: replacementReadiness.drafts },
-                      {
-                        label: "Queued",
-                        value: replacementReadiness.failed
-                          ? `${replacementReadiness.queued} · ${replacementReadiness.failed} failed`
-                          : replacementReadiness.queued,
-                      },
-                    ].map((item) => (
-                      <div
-                        key={item.label}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: "8px",
-                          fontSize: "0.76rem",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        <span>{item.label}</span>
-                        <strong style={{ color: "var(--color-text-primary)" }}>{item.value}</strong>
+                </div>
+              )}
+              {displayedThreads.length > 0 &&
+                threadGroups.map((group) => (
+                  <div key={group.id} className="ibx-group">
+                    {group.label && (
+                      <div className="ibx-group-head">
+                        <h2>{group.label}</h2>
+                        {group.description && inboxMode === "today" && (
+                          <span title={group.description}>{group.description}</span>
+                        )}
+                        <span className="ibx-count">
+                          {inboxMode === "today"
+                            ? (todayDigest?.buckets.find((bucket) => bucket.bucket === group.id)
+                                ?.count ?? group.threads.length)
+                            : group.threads.length}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "7px" }}>
-                    {[
-                      { label: "Send", active: replacementReadiness.canSend },
-                      { label: "Drafts", active: replacementReadiness.canDraft },
-                      { label: "Organize", active: replacementReadiness.canOrganize },
-                    ].map((chip) => (
-                      <span
-                        key={chip.label}
-                        style={{
-                          borderRadius: "999px",
-                          padding: "2px 7px",
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: chip.active ? "var(--color-accent)" : "var(--color-text-muted)",
-                          background: chip.active
-                            ? "var(--color-accent-subtle)"
-                            : "var(--color-bg-secondary)",
-                          border: "1px solid var(--color-border-subtle)",
-                        }}
-                      >
-                        {chip.label}
-                      </span>
-                    ))}
-                  </div>
-                  {replacementReadiness.providerBackends.length > 0 && (
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        fontSize: "0.68rem",
-                        color: "var(--color-text-muted)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                      title={replacementReadiness.providerBackends.join(", ")}
-                    >
-                      {replacementReadiness.providerBackends.join(" + ")}
-                    </div>
-                  )}
-                  {mailboxClientState.queuedActions
-                    .filter(
-                      (action) => action.status === "failed" || action.status === "outcome_unknown",
-                    )
-                    .slice(0, 3)
-                    .map((action) => (
-                      <div
-                        key={action.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          marginTop: "6px",
-                          fontSize: "0.68rem",
-                          color: "var(--color-text-muted)",
-                        }}
-                      >
-                        <span
-                          style={{
-                            minWidth: 0,
-                            flex: 1,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
+                    )}
+                    {group.threads.map((thread) => {
+                      const selected = selectedThreadId === thread.id;
+                      const checked = selectedThreadIds.includes(thread.id);
+                      const sender = thread.participants[0];
+                      const unread = thread.unreadCount > 0;
+                      const account = mailboxAccountById.get(thread.accountId);
+                      const accountLabel = account
+                        ? formatMailboxAccountLabel(account)
+                        : thread.accountId;
+                      const summaryLabel = thread.summary?.suggestedNextAction || thread.snippet;
+                      const showPriority =
+                        thread.priorityBand === "critical" || thread.priorityBand === "high";
+                      return (
+                        <div
+                          key={thread.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={selected ? "true" : undefined}
+                          aria-label={`${unread ? "Unread. " : ""}${sender?.name || sender?.email || "Unknown"}: ${thread.subject}`}
+                          className={[
+                            "ibx-row",
+                            selected ? "is-selected" : "",
+                            checked ? "is-checked" : "",
+                            unread ? "is-unread" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          onClick={() => openThread(thread)}
+                          onKeyDown={(event) => {
+                            if (event.target !== event.currentTarget) return;
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openThread(thread);
+                            }
                           }}
                         >
-                          {action.status === "outcome_unknown"
-                            ? `${action.type} delivery status unknown; check Sent before choosing`
-                            : `${action.type} failed`}
-                          {action.latestError ? `: ${action.latestError}` : ""}
-                        </span>
-                        {action.status === "outcome_unknown" && action.type === "send" && (
-                          <>
-                            <button
-                              type="button"
-                              title="I checked the provider's Sent folder and confirmed this message was sent."
-                              onClick={() =>
-                                void runAction(async () => {
-                                  await window.electronAPI.resolveMailboxSendOutcome(
-                                    action.id,
-                                    "confirmed_sent",
-                                  );
-                                  await reloadAll(selectedThread?.id);
-                                })
-                              }
-                              style={{
-                                border: "1px solid var(--color-border-subtle)",
-                                background: "var(--color-bg-secondary)",
-                                borderRadius: "999px",
-                                color: "var(--color-text-muted)",
-                                fontSize: "0.62rem",
-                                padding: "2px 6px",
-                                cursor: "pointer",
-                                flexShrink: 0,
-                              }}
+                          {unread && <span className="ibx-row-unread" aria-hidden />}
+                          <div className="ibx-row-lead">
+                            <Avatar name={sender?.name} email={sender?.email} size={32} />
+                            <label
+                              className="ibx-check-wrap"
+                              onClick={(event) => event.stopPropagation()}
                             >
-                              I verified sent
-                            </button>
-                            <button
-                              type="button"
-                              title="I checked the provider's Sent folder and confirmed this message was not sent. The app will try to send it now."
-                              onClick={() =>
-                                void runAction(async () => {
-                                  await window.electronAPI.resolveMailboxSendOutcome(
-                                    action.id,
-                                    "confirmed_not_sent",
-                                  );
-                                  await reloadAll(selectedThread?.id);
-                                })
-                              }
-                              style={{
-                                border: "1px solid var(--color-border-subtle)",
-                                background: "var(--color-bg-secondary)",
-                                borderRadius: "999px",
-                                color: "var(--color-text-muted)",
-                                fontSize: "0.62rem",
-                                padding: "2px 6px",
-                                cursor: "pointer",
-                                flexShrink: 0,
-                              }}
-                            >
-                              Not sent · retry
-                            </button>
-                          </>
-                        )}
-                        {action.status === "failed" && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void runAction(async () => {
-                                await window.electronAPI.retryMailboxAction(action.id);
-                                await reloadAll(selectedThread?.id);
-                              })
-                            }
-                            style={{
-                              border: "1px solid var(--color-border-subtle)",
-                              background: "var(--color-bg-secondary)",
-                              borderRadius: "999px",
-                              color: "var(--color-text-muted)",
-                              fontSize: "0.68rem",
-                              padding: "2px 8px",
-                              cursor: "pointer",
-                              flexShrink: 0,
-                            }}
-                          >
-                            Retry
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                </>
-              )}
-            </div>
-          )}
-
-          {inboxMode === "today" && todayDigest && (
-            <div
-              style={{
-                marginBottom: "8px",
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gap: "4px",
-              }}
-            >
-              {todayDigest.buckets.map((bucket) => (
-                <div
-                  key={bucket.bucket}
-                  style={{
-                    padding: "7px 8px",
-                    borderRadius: "var(--radius-sm, 8px)",
-                    border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-secondary)",
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "0.95rem",
-                      fontWeight: 800,
-                      color: "var(--color-text-primary)",
-                    }}
-                  >
-                    {bucket.count}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "0.58rem",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      color: "var(--color-text-muted)",
-                      fontWeight: 700,
-                      lineHeight: 1.1,
-                    }}
-                  >
-                    {bucket.label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {status &&
-            !classificationWarningAcknowledged &&
-            (status.classificationPendingCount > 0 || !status.lastSyncedAt) && (
-              <div
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: "var(--radius-md, 10px)",
-                  marginBottom: "12px",
-                  background: "rgba(34, 211, 238, 0.08)",
-                  border: "1px solid rgba(34, 211, 238, 0.28)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                  lineHeight: 1.5,
-                }}
-              >
-                <div style={{ fontWeight: 700, marginBottom: "4px" }}>
-                  LLM classification is enabled for mailbox triage.
-                </div>
-                <div style={{ color: "var(--color-text-muted)", marginBottom: "10px" }}>
-                  It will use the configured model, can consume API credits, and is currently
-                  classifying {status.classificationPendingCount || 0} thread
-                  {status.classificationPendingCount === 1 ? "" : "s"}.
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={acknowledgeMailboxClassificationWarning}
-                    style={{
-                      border: "1px solid var(--color-accent)",
-                      background: "var(--color-accent-subtle)",
-                      color: "var(--color-accent)",
-                      borderRadius: "999px",
-                      padding: "6px 10px",
-                      cursor: "pointer",
-                      fontSize: "0.75rem",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Dismiss
-                  </button>
-                  <span style={{ color: "var(--color-text-muted)", fontSize: "0.75rem" }}>
-                    Configure cheaper models in Settings if needed.
-                  </span>
-                </div>
-              </div>
-            )}
-
-          {!!selectedThreadIds.length && (
-            <div
-              style={{
-                marginBottom: "10px",
-                padding: "12px",
-                borderRadius: "var(--radius-md, 10px)",
-                background:
-                  "linear-gradient(180deg, rgba(34, 211, 238, 0.10) 0%, var(--color-bg-elevated) 100%)",
-                border: "1px solid rgba(34, 211, 238, 0.18)",
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "6px",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "0.74rem",
-                  color: "var(--color-text-secondary)",
-                  lineHeight: 1.4,
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 700,
-                    color: "var(--color-text-primary)",
-                    marginBottom: "2px",
-                  }}
-                >
-                  {selectedThreadIds.length} thread{selectedThreadIds.length === 1 ? "" : "s"}{" "}
-                  selected
-                </div>
-                <div>
-                  Use bulk actions to clear the queue faster. Selection stays visible while you
-                  browse.
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                <ActionBtn
-                  onClick={() => setSelectedThreadIds(displayedThreads.map((thread) => thread.id))}
-                  icon={<CheckSquare size={11} />}
-                  label="Select all visible"
-                  disabled={busy || displayedThreads.length === 0}
-                />
-                <ActionBtn
-                  onClick={() => void handleBulkThreadAction("archive")}
-                  icon={<Archive size={11} />}
-                  label="Archive"
-                  disabled={busy || Boolean(bulkArchiveTrashDisabledReason)}
-                  title={bulkArchiveTrashDisabledReason || undefined}
-                />
-                <ActionBtn
-                  onClick={() => void handleBulkThreadAction(bulkReadStateAction)}
-                  icon={<MailOpen size={11} />}
-                  label={bulkReadStateAction === "mark_read" ? "Mark read" : "Mark unread"}
-                  disabled={busy || Boolean(bulkReadStateDisabledReason)}
-                  title={bulkReadStateDisabledReason || undefined}
-                />
-                <ActionBtn
-                  onClick={() => void handleBulkThreadAction("trash")}
-                  icon={<Trash2 size={11} />}
-                  label="Trash"
-                  variant="danger"
-                  disabled={busy || Boolean(bulkArchiveTrashDisabledReason)}
-                  title={bulkArchiveTrashDisabledReason || undefined}
-                />
-                <ActionBtn
-                  onClick={clearThreadSelection}
-                  icon={<X size={11} />}
-                  label="Clear"
-                  disabled={busy}
-                />
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
-            <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-              <Sparkles
-                size={13}
-                style={{
-                  position: "absolute",
-                  left: 10,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--color-text-muted)",
-                  pointerEvents: "none",
-                }}
-              />
-              <input
-                value={askQuery}
-                onChange={(e) => setAskQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void runMailboxAsk();
-                }}
-                placeholder="Ask your mailbox…"
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: "7px 10px 7px 28px",
-                  borderRadius: "var(--radius-sm, 8px)",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.78rem",
-                  outline: "none",
-                  fontFamily: "var(--font-ui)",
-                }}
-              />
-            </div>
-            {searchExpanded || query ? (
-              <div
-                style={{
-                  position: "relative",
-                  flex: "0 1 210px",
-                  minWidth: "142px",
-                }}
-              >
-                <MailSearch
-                  size={13}
-                  style={{
-                    position: "absolute",
-                    left: 10,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "var(--color-text-muted)",
-                    pointerEvents: "none",
-                  }}
-                />
-                <input
-                  ref={searchInputRef}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void loadThreads({ query: e.currentTarget.value });
-                    if (e.key === "Escape") {
-                      if (query) {
-                        setQuery("");
-                        void loadThreads({ query: "" });
-                      }
-                      setSearchExpanded(false);
-                    }
-                  }}
-                  placeholder="Search threads…"
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "7px 34px 7px 28px",
-                    borderRadius: "var(--radius-sm, 8px)",
-                    border: "1px solid var(--color-border)",
-                    background: "var(--color-bg-input)",
-                    color: "var(--color-text-primary)",
-                    fontSize: "0.78rem",
-                    outline: "none",
-                    fontFamily: "var(--font-ui)",
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => void voice.toggleRecording()}
-                  title={voice.state === "recording" ? "Stop recording" : "Voice search"}
-                  aria-label={voice.state === "recording" ? "Stop recording" : "Voice search"}
-                  style={{
-                    position: "absolute",
-                    right: 4,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    width: 24,
-                    height: 24,
-                    display: "grid",
-                    placeItems: "center",
-                    border: 0,
-                    borderRadius: "var(--radius-xs, 6px)",
-                    background:
-                      voice.state === "recording" ? "var(--color-accent-subtle)" : "transparent",
-                    color:
-                      voice.state === "recording"
-                        ? "var(--color-accent)"
-                        : "var(--color-text-secondary)",
-                    cursor: "pointer",
-                    padding: 0,
-                  }}
-                >
-                  {voice.state === "recording" ? <MicOff size={12} /> : <Mic size={12} />}
-                </button>
-              </div>
-            ) : (
-              <IconBtn
-                onClick={() => setSearchExpanded(true)}
-                icon={<MailSearch size={13} />}
-                title="Search threads"
-              />
-            )}
-            <IconBtn
-              onClick={() => void runMailboxAsk()}
-              icon={
-                askBusy ? (
-                  <RefreshCcw size={13} style={{ animation: "spin 1s linear infinite" }} />
-                ) : (
-                  <Sparkles size={13} />
-                )
-              }
-              title="Ask mailbox"
-              disabled={askBusy || !askQuery.trim()}
-            />
-          </div>
-
-          {/* Filters */}
-          <div
-            style={{
-              display: "grid",
-              gap: "6px",
-              marginBottom: "8px",
-              padding: "7px",
-              borderRadius: "var(--radius-md, 10px)",
-              border: "1px solid var(--color-border-subtle)",
-              background: "var(--color-bg-secondary)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                minWidth: 0,
-              }}
-            >
-              <div
-                aria-label="Filter by category"
-                style={
-                  {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    flex: 1,
-                    minWidth: 0,
-                    overflowX: "auto",
-                    scrollbarWidth: "none",
-                    WebkitOverflowScrolling: "touch",
-                  } as CSSProperties
-                }
-              >
-                {categories.map((cat) => {
-                  const active = category === cat.id;
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => {
-                        setCategory(cat.id as Any);
-                        void loadThreads({ category: cat.id });
-                      }}
-                      style={{
-                        minHeight: 25,
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        fontSize: "0.66rem",
-                        fontWeight: active ? 750 : 600,
-                        border: active
-                          ? "1px solid var(--color-accent)"
-                          : "1px solid var(--color-border-subtle)",
-                        background: active
-                          ? "var(--color-accent-subtle)"
-                          : "var(--color-bg-elevated)",
-                        color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-                        cursor: "pointer",
-                        transition: "background 0.12s ease, border-color 0.12s ease",
-                        fontFamily: "var(--font-ui)",
-                        flexShrink: 0,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {cat.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <div
-                role="group"
-                aria-label="Sort threads"
-                style={{
-                  display: "inline-flex",
-                  flexShrink: 0,
-                  padding: "2px",
-                  borderRadius: "999px",
-                  border: "1px solid var(--color-border-subtle)",
-                  background: "var(--color-bg-elevated)",
-                }}
-              >
-                {[
-                  { id: "recent" as const, label: "Recent" },
-                  { id: "priority" as const, label: "Priority" },
-                ].map((sort) => {
-                  const active = threadSortOrder === sort.id;
-                  return (
-                    <button
-                      key={sort.id}
-                      type="button"
-                      onClick={() => {
-                        setThreadSortOrder(sort.id);
-                        void loadThreads({ sortBy: sort.id });
-                      }}
-                      style={{
-                        minHeight: 23,
-                        padding: "3px 8px",
-                        fontSize: "0.66rem",
-                        fontWeight: active ? 750 : 600,
-                        border: "none",
-                        borderRadius: "999px",
-                        background: active ? "var(--color-accent-subtle)" : "transparent",
-                        color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-                        cursor: "pointer",
-                        transition: "background 0.12s ease, color 0.12s ease",
-                        fontFamily: "var(--font-ui)",
-                        whiteSpace: "nowrap",
-                      }}
-                      aria-pressed={active}
-                    >
-                      {sort.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div
-              aria-label="Filter by domain"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                flexWrap: "wrap",
-                minWidth: 0,
-              }}
-            >
-              {(domainFiltersOpen || domainFilter !== "all"
-                ? domainFilters
-                : domainFilters.filter(
-                    (filter) =>
-                      filter.id === "all" || filter.id === "work" || filter.id === "receipts",
-                  )
-              ).map((filter) => {
-                const active = domainFilter === filter.id;
-                return (
-                  <button
-                    key={filter.id}
-                    type="button"
-                    onClick={() => {
-                      setDomainFilter(filter.id);
-                      void loadThreads({ domainFilter: filter.id });
-                    }}
-                    style={{
-                      minHeight: 25,
-                      padding: "3px 8px",
-                      borderRadius: "999px",
-                      fontSize: "0.65rem",
-                      fontWeight: active ? 750 : 600,
-                      border: active
-                        ? "1px solid var(--color-accent)"
-                        : "1px solid var(--color-border-subtle)",
-                      background: active
-                        ? "var(--color-accent-subtle)"
-                        : "var(--color-bg-elevated)",
-                      color: active ? "var(--color-accent)" : "var(--color-text-secondary)",
-                      cursor: "pointer",
-                      whiteSpace: "nowrap",
-                      fontFamily: "var(--font-ui)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {filter.label}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setDomainFiltersOpen((current) => !current)}
-                aria-expanded={domainFiltersOpen}
-                style={{
-                  minHeight: 25,
-                  padding: "3px 8px",
-                  borderRadius: "999px",
-                  fontSize: "0.65rem",
-                  fontWeight: 650,
-                  border: "1px solid var(--color-border-subtle)",
-                  background: "var(--color-bg-elevated)",
-                  color: "var(--color-text-muted)",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  fontFamily: "var(--font-ui)",
-                  flexShrink: 0,
-                }}
-              >
-                {domainFiltersOpen ? "Less" : "More"}
-              </button>
-            </div>
-          </div>
-
-          {status?.syncProgress?.label && (
-            <div
-              style={{
-                marginTop: "8px",
-                fontSize: "0.68rem",
-                color:
-                  status.syncProgress.phase === "error" ? "#ef4444" : "var(--color-text-muted)",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-              }}
-            >
-              <Clock size={10} />
-              {status.syncProgress.label}
-            </div>
-          )}
-        </div>
-
-        {/* Thread list */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px" }}>
-          {displayedThreads.length === 0 && !busy && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "10px",
-                padding: "40px 16px",
-                color: "var(--color-text-muted)",
-                textAlign: "center",
-              }}
-            >
-              <Inbox size={32} strokeWidth={1.25} />
-              <div style={{ fontSize: "0.82rem" }}>
-                {activeAccount ? "No threads yet for this account." : "No threads yet."}
-                <br />
-                Click the sync button to populate the inbox.
-              </div>
-            </div>
-          )}
-          {displayedThreads.length > 0 &&
-            threadGroups.map((group) => (
-              <div
-                key={group.id}
-                style={{
-                  marginBottom: "10px",
-                  padding: "10px",
-                  borderRadius: "var(--radius-lg, 14px)",
-                  border: "1px solid var(--color-border-subtle)",
-                  background: "var(--color-bg-secondary)",
-                }}
-              >
-                {(group.label || group.description) && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                      marginBottom: "8px",
-                      padding: "0 2px",
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontSize: "0.76rem",
-                          fontWeight: 800,
-                          letterSpacing: "0.08em",
-                          textTransform: "uppercase",
-                          color: "var(--color-text-primary)",
-                        }}
-                      >
-                        {group.label}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "0.72rem",
-                          color: "var(--color-text-muted)",
-                          marginTop: "2px",
-                        }}
-                      >
-                        {group.description}
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        fontSize: "0.7rem",
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        background: "var(--color-bg-elevated)",
-                        color: "var(--color-text-muted)",
-                        border: "1px solid var(--color-border-subtle)",
-                      }}
-                    >
-                      {group.threads.length}
-                    </span>
-                  </div>
-                )}
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  {group.threads.map((thread) => {
-                    const selected = selectedThreadId === thread.id;
-                    const selectedForBulk = selectedThreadIds.includes(thread.id);
-                    const badge = priorityBadge(thread.priorityBand);
-                    const sender = thread.participants[0];
-                    const unread = thread.unreadCount > 0;
-                    const accountLabel = mailboxAccountById.get(thread.accountId)
-                      ? formatMailboxAccountLabel(mailboxAccountById.get(thread.accountId)!)
-                      : thread.accountId;
-                    const summaryLabel = thread.summary?.suggestedNextAction || thread.snippet;
-                    return (
-                      <button
-                        key={thread.id}
-                        onClick={() => openThread(thread)}
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          padding: unread ? "12px 12px 11px 16px" : "12px 12px 11px",
-                          borderRadius: "var(--radius-md, 10px)",
-                          border: selected
-                            ? "1px solid var(--color-accent)"
-                            : selectedForBulk
-                              ? "1px solid rgba(34, 211, 238, 0.5)"
-                              : unread
-                                ? "1px solid rgba(14, 165, 233, 0.55)"
-                                : "1px solid var(--color-border-subtle)",
-                          background: selected
-                            ? "linear-gradient(180deg, rgba(34, 211, 238, 0.12) 0%, var(--color-bg-elevated) 100%)"
-                            : selectedForBulk
-                              ? "rgba(34, 211, 238, 0.08)"
-                              : unread
-                                ? "linear-gradient(90deg, rgba(14, 165, 233, 0.18) 0%, rgba(240, 249, 255, 0.86) 42%, var(--color-bg-elevated) 100%)"
-                                : "var(--color-bg-elevated)",
-                          color: "var(--color-text-primary)",
-                          cursor: "pointer",
-                          transition: "all 0.12s ease",
-                          display: "block",
-                          fontFamily: "var(--font-ui)",
-                          position: "relative",
-                          boxShadow: unread
-                            ? "0 8px 22px rgba(14, 165, 233, 0.12), 0 0 0 1px rgba(14, 165, 233, 0.12) inset"
-                            : "none",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!selected) {
-                            (e.currentTarget as HTMLElement).style.background =
-                              "var(--color-bg-hover)";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!selected && !selectedForBulk) {
-                            (e.currentTarget as HTMLElement).style.background = unread
-                              ? "linear-gradient(90deg, rgba(14, 165, 233, 0.18) 0%, rgba(240, 249, 255, 0.86) 42%, var(--color-bg-elevated) 100%)"
-                              : "var(--color-bg-elevated)";
-                          }
-                        }}
-                      >
-                        {unread && (
-                          <span
-                            aria-hidden
-                            style={{
-                              position: "absolute",
-                              left: 0,
-                              top: 12,
-                              bottom: 12,
-                              width: 4,
-                              borderRadius: "0 999px 999px 0",
-                              background: "#0284c7",
-                            }}
-                          />
-                        )}
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
-                          <input
-                            type="checkbox"
-                            checked={selectedForBulk}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={() => toggleThreadSelection(thread.id)}
-                            style={{
-                              marginTop: "7px",
-                              accentColor: "var(--color-accent)",
-                              flexShrink: 0,
-                            }}
-                          />
-                          <Avatar name={sender?.name} email={sender?.email} size={30} />
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: "6px",
-                                marginBottom: "2px",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: "0.8rem",
-                                  fontWeight: unread ? 800 : 600,
-                                  color: unread
-                                    ? "var(--color-text-primary)"
-                                    : "var(--color-text-secondary)",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                  minWidth: 0,
-                                }}
-                              >
-                                {unread && (
-                                  <span
-                                    aria-hidden
-                                    style={{
-                                      width: 8,
-                                      height: 8,
-                                      borderRadius: "50%",
-                                      background: "#0284c7",
-                                      flexShrink: 0,
-                                      boxShadow: "0 0 0 3px rgba(14, 165, 233, 0.14)",
-                                    }}
-                                  />
-                                )}
+                              <input
+                                type="checkbox"
+                                className="ibx-check"
+                                checked={checked}
+                                onChange={() => toggleThreadSelection(thread.id)}
+                                aria-label="Select thread"
+                              />
+                            </label>
+                          </div>
+                          <div className="ibx-row-main">
+                            <div className="ibx-row-top">
+                              <span className="ibx-row-sender">
                                 {sender?.name || sender?.email || "Unknown"}
+                                {thread.messageCount > 1 && <em>{thread.messageCount}</em>}
                               </span>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {unread && (
-                                  <span
-                                    style={{
-                                      fontSize: "0.6rem",
-                                      fontWeight: 800,
-                                      letterSpacing: 0,
-                                      textTransform: "uppercase",
-                                      padding: "2px 6px",
-                                      borderRadius: "999px",
-                                      background: "#0284c7",
-                                      color: "#fff",
-                                      lineHeight: 1.2,
-                                    }}
-                                  >
-                                    {thread.unreadCount > 1 ? `${thread.unreadCount} new` : "New"}
-                                  </span>
-                                )}
-                                <span
-                                  style={{
-                                    fontSize: "0.68rem",
-                                    color: unread
-                                      ? "var(--color-text-primary)"
-                                      : "var(--color-text-muted)",
-                                    fontWeight: unread ? 700 : 500,
-                                  }}
-                                >
-                                  {formatTime(thread.lastMessageAt)}
-                                </span>
-                              </div>
-                            </div>
-                            <div
-                              style={{
-                                fontSize: "0.84rem",
-                                fontWeight: unread ? 800 : 500,
-                                color: unread
-                                  ? "var(--color-text-primary)"
-                                  : "var(--color-text-secondary)",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                                marginBottom: "4px",
-                              }}
-                            >
-                              {thread.subject}
-                            </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: "8px",
-                                marginBottom: "6px",
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: "0.74rem",
-                                  color: unread
-                                    ? "var(--color-text-secondary)"
-                                    : "var(--color-text-muted)",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                  flex: 1,
-                                  minWidth: 0,
-                                }}
-                              >
-                                {summaryLabel}
+                              <span className="ibx-row-time">
+                                {formatTime(thread.lastMessageAt)}
                               </span>
                             </div>
-                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                              {mailboxAccounts.length > 1 && (
-                                <span
-                                  style={{
-                                    fontSize: "0.64rem",
-                                    padding: "2px 6px",
-                                    borderRadius: "999px",
-                                    background: "rgba(16,185,129,0.08)",
-                                    color: "var(--inbox-account-text, #0f766e)",
-                                    border: "1px solid rgba(16,185,129,0.16)",
-                                    maxWidth: "160px",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  title={accountLabel}
-                                >
-                                  {accountLabel}
+                            <div className="ibx-row-subject">{thread.subject}</div>
+                            {summaryLabel && <div className="ibx-row-snippet">{summaryLabel}</div>}
+                            <div className="ibx-row-tags">
+                              {thread.needsReply && (
+                                <span className="ibx-tag ibx-tag--warn">
+                                  <span className="ibx-dot" />
+                                  Needs reply
                                 </span>
                               )}
-                              <span
-                                style={{
-                                  fontSize: "0.64rem",
-                                  padding: "2px 6px",
-                                  borderRadius: "999px",
-                                  background: "rgba(34, 211, 238, 0.08)",
-                                  color: "var(--color-text-muted)",
-                                  border: "1px solid var(--color-border-subtle)",
-                                }}
-                              >
-                                {thread.messageCount} msg{thread.messageCount === 1 ? "" : "s"}
-                              </span>
+                              {showPriority && (
+                                <span
+                                  className={`ibx-tag ${
+                                    thread.priorityBand === "critical"
+                                      ? "ibx-tag--danger"
+                                      : "ibx-tag--warn"
+                                  }`}
+                                >
+                                  <span className="ibx-dot" />
+                                  {priorityBadge(thread.priorityBand).label}
+                                </span>
+                              )}
+                              {thread.hasSensitiveContent && (
+                                <span className="ibx-tag ibx-tag--danger">
+                                  <span className="ibx-dot" />
+                                  Sensitive
+                                </span>
+                              )}
+                              {thread.cleanupCandidate && <span className="ibx-tag">Cleanup</span>}
                               {!!thread.attachments?.length && (
                                 <span
-                                  style={{
-                                    fontSize: "0.64rem",
-                                    padding: "2px 6px",
-                                    borderRadius: "999px",
-                                    background: "rgba(99,102,241,0.10)",
-                                    color: "var(--color-text-muted)",
-                                    border: "1px solid rgba(99,102,241,0.18)",
-                                    maxWidth: "140px",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                  }}
+                                  className="ibx-tag"
                                   title={thread.attachments
                                     .map((attachment) => attachment.filename)
                                     .join(", ")}
                                 >
-                                  {thread.attachments.length} attachment
-                                  {thread.attachments.length === 1 ? "" : "s"}
+                                  <Paperclip size={11} />
+                                  {thread.attachments.length}
                                 </span>
                               )}
-                              {thread.needsReply && (
-                                <span
-                                  style={{
-                                    fontSize: "0.64rem",
-                                    padding: "2px 6px",
-                                    borderRadius: "999px",
-                                    background: "rgba(245,158,11,0.12)",
-                                    color: "#b45309",
-                                    border: "1px solid rgba(245,158,11,0.16)",
-                                  }}
-                                >
-                                  Needs reply
-                                </span>
-                              )}
-                              {thread.cleanupCandidate && (
-                                <span
-                                  style={{
-                                    fontSize: "0.64rem",
-                                    padding: "2px 6px",
-                                    borderRadius: "999px",
-                                    background: "rgba(148,163,184,0.12)",
-                                    color: "var(--color-text-muted)",
-                                    border: "1px solid rgba(148,163,184,0.16)",
-                                  }}
-                                >
-                                  Cleanup
-                                </span>
-                              )}
-                              {thread.hasSensitiveContent && (
-                                <span
-                                  style={{
-                                    fontSize: "0.64rem",
-                                    padding: "2px 6px",
-                                    borderRadius: "999px",
-                                    background: "rgba(239,68,68,0.12)",
-                                    color: "#ef4444",
-                                    border: "1px solid rgba(239,68,68,0.16)",
-                                  }}
-                                >
-                                  Sensitive
-                                </span>
-                              )}
-                              {thread.priorityBand !== "low" && (
-                                <span
-                                  style={{
-                                    fontSize: "0.64rem",
-                                    fontWeight: 700,
-                                    padding: "2px 6px",
-                                    borderRadius: "8px",
-                                    background: badge.bg,
-                                    color: badge.color,
-                                    flexShrink: 0,
-                                  }}
-                                >
-                                  {badge.label}
+                              {mailboxAccounts.length > 1 && (
+                                <span className="ibx-tag" title={accountLabel}>
+                                  {accountLabel}
                                 </span>
                               )}
                             </div>
                           </div>
                         </div>
-                      </button>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          {!!selectedThreadIds.length && (
+            <div className="ibx-bulkbar" role="toolbar" aria-label="Bulk actions">
+              <span className="ibx-bulkbar-count">{selectedThreadIds.length} selected</span>
+              <span className="ibx-bulkbar-divider" />
+              <IconBtn
+                onClick={() => setSelectedThreadIds(displayedThreads.map((thread) => thread.id))}
+                icon={<CheckSquare size={14} />}
+                title="Select all visible"
+                disabled={busy || displayedThreads.length === 0}
+              />
+              <IconBtn
+                onClick={() => void handleBulkThreadAction("archive")}
+                icon={<Archive size={14} />}
+                title={bulkArchiveTrashDisabledReason || "Archive"}
+                disabled={busy || Boolean(bulkArchiveTrashDisabledReason)}
+              />
+              <IconBtn
+                onClick={() => void handleBulkThreadAction(bulkReadStateAction)}
+                icon={<MailOpen size={14} />}
+                title={
+                  bulkReadStateDisabledReason ||
+                  (bulkReadStateAction === "mark_read" ? "Mark read" : "Mark unread")
+                }
+                disabled={busy || Boolean(bulkReadStateDisabledReason)}
+              />
+              <IconBtn
+                onClick={() => void handleBulkThreadAction("trash")}
+                icon={<Trash2 size={14} />}
+                title={bulkArchiveTrashDisabledReason || "Trash"}
+                disabled={busy || Boolean(bulkArchiveTrashDisabledReason)}
+              />
+              <span className="ibx-bulkbar-divider" />
+              <IconBtn
+                onClick={clearThreadSelection}
+                icon={<X size={14} />}
+                title="Clear selection"
+                disabled={busy}
+              />
+            </div>
+          )}
+
+          <footer className="ibx-list-foot">
+            <Popover
+              placement="up"
+              align="start"
+              className="ibx-pop--status"
+              anchorClassName="ibx-status-anchor"
+              trigger={({ open, toggle }) => (
+                <button
+                  type="button"
+                  className={`ibx-status-btn ${statusTone === "ok" ? "" : `is-${statusTone}`}`}
+                  onClick={toggle}
+                  aria-expanded={open}
+                  title={status?.statusLabel || undefined}
+                >
+                  <span className="ibx-dot" />
+                  <span>
+                    {statusText}
+                    {status?.lastSyncedAt && statusTone === "ok"
+                      ? ` · ${formatTime(status.lastSyncedAt)}`
+                      : ""}
+                  </span>
+                  <ChevronDown size={13} />
+                </button>
+              )}
+            >
+              {() => (
+                <>
+                  <div className="ibx-pop-section">
+                    <div
+                      className={`ibx-status-detail ${statusTone === "error" ? "is-error" : ""}`}
+                    >
+                      <span>{status?.statusLabel || statusText}</span>
+                      <ActionBtn
+                        onClick={() => void syncMailboxWithProgress()}
+                        icon={<RefreshCcw size={12} className={busy ? "ibx-spin" : undefined} />}
+                        label="Sync now"
+                        size="sm"
+                        disabled={busy}
+                      />
+                    </div>
+                  </div>
+                  <div className="ibx-pop-section">
+                    <div className="ibx-pop-title">Mailbox</div>
+                    <div className="ibx-stat-list">
+                      {[
+                        { label: "Accounts", value: replacementReadiness.accountCount || 0 },
+                        { label: "Folders", value: replacementReadiness.folderCount || 0 },
+                        { label: "Drafts", value: replacementReadiness.drafts },
+                        {
+                          label: "Queued",
+                          value: replacementReadiness.failed
+                            ? `${replacementReadiness.queued} · ${replacementReadiness.failed} failed`
+                            : replacementReadiness.queued,
+                        },
+                        {
+                          label: "Last sync",
+                          value: status?.lastSyncedAt
+                            ? formatFullTime(status.lastSyncedAt)
+                            : "Never",
+                        },
+                      ].map((item) => (
+                        <div key={item.label}>
+                          <span>{item.label}</span>
+                          <strong>{item.value}</strong>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="ibx-cap-row">
+                      {[
+                        { label: "Send", active: replacementReadiness.canSend },
+                        { label: "Drafts", active: replacementReadiness.canDraft },
+                        { label: "Organize", active: replacementReadiness.canOrganize },
+                      ].map((chip) => (
+                        <span
+                          key={chip.label}
+                          className="ibx-tag"
+                          title={
+                            chip.active ? `${chip.label} supported` : `${chip.label} unavailable`
+                          }
+                        >
+                          {chip.active ? <Check size={12} /> : <X size={12} />}
+                          {chip.label}
+                        </span>
+                      ))}
+                    </div>
+                    {replacementReadiness.providerBackends.length > 0 && (
+                      <div className="ibx-hint ibx-pop-body">
+                        {replacementReadiness.providerBackends.join(" + ")}
+                      </div>
+                    )}
+                  </div>
+                  {troubledQueuedActions.length > 0 && (
+                    <div className="ibx-pop-section">
+                      <div className="ibx-pop-title">Needs attention</div>
+                      {troubledQueuedActions.slice(0, 3).map((action) => (
+                        <div key={action.id} className="ibx-queued-issue">
+                          <span>
+                            {action.status === "outcome_unknown"
+                              ? `${action.type} delivery status unknown; check Sent before choosing`
+                              : `${action.type} failed`}
+                            {action.latestError ? `: ${action.latestError}` : ""}
+                          </span>
+                          <div className="ibx-queued-issue-actions">
+                            {action.status === "outcome_unknown" && action.type === "send" && (
+                              <>
+                                <ActionBtn
+                                  size="sm"
+                                  label="I verified sent"
+                                  title="I checked the provider's Sent folder and confirmed this message was sent."
+                                  onClick={() =>
+                                    void runAction(async () => {
+                                      await window.electronAPI.resolveMailboxSendOutcome(
+                                        action.id,
+                                        "confirmed_sent",
+                                      );
+                                      await reloadAll(selectedThread?.id);
+                                    })
+                                  }
+                                />
+                                <ActionBtn
+                                  size="sm"
+                                  label="Not sent · retry"
+                                  title="I checked the provider's Sent folder and confirmed this message was not sent. The app will try to send it now."
+                                  onClick={() =>
+                                    void runAction(async () => {
+                                      await window.electronAPI.resolveMailboxSendOutcome(
+                                        action.id,
+                                        "confirmed_not_sent",
+                                      );
+                                      await reloadAll(selectedThread?.id);
+                                    })
+                                  }
+                                />
+                              </>
+                            )}
+                            {action.status === "failed" && (
+                              <ActionBtn
+                                size="sm"
+                                label="Retry"
+                                onClick={() =>
+                                  void runAction(async () => {
+                                    await window.electronAPI.retryMailboxAction(action.id);
+                                    await reloadAll(selectedThread?.id);
+                                  })
+                                }
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </Popover>
+          </footer>
+        </section>
+
+        {/* ── MIDDLE: Reader ────────────────────────────────────────────── */}
+        <section className="ibx-pane ibx-reader-pane" aria-label="Conversation">
+          <div className="ibx-toolbar" role="toolbar" aria-label="Thread actions">
+            {selectedThread ? (
+              <>
+                <IconBtn
+                  onClick={() => void handleThreadAction("archive")}
+                  icon={<Archive size={15} />}
+                  title={
+                    !canSelectedThread("archive") ? selectedThreadCapabilityReason : "Archive (E)"
+                  }
+                  disabled={busy || !canSelectedThread("archive")}
+                />
+                <IconBtn
+                  onClick={() => void handleThreadAction("trash")}
+                  icon={<Trash2 size={15} />}
+                  title={!canSelectedThread("trash") ? selectedThreadCapabilityReason : "Trash (#)"}
+                  disabled={busy || !canSelectedThread("trash")}
+                />
+                <IconBtn
+                  onClick={() => void handleThreadAction(selectedThreadReadAction)}
+                  icon={<MailOpen size={15} />}
+                  title={
+                    !canSelectedThread(selectedThreadReadAction)
+                      ? selectedThreadCapabilityReason
+                      : selectedThreadReadAction === "mark_read"
+                        ? "Mark read"
+                        : "Mark unread"
+                  }
+                  disabled={busy || !canSelectedThread(selectedThreadReadAction)}
+                />
+                <IconBtn
+                  onClick={() => void snoozeSelectedThread()}
+                  icon={<Clock size={15} />}
+                  title="Snooze or remind later"
+                  disabled={busy}
+                />
+                <IconBtn
+                  onClick={() => void handleThreadAction("mark_done")}
+                  icon={<CheckSquare size={15} />}
+                  title={
+                    selectedThreadCanMarkDone
+                      ? "Mark done: clear Needs reply and close open commitments after you handled this outside Cowork"
+                      : "Nothing to mark done"
+                  }
+                  disabled={busy || !selectedThreadCanMarkDone}
+                />
+                <span className="ibx-toolbar-sep" />
+                <IconBtn
+                  onClick={() => openManualCompose("reply")}
+                  icon={<Reply size={15} />}
+                  title={replyBlockedReason || "Reply"}
+                  disabled={busy || Boolean(replyBlockedReason)}
+                />
+                <IconBtn
+                  onClick={() => openManualCompose("forward")}
+                  icon={<Forward size={15} />}
+                  title={forwardBlockedReason || "Forward"}
+                  disabled={busy || Boolean(forwardBlockedReason)}
+                />
+                <span className="ibx-toolbar-spacer" />
+                {busy && (
+                  <span className="ibx-busy ibx-hide-narrow" role="status">
+                    <RefreshCcw size={13} className="ibx-spin" />
+                    Working…
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="ibx-btn ibx-btn--ghost ibx-toolbar-draft"
+                  onClick={draftWithAi}
+                  disabled={busy}
+                  title="Draft a reply with AI (D)"
+                  aria-label="Draft reply"
+                >
+                  <Sparkles size={13} />
+                  <span className="ibx-draft-label">Draft reply</span>
+                </button>
+                <Popover
+                  trigger={({ open, toggle }) => (
+                    <IconBtn
+                      onClick={toggle}
+                      icon={<MoreHorizontal size={16} />}
+                      title="More actions"
+                      active={open}
+                    />
+                  )}
+                >
+                  {(close) => (
+                    <>
+                      <div className="ibx-pop-section">
+                        {!selectedThreadIsShort && (
+                          <MenuItem
+                            label="Summarize with AI"
+                            icon={<Sparkles size={14} />}
+                            onSelect={() => {
+                              close();
+                              void runAction(async () => {
+                                await window.electronAPI.summarizeMailboxThread(selectedThread.id);
+                                await loadThread(selectedThread.id);
+                              });
+                            }}
+                          />
+                        )}
+                        <MenuItem
+                          label="Reclassify thread"
+                          icon={<RefreshCcw size={14} />}
+                          disabled={busy}
+                          onSelect={() => {
+                            close();
+                            void reclassifySelectedThread();
+                          }}
+                        />
+                        <MenuItem
+                          label="Reply all"
+                          icon={<ReplyAll size={14} />}
+                          disabled={busy || Boolean(replyBlockedReason)}
+                          title={replyBlockedReason}
+                          onSelect={() => {
+                            close();
+                            openManualCompose("reply_all");
+                          }}
+                        />
+                      </div>
+                      <div className="ibx-pop-section" role="group" aria-label="Message order">
+                        <div className="ibx-pop-title">Message order</div>
+                        <MenuItem
+                          label="Newest first"
+                          checked={messageSortOrder === "newest"}
+                          onSelect={() => setMessageSortOrder("newest")}
+                        />
+                        <MenuItem
+                          label="Oldest first"
+                          checked={messageSortOrder === "oldest"}
+                          onSelect={() => setMessageSortOrder("oldest")}
+                        />
+                      </div>
+                    </>
+                  )}
+                </Popover>
+              </>
+            ) : (
+              <>
+                <span className="ibx-toolbar-hint">
+                  {displayedThreads.length
+                    ? `${displayedThreads.length} conversation${displayedThreads.length === 1 ? "" : "s"}`
+                    : ""}
+                </span>
+                <span className="ibx-toolbar-spacer" />
+                {busy && (
+                  <span className="ibx-busy" role="status">
+                    <RefreshCcw size={13} className="ibx-spin" />
+                    Working…
+                  </span>
+                )}
+              </>
+            )}
+            <IconBtn
+              onClick={toggleRail}
+              icon={railVisible ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+              title={railVisible ? "Hide agent panel" : "Show agent panel"}
+            />
+          </div>
+
+          {error && (
+            <div className="ibx-notice ibx-notice--danger" role="alert">
+              <AlertCircle size={14} />
+              <div className="ibx-notice-body">{error}</div>
+              <IconBtn onClick={() => setError(null)} icon={<X size={13} />} title="Dismiss" />
+            </div>
+          )}
+
+          {selectedThread && selectedThreadNeedsGmailCleanupAttention && (
+            <div className="ibx-notice">
+              <AlertCircle size={14} />
+              <div className="ibx-notice-body">{gmailCleanupDisabledReason}</div>
+            </div>
+          )}
+
+          <div className="ibx-scroll">
+            {!selectedThread ? (
+              <div className="ibx-reader-empty">
+                <div className="ibx-empty">
+                  <MailSearch size={30} strokeWidth={1.3} />
+                  <div className="ibx-empty-title">No conversation selected</div>
+                  <div className="ibx-empty-text">
+                    Pick a thread to read it with its summary, drafts and commitments.
+                  </div>
+                  <div className="ibx-empty-keys">
+                    <span className="ibx-kbd">J</span>
+                    <span className="ibx-kbd">K</span>
+                    <span>to move</span>
+                    <span className="ibx-kbd">E</span>
+                    <span>archive</span>
+                    <span className="ibx-kbd">D</span>
+                    <span>draft</span>
+                  </div>
                 </div>
               </div>
-            ))}
-        </div>
-      </section>
-
-      {/* ── MIDDLE: Thread Detail ──────────────────────────────────────── */}
-      <section
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          border: "1px solid var(--color-border)",
-          borderRadius: "var(--radius-xl, 18px)",
-          background: "var(--color-bg-elevated)",
-          boxShadow: "var(--shadow-md)",
-          minHeight: 0,
-          minWidth: 0,
-          width: "100%",
-          maxWidth: "100%",
-          overflow: "hidden",
-        }}
-      >
-        {/* Thread header */}
-        <div
-          style={{
-            padding: "14px 18px",
-            borderBottom: "1px solid var(--color-border-subtle)",
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: "12px",
-          }}
-        >
-          {selectedThread ? (
-            <>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 700,
-                    color: "var(--color-text-primary)",
-                    marginBottom: "4px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {selectedThread.subject}
-                </div>
-                <div style={{ fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+            ) : (
+              <div className="ibx-reader">
+                <h2 className="ibx-subject">{selectedThread.subject || "(no subject)"}</h2>
+                <div className="ibx-meta-people">
                   {selectedThread.participants.map((p) => p.name || p.email).join(", ")}
                 </div>
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" }}>
+                <div className="ibx-meta">
+                  {selectedThread.needsReply ? (
+                    <span className="ibx-tag ibx-tag--warn">
+                      <span className="ibx-dot" />
+                      Needs reply
+                    </span>
+                  ) : (
+                    <span className="ibx-tag">No reply needed</span>
+                  )}
+                  {selectedThread.sensitiveContent?.hasSensitiveContent && (
+                    <span className="ibx-tag ibx-tag--danger">
+                      <span className="ibx-dot" />
+                      Sensitive content
+                    </span>
+                  )}
+                  {selectedThreadOpenCommitments.length > 0 && (
+                    <span className="ibx-tag">
+                      {selectedThreadOpenCommitments.length} open commitment
+                      {selectedThreadOpenCommitments.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  <span className="ibx-tag">
+                    {selectedThread.messageCount} message
+                    {selectedThread.messageCount === 1 ? "" : "s"}
+                  </span>
                   {mailboxAccounts.length > 1 && selectedThreadAccount && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        background: "rgba(16,185,129,0.08)",
-                        color: "var(--inbox-account-text, #0f766e)",
-                        fontSize: "0.68rem",
-                        border: "1px solid rgba(16,185,129,0.16)",
-                      }}
-                    >
+                    <span className="ibx-tag">
                       {formatMailboxAccountLabel(selectedThreadAccount)}
                     </span>
                   )}
-                  <span
-                    style={{
-                      padding: "3px 8px",
-                      borderRadius: "999px",
-                      background: "var(--color-bg-secondary)",
-                      color: "var(--color-text-secondary)",
-                      fontSize: "0.68rem",
-                      border: "1px solid var(--color-border-subtle)",
-                    }}
-                  >
-                    {selectedThread.provider}
-                  </span>
+                  <span className="ibx-tag">{selectedThread.provider.replace(/_/g, " ")}</span>
                   {selectedThread.provider === "agentmail" && (
                     <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        background: "rgba(14,165,233,0.10)",
-                        color: "#0369a1",
-                        fontSize: "0.68rem",
-                        border: "1px solid rgba(14,165,233,0.20)",
-                      }}
+                      className="ibx-tag"
                       title="Manage AgentMail pods, domains, lists, and inbox keys in Settings > Integrations > AgentMail."
                     >
                       Settings → Integrations → AgentMail
                     </span>
                   )}
-                  <span
-                    style={{
-                      padding: "3px 8px",
-                      borderRadius: "999px",
-                      background: selectedThread.needsReply
-                        ? "rgba(245,158,11,0.12)"
-                        : "var(--color-bg-secondary)",
-                      color: selectedThread.needsReply ? "#b45309" : "var(--color-text-secondary)",
-                      fontSize: "0.68rem",
-                      border: "1px solid var(--color-border-subtle)",
-                    }}
-                  >
-                    {selectedThread.needsReply ? "Needs reply" : "No reply needed"}
-                  </span>
-                  <span
-                    style={{
-                      padding: "3px 8px",
-                      borderRadius: "999px",
-                      background: "var(--color-bg-secondary)",
-                      color: "var(--color-text-secondary)",
-                      fontSize: "0.68rem",
-                      border: "1px solid var(--color-border-subtle)",
-                    }}
-                  >
-                    {selectedThread.messageCount} message
-                    {selectedThread.messageCount === 1 ? "" : "s"}
-                  </span>
-                  {selectedThreadOpenCommitments.length > 0 && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        background: "var(--color-bg-secondary)",
-                        color: "var(--color-text-secondary)",
-                        fontSize: "0.68rem",
-                        border: "1px solid var(--color-border-subtle)",
-                      }}
-                    >
-                      {selectedThreadOpenCommitments.length} open commitment
-                      {selectedThreadOpenCommitments.length === 1 ? "" : "s"}
-                    </span>
-                  )}
-                  {selectedThread.sensitiveContent?.hasSensitiveContent && (
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        background: "rgba(239,68,68,0.12)",
-                        color: "#ef4444",
-                        fontSize: "0.68rem",
-                        border: "1px solid rgba(239,68,68,0.16)",
-                      }}
-                    >
-                      Sensitive content
-                    </span>
-                  )}
                 </div>
-              </div>
-              <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                <IconBtn
-                  onClick={() =>
-                    setMessageSortOrder((current) => (current === "newest" ? "oldest" : "newest"))
-                  }
-                  icon={<Clock size={13} />}
-                  title={
-                    messageSortOrder === "newest"
-                      ? "Message order: newest first (click for oldest first)"
-                      : "Message order: oldest first (click for newest first)"
-                  }
-                  active={messageSortOrder === "newest"}
-                />
-                {!selectedThreadIsShort && (
-                  <IconBtn
-                    onClick={() =>
-                      runAction(async () => {
-                        await window.electronAPI.summarizeMailboxThread(selectedThread.id);
-                        await loadThread(selectedThread.id);
-                      })
-                    }
-                    icon={<Sparkles size={13} />}
-                    title="Summarize thread with AI"
-                  />
-                )}
-                <IconBtn
-                  onClick={() => void reclassifySelectedThread()}
-                  icon={<RefreshCcw size={13} />}
-                  title="Reclassify thread (triage labels)"
-                  disabled={busy}
-                />
-                <IconBtn
-                  onClick={() => void snoozeSelectedThread()}
-                  icon={<Clock size={13} />}
-                  title="Snooze or remind later"
-                  disabled={busy}
-                />
-                <IconBtn
-                  onClick={() => openManualCompose("reply")}
-                  icon={<Reply size={13} />}
-                  title="Reply"
-                  disabled={busy}
-                />
-                <IconBtn
-                  onClick={() => openManualCompose("forward")}
-                  icon={<Forward size={13} />}
-                  title="Forward"
-                  disabled={busy}
-                />
-                <IconBtn
-                  onClick={() =>
-                    runAction(async () => {
-                      await generateDraftForThread(selectedThread.id, {
-                        tone: "concise",
-                        includeAvailability: true,
-                        manual: true,
-                      });
-                      await loadThread(selectedThread.id);
-                    })
-                  }
-                  icon={<Sparkles size={13} />}
-                  title="Draft a reply with AI"
-                />
-              </div>
-            </>
-          ) : (
-            <div style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>
-              Select a thread
-            </div>
-          )}
-        </div>
 
-        {/* Thread body */}
-        <div
-          style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", padding: "16px" }}
-        >
-          {!selectedThread && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                gap: "12px",
-                color: "var(--color-text-muted)",
-                textAlign: "center",
-              }}
-            >
-              <MailSearch size={40} strokeWidth={1.2} />
-              <div style={{ fontSize: "0.85rem", lineHeight: 1.5 }}>
-                Choose a thread to inspect
-                <br />
-                summaries, drafts, and commitments.
-              </div>
-            </div>
-          )}
-
-          {/* AI summary card */}
-          {selectedThread?.summary && !selectedThreadIsShort && (
-            <div
-              style={{
-                padding: "14px 16px",
-                borderRadius: "var(--radius-lg, 14px)",
-                background: "var(--color-accent-subtle)",
-                border: "1px solid var(--color-accent)",
-                marginBottom: "14px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  marginBottom: "8px",
-                  color: "var(--color-accent)",
-                  fontSize: "0.72rem",
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                <Sparkles size={11} />
-                AI Summary
-              </div>
-              <div
-                style={{
-                  color: "var(--color-text-primary)",
-                  lineHeight: 1.6,
-                  fontSize: "0.86rem",
-                }}
-              >
-                {stripMailboxSummaryHtmlArtifacts(selectedThread.summary.summary)}
-              </div>
-              {!!selectedThread.summary.keyAsks.length && (
-                <div
-                  style={{
-                    marginTop: "10px",
-                    fontSize: "0.8rem",
-                    color: "var(--color-text-secondary)",
-                  }}
-                >
-                  <strong>Key asks:</strong> {selectedThread.summary.keyAsks.join(" · ")}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Manual compose */}
-          {selectedThread && manualComposeMode && (
-            <div
-              style={{
-                padding: "14px 16px",
-                borderRadius: "var(--radius-lg, 14px)",
-                background: "rgba(14,165,233,0.06)",
-                border: "1px solid rgba(14,165,233,0.22)",
-                marginBottom: "14px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "12px",
-                  marginBottom: "10px",
-                }}
-              >
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                  {(["reply", "reply_all", "forward"] as ManualComposeMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => openManualCompose(mode)}
-                      style={{
-                        border:
-                          manualComposeMode === mode
-                            ? "1px solid rgba(14,165,233,0.65)"
-                            : "1px solid var(--color-border-subtle)",
-                        background:
-                          manualComposeMode === mode
-                            ? "rgba(14,165,233,0.14)"
-                            : "var(--color-bg-secondary)",
-                        color:
-                          manualComposeMode === mode ? "#0369a1" : "var(--color-text-secondary)",
-                        borderRadius: "999px",
-                        padding: "5px 9px",
-                        fontSize: "0.72rem",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        fontFamily: "var(--font-ui)",
-                      }}
-                    >
-                      {mode === "reply_all"
-                        ? "Reply all"
-                        : mode === "forward"
-                          ? "Forward"
-                          : "Reply"}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                  <ActionBtn
-                    onClick={closeManualCompose}
-                    icon={<X size={13} />}
-                    label="Close"
-                    disabled={busy}
-                  />
-                  <ActionBtn
-                    onClick={() => void sendManualCompose()}
-                    icon={<Send size={13} />}
-                    label={manualComposeMode === "forward" ? "Forward" : "Send"}
-                    variant="primary"
-                    disabled={
-                      busy ||
-                      !manualComposeBody.trim() ||
-                      splitMailboxRecipients(manualComposeTo).length +
-                        splitMailboxRecipients(manualComposeCc).length +
-                        splitMailboxRecipients(manualComposeBcc).length ===
-                        0
-                    }
-                  />
-                </div>
-              </div>
-              <div style={{ display: "grid", gap: "8px" }}>
-                <input
-                  aria-label="To"
-                  placeholder="To"
-                  value={manualComposeTo}
-                  onChange={(event) => setManualComposeTo(event.target.value)}
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    border: "1px solid rgba(14,165,233,0.18)",
-                    background: "rgba(255,255,255,0.72)",
-                    borderRadius: "var(--radius-sm, 8px)",
-                    padding: "8px 10px",
-                    fontFamily: "var(--font-ui)",
-                    color: "var(--color-text-primary)",
-                    outline: "none",
-                  }}
-                />
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                    gap: "8px",
-                  }}
-                >
-                  <input
-                    aria-label="Cc"
-                    placeholder="Cc"
-                    value={manualComposeCc}
-                    onChange={(event) => setManualComposeCc(event.target.value)}
-                    style={{
-                      width: "100%",
-                      boxSizing: "border-box",
-                      border: "1px solid rgba(14,165,233,0.18)",
-                      background: "rgba(255,255,255,0.72)",
-                      borderRadius: "var(--radius-sm, 8px)",
-                      padding: "8px 10px",
-                      fontFamily: "var(--font-ui)",
-                      color: "var(--color-text-primary)",
-                      outline: "none",
-                    }}
-                  />
-                  <input
-                    aria-label="Bcc"
-                    placeholder="Bcc"
-                    value={manualComposeBcc}
-                    onChange={(event) => setManualComposeBcc(event.target.value)}
-                    style={{
-                      width: "100%",
-                      boxSizing: "border-box",
-                      border: "1px solid rgba(14,165,233,0.18)",
-                      background: "rgba(255,255,255,0.72)",
-                      borderRadius: "var(--radius-sm, 8px)",
-                      padding: "8px 10px",
-                      fontFamily: "var(--font-ui)",
-                      color: "var(--color-text-primary)",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-                <input
-                  aria-label="Subject"
-                  placeholder="Subject"
-                  value={manualComposeSubject}
-                  onChange={(event) => setManualComposeSubject(event.target.value)}
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    border: "1px solid rgba(14,165,233,0.18)",
-                    background: "rgba(255,255,255,0.72)",
-                    borderRadius: "var(--radius-sm, 8px)",
-                    padding: "8px 10px",
-                    fontFamily: "var(--font-ui)",
-                    fontWeight: 600,
-                    color: "var(--color-text-primary)",
-                    outline: "none",
-                  }}
-                />
-                <textarea
-                  aria-label="Message"
-                  placeholder="Write your message..."
-                  value={manualComposeBody}
-                  onChange={(event) => setManualComposeBody(event.target.value)}
-                  style={{
-                    width: "100%",
-                    minHeight: manualComposeMode === "forward" ? "240px" : "180px",
-                    boxSizing: "border-box",
-                    border: "1px solid rgba(14,165,233,0.18)",
-                    background: "rgba(255,255,255,0.72)",
-                    borderRadius: "var(--radius-sm, 8px)",
-                    padding: "10px 12px",
-                    fontFamily: "var(--font-ui)",
-                    color: "var(--color-text-primary)",
-                    lineHeight: 1.5,
-                    resize: "vertical",
-                    outline: "none",
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Draft preview */}
-          {selectedThread && activeGeneratedDraft && (
-            <div
-              style={{
-                padding: "14px 16px",
-                borderRadius: "var(--radius-lg, 14px)",
-                background: "rgba(251,191,36,0.06)",
-                border: "1px solid rgba(251,191,36,0.22)",
-                marginBottom: "14px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  marginBottom: "10px",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      color: "#d97706",
-                      marginBottom: "2px",
-                    }}
-                  >
-                    Draft ready
-                  </div>
-                  <input
-                    aria-label="Draft subject"
-                    value={editableDraftSubject}
-                    onChange={(event) => setEditableDraftSubject(event.target.value)}
-                    style={{
-                      width: "100%",
-                      boxSizing: "border-box",
-                      border: "1px solid rgba(217,119,6,0.18)",
-                      background: "rgba(255,255,255,0.72)",
-                      borderRadius: "var(--radius-sm, 8px)",
-                      padding: "7px 9px",
-                      fontWeight: 600,
-                      fontSize: "0.86rem",
-                      color: "var(--color-text-primary)",
-                      fontFamily: "var(--font-ui)",
-                      outline: "none",
-                    }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                  <ActionBtn
-                    onClick={() =>
-                      runAction(async () => {
-                        await window.electronAPI.applyMailboxAction({
-                          threadId: selectedThread.id,
-                          draftId: activeGeneratedDraft.id,
-                          type: "discard_draft",
-                        });
-                        setEditableDraftId(null);
-                        setEditableDraftSubject("");
-                        setEditableDraftBody("");
-                        await reloadAll(selectedThread.id);
-                      })
-                    }
-                    icon={<Trash2 size={13} />}
-                    label="Discard"
-                    variant="danger"
-                  />
-                  <ActionBtn
-                    onClick={() =>
-                      runAction(async () => {
-                        const sentDraftId = activeGeneratedDraft.id;
-                        await window.electronAPI.applyMailboxAction({
-                          threadId: selectedThread.id,
-                          draftId: sentDraftId,
-                          draftSubject: editableDraftSubject.trim() || activeGeneratedDraft.subject,
-                          draftBody: editableDraftBody,
-                          type: "send_draft",
-                        });
-                        setEditableDraftId(null);
-                        setEditableDraftSubject("");
-                        setEditableDraftBody("");
-                        setSelectedThread((current) =>
-                          current?.id === selectedThread.id
-                            ? {
-                                ...current,
-                                drafts: current.drafts.filter((draft) => draft.id !== sentDraftId),
-                                needsReply: false,
-                                handled: true,
-                                todayBucket:
-                                  current.todayBucket === "needs_action"
-                                    ? "good_to_know"
-                                    : current.todayBucket,
-                              }
-                            : current,
-                        );
-                        await reloadAll(selectedThread.id);
-                      })
-                    }
-                    icon={<Reply size={13} />}
-                    label="Send"
-                    variant="primary"
-                    disabled={busy || !editableDraftBody.trim()}
-                  />
-                </div>
-              </div>
-              {selectedThread.sensitiveContent?.hasSensitiveContent && (
-                <div
-                  style={{
-                    marginBottom: "10px",
-                    padding: "8px 10px",
-                    borderRadius: "var(--radius-sm, 8px)",
-                    background: "rgba(239,68,68,0.08)",
-                    border: "1px solid rgba(239,68,68,0.2)",
-                    color: "var(--color-text-secondary)",
-                    fontSize: "0.76rem",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Sensitive content detected. Review carefully before sending or automating this
-                  thread.
-                </div>
-              )}
-              <textarea
-                aria-label="Draft body"
-                value={editableDraftBody}
-                onChange={(event) => setEditableDraftBody(event.target.value)}
-                style={{
-                  margin: 0,
-                  width: "100%",
-                  minHeight: "180px",
-                  boxSizing: "border-box",
-                  whiteSpace: "pre-wrap",
-                  overflowWrap: "break-word",
-                  wordBreak: "break-word",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.8rem",
-                  lineHeight: 1.6,
-                  color: "var(--color-text-secondary)",
-                  background: "rgba(0,0,0,0.04)",
-                  border: "1px solid rgba(217,119,6,0.16)",
-                  borderRadius: "var(--radius-sm, 8px)",
-                  padding: "10px 12px",
-                  resize: "vertical",
-                  outline: "none",
-                }}
-              />
-            </div>
-          )}
-
-          {!!selectedThread?.attachments?.length && (
-            <div
-              style={{
-                padding: "12px",
-                borderRadius: "var(--radius-lg, 14px)",
-                background: "var(--color-bg-secondary)",
-                border: "1px solid var(--color-border-subtle)",
-                marginBottom: "14px",
-              }}
-            >
-              <SectionLabel>Attachments</SectionLabel>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {selectedThread.attachments.map((attachment) => (
-                  <button
-                    key={attachment.id}
-                    type="button"
-                    onClick={() =>
-                      runAction(async () => {
-                        await window.electronAPI.extractMailboxAttachmentText(attachment.id);
-                        await loadThread(selectedThread.id);
-                      })
-                    }
-                    style={{
-                      border: "1px solid var(--color-border-subtle)",
-                      background: "var(--color-bg-elevated)",
-                      color: "var(--color-text-secondary)",
-                      borderRadius: "999px",
-                      padding: "5px 8px",
-                      fontSize: "0.7rem",
-                      cursor: "pointer",
-                      maxWidth: "100%",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    title={
-                      attachment.extractionStatus === "indexed"
-                        ? "Text indexed"
-                        : "Extract text for mailbox search"
-                    }
-                  >
-                    {attachment.filename}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Messages */}
-          {selectedThread?.messages.length ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr",
-                gap: "12px",
-              }}
-            >
-              {messageSections.map((section) => (
-                <div
-                  key={section.title}
-                  style={{
-                    border: "1px solid var(--color-border-subtle)",
-                    borderRadius: "var(--radius-lg, 14px)",
-                    background: "var(--color-bg-secondary)",
-                    padding: "12px",
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "8px",
-                    }}
-                  >
-                    <SectionLabel>{section.title}</SectionLabel>
-                    <span
-                      style={{
-                        fontSize: "0.7rem",
-                        padding: "2px 8px",
-                        borderRadius: "10px",
-                        background: "var(--color-bg-elevated)",
-                        color: "var(--color-text-muted)",
-                        border: "1px solid var(--color-border-subtle)",
-                      }}
-                    >
-                      {section.messages.length}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {section.messages.map((message) => renderMessageCard(message))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div
-              style={{
-                padding: "16px",
-                textAlign: "center",
-                color: "var(--color-text-muted)",
-                fontSize: "0.82rem",
-                borderRadius: "var(--radius-md, 10px)",
-                background: "var(--color-bg-secondary)",
-                border: "1px solid var(--color-border-subtle)",
-              }}
-            >
-              No messages in this thread
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ── RIGHT: Agent Rail ──────────────────────────────────────────── */}
-      <section
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          border: "1px solid var(--color-border)",
-          borderRadius: "var(--radius-xl, 18px)",
-          background: "var(--color-bg-elevated)",
-          boxShadow: "var(--shadow-md)",
-          minHeight: 0,
-          minWidth: 0,
-          width: "100%",
-          maxWidth: "100%",
-          overflow: "hidden",
-        }}
-      >
-        {/* Agent Rail header */}
-        <div
-          style={{
-            padding: "14px 16px 12px",
-            borderBottom: "1px solid var(--color-border-subtle)",
-          }}
-        >
-          <div
-            role="tablist"
-            aria-label="Inbox side panel"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "6px",
-              marginBottom: "12px",
-              padding: "3px",
-              borderRadius: "var(--radius-sm, 8px)",
-              background: "var(--color-bg-secondary)",
-              border: "1px solid var(--color-border-subtle)",
-            }}
-          >
-            {[
-              ["agent_rail", "Agent Rail"],
-              ["ask_inbox", "Ask Inbox"],
-            ].map(([tab, label]) => {
-              const active = rightRailTab === tab;
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setRightRailTab(tab as RightRailTab)}
-                  style={{
-                    minWidth: 0,
-                    border: "1px solid transparent",
-                    borderRadius: "var(--radius-xs, 6px)",
-                    background: active ? "var(--color-bg-elevated)" : "transparent",
-                    color: active ? "var(--color-text-primary)" : "var(--color-text-muted)",
-                    boxShadow: active ? "0 1px 2px rgba(15, 23, 42, 0.08)" : "none",
-                    padding: "6px 8px",
-                    cursor: "pointer",
-                    fontFamily: "var(--font-ui)",
-                    fontSize: "0.72rem",
-                    fontWeight: 800,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
-          {rightRailTab === "agent_rail" ? (
-            <>
-              <div style={{ marginBottom: "12px" }}>
-                <div
-                  style={{
-                    fontSize: "0.92rem",
-                    fontWeight: 700,
-                    color: "var(--color-text-primary)",
-                    marginBottom: "2px",
-                  }}
-                >
-                  Agent Rail
-                </div>
-                <div style={{ fontSize: "0.74rem", color: "var(--color-text-muted)" }}>
-                  Drafts, approvals, commitments &amp; queues
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                <ActionBtn
-                  onClick={() => void reviewQueue("cleanup")}
-                  icon={<Trash2 size={13} />}
-                  label="Cleanup"
-                  disabled={busy}
-                />
-                <ActionBtn
-                  onClick={() => void reviewQueue("follow_up")}
-                  icon={<Reply size={13} />}
-                  label="Follow-up"
-                  disabled={busy}
-                />
-                <ActionBtn
-                  onClick={() => openManualCompose("reply")}
-                  icon={<Reply size={13} />}
-                  label="Reply"
-                  disabled={busy || !selectedThread || !canSelectedThread("send")}
-                  title={
-                    selectedThread && !canSelectedThread("send")
-                      ? selectedThreadCapabilityReason
-                      : undefined
-                  }
-                />
-                <ActionBtn
-                  onClick={() => openManualCompose("forward")}
-                  icon={<Forward size={13} />}
-                  label="Forward"
-                  disabled={busy || !selectedThread || !canSelectedThread("forward")}
-                  title={
-                    selectedThread && !canSelectedThread("forward")
-                      ? selectedThreadCapabilityReason
-                      : undefined
-                  }
-                />
-                <ActionBtn
-                  onClick={() => void handleThreadAction("mark_done")}
-                  icon={<CheckSquare size={13} />}
-                  label="Mark done"
-                  disabled={busy || !selectedThreadCanMarkDone}
-                  title="Clear Needs reply and close open commitments after you handled this outside Cowork."
-                />
-                <ActionBtn
-                  onClick={() => void runThreadWorkflow()}
-                  icon={<Sparkles size={13} />}
-                  label="Prep thread"
-                  disabled={busy || !selectedThread}
-                />
-                <ActionBtn
-                  onClick={() =>
-                    selectedThread &&
-                    void runAction(async () => {
-                      await window.electronAPI.extractMailboxCommitments(selectedThread.id);
-                      await reloadAll(selectedThread.id);
-                    })
-                  }
-                  icon={<CheckSquare size={13} />}
-                  label="Extract todos"
-                  disabled={busy || !selectedThread}
-                />
-                <ActionBtn
-                  onClick={() =>
-                    selectedThread &&
-                    void runAction(async () => {
-                      await window.electronAPI.applyMailboxAction({
-                        threadId: selectedThread.id,
-                        type: "schedule_event",
-                      });
-                      await reloadAll(selectedThread.id);
-                    })
-                  }
-                  icon={<Calendar size={13} />}
-                  label="Schedule"
-                  disabled={
-                    busy || !selectedThread || !googleWorkspaceEnabled || !googleWorkspaceConfigured
-                  }
-                />
-                <ActionBtn
-                  onClick={() => void refreshThreadIntel()}
-                  icon={<RefreshCcw size={13} />}
-                  label="Refresh intel"
-                  disabled={busy || !selectedThread}
-                />
-                <ActionBtn
-                  onClick={() => void openHandoffPanel()}
-                  icon={<User size={13} />}
-                  label="Handoff"
-                  disabled={busy || !selectedThread}
-                />
-              </div>
-            </>
-          ) : (
-            <div style={{ marginBottom: "2px" }}>
-              <div
-                style={{
-                  fontSize: "0.92rem",
-                  fontWeight: 700,
-                  color: "var(--color-text-primary)",
-                  marginBottom: "2px",
-                }}
-              >
-                Ask Inbox
-              </div>
-              <div
-                style={{ fontSize: "0.74rem", color: "var(--color-text-muted)", lineHeight: 1.35 }}
-              >
-                Questions, live mailbox steps, answers &amp; evidence
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Rail content */}
-        {rightRailTab === "agent_rail" ? (
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "14px 14px 18px" }}>
-            {/* Error */}
-            {error && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: "10px",
-                  padding: "12px 14px",
-                  borderRadius: "var(--radius-md, 10px)",
-                  background: "var(--color-error-subtle)",
-                  border: "1px solid rgba(248,113,113,0.3)",
-                  marginBottom: "14px",
-                }}
-              >
-                <AlertCircle
-                  size={15}
-                  style={{ color: "var(--color-error)", flexShrink: 0, marginTop: "1px" }}
-                />
-                <div
-                  style={{
-                    flex: 1,
-                    fontSize: "0.8rem",
-                    color: "var(--color-text-primary)",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {error}
-                </div>
-                <button
-                  onClick={() => setError(null)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "var(--color-text-muted)",
-                    padding: 0,
-                    flexShrink: 0,
-                  }}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            )}
-
-            {/* Busy indicator */}
-            {busy && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "10px 14px",
-                  borderRadius: "var(--radius-md, 10px)",
-                  background: "var(--color-bg-secondary)",
-                  border: "1px solid var(--color-border-subtle)",
-                  marginBottom: "14px",
-                  fontSize: "0.8rem",
-                  color: "var(--color-text-muted)",
-                }}
-              >
-                <RefreshCcw
-                  size={13}
-                  style={{ animation: "spin 1s linear infinite", color: "var(--color-accent)" }}
-                />
-                Working…
-              </div>
-            )}
-
-            {selectedThread && (
-              <div
-                style={{
-                  marginBottom: "16px",
-                  padding: "14px",
-                  borderRadius: "var(--radius-lg, 14px)",
-                  background:
-                    "linear-gradient(180deg, rgba(34, 211, 238, 0.08) 0%, var(--color-bg-elevated) 100%)",
-                  border: "1px solid rgba(34, 211, 238, 0.18)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "0.68rem",
-                    fontWeight: 800,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    color: "var(--color-accent)",
-                    marginBottom: "6px",
-                  }}
-                >
-                  Next best action
-                </div>
-                <div
-                  style={{
-                    fontSize: "0.84rem",
-                    lineHeight: 1.55,
-                    color: "var(--color-text-primary)",
-                    marginBottom: "10px",
-                    fontWeight: 600,
-                  }}
-                >
-                  {selectedThread.summary?.suggestedNextAction ||
-                    (selectedThread.drafts[0]
-                      ? "Review the draft, then send or discard."
-                      : selectedThread.needsReply
-                        ? "Draft a response and check the commitments."
-                        : selectedThreadOpenCommitments.length
-                          ? "Mark done when these commitments are already handled."
-                          : "Review the thread and decide whether it can be archived.")}
-                </div>
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                  <span
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "999px",
-                      background: "var(--color-bg-elevated)",
-                      border: "1px solid var(--color-border-subtle)",
-                      fontSize: "0.7rem",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    {selectedThread.provider}
-                  </span>
-                  <span
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "999px",
-                      background: "var(--color-bg-elevated)",
-                      border: "1px solid var(--color-border-subtle)",
-                      fontSize: "0.7rem",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    {selectedThread.messageCount} message
-                    {selectedThread.messageCount === 1 ? "" : "s"}
-                  </span>
-                  <span
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: "999px",
-                      background: selectedThread.needsReply
-                        ? "rgba(245,158,11,0.12)"
-                        : "var(--color-bg-elevated)",
-                      border: "1px solid var(--color-border-subtle)",
-                      fontSize: "0.7rem",
-                      color: selectedThread.needsReply ? "#b45309" : "var(--color-text-secondary)",
-                    }}
-                  >
-                    {selectedThread.needsReply ? "Needs reply" : "No reply needed"}
-                  </span>
-                </div>
-                {selectedThread.sensitiveContent?.hasSensitiveContent && (
-                  <div
-                    style={{
-                      marginTop: "10px",
-                      padding: "9px 10px",
-                      borderRadius: "var(--radius-sm, 8px)",
-                      background: "rgba(239,68,68,0.08)",
-                      border: "1px solid rgba(239,68,68,0.18)",
-                      color: "var(--color-text-secondary)",
-                      fontSize: "0.76rem",
-                      lineHeight: 1.45,
-                    }}
-                  >
-                    Sensitive content detected. Review before forwarding or automating this thread.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!!senderCleanupDigest?.senders.length && (
-              <div style={{ marginBottom: "14px" }}>
-                <SectionLabel>Sender cleanup</SectionLabel>
-                <div style={{ display: "grid", gap: "6px", marginTop: "6px" }}>
-                  {senderCleanupDigest.senders.slice(0, 4).map((sender) => (
-                    <button
-                      key={sender.email}
-                      type="button"
-                      onClick={() => {
-                        const first = sender.threads[0];
-                        if (first) setSelectedThreadId(first.id);
-                      }}
-                      style={{
-                        width: "100%",
-                        boxSizing: "border-box",
-                        border: "1px solid var(--color-border-subtle)",
-                        background: "var(--color-bg-secondary)",
-                        borderRadius: "var(--radius-sm, 8px)",
-                        padding: "9px 10px",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        fontFamily: "var(--font-ui)",
-                        display: "grid",
-                        gridTemplateColumns: "minmax(0, 1fr) auto",
-                        alignItems: "center",
-                        gap: "10px",
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <span
-                          style={{
-                            display: "block",
-                            minWidth: 0,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            fontSize: "0.78rem",
-                            fontWeight: 700,
-                            color: "var(--color-text-primary)",
-                            lineHeight: 1.25,
-                          }}
-                        >
-                          {sender.name || sender.email}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "flex-end",
-                          gap: "3px",
-                          minWidth: "92px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "0.68rem",
-                            fontWeight: 700,
-                            color: "var(--color-text-primary)",
-                            lineHeight: 1,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          -{sender.estimatedWeeklyReduction}/week
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "0.66rem",
-                            color: "var(--color-text-muted)",
-                            lineHeight: 1.15,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {sender.threadCount} threads · {sender.cleanupCandidateCount} cleanup
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {selectedThread &&
-              (quickReplySuggestions.length > 0 || quickReplyError || quickReplySettled) && (
-                <div style={{ marginBottom: "14px" }}>
-                  <SectionLabel>Quick replies</SectionLabel>
-                  {quickReplyError && (
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        fontSize: "0.72rem",
-                        color: "#b45309",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      {quickReplyError}
+                {summaryText && !selectedThreadIsShort && (
+                  <div className="ibx-summary">
+                    <div className="ibx-summary-label">
+                      <Sparkles size={12} />
+                      Summary
                     </div>
-                  )}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
-                    {quickReplySuggestions.map((text, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          if (selectedThreadReplyTargets.length > 0) {
-                            setReplyMessage(text);
-                            openReplyComposer(selectedThreadReplyTargets[0].handleId);
-                          } else {
-                            void copyTextToClipboard(text);
+                    <p>{summaryText}</p>
+                    {!!selectedThread.summary?.keyAsks.length && (
+                      <ul>
+                        {selectedThread.summary.keyAsks.map((ask) => (
+                          <li key={ask}>{ask}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {manualComposeMode && (
+                  <div className="ibx-compose">
+                    <div className="ibx-compose-head">
+                      <div className="ibx-segmented" role="group" aria-label="Compose mode">
+                        {(["reply", "reply_all", "forward"] as ManualComposeMode[]).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={manualComposeMode === mode}
+                            onClick={() => openManualCompose(mode)}
+                          >
+                            {mode === "reply_all"
+                              ? "Reply all"
+                              : mode === "forward"
+                                ? "Forward"
+                                : "Reply"}
+                          </button>
+                        ))}
+                      </div>
+                      <IconBtn
+                        onClick={closeManualCompose}
+                        icon={<X size={14} />}
+                        title="Close"
+                        disabled={busy}
+                      />
+                    </div>
+                    <label className="ibx-compose-field">
+                      <span>To</span>
+                      <input
+                        aria-label="To"
+                        value={manualComposeTo}
+                        onChange={(event) => setManualComposeTo(event.target.value)}
+                      />
+                    </label>
+                    <div className="ibx-compose-split">
+                      <label className="ibx-compose-field">
+                        <span>Cc</span>
+                        <input
+                          aria-label="Cc"
+                          value={manualComposeCc}
+                          onChange={(event) => setManualComposeCc(event.target.value)}
+                        />
+                      </label>
+                      <label className="ibx-compose-field">
+                        <span>Bcc</span>
+                        <input
+                          aria-label="Bcc"
+                          value={manualComposeBcc}
+                          onChange={(event) => setManualComposeBcc(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <label className="ibx-compose-field">
+                      <span>Subject</span>
+                      <input
+                        aria-label="Subject"
+                        value={manualComposeSubject}
+                        onChange={(event) => setManualComposeSubject(event.target.value)}
+                      />
+                    </label>
+                    <textarea
+                      aria-label="Message"
+                      placeholder="Write your message…"
+                      className={manualComposeMode === "forward" ? "is-tall" : undefined}
+                      value={manualComposeBody}
+                      onChange={(event) => setManualComposeBody(event.target.value)}
+                    />
+                    <div className="ibx-compose-foot">
+                      <div className="ibx-compose-foot-actions">
+                        <ActionBtn
+                          onClick={closeManualCompose}
+                          label="Cancel"
+                          variant="ghost"
+                          disabled={busy}
+                        />
+                        <ActionBtn
+                          onClick={() => void sendManualCompose()}
+                          icon={<Send size={13} />}
+                          label={manualComposeMode === "forward" ? "Forward" : "Send"}
+                          variant="primary"
+                          disabled={
+                            busy ||
+                            !manualComposeBody.trim() ||
+                            splitMailboxRecipients(manualComposeTo).length +
+                              splitMailboxRecipients(manualComposeCc).length +
+                              splitMailboxRecipients(manualComposeBcc).length ===
+                              0
                           }
-                        }}
-                        style={{
-                          textAlign: "left",
-                          maxWidth: "100%",
-                          padding: "8px 10px",
-                          borderRadius: "var(--radius-sm, 8px)",
-                          border: "1px solid var(--color-border-subtle)",
-                          background: "var(--color-bg-secondary)",
-                          color: "var(--color-text-primary)",
-                          fontSize: "0.74rem",
-                          lineHeight: 1.4,
-                          cursor: "pointer",
-                        }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeGeneratedDraft && (
+                  <div className="ibx-compose">
+                    <div className="ibx-compose-head">
+                      <div className="ibx-compose-title">
+                        <Sparkles size={13} />
+                        Draft ready
+                      </div>
+                    </div>
+                    <label className="ibx-compose-field">
+                      <span>Subject</span>
+                      <input
+                        aria-label="Draft subject"
+                        value={editableDraftSubject}
+                        onChange={(event) => setEditableDraftSubject(event.target.value)}
+                      />
+                    </label>
+                    {selectedThread.sensitiveContent?.hasSensitiveContent && (
+                      <div className="ibx-inline-warning">
+                        <AlertCircle size={13} />
+                        Sensitive content detected. Review carefully before sending or automating
+                        this thread.
+                      </div>
+                    )}
+                    <textarea
+                      aria-label="Draft body"
+                      value={editableDraftBody}
+                      onChange={(event) => setEditableDraftBody(event.target.value)}
+                    />
+                    <div className="ibx-compose-foot">
+                      <ActionBtn
+                        onClick={() =>
+                          runAction(async () => {
+                            await window.electronAPI.applyMailboxAction({
+                              threadId: selectedThread.id,
+                              draftId: activeGeneratedDraft.id,
+                              type: "discard_draft",
+                            });
+                            setEditableDraftId(null);
+                            setEditableDraftSubject("");
+                            setEditableDraftBody("");
+                            await reloadAll(selectedThread.id);
+                          })
+                        }
+                        icon={<Trash2 size={13} />}
+                        label="Discard"
+                        variant="danger"
+                      />
+                      <div className="ibx-compose-foot-actions">
+                        <ActionBtn
+                          onClick={() =>
+                            runAction(async () => {
+                              const sentDraftId = activeGeneratedDraft.id;
+                              await window.electronAPI.applyMailboxAction({
+                                threadId: selectedThread.id,
+                                draftId: sentDraftId,
+                                draftSubject:
+                                  editableDraftSubject.trim() || activeGeneratedDraft.subject,
+                                draftBody: editableDraftBody,
+                                type: "send_draft",
+                              });
+                              setEditableDraftId(null);
+                              setEditableDraftSubject("");
+                              setEditableDraftBody("");
+                              setSelectedThread((current) =>
+                                current?.id === selectedThread.id
+                                  ? {
+                                      ...current,
+                                      drafts: current.drafts.filter(
+                                        (draft) => draft.id !== sentDraftId,
+                                      ),
+                                      needsReply: false,
+                                      handled: true,
+                                      todayBucket:
+                                        current.todayBucket === "needs_action"
+                                          ? "good_to_know"
+                                          : current.todayBucket,
+                                    }
+                                  : current,
+                              );
+                              await reloadAll(selectedThread.id);
+                            })
+                          }
+                          icon={<Send size={13} />}
+                          label="Send"
+                          variant="primary"
+                          disabled={busy || !editableDraftBody.trim()}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!!selectedThread.attachments?.length && (
+                  <div className="ibx-attachments" aria-label="Attachments">
+                    {selectedThread.attachments.map((attachment) => (
+                      <button
+                        key={attachment.id}
+                        type="button"
+                        className={`ibx-attachment ${
+                          attachment.extractionStatus === "indexed" ? "is-indexed" : ""
+                        }`}
+                        onClick={() =>
+                          runAction(async () => {
+                            await window.electronAPI.extractMailboxAttachmentText(attachment.id);
+                            await loadThread(selectedThread.id);
+                          })
+                        }
+                        title={
+                          attachment.extractionStatus === "indexed"
+                            ? "Text indexed"
+                            : "Extract text for mailbox search"
+                        }
                       >
-                        {text.length > 120 ? `${text.slice(0, 120)}…` : text}
+                        <Paperclip size={13} />
+                        <span>{attachment.filename}</span>
                       </button>
                     ))}
                   </div>
-                  {quickReplySettled && !quickReplyError && quickReplySuggestions.length === 0 && (
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        fontSize: "0.72rem",
-                        color: "var(--color-text-muted)",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      No quick reply suggestions for this thread.
-                    </div>
-                  )}
-                  {!selectedThreadReplyTargets.length && quickReplySuggestions.length > 0 && (
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        fontSize: "0.7rem",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      Tip: click to copy to clipboard, then paste into your mail client or a
-                      generated draft.
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
 
-            {selectedThreadReplyTargets.length ? (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Reply via</SectionLabel>
-                <div style={{ display: "grid", gap: "8px" }}>
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                    {selectedThreadReplyTargets.map((target) => (
-                      <ActionBtn
-                        key={target.handleId}
-                        onClick={() => openReplyComposer(target.handleId)}
-                        icon={<Reply size={11} />}
-                        label={`Reply via ${formatChannelLabel(target.channelType)}`}
-                        variant={
-                          recommendedReplyTarget?.handleId === target.handleId
-                            ? "primary"
-                            : "default"
-                        }
-                        title={
-                          recommendedReplyTarget?.handleId === target.handleId
-                            ? "Recommended target based on recent activity"
-                            : target.lastMessageAt
-                              ? `Last active ${formatFullTime(target.lastMessageAt)}`
-                              : target.displayValue
-                        }
-                        disabled={busy}
-                      />
-                    ))}
+                {sortedThreadMessages.length ? (
+                  <div className="ibx-messages">
+                    {sortedThreadMessages.map((message) => renderMessage(message))}
                   </div>
-                  {replyChannelType && (
-                    <div
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: "var(--radius-md, 10px)",
-                        border: "1px solid var(--color-border-subtle)",
-                        background: "var(--color-bg-secondary)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "0.8rem",
-                          fontWeight: 600,
-                          color: "var(--color-text-primary)",
-                        }}
-                      >
-                        Reply via {formatChannelLabel(replyChannelType)}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: "4px",
-                          fontSize: "0.72rem",
-                          color: "var(--color-text-muted)",
-                        }}
-                      >
-                        Choose the channel target, write the reply, then send it.
-                      </div>
-                      <textarea
-                        value={replyMessage}
-                        onChange={(event) => setReplyMessage(event.target.value)}
-                        rows={5}
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          marginTop: "10px",
-                          padding: "10px 12px",
-                          borderRadius: "var(--radius-sm, 8px)",
-                          border: "1px solid var(--color-border)",
-                          background: "var(--color-bg-input)",
-                          color: "var(--color-text-primary)",
-                          fontSize: "0.78rem",
-                          resize: "vertical",
-                          lineHeight: 1.5,
-                        }}
-                      />
-                      <div
-                        style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "10px" }}
-                      >
-                        <ActionBtn
-                          onClick={() => void replyVoice.toggleRecording()}
-                          icon={
-                            replyVoice.state === "recording" ? (
-                              <MicOff size={11} />
-                            ) : (
-                              <Mic size={11} />
-                            )
-                          }
-                          label={replyVoice.state === "recording" ? "Stop voice" : "Speak reply"}
-                          disabled={busy || replyVoice.state === "processing"}
-                        />
-                        <ActionBtn
-                          onClick={() => void sendReplyViaChannel()}
-                          icon={<Send size={11} />}
-                          label="Send reply"
-                          variant="primary"
-                          disabled={busy || !replyMessage.trim()}
-                        />
-                        <ActionBtn
-                          onClick={() => {
-                            setReplyChannelType(null);
-                            setReplyTargetHandleId(null);
-                            setReplyMessage("");
-                          }}
-                          icon={<X size={11} />}
-                          label="Cancel"
-                          disabled={busy}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            {selectedThread && handoffPanelOpen && (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Mission Control Handoff</SectionLabel>
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: "var(--radius-md, 10px)",
-                    border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-secondary)",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "0.76rem",
-                      color: "var(--color-text-muted)",
-                      lineHeight: 1.5,
-                      marginBottom: "10px",
-                    }}
-                  >
-                    Create a Mission Control issue from this thread, assign the operator, then wake
-                    them immediately.
+                ) : (
+                  <div className="ibx-empty">
+                    <div className="ibx-empty-text">No messages in this thread.</div>
                   </div>
+                )}
 
-                  <div style={{ display: "grid", gap: "8px", marginBottom: "10px" }}>
-                    <label style={{ display: "grid", gap: "4px" }}>
-                      <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                        Operator
-                      </span>
-                      <select
-                        value={handoffOperatorRoleId}
-                        onChange={(event) => setHandoffOperatorRoleId(event.target.value)}
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          padding: "7px 10px",
-                          borderRadius: "var(--radius-sm, 8px)",
-                          border: "1px solid var(--color-border)",
-                          background: "var(--color-bg-input)",
-                          color: "var(--color-text-primary)",
-                          fontSize: "0.78rem",
-                        }}
-                      >
-                        <option value="">Select operator</option>
-                        {selectedCompanyRoles.map((role) => (
-                          <option key={role.id} value={role.id}>
-                            {role.displayName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label style={{ display: "grid", gap: "4px" }}>
-                      <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                        Issue title
-                      </span>
-                      <input
-                        value={handoffIssueTitle}
-                        onChange={(event) => setHandoffIssueTitle(event.target.value)}
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          padding: "7px 10px",
-                          borderRadius: "var(--radius-sm, 8px)",
-                          border: "1px solid var(--color-border)",
-                          background: "var(--color-bg-input)",
-                          color: "var(--color-text-primary)",
-                          fontSize: "0.78rem",
-                        }}
-                      />
-                    </label>
-
-                    <label style={{ display: "grid", gap: "4px" }}>
-                      <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                        Issue summary
-                      </span>
-                      <textarea
-                        value={handoffIssueSummary}
-                        onChange={(event) => setHandoffIssueSummary(event.target.value)}
-                        rows={6}
-                        style={{
-                          width: "100%",
-                          boxSizing: "border-box",
-                          padding: "8px 10px",
-                          borderRadius: "var(--radius-sm, 8px)",
-                          border: "1px solid var(--color-border)",
-                          background: "var(--color-bg-input)",
-                          color: "var(--color-text-primary)",
-                          fontSize: "0.76rem",
-                          resize: "vertical",
-                          lineHeight: 1.45,
-                        }}
-                      />
-                    </label>
-                  </div>
-
-                  {handoffPreview?.sensitiveContentRedacted && (
-                    <div
-                      style={{
-                        marginBottom: "10px",
-                        padding: "9px 10px",
-                        borderRadius: "var(--radius-sm, 8px)",
-                        background: "rgba(239,68,68,0.08)",
-                        border: "1px solid rgba(239,68,68,0.18)",
-                        color: "var(--color-text-secondary)",
-                        fontSize: "0.74rem",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      Sensitive content detected. The handoff uses summary-level context and mailbox
-                      evidence refs only.
-                    </div>
-                  )}
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "6px",
-                      flexWrap: "wrap",
-                      marginBottom: handoffRecords.length ? "12px" : 0,
-                    }}
-                  >
+                {!manualComposeMode && (
+                  <div className="ibx-reply-dock">
                     <ActionBtn
-                      onClick={() => void createMissionControlHandoff()}
-                      icon={<CheckSquare size={11} />}
-                      label="Create issue & wake operator"
-                      variant="primary"
-                      disabled={
-                        busy ||
-                        !handoffCompanyId ||
-                        !handoffOperatorRoleId ||
-                        !handoffIssueTitle.trim()
-                      }
+                      onClick={() => openManualCompose("reply")}
+                      icon={<Reply size={13} />}
+                      label="Reply"
+                      disabled={busy || Boolean(replyBlockedReason)}
+                      title={replyBlockedReason}
                     />
                     <ActionBtn
-                      onClick={() => setHandoffPanelOpen(false)}
-                      icon={<X size={11} />}
-                      label="Close"
+                      onClick={() => openManualCompose("reply_all")}
+                      icon={<ReplyAll size={13} />}
+                      label="Reply all"
+                      disabled={busy || Boolean(replyBlockedReason)}
+                      title={replyBlockedReason}
+                    />
+                    <ActionBtn
+                      onClick={() => openManualCompose("forward")}
+                      icon={<Forward size={13} />}
+                      label="Forward"
+                      disabled={busy || Boolean(forwardBlockedReason)}
+                      title={forwardBlockedReason}
+                    />
+                    <ActionBtn
+                      onClick={draftWithAi}
+                      icon={<Sparkles size={13} />}
+                      label="Draft with AI"
+                      variant="ghost"
                       disabled={busy}
                     />
                   </div>
-
-                  {handoffRecords.length > 0 && (
-                    <div style={{ display: "grid", gap: "8px", marginTop: "10px" }}>
-                      {handoffRecords.map((record) => (
-                        <div
-                          key={record.id}
-                          style={{
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius-sm, 8px)",
-                            background: "var(--color-bg-elevated)",
-                            border: "1px solid var(--color-border-subtle)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: "8px",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: "0.8rem",
-                                fontWeight: 600,
-                                color: "var(--color-text-primary)",
-                              }}
-                            >
-                              {record.issueTitle}
-                            </div>
-                            <span className="mc-v2-ops-pill">{record.issueStatus}</span>
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "0.72rem",
-                              color: "var(--color-text-muted)",
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            {record.companyName} · {record.operatorDisplayName}
-                            {record.latestOutcome ? ` · ${record.latestOutcome}` : ""}
-                          </div>
-                          {onOpenMissionControlIssue && (
-                            <div style={{ marginTop: "8px" }}>
-                              <button
-                                type="button"
-                                className="mc-v2-icon-btn"
-                                onClick={() =>
-                                  onOpenMissionControlIssue(record.companyId, record.issueId)
-                                }
-                                style={{ fontSize: "0.72rem" }}
-                              >
-                                Open in Mission Control
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
             )}
+          </div>
+        </section>
 
-            {selectedThread && (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Automations</SectionLabel>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "6px",
-                    marginBottom: "10px",
-                  }}
-                >
-                  <ActionBtn
-                    onClick={() => void createRuleFromCurrentContext()}
-                    icon={<Sparkles size={13} />}
-                    label="Rule from context"
-                    disabled={busy}
-                  />
-                  <ActionBtn
-                    onClick={() => void snoozeSelectedThread()}
-                    icon={<Clock size={13} />}
-                    label="Remind later"
-                    disabled={busy}
-                  />
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "6px",
-                    marginBottom: "10px",
-                  }}
-                >
-                  <ActionBtn
-                    onClick={() => void createForwardAutomationFromCurrentContext()}
-                    icon={<Send size={13} />}
-                    label="Auto-forward…"
-                    disabled={busy || !selectedThread || selectedThread.provider !== "gmail"}
-                  />
-                  <div />
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "6px",
-                    marginBottom: "10px",
-                  }}
-                >
-                  <ActionBtn
-                    onClick={() => {
-                      if (!selectedThread) return;
-                      setLabelSimilarName(selectedThread.subject?.slice(0, 120) || "My saved view");
-                      setLabelSimilarInstructions(
-                        "Threads similar to this conversation (topic, sender type, or action requested).",
-                      );
-                      setLabelSimilarShowInInbox(true);
-                      resetLabelSimilarPreview();
-                      setLabelSimilarOpen(true);
-                    }}
-                    icon={<MailSearch size={13} />}
-                    label="Label similar…"
-                    disabled={busy || !selectedThread}
-                  />
-                  <div />
-                </div>
-                <div style={{ marginBottom: "10px" }}>
-                  <SectionLabel>Snippets</SectionLabel>
-                  <div
-                    style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}
+        {/* ── RIGHT: Agent rail ─────────────────────────────────────────── */}
+        {railVisible && (
+          <section
+            className={`ibx-pane ibx-rail-pane ${compactLayout ? "is-overlay" : ""}`}
+            aria-label="Agent"
+          >
+            <div className="ibx-rail-head">
+              <div className="ibx-segmented" role="tablist" aria-label="Inbox side panel">
+                {[
+                  ["agent_rail", "Agent"],
+                  ["ask_inbox", "Ask"],
+                ].map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={rightRailTab === tab}
+                    onClick={() => setRightRailTab(tab as RightRailTab)}
                   >
-                    <select
-                      aria-label="Insert snippet"
-                      defaultValue=""
-                      onChange={(event) => {
-                        const id = event.target.value;
-                        event.target.value = "";
-                        if (!id) return;
-                        const sn = snippets.find((entry) => entry.id === id);
-                        if (!sn) return;
-                        if (selectedThreadReplyTargets.length > 0) {
-                          openReplyComposer(selectedThreadReplyTargets[0].handleId);
-                          setReplyMessage((prev) =>
-                            prev.trim() ? `${prev}\n\n${sn.body}` : sn.body,
-                          );
-                        } else {
-                          void copyTextToClipboard(sn.body);
-                        }
-                      }}
-                      style={{
-                        flex: 1,
-                        minWidth: "140px",
-                        padding: "6px 8px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--color-border-subtle)",
-                        background: "var(--color-bg-input)",
-                        color: "var(--color-text-primary)",
-                        fontSize: "0.72rem",
-                      }}
-                    >
-                      <option value="">Insert snippet…</option>
-                      {snippets.map((sn) => (
-                        <option key={sn.id} value={sn.id}>
-                          {sn.shortcut}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="mc-v2-icon-btn"
-                      onClick={() => {
-                        setSnippetShortcutDraft("");
-                        setSnippetBodyDraft("");
-                        setSnippetModalOpen(true);
-                      }}
-                      style={{ fontSize: "0.72rem" }}
-                    >
-                      New snippet
-                    </button>
-                  </div>
-                </div>
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: "var(--radius-md, 10px)",
-                    border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-secondary)",
-                  }}
-                >
-                  {selectedThreadAutomations.length ? (
-                    <div style={{ display: "grid", gap: "8px" }}>
-                      {selectedThreadAutomations.map((automation) => (
-                        <div
-                          key={automation.id}
-                          style={{
-                            padding: "10px 12px",
-                            borderRadius: "var(--radius-sm, 8px)",
-                            background: "var(--color-bg-elevated)",
-                            border: "1px solid var(--color-border-subtle)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: "8px",
-                              justifyContent: "space-between",
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {compactLayout && (
+                <IconBtn
+                  onClick={() => setCompactRailOpen(false)}
+                  icon={<X size={14} />}
+                  title="Close agent panel"
+                />
+              )}
+            </div>
+
+            {rightRailTab === "agent_rail" ? (
+              <div className="ibx-scroll">
+                <div className="ibx-rail">
+                  {!selectedThread ? (
+                    <>
+                      {renderInboxSection()}
+                      <div className="ibx-rail-empty">
+                        <Sparkles size={22} strokeWidth={1.4} />
+                        Select a conversation to see its next step, commitments and contact context.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="ibx-next">
+                        <div className="ibx-next-label">
+                          <Sparkles size={12} />
+                          Next step
+                        </div>
+                        <div className="ibx-next-text">{nextStepText}</div>
+                        {selectedThread.sensitiveContent?.hasSensitiveContent && (
+                          <div className="ibx-inline-warning">
+                            <AlertCircle size={13} />
+                            Sensitive content detected. Review before forwarding or automating this
+                            thread.
+                          </div>
+                        )}
+                      </div>
+
+                      <section className="ibx-section">
+                        <SectionLabel>Actions</SectionLabel>
+                        <div className="ibx-action-grid">
+                          <RailAction
+                            onClick={() => void runThreadWorkflow()}
+                            icon={<Sparkles size={14} />}
+                            label="Prep thread"
+                            disabled={busy}
+                            title="Summarize, draft, and extract commitments in one pass"
+                          />
+                          <RailAction
+                            onClick={() =>
+                              void runAction(async () => {
+                                await window.electronAPI.extractMailboxCommitments(
+                                  selectedThread.id,
+                                );
+                                await reloadAll(selectedThread.id);
+                              })
+                            }
+                            icon={<ListChecks size={14} />}
+                            label="Extract todos"
+                            disabled={busy}
+                          />
+                          <RailAction
+                            onClick={() =>
+                              void runAction(async () => {
+                                await window.electronAPI.applyMailboxAction({
+                                  threadId: selectedThread.id,
+                                  type: "schedule_event",
+                                });
+                                await reloadAll(selectedThread.id);
+                              })
+                            }
+                            icon={<Calendar size={14} />}
+                            label="Schedule"
+                            disabled={busy || !googleWorkspaceEnabled || !googleWorkspaceConfigured}
+                            title={
+                              !googleWorkspaceEnabled || !googleWorkspaceConfigured
+                                ? "Connect Google Workspace to schedule events"
+                                : undefined
+                            }
+                          />
+                          <RailAction
+                            onClick={() => void refreshThreadIntel()}
+                            icon={<RefreshCcw size={14} />}
+                            label="Refresh intel"
+                            disabled={busy}
+                          />
+                          <RailAction
+                            onClick={() => void openHandoffPanel()}
+                            icon={<User size={14} />}
+                            label="Handoff"
+                            disabled={busy}
+                            title="Create a Mission Control issue from this thread"
+                          />
+                          <RailAction
+                            onClick={() => void createRuleFromCurrentContext()}
+                            icon={<Zap size={14} />}
+                            label="Create rule"
+                            disabled={busy}
+                          />
+                          <RailAction
+                            onClick={() => void createForwardAutomationFromCurrentContext()}
+                            icon={<Send size={14} />}
+                            label="Auto-forward"
+                            disabled={busy || selectedThread.provider !== "gmail"}
+                            title={
+                              selectedThread.provider !== "gmail"
+                                ? "Auto-forward is available for Gmail threads"
+                                : undefined
+                            }
+                          />
+                          <RailAction
+                            onClick={() => {
+                              setLabelSimilarName(
+                                selectedThread.subject?.slice(0, 120) || "My saved view",
+                              );
+                              setLabelSimilarInstructions(
+                                "Threads similar to this conversation (topic, sender type, or action requested).",
+                              );
+                              setLabelSimilarShowInInbox(true);
+                              resetLabelSimilarPreview();
+                              setLabelSimilarOpen(true);
+                            }}
+                            icon={<Tag size={14} />}
+                            label="Label similar"
+                            disabled={busy}
+                          />
+                        </div>
+                      </section>
+
+                      {queueMode && renderInboxSection()}
+
+                      {suggestedThreadProposals.length > 0 && (
+                        <section className="ibx-section">
+                          <SectionLabel>Suggestions</SectionLabel>
+                          {suggestedThreadProposals.map((proposal) => {
+                            const suggestedAction = String(proposal.preview?.suggestedAction || "");
+                            const scheduleSuggestions = previewStringList(
+                              proposal.preview,
+                              "suggestions",
+                            );
+                            const draftSubject =
+                              typeof proposal.preview?.subject === "string"
+                                ? proposal.preview.subject
+                                : null;
+                            return (
+                              <div key={proposal.id} className="ibx-item">
+                                <div className="ibx-item-title">{proposal.title}</div>
+                                <div className="ibx-item-text">{proposal.reasoning}</div>
+                                {draftSubject && (
+                                  <div className="ibx-item-text">Draft: {draftSubject}</div>
+                                )}
+                                {suggestedAction && (
+                                  <div className="ibx-item-text">
+                                    Suggested action: {suggestedAction}
+                                  </div>
+                                )}
+                                {!!scheduleSuggestions.length && (
+                                  <div className="ibx-item-text">
+                                    {scheduleSuggestions.join(" · ")}
+                                  </div>
+                                )}
+                                <div className="ibx-item-actions">
+                                  <ActionBtn
+                                    onClick={() => void handleApplyProposal(proposal)}
+                                    label={proposalActionLabel(proposal)}
+                                    variant="primary"
+                                    size="sm"
+                                    disabled={busy}
+                                  />
+                                  <ActionBtn
+                                    onClick={() =>
+                                      void runAction(async () => {
+                                        await window.electronAPI.applyMailboxAction({
+                                          proposalId: proposal.id,
+                                          threadId: proposal.threadId,
+                                          type: "dismiss_proposal",
+                                        });
+                                        await reloadAll(selectedThread.id);
+                                      })
+                                    }
+                                    label="Dismiss"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={busy}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </section>
+                      )}
+
+                      {!!selectedThread.commitments.length && (
+                        <section className="ibx-section">
+                          <div className="ibx-section-head">
+                            <SectionLabel>Commitments</SectionLabel>
+                            <span className="ibx-count">{selectedThread.commitments.length}</span>
+                          </div>
+                          {selectedThread.commitments.map((commitment) => (
+                            <div key={commitment.id} className="ibx-item">
+                              <div className="ibx-item-title">
+                                <span>{commitment.title}</span>
+                                {editingCommitmentId !== commitment.id && (
+                                  <button
+                                    type="button"
+                                    className="ibx-link-btn"
+                                    onClick={() => beginCommitmentEdit(commitment)}
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                              </div>
+                              <div className="ibx-item-meta">
+                                <span className="ibx-tag">
+                                  <Clock size={11} />
+                                  {commitment.dueAt
+                                    ? `Due ${formatFullTime(commitment.dueAt)}`
+                                    : "No due date"}
+                                </span>
+                                <span className="ibx-tag">{commitment.state}</span>
+                              </div>
+                              {editingCommitmentId === commitment.id ? (
+                                <div className="ibx-form ibx-item-actions">
+                                  <input
+                                    className="ibx-input"
+                                    value={editingCommitmentTitle}
+                                    onChange={(event) =>
+                                      setEditingCommitmentTitle(event.target.value)
+                                    }
+                                    placeholder="Commitment title"
+                                    aria-label="Commitment title"
+                                  />
+                                  <input
+                                    className="ibx-input"
+                                    type="datetime-local"
+                                    value={editingCommitmentDueAt}
+                                    onChange={(event) =>
+                                      setEditingCommitmentDueAt(event.target.value)
+                                    }
+                                    aria-label="Due date"
+                                  />
+                                  <input
+                                    className="ibx-input"
+                                    value={editingCommitmentOwnerEmail}
+                                    onChange={(event) =>
+                                      setEditingCommitmentOwnerEmail(event.target.value)
+                                    }
+                                    placeholder="Owner email"
+                                    aria-label="Owner email"
+                                  />
+                                  <div className="ibx-item-actions">
+                                    <ActionBtn
+                                      onClick={() => void saveCommitmentEdit(commitment)}
+                                      label="Save"
+                                      variant="primary"
+                                      size="sm"
+                                      disabled={busy}
+                                    />
+                                    <ActionBtn
+                                      onClick={cancelCommitmentEdit}
+                                      label="Cancel"
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={busy}
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="ibx-item-actions">
+                                  <ActionBtn
+                                    onClick={() =>
+                                      void handleCommitmentState(commitment, "accepted")
+                                    }
+                                    label={
+                                      commitment.state === "accepted"
+                                        ? commitment.followUpTaskId
+                                          ? "Accepted"
+                                          : "Create follow-up"
+                                        : "Accept"
+                                    }
+                                    variant={
+                                      commitment.state === "accepted" && commitment.followUpTaskId
+                                        ? "default"
+                                        : "primary"
+                                    }
+                                    size="sm"
+                                    disabled={
+                                      busy ||
+                                      (commitment.state === "accepted" &&
+                                        Boolean(commitment.followUpTaskId))
+                                    }
+                                  />
+                                  <ActionBtn
+                                    onClick={() => void handleCommitmentState(commitment, "done")}
+                                    label="Done"
+                                    size="sm"
+                                    disabled={busy}
+                                  />
+                                  <ActionBtn
+                                    onClick={() =>
+                                      void handleCommitmentState(commitment, "dismissed")
+                                    }
+                                    label="Dismiss"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={busy}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </section>
+                      )}
+
+                      {(quickReplySuggestions.length > 0 ||
+                        quickReplyError ||
+                        quickReplySettled) && (
+                        <section className="ibx-section">
+                          <SectionLabel>Quick replies</SectionLabel>
+                          {quickReplyError && (
+                            <p className="ibx-hint ibx-hint--warn">{quickReplyError}</p>
+                          )}
+                          {quickReplySuggestions.length > 0 && (
+                            <div className="ibx-quick-replies">
+                              {quickReplySuggestions.map((text, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  className="ibx-quick-reply"
+                                  onClick={() => {
+                                    if (selectedThreadReplyTargets.length > 0) {
+                                      setReplyMessage(text);
+                                      openReplyComposer(selectedThreadReplyTargets[0].handleId);
+                                    } else {
+                                      void copyTextToClipboard(text);
+                                    }
+                                  }}
+                                >
+                                  {text.length > 120 ? `${text.slice(0, 120)}…` : text}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {quickReplySettled &&
+                            !quickReplyError &&
+                            quickReplySuggestions.length === 0 && (
+                              <p className="ibx-hint">
+                                No quick reply suggestions for this thread.
+                              </p>
+                            )}
+                          {!selectedThreadReplyTargets.length &&
+                            quickReplySuggestions.length > 0 && (
+                              <p className="ibx-hint">
+                                Click to copy, then paste into your mail client or a draft.
+                              </p>
+                            )}
+                        </section>
+                      )}
+
+                      {selectedThreadReplyTargets.length > 0 && (
+                        <section className="ibx-section">
+                          <SectionLabel>Reply via</SectionLabel>
+                          <div className="ibx-item-actions">
+                            {selectedThreadReplyTargets.map((target) => (
+                              <ActionBtn
+                                key={target.handleId}
+                                onClick={() => openReplyComposer(target.handleId)}
+                                icon={<Reply size={12} />}
+                                label={formatChannelLabel(target.channelType)}
+                                size="sm"
+                                variant={
+                                  recommendedReplyTarget?.handleId === target.handleId
+                                    ? "primary"
+                                    : "default"
+                                }
+                                title={
+                                  recommendedReplyTarget?.handleId === target.handleId
+                                    ? "Recommended target based on recent activity"
+                                    : target.lastMessageAt
+                                      ? `Last active ${formatFullTime(target.lastMessageAt)}`
+                                      : target.displayValue
+                                }
+                                disabled={busy}
+                              />
+                            ))}
+                          </div>
+                          {replyChannelType && (
+                            <div className="ibx-panel ibx-item-actions">
+                              <div className="ibx-form">
+                                <textarea
+                                  className="ibx-textarea"
+                                  value={replyMessage}
+                                  onChange={(event) => setReplyMessage(event.target.value)}
+                                  rows={5}
+                                  placeholder={`Reply via ${formatChannelLabel(replyChannelType)}…`}
+                                  aria-label={`Reply via ${formatChannelLabel(replyChannelType)}`}
+                                />
+                                <div className="ibx-item-actions">
+                                  <ActionBtn
+                                    onClick={() => void sendReplyViaChannel()}
+                                    icon={<Send size={12} />}
+                                    label="Send"
+                                    variant="primary"
+                                    size="sm"
+                                    disabled={busy || !replyMessage.trim()}
+                                  />
+                                  <ActionBtn
+                                    onClick={() => void replyVoice.toggleRecording()}
+                                    icon={
+                                      replyVoice.state === "recording" ? (
+                                        <MicOff size={12} />
+                                      ) : (
+                                        <Mic size={12} />
+                                      )
+                                    }
+                                    label={replyVoice.state === "recording" ? "Stop" : "Speak"}
+                                    size="sm"
+                                    disabled={busy || replyVoice.state === "processing"}
+                                  />
+                                  <ActionBtn
+                                    onClick={() => {
+                                      setReplyChannelType(null);
+                                      setReplyTargetHandleId(null);
+                                      setReplyMessage("");
+                                    }}
+                                    label="Cancel"
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={busy}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </section>
+                      )}
+
+                      {handoffPanelOpen && (
+                        <section className="ibx-section">
+                          <div className="ibx-section-head">
+                            <SectionLabel>Mission Control handoff</SectionLabel>
+                            <IconBtn
+                              onClick={() => setHandoffPanelOpen(false)}
+                              icon={<X size={13} />}
+                              title="Close handoff"
+                              disabled={busy}
+                            />
+                          </div>
+                          <div className="ibx-panel">
+                            <p className="ibx-panel-text">
+                              Create an issue from this thread, assign an operator, and wake them
+                              immediately.
+                            </p>
+                            <div className="ibx-form">
+                              <label className="ibx-field">
+                                <span>Operator</span>
+                                <select
+                                  className="ibx-select"
+                                  value={handoffOperatorRoleId}
+                                  onChange={(event) => setHandoffOperatorRoleId(event.target.value)}
+                                >
+                                  <option value="">Select operator</option>
+                                  {selectedCompanyRoles.map((role) => (
+                                    <option key={role.id} value={role.id}>
+                                      {role.displayName}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="ibx-field">
+                                <span>Issue title</span>
+                                <input
+                                  className="ibx-input"
+                                  value={handoffIssueTitle}
+                                  onChange={(event) => setHandoffIssueTitle(event.target.value)}
+                                />
+                              </label>
+                              <label className="ibx-field">
+                                <span>Issue summary</span>
+                                <textarea
+                                  className="ibx-textarea"
+                                  value={handoffIssueSummary}
+                                  onChange={(event) => setHandoffIssueSummary(event.target.value)}
+                                  rows={6}
+                                />
+                              </label>
+                              {handoffPreview?.sensitiveContentRedacted && (
+                                <div className="ibx-inline-warning">
+                                  <AlertCircle size={13} />
+                                  Sensitive content detected. The handoff uses summary-level context
+                                  and mailbox evidence refs only.
+                                </div>
+                              )}
+                              <ActionBtn
+                                onClick={() => void createMissionControlHandoff()}
+                                label="Create issue & wake operator"
+                                variant="primary"
+                                disabled={
+                                  busy ||
+                                  !handoffCompanyId ||
+                                  !handoffOperatorRoleId ||
+                                  !handoffIssueTitle.trim()
+                                }
+                              />
+                            </div>
+                          </div>
+                          {handoffRecords.map((record) => (
+                            <div key={record.id} className="ibx-item">
+                              <div className="ibx-item-title">
+                                <span>{record.issueTitle}</span>
+                                <span className="ibx-tag">{record.issueStatus}</span>
+                              </div>
+                              <div className="ibx-item-meta">
+                                {record.companyName} · {record.operatorDisplayName}
+                                {record.latestOutcome ? ` · ${record.latestOutcome}` : ""}
+                              </div>
+                              {onOpenMissionControlIssue && (
+                                <div className="ibx-item-actions">
+                                  <ActionBtn
+                                    onClick={() =>
+                                      onOpenMissionControlIssue(record.companyId, record.issueId)
+                                    }
+                                    icon={<ArrowRight size={12} />}
+                                    label="Open in Mission Control"
+                                    size="sm"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </section>
+                      )}
+
+                      {selectedThread.contactMemory && (
+                        <section className="ibx-section">
+                          <SectionLabel>Contact</SectionLabel>
+                          <div className="ibx-contact">
+                            <Avatar
+                              name={selectedThread.contactMemory.name}
+                              email={selectedThread.contactMemory.email}
+                              size={34}
+                            />
+                            <div className="ibx-contact-body">
+                              <div className="ibx-list-row-title">
+                                {selectedThread.contactMemory.name ||
+                                  selectedThread.contactMemory.email}
+                              </div>
+                              <div className="ibx-list-row-sub">
+                                {selectedThread.contactMemory.company || "Independent contact"}
+                              </div>
+                              {selectedThread.contactMemory.responseTendency && (
+                                <div className="ibx-item-text">
+                                  {selectedThread.contactMemory.responseTendency}
+                                </div>
+                              )}
+                              {!!selectedThread.contactMemory.learnedFacts.length && (
+                                <div className="ibx-item-text">
+                                  {selectedThread.contactMemory.learnedFacts.join(" · ")}
+                                </div>
+                              )}
+                              {!!selectedThread.contactMemory.styleSignals?.length && (
+                                <div className="ibx-item-meta">
+                                  {selectedThread.contactMemory.styleSignals.join(" · ")}
+                                </div>
+                              )}
+                              {contactStats.length > 0 && (
+                                <div className="ibx-item-meta">{contactStats.join(" · ")}</div>
+                              )}
+                              {!!selectedThread.contactMemory.recentSubjects?.length && (
+                                <div className="ibx-item-meta">
+                                  Recent: {selectedThread.contactMemory.recentSubjects.join(" · ")}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </section>
+                      )}
+
+                      {selectedThread.research && (
+                        <section className="ibx-section">
+                          <SectionLabel>Research</SectionLabel>
+                          <dl className="ibx-dl">
+                            <div>
+                              <dt>Contact</dt>
+                              <dd>
+                                {selectedThread.research.primaryContact?.email || "Unknown contact"}
+                                {selectedThread.research.contactIdentityId
+                                  ? ` · ${Math.round(
+                                      (selectedThread.research.identityConfidence || 0) * 100,
+                                    )}% identity confidence`
+                                  : ""}
+                              </dd>
+                            </div>
+                            {selectedThread.research.company && (
+                              <div>
+                                <dt>Company</dt>
+                                <dd>{selectedThread.research.company}</dd>
+                              </div>
+                            )}
+                            {selectedThread.research.relationshipSummary && (
+                              <div>
+                                <dt>Relationship</dt>
+                                <dd>{selectedThread.research.relationshipSummary}</dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.recommendedQueries.length && (
+                              <div>
+                                <dt>Look into</dt>
+                                <dd>{selectedThread.research.recommendedQueries.join(" · ")}</dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.relatedEntities?.length && (
+                              <div>
+                                <dt>Related</dt>
+                                <dd>{selectedThread.research.relatedEntities.join(" · ")}</dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.linkedChannels?.length && (
+                              <div>
+                                <dt>Linked channels</dt>
+                                <dd>
+                                  {selectedThread.research.linkedChannels
+                                    .map((channel) => channel.channelType || channel.handleType)
+                                    .join(" · ")}
+                                </dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.identityCandidates?.length &&
+                              !selectedThread.research.linkedChannels?.length && (
+                                <div>
+                                  <dt>Possible matches</dt>
+                                  <dd className="ibx-hint--warn">
+                                    {selectedThread.research.identityCandidates
+                                      .slice(0, 3)
+                                      .map((candidate) => candidate.sourceLabel)
+                                      .join(" · ")}
+                                  </dd>
+                                </div>
+                              )}
+                            {!!selectedThread.research.styleSignals?.length && (
+                              <div>
+                                <dt>Style</dt>
+                                <dd>{selectedThread.research.styleSignals.join(" · ")}</dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.recentSubjects?.length && (
+                              <div>
+                                <dt>Recent threads</dt>
+                                <dd>{selectedThread.research.recentSubjects.join(" · ")}</dd>
+                              </div>
+                            )}
+                            {selectedThread.research.recentOutboundExample && (
+                              <div>
+                                <dt>Last outbound</dt>
+                                <dd>{selectedThread.research.recentOutboundExample}</dd>
+                              </div>
+                            )}
+                            {selectedThread.research.channelPreference?.recommendedReason && (
+                              <div>
+                                <dt>Channel recommendation</dt>
+                                <dd>
+                                  {selectedThread.research.channelPreference.recommendedReason}
+                                </dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.unifiedTimeline?.length && (
+                              <div>
+                                <dt>Unified timeline</dt>
+                                <dd>
+                                  <div className="ibx-timeline">
+                                    {selectedThread.research.unifiedTimeline
+                                      .slice(0, 5)
+                                      .map((event) => (
+                                        <div key={event.id} className="ibx-timeline-item">
+                                          <div className="ibx-item-meta">
+                                            {event.sourceLabel} · {formatTime(event.timestamp)}
+                                          </div>
+                                          <div className="ibx-list-row-title">{event.title}</div>
+                                          <div className="ibx-item-text">{event.summary}</div>
+                                        </div>
+                                      ))}
+                                  </div>
+                                </dd>
+                              </div>
+                            )}
+                            {!!selectedThread.research.nextSteps?.length && (
+                              <div>
+                                <dt>Next</dt>
+                                <dd>{selectedThread.research.nextSteps.join(" · ")}</dd>
+                              </div>
+                            )}
+                          </dl>
+                        </section>
+                      )}
+
+                      <section className="ibx-section">
+                        <div className="ibx-section-head">
+                          <SectionLabel>Automations</SectionLabel>
+                          <button
+                            type="button"
+                            className="ibx-link-btn"
+                            onClick={() => {
+                              setSnippetShortcutDraft("");
+                              setSnippetBodyDraft("");
+                              setSnippetModalOpen(true);
                             }}
                           >
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div
-                                style={{
-                                  fontSize: "0.82rem",
-                                  fontWeight: 600,
-                                  color: "var(--color-text-primary)",
-                                  marginBottom: "3px",
-                                }}
-                              >
-                                {automation.name}
+                            New snippet
+                          </button>
+                        </div>
+                        {selectedThreadAutomations.length ? (
+                          selectedThreadAutomations.map((automation) => (
+                            <div key={automation.id} className="ibx-item">
+                              <div className="ibx-item-title">
+                                <span>{automation.name}</span>
                               </div>
-                              <div
-                                style={{
-                                  fontSize: "0.72rem",
-                                  color: "var(--color-text-muted)",
-                                  lineHeight: 1.45,
-                                }}
-                              >
+                              <div className="ibx-item-meta">
                                 {automation.kind}
                                 {" · "}
                                 {automation.status}
@@ -6360,965 +4857,94 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                                   ? ` · Fired ${formatFullTime(automation.latestFireAt)}`
                                   : ""}
                               </div>
-                            </div>
-                            <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                              {automation.kind === "forward" && (
-                                <button
-                                  type="button"
+                              <div className="ibx-item-actions">
+                                {automation.kind === "forward" && (
+                                  <ActionBtn
+                                    size="sm"
+                                    label="Run now"
+                                    onClick={() =>
+                                      void runAction(async () => {
+                                        await window.electronAPI.runMailboxForward(automation.id);
+                                        await reloadAll(selectedThread.id);
+                                      })
+                                    }
+                                  />
+                                )}
+                                <ActionBtn
+                                  size="sm"
+                                  variant="ghost"
+                                  label="Remove"
                                   onClick={() =>
                                     void runAction(async () => {
-                                      await window.electronAPI.runMailboxForward(automation.id);
+                                      if (automation.kind === "rule") {
+                                        await window.electronAPI.deleteMailboxRule(automation.id);
+                                      } else if (automation.kind === "forward") {
+                                        await window.electronAPI.deleteMailboxForward(
+                                          automation.id,
+                                        );
+                                      } else {
+                                        await window.electronAPI.deleteMailboxSchedule(
+                                          automation.id,
+                                        );
+                                      }
                                       await reloadAll(selectedThread.id);
                                     })
                                   }
-                                  style={{
-                                    border: "1px solid var(--color-border-subtle)",
-                                    background: "var(--color-bg-secondary)",
-                                    borderRadius: "999px",
-                                    color: "var(--color-text-muted)",
-                                    fontSize: "0.68rem",
-                                    padding: "2px 8px",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Run now
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void runAction(async () => {
-                                    if (automation.kind === "rule") {
-                                      await window.electronAPI.deleteMailboxRule(automation.id);
-                                    } else if (automation.kind === "forward") {
-                                      await window.electronAPI.deleteMailboxForward(automation.id);
-                                    } else {
-                                      await window.electronAPI.deleteMailboxSchedule(automation.id);
-                                    }
-                                    await reloadAll(selectedThread.id);
-                                  })
-                                }
-                                style={{
-                                  border: "1px solid var(--color-border-subtle)",
-                                  background: "var(--color-bg-secondary)",
-                                  borderRadius: "999px",
-                                  color: "var(--color-text-muted)",
-                                  fontSize: "0.68rem",
-                                  padding: "2px 8px",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                Remove
-                              </button>
+                                />
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        fontSize: "0.78rem",
-                        color: "var(--color-text-muted)",
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      No automations are attached to this thread yet.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {selectedThread && (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Quick Actions</SectionLabel>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                  <ActionBtn
-                    onClick={() => void handleThreadAction("mark_done")}
-                    icon={<CheckSquare size={13} />}
-                    label="Mark done"
-                    disabled={busy || !selectedThreadCanMarkDone}
-                    title="Clear Needs reply and close open commitments after you handled this outside Cowork."
-                  />
-                  <ActionBtn
-                    onClick={() =>
-                      void handleThreadAction(
-                        selectedThread.unreadCount > 0 ? "mark_read" : "mark_unread",
-                      )
-                    }
-                    icon={<MailOpen size={13} />}
-                    label={selectedThread.unreadCount > 0 ? "Mark read" : "Mark unread"}
-                    disabled={
-                      busy ||
-                      !canSelectedThread(
-                        selectedThread.unreadCount > 0 ? "mark_read" : "mark_unread",
-                      )
-                    }
-                    title={
-                      !canSelectedThread(
-                        selectedThread.unreadCount > 0 ? "mark_read" : "mark_unread",
-                      )
-                        ? selectedThreadCapabilityReason
-                        : undefined
-                    }
-                  />
-                  <ActionBtn
-                    onClick={() => void handleThreadAction("archive")}
-                    icon={<Archive size={13} />}
-                    label="Archive"
-                    disabled={busy || !canSelectedThread("archive")}
-                    title={
-                      !canSelectedThread("archive") ? selectedThreadCapabilityReason : undefined
-                    }
-                  />
-                  <ActionBtn
-                    onClick={() => void handleThreadAction("trash")}
-                    icon={<Trash2 size={13} />}
-                    label="Trash"
-                    variant="danger"
-                    disabled={busy || !canSelectedThread("trash")}
-                    title={!canSelectedThread("trash") ? selectedThreadCapabilityReason : undefined}
-                  />
-                </div>
-                {selectedThreadNeedsGmailCleanupAttention && (
-                  <div
-                    style={{
-                      marginTop: "8px",
-                      fontSize: "0.74rem",
-                      lineHeight: 1.45,
-                      color: "var(--color-text-muted)",
-                    }}
-                  >
-                    {gmailCleanupDisabledReason}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Queue proposals */}
-            {queueMode && (
-              <div style={{ marginBottom: "18px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: "10px",
-                  }}
-                >
-                  <SectionLabel>
-                    {queueMode === "cleanup" ? "Cleanup Suggestions" : "Follow-up Suggestions"}
-                  </SectionLabel>
-                  <span
-                    style={{
-                      fontSize: "0.7rem",
-                      padding: "2px 8px",
-                      borderRadius: "10px",
-                      background: "var(--color-bg-secondary)",
-                      color: "var(--color-text-muted)",
-                      border: "1px solid var(--color-border-subtle)",
-                    }}
-                  >
-                    {queueProposals.length}
-                  </span>
-                </div>
-                {queueProposals.map((proposal) => {
-                  return (
-                    <div
-                      key={proposal.id}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: "var(--radius-md, 10px)",
-                        border: "1px solid var(--color-border-subtle)",
-                        background: "var(--color-bg-secondary)",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          fontSize: "0.84rem",
-                          color: "var(--color-text-primary)",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        {proposal.title}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "0.78rem",
-                          color: "var(--color-text-muted)",
-                          lineHeight: 1.5,
-                          marginBottom: "10px",
-                        }}
-                      >
-                        {proposal.reasoning}
-                      </div>
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        <ActionBtn
-                          onClick={() => void handleApplyProposal(proposal)}
-                          icon={<CheckSquare size={12} />}
-                          label={proposalActionLabel(proposal)}
-                          variant="primary"
-                          disabled={busy}
-                        />
-                        <ActionBtn
-                          onClick={() =>
-                            void runAction(async () => {
-                              await window.electronAPI.applyMailboxAction({
-                                proposalId: proposal.id,
-                                threadId: proposal.threadId,
-                                type: "dismiss_proposal",
-                              });
-                              if (queueMode) {
-                                const result = await window.electronAPI.reviewMailboxBulkAction({
-                                  type: queueMode,
-                                  limit: 20,
-                                });
-                                setQueueProposals(result.proposals);
+                          ))
+                        ) : (
+                          <p className="ibx-hint">
+                            No automations are attached to this thread yet.
+                          </p>
+                        )}
+                        {snippets.length > 0 && (
+                          <select
+                            className="ibx-select ibx-item-actions"
+                            aria-label="Insert snippet"
+                            defaultValue=""
+                            onChange={(event) => {
+                              const id = event.target.value;
+                              event.target.value = "";
+                              if (!id) return;
+                              const sn = snippets.find((entry) => entry.id === id);
+                              if (!sn) return;
+                              if (selectedThreadReplyTargets.length > 0) {
+                                openReplyComposer(selectedThreadReplyTargets[0].handleId);
+                                setReplyMessage((prev) =>
+                                  prev.trim() ? `${prev}\n\n${sn.body}` : sn.body,
+                                );
+                              } else {
+                                void copyTextToClipboard(sn.body);
                               }
-                              await loadStatus();
-                            })
-                          }
-                          icon={<X size={12} />}
-                          label="Dismiss"
-                          disabled={busy}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                {queueProposals.length === 0 && (
-                  <div
-                    style={{
-                      padding: "16px",
-                      textAlign: "center",
-                      color: "var(--color-text-muted)",
-                      fontSize: "0.82rem",
-                      borderRadius: "var(--radius-md, 10px)",
-                      background: "var(--color-bg-secondary)",
-                      border: "1px solid var(--color-border-subtle)",
-                    }}
-                  >
-                    No suggested actions
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Selected thread proposals */}
-            {!!selectedThread?.proposals.filter((proposal) => proposal.status === "suggested")
-              .length && (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Suggestions</SectionLabel>
-                {selectedThread.proposals
-                  .filter((proposal) => proposal.status === "suggested")
-                  .map((proposal) => {
-                    const suggestedAction = String(proposal.preview?.suggestedAction || "");
-                    const scheduleSuggestions = previewStringList(proposal.preview, "suggestions");
-                    const draftSubject =
-                      typeof proposal.preview?.subject === "string"
-                        ? proposal.preview.subject
-                        : null;
-                    return (
-                      <div
-                        key={proposal.id}
-                        style={{
-                          padding: "12px 14px",
-                          borderRadius: "var(--radius-md, 10px)",
-                          border: "1px solid var(--color-border-subtle)",
-                          background: "var(--color-bg-secondary)",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            fontSize: "0.84rem",
-                            color: "var(--color-text-primary)",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {proposal.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "0.78rem",
-                            color: "var(--color-text-muted)",
-                            lineHeight: 1.5,
-                          }}
-                        >
-                          {proposal.reasoning}
-                        </div>
-                        {draftSubject && (
-                          <div
-                            style={{
-                              marginTop: "8px",
-                              fontSize: "0.76rem",
-                              color: "var(--color-text-secondary)",
                             }}
                           >
-                            Draft: {draftSubject}
-                          </div>
+                            <option value="">Insert snippet…</option>
+                            {snippets.map((sn) => (
+                              <option key={sn.id} value={sn.id}>
+                                {sn.shortcut}
+                              </option>
+                            ))}
+                          </select>
                         )}
-                        {suggestedAction && (
-                          <div
-                            style={{
-                              marginTop: "8px",
-                              fontSize: "0.76rem",
-                              color: "var(--color-text-secondary)",
-                            }}
-                          >
-                            Suggested action: {suggestedAction}
-                          </div>
-                        )}
-                        {!!scheduleSuggestions.length && (
-                          <div
-                            style={{
-                              marginTop: "8px",
-                              fontSize: "0.76rem",
-                              color: "var(--color-text-secondary)",
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            {scheduleSuggestions.join(" · ")}
-                          </div>
-                        )}
-                        <div style={{ display: "flex", gap: "6px", marginTop: "10px" }}>
-                          <ActionBtn
-                            onClick={() => void handleApplyProposal(proposal)}
-                            icon={<CheckSquare size={12} />}
-                            label={proposalActionLabel(proposal)}
-                            variant="primary"
-                            disabled={busy}
-                          />
-                          <ActionBtn
-                            onClick={() =>
-                              void runAction(async () => {
-                                await window.electronAPI.applyMailboxAction({
-                                  proposalId: proposal.id,
-                                  threadId: proposal.threadId,
-                                  type: "dismiss_proposal",
-                                });
-                                await reloadAll(selectedThread.id);
-                              })
-                            }
-                            icon={<X size={12} />}
-                            label="Dismiss"
-                            disabled={busy}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
+                      </section>
 
-            {/* Contact memory */}
-            {selectedThread?.contactMemory && (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Contact</SectionLabel>
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: "var(--radius-md, 10px)",
-                    border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-secondary)",
-                    display: "flex",
-                    gap: "10px",
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <Avatar
-                    name={selectedThread.contactMemory.name}
-                    email={selectedThread.contactMemory.email}
-                    size={32}
-                  />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div
-                      style={{
-                        fontWeight: 600,
-                        fontSize: "0.84rem",
-                        color: "var(--color-text-primary)",
-                      }}
-                    >
-                      {selectedThread.contactMemory.name || selectedThread.contactMemory.email}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                        marginTop: "2px",
-                      }}
-                    >
-                      {selectedThread.contactMemory.company || "Independent contact"}
-                    </div>
-                    {selectedThread.contactMemory.responseTendency && (
-                      <div
-                        style={{
-                          marginTop: "6px",
-                          fontSize: "0.76rem",
-                          color: "var(--color-text-secondary)",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {selectedThread.contactMemory.responseTendency}
-                      </div>
-                    )}
-                    {!!selectedThread.contactMemory.learnedFacts.length && (
-                      <div
-                        style={{
-                          marginTop: "6px",
-                          fontSize: "0.76rem",
-                          color: "var(--color-text-secondary)",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {selectedThread.contactMemory.learnedFacts.join(" · ")}
-                      </div>
-                    )}
-                    {!!selectedThread.contactMemory.styleSignals?.length && (
-                      <div
-                        style={{
-                          marginTop: "8px",
-                          fontSize: "0.74rem",
-                          color: "var(--color-text-muted)",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {selectedThread.contactMemory.styleSignals.join(" · ")}
-                      </div>
-                    )}
-                    {[
-                      selectedThread.contactMemory.totalThreads
-                        ? `${selectedThread.contactMemory.totalThreads} thread${selectedThread.contactMemory.totalThreads === 1 ? "" : "s"}`
-                        : null,
-                      selectedThread.contactMemory.totalMessages
-                        ? `${selectedThread.contactMemory.totalMessages} messages`
-                        : null,
-                      typeof selectedThread.contactMemory.averageResponseHours === "number"
-                        ? `${selectedThread.contactMemory.averageResponseHours.toFixed(1)}h avg response`
-                        : null,
-                    ].filter((entry): entry is string => Boolean(entry)).length > 0 && (
-                      <div
-                        style={{
-                          marginTop: "8px",
-                          fontSize: "0.72rem",
-                          color: "var(--color-text-muted)",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {[
-                          selectedThread.contactMemory.totalThreads
-                            ? `${selectedThread.contactMemory.totalThreads} thread${selectedThread.contactMemory.totalThreads === 1 ? "" : "s"}`
-                            : null,
-                          selectedThread.contactMemory.totalMessages
-                            ? `${selectedThread.contactMemory.totalMessages} messages`
-                            : null,
-                          typeof selectedThread.contactMemory.averageResponseHours === "number"
-                            ? `${selectedThread.contactMemory.averageResponseHours.toFixed(1)}h avg response`
-                            : null,
-                        ]
-                          .filter((entry): entry is string => Boolean(entry))
-                          .join(" · ")}
-                      </div>
-                    )}
-                    {!!selectedThread.contactMemory.recentSubjects?.length && (
-                      <div
-                        style={{
-                          marginTop: "8px",
-                          fontSize: "0.72rem",
-                          color: "var(--color-text-muted)",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        Recent: {selectedThread.contactMemory.recentSubjects.join(" · ")}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Commitments */}
-            {!!selectedThread?.commitments.length && (
-              <div style={{ marginBottom: "16px" }}>
-                <SectionLabel>Commitments</SectionLabel>
-                {selectedThread.commitments.map((commitment) => (
-                  <div
-                    key={commitment.id}
-                    style={{
-                      padding: "12px 14px",
-                      borderRadius: "var(--radius-md, 10px)",
-                      border: "1px solid var(--color-border-subtle)",
-                      background: "var(--color-bg-secondary)",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "8px",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          fontSize: "0.84rem",
-                          color: "var(--color-text-primary)",
-                          marginBottom: "4px",
-                          minWidth: 0,
-                          flex: 1,
-                        }}
-                      >
-                        {commitment.title}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => beginCommitmentEdit(commitment)}
-                        style={{
-                          border: "1px solid var(--color-border-subtle)",
-                          background: "var(--color-bg-elevated)",
-                          borderRadius: "999px",
-                          color: "var(--color-text-secondary)",
-                          fontSize: "0.68rem",
-                          padding: "2px 8px",
-                          cursor: "pointer",
-                          flexShrink: 0,
-                        }}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.74rem",
-                        color: "var(--color-text-muted)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        marginBottom: "10px",
-                      }}
-                    >
-                      <Clock size={10} />
-                      {commitment.dueAt ? `Due ${formatFullTime(commitment.dueAt)}` : "No due date"}
-                      <span
-                        style={{
-                          padding: "1px 6px",
-                          borderRadius: "6px",
-                          background: "var(--color-bg-tertiary)",
-                          color: "var(--color-text-muted)",
-                          fontSize: "0.68rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {commitment.state}
-                      </span>
-                    </div>
-                    {editingCommitmentId === commitment.id ? (
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "8px",
-                          marginTop: "8px",
-                          padding: "10px",
-                          borderRadius: "var(--radius-md, 10px)",
-                          background: "var(--color-bg-elevated)",
-                          border: "1px solid var(--color-border-subtle)",
-                        }}
-                      >
-                        <input
-                          value={editingCommitmentTitle}
-                          onChange={(event) => setEditingCommitmentTitle(event.target.value)}
-                          placeholder="Commitment title"
-                          style={{
-                            width: "100%",
-                            boxSizing: "border-box",
-                            padding: "7px 10px",
-                            borderRadius: "var(--radius-sm, 8px)",
-                            border: "1px solid var(--color-border)",
-                            background: "var(--color-bg-input)",
-                            color: "var(--color-text-primary)",
-                            fontSize: "0.78rem",
-                          }}
-                        />
-                        <input
-                          type="datetime-local"
-                          value={editingCommitmentDueAt}
-                          onChange={(event) => setEditingCommitmentDueAt(event.target.value)}
-                          style={{
-                            width: "100%",
-                            boxSizing: "border-box",
-                            padding: "7px 10px",
-                            borderRadius: "var(--radius-sm, 8px)",
-                            border: "1px solid var(--color-border)",
-                            background: "var(--color-bg-input)",
-                            color: "var(--color-text-primary)",
-                            fontSize: "0.78rem",
-                          }}
-                        />
-                        <input
-                          value={editingCommitmentOwnerEmail}
-                          onChange={(event) => setEditingCommitmentOwnerEmail(event.target.value)}
-                          placeholder="Owner email"
-                          style={{
-                            width: "100%",
-                            boxSizing: "border-box",
-                            padding: "7px 10px",
-                            borderRadius: "var(--radius-sm, 8px)",
-                            border: "1px solid var(--color-border)",
-                            background: "var(--color-bg-input)",
-                            color: "var(--color-text-primary)",
-                            fontSize: "0.78rem",
-                          }}
-                        />
-                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                          <ActionBtn
-                            onClick={() => void saveCommitmentEdit(commitment)}
-                            icon={<CheckSquare size={11} />}
-                            label="Save"
-                            variant="primary"
-                            disabled={busy}
-                          />
-                          <ActionBtn
-                            onClick={cancelCommitmentEdit}
-                            icon={<X size={11} />}
-                            label="Cancel"
-                            disabled={busy}
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
-                        <ActionBtn
-                          onClick={() => void handleCommitmentState(commitment, "accepted")}
-                          icon={<CheckSquare size={11} />}
-                          label={
-                            commitment.state === "accepted"
-                              ? commitment.followUpTaskId
-                                ? "Accepted"
-                                : "Create follow-up"
-                              : "Accept"
-                          }
-                          variant={
-                            commitment.state === "accepted" && commitment.followUpTaskId
-                              ? "default"
-                              : "primary"
-                          }
-                          disabled={
-                            busy ||
-                            (commitment.state === "accepted" && Boolean(commitment.followUpTaskId))
-                          }
-                        />
-                        <ActionBtn
-                          onClick={() => void handleCommitmentState(commitment, "done")}
-                          icon={<CheckSquare size={11} />}
-                          label="Done"
-                          disabled={busy}
-                        />
-                        <ActionBtn
-                          onClick={() => void handleCommitmentState(commitment, "dismissed")}
-                          icon={<X size={11} />}
-                          label="Dismiss"
-                          variant="danger"
-                          disabled={busy}
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Research */}
-            {selectedThread?.research && (
-              <div>
-                <SectionLabel>Research</SectionLabel>
-                <div
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: "var(--radius-md, 10px)",
-                    border: "1px solid var(--color-border-subtle)",
-                    background: "var(--color-bg-secondary)",
-                    fontSize: "0.82rem",
-                    lineHeight: 1.6,
-                    color: "var(--color-text-secondary)",
-                  }}
-                >
-                  <div style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
-                    <User
-                      size={13}
-                      style={{ flexShrink: 0, marginTop: "2px", color: "var(--color-text-muted)" }}
-                    />
-                    <span>
-                      {selectedThread.research.primaryContact?.email || "Unknown contact"}
-                    </span>
-                  </div>
-                  {selectedThread.research.contactIdentityId && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        fontSize: "0.74rem",
-                        color: "var(--color-text-muted)",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      Identity confidence:{" "}
-                      {Math.round((selectedThread.research.identityConfidence || 0) * 100)}%
-                    </div>
-                  )}
-                  {selectedThread.research.company && (
-                    <div
-                      style={{
-                        color: "var(--color-text-muted)",
-                        paddingLeft: "19px",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      {selectedThread.research.company}
-                    </div>
-                  )}
-                  {selectedThread.research.relationshipSummary && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-secondary)",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      {selectedThread.research.relationshipSummary}
-                    </div>
-                  )}
-                  {!!selectedThread.research.recommendedQueries.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      {selectedThread.research.recommendedQueries.join(" · ")}
-                    </div>
-                  )}
-                  {!!selectedThread.research.relatedEntities?.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "8px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      Related: {selectedThread.research.relatedEntities.join(" · ")}
-                    </div>
-                  )}
-                  {!!selectedThread.research.linkedChannels?.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "8px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      Linked channels:{" "}
-                      {selectedThread.research.linkedChannels
-                        .map((channel) => channel.channelType || channel.handleType)
-                        .join(" · ")}
-                    </div>
-                  )}
-                  {!!selectedThread.research.identityCandidates?.length &&
-                    !selectedThread.research.linkedChannels?.length && (
-                      <div
-                        style={{
-                          paddingLeft: "19px",
-                          marginTop: "8px",
-                          fontSize: "0.76rem",
-                          color: "var(--color-warning, #c47f00)",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        Possible matches:{" "}
-                        {selectedThread.research.identityCandidates
-                          .slice(0, 3)
-                          .map((candidate) => candidate.sourceLabel)
-                          .join(" · ")}
-                      </div>
-                    )}
-                  {!!selectedThread.research.styleSignals?.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "8px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      Style: {selectedThread.research.styleSignals.join(" · ")}
-                    </div>
-                  )}
-                  {!!selectedThread.research.recentSubjects?.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "8px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                      }}
-                    >
-                      Recent threads: {selectedThread.research.recentSubjects.join(" · ")}
-                    </div>
-                  )}
-                  {selectedThread.research.recentOutboundExample && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "8px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-muted)",
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      Last outbound: {selectedThread.research.recentOutboundExample}
-                    </div>
-                  )}
-                  {selectedThread.research.channelPreference?.recommendedReason && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "8px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-secondary)",
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      Channel recommendation:{" "}
-                      {selectedThread.research.channelPreference.recommendedReason}
-                    </div>
-                  )}
-                  {!!selectedThread.research.unifiedTimeline?.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "10px",
-                        display: "grid",
-                        gap: "8px",
-                      }}
-                    >
-                      <div style={{ fontSize: "0.74rem", color: "var(--color-text-muted)" }}>
-                        Unified timeline
-                      </div>
-                      {selectedThread.research.unifiedTimeline.slice(0, 5).map((event) => (
-                        <div
-                          key={event.id}
-                          style={{
-                            padding: "8px 10px",
-                            borderRadius: "8px",
-                            border: "1px solid var(--color-border-subtle)",
-                            background: "var(--color-bg-elevated)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              gap: "8px",
-                              fontSize: "0.72rem",
-                              color: "var(--color-text-muted)",
-                            }}
-                          >
-                            <span>{event.sourceLabel}</span>
-                            <span>{formatTime(event.timestamp)}</span>
-                          </div>
-                          <div
-                            style={{
-                              marginTop: "3px",
-                              fontSize: "0.76rem",
-                              color: "var(--color-text-primary)",
-                              fontWeight: 600,
-                            }}
-                          >
-                            {event.title}
-                          </div>
-                          <div
-                            style={{
-                              marginTop: "2px",
-                              fontSize: "0.74rem",
-                              color: "var(--color-text-secondary)",
-                              lineHeight: 1.45,
-                            }}
-                          >
-                            {event.summary}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {!!selectedThread.research.nextSteps?.length && (
-                    <div
-                      style={{
-                        paddingLeft: "19px",
-                        marginTop: "10px",
-                        fontSize: "0.76rem",
-                        color: "var(--color-text-secondary)",
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      Next: {selectedThread.research.nextSteps.join(" · ")}
-                    </div>
+                      {!queueMode && renderInboxSection()}
+                    </>
                   )}
                 </div>
               </div>
+            ) : (
+              renderAskInbox()
             )}
-
-            {/* Empty rail state */}
-            {!queueMode &&
-              !selectedThread?.commitments.length &&
-              !selectedThread?.contactMemory &&
-              !selectedThread?.research &&
-              !error &&
-              !busy && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "32px 16px",
-                    color: "var(--color-text-muted)",
-                    textAlign: "center",
-                  }}
-                >
-                  <Sparkles size={30} strokeWidth={1.25} />
-                  <div style={{ fontSize: "0.8rem", lineHeight: 1.5 }}>
-                    Select a thread and use the
-                    <br />
-                    actions above to analyse it.
-                  </div>
-                </div>
-              )}
-          </div>
-        ) : (
-          renderAskInbox()
+          </section>
         )}
-      </section>
+      </div>
 
       {labelSimilarOpen && selectedThread && (
         <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            zIndex: 1200,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-          }}
+          className="ibx-overlay"
           onClick={() => {
             if (!labelSimilarBusy) setLabelSimilarOpen(false);
           }}
@@ -7327,83 +4953,56 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="mailbox-label-similar-title"
+            className="ibx-dialog"
             onClick={(event) => event.stopPropagation()}
-            style={{
-              maxWidth: 520,
-              width: "100%",
-              maxHeight: "90vh",
-              overflow: "auto",
-              padding: "20px",
-              borderRadius: "14px",
-              background: "var(--color-bg-elevated)",
-              border: "1px solid var(--color-border-subtle)",
-            }}
           >
-            <h3 id="mailbox-label-similar-title" style={{ margin: "0 0 12px", fontSize: "1rem" }}>
-              Saved view (similar threads)
-            </h3>
-            <label style={{ display: "grid", gap: 4, marginBottom: 10 }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>Name</span>
-              <input
-                value={labelSimilarName}
-                onChange={(event) => {
-                  setLabelSimilarName(event.target.value);
-                  resetLabelSimilarPreview();
-                }}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                }}
+            <h3 id="mailbox-label-similar-title">Saved view</h3>
+            <p className="ibx-dialog-sub">
+              Find threads like this one and keep them together in a view.
+            </p>
+            <div className="ibx-form">
+              <label className="ibx-field">
+                <span>Name</span>
+                <input
+                  className="ibx-input"
+                  value={labelSimilarName}
+                  onChange={(event) => {
+                    setLabelSimilarName(event.target.value);
+                    resetLabelSimilarPreview();
+                  }}
+                />
+              </label>
+              <label className="ibx-field">
+                <span>Instructions</span>
+                <textarea
+                  className="ibx-textarea"
+                  value={labelSimilarInstructions}
+                  onChange={(event) => {
+                    setLabelSimilarInstructions(event.target.value);
+                    resetLabelSimilarPreview();
+                  }}
+                  rows={3}
+                />
+              </label>
+              <label className="ibx-check-label">
+                <input
+                  type="checkbox"
+                  className="ibx-check"
+                  checked={labelSimilarShowInInbox}
+                  onChange={(event) => setLabelSimilarShowInInbox(event.target.checked)}
+                />
+                Show matching threads in the main inbox list
+              </label>
+            </div>
+            <div className="ibx-dialog-actions">
+              <ActionBtn
+                label="Cancel"
+                variant="ghost"
+                disabled={labelSimilarBusy}
+                onClick={() => setLabelSimilarOpen(false)}
               />
-            </label>
-            <label style={{ display: "grid", gap: 4, marginBottom: 12 }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                Instructions
-              </span>
-              <textarea
-                value={labelSimilarInstructions}
-                onChange={(event) => {
-                  setLabelSimilarInstructions(event.target.value);
-                  resetLabelSimilarPreview();
-                }}
-                rows={3}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                  resize: "vertical",
-                }}
-              />
-            </label>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 12,
-                fontSize: "0.78rem",
-                color: "var(--color-text-secondary)",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={labelSimilarShowInInbox}
-                onChange={(event) => setLabelSimilarShowInInbox(event.target.checked)}
-              />
-              Show matching threads in the main inbox list
-            </label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              <button
-                type="button"
-                className="mc-v2-icon-btn"
+              <ActionBtn
+                label="Preview matches"
                 disabled={labelSimilarBusy}
                 onClick={() =>
                   runAction(async () => {
@@ -7425,12 +5024,10 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     }
                   })
                 }
-              >
-                Preview matches
-              </button>
-              <button
-                type="button"
-                className="mc-v2-icon-btn"
+              />
+              <ActionBtn
+                label="Save view"
+                variant="primary"
                 disabled={labelSimilarBusy || !labelSimilarPreviewIds.length}
                 onClick={() =>
                   runAction(async () => {
@@ -7451,42 +5048,18 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     }
                   })
                 }
-              >
-                Save view
-              </button>
-              <button
-                type="button"
-                className="mc-v2-icon-btn"
-                disabled={labelSimilarBusy}
-                onClick={() => setLabelSimilarOpen(false)}
-              >
-                Cancel
-              </button>
+              />
             </div>
-            {labelSimilarError && (
-              <p
-                style={{ fontSize: "0.74rem", color: "#b45309", lineHeight: 1.45, marginBottom: 8 }}
-              >
-                {labelSimilarError}
-              </p>
-            )}
-            {labelSimilarRationale && (
-              <p
-                style={{ fontSize: "0.74rem", color: "var(--color-text-muted)", lineHeight: 1.45 }}
-              >
-                {labelSimilarRationale}
-              </p>
-            )}
+            {labelSimilarError && <p className="ibx-dialog-note is-warn">{labelSimilarError}</p>}
+            {labelSimilarRationale && <p className="ibx-dialog-note">{labelSimilarRationale}</p>}
             {labelSimilarPreviewIds.length > 0 && (
-              <p style={{ fontSize: "0.72rem", color: "var(--color-text-secondary)" }}>
+              <p className="ibx-dialog-note">
                 {labelSimilarPreviewIds.length} thread
                 {labelSimilarPreviewIds.length === 1 ? "" : "s"} will be linked to this view.
               </p>
             )}
             {!labelSimilarBusy && !labelSimilarError && !labelSimilarDidPreview && (
-              <p
-                style={{ fontSize: "0.72rem", color: "var(--color-text-muted)", lineHeight: 1.45 }}
-              >
+              <p className="ibx-dialog-note">
                 Run Preview matches to find similar threads from your current mailbox (recent
                 slice). If none appear, try a clearer name and instructions.
               </p>
@@ -7495,13 +5068,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
               !labelSimilarError &&
               labelSimilarDidPreview &&
               labelSimilarPreviewIds.length === 0 && (
-                <p
-                  style={{
-                    fontSize: "0.72rem",
-                    color: "var(--color-text-muted)",
-                    lineHeight: 1.45,
-                  }}
-                >
+                <p className="ibx-dialog-note">
                   No similar threads in the current preview slice. Adjust instructions or sync more
                   mail and try again.
                 </p>
@@ -7513,79 +5080,47 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       {snippetModalOpen && (
         <div
           role="presentation"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 1200,
-            background: "rgba(0,0,0,0.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px",
-          }}
+          className="ibx-overlay"
           onMouseDown={() => setSnippetModalOpen(false)}
         >
           <div
             role="dialog"
+            aria-modal="true"
             aria-labelledby="mailbox-snippet-modal-title"
+            className="ibx-dialog"
             onMouseDown={(event) => event.stopPropagation()}
-            style={{
-              width: "100%",
-              maxWidth: "420px",
-              padding: "20px",
-              borderRadius: "14px",
-              background: "var(--color-bg-elevated)",
-              border: "1px solid var(--color-border-subtle)",
-            }}
           >
-            <h3 id="mailbox-snippet-modal-title" style={{ margin: "0 0 12px", fontSize: "1rem" }}>
-              New snippet
-            </h3>
-            <label style={{ display: "grid", gap: 4, marginBottom: 10 }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                Label (menu)
-              </span>
-              <input
-                value={snippetShortcutDraft}
-                onChange={(event) => setSnippetShortcutDraft(event.target.value)}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                }}
-              />
-            </label>
-            <label style={{ display: "grid", gap: 4, marginBottom: 12 }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>Body</span>
-              <textarea
-                value={snippetBodyDraft}
-                onChange={(event) => setSnippetBodyDraft(event.target.value)}
-                rows={5}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-bg-input)",
-                  color: "var(--color-text-primary)",
-                  fontSize: "0.8rem",
-                  resize: "vertical",
-                }}
-              />
-            </label>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="mc-v2-icon-btn"
+            <h3 id="mailbox-snippet-modal-title">New snippet</h3>
+            <p className="ibx-dialog-sub">Reusable text you can insert into replies.</p>
+            <div className="ibx-form">
+              <label className="ibx-field">
+                <span>Label</span>
+                <input
+                  className="ibx-input"
+                  value={snippetShortcutDraft}
+                  onChange={(event) => setSnippetShortcutDraft(event.target.value)}
+                />
+              </label>
+              <label className="ibx-field">
+                <span>Body</span>
+                <textarea
+                  className="ibx-textarea"
+                  value={snippetBodyDraft}
+                  onChange={(event) => setSnippetBodyDraft(event.target.value)}
+                  rows={5}
+                />
+              </label>
+            </div>
+            <div className="ibx-dialog-actions">
+              <ActionBtn
+                label="Cancel"
+                variant="ghost"
                 onClick={() => setSnippetModalOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="mc-v2-icon-btn"
+              />
+              <ActionBtn
+                label="Save"
+                variant="primary"
+                disabled={!snippetShortcutDraft.trim() || !snippetBodyDraft.trim()}
                 onClick={() => {
                   const shortcut = snippetShortcutDraft.trim();
                   const body = snippetBodyDraft.trim();
@@ -7596,20 +5131,11 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                     setSnippetModalOpen(false);
                   });
                 }}
-              >
-                Save
-              </button>
+              />
             </div>
           </div>
         </div>
       )}
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 }

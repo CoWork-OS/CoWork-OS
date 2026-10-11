@@ -44,6 +44,61 @@ interface VoiceSettingsProps {
   onStateChange?: (state: VoiceState) => void;
 }
 
+export function createVoiceSettingsAutosave(
+  save: (patch: Partial<VoiceSettingsType>) => Promise<VoiceSettingsType>,
+  onSaved: (settings: VoiceSettingsType) => void,
+  delayMs = 500,
+  onError?: (error: unknown) => void,
+) {
+  let pending: Partial<VoiceSettingsType> = {};
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
+  let disposed = false;
+  let saveChain = Promise.resolve();
+  const flush = async () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    saveChain = saveChain.then(async () => {
+      const patch = pending;
+      if (Object.keys(patch).length === 0) return;
+      pending = {};
+      const startedAt = generation;
+      try {
+        const updated = await save(patch);
+        if (!disposed && startedAt === generation && Object.keys(pending).length === 0) {
+          onSaved(updated);
+        }
+      } catch (error) {
+        onError?.(error);
+        if (!disposed) pending = { ...patch, ...pending };
+      }
+    });
+    await saveChain;
+  };
+  return {
+    queue(patch: Partial<VoiceSettingsType>) {
+      disposed = false;
+      pending = { ...pending, ...patch };
+      generation += 1;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void flush(), delayMs);
+    },
+    flush,
+    saveNow(patch: Partial<VoiceSettingsType>) {
+      disposed = false;
+      pending = { ...pending, ...patch };
+      generation += 1;
+      return flush();
+    },
+    dispose() {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      void flush();
+    },
+  };
+}
+
 export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   const [settings, setSettings] = useState<VoiceSettingsType>(DEFAULT_VOICE_SETTINGS);
   const [voiceState, setVoiceState] = useState<VoiceState>({
@@ -80,8 +135,22 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   const [testingSpeech, setTestingSpeech] = useState(false);
 
   // Debounce ref for text input saves to prevent race conditions
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingSettingsRef = useRef<Partial<VoiceSettingsType>>({});
+  const autosaveRef = useRef<ReturnType<typeof createVoiceSettingsAutosave> | null>(null);
+  if (!autosaveRef.current) {
+    autosaveRef.current = createVoiceSettingsAutosave(
+      async (patch) => {
+        setSaving(true);
+        try {
+          return await window.electronAPI.saveVoiceSettings(patch);
+        } finally {
+          setSaving(false);
+        }
+      },
+      (updated) => setSettings(updated),
+      500,
+      (error) => console.error("Failed to save voice settings:", error),
+    );
+  }
 
   useEffect(() => {
     loadSettings();
@@ -97,10 +166,9 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
 
     return () => {
       unsubscribe();
-      // Clean up pending save on unmount
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
+      // Settings panels unmount when switching tabs. Flush the last edit
+      // before cancelling the debounce instead of silently dropping it.
+      autosaveRef.current?.dispose();
     };
   }, [onStateChange]);
 
@@ -138,45 +206,16 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   };
 
   const saveSettings = async (newSettings: Partial<VoiceSettingsType>) => {
-    try {
-      setSaving(true);
-      const updated = await window.electronAPI.saveVoiceSettings(newSettings);
-      setSettings(updated);
-    } catch (error) {
-      console.error("Failed to save voice settings:", error);
-    } finally {
-      setSaving(false);
-    }
+    setSettings((prev) => ({ ...prev, ...newSettings }));
+    await autosaveRef.current?.saveNow(newSettings);
   };
 
   // Debounced save for text inputs - prevents race conditions when typing
   const debouncedSave = useCallback((newSettings: Partial<VoiceSettingsType>) => {
-    // Merge with any pending settings
-    pendingSettingsRef.current = { ...pendingSettingsRef.current, ...newSettings };
+    autosaveRef.current?.queue(newSettings);
 
     // Update local state immediately for responsive UI
     setSettings((prev) => ({ ...prev, ...newSettings }));
-
-    // Clear existing timeout
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    // Schedule save after user stops typing
-    saveTimeoutRef.current = setTimeout(async () => {
-      const toSave = pendingSettingsRef.current;
-      pendingSettingsRef.current = {};
-
-      try {
-        setSaving(true);
-        const updated = await window.electronAPI.saveVoiceSettings(toSave);
-        setSettings(updated);
-      } catch (error) {
-        console.error("Failed to save voice settings:", error);
-      } finally {
-        setSaving(false);
-      }
-    }, 500); // Wait 500ms after last keystroke before saving
   }, []);
 
   const handleToggleEnabled = async () => {

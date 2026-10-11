@@ -347,9 +347,12 @@ export class SSETransport extends EventEmitter implements MCPTransport {
   private cleanup(): void {
     this.connected = false;
 
-    // Clear all pending requests
+    // An unexpected stream error must settle callers too. Keep the error
+    // generic: a request may have reached the server, so callers must treat a
+    // rejected mutation as outcome-uncertain and reconcile before retrying.
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
+      pending.reject(new Error("SSE connection lost; request outcome is uncertain"));
     }
     this.pendingRequests.clear();
 

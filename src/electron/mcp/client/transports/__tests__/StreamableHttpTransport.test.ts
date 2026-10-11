@@ -47,6 +47,70 @@ describe("StreamableHttpTransport", () => {
     expect(new Headers(init.headers).get("MCP-Protocol-Version")).toBe("2026-07-28");
   });
 
+  it("resolves a matching SSE response before the server closes the stream", async () => {
+    const transport = new StreamableHttpTransport({
+      id: "stream",
+      name: "Stream",
+      enabled: true,
+      transport: "streamable-http",
+      url: "https://example.invalid/mcp",
+      requestTimeout: 100,
+    });
+    await transport.connect();
+    let release!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n'),
+        );
+        release = () => {
+          try {
+            controller.close();
+          } catch {
+            // The transport cancels the reader after the matching response.
+          }
+        };
+      },
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": "text/event-stream" } }),
+    );
+
+    await expect(transport.sendRequest("tools/list")).resolves.toEqual({ ok: true });
+    release();
+    expect((transport as Any).activeAbortControllers.size).toBe(0);
+  });
+
+  it("keeps the body deadline owned after response headers arrive", async () => {
+    const transport = new StreamableHttpTransport({
+      id: "stall",
+      name: "Stall",
+      enabled: true,
+      transport: "streamable-http",
+      url: "https://example.invalid/mcp",
+      requestTimeout: 20,
+    });
+    await transport.connect();
+    let bodyController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(body, { headers: { "content-type": "text/event-stream" } }),
+    );
+
+    const pending = (transport as Any).sendRequest("tools/list");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(
+      [...((transport as Any).activeAbortControllers as Set<AbortController>)][0]?.signal.aborted,
+    ).toBe(true);
+    bodyController.error(new Error("body released after deadline"));
+    await expect(pending).rejects.toThrow();
+    expect((transport as Any).activeAbortControllers.size).toBe(0);
+  });
+
   it("checks current authority after awaiting credential setup and before posting action bytes", async () => {
     const transport = new StreamableHttpTransport({
       id: "fixture",

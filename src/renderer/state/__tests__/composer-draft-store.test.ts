@@ -58,6 +58,24 @@ describe("ComposerDraftStore", () => {
     expect(store.get("local:w:a:main")).toBeNull();
   });
 
+  it("preserves typing when a second restoration begins after the edit", async () => {
+    const resolvers: Array<(draft: ReturnType<typeof createEmptyComposerDraft>) => void> = [];
+    const store = new ComposerDraftStore({
+      transport: { get: () => new Promise((resolve) => resolvers.push(resolve)) },
+    });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+    const first = store.load(input);
+    const typed = store.update(input, { text: "typing before switching away and back" });
+    const second = store.load(input);
+    const stored = { ...createEmptyComposerDraft(input, 10), revision: 10, text: "old saved text" };
+    resolvers[0](stored);
+    await first;
+    resolvers[1](stored);
+    await second;
+    expect(store.get(typed.draftKey)?.text).toBe(typed.text);
+    expect(store.get(typed.draftKey)?.revision).toBe(11);
+  });
+
   it("does not clear newer text when an older send is accepted", async () => {
     const clear = vi.fn(async () => ({ cleared: true, releasedAttachments: 0 }));
     const store = new ComposerDraftStore({ transport: { clear } });
@@ -102,6 +120,72 @@ describe("ComposerDraftStore", () => {
     await loading;
 
     expect(store.get(current.draftKey)?.text).toBe("typed locally");
+  });
+
+  it("reconciles a persisted revision without replacing local typing", async () => {
+    let resolveLoad: ((draft: ReturnType<typeof createEmptyComposerDraft>) => void) | undefined;
+    let saved = createEmptyComposerDraft({ scope: "local", workspaceId: "w", taskId: "a" }, 41);
+    saved.revision = 41;
+    saved.text = "old text";
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => {
+      // Match ComposerDraftRepository.upsertIfNewer's strict revision check.
+      const accepted = draft.revision > saved.revision;
+      if (accepted) saved = draft;
+      return { accepted, draft: saved };
+    });
+    const store = new ComposerDraftStore({
+      transport: { get: () => new Promise((resolve) => (resolveLoad = resolve)), upsert },
+    });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+    const loading = store.load(input);
+    const current = store.update(input, { text: "typed after restore started" });
+    const persisted = createEmptyComposerDraft(input, 41);
+    persisted.revision = 41;
+    persisted.text = "old text";
+    resolveLoad?.(persisted);
+    const reconciled = await loading;
+
+    expect(reconciled?.text).toBe(current.text);
+    expect(reconciled?.revision).toBe(42);
+    await store.flush(reconciled!.draftKey);
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: current.text, revision: 42 }),
+    );
+    const restored = new ComposerDraftStore({ transport: { get: async () => saved } });
+    expect((await restored.load(input))?.text).toBe(current.text);
+  });
+
+  it("rebases a dirty draft after an overlapping low-revision write is rejected", async () => {
+    let persisted = createEmptyComposerDraft({ scope: "local", workspaceId: "w", taskId: "a" }, 10);
+    persisted.revision = 10;
+    persisted.text = "server text";
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => {
+      if (draft.revision <= persisted.revision) return { accepted: false, draft: persisted };
+      persisted = draft;
+      return { accepted: true, draft };
+    });
+    const store = new ComposerDraftStore({ transport: { upsert }, debounceMs: 0 });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+
+    const local = store.update(input, { text: "keep my newer typing" });
+    await store.flush(local.draftKey);
+
+    await vi.waitFor(() => expect(upsert).toHaveBeenCalledTimes(2));
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: local.text, revision: 11 }),
+    );
+    expect(store.get(local.draftKey)?.text).toBe(local.text);
+  });
+
+  it("does not retry forever when a rejection carries no authoritative draft", async () => {
+    const upsert = vi.fn(async () => ({ accepted: false, draft: null }));
+    const store = new ComposerDraftStore({ transport: { upsert } as Any, debounceMs: 0 });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: "a" };
+    const local = store.update(input, { text: "unsaved" });
+    await store.flush(local.draftKey);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(store.get(local.draftKey)?.revision).toBe(local.revision);
   });
 
   it("does not let an in-flight load resurrect an accepted draft", async () => {

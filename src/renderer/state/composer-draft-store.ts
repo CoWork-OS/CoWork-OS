@@ -31,6 +31,7 @@ export class ComposerDraftStore {
   private readonly listeners = new Map<string, Set<ComposerDraftListener>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly loadGenerations = new Map<string, number>();
+  private readonly dirtyRevisions = new Map<string, number>();
   private readonly writeChains = new Map<string, Promise<void>>();
   private readonly clearChains = new Map<string, Promise<boolean>>();
   private readonly debounceMs: number;
@@ -83,6 +84,21 @@ export class ComposerDraftStore {
     const normalized = normalizeComposerDraft(loaded);
     if (normalized) {
       const current = this.drafts.get(key);
+      // A persisted revision never authorizes replacing a local edit that has
+      // not been acknowledged by an accepted upsert yet. This remains true
+      // when a second load starts after the edit itself.
+      if (this.dirtyRevisions.has(key) && current) {
+        const reconciled = {
+          ...current,
+          revision: Math.max(current.revision, normalized.revision + 1),
+          updatedAt: Math.max(current.updatedAt, normalized.updatedAt),
+        };
+        this.drafts.set(key, reconciled);
+        this.dirtyRevisions.set(key, reconciled.revision);
+        this.emit(key, reconciled);
+        this.schedulePersist(key);
+        return reconciled;
+      }
       if (current && current.revision > normalized.revision) return current;
       this.drafts.set(key, normalized);
       this.emit(key, normalized);
@@ -116,6 +132,7 @@ export class ComposerDraftStore {
       updatedAt: this.now(),
     };
     this.drafts.set(next.draftKey, next);
+    this.dirtyRevisions.set(next.draftKey, next.revision);
     this.emit(next.draftKey, next);
     this.schedulePersist(next.draftKey);
     return next;
@@ -155,7 +172,26 @@ export class ComposerDraftStore {
       .then(async () => {
         const current = this.drafts.get(key);
         if (!current || current.revision < revision) return;
-        await this.transport.upsert?.(current);
+        const result = await this.transport.upsert?.(current);
+        // Rebase only onto a known authoritative revision. A rejection without one
+        // (expired row, invalid draft) waits for the next edit instead of looping.
+        if (
+          result &&
+          !result.accepted &&
+          result.draft &&
+          this.drafts.get(key)?.revision === revision
+        ) {
+          const rebased = {
+            ...current,
+            revision: Math.max(revision, result.draft.revision + 1),
+            updatedAt: Math.max(current.updatedAt, result.draft.updatedAt ?? 0),
+          };
+          this.drafts.set(key, rebased);
+          this.dirtyRevisions.set(key, rebased.revision);
+          this.emit(key, rebased);
+        } else if (result?.accepted && this.drafts.get(key)?.revision === revision) {
+          this.dirtyRevisions.delete(key);
+        }
         if (this.drafts.get(key)?.revision !== revision) {
           this.schedulePersist(key);
         }
@@ -262,6 +298,7 @@ export class ComposerDraftStore {
     }
     if (this.drafts.get(key)?.revision !== submittedRevision) return false;
     this.drafts.delete(key);
+    this.dirtyRevisions.delete(key);
     this.emit(key, null);
     return true;
   }

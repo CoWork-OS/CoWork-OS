@@ -84,9 +84,26 @@ export class GitService {
   /**
    * Get the current HEAD commit SHA.
    */
-  static async getHeadCommit(repoPath: string): Promise<string> {
-    const { stdout } = await GitService.exec(["rev-parse", "HEAD"], repoPath);
+  static async getHeadCommit(repoPath: string, branch?: string): Promise<string> {
+    // The fully qualified ref can never start with "-", so it needs no
+    // --end-of-options (unsupported by rev-parse in older Apple git builds).
+    const ref = branch ? `refs/heads/${branch}` : "HEAD";
+    const { stdout } = await GitService.exec(
+      ["rev-parse", "--verify", `${ref}^{commit}`],
+      repoPath,
+    );
     return stdout.trim();
+  }
+
+  static async getLocalBranches(repoPath: string): Promise<string[]> {
+    const { stdout } = await GitService.exec(
+      ["for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads/"],
+      repoPath,
+    );
+    return stdout
+      .split("\n")
+      .map((branch) => branch.trim())
+      .filter(Boolean);
   }
 
   /**
@@ -97,8 +114,12 @@ export class GitService {
     repoPath: string,
     worktreePath: string,
     branchName: string,
+    baseCommit?: string,
   ): Promise<void> {
-    await GitService.exec(["worktree", "add", "-b", branchName, worktreePath], repoPath);
+    await GitService.exec(
+      ["worktree", "add", "-b", branchName, worktreePath, ...(baseCommit ? [baseCommit] : [])],
+      repoPath,
+    );
   }
 
   /**

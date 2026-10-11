@@ -130,6 +130,10 @@ Heartbeat v3 is the default background automation architecture.
 
 See [Heartbeat v3](heartbeat-v3.md) for the detailed runtime contract.
 
+## Build checkouts
+
+Build sessions can use the local workspace or an isolated Git worktree and select an existing starting branch. Checkout reuse validates ownership and preserves files. Missing saved checkouts fail explicitly instead of silently redirecting work to the workspace root. See [Worktrees](worktrees.md).
+
 ## Dreaming
 
 Dreaming is the background memory-curation phase inside Workflow Intelligence.

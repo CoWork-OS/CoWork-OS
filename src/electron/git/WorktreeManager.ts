@@ -110,9 +110,11 @@ export class WorktreeManager {
     workspacePath: string,
     isTemp?: boolean,
     requireIsolation = false,
+    mode?: "local" | "worktree",
   ): Promise<boolean> {
     const settings = this.getSettings();
-    if (!settings.enabled && !requireIsolation) return false;
+    const required = requireIsolation || mode === "worktree";
+    if (!required && (mode === "local" || !settings.enabled)) return false;
     if (isTemp) return false;
 
     try {
@@ -142,11 +144,37 @@ export class WorktreeManager {
     taskTitle: string,
     workspaceId: string,
     workspacePath: string,
+    startingBranch?: string,
   ): Promise<WorktreeInfo> {
+    const existing = await this.worktreeInfoRepo.findByTaskId(taskId);
+    if (existing && existing.status !== "cleaned") {
+      if (existing.workspaceId !== workspaceId) {
+        throw new Error("The task's worktree belongs to another workspace.");
+      }
+      const registered = await GitService.listWorktrees(existing.repoPath || workspacePath);
+      if (
+        !fs.existsSync(existing.worktreePath) ||
+        !registered.some(
+          (entry) =>
+            path.resolve(entry.path) === path.resolve(existing.worktreePath) &&
+            entry.branch === existing.branchName,
+        )
+      ) {
+        throw new Error(
+          "The task's worktree is unavailable. Restore it before retrying this task.",
+        );
+      }
+      return existing;
+    }
     const settings = this.getSettings();
     const repoPath = await GitService.getRepoRoot(workspacePath);
-    const baseBranch = await GitService.getCurrentBranch(repoPath);
-    const baseCommit = await GitService.getHeadCommit(repoPath);
+    const baseBranch = startingBranch || (await GitService.getCurrentBranch(repoPath));
+    if (startingBranch && !(await GitService.getLocalBranches(repoPath)).includes(startingBranch)) {
+      throw new Error(
+        `Starting branch "${startingBranch}" is unavailable. Select an existing local branch.`,
+      );
+    }
+    const baseCommit = await GitService.getHeadCommit(repoPath, startingBranch);
     const branchName = GitService.generateBranchName(taskTitle, settings.branchPrefix, taskId);
 
     // Place worktrees in a subdirectory that's gitignored
@@ -159,21 +187,18 @@ export class WorktreeManager {
       fs.mkdirSync(worktreeDir, { recursive: true });
     }
 
-    // Clean up stale worktree directory if it exists (e.g., from a previous failed cleanup)
+    // Never delete an existing checkout during task admission: it may hold user work.
     if (fs.existsSync(worktreePath)) {
-      try {
-        await GitService.removeWorktree(repoPath, worktreePath);
-      } catch {
-        // removeWorktree may fail if git doesn't know about it; just remove the directory
-      }
-      fs.rmSync(worktreePath, { recursive: true, force: true });
+      throw new Error(
+        "The worktree destination already exists. Resolve it before retrying this task.",
+      );
     }
 
     // Ensure .cowork-worktrees is in .gitignore
     await this.ensureGitignore(repoPath, workspacePath);
 
     // Create the worktree
-    await GitService.createWorktree(repoPath, worktreePath, branchName);
+    await GitService.createWorktree(repoPath, worktreePath, branchName, baseCommit);
 
     const info: WorktreeInfo = {
       taskId,

@@ -226,6 +226,8 @@ export const AgentConfigSchema = z
     chronicleMode: z.enum(["inherit", "enabled", "disabled"]).optional(),
     shellAccess: z.boolean().optional(),
     requireWorktree: z.boolean().optional(),
+    worktreeMode: z.enum(["local", "worktree"]).optional(),
+    worktreeBaseBranch: z.string().trim().min(1).max(250).optional(),
     autoApproveTypes: z.array(z.string().min(1).max(200)).max(50).optional(),
     allowSharedContextMemory: z.boolean().optional(),
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),

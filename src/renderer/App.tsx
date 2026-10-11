@@ -7031,7 +7031,10 @@ export function App() {
   const handleCreateTaskFromPrompt = async (
     prompt: string,
     attachments: PendingAttachment[] = [],
-    taskOptions?: { accessProfileId?: AccessProfileId },
+    taskOptions?: { accessProfileId?: AccessProfileId } & Pick<
+      AgentConfig,
+      "worktreeMode" | "worktreeBaseBranch"
+    >,
   ): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
@@ -7071,7 +7074,15 @@ export function App() {
       {
         generateTitle: true,
         ...(taskOptions?.accessProfileId ? { accessProfileId: taskOptions.accessProfileId } : {}),
-        ...(isBuildPrompt(prompt) ? { agentConfig: { taskOrigin: "build" as const } } : {}),
+        ...(isBuildPrompt(prompt)
+          ? {
+              agentConfig: {
+                taskOrigin: "build" as const,
+                worktreeMode: taskOptions?.worktreeMode,
+                worktreeBaseBranch: taskOptions?.worktreeBaseBranch,
+              },
+            }
+          : {}),
       },
       images,
       workspace || undefined,

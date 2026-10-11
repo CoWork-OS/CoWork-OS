@@ -5615,6 +5615,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
 
   // Git Worktree APIs
+  getWorktreeWorkspaceInfo: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_WORKSPACE_INFO, workspaceId),
   getWorktreeInfo: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_GET_INFO, taskId),
   listWorktrees: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.WORKTREE_LIST, workspaceId),
@@ -9602,6 +9604,9 @@ export interface ElectronAPI {
   onVoiceEvent: (callback: (event: VoiceEventData) => void) => () => void;
 
   // Git Worktree APIs
+  getWorktreeWorkspaceInfo: (
+    workspaceId: string,
+  ) => Promise<import("../shared/types").WorktreeWorkspaceInfo>;
   getWorktreeInfo: (taskId: string) => Promise<Any>;
   listWorktrees: (workspaceId: string) => Promise<Any[]>;
   mergeWorktree: (taskId: string) => Promise<Any>;

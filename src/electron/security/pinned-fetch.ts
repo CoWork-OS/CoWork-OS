@@ -101,7 +101,7 @@ export async function pinnedFetch(
       );
     // The proxy resolves and connects, so pinning a local lookup cannot apply.
     // Keep the global (EnvHttpProxyAgent) transport and its lenient DNS check.
-    await assertResolvedHostAllowed(hostname);
+    if (!explicitlyAllowedInternal) await assertResolvedHostAllowed(hostname);
     init.signal?.throwIfAborted();
     return fetch(url, { ...init, redirect: "manual" });
   }

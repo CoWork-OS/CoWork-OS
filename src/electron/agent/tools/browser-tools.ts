@@ -31,9 +31,11 @@ import { BrowserHistoryRepository } from "../../database/repository-facades";
 import { browserProfileKey } from "../../../shared/browser-profile";
 import { DEVELOPER_MODE_BROWSER_TOOLS } from "../../../shared/browser-settings";
 import { BrowserSettingsManager } from "../../settings/browser-settings-manager";
-import { evaluateNetworkPolicy } from "../../security/network-policy";
+import {
+  evaluateNetworkPolicy,
+  assertPolicyResolvedHostAllowed,
+} from "../../security/network-policy";
 import { recordUntrustedContentRead } from "../security/untrusted-content-source";
-import { assertResolvedHostAllowed } from "../../security/address-classes";
 import {
   assertWorkspaceFilesystemAccess,
   assertWorkspaceReadableFileAccessWithApproval,
@@ -456,7 +458,7 @@ export class BrowserTools {
     // The policy above only inspects the literal host. Resolve the name too, so
     // `evil.test` pointing at 169.254.169.254 or a private range is refused
     // rather than navigated to and read back through browser_get_content.
-    await assertResolvedHostAllowed(new URL(url).hostname);
+    await assertPolicyResolvedHostAllowed(new URL(url).hostname);
     return url;
   }
 
@@ -723,6 +725,11 @@ export class BrowserTools {
   private async ensureBrowserUseCloudConfigured(
     input: unknown,
   ): Promise<BrowserUseCloudSessionState> {
+    if (!BrowserService.supportsExternalDebuggerAttachment) {
+      throw new Error(
+        "Browser Use Cloud navigation is unavailable under enforced network policy. Use the local Browser Workbench instead.",
+      );
+    }
     const client = this.getBrowserUseCloudClient();
     if (!client) {
       throw new Error(
@@ -1090,7 +1097,9 @@ export class BrowserTools {
    * Get the tool definitions for browser automation
    */
   static getToolDefinitions() {
-    const browserUseCloudConfigured = BrowserTools.isBrowserUseCloudConfiguredForToolSchema();
+    const browserUseCloudConfigured =
+      BrowserService.supportsExternalDebuggerAttachment &&
+      BrowserTools.isBrowserUseCloudConfiguredForToolSchema();
     const browserNavigateProperties: Record<string, Any> = {
       url: {
         type: "string",
@@ -2176,6 +2185,15 @@ export class BrowserTools {
               success: false,
               error:
                 "Browser Use Cloud cannot be used for localhost, private IP, link-local, or file targets. Use the default visible Browser Workbench for local/private sites.",
+            };
+          }
+          if (!BrowserService.supportsExternalDebuggerAttachment) {
+            return {
+              success: false,
+              error:
+                "Browser Use Cloud navigation is unavailable under enforced network policy. Use the local Browser Workbench instead.",
+              browserProvider: "browser-use-cloud",
+              retryable: false,
             };
           }
           let lastError: unknown;

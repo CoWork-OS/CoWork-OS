@@ -241,6 +241,14 @@ export function assertNetworkPolicyAllowed(request: NetworkPolicyRequest): Netwo
   throw new Error(`Network access denied for "${request.url}": ${decision.reason}`);
 }
 
+/** Apply the same deliberate internal-host exception to preflight and transport. */
+export async function assertPolicyResolvedHostAllowed(hostname: string): Promise<void> {
+  const explicitlyAllowed = (loadPolicies().runtime.network.allowedInternalHosts ?? []).some(
+    (pattern) => domainMatches(hostname, pattern),
+  );
+  if (!explicitlyAllowed) await assertResolvedHostAllowed(hostname);
+}
+
 /**
  * Policy check plus DNS resolution, for any caller about to actually connect.
  *
@@ -265,6 +273,6 @@ export async function assertNetworkDestinationAllowed(
   } catch {
     throw new Error(`Network access denied for "${request.url}": malformed_url`);
   }
-  await assertResolvedHostAllowed(hostname);
+  await assertPolicyResolvedHostAllowed(hostname);
   return decision;
 }

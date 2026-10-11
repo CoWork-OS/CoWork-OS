@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GuardrailManager } from "../../guardrails/guardrail-manager";
-import { domainMatches, evaluateNetworkPolicy } from "../network-policy";
+import {
+  domainMatches,
+  evaluateNetworkPolicy,
+  assertNetworkDestinationAllowed,
+} from "../network-policy";
 
 vi.mock("../../admin/policies", () => ({
   loadPolicies: vi.fn(() => ({
@@ -183,5 +187,29 @@ describe("evaluateNetworkPolicy", () => {
       reason: "profile_network_disabled",
       ruleSource: "access_profile",
     });
+  });
+  it("carries explicit LAN exceptions through the destination preflight", async () => {
+    const policies = loadPolicies();
+    policies.runtime.network.allowedInternalHosts = ["192.168.1.50", "intranet.internal"];
+    vi.mocked(loadPolicies).mockReturnValue(policies);
+    for (const hostname of ["192.168.1.50", "intranet.internal"]) {
+      await expect(
+        assertNetworkDestinationAllowed({
+          url: `http://${hostname}`,
+          toolName: "browser_navigate",
+          networkEnabled: true,
+        }),
+      ).resolves.toMatchObject({ action: "allow" });
+    }
+    await expect(
+      assertNetworkDestinationAllowed({ url: "http://192.168.1.51", toolName: "browser_navigate" }),
+    ).rejects.toThrow("internal_address_blocked");
+    await expect(
+      assertNetworkDestinationAllowed({
+        url: "http://192.168.1.50",
+        toolName: "browser_navigate",
+        networkEnabled: false,
+      }),
+    ).rejects.toThrow("workspace_network_disabled");
   });
 });

@@ -1,0 +1,60 @@
+{
+  "id": "inline-generated-images-2026-10-11",
+  "title": "Generated images are shown inline in the conversation",
+  "source": {
+    "incident": "local-mcp-image-banner-acceptance",
+    "pullRequest": 453
+  },
+  "categories": [
+    {
+      "id": "generated-image-card-at-creation",
+      "prompt": "A task creates an image with the built-in generate_image tool or an MCP image tool; the image is visible in the conversation without expanding a step.",
+      "assertions": {
+        "imageCardShownForBuiltInImage": true,
+        "imageCardShownForMcpImage": true,
+        "imageCardShownForBrowserScreenshot": false,
+        "duplicateCardWhenAnswerEmbedsImage": false,
+        "executableTest": "src/renderer/components/__tests__/generated-image-artifact-cards.test.ts",
+        "executableTestNames": [
+          "surfaces built-in generate_image output as an image card anchored at creation",
+          "surfaces MCP-saved images, including legacy screenshot-typed MCP events",
+          "does not surface browser screenshots or MCP videos",
+          "skips an image card when an assistant answer already embeds the image inline",
+          "skips an image card when an assistant answer links the image (the link shows a thumbnail)",
+          "keeps image cards from crowding out file cards and estimates their taller height"
+        ]
+      }
+    },
+    {
+      "id": "markdown-image-links-show-thumbnails",
+      "prompt": "The final answer links a workspace image, e.g. [Download the banner](banner.png); the link renders with an inline thumbnail (not in step titles), and %20 names resolve.",
+      "assertions": {
+        "thumbnailForImageLink": true,
+        "thumbnailForRemoteOrSvgLink": false,
+        "thumbnailInStepTitle": false,
+        "executableTest": "src/renderer/components/__tests__/MarkdownRenderer.test.tsx",
+        "executableTestNames": [
+          "adds an inline thumbnail after a link to a workspace image",
+          "does not add thumbnails for non-image or remote links",
+          "can disable link thumbnails for compact event titles",
+          "keeps ![]() image embeds rendering through the image preview only",
+          "decodes percent-encoded relative file links"
+        ]
+      }
+    },
+    {
+      "id": "mcp-images-logged-as-images",
+      "prompt": "An MCP image-generation tool returns image content; it is logged as type image with a tool-based file name and a hint to embed it.",
+      "assertions": {
+        "fileCreatedType": "image",
+        "screenshotToolsKeepScreenshotType": true,
+        "savedImageLineFormatUnchanged": true,
+        "executableTest": "src/electron/agent/tools/__tests__/mcp-screenshot-naming.test.ts",
+        "executableTestNames": [
+          "names generated MCP images after the tool, logs them as images, and asks for inline display"
+        ]
+      }
+    }
+  ],
+  "notes": "Before: generated images appeared only as file links (preview hidden in a collapsed step row; MCP images typed as screenshots render as plain links in summary mode; markdown image links had no preview), and the link thumbnail frame left an empty strip next to wide images. After: an image card appears where the image was created, links to images get thumbnails, and the final answer's embed renders inline."
+}

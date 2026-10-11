@@ -156,6 +156,11 @@ export interface LLMToolUse {
   id: string;
   name: string;
   input: Record<string, Any>;
+  /** Provider replay metadata retained across task/session restoration. */
+  providerMetadata?: {
+    geminiFunctionName?: string;
+    geminiThoughtSignature?: string;
+  };
   /**
    * Provider-side arguments or call metadata are invalid. The executor must turn
    * this into an error tool result without dispatching the tool. Invalid metadata

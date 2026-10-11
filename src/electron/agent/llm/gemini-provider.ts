@@ -162,7 +162,9 @@ export class GeminiProvider implements LLMProvider {
             // Gemini uses functionResponse for tool results
             parts.push({
               functionResponse: {
-                name: this.getToolNameFromId(item.tool_use_id),
+                name:
+                  (item as Any).providerMetadata?.geminiFunctionName ||
+                  this.getToolNameFromId(item.tool_use_id),
                 response: {
                   result: item.content,
                   is_error: item.is_error || false,
@@ -171,7 +173,18 @@ export class GeminiProvider implements LLMProvider {
             });
           } else if (item.type === "tool_use") {
             // Gemini uses functionCall for tool invocations
-            const thoughtSignature = this.getThoughtSignatureFromId(item.id);
+            // Rebuild these maps from persisted assistant content so a fresh
+            // provider instance can replay a restored conversation losslessly.
+            this.toolIdToName.set(item.id, item.name);
+            if (item.providerMetadata?.geminiThoughtSignature) {
+              this.toolIdToThoughtSignature.set(
+                item.id,
+                item.providerMetadata.geminiThoughtSignature,
+              );
+            }
+            const thoughtSignature =
+              item.providerMetadata?.geminiThoughtSignature ||
+              this.getThoughtSignatureFromId(item.id);
             const functionCallPart: Any = {
               functionCall: {
                 name: item.name,
@@ -354,6 +367,10 @@ export class GeminiProvider implements LLMProvider {
           id: toolUseId,
           name: part.functionCall.name,
           input: part.functionCall.args || {},
+          providerMetadata: {
+            geminiFunctionName: part.functionCall.name,
+            ...(part.thoughtSignature ? { geminiThoughtSignature: part.thoughtSignature } : {}),
+          },
         });
       }
     }

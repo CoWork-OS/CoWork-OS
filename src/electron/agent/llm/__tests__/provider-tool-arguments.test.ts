@@ -95,13 +95,23 @@ describe("provider-specific malformed argument boundaries", () => {
 
   it("rejects truncated Azure Responses arguments without dropping a valid streamed sibling", async () => {
     const provider = Object.create(AzureOpenAIProvider.prototype) as Any;
-    const response = sse(
-      calls.map((call, output_index) => ({
+    const response = sse([
+      ...calls.map((call, output_index) => ({
         type: "response.output_item.done",
         output_index,
         item: { ...call, call_id: call.id, type: "function_call" },
       })),
-    );
+      {
+        type: "response.completed",
+        response: {
+          output: calls.map((call) => ({
+            ...call,
+            call_id: call.id,
+            type: "function_call",
+          })),
+        },
+      },
+    ]);
     assertMixedResult(await provider.fromResponsesStreamResponse(response, {}, Date.now()));
   });
 });

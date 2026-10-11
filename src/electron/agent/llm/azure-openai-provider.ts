@@ -37,7 +37,6 @@ const DEFAULT_AZURE_API_VERSION = "2024-12-01-preview";
 const AZURE_MAX_TOOLS = 128;
 const AZURE_CHAT_MAX_TOOL_CALL_ID_LENGTH = 64;
 const AZURE_RESPONSES_MAX_CALL_ID_LENGTH = 64;
-const textDecoder = new TextDecoder();
 
 const isToolResult = (item: LLMContent | LLMToolResult): item is LLMToolResult =>
   item?.type === "tool_result";
@@ -412,6 +411,7 @@ export class AzureOpenAIProvider implements LLMProvider {
 
     let buffer = "";
     let eventDataLines: string[] = [];
+    const textDecoder = new TextDecoder();
 
     const flushEvent = () => {
       if (eventDataLines.length === 0) return;
@@ -444,6 +444,7 @@ export class AzureOpenAIProvider implements LLMProvider {
         }
 
         if (done) {
+          buffer += textDecoder.decode();
           if (buffer.length > 0) {
             let line = buffer;
             if (line.endsWith("\r")) {
@@ -479,14 +480,25 @@ export class AzureOpenAIProvider implements LLMProvider {
     let cachedTokens = 0;
     let cacheWriteTokens = 0;
     let finishReason: LLMResponse["stopReason"] = "end_turn";
+    let streamError: Error | undefined;
+    let sawTerminalEvent = false;
+    let sawFinishReason = false;
 
     await this.consumeSseEvents(response, (eventData) => {
-      if (!eventData || eventData === "[DONE]") return;
+      if (!eventData) return;
+      if (eventData === "[DONE]") {
+        return;
+      }
 
       let payload: Any;
       try {
         payload = JSON.parse(eventData);
       } catch {
+        return;
+      }
+
+      if (payload?.error) {
+        streamError = new Error(payload.error.message || "Azure OpenAI streaming request failed");
         return;
       }
 
@@ -555,20 +567,38 @@ export class AzureOpenAIProvider implements LLMProvider {
       switch (choice?.finish_reason) {
         case "tool_calls":
           finishReason = "tool_use";
+          sawFinishReason = true;
           break;
         case "length":
           finishReason = "max_tokens";
+          sawFinishReason = true;
           break;
         case "stop":
           finishReason = "end_turn";
+          sawFinishReason = true;
           break;
         case "content_filter":
           finishReason = "refusal";
+          sawFinishReason = true;
+          sawTerminalEvent = true;
+          break;
+        case null:
+        case undefined:
           break;
         default:
+          sawTerminalEvent = true;
           break;
       }
+      if (choice?.finish_reason) {
+        sawFinishReason = true;
+        sawTerminalEvent = true;
+      }
     });
+
+    if (streamError) throw streamError;
+    if (!sawTerminalEvent || !sawFinishReason) {
+      throw new Error("Azure OpenAI stream ended without a terminal response");
+    }
 
     this.emitStreamProgress(
       request.onStreamProgress,
@@ -584,7 +614,14 @@ export class AzureOpenAIProvider implements LLMProvider {
     if (contentText.length > 0) {
       content.push({ type: "text", text: contentText });
     }
-    for (const [index, toolCall] of [...streamedToolCalls.entries()].sort((a, b) => a[0] - b[0])) {
+    // Drop truncated or filtered calls only. Some Azure-hosted models report
+    // "stop" alongside complete tool calls, which the non-streaming path keeps.
+    const finalFinishReason: LLMResponse["stopReason"] = finishReason;
+    const shouldExposeToolCalls =
+      String(finalFinishReason) !== "max_tokens" && String(finalFinishReason) !== "refusal";
+    for (const [index, toolCall] of shouldExposeToolCalls
+      ? [...streamedToolCalls.entries()].sort((a, b) => a[0] - b[0])
+      : []) {
       if (!toolCall.name) {
         continue;
       }
@@ -637,6 +674,9 @@ export class AzureOpenAIProvider implements LLMProvider {
     let cachedTokens = 0;
     let cacheWriteTokens = 0;
     let finishReason: LLMResponse["stopReason"] = "end_turn";
+    let streamError: Error | undefined;
+    let sawTerminalEvent = false;
+    let allowStreamedTools = true;
 
     const normalizeStreamedToolCallIdentifier = (value: unknown): string | undefined => {
       if (value === undefined || value === null) {
@@ -690,12 +730,24 @@ export class AzureOpenAIProvider implements LLMProvider {
     };
 
     await this.consumeSseEvents(response, (eventData) => {
-      if (!eventData || eventData === "[DONE]") return;
+      if (!eventData) return;
+      if (eventData === "[DONE]") {
+        return;
+      }
 
       let payload: Any;
       try {
         payload = JSON.parse(eventData);
       } catch {
+        return;
+      }
+
+      if (payload?.type === "response.failed" || payload?.type === "error" || payload?.error) {
+        const detail = payload?.response?.error || payload?.error;
+        const message = typeof detail === "string" ? detail : detail?.message;
+        streamError = new Error(
+          message || payload?.message || "Azure OpenAI streaming request failed",
+        );
         return;
       }
 
@@ -774,7 +826,12 @@ export class AzureOpenAIProvider implements LLMProvider {
           break;
         }
         case "response.incomplete":
+          allowStreamedTools = false;
         case "response.completed":
+          sawTerminalEvent = true;
+          if (payload.type === "response.completed") {
+            allowStreamedTools = true;
+          }
           completedResponse = payload.response;
           if (payload.response?.usage) {
             inputTokens = payload.response.usage.input_tokens ?? inputTokens;
@@ -789,6 +846,7 @@ export class AzureOpenAIProvider implements LLMProvider {
           if (Array.isArray(payload.response?.output)) {
             for (const [index, item] of payload.response.output.entries()) {
               if (item?.type === "function_call") {
+                if (item.status === "incomplete") continue;
                 finishReason = "tool_use";
                 const existing = getStreamedToolCall({
                   callId: item.call_id,
@@ -813,6 +871,9 @@ export class AzureOpenAIProvider implements LLMProvider {
           break;
       }
     });
+
+    if (streamError) throw streamError;
+    if (!sawTerminalEvent) throw new Error("Azure OpenAI stream ended without a terminal response");
 
     this.emitStreamProgress(
       request.onStreamProgress,
@@ -849,11 +910,17 @@ export class AzureOpenAIProvider implements LLMProvider {
       };
     }
 
+    if (allowStreamedTools && streamedToolCalls.size > 0) {
+      finishReason = "tool_use";
+    }
+
     const content: LLMContent[] = [];
     if (contentText.length > 0) {
       content.push({ type: "text", text: contentText });
     }
-    for (const toolCall of [...streamedToolCalls.values()].sort((a, b) => a.order - b.order)) {
+    for (const toolCall of allowStreamedTools && finishReason === "tool_use"
+      ? [...streamedToolCalls.values()].sort((a, b) => a.order - b.order)
+      : []) {
       if (!toolCall.name) {
         continue;
       }
@@ -888,6 +955,9 @@ export class AzureOpenAIProvider implements LLMProvider {
   private fromResponsesApiResponse(response: Any): LLMResponse {
     const content: LLMContent[] = [];
     let sawToolCall = false;
+    const responseAllowsTools =
+      (response?.status === undefined || response?.status === "completed") &&
+      mapResponsesApiStopReason(response, false) === "end_turn";
 
     if (Array.isArray(response?.output)) {
       response.output.forEach((item: Any, index: number) => {
@@ -898,7 +968,11 @@ export class AzureOpenAIProvider implements LLMProvider {
               content.push({ type: "text", text: block.text });
             }
           }
-        } else if (item.type === "function_call") {
+        } else if (
+          item.type === "function_call" &&
+          responseAllowsTools &&
+          (item.status === undefined || item.status === "completed")
+        ) {
           sawToolCall = true;
           const id = item.call_id || item.id || `call_${index}`;
           const parsedArguments = parseOpenAICompatibleToolArguments(item.arguments);

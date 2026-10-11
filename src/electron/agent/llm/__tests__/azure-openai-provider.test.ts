@@ -837,7 +837,7 @@ describe("AzureOpenAIProvider", () => {
     expect(response.usage).toEqual({ inputTokens: 6, outputTokens: 2 });
   });
 
-  it("merges Responses argument events keyed by item_id with call_id records without a completed event", async () => {
+  it("merges Responses argument events keyed by item_id with call_id records before the terminal event", async () => {
     const provider = Object.create(AzureOpenAIProvider.prototype) as Any;
     const response = createStreamingResponse([
       'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read_file","arguments":""}}\n\n',
@@ -846,6 +846,7 @@ describe("AzureOpenAIProvider", () => {
       'data: {"type":"response.function_call_arguments.delta","item_id":"fc_2","output_index":1,"delta":"{\\"path\\":\\"result.txt\\"}"}\n\n',
       'data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":0,"arguments":"{\\"path\\":\\"source.txt\\"}"}\n\n',
       'data: {"type":"response.function_call_arguments.done","item_id":"fc_2","output_index":1,"arguments":"{\\"path\\":\\"result.txt\\"}"}\n\n',
+      'data: {"type":"response.completed"}\n\n',
       "data: [DONE]\n\n",
     ]);
 
@@ -878,6 +879,7 @@ describe("AzureOpenAIProvider", () => {
       'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_legacy","name":"read_file","arguments":""}}\n\n',
       'data: {"type":"response.function_call_arguments.delta","item_id":"call_legacy","delta":"{\\"path\\":\\"legacy.txt\\"}"}\n\n',
       'data: {"type":"response.function_call_arguments.done","item_id":"call_legacy","arguments":"{\\"path\\":\\"legacy.txt\\"}"}\n\n',
+      'data: {"type":"response.completed"}\n\n',
       "data: [DONE]\n\n",
     ]);
 

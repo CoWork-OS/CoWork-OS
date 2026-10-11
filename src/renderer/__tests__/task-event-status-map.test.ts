@@ -52,6 +52,15 @@ describe("getTaskEventStatus", () => {
     );
   });
 
+  it("keeps a live timeline envelope of the pause progress update paused", () => {
+    expect(
+      getTaskEventStatus("timeline_step_updated", {
+        legacyType: "progress_update",
+        message: "Paused - awaiting user input",
+      }),
+    ).toBe("paused");
+  });
+
   it("keeps ordinary progress active and allows explicit resumption", () => {
     expect(getTaskEventStatus("progress_update", { message: "Running a command" })).toBe(
       "executing",

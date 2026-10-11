@@ -157,6 +157,8 @@ export class BlueBubblesClient extends EventEmitter {
   private pollTimer?: NodeJS.Timeout;
   private connected = false;
   private lastMessageDate = 0;
+  private lastMessageGuids = new Set<string>();
+  private pollInFlight?: Promise<void>;
 
   constructor(options: BlueBubblesClientOptions) {
     super();
@@ -376,21 +378,74 @@ export class BlueBubblesClient extends EventEmitter {
    * Poll for new messages
    */
   private async pollMessages(): Promise<void> {
-    const response = await this.apiRequest("POST", "/message/query", {
-      with: ["chat", "handle"],
-      sort: "DESC",
-      after: this.lastMessageDate,
-      limit: 50,
+    if (this.pollInFlight) {
+      return this.pollInFlight;
+    }
+    const poll = this.pollMessagesOnce();
+    let guarded!: Promise<void>;
+    guarded = poll.finally(() => {
+      if (this.pollInFlight === guarded) this.pollInFlight = undefined;
     });
+    this.pollInFlight = guarded;
+    return guarded;
+  }
 
-    const messages = (response.data || []) as BlueBubblesMessage[];
-
-    // Process messages in chronological order
-    for (const msg of messages.reverse()) {
-      if (!msg.isFromMe && msg.dateCreated > this.lastMessageDate) {
-        this.emit("message", this.normalizeMessage(msg));
-        this.lastMessageDate = Math.max(this.lastMessageDate, msg.dateCreated);
+  /** Execute one complete paginated cursor transaction. */
+  private async pollMessagesOnce(): Promise<void> {
+    const pageSize = 100;
+    const previousDate = this.lastMessageDate;
+    const previousGuids = this.lastMessageGuids;
+    // Query a one-millisecond overlap because BlueBubbles treats `after` as
+    // exclusive. The local cursor and GUID set provide the exact boundary.
+    const queryAfter = Math.max(0, previousDate - 1);
+    // Freeze the upper bound so inserts during pagination are deferred to the
+    // next poll instead of shifting DESC offsets underneath this batch.
+    const queryBefore = Date.now();
+    const messages: BlueBubblesMessage[] = [];
+    const seenGuids = new Set<string>();
+    let offset = 0;
+    while (true) {
+      const response = await this.apiRequest("POST", "/message/query", {
+        with: ["chat", "handle"],
+        sort: "DESC",
+        after: queryAfter,
+        before: queryBefore,
+        limit: pageSize,
+        offset,
+      });
+      const page = (response.data || []) as BlueBubblesMessage[];
+      let added = 0;
+      for (const message of page) {
+        if (!seenGuids.has(message.guid)) {
+          seenGuids.add(message.guid);
+          messages.push(message);
+          added += 1;
+        }
       }
+      // A full page with nothing new means the server ignored `offset`; stop
+      // instead of re-requesting the same page forever.
+      if (page.length < pageSize || added === 0) break;
+      offset += page.length;
+    }
+
+    const eligible = messages
+      .filter(
+        (msg) =>
+          !msg.isFromMe &&
+          (msg.dateCreated > previousDate ||
+            (msg.dateCreated === previousDate && !previousGuids.has(msg.guid))),
+      )
+      .sort((a, b) => a.dateCreated - b.dateCreated || a.guid.localeCompare(b.guid));
+    for (const msg of eligible) this.emit("message", this.normalizeMessage(msg));
+
+    if (eligible.length > 0) {
+      const maxDate = eligible.reduce((max, msg) => Math.max(max, msg.dateCreated), previousDate);
+      this.lastMessageDate = maxDate;
+      const guidsAtCursor = maxDate === previousDate ? new Set(previousGuids) : new Set<string>();
+      for (const msg of eligible) {
+        if (msg.dateCreated === maxDate) guidsAtCursor.add(msg.guid);
+      }
+      this.lastMessageGuids = guidsAtCursor;
     }
   }
 

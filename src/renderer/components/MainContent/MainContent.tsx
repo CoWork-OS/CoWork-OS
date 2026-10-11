@@ -394,6 +394,9 @@ import {
   assignTimelineRef,
   getAutoScrollTargetTop,
   shouldScheduleAutoScrollWrite,
+  captureTaskFeedReadingAnchor,
+  getTaskFeedReadingAnchorDrift,
+  type TaskFeedReadingAnchor,
 } from "./task-feed-logic";
 import {
   formatSignedScore,
@@ -846,33 +849,36 @@ function VirtualizedTaskFeedRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const visibleNotifiedEventIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = rowRef.current;
     if (!element) return;
 
     let frame = 0;
+    const report = () => {
+      const nextHeight = Math.ceil(element.getBoundingClientRect().height);
+      // A row that renders nothing is 0px tall and must report it, or it keeps its estimated
+      // height as a blank gap. A row inside a hidden (display: none) view has no layout boxes
+      // at all; skip it so a hidden feed does not collapse every row to 0.
+      if (nextHeight === 0 && element.getClientRects().length === 0) return;
+      onHeightChange(itemKey, nextHeight);
+      if (
+        nextHeight > 0 &&
+        visibilityEnabled &&
+        visiblePerfEventId &&
+        visibleNotifiedEventIdRef.current !== visiblePerfEventId
+      ) {
+        visibleNotifiedEventIdRef.current = visiblePerfEventId;
+        markTaskEventVisible({ id: visiblePerfEventId }, "measured-row", visibilityEnabled);
+      }
+    };
     const measure = () => {
       if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const nextHeight = Math.ceil(element.getBoundingClientRect().height);
-        // A row that renders nothing is 0px tall and must report it, or it keeps its estimated
-        // height as a blank gap. A row inside a hidden (display: none) view has no layout boxes
-        // at all; skip it so a hidden feed does not collapse every row to 0.
-        if (nextHeight === 0 && element.getClientRects().length === 0) return;
-        onHeightChange(itemKey, nextHeight);
-        if (
-          nextHeight > 0 &&
-          visibilityEnabled &&
-          visiblePerfEventId &&
-          visibleNotifiedEventIdRef.current !== visiblePerfEventId
-        ) {
-          visibleNotifiedEventIdRef.current = visiblePerfEventId;
-          markTaskEventVisible({ id: visiblePerfEventId }, "measured-row", visibilityEnabled);
-        }
-      });
+      frame = requestAnimationFrame(report);
     };
 
-    measure();
+    // Measure a newly mounted row before it is painted. Rows scrolled into view from above
+    // otherwise show at their estimated height for a few frames and then jump into place.
+    report();
 
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(() => measure());
@@ -895,6 +901,7 @@ function VirtualizedTaskFeedRow({
   return (
     <div
       data-task-feed-virtual-row={itemKey}
+      data-task-feed-row={itemKey}
       style={{
         position: "absolute",
         top: offsetTop,
@@ -909,10 +916,12 @@ function VirtualizedTaskFeedRow({
 }
 
 function MeasuredTaskFeedRow({
+  itemKey,
   visiblePerfEventId,
   enabled,
   children,
 }: {
+  itemKey: string;
   visiblePerfEventId: string | null;
   enabled: boolean;
   children: React.ReactNode;
@@ -957,7 +966,11 @@ function MeasuredTaskFeedRow({
     };
   }, [enabled, visiblePerfEventId]);
 
-  return <div ref={rowRef}>{children}</div>;
+  return (
+    <div ref={rowRef} data-task-feed-row={itemKey}>
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -1103,6 +1116,9 @@ const TaskConversationRenderedRows = memo(
     const [suppressVirtualAutoScroll, setSuppressVirtualAutoScroll] = useState(false);
     const previousFeedTaskIdRef = useRef(taskId);
     const previousFeedRowCountRef = useRef(visibleFeedRows.length);
+    const previousFeedLastRowKeyRef = useRef<string | undefined>(
+      visibleFeedRows[visibleFeedRows.length - 1]?.key,
+    );
 
     const renderableFeedRows = useMemo(() => visibleFeedRows, [visibleFeedRows]);
     const handleLoadMoreTimelineHistory = useCallback(
@@ -1289,12 +1305,16 @@ const TaskConversationRenderedRows = memo(
       visibleStartIndex,
       isAtBottom,
       scrollToBottom,
+      getItemOffset: getVirtualFeedRowOffset,
+      syncScrollPosition: syncVirtualFeedScroll,
     } = useVirtualList({
       items: renderableFeedRows,
       containerRef: mainBodyRef as React.RefObject<HTMLElement | null>,
       getItemHeight: (row) => feedRowHeights.get(row.key) ?? row.estimatedHeight,
       estimatedItemHeight: 160,
-      overscan: 4,
+      // Rows are measured as they mount; a wider overscan measures them before they scroll
+      // into view, so scrolling up through rows the reader has not seen yet stays steady.
+      overscan: 12,
       enabled: useVirtualizedFeed,
       scrollOffsetTop: conversationFlowOffsetTop,
       suppressAutoScrollOnItemsChange: suppressVirtualAutoScroll,
@@ -1304,13 +1324,19 @@ const TaskConversationRenderedRows = memo(
       if (previousFeedTaskIdRef.current !== taskId) {
         previousFeedTaskIdRef.current = taskId;
         previousFeedRowCountRef.current = renderableFeedRows.length;
+        previousFeedLastRowKeyRef.current = renderableFeedRows[renderableFeedRows.length - 1]?.key;
         onNewActivityCountChange?.(0);
         return;
       }
       const added = Math.max(0, renderableFeedRows.length - previousFeedRowCountRef.current);
       previousFeedRowCountRef.current = renderableFeedRows.length;
+      const lastRowKey = renderableFeedRows[renderableFeedRows.length - 1]?.key;
+      const previousLastRowKey = previousFeedLastRowKeyRef.current;
+      previousFeedLastRowKeyRef.current = lastRowKey;
       const loadingEarlierHistory = historyPrependAnchorRef.current?.observedLoading === true;
       if (loadingEarlierHistory) return;
+      // Older history loads in above the reader; only rows after the latest one are new.
+      if (added > 0 && lastRowKey === previousLastRowKey) return;
       if (!useVirtualizedFeed || added === 0) {
         if (isAtBottom) onNewActivityCountChange?.(0);
         return;
@@ -1320,13 +1346,7 @@ const TaskConversationRenderedRows = memo(
       } else {
         onNewActivityCountChange?.((count) => count + added);
       }
-    }, [
-      isAtBottom,
-      onNewActivityCountChange,
-      renderableFeedRows.length,
-      taskId,
-      useVirtualizedFeed,
-    ]);
+    }, [isAtBottom, onNewActivityCountChange, renderableFeedRows, taskId, useVirtualizedFeed]);
     // A short feed is not virtualized, so the virtual list cannot report reaching the top.
     // Track it from the scroll container instead; a feed that does not overflow shows its top.
     const [isNearFeedTop, setIsNearFeedTop] = useState(false);
@@ -1404,10 +1424,8 @@ const TaskConversationRenderedRows = memo(
         return;
       }
 
-      const delta = container.scrollHeight - anchor.scrollHeight;
-      if (delta > 0) {
-        container.scrollTop = anchor.scrollTop + delta;
-      }
+      // The reading anchor below already kept the reader's row in place as the earlier rows
+      // arrived; moving the scroll position again here would jump.
       if (suppressVirtualAutoScroll) setSuppressVirtualAutoScroll(false);
     }, [
       isLoadingTimelineHistory,
@@ -1418,6 +1436,69 @@ const TaskConversationRenderedRows = memo(
       useVirtualizedFeed,
       virtualFeedTotalHeight,
     ]);
+    // Keep the row the reader is looking at in place when rows above it change: earlier
+    // history arriving at the top, the feed switching to its virtualized layout, or rows above
+    // the viewport being measured. Runs after every commit, before paint, so the reader never
+    // sees the content shift. A reader on the latest message is followed by the bottom pin
+    // instead.
+    const virtualFeedListRef = useRef<HTMLDivElement | null>(null);
+    const readingAnchorRef = useRef<TaskFeedReadingAnchor | null>(null);
+    const captureReadingAnchor = useCallback(() => {
+      readingAnchorRef.current = captureTaskFeedReadingAnchor(mainBodyRef.current, taskId);
+    }, [mainBodyRef, taskId]);
+    useEffect(() => {
+      const container = mainBodyRef.current;
+      if (!container) return;
+      container.addEventListener("scroll", captureReadingAnchor, { passive: true });
+      return () => container.removeEventListener("scroll", captureReadingAnchor);
+    }, [captureReadingAnchor, mainBodyRef]);
+    useLayoutEffect(() => {
+      const container = mainBodyRef.current;
+      const anchor = readingAnchorRef.current;
+      // A reader following the latest message stays on it through every commit, before paint;
+      // rows still loading or being measured keep growing the feed under them.
+      if (container?.dataset.followingLatest === "true") {
+        readingAnchorRef.current = null;
+        const target = getAutoScrollTargetTop(container.scrollHeight, container.clientHeight);
+        if (Math.abs(container.scrollTop - target) >= 2) {
+          container.scrollTop = target;
+          if (useVirtualizedFeed) syncVirtualFeedScroll();
+        }
+        return;
+      }
+      if (container && anchor && anchor.taskId === taskId) {
+        let drift = getTaskFeedReadingAnchorDrift(container, anchor);
+        // The virtualized list may not render the anchored row in this commit: it windows by
+        // the previous scroll position, and the row moved (earlier history arrived, or the feed
+        // just switched to its virtualized layout). Place it from its laid-out offset instead,
+        // then re-window at once so the reader never sees the rows from the old position.
+        let rewindow = false;
+        const virtualList = virtualFeedListRef.current;
+        if (drift === null && useVirtualizedFeed && virtualList) {
+          const offset = getVirtualFeedRowOffset(
+            renderableFeedRows.findIndex((row) => row.key === anchor.key),
+          );
+          if (offset !== null) {
+            const listTop =
+              virtualList.getBoundingClientRect().top - container.getBoundingClientRect().top;
+            drift = listTop + offset - anchor.top;
+            rewindow = true;
+          }
+        }
+        if (drift !== null && Math.abs(drift) >= 1) {
+          container.scrollTop += drift;
+          // This correction can land exactly on the bottom of a feed that just shrank; it
+          // must not read as the reader choosing to follow the latest message.
+          container.dataset.readingAnchorAdjusted = "true";
+          if (rewindow) {
+            // Keep the anchor: the re-windowed commit runs this effect again and checks it.
+            syncVirtualFeedScroll();
+            return;
+          }
+        }
+      }
+      captureReadingAnchor();
+    });
     const showBootstrapProgress = shouldShowBootstrapProgressRow({
       isTaskWorking,
       visibleRenderableFeedRowsLength: renderableFeedRows.length,
@@ -1489,6 +1570,7 @@ const TaskConversationRenderedRows = memo(
           renderedFeedRows.map((row) => (
             <MeasuredTaskFeedRow
               key={row.key}
+              itemKey={row.key}
               visiblePerfEventId={getTaskFeedRowVisiblePerfEventId(row)}
               enabled={Boolean(rendererPerfLoggingEnabled)}
             >
@@ -1496,7 +1578,10 @@ const TaskConversationRenderedRows = memo(
             </MeasuredTaskFeedRow>
           ))
         ) : (
-          <div style={{ height: virtualFeedTotalHeight, position: "relative" }}>
+          <div
+            ref={virtualFeedListRef}
+            style={{ height: virtualFeedTotalHeight, position: "relative" }}
+          >
             {virtualFeedRows.map((virtualRow) => (
               <VirtualizedTaskFeedRow
                 key={virtualRow.item.key}
@@ -7238,6 +7323,25 @@ function MainContentComponent({
     return scrollHeight - scrollTop - clientHeight < threshold;
   }, []);
 
+  // Whether the reader follows the latest message. Opening a task starts it. Only the
+  // reader's own input changes it: scrolling up (wheel, keys, touch, scrollbar) releases it at
+  // once, and scrolling back down onto the latest message restores it. Scrolls the app makes
+  // itself (landing on an opened task, keeping a row in place, rows being measured) never
+  // release it, so a task still loading its rows keeps landing on its newest messages. The
+  // feed reads the same state from the container (data-following-latest).
+  const pinnedToLatestRef = useRef(true);
+  const lastReaderScrollTopRef = useRef(0);
+  const readerScrolledUpAtRef = useRef(0);
+  const readerInputAtRef = useRef(0);
+  const readerPointerDownRef = useRef(false);
+  const setPinnedToLatest = useCallback((pinned: boolean) => {
+    pinnedToLatestRef.current = pinned;
+    const container = mainBodyRef.current;
+    if (!container) return;
+    if (pinned) container.dataset.followingLatest = "true";
+    else delete container.dataset.followingLatest;
+  }, []);
+
   // Handle scroll events to detect manual scrolling
   const handleScroll = useCallback(() => {
     const container = mainBodyRef.current;
@@ -7252,11 +7356,81 @@ function MainContentComponent({
       activeScrollbarTimeoutRef.current = null;
     }, 800);
 
-    // If user scrolls to near bottom, re-enable auto-scroll
-    // If user scrolls away from bottom, disable auto-scroll
-    const nextAutoScroll = isNearBottom(container);
+    // A scroll caused by the feed keeping the reader's row in place is not the reader's own
+    // move.
+    const anchorAdjusted = container.dataset.readingAnchorAdjusted === "true";
+    delete container.dataset.readingAnchorAdjusted;
+    const scrollTop = container.scrollTop;
+    const movedDown = scrollTop > lastReaderScrollTopRef.current;
+    lastReaderScrollTopRef.current = scrollTop;
+    const now = performance.now();
+    const readerScrolling =
+      !anchorAdjusted && (readerPointerDownRef.current || now - readerInputAtRef.current < 400);
+    if (readerScrolling) {
+      if (!isNearBottom(container, 4)) {
+        setPinnedToLatest(false);
+      } else if (movedDown && now - readerScrolledUpAtRef.current >= 250) {
+        setPinnedToLatest(true);
+      }
+    }
+
+    const nextAutoScroll = pinnedToLatestRef.current;
     setAutoScroll((prev) => (prev === nextAutoScroll ? prev : nextAutoScroll));
-  }, [isNearBottom]);
+  }, [isNearBottom, setPinnedToLatest]);
+
+  // The reader's own scroll input. A scroll-up gesture releases the latest-message pin before
+  // its scroll event arrives.
+  useEffect(() => {
+    const container = mainBodyRef.current;
+    if (!container) return;
+    const markInput = () => {
+      readerInputAtRef.current = performance.now();
+    };
+    const releasePin = () => {
+      markInput();
+      readerScrolledUpAtRef.current = performance.now();
+      setPinnedToLatest(false);
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) releasePin();
+      else markInput();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") releasePin();
+      else if (
+        event.key === "ArrowDown" ||
+        event.key === "PageDown" ||
+        event.key === "End" ||
+        event.key === " "
+      ) {
+        markInput();
+      }
+    };
+    // Dragging the scrollbar, or selecting text past the edge, scrolls while a pointer is down.
+    const onPointerDown = () => {
+      readerPointerDownRef.current = true;
+      markInput();
+    };
+    const onPointerUp = () => {
+      if (!readerPointerDownRef.current) return;
+      readerPointerDownRef.current = false;
+      markInput();
+    };
+    container.addEventListener("wheel", onWheel, { passive: true });
+    container.addEventListener("keydown", onKeyDown);
+    container.addEventListener("touchmove", markInput, { passive: true });
+    container.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("keydown", onKeyDown);
+      container.removeEventListener("touchmove", markInput);
+      container.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [setPinnedToLatest, task?.id]);
 
   // Auto-scroll to bottom when visible transcript rows materially change.
   useEffect(() => {
@@ -7309,6 +7483,8 @@ function MainContentComponent({
   // Reset auto-scroll when task changes
   useEffect(() => {
     setAutoScroll(true);
+    setPinnedToLatest(true);
+    lastReaderScrollTopRef.current = 0;
     lastAutoScrollTargetRef.current = null;
   }, [task?.id]);
 
@@ -7394,21 +7570,24 @@ function MainContentComponent({
     };
   }, [botHistoryUnlocked, botRevealed, isBotConversation, task?.id]);
 
-  // Replies keep growing after they appear (markdown renders in a later pass). While the
-  // reader is on the latest message, keep it pinned there.
+  // Replies keep growing after they appear (markdown renders and feed rows are measured in a
+  // later pass). While the reader is on the latest message, keep it pinned there, so an opened
+  // session lands on its newest messages instead of stopping partway.
   useEffect(() => {
     const content = taskContentRef.current;
     const container = mainBodyRef.current;
-    if (!isBotConversation || !content || !container) return;
+    if (!content || !container) return;
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (!autoScrollRef.current) return;
+      if (!pinnedToLatestRef.current) return;
       const target = getAutoScrollTargetTop(container.scrollHeight, container.clientHeight);
       if (Math.abs(container.scrollTop - target) >= 2) container.scrollTop = target;
     });
     observer.observe(content);
+    // The viewport shrinks too, e.g. when the composer grows a line.
+    observer.observe(container);
     return () => observer.disconnect();
-  }, [isBotConversation, task?.id]);
+  }, [task?.id]);
 
   const reportAttachmentError = (message: string) => {
     setAttachmentError(message);
@@ -12239,6 +12418,7 @@ function MainContentComponent({
                     behavior: isBotConversation ? "auto" : "smooth",
                   });
                   setAutoScroll(true);
+                  setPinnedToLatest(true);
                 }
               }}
               title="Scroll to bottom"

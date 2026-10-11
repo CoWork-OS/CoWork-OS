@@ -7,7 +7,7 @@
  * fixed `estimatedItemHeight` fallback.
  */
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,7 +37,7 @@ export interface UseVirtualListOptions<T> {
   scrollOffsetTop?: number;
   /** Skip the next item-count auto-scroll, used when callers prepend history. */
   suppressAutoScrollOnItemsChange?: boolean;
-  /** Stable task/surface key used to restore each task's scroll anchor. */
+  /** Stable task/surface key; a new key lands the list on its latest item. */
   scrollAnchorKey?: string | null;
 }
 
@@ -50,6 +50,10 @@ export interface UseVirtualListResult<T> {
   scrollToIndex: (index: number) => void;
   /** Scroll the container to the very bottom. */
   scrollToBottom: () => void;
+  /** Top offset of the item at `index` within the list, or null when out of range. */
+  getItemOffset: (index: number) => number | null;
+  /** Re-read the container's scroll position now, after a caller moved it. */
+  syncScrollPosition: () => void;
   /** Whether the user's scroll position is pinned to the bottom. */
   isAtBottom: boolean;
   /** First item index currently rendered, including overscan. */
@@ -130,9 +134,6 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
   const previousItemCountRef = useRef(items.length);
   const previousOffsetsRef = useRef<number[]>([]);
   const previousScrollAnchorKeyRef = useRef(scrollAnchorKey);
-  const scrollAnchorsRef = useRef(
-    new Map<string, { scrollTop: number; followingBottom: boolean }>(),
-  );
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   // ---- Compute item offsets ------------------------------------------------
@@ -164,12 +165,6 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
         const atBottom = st + container.clientHeight >= container.scrollHeight - 30;
         isAtBottomRef.current = atBottom;
         setIsAtBottom(atBottom);
-        if (scrollAnchorKey) {
-          scrollAnchorsRef.current.set(scrollAnchorKey, {
-            scrollTop: st,
-            followingBottom: atBottom,
-          });
-        }
       });
     };
 
@@ -178,44 +173,33 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
       container.removeEventListener("scroll", onScroll);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [containerRef, enabled, scrollAnchorKey]);
+  }, [containerRef, enabled]);
 
-  // Preserve the visible task surface when switching between tasks. A task
-  // without a saved anchor starts at the latest content, matching normal
-  // conversation behavior.
+  // Opening a task (or switching to another one) always lands on its latest
+  // content, like a conversation. Only the reader's own scrolling moves away
+  // from it.
   useEffect(() => {
     const previousKey = previousScrollAnchorKeyRef.current;
     const nextKey = scrollAnchorKey;
     if (previousKey === nextKey) return;
-    const container = containerRef.current;
-    if (container && previousKey) {
-      scrollAnchorsRef.current.set(previousKey, {
-        scrollTop: container.scrollTop,
-        followingBottom: isAtBottomRef.current,
-      });
-    }
     previousScrollAnchorKeyRef.current = nextKey;
+    const container = containerRef.current;
     if (!container) return;
-    const saved = nextKey ? scrollAnchorsRef.current.get(nextKey) : undefined;
-    isAtBottomRef.current = saved?.followingBottom ?? true;
-    setIsAtBottom(isAtBottomRef.current);
+    isAtBottomRef.current = true;
+    setIsAtBottom(true);
     previousItemCountRef.current = items.length;
     requestAnimationFrame(() => {
       const current = containerRef.current;
       if (!current) return;
-      if (saved?.followingBottom || !saved) {
-        current.scrollTop = current.scrollHeight;
-      } else {
-        current.scrollTop = Math.min(saved.scrollTop, current.scrollHeight);
-      }
+      current.scrollTop = current.scrollHeight;
       setScrollTop(current.scrollTop);
     });
   }, [containerRef, items.length, scrollAnchorKey]);
 
   // Correct the scroll position when a measured row above the viewport grows
   // or shrinks. Late Markdown/image measurement must not move the reader's
-  // anchor row.
-  useEffect(() => {
+  // anchor row. Runs before paint so the shift is never seen.
+  useLayoutEffect(() => {
     const container = containerRef.current;
     const previousOffsets = previousOffsetsRef.current;
     if (
@@ -332,11 +316,23 @@ export function useVirtualList<T>(options: UseVirtualListOptions<T>): UseVirtual
     }
   }, [containerRef]);
 
+  const getItemOffset = useCallback(
+    (index: number) => (index >= 0 && index < offsets.length ? offsets[index] : null),
+    [offsets],
+  );
+
+  const syncScrollPosition = useCallback(() => {
+    const container = containerRef.current;
+    if (container) setScrollTop(container.scrollTop);
+  }, [containerRef]);
+
   return {
     virtualItems,
     totalHeight,
     scrollToIndex,
     scrollToBottom,
+    getItemOffset,
+    syncScrollPosition,
     isAtBottom,
     visibleStartIndex: virtualItems[0]?.index ?? 0,
     visibleEndIndex: virtualItems[virtualItems.length - 1]?.index ?? -1,

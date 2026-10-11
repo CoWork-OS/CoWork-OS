@@ -88,6 +88,68 @@ describeWithSqlite("WorktreeManager", () => {
     vi.restoreAllMocks();
   });
 
+  it("returns secure settings when decryption succeeds", () => {
+    mockSecureRepository.loadWithStatus.mockReturnValue({
+      status: "success",
+      data: {
+        enabled: false,
+        branchPrefix: "secure/",
+      },
+    });
+
+    const manager = new WorktreeManagerClass(db);
+
+    expect(manager.getSettings()).toEqual({
+      ...DEFAULT_WORKTREE_SETTINGS,
+      enabled: false,
+      branchPrefix: "secure/",
+    });
+    expect(mockSecureRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes corrupted secure settings and falls back to defaults", () => {
+    mockSecureRepository.loadWithStatus.mockReturnValue({
+      status: "decryption_failed",
+      error: "Unsupported state or unable to authenticate data",
+    });
+
+    const manager = new WorktreeManagerClass(db);
+
+    expect(manager.getSettings()).toEqual({ ...DEFAULT_WORKTREE_SETTINGS });
+    expect(mockSecureRepository.delete).toHaveBeenCalledWith("worktree");
+    expect(mockSecureRepository.save).not.toHaveBeenCalled();
+  });
+
+  it("repairs corrupted secure settings from legacy storage when available", () => {
+    mockSecureRepository.loadWithStatus.mockReturnValue({
+      status: "checksum_mismatch",
+      error: "corrupted",
+    });
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
+      "worktree_settings",
+      JSON.stringify({
+        enabled: false,
+        branchPrefix: "legacy/",
+        commitMessagePrefix: "[legacy] ",
+      }),
+    );
+
+    const manager = new WorktreeManagerClass(db);
+
+    expect(manager.getSettings()).toEqual({
+      ...DEFAULT_WORKTREE_SETTINGS,
+      enabled: false,
+      branchPrefix: "legacy/",
+      commitMessagePrefix: "[legacy] ",
+    });
+    expect(mockSecureRepository.delete).toHaveBeenCalledWith("worktree");
+    expect(mockSecureRepository.save).toHaveBeenCalledWith("worktree", {
+      ...DEFAULT_WORKTREE_SETTINGS,
+      enabled: false,
+      branchPrefix: "legacy/",
+      commitMessagePrefix: "[legacy] ",
+    });
+  });
   it("honors explicit checkout choices while preserving required isolation and global defaults", async () => {
     const repo = repository();
     const manager = new WorktreeManagerClass(db);
@@ -154,68 +216,5 @@ describeWithSqlite("WorktreeManager", () => {
       "destination already exists",
     );
     expect(fs.readFileSync(path.join(destination, "keep.txt"), "utf8")).toBe("keep this");
-  });
-
-  it("returns secure settings when decryption succeeds", () => {
-    mockSecureRepository.loadWithStatus.mockReturnValue({
-      status: "success",
-      data: {
-        enabled: false,
-        branchPrefix: "secure/",
-      },
-    });
-
-    const manager = new WorktreeManagerClass(db);
-
-    expect(manager.getSettings()).toEqual({
-      ...DEFAULT_WORKTREE_SETTINGS,
-      enabled: false,
-      branchPrefix: "secure/",
-    });
-    expect(mockSecureRepository.delete).not.toHaveBeenCalled();
-  });
-
-  it("deletes corrupted secure settings and falls back to defaults", () => {
-    mockSecureRepository.loadWithStatus.mockReturnValue({
-      status: "decryption_failed",
-      error: "Unsupported state or unable to authenticate data",
-    });
-
-    const manager = new WorktreeManagerClass(db);
-
-    expect(manager.getSettings()).toEqual({ ...DEFAULT_WORKTREE_SETTINGS });
-    expect(mockSecureRepository.delete).toHaveBeenCalledWith("worktree");
-    expect(mockSecureRepository.save).not.toHaveBeenCalled();
-  });
-
-  it("repairs corrupted secure settings from legacy storage when available", () => {
-    mockSecureRepository.loadWithStatus.mockReturnValue({
-      status: "checksum_mismatch",
-      error: "corrupted",
-    });
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
-      "worktree_settings",
-      JSON.stringify({
-        enabled: false,
-        branchPrefix: "legacy/",
-        commitMessagePrefix: "[legacy] ",
-      }),
-    );
-
-    const manager = new WorktreeManagerClass(db);
-
-    expect(manager.getSettings()).toEqual({
-      ...DEFAULT_WORKTREE_SETTINGS,
-      enabled: false,
-      branchPrefix: "legacy/",
-      commitMessagePrefix: "[legacy] ",
-    });
-    expect(mockSecureRepository.delete).toHaveBeenCalledWith("worktree");
-    expect(mockSecureRepository.save).toHaveBeenCalledWith("worktree", {
-      ...DEFAULT_WORKTREE_SETTINGS,
-      enabled: false,
-      branchPrefix: "legacy/",
-      commitMessagePrefix: "[legacy] ",
-    });
   });
 });

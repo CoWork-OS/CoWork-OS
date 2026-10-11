@@ -255,16 +255,19 @@ const SCREEN_CONTEXT_INTENT_PATTERN =
   /\b(failing one|on screen|latest draft|same doc|what is this|why is this failing|screen context|right side|left side|top right|top left|bottom right|bottom left)\b/i;
 const EXPLICIT_APPLESCRIPT_INTENT_PATTERN =
   /\b(applescript|osascript|script editor|apple script|tell application|system events)\b/i;
+// Bare "note(s)" is ordinary prose ("a provenance note"); Apple Notes needs app context.
 const NATIVE_APP_REFERENCE_PATTERN =
-  /\b(calculator|notes?|finder|preview|textedit|system settings|system preferences|simulator|ios simulator|xcode|mail|photos|music|quicktime|terminal|iterm|warp|cursor|vscode|visual studio code|menu bar|dock|spotlight|native app|desktop app|macos app)\b/i;
+  /\b(calculator|apple notes|notes(?:\.app|\s+app(?:lication)?)|(?:open|launch|activate|focus|switch to)\s+(?:the\s+)?notes|notes?\s+in\s+(?:the\s+)?notes(?!\s+(?:section|field|column|file|tab|panel))|finder|preview|textedit|system settings|system preferences|simulator|ios simulator|xcode|mail|photos|music|quicktime|terminal|iterm|warp|cursor|vscode|visual studio code|menu bar|dock|spotlight|native app|desktop app|macos app)\b/i;
 // Generic message references (including "no messages") are not requests to
 // control Apple's Messages application. Require an explicit app-use phrase.
 const MESSAGES_APP_REFERENCE_PATTERN =
   /\b(?:open|launch|activate|focus|use|using|in|via|inside|through|switch to)\s+(?:(?:the|apple)\s+)?messages\b|\bmessages(?:\.app|\s+app(?:lication)?)\b/i;
 const NATIVE_GUI_ACTION_PATTERN =
   /\b(click|tap|press|type|enter|select|choose|toggle|drag|drop|scroll|hover|move (?:the )?mouse|cursor|navigate|create|rename|delete|compose|reply|submit)\b/i;
+// "launch" is an open verb only before an app ("launch the app", "launch Xcode"),
+// not as a noun ("for our launch").
 const NATIVE_APP_OPEN_PATTERN =
-  /\b(open|launch|activate|bring(?:ing)? .* front|focus|switch to|use)\b/i;
+  /\b(open|launch(?=\s+(?:(?:the|an?|apple)\s+)?(?:app|application|calculator|notes|finder|preview|textedit|system settings|system preferences|simulator|ios simulator|xcode|mail|photos|music|quicktime|terminal|iterm|warp|cursor|vscode|visual studio code|messages|spotlight)\b)|activate|bring(?:ing)? .* front|focus|switch to|use)\b/i;
 const GENERIC_NATIVE_SURFACE_PATTERN =
   /\b(?:the|this|that|current)\s+(?:(?:native|desktop|macos|windows)\s+)?(?:app|application|desktop|screen)\b/i;
 const WEB_SURFACE_PATTERN =

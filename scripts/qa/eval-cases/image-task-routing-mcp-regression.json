@@ -1,0 +1,81 @@
+{
+  "id": "image-task-routing-mcp-2026-10-11",
+  "title": "Image requests take the one-step image path and use connected MCP image tools",
+  "source": {
+    "incident": "local-mcp-image-banner-acceptance",
+    "pullRequest": 452
+  },
+  "categories": [
+    {
+      "id": "ratio-and-version-modifiers-route-to-image-path",
+      "prompt": "Generate a 16:9 banner for our launch that reads “COWORK OS 2.0”, dark background, neon accents",
+      "assertions": {
+        "simpleImageGenerationTask": true,
+        "planStepCount": 1,
+        "verificationStepRequired": false,
+        "executableTest": "src/electron/agent/__tests__/executor-image-task-routing.test.ts",
+        "executableTestNames": [
+          "routes the launch banner prompt to the simple image path",
+          "does not require a verification step for an image task",
+          "keeps the verification step when the user asks to verify the image",
+          "keeps the verification step for non-image tasks"
+        ]
+      }
+    },
+    {
+      "id": "verification-does-not-drive-desktop-apps",
+      "prompt": "An image task whose assistant output mentions a provenance note and a launch; verification and repair steps must not get Computer Use tools unless the user asked for native GUI work.",
+      "assertions": {
+        "computerUseToolsInVerificationStep": false,
+        "computerUseToolsInRepairStep": false,
+        "nativeGuiIntentFromAssistantOutput": false,
+        "executableTest": "src/electron/agent/__tests__/executor-image-task-routing.test.ts",
+        "executableTestNames": [
+          "does not read native GUI intent from the model's own output",
+          "removes computer-use tools from a verification step the model described with an app",
+          "removes computer-use tools from a verification repair step",
+          "removes computer-use tools from a verification step of a grounded image task",
+          "keeps computer-use tools when the user asked to drive a native app"
+        ]
+      }
+    },
+    {
+      "id": "connected-mcp-image-tool-is-used-and-falls-back",
+      "prompt": "With a connected MCP image tool (mcp_*_generate_image) and the built-in generate_image, generate an image; also deny or fail the built-in tool once.",
+      "assertions": {
+        "mcpImageToolOfferedInImageOnlyMode": true,
+        "stepContractRequiresWriteFile": false,
+        "deniedBuiltInPausesTask": false,
+        "expectedTerminalStatus": "ok",
+        "approvalPromptsForMcpTool": 0,
+        "executableTest": "src/electron/agent/__tests__/executor-mcp-image-fallback.test.ts",
+        "executableTestNames": [
+          "keeps MCP image tools in the image-only tool list",
+          "prefers a connected MCP image tool in the step contract",
+          "requires the MCP image tool, not write_file, when it is connected",
+          "completes the step contract when the required MCP image tool succeeds",
+          "falls back to the MCP image tool after the built-in generator fails",
+          "falls back after a thrown built-in failure and completes on an immediate MCP image",
+          "falls back instead of pausing when the user denies the built-in generator",
+          "still stops after a built-in failure when no MCP image tool is available",
+          "ends as failed when the MCP fallback also fails"
+        ]
+      }
+    },
+    {
+      "id": "final-answer-embeds-generated-image",
+      "prompt": "After an image tool succeeds (built-in or MCP), the final answer shows the image instead of commentary sent with the tool call.",
+      "assertions": {
+        "finalAnswerContainsMarkdownImage": true,
+        "commentaryReplacesFinalAnswer": false,
+        "executableTest": "src/electron/agent/__tests__/executor-mcp-image-fallback.test.ts",
+        "executableTestNames": [
+          "embeds the built-in generator's image in the final answer",
+          "embeds every image an MCP tool saved",
+          "makes the created-image answer the final result over earlier commentary"
+        ]
+      }
+    }
+  ],
+  "notes": "Before: the banner prompt missed the image path (16:9 and 2.0 broke the intent regex), got a 3-step plan with an OCR/exact-ratio verification step that drove Preview through Computer Use (4-6 approval prompts), ignored the connected MCP image tool, and ended partial_success after ~4 minutes with only a download link. After: one-step plan, MCP image tool used first with 0 approvals, ~1 minute, final answer embeds the image; a denied or failed built-in generator falls back to the MCP tool instead of pausing."
+}

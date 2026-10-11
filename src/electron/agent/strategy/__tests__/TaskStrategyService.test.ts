@@ -236,8 +236,28 @@ describe("TaskStrategyService decoratePrompt", () => {
     );
 
     expect(prompt).toContain("image_generation_contract:");
-    expect(prompt).toContain("call generate_image once");
+    expect(prompt).toContain("call a connected MCP image tool");
+    expect(prompt).toContain("call the matching *_get_image_result");
     expect(prompt).toContain("Do not search files");
+  });
+
+  it.each([
+    "Generate a 16:9 banner for our launch that reads \u201cCOWORK OS 2.0\u201d, dark background, neon accents",
+    "Generate a COWORK OS 2.0 banner",
+    "make a 4K wallpaper of a mountain lake at dusk",
+    "create a 1920\u00d71080 hero image of a forest",
+    'generate a "Summer Sale" banner',
+  ])("treats %s as a simple image request", (text) => {
+    expect((TaskStrategyService as Any).isSimpleImageGenerationTask(text)).toBe(true);
+  });
+
+  it.each([
+    "create notes.md describing the image",
+    "Create report.md with an image of the chart",
+    "create a website that has a banner",
+    "write a python script that generates images",
+  ])("does not treat %s as an image request", (text) => {
+    expect((TaskStrategyService as Any).isSimpleImageGenerationTask(text)).toBe(false);
   });
 
   it("adds direct completion guidance for infographic image generation", () => {
@@ -257,7 +277,7 @@ describe("TaskStrategyService decoratePrompt", () => {
     );
 
     expect(prompt).toContain("image_generation_contract:");
-    expect(prompt).toContain("call generate_image once");
+    expect(prompt).toContain("call a connected MCP image tool");
   });
 
   it("keeps direct image guidance when strategy context is already present", () => {
@@ -299,7 +319,7 @@ image_generation_contract:
     );
 
     expect(prompt).toContain("gather only the information needed");
-    expect(prompt).toContain("call generate_image once");
+    expect(prompt).toContain("call a connected MCP image tool");
     expect(prompt).not.toContain("Do not search files");
   });
 });
@@ -344,7 +364,7 @@ describe("TaskStrategyService buildExecutionStrategyPrompt", () => {
         taskDomain: "media",
         imageGeneration: "simple",
       }),
-    ).toContain("call generate_image once");
+    ).toContain("call a connected MCP image tool");
   });
 
   it("only advertises the debug ingest endpoint in debug mode", () => {

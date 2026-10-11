@@ -38,6 +38,9 @@ export const STRATEGY_CONTEXT_OPEN = "[AGENT_STRATEGY_CONTEXT_V1]";
 export const STRATEGY_CONTEXT_CLOSE = "[/AGENT_STRATEGY_CONTEXT_V1]";
 const STRATEGY_CONTEXT_BLOCK_REGEX =
   /\[AGENT_STRATEGY_CONTEXT_V1\][\s\S]*?\[\/AGENT_STRATEGY_CONTEXT_V1\]/g;
+/** The single image-generation call, built in or through a connected MCP image tool. */
+const IMAGE_TOOL_CALL_ONCE =
+  "call a connected MCP image tool (e.g. mcp_*_generate_image — it runs locally without extra approval; if it reports the image is still generating, call the matching *_get_image_result) — or generate_image if no MCP image tool is connected — once";
 
 export class TaskStrategyService {
   private static hasTextToImageGenerationIntent(lower: string): boolean {
@@ -47,7 +50,7 @@ export class TaskStrategyService {
         lower,
       ) ||
       /\b(create|generate|make)\s+(?:an?\s+)?(?:infographic|poster)(?:\s+image)?\b/.test(lower) ||
-      /\b(create|generate|make|produce|design|render)\s+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)\s+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)[\w-]+\s+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
+      /\b(create|generate|make|produce|design|render)\s+(?:(?:a|an|the|some|me|us|one|two|three|four|five|several|new)\s+)?(?:(?!\b(?:with|using|containing|including|mentioning|that)\b)["“'‘]?(?:\d[\w:.×%/-]*|[\w-]+)["”'’]?,?\s+){0,5}(?:image|picture|photo|photograph|illustration|render|rendering|artwork|drawing|painting|visual|graphic|poster|infographic|icon|logo|avatar|wallpaper|banner|portrait|thumbnail|mockup)s?\b/.test(
         lower,
       )
     );
@@ -679,7 +682,7 @@ export class TaskStrategyService {
     if (this.isSimpleImageGenerationTask(imageTaskText)) {
       lines.push(
         "image_generation_contract:",
-        "- For a simple text-to-image request, call generate_image once, share the generated output, and finish.",
+        `- For a simple text-to-image request, ${IMAGE_TOOL_CALL_ONCE}, share the generated output, and finish.`,
         "- Do not search files, use scratchpad, ask for art direction, or run analyze_image unless the user explicitly asks for those extra steps.",
         "- Do not add subjective review/verification steps after a successful image file is created.",
       );
@@ -687,7 +690,7 @@ export class TaskStrategyService {
       lines.push(
         "image_generation_contract:",
         "- For a grounded image or infographic request, gather only the information needed to write the image prompt.",
-        "- Then call generate_image once with a concrete prompt for the image model, share the generated output, and finish.",
+        `- Then ${IMAGE_TOOL_CALL_ONCE} with a concrete prompt for the image model, share the generated output, and finish.`,
         "- Do not run analyze_image or subjective quality checks after a successful image file is created unless the user explicitly asked for image review.",
       );
     }
@@ -765,11 +768,11 @@ export class TaskStrategyService {
     }
     if (params.imageGeneration === "simple") {
       lines.push(
-        "- Simple image request: call generate_image once, share the result, and finish. Do not search files, use the scratchpad, ask for art direction, run analyze_image, or add subjective review unless the user asks.",
+        `- Simple image request: ${IMAGE_TOOL_CALL_ONCE}, share the result, and finish. Do not search files, use the scratchpad, ask for art direction, run analyze_image, or add subjective review unless the user asks.`,
       );
     } else if (params.imageGeneration === "grounded") {
       lines.push(
-        "- Grounded image request: gather only the facts the image prompt needs, call generate_image once with a concrete prompt, share the result, and finish without analyze_image or subjective review unless the user asks.",
+        `- Grounded image request: gather only the facts the image prompt needs, ${IMAGE_TOOL_CALL_ONCE} with a concrete prompt, share the result, and finish without analyze_image or subjective review unless the user asks.`,
       );
     }
     if (params.executionMode === "debug") {

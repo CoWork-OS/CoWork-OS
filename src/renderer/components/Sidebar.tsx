@@ -121,6 +121,8 @@ interface SidebarProps {
 
   onTasksChanged: () => void;
   onLoadMoreTasks?: () => void;
+  /** Reports the folders shown as project groups so their sessions get loaded. */
+  onProjectWorkspaceIdsChange?: (workspaceIds: string[]) => void;
   hasMoreTasks?: boolean;
   uiDensity?: UiDensity;
 }
@@ -850,6 +852,7 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.onBotUpdated === next.onBotUpdated &&
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
+    prev.onProjectWorkspaceIdsChange === next.onProjectWorkspaceIdsChange &&
     prev.onOpenBotMemory === next.onOpenBotMemory
   );
 }
@@ -886,6 +889,7 @@ function SidebarComponent({
 
   onTasksChanged,
   onLoadMoreTasks,
+  onProjectWorkspaceIdsChange,
   hasMoreTasks = false,
   uiDensity = "focused",
   onBotUpdated,
@@ -996,6 +1000,23 @@ function SidebarComponent({
     () => getSidebarWorkspaceSelection(workspaceNavSettings),
     [workspaceNavSettings],
   );
+
+  const projectWorkspaceIdsKey = useMemo(
+    () =>
+      knownSidebarWorkspaces
+        .filter(
+          (candidate) =>
+            sidebarWorkspaceIds.has(candidate.id) && !isSidebarRecentWorkspace(candidate),
+        )
+        .map((candidate) => candidate.id)
+        .sort()
+        .join(","),
+    [knownSidebarWorkspaces, sidebarWorkspaceIds],
+  );
+
+  useEffect(() => {
+    onProjectWorkspaceIdsChange?.(projectWorkspaceIdsKey ? projectWorkspaceIdsKey.split(",") : []);
+  }, [onProjectWorkspaceIdsChange, projectWorkspaceIdsKey]);
 
   const isWorkspaceExpanded = useCallback(
     (workspaceId: string) => {
@@ -1186,16 +1207,27 @@ function SidebarComponent({
     async (workspaceId: string) => {
       setWorkspaceMenuOpenId(null);
       setWorkspaceActionError(null);
-      const taskIds = tasks
-        .filter((task) => task.workspaceId === workspaceId && !task.parentTaskId)
-        .map((task) => task.id);
-      if (taskIds.length === 0 || !window.electronAPI?.archiveTask) return;
+      // The sidebar holds only a page of the project's sessions; archive the
+      // whole project in the main process when it can.
+      if (window.electronAPI?.archiveWorkspaceSessions) {
+        try {
+          await window.electronAPI.archiveWorkspaceSessions(workspaceId);
+        } catch (error) {
+          console.error("Failed to archive project sessions:", error);
+          setWorkspaceActionError("Project sessions could not be archived.");
+        }
+      } else {
+        const taskIds = tasks
+          .filter((task) => task.workspaceId === workspaceId && !task.parentTaskId)
+          .map((task) => task.id);
+        if (taskIds.length === 0 || !window.electronAPI?.archiveTask) return;
 
-      const results = await Promise.allSettled(
-        taskIds.map((taskId) => window.electronAPI.archiveTask(taskId)),
-      );
-      if (results.some((result) => result.status === "rejected")) {
-        setWorkspaceActionError("Some project sessions could not be archived.");
+        const results = await Promise.allSettled(
+          taskIds.map((taskId) => window.electronAPI.archiveTask(taskId)),
+        );
+        if (results.some((result) => result.status === "rejected")) {
+          setWorkspaceActionError("Some project sessions could not be archived.");
+        }
       }
       if (tasks.some((task) => task.workspaceId === workspaceId && task.id === selectedTaskId)) {
         onSelectTask(null);

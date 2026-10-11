@@ -5330,6 +5330,7 @@ export async function setupIpcHandlers(
         includeArchivedSessions?: boolean;
         excludeBotConversations?: boolean;
         excludeSources?: Array<NonNullable<Task["source"]>>;
+        workspaceId?: string;
         cursor?: {
           id?: string;
           pinned?: boolean;
@@ -5341,12 +5342,19 @@ export async function setupIpcHandlers(
     ) => {
       const limit = typeof opts?.limit === "number" && opts.limit > 0 ? opts.limit : 100;
       const offset = typeof opts?.offset === "number" && opts.offset >= 0 ? opts.offset : 0;
+      // Sidebar project groups page their own folder; the global page can hold
+      // none of an older project's sessions.
+      const workspaceId =
+        opts?.workspaceId === undefined
+          ? undefined
+          : validateInput(WorkspaceIdSchema, opts.workspaceId, "sidebar workspace filter");
       const startedAt = Date.now();
       const tasks = await taskRepo.findSidebarSummaries(limit, offset, {
         prioritizeSidebar: opts?.prioritizeSidebar === true,
         includeArchivedSessions: opts?.includeArchivedSessions === true,
         excludeBotConversations: opts?.excludeBotConversations !== false,
         excludeSources: opts?.excludeSources,
+        workspaceId,
         cursor: opts?.cursor,
       });
       const dbMs = Date.now() - startedAt;
@@ -5770,6 +5778,17 @@ export async function setupIpcHandlers(
     }
     return sessionRetentionService.archiveSession(task.sessionId || task.id);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_ARCHIVE_WORKSPACE_SESSIONS,
+    async (_, rawWorkspaceId: unknown) => {
+      const workspaceId = validateInput(WorkspaceIdSchema, rawWorkspaceId, "workspace ID");
+      // Same session set the main sidebar lists for a project.
+      return sessionRetentionService.archiveWorkspaceSessions(workspaceId, {
+        excludeSources: ["managed_agent_panel", "side_chat"],
+      });
+    },
+  );
 
   /** Delete one task and everything derived from it (the TASK_DELETE path). */
   const deleteTaskCompletely = async (id: string): Promise<void> => {

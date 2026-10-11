@@ -83,6 +83,57 @@ describeWithSqlite("SessionRetentionService", () => {
     ).toEqual([task.id]);
   });
 
+  it("archives every session in a workspace, not just a loaded page", () => {
+    const tasks = Array.from({ length: 5 }, (_, index) => createTask("completed", `Task ${index}`));
+    // Subtasks belong to their parent's session and are not counted separately.
+    taskRepo.create({
+      title: "Child",
+      prompt: "Child",
+      status: "completed",
+      workspaceId,
+      parentTaskId: tasks[0].id,
+    });
+    const sideChat = taskRepo.create({
+      title: "Side chat",
+      prompt: "Side chat",
+      status: "completed",
+      workspaceId,
+      source: "side_chat",
+    });
+    const otherWorkspaceId = workspaceRepo.create("Other", path.join(tmpDir, "other"), {
+      read: true,
+      write: true,
+      delete: true,
+      network: true,
+      shell: true,
+    }).id;
+    const otherTask = taskRepo.create({
+      title: "Other",
+      prompt: "Other",
+      status: "completed",
+      workspaceId: otherWorkspaceId,
+    });
+
+    const result = service.archiveWorkspaceSessions(workspaceId, {
+      excludeSources: ["managed_agent_panel", "side_chat"],
+    });
+
+    expect(result.sessionCount).toBe(5);
+    const visibleIds = taskRepo
+      .findSidebarSummaries(50, 0, { includeArchivedSessions: false })
+      .map((row) => row.id);
+    expect(visibleIds).toEqual(expect.arrayContaining([otherTask.id, sideChat.id]));
+    for (const task of tasks) expect(visibleIds).not.toContain(task.id);
+    expect(taskRepo.findById(tasks[0].id)).toBeDefined();
+  });
+
+  it("archives nothing for a workspace without unarchived sessions", () => {
+    const task = createTask("completed", "Already archived");
+    service.archiveSession(task.id);
+
+    expect(service.archiveWorkspaceSessions(workspaceId)).toEqual({ sessionCount: 0 });
+  });
+
   it("prunes only terminal unpinned sessions matching the retention window", async () => {
     const oldCompleted = createTask("completed", "Old completed");
     const oldActive = createTask("executing", "Old active");

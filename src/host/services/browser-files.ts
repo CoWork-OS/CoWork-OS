@@ -4,6 +4,11 @@ import * as fs from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
+import {
+  BrowserUploadQuota,
+  type BrowserUploadQuotaOptions,
+  type BrowserUploadReservation,
+} from "./browser-upload-quota";
 import type { Workspace } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
 import {
@@ -75,7 +80,7 @@ export interface BrowserWorkspaceMediaHandle {
   expiresAt: number;
 }
 
-export interface BrowserWorkspaceFilesOptions {
+export interface BrowserWorkspaceFilesOptions extends BrowserUploadQuotaOptions {
   /**
    * Resolve the workspace authorized for this host identity. Return null for
    * unknown or profile-inaccessible workspaces. Permissions must be the
@@ -130,11 +135,14 @@ export interface BrowserTaskMediaFileSnapshot {
  * enter WebApplication's JSON-RPC response path.
  */
 export class BrowserWorkspaceFiles {
+  private readonly uploadQuota: BrowserUploadQuota;
   private activeUploadBytes = 0;
   private readonly activeUploadBytesByWorkspace = new Map<string, number>();
   private readonly mediaHandles = new Map<string, MediaHandleRecord>();
 
-  constructor(private readonly options: BrowserWorkspaceFilesOptions) {}
+  constructor(private readonly options: BrowserWorkspaceFilesOptions) {
+    this.uploadQuota = new BrowserUploadQuota(options);
+  }
 
   async list(context: WebRequestContext, rawTarget: unknown): Promise<BrowserWorkspaceFileListing> {
     await this.assertCapability(context);
@@ -560,12 +568,12 @@ export class BrowserWorkspaceFiles {
     let tempPath: string | undefined;
     let finalIdentity: OwnedFileIdentity | undefined;
     let finalPath: string | undefined;
-    let finalLinked = false;
     let success = false;
     let reservedBytes = 0;
     let handle: fs.FileHandle | undefined;
     let responseError: WebApplicationError | undefined;
     let bodyTimedOut = false;
+    let persistentReservation: BrowserUploadReservation | undefined;
 
     try {
       if (url.search) throw invalidTarget();
@@ -581,6 +589,15 @@ export class BrowserWorkspaceFiles {
       await this.verifyUploadDirectory(location, workspace);
       await this.cleanupStaleUploadTemps(location, workspace);
       if (await lstatIfPresent(finalPath)) throw uploadConflict();
+
+      await this.uploadQuota.assertTargetAllowed(location.parentPath);
+      const rootIdentity = location.directoryIdentities[0];
+      persistentReservation = await this.uploadQuota.reserve(
+        context.identity.profileId,
+        `${rootIdentity.dev}:${rootIdentity.ino}`,
+        contentLength ?? this.maxUploadBytes,
+        () => this.getUploadFreeBytes(location!.parentPath),
+      );
 
       const tempName = `${UPLOAD_TEMP_PREFIX}${crypto.randomUUID()}.tmp`;
       tempPath = path.join(location.parentPath, tempName);
@@ -626,6 +643,10 @@ export class BrowserWorkspaceFiles {
           reservedBytes += chunk.length;
           size += chunk.length;
           digest.update(chunk);
+          await this.uploadQuota.assertFreeSpace(
+            () => this.getUploadFreeBytes(location!.parentPath),
+            chunk.length,
+          );
           await writeAll(handle, chunk);
         }
       } finally {
@@ -650,11 +671,16 @@ export class BrowserWorkspaceFiles {
       await this.verifyOwnedFile(tempPath, finalIdentity, size);
       if (await lstatIfPresent(finalPath)) throw uploadConflict();
 
+      await this.uploadQuota.assertFreeSpace(
+        () => this.getUploadFreeBytes(location!.parentPath),
+        0,
+      );
+
       await this.linkUploadTemp(tempPath, finalPath);
-      finalLinked = true;
       await this.verifyUploadDirectory(location, workspace);
       await this.verifyOwnedFile(finalPath, finalIdentity, size);
-      await this.unlinkOwnedFile(tempPath, finalIdentity);
+      if (!(await this.unlinkOwnedFile(tempPath, finalIdentity))) throw unavailable();
+      await this.uploadQuota.settle(persistentReservation, size);
 
       const responseBody = JSON.stringify({
         apiVersion: WEB_API_VERSION,
@@ -682,12 +708,27 @@ export class BrowserWorkspaceFiles {
               ? interruptedUpload()
               : unavailable();
     } finally {
-      await handle?.close().catch(() => undefined);
-      if (tempPath && finalIdentity) {
-        await this.unlinkOwnedFile(tempPath, finalIdentity);
+      let cleanupConfirmed = true;
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          cleanupConfirmed = false;
+        }
       }
-      if (!success && finalLinked && finalPath && finalIdentity) {
-        await this.unlinkOwnedFile(finalPath, finalIdentity);
+      if (tempPath && finalIdentity) {
+        cleanupConfirmed =
+          (await this.unlinkOwnedFile(tempPath, finalIdentity)) && cleanupConfirmed;
+      } else if (tempPath) {
+        // A failed open/stat cannot prove ownership or absence.
+        cleanupConfirmed = false;
+      }
+      if (!success && finalPath && finalIdentity) {
+        cleanupConfirmed =
+          (await this.unlinkOwnedFile(finalPath, finalIdentity)) && cleanupConfirmed;
+      }
+      if (persistentReservation && !persistentReservation.settled && cleanupConfirmed) {
+        await this.uploadQuota.settle(persistentReservation, null).catch(() => undefined);
       }
       if (workspace && reservedBytes > 0) {
         this.releaseUploadBytes(workspace.id, reservedBytes);
@@ -1095,16 +1136,36 @@ export class BrowserWorkspaceFiles {
     return fs.link(tempPath, finalPath);
   }
 
-  private async unlinkOwnedFile(filePath: string, identity: OwnedFileIdentity): Promise<void> {
-    const stats = await fs.lstat(filePath).catch(() => null);
+  private async unlinkOwnedFile(filePath: string, identity: OwnedFileIdentity): Promise<boolean> {
+    let stats: Stats;
+    try {
+      stats = await fs.lstat(filePath);
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT";
+    }
     if (
       !stats?.isFile() ||
       stats.isSymbolicLink() ||
       !sameOwnedIdentity(identity, ownedIdentityOf(stats))
     ) {
-      return;
+      return false;
     }
-    await fs.unlink(filePath).catch(() => undefined);
+    try {
+      await this.unlinkUploadFile(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** @internal Test seam for unavailable disks and failed cleanup. */
+  protected async getUploadFreeBytes(directory: string): Promise<bigint> {
+    const stats = await fs.statfs(directory, { bigint: true });
+    return stats.bavail * stats.bsize;
+  }
+
+  protected unlinkUploadFile(filePath: string): Promise<void> {
+    return fs.unlink(filePath);
   }
 
   /** @internal Overridable for host-specific safe-open behavior and race tests. */

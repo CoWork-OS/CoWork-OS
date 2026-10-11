@@ -316,6 +316,19 @@
       }
     },
     {
+      "id": "browser-upload-no-persistent-quota-confirmed-fix",
+      "prompt": "Regression guard for Durably bound browser upload bytes and files across workspaces and profiles, preserve available disk space, and throttle admissions: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "browser-upload-no-persistent-quota",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/host/services/__tests__/browser-files.test.ts",
+        "companionTest": "src/host/services/__tests__/browser-upload-quota.test.ts"
+      }
+    },
+    {
       "id": "csf-9962c722759f2797a5f0725c-confirmed-fix",
       "prompt": "Regression guard for Confine LaTeX interpreters to restricted filesystem and offline private output: replay the original failure class and verify the fix still holds.",
       "assertions": {

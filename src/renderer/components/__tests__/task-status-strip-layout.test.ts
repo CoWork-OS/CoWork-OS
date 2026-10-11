@@ -10,6 +10,10 @@ const component = readFileSync(
   fileURLToPath(new URL("../TaskStatusStrip.tsx", import.meta.url)),
   "utf8",
 );
+const mainContent = readFileSync(
+  fileURLToPath(new URL("../MainContent/MainContent.tsx", import.meta.url)),
+  "utf8",
+);
 
 describe("TaskStatusStrip rollout and accessibility styles", () => {
   it("progressively hides the second metric and then all optional compact slots", () => {
@@ -42,6 +46,17 @@ describe("TaskStatusStrip rollout and accessibility styles", () => {
   it("marks a fallback phase by compact-slot position", () => {
     expect(component).toContain(
       "task-status-strip-phase phase-${model.compactMetricSlots.length + 1}",
+    );
+  });
+
+  it("renders the tucked wrapper only while the strip shows", () => {
+    // The wrapper's negative margin lifts the composer; left empty, it pushes the
+    // composer's top edge under the footer fade.
+    expect(css).toMatch(
+      /\.composer-status-strip \{[\s\S]*?margin: 0 auto calc\(-1 \* var\(--composer-status-tuck\)\)/,
+    );
+    expect(mainContent).toMatch(
+      /taskStatusStripModel\.visible && \(\s*<div className="composer-status-strip">/,
     );
   });
 });

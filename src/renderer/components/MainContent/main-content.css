@@ -2330,7 +2330,12 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 24px 32px;
-  scroll-behavior: smooth;
+  /* No smooth scroll-behavior: programmatic jumps to the latest message (opening a session,
+     following new output) must land instantly, not animate and stop partway. The
+     scroll-to-bottom button asks for smooth scrolling itself. */
+  /* The feed keeps the reader's row in place itself (see the reading anchor in
+     MainContent); the browser's own scroll anchoring would correct the same shift again. */
+  overflow-anchor: none;
   position: relative;
   z-index: 1;
 }
@@ -2466,6 +2471,13 @@
   /* Ensure all children stay within this container */
   position: relative;
   isolation: isolate;
+}
+
+/* Breathing room under the last message: the composer's fade (.main-footer::before, 48px)
+   overlaps the bottom of the transcript, so without this the latest message ends inside the
+   fade, right against the input. */
+.main-body > .task-content {
+  padding-bottom: 40px;
 }
 
 .task-section {

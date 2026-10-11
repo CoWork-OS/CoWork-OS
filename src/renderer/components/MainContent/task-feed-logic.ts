@@ -1022,3 +1022,43 @@ export function shouldScheduleAutoScrollWrite(args: {
     Math.abs(args.lastTargetTop - targetTop) < 2
   );
 }
+
+export interface TaskFeedReadingAnchor {
+  taskId: string | undefined;
+  key: string;
+  /** Row top relative to the scroll container's top edge, in px. */
+  top: number;
+}
+
+/**
+ * The first feed row visible at the top of the scroll container, or null when the reader follows
+ * or sits on the latest message (the bottom pin follows new content there instead).
+ */
+export function captureTaskFeedReadingAnchor(
+  container: HTMLElement | null,
+  taskId: string | undefined,
+): TaskFeedReadingAnchor | null {
+  if (!container || container.dataset.followingLatest === "true") return null;
+  if (container.scrollHeight - container.scrollTop - container.clientHeight < 4) return null;
+  const containerTop = container.getBoundingClientRect().top;
+  for (const row of container.querySelectorAll<HTMLElement>("[data-task-feed-row]")) {
+    const rect = row.getBoundingClientRect();
+    const key = row.dataset.taskFeedRow;
+    if (key && rect.height > 0 && rect.bottom > containerTop + 1) {
+      return { taskId, key, top: rect.top - containerTop };
+    }
+  }
+  return null;
+}
+
+/** How far the anchored row moved since it was captured; null when it is no longer rendered. */
+export function getTaskFeedReadingAnchorDrift(
+  container: HTMLElement,
+  anchor: TaskFeedReadingAnchor,
+): number | null {
+  const row = container.querySelector<HTMLElement>(
+    `[data-task-feed-row="${CSS.escape(anchor.key)}"]`,
+  );
+  if (!row) return null;
+  return row.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.top;
+}

@@ -31,6 +31,7 @@ export const END_OF_TASK_ARTIFACT_KINDS = new Set<GeneratedInlinePreviewKind>([
 ]);
 const END_OF_TASK_ARTIFACT_COLLAPSED_LIMIT = 5;
 const END_OF_TASK_ARTIFACT_CARD_ESTIMATED_HEIGHT = 86;
+const END_OF_TASK_IMAGE_CARD_ESTIMATED_HEIGHT = 300;
 const END_OF_TASK_ARTIFACT_STACK_CHROME_ESTIMATED_HEIGHT = 28;
 const END_OF_TASK_ARTIFACT_SHOW_MORE_ESTIMATED_HEIGHT = 48;
 
@@ -68,7 +69,14 @@ export function estimateEndOfTaskArtifactStackHeight(
   const { visibleArtifacts, hiddenCount } = getVisibleEndOfTaskArtifactCards(artifacts, expanded);
   return (
     END_OF_TASK_ARTIFACT_STACK_CHROME_ESTIMATED_HEIGHT +
-    visibleArtifacts.length * END_OF_TASK_ARTIFACT_CARD_ESTIMATED_HEIGHT +
+    visibleArtifacts.reduce(
+      (total, artifact) =>
+        total +
+        (artifact.kind === "image"
+          ? END_OF_TASK_IMAGE_CARD_ESTIMATED_HEIGHT
+          : END_OF_TASK_ARTIFACT_CARD_ESTIMATED_HEIGHT),
+      0,
+    ) +
     (hiddenCount > 0 ? END_OF_TASK_ARTIFACT_SHOW_MORE_ESTIMATED_HEIGHT : 0)
   );
 }
@@ -322,6 +330,102 @@ export function shouldRenderOpenArtifactCardAtEvent(args: {
   return currentIndex >= 0 && currentIndex === lastReferenceIndex;
 }
 
+/**
+ * Path of an image the task generated (built-in generate_image, or image content saved
+ * from an MCP tool), for a file_created event. Browser/computer-use screenshots and
+ * other non-generated images return null.
+ */
+export function getGeneratedImagePathForTaskEvent(event: TaskEvent): string | null {
+  if (getEffectiveTaskEventType(event) !== "file_created") return null;
+  const payload = event.payload;
+  if (!payload || typeof payload !== "object") return null;
+  const filePath = typeof payload.path === "string" ? payload.path.trim() : "";
+  if (!filePath) return null;
+  const fileType = typeof payload.type === "string" ? payload.type.toLowerCase() : "";
+  const isGenerated =
+    fileType === "image" ||
+    (payload.source === "mcp" && fileType !== "video" && fileType !== "directory");
+  if (!isGenerated) return null;
+  const kind = getInlinePreviewKindForGeneratedFile({
+    path: filePath,
+    mimeType: payload.mimeType,
+    type: fileType === "image" ? "image" : undefined,
+  });
+  return kind === "image" ? filePath : null;
+}
+
+function getFileBaseNameKey(filePath: string): string {
+  let value = filePath.trim().replace(/^<|>$/g, "");
+  try {
+    value = decodeURIComponent(value);
+  } catch {
+    // Keep the raw value when it is not valid percent-encoding.
+  }
+  const normalized = value.replace(/\\/g, "/").split(/[?#]/)[0] || "";
+  return (normalized.split("/").filter(Boolean).pop() || normalized).toLowerCase();
+}
+
+// Matches ![alt](path) embeds and [text](path) links (links to images render a thumbnail).
+const MARKDOWN_IMAGE_EMBED_RE = /(!?)\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)/g;
+
+/** Basenames of images an assistant answer already shows inline via ![alt](path) or a link. */
+function collectMarkdownEmbeddedImageNames(eventStream: TaskEvent[]): Set<string> {
+  const names = new Set<string>();
+  for (const event of eventStream) {
+    const effectiveType = getEffectiveTaskEventType(event);
+    const text =
+      effectiveType === "assistant_message" && typeof event.payload?.message === "string"
+        ? event.payload.message
+        : effectiveType === "task_completed" && typeof event.payload?.resultSummary === "string"
+          ? event.payload.resultSummary
+          : "";
+    if (!text || !text.includes("](")) continue;
+    MARKDOWN_IMAGE_EMBED_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = MARKDOWN_IMAGE_EMBED_RE.exec(text))) {
+      const isEmbed = match[1] === "!";
+      const target = match[2] || "";
+      if (/^(?:https?:|data:)/i.test(target)) continue;
+      const name = getFileBaseNameKey(target);
+      const shownInline = isEmbed
+        ? IMAGE_FILE_EXT_RE.test(name)
+        : /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
+      if (name && shownInline) names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Generated images surface as always-visible image cards anchored where they were
+ * created, so they stay visible even when the step group holding the event is folded.
+ * Images an assistant answer already embeds inline are skipped to avoid showing twice.
+ */
+function collectGeneratedImageArtifactCards(
+  eventStream: TaskEvent[],
+  limit: number,
+): EndOfTaskArtifactCard[] {
+  const byKey = new Map<string, EndOfTaskArtifactCard>();
+  eventStream.forEach((event, index) => {
+    const imagePath = getGeneratedImagePathForTaskEvent(event);
+    if (!imagePath) return;
+    byKey.set(getArtifactCardDisplayKey(imagePath, "image"), {
+      path: imagePath,
+      kind: "image",
+      eventId: event.id,
+      lastReferenceIndex: index,
+      lastReferenceTimestamp: event.timestamp,
+    });
+  });
+  if (byKey.size === 0) return [];
+
+  const embedded = collectMarkdownEmbeddedImageNames(eventStream);
+  const cards = Array.from(byKey.values()).filter(
+    (card) => !embedded.has(getFileBaseNameKey(card.path)),
+  );
+  return cards.slice(Math.max(0, cards.length - limit));
+}
+
 export function collectLatestEndOfTaskArtifactCards(
   eventStream: TaskEvent[],
   limit = 8,
@@ -343,13 +447,18 @@ export function collectLatestEndOfTaskArtifactCards(
     }
   });
 
-  const cards = Array.from(byKey.values()).sort((a, b) => {
+  const sortCards = (a: EndOfTaskArtifactCard, b: EndOfTaskArtifactCard) => {
     if (a.lastReferenceIndex !== b.lastReferenceIndex) {
       return a.lastReferenceIndex - b.lastReferenceIndex;
     }
     return a.lastReferenceTimestamp - b.lastReferenceTimestamp;
-  });
-  return cards.slice(Math.max(0, cards.length - limit));
+  };
+  const cards = Array.from(byKey.values()).sort(sortCards);
+  // Generated images have their own budget so they never push file cards out.
+  return [
+    ...cards.slice(Math.max(0, cards.length - limit)),
+    ...collectGeneratedImageArtifactCards(eventStream, limit),
+  ].sort(sortCards);
 }
 
 export function collectEndOfTaskArtifactCardStacks(

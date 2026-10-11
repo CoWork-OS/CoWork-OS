@@ -1935,7 +1935,8 @@ export function renderEventDetails(
     case "file_created": {
       const fcPayload = event.payload;
       const fcPath = fcPayload?.path;
-      const fcIsScreenshot = fcPayload?.type === "screenshot";
+      // MCP-saved images (source "mcp") are previewed inline even in summary mode.
+      const fcIsScreenshot = fcPayload?.type === "screenshot" && fcPayload?.source !== "mcp";
       const fcPreviewKind = getInlinePreviewKindForGeneratedFile({
         path: fcPath,
         mimeType: fcPayload?.mimeType,
@@ -2142,7 +2143,8 @@ export function renderEventDetails(
     case "file_modified": {
       const fmPayload = event.payload;
       const fmPath = fmPayload?.path || fmPayload?.from;
-      const fmIsScreenshot = fmPayload?.type === "screenshot";
+      // MCP-saved images (source "mcp") are previewed inline even in summary mode.
+      const fmIsScreenshot = fmPayload?.type === "screenshot" && fmPayload?.source !== "mcp";
       const fmPreviewKind = getInlinePreviewKindForGeneratedFile({
         path: fmPath,
         mimeType: fmPayload?.mimeType,

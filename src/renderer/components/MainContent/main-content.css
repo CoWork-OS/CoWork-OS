@@ -6260,7 +6260,9 @@ button.collab-timeline-thought-agent:hover {
 
 .markdown-image-preview-img {
   display: block;
-  max-width: min(360px, 100%);
+  /* Fixed px cap: a percentage max-width is ignored when the fit-content frame is sized,
+     so the frame took the width implied by max-height and left an empty strip. */
+  max-width: 360px;
   max-height: 220px;
   width: auto;
   height: auto;
@@ -14803,4 +14805,9 @@ html.visual-calm .calm-main .prompt-composer-input[data-has-prediction="true"]:e
   overflow: visible;
   text-overflow: clip;
   opacity: 0.8;
+}
+
+.conversation-artifact-image .inline-image-preview-image {
+  max-height: 360px;
+  border-radius: 12px;
 }

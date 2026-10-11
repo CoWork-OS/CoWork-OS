@@ -34,6 +34,8 @@ type MarkdownComponentsOptions = {
   workspacePath?: string;
   onOpenViewer?: (path: string) => void;
   onOpenWebLinkInSidebar?: (url: string) => void;
+  /** Show an inline thumbnail after links to local image files (default true). */
+  inlineImageLinks?: boolean;
   citations?: Array<{
     index: number;
     url: string;
@@ -513,7 +515,22 @@ function normalizeFileHref(href: string): string {
     })();
     return decoded.replace(/^\/([a-zA-Z]:\/)/, "$1").split(/[?#]/)[0];
   }
-  return href.split(/[?#]/)[0];
+  // Markdown renderers percent-encode destinations (e.g. spaces -> %20); decode relative paths.
+  const withoutQuery = href.split(/[?#]/)[0];
+  try {
+    return decodeURIComponent(withoutQuery);
+  } catch {
+    return withoutQuery;
+  }
+}
+
+const INLINE_IMAGE_LINK_EXT_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+function hastNodeContainsImage(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const record = node as { tagName?: unknown; children?: unknown };
+  if (record.tagName === "img") return true;
+  return Array.isArray(record.children) && record.children.some(hastNodeContainsImage);
 }
 
 function resolveFileLinkTarget(href: string, linkText: string): string | null {
@@ -537,13 +554,19 @@ function resolveFileLinkTarget(href: string, linkText: string): string | null {
 const CITATION_REF_REGEX = /\[(\d+)\]/g;
 
 export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
-  const { workspacePath, onOpenViewer, onOpenWebLinkInSidebar, citations } = options;
+  const {
+    workspacePath,
+    onOpenViewer,
+    onOpenWebLinkInSidebar,
+    citations,
+    inlineImageLinks = true,
+  } = options;
   const citationMap = new Map((citations || []).map((citation) => [citation.index, citation]));
   const citationUrlMap = new Map(
     (citations || []).map((citation) => [citation.url.replace(/\/+$/, "").toLowerCase(), citation]),
   );
 
-  const MarkdownLink = ({ href, children, ...props }: MarkdownAnchorProps) => {
+  const MarkdownLink = ({ href, children, node, ...props }: MarkdownAnchorProps) => {
     if (!href) {
       return <a {...props}>{children}</a>;
     }
@@ -591,7 +614,7 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
         }
       };
 
-      return (
+      const fileLink = (
         <a
           {...props}
           href={href}
@@ -603,6 +626,30 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
           {children}
         </a>
       );
+
+      // Links to workspace images also show the image inline (unless the link already wraps one).
+      if (
+        inlineImageLinks &&
+        workspacePath &&
+        INLINE_IMAGE_LINK_EXT_RE.test(filePath) &&
+        !hastNodeContainsImage(node)
+      ) {
+        return (
+          <>
+            {fileLink}
+            <span className="markdown-image-link-preview">
+              <MarkdownImagePreview
+                src={filePath}
+                alt={linkText}
+                workspacePath={workspacePath}
+                quiet
+              />
+            </span>
+          </>
+        );
+      }
+
+      return fileLink;
     }
 
     if (externalHref) {

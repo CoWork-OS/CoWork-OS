@@ -229,6 +229,7 @@ import { SpreadsheetArtifactCard } from "../SpreadsheetArtifactCard";
 import { DocumentArtifactCard } from "../DocumentArtifactCard";
 import { PresentationArtifactCard } from "../PresentationArtifactCard";
 import { WebArtifactCard } from "../WebArtifactCard";
+import { InlineImagePreview } from "../InlineImagePreview";
 import { ReplayControlsBar } from "../ReplayControls";
 import { DebugSessionPanel } from "../DebugSessionPanel";
 import { TaskPauseBanner } from "../TaskPauseBanner";
@@ -1766,11 +1767,22 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     const rows: TaskFeedRow[] = [];
     const artifactStacks = collectEndOfTaskArtifactCardStacks(events);
     const artifactStacksByAnchorIndex = new Map<number, EndOfTaskArtifactStack[]>();
+    // Timeline item indices refer to the filtered live stream while stacks are computed
+    // over all events, so anchor by event id when the anchor event has one.
+    const artifactStacksByAnchorEventId = new Map<string, EndOfTaskArtifactStack[]>();
     for (const stack of artifactStacks) {
+      const anchorEventId = events[stack.anchorEventIndex]?.id;
+      if (anchorEventId) {
+        const existing = artifactStacksByAnchorEventId.get(anchorEventId) || [];
+        existing.push(stack);
+        artifactStacksByAnchorEventId.set(anchorEventId, existing);
+        continue;
+      }
       const existing = artifactStacksByAnchorIndex.get(stack.anchorEventIndex) || [];
       existing.push(stack);
       artifactStacksByAnchorIndex.set(stack.anchorEventIndex, existing);
     }
+    const pushedArtifactStackKeys = new Set<string>();
     const pushArtifactStacksForTimelineItem = (item: any) => {
       const eventIndices =
         item.kind === "event"
@@ -1778,29 +1790,40 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
           : item.kind === "action_block" && Array.isArray(item.eventIndices)
             ? item.eventIndices
             : [];
+      const itemEvents: TaskEvent[] =
+        item.kind === "event"
+          ? [item.event]
+          : item.kind === "action_block" && Array.isArray(item.events)
+            ? item.events
+            : [];
+      const itemStacks: EndOfTaskArtifactStack[] = [];
+      for (const itemEvent of itemEvents) {
+        const stacks = itemEvent?.id ? artifactStacksByAnchorEventId.get(itemEvent.id) : undefined;
+        if (stacks) itemStacks.push(...stacks);
+      }
       for (const eventIndex of eventIndices) {
         if (typeof eventIndex !== "number") continue;
         const stacks = artifactStacksByAnchorIndex.get(eventIndex);
-        if (!stacks) continue;
-        for (const stack of stacks) {
-          const rowKey = `end-artifact-stack:${stack.anchorEventIndex}`;
-          const expanded = expandedArtifactStacks.has(rowKey);
-          rows.push({
-            kind: "artifact-stack",
-            key: rowKey,
-            estimatedHeight: estimateEndOfTaskArtifactStackHeight(stack.artifacts, expanded),
-            artifacts: stack.artifacts,
-            revision: [
-              expanded ? "expanded" : "collapsed",
-              stack.artifacts
-                .map(
-                  (artifact) => `${artifact.path}:${artifact.kind}:${artifact.eventId ?? "none"}`,
-                )
-                .join("|"),
-            ].join(":"),
-            visiblePerfEventId: null,
-          });
-        }
+        if (stacks) itemStacks.push(...stacks);
+      }
+      for (const stack of itemStacks) {
+        const rowKey = `end-artifact-stack:${stack.anchorEventIndex}`;
+        if (pushedArtifactStackKeys.has(rowKey)) continue;
+        pushedArtifactStackKeys.add(rowKey);
+        const expanded = expandedArtifactStacks.has(rowKey);
+        rows.push({
+          kind: "artifact-stack",
+          key: rowKey,
+          estimatedHeight: estimateEndOfTaskArtifactStackHeight(stack.artifacts, expanded),
+          artifacts: stack.artifacts,
+          revision: [
+            expanded ? "expanded" : "collapsed",
+            stack.artifacts
+              .map((artifact) => `${artifact.path}:${artifact.kind}:${artifact.eventId ?? "none"}`)
+              .join("|"),
+          ].join(":"),
+          visiblePerfEventId: null,
+        });
       }
     };
     let lastActionBlockTimelineIndex = -1;
@@ -1845,6 +1868,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
           item.blockId,
         );
         if (actionBlockState.renderableCount === 0 && !actionBlockState.hasBlockCommandOutputs) {
+          // Generated-file cards anchored in a hidden block still surface in the conversation.
+          pushArtifactStacksForTimelineItem(item);
           return;
         }
         const visibleBlockEvents = actionBlockState.visibleBlockEvents;
@@ -2227,6 +2252,17 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             workspacePath={workspace.path}
                             onOpenViewer={onOpenWebArtifact || setViewerFilePath}
                           />
+                        );
+                      }
+                      if (artifact.kind === "image") {
+                        return (
+                          <div key={artifact.path} className="conversation-artifact-image">
+                            <InlineImagePreview
+                              filePath={artifact.path}
+                              workspacePath={workspace.path}
+                              onOpenViewer={setViewerFilePath}
+                            />
+                          </div>
                         );
                       }
                       return null;
@@ -5128,10 +5164,18 @@ function MainContentComponent({
   const eventTitleMarkdownComponents = useMemo(
     () => ({
       ...markdownComponents,
+      // Timeline titles stay one line: image links render as plain links, no thumbnail.
+      a: buildMarkdownComponents({
+        workspacePath: workspace?.path,
+        onOpenViewer: setViewerFilePath,
+        onOpenWebLinkInSidebar,
+        citations,
+        inlineImageLinks: false,
+      }).a,
       // Keep timeline titles inline; replace emoji with Lucide icons.
       p: ({ children }: Any) => <>{replaceEmojisInChildren(children, 14)}</>,
     }),
-    [markdownComponents],
+    [markdownComponents, workspace?.path, setViewerFilePath, onOpenWebLinkInSidebar, citations],
   );
   // Canvas sessions state - track active canvas sessions for current task
   const [canvasSessions, setCanvasSessions] = useState<CanvasSession[]>([]);

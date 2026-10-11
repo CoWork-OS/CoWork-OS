@@ -5764,6 +5764,18 @@ ${skillDescriptions}`;
       // Handle image/video content from MCP tools and persist them as workspace artifacts.
       const savedImageFilenames: string[] = [];
       const savedVideoFilenames: string[] = [];
+      // Screenshot/capture tools keep the "screenshot" event type; other MCP image
+      // content (e.g. image generators) is a generated "image" shown inline to the user.
+      const isMcpCaptureTool =
+        typeof toolName === "string" && /screenshot|snapshot|capture/i.test(toolName);
+      const mcpMediaBaseName =
+        typeof toolName === "string" && toolName.trim()
+          ? toolName
+              .trim()
+              .replace(/[^A-Za-z0-9]+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .toLowerCase() || "mcp-image"
+          : "mcp-screenshot";
       for (const content of result.content) {
         if ((content.type === "image" || content.type === "video") && content.data) {
           const mimeType: string | undefined = content.mimeType || undefined;
@@ -5776,7 +5788,7 @@ ${skillDescriptions}`;
                 ? path.basename(input.filename)
                 : typeof input?.name === "string" && input.name.trim()
                   ? String(input.name).trim()
-                  : `mcp-screenshot-${Date.now()}`;
+                  : `${mcpMediaBaseName}-${Date.now()}`;
 
           let filename = sanitizeFilename(rawNameCandidate);
           if (!path.extname(filename)) {
@@ -5797,7 +5809,7 @@ ${skillDescriptions}`;
 
             this.daemon.logEvent(this.taskId, "file_created", {
               path: filename,
-              type: content.type === "video" ? "video" : "screenshot",
+              type: content.type === "video" ? "video" : isMcpCaptureTool ? "screenshot" : "image",
               source: "mcp",
               mimeType,
             });
@@ -5838,11 +5850,16 @@ ${skillDescriptions}`;
         textParts.push(JSON.stringify(result.structuredContent, null, 2));
       }
 
+      // Keep each line starting with "Saved image: <filename>" (the executor detects and
+      // parses it); the inline-display hint goes on its own following line.
+      const formatSavedImageLine = (f: string) =>
+        `Saved image: ${f}\nShow it to the user inline with ![](${f}).`;
+
       if (textParts.length > 0) {
         const baseText = textParts.join("\n");
         if (savedImageFilenames.length > 0 || savedVideoFilenames.length > 0) {
           const suffix = [
-            ...savedImageFilenames.map((f) => `Saved image: ${f}`),
+            ...savedImageFilenames.map(formatSavedImageLine),
             ...savedVideoFilenames.map((f) => `Saved video: ${f}`),
           ].join("\n");
           return `${baseText}\n${suffix}`;
@@ -5851,9 +5868,7 @@ ${skillDescriptions}`;
       }
 
       if (savedImageFilenames.length > 0) {
-        return savedImageFilenames.length === 1
-          ? `Saved image: ${savedImageFilenames[0]}`
-          : savedImageFilenames.map((f) => `Saved image: ${f}`).join("\n");
+        return savedImageFilenames.map(formatSavedImageLine).join("\n");
       }
 
       // Return raw result if no text content
@@ -5889,7 +5904,12 @@ ${skillDescriptions}`;
             // Emit file_created event with workspace-relative path
             this.daemon.logEvent(this.taskId, "file_created", {
               path: filename,
-              type: "screenshot",
+              type:
+                typeof toolName === "string" &&
+                !/screenshot|snapshot|capture/i.test(toolName) &&
+                /\.(png|jpe?g|gif|webp|bmp)$/i.test(filename)
+                  ? "image"
+                  : "screenshot",
               source: "mcp",
             });
 

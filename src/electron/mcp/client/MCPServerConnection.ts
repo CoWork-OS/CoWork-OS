@@ -24,6 +24,7 @@ import {
   MCPToolCallOptions,
 } from "../types";
 import { StdioTransport } from "./transports/StdioTransport";
+import { legacyOnlyServers } from "./legacy-only-servers";
 import { SSETransport } from "./transports/SSETransport";
 import { WebSocketTransport } from "./transports/WebSocketTransport";
 import { StreamableHttpTransport } from "./transports/StreamableHttpTransport";
@@ -66,12 +67,6 @@ export interface MCPConnectorEvent {
   timestamp: number;
   payload?: Record<string, Any>;
 }
-
-/**
- * Servers that closed when probed with `server/discover`, keyed by how they are launched
- * or reached. Kept for the app's lifetime so reconnects go straight to `initialize`.
- */
-const legacyOnlyServers = new Set<string>();
 
 function legacyOnlyServerKey(config: MCPServerConfig): string {
   return JSON.stringify([

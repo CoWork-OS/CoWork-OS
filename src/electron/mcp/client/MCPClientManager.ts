@@ -7,6 +7,7 @@
  */
 
 import { EventEmitter } from "events";
+import path from "path";
 import {
   MCPServerConfig,
   MCPServerStatus,
@@ -19,8 +20,10 @@ import {
 } from "../types";
 import { MCPSettingsManager } from "../settings";
 import { MCPServerConnection } from "./MCPServerConnection";
+import { LEGACY_ONLY_SERVERS_FILE, legacyOnlyServers } from "./legacy-only-servers";
 import { IPC_CHANNELS } from "../../../shared/types";
 import { createLogger } from "../../utils/logger";
+import { getUserDataDir } from "../../utils/user-data-dir";
 import {
   detectConnectorCapabilityId,
   getKnownConnectorIds,
@@ -117,6 +120,10 @@ export class MCPClientManager extends EventEmitter {
 
     // Initialize settings manager
     MCPSettingsManager.initialize();
+
+    // Remember across launches which servers must skip `server/discover`, so a strict
+    // server isn't started twice on every launch.
+    legacyOnlyServers.persistTo(path.join(getUserDataDir(), LEGACY_ONLY_SERVERS_FILE));
 
     // Enter batch mode to defer all settings saves until initialization completes
     MCPSettingsManager.beginBatch();

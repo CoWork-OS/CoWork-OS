@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Task, TaskEvent, Workspace } from "../../../shared/types";
+import { isTerminalTaskStatus } from "../../../shared/task-status";
 import { SessionRetentionService } from "../SessionRetentionService";
 import { QueuedAttachmentStore } from "../../agent/runtime/queued-attachment-store";
 
@@ -166,6 +167,49 @@ describeWithSqlite("SessionRetentionService", () => {
     expect(taskRepo.findById(otherTask.id)).toBeDefined();
   });
 
+  it("guards deletion against active and pinned complete lineage in SQLite", () => {
+    const first = createTask("completed", "First");
+    const second = createTask("completed", "Second");
+    taskRepo.update(first.id, { sessionId: first.id });
+    taskRepo.update(second.id, { sessionId: first.id, status: "executing" });
+
+    expect(taskRepo.deleteIfSessionPrunable(first.id, first.id)).toBe("active");
+    expect(taskRepo.findById(first.id)).toBeDefined();
+    taskRepo.update(second.id, { status: "completed" });
+    taskRepo.togglePin(second.id);
+    expect(taskRepo.deleteIfSessionPrunable(first.id, first.id)).toBe("pinned");
+    expect(taskRepo.findById(first.id)).toBeDefined();
+    taskRepo.togglePin(second.id);
+    expect(taskRepo.deleteIfSessionPrunable(first.id, first.id)).toBe("deleted");
+    expect(taskRepo.findById(first.id)).toBeUndefined();
+    expect(taskRepo.findById(second.id)).toBeDefined();
+  });
+
+  it.each([null, ""])(
+    "includes legacy roots with session_id %s in lineage and deletion guards",
+    (legacySessionId) => {
+      const root = createTask("completed", "Legacy root");
+      const child = createTask("completed", "Child");
+      taskRepo.update(child.id, { sessionId: root.id });
+      db.prepare("UPDATE tasks SET session_id = ?, created_at = 0 WHERE id = ?").run(
+        legacySessionId,
+        root.id,
+      );
+
+      expect(taskRepo.findBySessionId(root.id).map((task) => task.id)).toEqual([root.id, child.id]);
+      expect(taskRepo.findBySessionId(root.id, 1, 0).map((task) => task.id)).toEqual([root.id]);
+      expect(taskRepo.findBySessionId(root.id, 1, 1).map((task) => task.id)).toEqual([child.id]);
+      taskRepo.togglePin(root.id);
+      expect(taskRepo.deleteIfSessionPrunable(child.id, root.id)).toBe("pinned");
+      taskRepo.togglePin(root.id);
+      taskRepo.update(root.id, { status: "executing" });
+      expect(taskRepo.deleteIfSessionPrunable(child.id, root.id)).toBe("active");
+      expect(taskRepo.findById(child.id)).toBeDefined();
+      taskRepo.update(root.id, { status: "completed" });
+      expect(taskRepo.deleteIfSessionPrunable(child.id, root.id)).toBe("deleted");
+    },
+  );
+
   function insertWorkspace(): string {
     const workspace = workspaceRepo.create("Workspace", path.join(tmpDir, "workspace"), {
       read: true,
@@ -213,6 +257,143 @@ describeWithSqlite("SessionRetentionService", () => {
 });
 
 describe("SessionRetentionService unit", () => {
+  it.each([
+    [undefined, "executing"],
+    [undefined, "pinned"],
+    ["", "executing"],
+    ["", "pinned"],
+  ] as const)(
+    "keeps legacy root %s and children when root becomes %s during preparation",
+    async (legacySessionId, change) => {
+      const root = makeTask({ id: "legacy-root", sessionId: legacySessionId, status: "completed" });
+      const child = makeTask({ id: "legacy-child", sessionId: root.id, status: "completed" });
+      const tasks = [root, child];
+      const service = makeService(tasks);
+      let cleanupCalled = false;
+
+      const result = await service.pruneSessions(
+        { all: true },
+        {
+          prepareTaskDeletion: () => {
+            if (change === "executing") root.status = "executing";
+            else root.pinned = true;
+          },
+          onTaskDeleted: () => {
+            cleanupCalled = true;
+          },
+        },
+      );
+
+      expect(result.deletedTaskIds).toEqual([]);
+      expect(tasks).toEqual([root, child]);
+      expect(cleanupCalled).toBe(false);
+    },
+  );
+
+  it("does not prune a session when an omitted lineage task is active", async () => {
+    const sessionId = "session-with-active-lineage";
+    const tasks = [
+      makeTask({ id: "recent-terminal", sessionId, status: "completed" }),
+      makeTask({ id: "older-active", sessionId, status: "executing" }),
+    ];
+    const service = makeService(tasks);
+
+    const result = await service.pruneSessions({ all: true });
+
+    expect(result.deletedTaskIds).toEqual([]);
+    expect(tasks.map((task) => task.id).sort()).toEqual(["older-active", "recent-terminal"]);
+  });
+
+  it("rechecks lineage after nondestructive metadata preparation", async () => {
+    const sessionId = "session-changing-during-cleanup";
+    const tasks = [
+      makeTask({ id: "first", sessionId, status: "completed" }),
+      makeTask({ id: "second", sessionId, status: "completed" }),
+    ];
+    const service = makeService(tasks);
+    const result = await service.pruneSessions(
+      { all: true },
+      {
+        prepareTaskDeletion: (task) => {
+          if (task.id === "first") {
+            const remaining = tasks.find((candidate) => candidate.id === "second");
+            if (remaining) remaining.status = "executing";
+          }
+        },
+      },
+    );
+
+    expect(result.deletedTaskIds).toEqual([]);
+    expect(result).toMatchObject({ sessionCount: 0, taskCount: 0, deleted: false });
+    expect(tasks.map((task) => task.id).sort()).toEqual(["first", "second"]);
+  });
+
+  it.each(["executing", "pinned"])(
+    "retains the checkout when a task becomes %s while metadata capture is pending",
+    async (change) => {
+      const task = makeTask({
+        id: "pending-prune",
+        sessionId: "pending-prune",
+        status: "completed",
+      });
+      const tasks = [task];
+      const service = makeService(tasks);
+      let entered!: () => void;
+      let release!: () => void;
+      const prepared = new Promise<void>((resolve) => (entered = resolve));
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let checkoutRemoved = false;
+      const pruning = service.pruneSessions(
+        { all: true },
+        {
+          prepareTaskDeletion: async () => {
+            entered();
+            await held;
+          },
+          onTaskDeleted: () => {
+            checkoutRemoved = true;
+          },
+        },
+      );
+      await prepared;
+      if (change === "executing") task.status = "executing";
+      else task.pinned = true;
+      release();
+      const result = await pruning;
+      expect(result.deletedTaskIds).toEqual([]);
+      expect(tasks).toEqual([task]);
+      expect(checkoutRemoved).toBe(false);
+    },
+  );
+
+  it("commits deletion before awaited resource cleanup admits a resume", async () => {
+    const task = makeTask({
+      id: "deleted-before-cleanup",
+      sessionId: "deleted-before-cleanup",
+      status: "completed",
+    });
+    const tasks = [task];
+    const service = makeService(tasks);
+    let entered!: () => void;
+    let release!: () => void;
+    const cleaning = new Promise<void>((resolve) => (entered = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const pruning = service.pruneSessions(
+      { all: true },
+      {
+        onTaskDeleted: async () => {
+          entered();
+          await held;
+        },
+      },
+    );
+    await cleaning;
+    // Resume/continue/pin cannot find the deleted task while cleanup is waiting.
+    expect(tasks.find((candidate) => candidate.id === task.id)).toBeUndefined();
+    release();
+    expect((await pruning).deletedTaskIds).toEqual([task.id]);
+  });
+
   it("deletes only terminal unpinned sessions in the selected window", async () => {
     const now = Date.now();
     const tasks: Task[] = [
@@ -430,12 +611,24 @@ function makeService(
   const taskRepo = {
     findAll: (limit = 100, offset = 0) =>
       findAllOverride ? findAllOverride(limit, offset) : [...tasks],
-    findBySessionId: (sessionId: string) => tasks.filter((task) => task.sessionId === sessionId),
+    findBySessionId: (sessionId: string) =>
+      tasks.filter((task) => (task.sessionId || task.id) === sessionId),
     findById: (id: string) => tasks.find((task) => task.id === id),
     delete: (id: string) => {
       if (deleteError) throw deleteError;
       const index = tasks.findIndex((task) => task.id === id);
       if (index >= 0) tasks.splice(index, 1);
+    },
+    deleteIfSessionPrunable: (id: string, sessionId: string) => {
+      const task = tasks.find((candidate) => candidate.id === id);
+      if (!task || (task.sessionId || task.id) !== sessionId) return "missing";
+      const lineage = tasks.filter(
+        (candidate) => (candidate.sessionId || candidate.id) === sessionId,
+      );
+      if (lineage.some((candidate) => !isTerminalTaskStatus(candidate.status))) return "active";
+      if (lineage.some((candidate) => candidate.pinned === true)) return "pinned";
+      taskRepo.delete(id);
+      return "deleted";
     },
   };
   const eventRepo = {

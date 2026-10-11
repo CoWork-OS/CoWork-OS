@@ -86,14 +86,14 @@ export class SessionRetentionService {
 
   listSessions(filters: SessionRetentionFilters = {}): TaskSessionSummary[] {
     const limit = normalizeLimit(filters.limit, 1000);
-    const tasks = this.taskRepo.findAll(Math.max(limit * 4, limit), 0, {
+    const tasks = this.taskRepo.findAll(-1, 0, {
       includeArchivedSessions: true,
     });
     const summaries = this.buildSessionSummaries(tasks);
     return this.applyFilters(summaries, filters).slice(0, limit);
   }
 
-  tasksForSession(sessionId: string, limit = 10000): Task[] {
+  tasksForSession(sessionId: string, limit?: number): Task[] {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) return [];
     const lineage = this.taskRepo.findBySessionId(normalizedSessionId, limit);
@@ -103,7 +103,7 @@ export class SessionRetentionService {
   }
 
   archiveSession(sessionId: string): { metadata: TaskSessionMetadata; taskCount: number } {
-    const rows = this.tasksForSession(sessionId, 10000);
+    const rows = this.tasksForSession(sessionId);
     if (rows.length === 0) {
       throw new Error(`Session not found: ${sessionId}`);
     }
@@ -146,7 +146,8 @@ export class SessionRetentionService {
     filters: SessionRetentionFilters,
     options: {
       dryRun?: boolean;
-      deleteTask?: (task: Task) => Promise<void> | void;
+      /** Capture cleanup metadata only; must not delete files or other resources. */
+      prepareTaskDeletion?: (task: Task) => Promise<void> | void;
       /** Runs after the task row is deleted, e.g. to remove its transcript files. */
       onTaskDeleted?: (task: Task) => Promise<void> | void;
     } = {},
@@ -176,16 +177,34 @@ export class SessionRetentionService {
       return result;
     }
 
+    const deletedSessions: TaskSessionSummary[] = [];
     for (const session of candidates) {
-      const tasks = this.tasksForSession(session.id, 10000);
+      const tasks = this.tasksForSession(session.id);
+      if (tasks.some((task) => !isTerminalTaskStatus(task.status))) {
+        result.skippedActive += 1;
+        continue;
+      }
+      if (tasks.some((task) => task.pinned === true)) {
+        result.skippedPinned += 1;
+        continue;
+      }
       let sessionFullyDeleted = true;
       for (const task of tasks) {
+        // Resource deletion runs only after the guarded database deletion.
+        // Preparation may await metadata; deleteIfSessionPrunable rechecks the
+        // whole lineage under the write lock after it settles.
         // One task that cannot be deleted (a foreign key, a locked file) must not abort
         // the whole retention run; it is reported and retried on the next run.
         try {
           const queuedAttachmentRefs = this.captureQueuedAttachmentRefs(task.id);
-          await options.deleteTask?.(task);
-          this.taskRepo.delete(task.id);
+          await options.prepareTaskDeletion?.(task);
+          const outcome = this.taskRepo.deleteIfSessionPrunable(task.id, session.id);
+          if (outcome !== "deleted") {
+            sessionFullyDeleted = false;
+            if (outcome === "active") result.skippedActive += 1;
+            if (outcome === "pinned") result.skippedPinned += 1;
+            break;
+          }
           this.releaseQueuedAttachmentRefs(task.id, queuedAttachmentRefs);
           result.deletedTaskIds.push(task.id);
         } catch (error) {
@@ -201,8 +220,9 @@ export class SessionRetentionService {
         }
       }
       // Keep the session's metadata (pin/archive state) while any of its tasks remain.
-      if (sessionFullyDeleted) {
+      if (sessionFullyDeleted && this.tasksForSession(session.id).length === 0) {
         this.metadataRepo.delete(session.id);
+        deletedSessions.push(session);
       }
     }
 
@@ -213,7 +233,10 @@ export class SessionRetentionService {
     // current prune candidate.
     this.cleanupOrphanedQueuedAttachments();
 
-    result.deleted = true;
+    result.sessions = deletedSessions;
+    result.sessionCount = deletedSessions.length;
+    result.taskCount = result.deletedTaskIds.length;
+    result.deleted = result.deletedTaskIds.length > 0;
     return result;
   }
 

@@ -408,7 +408,6 @@ export function mapResponsesApiStopReason(
   response: Any,
   hasToolUse: boolean,
 ): LLMResponse["stopReason"] {
-  if (hasToolUse) return "tool_use";
   const incompleteReason = String(response?.incomplete_details?.reason || "");
   const refusedInOutput =
     Array.isArray(response?.output) &&
@@ -422,5 +421,6 @@ export function mapResponsesApiStopReason(
   if (incompleteReason === "max_output_tokens" || response?.status === "incomplete") {
     return "max_tokens";
   }
+  if (hasToolUse) return "tool_use";
   return "end_turn";
 }

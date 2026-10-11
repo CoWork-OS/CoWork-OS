@@ -829,11 +829,8 @@ export class ShellTools {
 
   private async waitForVerificationCommandResult(key: string): Promise<RunCommandResult | null> {
     const now = Date.now();
-    const recent = ShellTools.recentVerificationResults.get(key);
-    if (recent && now - recent.completedAt <= ShellTools.verificationCommandTtlMs) {
-      return { ...recent.result };
-    }
-
+    // Completed checks are evidence for their source snapshot, not future runs.
+    // Retain sharing only for callers that joined the same in-flight command.
     const running = ShellTools.runningVerificationCommands.get(key);
     if (!running || now - running.startedAt > ShellTools.verificationCommandTtlMs) {
       ShellTools.runningVerificationCommands.delete(key);

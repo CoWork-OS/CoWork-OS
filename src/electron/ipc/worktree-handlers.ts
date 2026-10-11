@@ -1,6 +1,8 @@
 import { ipcMain } from "electron";
-import { IPC_CHANNELS } from "../../shared/types";
-import { AgentDaemon } from "../agent/daemon";
+import { IPC_CHANNELS, type WorktreeWorkspaceInfo } from "../../shared/types";
+import { GitService } from "../git/GitService";
+import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import type { AgentDaemon } from "../agent/daemon";
 import {
   validateInput,
   UUIDSchema,
@@ -25,6 +27,7 @@ function checkRateLimit(channel: string): void {
  */
 export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_GET_INFO, RATE_LIMIT_CONFIGS.standard);
+  rateLimiter.configure(IPC_CHANNELS.WORKTREE_WORKSPACE_INFO, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_LIST, RATE_LIMIT_CONFIGS.standard);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_MERGE, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.WORKTREE_CLEANUP, RATE_LIMIT_CONFIGS.limited);
@@ -35,6 +38,37 @@ export function setupWorktreeHandlers(agentDaemon: AgentDaemon): void {
   const worktreeManager = agentDaemon.getWorktreeManager();
 
   // ============ Worktree Handlers ============
+
+  ipcMain.handle(
+    IPC_CHANNELS.WORKTREE_WORKSPACE_INFO,
+    async (_, workspaceId: unknown): Promise<WorktreeWorkspaceInfo> => {
+      checkRateLimit(IPC_CHANNELS.WORKTREE_WORKSPACE_INFO);
+      const id = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
+      const workspace = agentDaemon.getWorkspaceById(id);
+      if (!workspace) throw new Error("Workspace not found");
+      const unavailable = (reason: string): WorktreeWorkspaceInfo => ({
+        workspaceId: id,
+        available: false,
+        reason,
+        branches: [],
+      });
+      if (workspace.isTemp) return unavailable("Choose a Git project folder to use a worktree.");
+      if (!workspace.permissions.write) return unavailable("This workspace is read-only.");
+      assertWorkspaceFilesystemAccess(workspace, workspace.path, "read", "worktree repository");
+      if (!(await GitService.isGitRepo(workspace.path)))
+        return unavailable("Worktrees require a Git repository.");
+      try {
+        await GitService.getHeadCommit(workspace.path);
+      } catch {
+        return unavailable("Create the repository's first commit before using a worktree.");
+      }
+      const [currentBranch, branches] = await Promise.all([
+        GitService.getCurrentBranch(workspace.path),
+        GitService.getLocalBranches(workspace.path),
+      ]);
+      return { workspaceId: id, available: true, currentBranch, branches };
+    },
+  );
 
   ipcMain.handle(IPC_CHANNELS.WORKTREE_GET_INFO, async (_, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.WORKTREE_GET_INFO);

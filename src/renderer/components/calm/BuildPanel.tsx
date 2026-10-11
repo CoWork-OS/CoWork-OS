@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge, Plus } from "lucide-react";
-import { isTempWorkspaceId, type TaskStatus, type Workspace } from "../../../shared/types";
+import { ArrowUp, Code2, LayoutDashboard, AppWindow, Gauge, GitBranch, Plus } from "lucide-react";
+import {
+  isTempWorkspaceId,
+  type AgentConfig,
+  type TaskStatus,
+  type Workspace,
+  type WorktreeWorkspaceInfo,
+} from "../../../shared/types";
 import { getWorkspaceStatusFolderLabel } from "../MainContent/welcome-suggestions";
 import { ModelDropdown, type ModelDropdownProps } from "../MainContent/ModelDropdown";
 import { type PendingAttachment } from "../MainContent/attachments";
@@ -19,7 +25,10 @@ interface BuildPanelProps {
   onStart: (
     prompt: string,
     attachments?: PendingAttachment[],
-    options?: { accessProfileId?: AccessProfileId },
+    options?: { accessProfileId?: AccessProfileId } & Pick<
+      AgentConfig,
+      "worktreeMode" | "worktreeBaseBranch"
+    >,
   ) => void | boolean | Promise<void | boolean>;
   /** Folder the new build task will run in. */
   workspace: Workspace | null;
@@ -101,11 +110,20 @@ const buildDraft: { value: string; attachments: PendingAttachment[] } = {
   attachments: [],
 };
 
+const buildCheckoutDraft: {
+  workspaceId?: string;
+  mode: "local" | "worktree";
+  branch: string;
+} = { mode: "local", branch: "" };
+
 export async function submitBuildTask(
   onStart: BuildPanelProps["onStart"],
   text: string,
   attachments: PendingAttachment[] = [],
-  options?: { accessProfileId?: AccessProfileId },
+  options?: { accessProfileId?: AccessProfileId } & Pick<
+    AgentConfig,
+    "worktreeMode" | "worktreeBaseBranch"
+  >,
 ): Promise<boolean> {
   const trimmed =
     text.trim() || (attachments.length > 0 ? "Build something from the attached files." : "");
@@ -133,6 +151,63 @@ export function BuildPanel({
 }: BuildPanelProps) {
   const access = useBuildAccessProfile();
   const [value, setValue] = useState(() => buildDraft.value);
+  const [checkoutMode, setCheckoutMode] = useState<"local" | "worktree">(() =>
+    buildCheckoutDraft.workspaceId === workspace?.id ? buildCheckoutDraft.mode : "local",
+  );
+  const [startingBranch, setStartingBranch] = useState(() =>
+    buildCheckoutDraft.workspaceId === workspace?.id ? buildCheckoutDraft.branch : "",
+  );
+  const checkoutWorkspaceId = useRef(workspace?.id);
+  const [worktreeWorkspace, setWorktreeWorkspace] = useState<WorktreeWorkspaceInfo | null>(null);
+  const [worktreeError, setWorktreeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    setWorktreeWorkspace(null);
+    setWorktreeError(null);
+    if (checkoutWorkspaceId.current !== workspace?.id) {
+      checkoutWorkspaceId.current = workspace?.id;
+      setStartingBranch("");
+      setCheckoutMode("local");
+    }
+    if (!workspace || workspace.isTemp || isTempWorkspaceId(workspace.id)) {
+      setWorktreeError("Choose a Git project folder to use a worktree.");
+      return;
+    }
+    if (
+      !hasHostMethod("getWorktreeWorkspaceInfo") ||
+      !window.electronAPI?.getWorktreeWorkspaceInfo
+    ) {
+      setWorktreeError("Worktree selection is unavailable on this host. Use the desktop app.");
+      return;
+    }
+    void window.electronAPI
+      .getWorktreeWorkspaceInfo(workspace.id)
+      .then((info) => {
+        if (!current) return;
+        if (info.workspaceId !== workspace.id)
+          throw new Error("The host returned another workspace.");
+        setWorktreeWorkspace(info);
+        setStartingBranch((branch) => (info.branches.includes(branch) ? branch : ""));
+      })
+      .catch((error: unknown) => {
+        if (current)
+          setWorktreeError(
+            error instanceof Error ? error.message : "Could not check the Git repository.",
+          );
+      });
+    return () => {
+      current = false;
+    };
+  }, [workspace?.id, workspace?.path, workspace?.permissions.write]);
+  useEffect(() => {
+    buildCheckoutDraft.workspaceId = workspace?.id;
+    buildCheckoutDraft.mode = checkoutMode;
+    buildCheckoutDraft.branch = startingBranch;
+  }, [workspace?.id, checkoutMode, startingBranch]);
+  const worktreeAvailable =
+    worktreeWorkspace?.workspaceId === workspace?.id && worktreeWorkspace?.available === true;
+  const worktreeReason = worktreeError || worktreeWorkspace?.reason || "Checking Git repository…";
   const [useCasesOpen, setUseCasesOpen] = useState(false);
 
   useEffect(() => {
@@ -211,7 +286,10 @@ export function BuildPanel({
     return () => window.removeEventListener(BUILD_FOCUS_COMPOSER_EVENT, focusComposer);
   }, []);
 
-  const canSubmit = (value.trim().length > 0 || attachments.length > 0) && !submitting;
+  const canSubmit =
+    (value.trim().length > 0 || attachments.length > 0) &&
+    !submitting &&
+    (checkoutMode === "local" || worktreeAvailable);
 
   const submit = async (text: string) => {
     if (!canSubmit) return;
@@ -219,6 +297,10 @@ export function BuildPanel({
     try {
       const admitted = await submitBuildTask(onStart, text, attachments, {
         accessProfileId: access.profileId,
+        worktreeMode: checkoutMode,
+        ...(checkoutMode === "worktree" && startingBranch
+          ? { worktreeBaseBranch: startingBranch }
+          : {}),
       });
       if (admitted) {
         // Admission can navigate away before another render/effect is committed.
@@ -313,18 +395,59 @@ export function BuildPanel({
         </form>
 
         <div className="calm-build-status">
-          <CalmFolderMenu
-            scope={{
-              label: getWorkspaceStatusFolderLabel(workspace),
-              workspaces: recentWorkspaces,
-              activeWorkspaceId: workspace?.id,
-              onSelect: onSelectWorkspace,
-              onNewFolder: onPickFolder,
-              onNewFolderDisabledReason: folderPickerUnavailableReason,
-              showWorkspacePaths,
-              onOpen: () => void loadRecentWorkspaces(),
-            }}
-          />
+          <div className="calm-build-location">
+            <CalmFolderMenu
+              scope={{
+                label: getWorkspaceStatusFolderLabel(workspace),
+                workspaces: recentWorkspaces,
+                activeWorkspaceId: workspace?.id,
+                onSelect: onSelectWorkspace,
+                onNewFolder: onPickFolder,
+                onNewFolderDisabledReason: folderPickerUnavailableReason,
+                showWorkspacePaths,
+                onOpen: () => void loadRecentWorkspaces(),
+              }}
+            />
+            <label
+              className="calm-build-checkout"
+              title={
+                checkoutMode === "worktree"
+                  ? "Build in a separate Git checkout"
+                  : "Build directly in the selected folder"
+              }
+            >
+              <GitBranch size={14} aria-hidden="true" />
+              <select
+                aria-label="Build location"
+                value={checkoutMode}
+                disabled={submitting}
+                onChange={(event) => setCheckoutMode(event.target.value as "local" | "worktree")}
+              >
+                <option value="local">Local</option>
+                <option value="worktree" disabled={!worktreeAvailable}>
+                  Worktree
+                </option>
+              </select>
+            </label>
+            {checkoutMode === "worktree" && worktreeAvailable && (
+              <select
+                className="calm-build-branch"
+                aria-label="Starting branch"
+                value={startingBranch}
+                disabled={submitting}
+                onChange={(event) => setStartingBranch(event.target.value)}
+              >
+                <option value="">
+                  Current checkout ({worktreeWorkspace?.currentBranch || "HEAD"})
+                </option>
+                {worktreeWorkspace?.branches.map((branch) => (
+                  <option key={branch} value={branch}>
+                    {branch}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <BuildAccessPicker
             profileId={access.profileId}
             customProfiles={access.customProfiles}
@@ -337,6 +460,13 @@ export function BuildPanel({
             <kbd>↵</kbd> to build · <kbd>⇧↵</kbd> new line
           </span>
         </div>
+        <p className="calm-build-location-help" aria-live="polite">
+          {checkoutMode === "worktree" && worktreeAvailable
+            ? "Starts from committed code in a separate checkout. Local uncommitted changes stay in your folder."
+            : !worktreeAvailable
+              ? worktreeReason
+              : "Local builds edit this folder. Choose Worktree to keep changes isolated."}
+        </p>
 
         <div className="calm-build-starters">
           {BUILD_STARTERS.map((starter) => {

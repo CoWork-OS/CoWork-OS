@@ -84,6 +84,15 @@ describe("browser-safe Home and Build actions", () => {
     expect(onStart.mock.calls[0][0]).toContain("Create a status board");
   });
 
+  it("passes the selected build checkout and starting branch through admission", async () => {
+    const onStart = vi.fn().mockResolvedValue(true);
+    const config = { worktreeMode: "worktree" as const, worktreeBaseBranch: "feature/base" };
+    await expect(submitBuildTask(onStart, "Create a board", [], config)).resolves.toBe(true);
+    expect(onStart.mock.calls[0][2]).toEqual(config);
+    await submitBuildTask(onStart, "Edit the local tool", [], { worktreeMode: "local" });
+    expect(onStart.mock.calls[1][2]).toEqual({ worktreeMode: "local" });
+  });
+
   it("treats browser-only folder picking as unavailable with a concrete reason", () => {
     const scope = {
       onNewFolderDisabledReason:

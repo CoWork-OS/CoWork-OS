@@ -2215,6 +2215,44 @@ html.visual-calm .calm-build-hints {
   font: 400 12px var(--font-ui);
 }
 
+html.visual-calm .calm-build-status {
+  flex-wrap: wrap;
+}
+
+html.visual-calm .calm-build-location {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+html.visual-calm .calm-build-checkout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-build-checkout select,
+html.visual-calm .calm-build-branch {
+  max-width: 240px;
+  padding: 4px 6px;
+  border: 1px solid var(--calm-border);
+  border-radius: 7px;
+  background: var(--calm-surface);
+  color: var(--calm-text-secondary);
+  font: 400 12.5px var(--font-ui);
+}
+
+html.visual-calm .calm-build-location-help {
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 0 20px;
+  color: var(--calm-text-muted);
+  font: 400 12px/1.5 var(--font-ui);
+}
+
 html.visual-calm .calm-build-hints kbd {
   display: inline-flex;
   align-items: center;

@@ -1434,6 +1434,22 @@ export class AgentDaemon extends EventEmitter {
     };
   }
 
+  private resolveRequiredWorktreeWorkspace(task: Task, workspace: Workspace): Workspace {
+    const requiresWorktree =
+      task.agentConfig?.requireWorktree === true || task.agentConfig?.worktreeMode === "worktree";
+    const hasActiveWorktree = task.worktreeStatus === "active" && Boolean(task.worktreePath);
+    if (requiresWorktree || hasActiveWorktree) {
+      const worktreePath = task.worktreePath?.trim();
+      if (!worktreePath || !fs.existsSync(worktreePath)) {
+        throw new Error(
+          `Task ${task.id} requires its isolated worktree, but the checkout is missing. Recreate the worktree before continuing.`,
+        );
+      }
+      return this.applyTaskWorkspaceOverridesForPath(task, workspace, worktreePath);
+    }
+    return this.applyTaskWorkspaceOverrides(task, workspace);
+  }
+
   /** Return the live task workspace, resolving profile rules against its checkout. */
   getEffectiveWorkspaceForTask(taskId: string): Workspace | undefined {
     const storedTask = this.taskRepo.findById(taskId);
@@ -2983,11 +2999,15 @@ export class AgentDaemon extends EventEmitter {
         this.finishQueueSlot(executionTask.id);
         return;
       }
-      const requiresWorktree = executionTask.agentConfig?.requireWorktree === true;
+      const requiresWorktree =
+        executionTask.agentConfig?.requireWorktree === true ||
+        executionTask.agentConfig?.worktreeMode === "worktree" ||
+        Boolean(executionTask.worktreePath && executionTask.worktreeStatus === "active");
       const canUseWorktree = await this.worktreeManager.shouldUseWorktree(
         workspace.path,
         workspace.isTemp,
         requiresWorktree,
+        executionTask.agentConfig?.worktreeMode,
       );
       if (this.shutdownRequested) {
         this.finishQueueSlot(executionTask.id);
@@ -3029,6 +3049,7 @@ export class AgentDaemon extends EventEmitter {
             executionTask.title,
             workspace.id,
             workspace.path,
+            executionTask.agentConfig?.worktreeBaseBranch,
           );
 
           // Create a virtual workspace pointing to the worktree
@@ -3394,20 +3415,7 @@ export class AgentDaemon extends EventEmitter {
     if (this.shutdownRequested) return;
 
     // Handle worktree workspace if applicable
-    let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
-    if (task.worktreePath && task.worktreeStatus === "active") {
-      if (fs.existsSync(task.worktreePath)) {
-        effectiveWorkspace = this.applyTaskWorkspaceOverridesForPath(
-          effectiveTask,
-          workspace,
-          task.worktreePath,
-        );
-      } else {
-        console.warn(
-          `[AgentDaemon] Worktree path ${task.worktreePath} no longer exists for task ${task.id}`,
-        );
-      }
-    }
+    const effectiveWorkspace = this.resolveRequiredWorktreeWorkspace(effectiveTask, workspace);
 
     // Restore any initial browser media as well as transcript state: an early
     // crash can occur after the initial user-message event but before the
@@ -3713,14 +3721,7 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
-    let effectiveWorkspace = this.applyTaskWorkspaceOverrides(effectiveTask, workspace);
-    if (task.worktreePath && task.worktreeStatus === "active" && fs.existsSync(task.worktreePath)) {
-      effectiveWorkspace = this.applyTaskWorkspaceOverridesForPath(
-        effectiveTask,
-        workspace,
-        task.worktreePath,
-      );
-    }
+    const effectiveWorkspace = this.resolveRequiredWorktreeWorkspace(effectiveTask, workspace);
 
     const executor = new TaskExecutor(effectiveTask, effectiveWorkspace, this);
     executor.rebuildConversationFromEvents(events);
@@ -3951,6 +3952,8 @@ export class AgentDaemon extends EventEmitter {
           permissionMode: undefined,
           shellAccess: false,
           requireWorktree: false,
+          worktreeMode: "local",
+          worktreeBaseBranch: undefined,
           allowUserInput: true,
           humanInputPolicy: "hard_blockers",
           toolRestrictions: ["*"],

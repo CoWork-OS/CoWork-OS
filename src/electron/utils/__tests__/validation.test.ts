@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   validateInput,
+  AgentConfigSchema,
   WorkspaceCreateSchema,
   TaskCreateSchema,
   TaskWorkspaceUpdateSchema,
@@ -20,6 +21,19 @@ import {
 } from "../validation";
 import { z } from "zod";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../../shared/guardrail-defaults";
+
+describe("task checkout configuration", () => {
+  it("preserves valid per-task worktree options", () => {
+    expect(
+      AgentConfigSchema.parse({ worktreeMode: "worktree", worktreeBaseBranch: "feature/base" }),
+    ).toEqual({ worktreeMode: "worktree", worktreeBaseBranch: "feature/base" });
+    expect(AgentConfigSchema.parse({ worktreeMode: "local" }).worktreeMode).toBe("local");
+  });
+  it("rejects invalid modes and empty starting branches", () => {
+    expect(AgentConfigSchema.safeParse({ worktreeMode: "elsewhere" }).success).toBe(false);
+    expect(AgentConfigSchema.safeParse({ worktreeBaseBranch: " " }).success).toBe(false);
+  });
+});
 
 describe("validateInput", () => {
   const simpleSchema = z.object({

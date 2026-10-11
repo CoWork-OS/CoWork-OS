@@ -2278,6 +2278,10 @@ export interface AgentConfig {
   teamWorkItemLane?: boolean;
   /** Require git worktree isolation for this task and fail fast if unavailable. */
   requireWorktree?: boolean;
+  /** Per-task checkout choice. Omit to use the global worktree setting. */
+  worktreeMode?: "local" | "worktree";
+  /** Existing local branch to base a new isolated checkout on; omit for HEAD. */
+  worktreeBaseBranch?: string;
   /**
    * Optional allow-list of approval types that may be auto-approved when
    * autonomousMode is enabled. Omit to preserve legacy "approve all" behavior.
@@ -2669,6 +2673,14 @@ export type WorktreeStatus =
   | "conflict" // Merge conflict detected
   | "cleaned" // Worktree removed after completion
   | "failed"; // Worktree setup or operation failed
+
+export interface WorktreeWorkspaceInfo {
+  workspaceId: string;
+  available: boolean;
+  reason?: string;
+  currentBranch?: string;
+  branches: string[];
+}
 
 export interface WorktreeInfo {
   taskId: string;
@@ -8769,6 +8781,7 @@ export const IPC_CHANNELS = {
 
   // Git Worktree operations
   WORKTREE_GET_INFO: "worktree:getInfo",
+  WORKTREE_WORKSPACE_INFO: "worktree:workspaceInfo",
   WORKTREE_LIST: "worktree:list",
   WORKTREE_MERGE: "worktree:merge",
   WORKTREE_CLEANUP: "worktree:cleanup",

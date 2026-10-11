@@ -31,6 +31,66 @@ function createDaemonLike(overrides?: Partial<Any>) {
 }
 
 describe("AgentDaemon.resumeTask", () => {
+  it("fails interrupted resume when the required worktree is missing", async () => {
+    const task = {
+      id: "task-missing-worktree",
+      status: "interrupted",
+      workspaceId: "workspace-1",
+      agentConfig: { requireWorktree: true, worktreeMode: "worktree" },
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      shutdownRequested: false,
+      taskRepo: { findById: vi.fn().mockReturnValue(task), update: vi.fn() },
+      workspaceRepo: {
+        findById: vi
+          .fn()
+          .mockReturnValue({ id: "workspace-1", path: "/tmp/base", permissions: {} }),
+      },
+      applyTaskWorkspaceOverrides: vi.fn((_task: Any, workspace: Any) => workspace),
+      getTaskEventsForResume: vi
+        .fn()
+        .mockReturnValue([
+          { type: "plan_created", payload: { plan: { description: "p", steps: [] } } },
+        ]),
+      getTaskEventsForReplay: vi.fn().mockReturnValue([]),
+      isLegacyEventType: vi.fn((event: Any, type: string) => event.type === type),
+      resolveLegacyEventType: vi.fn((event: Any) => event.type),
+      applyAgentRoleOverrides: vi.fn((value: Any) => ({ task: value })),
+      withLegacyTeamWorkItemLane: vi.fn((value: Any) => value),
+      logEvent: vi.fn(),
+      queueManager: { enqueue: vi.fn() },
+    });
+
+    await expect(
+      AgentDaemon.prototype["resumeInterruptedTask"].call(daemonLike, task),
+    ).rejects.toThrow(/isolated worktree.*missing/i);
+    expect(daemonLike.queueManager.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("fails manual continuation when the required worktree is missing", () => {
+    const task = {
+      id: "task-missing-worktree-continuation",
+      workspaceId: "workspace-1",
+      agentConfig: { requireWorktree: true, worktreeMode: "worktree" },
+    };
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: { update: vi.fn() },
+      workspaceRepo: {
+        findById: vi
+          .fn()
+          .mockReturnValue({ id: "workspace-1", path: "/tmp/base", permissions: {} }),
+      },
+      applyAgentRoleOverrides: vi.fn((value: Any) => ({ task: value })),
+      withLegacyTeamWorkItemLane: vi.fn((value: Any) => value),
+      isLegacyEventType: vi.fn((event: Any, type: string) => event.type === type),
+    });
+    const events = [{ type: "plan_created", payload: { plan: { description: "p", steps: [] } } }];
+
+    expect(() =>
+      AgentDaemon.prototype["createContinuationExecutor"].call(daemonLike, task, events),
+    ).toThrow(/isolated worktree.*missing/i);
+  });
+
   it("does not reopen a task that is already terminal", async () => {
     const daemonLike = createDaemonLike({
       taskRepo: {

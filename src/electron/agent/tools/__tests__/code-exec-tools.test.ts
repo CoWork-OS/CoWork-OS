@@ -69,6 +69,20 @@ describe("execute_code capability boundary", () => {
     expect(createSandbox).not.toHaveBeenCalled();
   });
 
+  it.each(["shell", "python", "javascript"] as const)(
+    "rejects on-request %s network capability before process creation",
+    async (language) => {
+      const tools = new CodeExecTools({
+        ...workspace,
+        permissions: { ...workspace.permissions, network: true, accessNetworkMode: "on-request" },
+      });
+      await expect(
+        tools.executeCode({ language, code: "ignored", allow_network: true }),
+      ).rejects.toThrow("cannot enforce per-request network grants");
+      expect(createSandbox).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects implicit networking in the unsandboxed backend", async () => {
     vi.mocked(createSandbox).mockResolvedValue({ type: "none", execute: vi.fn() } as never);
     const tools = new CodeExecTools({

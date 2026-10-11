@@ -75,6 +75,11 @@ export class CodeExecTools {
     if (permissions.accessNetworkMode === "disabled") {
       throw new Error("execute_code network access is disabled by the active access profile.");
     }
+    if (permissions.accessNetworkMode === "on-request") {
+      throw new Error(
+        "execute_code cannot enforce per-request network grants; use web_fetch, http_request, or web_search, or keep code networking disabled.",
+      );
+    }
     // The process sandboxes currently expose a coarse network on/off switch;
     // they cannot enforce per-domain egress for arbitrary user code. Refuse
     // the combination instead of pretending the profile remains effective.

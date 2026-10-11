@@ -895,8 +895,8 @@ export class ShellTools {
     );
   }
 
-  private shouldAllowShellNetwork(policies: AdminPolicies): boolean {
-    return canEnableSubprocessNetwork(this.workspace.permissions, policies);
+  private shouldAllowShellNetwork(policies: AdminPolicies, invocationApproved = false): boolean {
+    return canEnableSubprocessNetwork(this.workspace.permissions, policies, invocationApproved);
   }
 
   /**
@@ -912,6 +912,7 @@ export class ShellTools {
       policies: AdminPolicies;
       signal?: AbortSignal;
       background?: boolean;
+      networkApproved: boolean;
     },
   ): Promise<ISandbox | null> {
     const sandbox = await createSandbox(
@@ -923,7 +924,7 @@ export class ShellTools {
       const policies = options.policies;
       const sandboxAllowed = policies.runtime.allowedSandboxTypes.includes(sandbox.type);
       if (sandbox.type === "none" || !sandboxAllowed) {
-        if (!this.shouldAllowShellNetwork(policies)) {
+        if (!this.shouldAllowShellNetwork(policies, options.networkApproved)) {
           this.daemon.logEvent(this.taskId, "sandbox_denied", {
             tool: "run_command",
             reason: "no_os_sandbox_available",
@@ -1016,8 +1017,12 @@ export class ShellTools {
   }
 
   /** Whether a sandboxed shell command may use the network; logs the decision. */
-  private resolveSandboxShellNetwork(policies: AdminPolicies, sandboxType: string): boolean {
-    const allowShellNetwork = this.shouldAllowShellNetwork(policies);
+  private resolveSandboxShellNetwork(
+    policies: AdminPolicies,
+    sandboxType: string,
+    networkApproved: boolean,
+  ): boolean {
+    const allowShellNetwork = this.shouldAllowShellNetwork(policies, networkApproved);
     if (this.workspace.permissions?.network === true) {
       this.daemon.logEvent(this.taskId, "network_policy_decision", {
         action: allowShellNetwork ? "allow" : "deny",
@@ -1044,6 +1049,7 @@ export class ShellTools {
       policies: AdminPolicies;
       signal?: AbortSignal;
       beforeEffect: () => Promise<void>;
+      networkApproved: boolean;
     },
   ): Promise<{
     success: boolean;
@@ -1068,7 +1074,11 @@ export class ShellTools {
         sandboxType: sandbox.type,
       });
 
-      const allowShellNetwork = this.resolveSandboxShellNetwork(policies, sandbox.type);
+      const allowShellNetwork = this.resolveSandboxShellNetwork(
+        policies,
+        sandbox.type,
+        options.networkApproved,
+      );
 
       this.processSessionId++;
       this.clearEscalationTimeouts();
@@ -1400,7 +1410,11 @@ export class ShellTools {
     const manager = getBackgroundProcessManager();
     // Refuse before asking anyone to approve a command that could not start.
     manager.assertCanStart(this.taskId);
-    const { cwd, policies, beforeEffect } = await this.authorizeCommand(command, options, true);
+    const { cwd, policies, beforeEffect, networkApproved } = await this.authorizeCommand(
+      command,
+      options,
+      true,
+    );
     manager.assertCanStart(this.taskId);
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled after approval expired");
@@ -1426,12 +1440,13 @@ export class ShellTools {
         .catch(() => undefined);
     };
     let launch: BackgroundProcessLaunch | null = null;
-    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies)) {
+    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies, networkApproved)) {
       const sandbox = await this.acquireCommandSandbox(command, {
         cwd,
         policies,
         signal: options?.signal,
         background: true,
+        networkApproved,
       });
       if (sandbox) {
         try {
@@ -1444,6 +1459,7 @@ export class ShellTools {
           env: options?.env,
           policies,
           onListenerViolation,
+          networkApproved,
         });
       }
     }
@@ -1513,6 +1529,7 @@ export class ShellTools {
     options: {
       env?: Record<string, string>;
       policies: AdminPolicies;
+      networkApproved: boolean;
       onListenerViolation: (violation: LoopbackListenerViolation) => void;
     },
   ): BackgroundProcessLaunch {
@@ -1523,7 +1540,11 @@ export class ShellTools {
       );
     }
     this.warnUnforwardedSandboxEnv(options.env);
-    const allowShellNetwork = this.resolveSandboxShellNetwork(options.policies, sandbox.type);
+    const allowShellNetwork = this.resolveSandboxShellNetwork(
+      options.policies,
+      sandbox.type,
+      options.networkApproved,
+    );
     const docker = sandbox.type === "docker";
     const guardLoopback = sandbox.type === "macos" && !allowShellNetwork;
     let spawned: ReturnType<NonNullable<ISandbox["spawnProcess"]>>;
@@ -1666,9 +1687,19 @@ export class ShellTools {
       signal?: AbortSignal;
     },
   ): Promise<RunCommandResult> {
-    const { cwd, policies, beforeEffect } = await this.authorizeCommand(command, options);
+    const { cwd, policies, beforeEffect, networkApproved } = await this.authorizeCommand(
+      command,
+      options,
+    );
     const workbooks = await snapshotWorkbooks(command, cwd, [cwd, this.workspace.path]);
-    const result = await this.runAuthorizedCommand(command, cwd, policies, beforeEffect, options);
+    const result = await this.runAuthorizedCommand(
+      command,
+      cwd,
+      policies,
+      beforeEffect,
+      networkApproved,
+      options,
+    );
     return withShellAppleScriptHint(
       command,
       withLongRunningCommandHint(
@@ -1729,7 +1760,12 @@ export class ShellTools {
     command: string,
     options?: { cwd?: string; timeout?: number; signal?: AbortSignal },
     background = false,
-  ): Promise<{ cwd: string; policies: AdminPolicies; beforeEffect: () => Promise<void> }> {
+  ): Promise<{
+    cwd: string;
+    policies: AdminPolicies;
+    beforeEffect: () => Promise<void>;
+    networkApproved: boolean;
+  }> {
     const approvedScope = this.getShellAccessScopeFingerprint(this.workspace);
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled before approval");
@@ -1828,7 +1864,7 @@ export class ShellTools {
           "This shell command is blocked because the active profile disables network access.",
         );
       }
-      if (!this.shouldAllowShellNetwork(policies)) {
+      if (!this.shouldAllowShellNetwork(policies, true)) {
         throw new Error(
           "This shell command is blocked because shell network access is not allowed by the active policy. Use web_fetch, http_request, or web_search instead of retrying shell networking.",
         );
@@ -1990,7 +2026,8 @@ export class ShellTools {
       cwd: options?.cwd || this.workspace.path,
       ...(background ? { background: true } : {}),
     });
-    return { cwd, policies, beforeEffect };
+    // This grant is local to this admitted invocation, never stored on the tool instance.
+    return { cwd, policies, beforeEffect, networkApproved: networkRequiresApproval };
   }
 
   private async runAuthorizedCommand(
@@ -1998,6 +2035,7 @@ export class ShellTools {
     cwd: string,
     policies: AdminPolicies,
     beforeEffect: () => Promise<void>,
+    networkApproved: boolean,
     options?: {
       timeout?: number;
       env?: Record<string, string>;
@@ -2042,7 +2080,7 @@ export class ShellTools {
         hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions) ||
         (this.workspace.permissions.accessDomainRules?.length || 0) > 0,
     });
-    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies)) {
+    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies, networkApproved)) {
       const sandboxResult = await this.runCommandInSandbox(command, {
         cwd,
         timeout,
@@ -2051,6 +2089,7 @@ export class ShellTools {
         policies,
         signal: options?.signal,
         beforeEffect,
+        networkApproved,
       });
       if (sandboxResult) {
         return this.recordVerificationCommandResult(verificationCommandKey, sandboxResult);

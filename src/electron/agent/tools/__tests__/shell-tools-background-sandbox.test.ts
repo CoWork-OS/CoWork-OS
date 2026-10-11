@@ -29,14 +29,23 @@ import { GuardrailManager } from "../../../guardrails/guardrail-manager";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import { ShellTools } from "../shell-tools";
 import { getBackgroundProcessManager } from "../background-processes";
+import { loadPolicies } from "../../../admin/policies";
+import { isLikelyNetworkShellCommand } from "../../../../shared/shell-network";
 import type { AgentDaemon } from "../../daemon";
 import type { Workspace } from "../../../../shared/types";
 
 const node = JSON.stringify(process.execPath);
+const defaultPolicies = loadPolicies();
 
-function serverCommand(host: string): string {
+function scriptCommand(root: string, name: string, script: string, executable = node): string {
+  const file = path.join(root, name);
+  fs.writeFileSync(file, script);
+  return `${executable} ${JSON.stringify(file)}`;
+}
+
+function serverCommand(host: string, root: string): string {
   const script = `const s = require("net").createServer((c) => c.end("pong")); s.listen(0, "${host}", () => console.log("listening on port " + s.address().port));`;
-  return `${node} -e '${script}'`;
+  return scriptCommand(root, "server.cjs", script);
 }
 
 function fetchOnce(port: number): Promise<string> {
@@ -64,6 +73,7 @@ describe.skipIf(process.platform !== "darwin")(
     }
 
     beforeEach(() => {
+      vi.mocked(loadPolicies).mockReturnValue(structuredClone(defaultPolicies));
       base = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-shell-loopback-"));
       const root = path.join(base, "workspace");
       fs.mkdirSync(root);
@@ -100,9 +110,12 @@ describe.skipIf(process.platform !== "darwin")(
 
     it("serves a background loopback server the host can reach", async () => {
       const shellTools = newShellTools();
-      const started = await shellTools.startBackgroundCommand(serverCommand("127.0.0.1"), {
-        cwd: workspace.path,
-      });
+      const started = await shellTools.startBackgroundCommand(
+        serverCommand("127.0.0.1", workspace.path),
+        {
+          cwd: workspace.path,
+        },
+      );
 
       expect(started).toMatchObject({ success: true, running: true, sandbox: "macos" });
       expect(String((started.notes as string[])[0])).toMatch(/127\.0\.0\.1\/localhost/);
@@ -111,61 +124,130 @@ describe.skipIf(process.platform !== "darwin")(
       expect(await fetchOnce(port)).toBe("pong");
     }, 30_000);
 
-    it("stops a background server that listens on all interfaces", async () => {
-      const shellTools = newShellTools();
-      const started = await shellTools.startBackgroundCommand(serverCommand("0.0.0.0"), {
-        cwd: workspace.path,
-      });
-      const processId = started.process_id as string;
-      const manager = getBackgroundProcessManager();
-      const deadline = Date.now() + 10_000;
-      let status = await shellTools.getBackgroundProcessOutput({
-        process_id: processId,
-        since_offset: 0,
-      });
-      while (status.running && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        status = await shellTools.getBackgroundProcessOutput({
+    it.each(["node", "python"])(
+      "enforces administrator network denial for a readable %s script after consent",
+      async (language) => {
+        const command =
+          language === "node"
+            ? scriptCommand(
+                workspace.path,
+                "network.cjs",
+                'const s = require("net").connect(80, "192.0.2.1"); s.on("error", e => { console.log(e.code); process.exit(e.code === "EPERM" || e.code === "EACCES" ? 0 : 1); }); setTimeout(() => process.exit(2), 2000);',
+              )
+            : scriptCommand(
+                workspace.path,
+                "network.py",
+                "import socket\ns = socket.socket()\ns.connect(('192.0.2.1', 80))\n",
+                "python3",
+              );
+        workspace.permissions.network = true;
+        workspace.permissions.accessNetworkMode = "on-request";
+        workspace.permissions.accessSandboxMode = "danger-full-access";
+        workspace.permissions.accessApprovalPolicy = "never";
+        const policies = loadPolicies();
+        // Keep the same policy through admission and effect revalidation.
+        vi.mocked(loadPolicies).mockReturnValue({
+          ...policies,
+          runtime: {
+            ...policies.runtime,
+            requireSandboxForShell: false,
+            // Invocation consent cannot override the administrator network denial.
+            network: { ...policies.runtime.network, allowShellNetwork: false },
+          },
+        });
+        expect(isLikelyNetworkShellCommand(command)).toBe(false);
+        const shellTools = newShellTools();
+        const result = await shellTools.runCommand(command, { timeout: 10_000 });
+        expect(result.stdout + result.stderr).toMatch(
+          /EPERM|EACCES|Operation not permitted|Permission denied/,
+        );
+        expect(await shellTools.runCommand("printf local", { timeout: 10_000 })).toMatchObject({
+          success: true,
+          stdout: "local",
+        });
+        const background = await shellTools.startBackgroundCommand(command, {
+          startupWaitMs: 1000,
+        });
+        expect(background.sandbox).toBe("macos");
+        expect(background.startup_output).toMatch(
+          /EPERM|EACCES|Operation not permitted|Permission denied/,
+        );
+      },
+      30_000,
+    );
+
+    it.skipIf(process.env.COWORK_TEST_NON_LOOPBACK !== "1")(
+      "stops a background server that listens on all interfaces",
+      async () => {
+        const shellTools = newShellTools();
+        const started = await shellTools.startBackgroundCommand(
+          serverCommand("0.0.0.0", workspace.path),
+          {
+            cwd: workspace.path,
+          },
+        );
+        const processId = started.process_id as string;
+        const manager = getBackgroundProcessManager();
+        const deadline = Date.now() + 10_000;
+        let status = await shellTools.getBackgroundProcessOutput({
           process_id: processId,
           since_offset: 0,
         });
-      }
+        while (status.running && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          status = await shellTools.getBackgroundProcessOutput({
+            process_id: processId,
+            since_offset: 0,
+          });
+        }
 
-      expect(status).toMatchObject({
-        running: false,
-        status: "stopped",
-        stop_reason: "listened_on_non_loopback_address",
-      });
-      expect(status.output).toMatch(/listened on \*\.\d+/);
-      expect(manager.list("nobody")).toEqual([]);
-    }, 30_000);
+        expect(status).toMatchObject({
+          running: false,
+          status: "stopped",
+          stop_reason: "listened_on_non_loopback_address",
+        });
+        expect(status.output).toMatch(/listened on \*\.\d+/);
+        expect(manager.list("nobody")).toEqual([]);
+      },
+      30_000,
+    );
 
     it("lets a foreground test server listen on loopback with networking denied", async () => {
       const shellTools = newShellTools();
       const script =
         'const s = require("net").createServer((c) => c.end("pong")); s.listen(0, "127.0.0.1", () => { require("net").connect(s.address().port, "127.0.0.1").on("data", (d) => { console.log("got " + d); process.exit(0); }); });';
 
-      const result = await shellTools.runCommand(`${node} -e '${script}'`, {
-        cwd: workspace.path,
-        timeout: 20_000,
-      });
+      const result = await shellTools.runCommand(
+        scriptCommand(workspace.path, "foreground.cjs", script),
+        {
+          cwd: workspace.path,
+          timeout: 20_000,
+        },
+      );
 
       expect(result).toMatchObject({ success: true, exitCode: 0 });
       expect(result.stdout).toContain("got pong");
     }, 30_000);
 
-    it("stops a foreground command that listens on all interfaces", async () => {
-      const shellTools = newShellTools();
-      const startedAt = Date.now();
+    it.skipIf(process.env.COWORK_TEST_NON_LOOPBACK !== "1")(
+      "stops a foreground command that listens on all interfaces",
+      async () => {
+        const shellTools = newShellTools();
+        const startedAt = Date.now();
 
-      const result = await shellTools.runCommand(`${serverCommand("0.0.0.0")}; true`, {
-        cwd: workspace.path,
-        timeout: 20_000,
-      });
+        const result = await shellTools.runCommand(
+          `${serverCommand("0.0.0.0", workspace.path)}; true`,
+          {
+            cwd: workspace.path,
+            timeout: 20_000,
+          },
+        );
 
-      expect(Date.now() - startedAt).toBeLessThan(10_000);
-      expect(result).toMatchObject({ success: false, terminationReason: "error" });
-      expect(result.stderr).toMatch(/listened on \*\.\d+ .*Bind servers to 127\.0\.0\.1/s);
-    }, 30_000);
+        expect(Date.now() - startedAt).toBeLessThan(10_000);
+        expect(result).toMatchObject({ success: false, terminationReason: "error" });
+        expect(result.stderr).toMatch(/listened on \*\.\d+ .*Bind servers to 127\.0\.0\.1/s);
+      },
+      30_000,
+    );
   },
 );

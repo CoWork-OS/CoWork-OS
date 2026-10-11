@@ -93,6 +93,8 @@ CoWork supports multiple app profiles so one install can keep separate operating
 
 ## Access Profiles
 
+Saved HTTP allows retain their effect class, method, body presence, custom-header presence, and credential identity across storage and reload. A rule for an ordinary read cannot authorize data export or protected credentials; legacy ambiguous allows fail closed for sensitive effects. Malformed methods are rejected at the HTTP sink.
+
 Access profiles are task-level policy objects and are separate from app profiles. They combine the
 logical sandbox (`read-only`, `workspace-write`, or `danger-full-access`), approval and reviewer
 policy, network posture, and optional filesystem/domain scope. The selected profile is applied to

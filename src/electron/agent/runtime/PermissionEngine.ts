@@ -1,6 +1,11 @@
+import {
+  httpPermissionContext,
+  isReadOnlyHttpRequestInput,
+} from "../security/http-permission-context";
 import path from "node:path";
 import type {
   ApprovalType,
+  PermissionScopeConstraints,
   PermissionDecisionReason,
   PermissionEffect,
   PermissionEvaluationResult,
@@ -86,6 +91,7 @@ export interface PermissionEngineRequest {
 }
 
 type PermissionFacts = {
+  constraints: PermissionScopeConstraints;
   toolName: string;
   normalizedPath: string;
   normalizedCommand: string;
@@ -1315,7 +1321,31 @@ export class PermissionEngine {
       isMutatingTool;
     const isReadOnly = !isWriteLike;
 
+    const effectClass = isProtectedCredential
+      ? "protected_credential"
+      : isDataExport
+        ? "data_export"
+        : isNetworkAccess
+          ? "network_read"
+          : "ordinary";
+    const http =
+      toolName === "http_request" || toolName === "web_fetch"
+        ? httpPermissionContext(toolName === "web_fetch" ? { credentialId } : request.toolInput)
+        : undefined;
     return {
+      constraints: {
+        effectClass,
+        ...(http
+          ? {
+              http: {
+                method: http.method,
+                hasBody: http.hasBody,
+                hasCustomHeaders: http.hasCustomHeaders,
+                ...(http.credentialId ? { credentialId: http.credentialId } : {}),
+              },
+            }
+          : {}),
+      },
       toolName,
       normalizedPath,
       normalizedCommand,
@@ -1417,15 +1447,7 @@ export class PermissionEngine {
     if (canonicalizeToolName(toolName) !== "http_request") {
       return false;
     }
-    const method = this.extractHttpMethod(toolInput);
-    return method === "GET" || method === "HEAD";
-  }
-
-  private static extractHttpMethod(toolInput: unknown): string {
-    const obj =
-      toolInput && typeof toolInput === "object" ? (toolInput as Record<string, unknown>) : null;
-    const rawMethod = typeof obj?.method === "string" ? obj.method.trim() : "";
-    return rawMethod ? rawMethod.toUpperCase() : "GET";
+    return isReadOnlyHttpRequestInput(toolInput);
   }
 
   private static isDangerousOnlySafeCommand(command: string): boolean {
@@ -1534,6 +1556,27 @@ export class PermissionEngine {
 
   private static ruleMatches(rule: PermissionRule, facts: PermissionFacts): boolean {
     const scope = normalizePermissionScope(rule.scope);
+    // Restrictions keep their breadth. Allows must never gain sensitivity when
+    // loaded from legacy storage or reused with a different HTTP operation.
+    if (rule.effect === "allow") {
+      const current = facts.constraints;
+      if (scope.effectClass !== undefined && scope.effectClass !== current.effectClass)
+        return false;
+      const sensitive =
+        current.effectClass === "data_export" || current.effectClass === "protected_credential";
+      if (sensitive && scope.effectClass === undefined) return false;
+      if (current.http) {
+        if (sensitive && !scope.http) return false;
+        if (
+          scope.http &&
+          (scope.http.method !== current.http.method ||
+            scope.http.hasBody !== current.http.hasBody ||
+            scope.http.hasCustomHeaders !== current.http.hasCustomHeaders ||
+            scope.http.credentialId !== current.http.credentialId)
+        )
+          return false;
+      } else if (scope.http) return false;
+    }
     switch (scope.kind) {
       case "tool":
         return scope.toolName === facts.toolName;
@@ -1643,6 +1686,13 @@ export class PermissionEngine {
   static inferScope(
     request: PermissionEngineRequest,
     facts = this.buildFacts(request),
+  ): PermissionRuleScope {
+    return { ...this.inferScopeTarget(request, facts), ...facts.constraints };
+  }
+
+  private static inferScopeTarget(
+    request: PermissionEngineRequest,
+    facts: PermissionFacts,
   ): PermissionRuleScope {
     if (facts.normalizedDomain && facts.toolName.startsWith("browser_")) {
       return {

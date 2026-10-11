@@ -801,8 +801,10 @@ describe("PermissionEngine", () => {
       kind: "domain",
       toolName: "web_fetch",
       domain: "docs.example.com",
+      effectClass: "network_read",
+      http: { method: "GET", hasBody: false, hasCustomHeaders: false },
     });
-    expect(exportResult.decision).toBe("allow");
+    expect(exportResult.decision).toBe("ask");
     expect(readResult.scopePreview).toContain("docs.example.com");
   });
 
@@ -863,6 +865,7 @@ describe("PermissionEngine", () => {
       kind: "domain",
       domain: "github.com",
       toolPrefix: "browser_",
+      effectClass: "network_read",
     });
   });
 

@@ -34,22 +34,47 @@ describe("buildHomeSessions", () => {
     expect(result.needsYou).toEqual([
       { id: "waiting", title: "Session waiting", updatedAt: 200, attention: "Response needed" },
     ]);
-    expect(result.recent.map((item) => item.id)).toEqual(["new", "old"]);
   });
 
-  it("leaves out sub-agents and automated sessions from recent, and caps both lists", () => {
+  it("leaves out sub-agents and caps the waiting list", () => {
     const tasks = [
-      task("child", 900, { parentTaskId: "p" }),
-      task("auto", 800, { source: "cron" } as Partial<Task>),
-      ...Array.from({ length: 6 }, (_, i) => task(`r${i}`, 700 - i)),
-      ...Array.from({ length: 5 }, (_, i) =>
+      task("child", 900, { parentTaskId: "p", terminalStatus: "needs_user_action" }),
+      ...Array.from({ length: 8 }, (_, i) =>
         task(`n${i}`, 600 - i, { terminalStatus: "awaiting_approval" }),
       ),
     ];
     const result = buildHomeSessions(tasks);
-    expect(result.recent.map((item) => item.id)).toEqual(["r0", "r1", "r2", "r3"]);
-    expect(result.needsYou).toHaveLength(3);
-    expect(result.recent.some((item) => item.id === "child")).toBe(false);
+    expect(result.needsYou).toHaveLength(6);
+    expect(result.needsYou.some((item) => item.id === "child")).toBe(false);
+  });
+
+  it("returns the shared empty value when only finished manual sessions exist", () => {
+    expect(buildHomeSessions([task("a", 100), task("b", 200)])).toBe(EMPTY_HOME_SESSIONS);
+  });
+
+  it("lists automated sessions that finished cleanly in the last day as handled", () => {
+    const now = 10 * 24 * 60 * 60 * 1000;
+    const hour = 60 * 60 * 1000;
+    const result = buildHomeSessions(
+      [
+        task("cron-ok", now - hour, {
+          source: "cron",
+          completedAt: now - 2 * hour,
+        } as Partial<Task>),
+        task("cron-old", now - 30 * hour, { source: "cron" } as Partial<Task>),
+        task("cron-failed", now - hour, { source: "cron", status: "failed" } as Partial<Task>),
+        task("cron-waiting", now - hour, {
+          source: "cron",
+          terminalStatus: "awaiting_approval",
+        } as Partial<Task>),
+        task("manual", now - hour),
+      ],
+      now,
+    );
+    expect(result.handled).toEqual([
+      { id: "cron-ok", title: "Session cron-ok", updatedAt: now - 2 * hour },
+    ]);
+    expect(result.needsYou.map((item) => item.id)).toEqual(["cron-waiting"]);
   });
 });
 
@@ -58,8 +83,13 @@ describe("sameHomeSessions", () => {
     const tasks = [task("a", 1), task("b", 2, { terminalStatus: "needs_user_action" })];
     expect(sameHomeSessions(buildHomeSessions(tasks), buildHomeSessions(tasks))).toBe(true);
     expect(
-      sameHomeSessions(buildHomeSessions(tasks), buildHomeSessions([...tasks, task("c", 3)])),
+      sameHomeSessions(
+        buildHomeSessions(tasks),
+        buildHomeSessions([...tasks, task("c", 3, { terminalStatus: "awaiting_approval" })]),
+      ),
     ).toBe(false);
+    const handled = { ...EMPTY_HOME_SESSIONS, handled: [{ id: "h", title: "H", updatedAt: 1 }] };
+    expect(sameHomeSessions(EMPTY_HOME_SESSIONS, handled)).toBe(false);
   });
 });
 

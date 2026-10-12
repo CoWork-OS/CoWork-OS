@@ -564,6 +564,13 @@ import {
   createMemoryReviewService,
 } from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
+import { setupAttentionHandlers } from "./attention-handlers";
+import { AttentionService } from "../attention/AttentionService";
+import {
+  listSuggestionsAcross,
+  listWaitingFlowSteps,
+  toAttentionCommitment,
+} from "../attention/attention-sources";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { setupAnswerSurfaceHandlers } from "./answer-surface-handlers";
 import { AnswerDataError, readAnswerDataTable } from "../answer-surfaces/answer-data";
@@ -11189,6 +11196,39 @@ export async function setupIpcHandlers(
         .findByTaskIdAndTypes(taskId, [...MEMORY_USED_EVENT_TYPES], MEMORY_USED_MAX_EVENTS)
         .map(toMemoryUsedTimelineEvent);
     },
+  });
+
+  // Shared "needs you" queue: one snapshot of everything waiting on the user (approvals,
+  // agent questions, paused sessions, flow steps, due commitments and suggestions).
+  setupAttentionHandlers({
+    service: new AttentionService({
+      listPendingApprovals: () => approvalRepo.findAllPending(),
+      listPendingInputRequests: () => inputRequestRepo.findAllPending(),
+      listRecentTasks: () =>
+        taskRepo.findSidebarSummaries(200, 0, {
+          prioritizeSidebar: true,
+          includeArchivedSessions: false,
+        }),
+      findTask: async (taskId) => (await taskRepo.findById(taskId)) ?? undefined,
+      listAgentNames: async () =>
+        new Map(
+          (await agentRoleRepo.findAll()).map((role) => [role.id, role.displayName || role.name]),
+        ),
+      listWaitingFlowSteps: () => listWaitingFlowSteps(options?.getRoutineService?.() ?? null),
+      listDueCommitments: async () =>
+        RelationshipMemoryService.listDueSoonCommitments(24).map(toAttentionCommitment),
+      listSuggestions: async () => {
+        const { ProactiveSuggestionsService } =
+          await import("../agent/ProactiveSuggestionsService");
+        return listSuggestionsAcross(await workspaceRepo.findAll(), (id, opts, ids) =>
+          ProactiveSuggestionsService.listActive(id, opts, ids),
+        );
+      },
+      localLabel: process.platform === "darwin" ? "This Mac" : "This computer",
+      log: (message, error) => logger.warn(message, error),
+    }),
+    events: agentDaemon,
+    getMainWindow,
   });
 
   // Memory Hub "Review": automatic commitment expiries with undo.

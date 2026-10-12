@@ -5658,6 +5658,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
+  // Shared "needs you" queue
+  listAttention: () => ipcRenderer.invoke(IPC_CHANNELS.ATTENTION_LIST),
+  onAttentionChanged: (callback: () => void) => {
+    const subscription = () => callback();
+    ipcRenderer.on(IPC_CHANNELS.ATTENTION_CHANGED, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.ATTENTION_CHANGED, subscription);
+  },
+
   // Event Triggers
   listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
   listMcpEvents: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_LIST, serverId),
@@ -9655,6 +9663,11 @@ export interface ElectronAPI {
     workspaceId: string,
     suggestionId: string,
   ) => Promise<{ actionPrompt: string | null }>;
+
+  // Shared "needs you" queue
+  listAttention: () => Promise<import("../shared/attention").AttentionSnapshot>;
+  /** Fires, without data, when the queue may have changed; reload it with listAttention. */
+  onAttentionChanged: (callback: () => void) => () => void;
 
   // Playwright QA APIs
   qaGetRuns: () => Promise<Any[]>;

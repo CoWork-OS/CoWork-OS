@@ -38,6 +38,8 @@ interface AppearanceSettingsProps {
   onCostReceiptEnabledChange: (enabled: boolean) => void;
   subAgentStatsEnabled: boolean;
   onSubAgentStatsEnabledChange: (enabled: boolean) => void;
+  autoOpenTurnOutput: boolean;
+  onAutoOpenTurnOutputChange: (enabled: boolean) => void;
   onShowOnboarding?: () => void;
   onboardingCompletedAt?: string;
 }
@@ -65,6 +67,8 @@ export function AppearanceSettings({
   onCostReceiptEnabledChange,
   subAgentStatsEnabled,
   onSubAgentStatsEnabledChange,
+  autoOpenTurnOutput,
+  onAutoOpenTurnOutputChange,
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
@@ -465,7 +469,7 @@ export function AppearanceSettings({
       <div className="appearance-section">
         <h4>Task panel</h4>
         <p className="settings-description">
-          Optional sections in the right panel while a task runs. Off by default.
+          Optional right-panel sections and behavior. All off by default.
         </p>
         <label className="settings-checkbox">
           <input
@@ -482,6 +486,14 @@ export function AppearanceSettings({
             onChange={(event) => onSubAgentStatsEnabledChange(event.target.checked)}
           />
           <span>Show sub-agent stats</span>
+        </label>
+        <label className="settings-checkbox">
+          <input
+            type="checkbox"
+            checked={autoOpenTurnOutput}
+            onChange={(event) => onAutoOpenTurnOutputChange(event.target.checked)}
+          />
+          <span>Open a new document, sheet, deck or page when a turn finishes</span>
         </label>
       </div>
 

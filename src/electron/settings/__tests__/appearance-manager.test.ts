@@ -175,6 +175,19 @@ describe("AppearanceManager settings", () => {
     expect(AppearanceManager.loadSettings().commandOutputStyle).toBe("minimal");
   });
 
+  it("keeps turn-output auto-open off by default and persists an opt-in", () => {
+    mocks.storedSettings = { themeMode: "system", visualTheme: "warm", accentColor: "cyan" };
+    expect(AppearanceManager.loadSettings().autoOpenTurnOutput).toBe(false);
+
+    AppearanceManager.saveSettings({ autoOpenTurnOutput: true });
+    AppearanceManager.clearCache();
+    expect(AppearanceManager.loadSettings().autoOpenTurnOutput).toBe(true);
+
+    AppearanceManager.saveSettings({ autoOpenTurnOutput: "yes" as never });
+    AppearanceManager.clearCache();
+    expect(AppearanceManager.loadSettings().autoOpenTurnOutput).toBe(true);
+  });
+
   it("falls back to the terminal command output style when the stored value is invalid", () => {
     mocks.storedSettings = {
       themeMode: "system",

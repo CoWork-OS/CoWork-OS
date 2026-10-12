@@ -14,7 +14,7 @@ or another external app is still an explicit cross-application action.
 
 ## User Experience
 
-In the transcript, a generated document is a file reference, not a card. Each finished turn ends with one `Created N files` line (`TurnOutputsRow`) listing the files that turn wrote, and inline code in the answer that names a written file (for example `report.docx`) renders as a file chip. Clicking either opens supported local document previews in the right sidebar. Right-clicking any file reference, or the `…` button on a right-panel Files row, offers `Open with default app`, `Show in Finder` and `Copy path`. The compact `DocumentArtifactCard` card still appears in the fullscreen viewer's latest-turn context.
+In the transcript, a generated document is a file reference, not a card. Each finished turn ends with one `Created N files` line (`TurnOutputsRow`) listing the files that turn wrote, and inline code in the answer that names a written file (for example `report.docx`) renders as a file chip. Clicking either opens supported local document previews in the right sidebar. Right-clicking any file reference, or the `…` button on a right-panel Files row, offers `Open with default app`, `Show in Finder` and `Copy path`. The compact `DocumentArtifactCard` card still appears in the fullscreen viewer's latest-turn context. With **Settings → Appearance → Task panel → Open a new document, sheet, deck or page when a turn finishes** turned on, a turn you watched that created exactly one such file opens it in the sidebar automatically.
 
 The right sidebar can be resized by dragging its left edge. The resized width is persisted globally, so later artifact sidebar opens use the last chosen width while keeping the main task pane above a mobile-sized minimum.
 

@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS: AppearanceSettings = {
   homeNextActionsEnabled: false,
   costReceiptEnabled: false,
   subAgentStatsEnabled: false,
+  autoOpenTurnOutput: false,
   disclaimerAccepted: false,
   onboardingCompleted: false,
   onboardingCompletedAt: undefined,
@@ -156,7 +157,8 @@ export class AppearanceManager {
             typeof stored.homeResearchVaultEnabled !== "boolean" ||
             typeof stored.homeNextActionsEnabled !== "boolean" ||
             typeof stored.costReceiptEnabled !== "boolean" ||
-            typeof stored.subAgentStatsEnabled !== "boolean"
+            typeof stored.subAgentStatsEnabled !== "boolean" ||
+            typeof stored.autoOpenTurnOutput !== "boolean"
           ) {
             needsWrite = true;
           }
@@ -213,6 +215,10 @@ export class AppearanceManager {
         settings.subAgentStatsEnabled = DEFAULT_SETTINGS.subAgentStatsEnabled;
         needsWrite = true;
       }
+      if (typeof settings.autoOpenTurnOutput !== "boolean") {
+        settings.autoOpenTurnOutput = DEFAULT_SETTINGS.autoOpenTurnOutput;
+        needsWrite = true;
+      }
     } catch (error) {
       console.error("[AppearanceManager] Failed to load settings:", error);
       settings = { ...DEFAULT_SETTINGS };
@@ -237,6 +243,7 @@ export class AppearanceManager {
             homeNextActionsEnabled: settings.homeNextActionsEnabled,
             costReceiptEnabled: settings.costReceiptEnabled,
             subAgentStatsEnabled: settings.subAgentStatsEnabled,
+            autoOpenTurnOutput: settings.autoOpenTurnOutput,
           }),
         );
       } catch {
@@ -359,6 +366,10 @@ export class AppearanceManager {
           typeof settings.subAgentStatsEnabled === "boolean"
             ? settings.subAgentStatsEnabled
             : existingSettings.subAgentStatsEnabled,
+        autoOpenTurnOutput:
+          typeof settings.autoOpenTurnOutput === "boolean"
+            ? settings.autoOpenTurnOutput
+            : existingSettings.autoOpenTurnOutput,
       };
 
       const repository = SecureSettingsRepository.getInstance();

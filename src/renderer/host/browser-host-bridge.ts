@@ -2355,6 +2355,9 @@ function sanitizeBrowserAppearance(value: Record<string, unknown>): Partial<Appe
   if (typeof value.costReceiptEnabled === "boolean") {
     result.costReceiptEnabled = value.costReceiptEnabled;
   }
+  if (typeof value.autoOpenTurnOutput === "boolean") {
+    result.autoOpenTurnOutput = value.autoOpenTurnOutput;
+  }
   if (typeof value.subAgentStatsEnabled === "boolean") {
     result.subAgentStatsEnabled = value.subAgentStatsEnabled;
   }

@@ -7,8 +7,11 @@ import {
   buildWrittenFileResolver,
   collectTurnOutputSummaries,
   collectWrittenFilePaths,
+  getFinishedTurnAutoOpen,
   isArtifactEventCoveredByFileWrite,
   isScratchOutputPath,
+  pickTurnOutputToAutoOpen,
+  type TurnOutputSummary,
 } from "../MainContent/turn-outputs";
 import { TurnOutputsRow, describeTurnOutputs } from "../MainContent/TurnOutputsRow";
 import { buildMarkdownComponents } from "../markdown-components";
@@ -105,6 +108,66 @@ describe("collectTurnOutputSummaries", () => {
     expect(collectTurnOutputSummaries(events, { isTaskWorking: false })[0].files).toEqual([
       { path: "out/report.docx", action: "created" },
     ]);
+  });
+});
+
+describe("pickTurnOutputToAutoOpen", () => {
+  const turn = (files: TurnOutputSummary["files"]): TurnOutputSummary => ({
+    key: "turn",
+    files,
+    startIndex: 0,
+    endIndex: 1,
+  });
+
+  it("opens the turn's one new file that has a side-panel viewer", () => {
+    expect(
+      pickTurnOutputToAutoOpen(
+        turn([
+          { path: "build.py", action: "created" },
+          { path: "out/report.docx", action: "created" },
+        ]),
+      ),
+    ).toBe("out/report.docx");
+  });
+
+  it("opens nothing for edits, several viewable files, or files without a viewer", () => {
+    expect(pickTurnOutputToAutoOpen(turn([{ path: "budget.xlsx", action: "updated" }]))).toBeNull();
+    expect(
+      pickTurnOutputToAutoOpen(
+        turn([
+          { path: "report.docx", action: "created" },
+          { path: "deck.pptx", action: "created" },
+        ]),
+      ),
+    ).toBeNull();
+    expect(pickTurnOutputToAutoOpen(turn([{ path: "chart.png", action: "created" }]))).toBeNull();
+  });
+});
+
+describe("getFinishedTurnAutoOpen", () => {
+  const events = [
+    makeEvent("prompt", "user_message"),
+    makeEvent("doc", "file_created", { path: "brief.docx" }),
+    makeEvent("follow-up", "user_message"),
+    makeEvent("sheet", "file_created", { path: "data.xlsx" }),
+    makeEvent("answer", "assistant_message", { message: "Done" }),
+  ];
+
+  it("targets the final turn's file, once", () => {
+    expect(getFinishedTurnAutoOpen(events, new Set())).toEqual({
+      turnKey: "follow-up",
+      path: "data.xlsx",
+    });
+    expect(getFinishedTurnAutoOpen(events, new Set(["follow-up"]))).toBeNull();
+  });
+
+  it("does not reach back to an earlier turn when the final turn wrote nothing", () => {
+    const quietFollowUp = [
+      ...events.slice(0, 2),
+      makeEvent("question", "user_message", { message: "What changed?" }),
+      makeEvent("reply", "assistant_message", { message: "Nothing." }),
+    ];
+    expect(getFinishedTurnAutoOpen(quietFollowUp, new Set())).toBeNull();
   });
 });
 

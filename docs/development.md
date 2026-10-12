@@ -567,6 +567,7 @@ The shared positioning and UX contract is documented in [Everything Workbench](.
 
 - task outputs appear in the transcript as file references: one `Created N files` line per finished turn (`TurnOutputsRow`, built by `collectTurnOutputSummaries` in `MainContent/turn-outputs.ts`) and chips for written files named in the answer; never as a stack of cards
 - default **Open** should prefer the in-app sidebar for previewable/editable artifacts (`openPreviewableFileInSidebar` in `utils/open-file-in-panel.ts`); `FileActionMenu` offers the default app, Finder and copy path
+- the opt-in **Settings → Appearance → Task panel → Open a new document, sheet, deck or page when a turn finishes** (`autoOpenTurnOutput`) opens a watched turn's single new viewable file in the sidebar (`getFinishedTurnAutoOpen`); several such files, edits, and turns already finished on load open nothing
 - fullscreen mode should keep the functional follow-up composer and latest-turn/working context
 - active follow-up work should keep the current preview visible and defer refresh until the relevant output is updated or the task completes
 - external app and folder actions should remain available for advanced native workflows

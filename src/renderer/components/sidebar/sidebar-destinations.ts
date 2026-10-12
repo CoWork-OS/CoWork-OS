@@ -4,6 +4,7 @@ import {
   Hammer,
   House,
   Inbox,
+  Layers,
   Library,
   Monitor,
   Puzzle,
@@ -15,6 +16,7 @@ import { hasHostCapability, hasHostMethods } from "../../host/browser-capabiliti
 
 export type SidebarDestinationId =
   | "home"
+  | "work"
   | "inbox"
   | "agents"
   | "automations"
@@ -52,6 +54,15 @@ const calmOnly = ({ isCalm }: SidebarDestinationContext) => isCalm;
 
 export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
   { id: "home", label: "Home", icon: House, placement: "rail", views: ["main", "home"] },
+  {
+    // Every session grouped by project; styled for the Calm theme, like Library and Build.
+    id: "work",
+    label: "Work",
+    icon: Layers,
+    placement: "rail",
+    views: ["work"],
+    isVisible: calmOnly,
+  },
   {
     id: "inbox",
     label: "Inbox",

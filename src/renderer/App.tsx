@@ -304,6 +304,9 @@ const BrowserView = lazy(() =>
 const HomeDashboard = lazy(() =>
   import("./components/HomeDashboard").then((module) => ({ default: module.HomeDashboard })),
 );
+const WorkView = lazy(() =>
+  import("./components/work/WorkView").then((module) => ({ default: module.WorkView })),
+);
 const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
 const DevicesPanel = lazy(() =>
   import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
@@ -733,6 +736,7 @@ function appendSidebarTaskPage(tasks: Task[], page: Task[]): Task[] {
 
 type AppView =
   | "home"
+  | "work"
   | "automations"
   | "main"
   | "settings"
@@ -748,6 +752,7 @@ type AppView =
 const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
   "main",
   "home",
+  "work",
   "automations",
   "devices",
   "inboxAgent",
@@ -7648,6 +7653,9 @@ export function App() {
         case "home":
           setCurrentView("main");
           return;
+        case "work":
+          setCurrentView("work");
+          return;
         case "inbox":
           setCurrentView("inboxAgent");
           return;
@@ -8660,6 +8668,17 @@ export function App() {
                     onOpenTask={handleOpenManagedAgentTask}
                   />
                 </main>
+              ) : currentView === "work" ? (
+                <WorkView
+                  tasks={tasks}
+                  onOpenTask={(taskId) => {
+                    void selectTaskAfterDraftFlush(taskId);
+                    setCurrentView("main");
+                  }}
+                  onTasksChanged={refreshTaskLists}
+                  hasMoreTasks={hasMoreTasks}
+                  onLoadMoreTasks={loadMoreTasks}
+                />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />
               ) : currentView === "git" ? (

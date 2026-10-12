@@ -46,8 +46,8 @@ import { capitalizeSidebarSessionTitle } from "../utils/sidebar-title";
 import {
   countSidebarSessionStates,
   filterSidebarSessionsByState,
-  getSidebarSessionActivity,
   getSidebarSessionRowHeight,
+  withAttentionOverlay,
   type SidebarSessionFilter,
 } from "../utils/sidebar-session-state";
 import { deriveSlashCommandTaskTitle } from "../utils/slash-command-title";
@@ -118,6 +118,11 @@ interface SidebarProps {
   isLoadingSessions?: boolean;
   isLoadingMoreTasks?: boolean;
   completionAttentionTaskIds?: string[];
+  /**
+   * Sessions the shared needs-you queue says wait on you, by task id, with the reason.
+   * Keeps the row labels, the Needs you filter and its count in line with Today and the bell.
+   */
+  attentionWaiting?: ReadonlyMap<string, string>;
   onSelectTask: (id: string | null) => void;
   onOpenAgents?: () => void;
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
@@ -866,7 +871,8 @@ export function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): bo
     prev.onBotDeleted === next.onBotDeleted &&
     prev.onTasksChanged === next.onTasksChanged &&
     prev.onProjectWorkspaceIdsChange === next.onProjectWorkspaceIdsChange &&
-    prev.onOpenBotMemory === next.onOpenBotMemory
+    prev.onOpenBotMemory === next.onOpenBotMemory &&
+    prev.attentionWaiting === next.attentionWaiting
   );
 }
 
@@ -891,6 +897,7 @@ function SidebarComponent({
   onNavigate,
   isLoadingSessions = false,
   completionAttentionTaskIds = [],
+  attentionWaiting,
   onSelectTask,
   onOpenAgents,
   onOpenBot,
@@ -955,6 +962,7 @@ function SidebarComponent({
   const renameInputRef = useRef<HTMLInputElement>(null);
   const sessionSearchInputRef = useRef<HTMLInputElement>(null);
   const taskListRef = useRef<HTMLDivElement>(null);
+  const activityOf = useMemo(() => withAttentionOverlay(attentionWaiting), [attentionWaiting]);
   const completionAttentionSet = useMemo(
     () => new Set(completionAttentionTaskIds),
     [completionAttentionTaskIds],
@@ -1492,16 +1500,17 @@ function SidebarComponent({
     [automatedTaskTree, normalizedSessionSearch],
   );
   const sessionStateCounts = useMemo(
-    () => countSidebarSessionStates([...searchedTaskTree, ...searchedAutomatedTaskTree]),
-    [searchedTaskTree, searchedAutomatedTaskTree],
+    () =>
+      countSidebarSessionStates([...searchedTaskTree, ...searchedAutomatedTaskTree], activityOf),
+    [searchedTaskTree, searchedAutomatedTaskTree, activityOf],
   );
   const filteredTaskTree = useMemo(
-    () => filterSidebarSessionsByState(searchedTaskTree, sessionStateFilter),
-    [searchedTaskTree, sessionStateFilter],
+    () => filterSidebarSessionsByState(searchedTaskTree, sessionStateFilter, activityOf),
+    [searchedTaskTree, sessionStateFilter, activityOf],
   );
   const filteredAutomatedTaskTree = useMemo(
-    () => filterSidebarSessionsByState(searchedAutomatedTaskTree, sessionStateFilter),
-    [searchedAutomatedTaskTree, sessionStateFilter],
+    () => filterSidebarSessionsByState(searchedAutomatedTaskTree, sessionStateFilter, activityOf),
+    [searchedAutomatedTaskTree, sessionStateFilter, activityOf],
   );
 
   const effectiveCollapsedTasks = useMemo(
@@ -1551,8 +1560,8 @@ function SidebarComponent({
     [filteredAutomatedTaskTree],
   );
   const automatedStateCounts = useMemo(
-    () => countSidebarSessionStates(unpinnedAutomatedTaskTree),
-    [unpinnedAutomatedTaskTree],
+    () => countSidebarSessionStates(unpinnedAutomatedTaskTree, activityOf),
+    [unpinnedAutomatedTaskTree, activityOf],
   );
   const automatedTaskRows = useMemo(
     () => flattenVisibleTaskRows(unpinnedAutomatedTaskTree, effectiveCollapsedTasks),
@@ -1563,11 +1572,11 @@ function SidebarComponent({
       Math.min(
         220,
         automatedTaskRows.reduce(
-          (height, row) => height + getSidebarSessionRowHeight(row.node.task),
+          (height, row) => height + getSidebarSessionRowHeight(row.node.task, activityOf),
           0,
         ),
       ),
-    [automatedTaskRows],
+    [automatedTaskRows, activityOf],
   );
 
   const workspaceGroups = useMemo(() => {
@@ -2309,7 +2318,7 @@ function SidebarComponent({
       !isChatSession &&
       selectedTaskId !== task.id &&
       completionAttentionSet.has(task.id);
-    const activity = getSidebarSessionActivity(task);
+    const activity = activityOf(task);
     const rowStatus =
       activity?.category === "needs-you"
         ? "paused"
@@ -3459,7 +3468,7 @@ function SidebarComponent({
                                     : SIDEBAR_DATE_HEADER_HEIGHT
                                   : row.kind === "load-more"
                                     ? SIDEBAR_LOAD_MORE_HEIGHT
-                                    : getSidebarSessionRowHeight(row.row.node.task)
+                                    : getSidebarSessionRowHeight(row.row.node.task, activityOf)
                       }
                       renderItem={(row) => renderSidebarVirtualRow(row)}
                       estimatedItemHeight={
@@ -3543,7 +3552,9 @@ function SidebarComponent({
                         <VirtualList
                           items={automatedTaskRows}
                           getItemKey={(row) => row.node.task.id}
-                          getItemHeight={(row) => getSidebarSessionRowHeight(row.node.task)}
+                          getItemHeight={(row) =>
+                            getSidebarSessionRowHeight(row.node.task, activityOf)
+                          }
                           renderItem={(row) =>
                             renderTaskRow(row.node, row.rootIndex, row.depth, row.isLast)
                           }

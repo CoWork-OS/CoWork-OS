@@ -352,3 +352,34 @@ html.visual-calm .notif-row-cta {
     transition: none;
   }
 }
+
+/* The bell's count of decisions waiting on you (from the shared needs-you queue). */
+.notif-anchor > button {
+  position: relative;
+}
+
+.notif-bell-count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--color-warning-subtle, rgba(180, 83, 9, 0.14));
+  color: var(--color-warning, #b45309);
+  font: 700 10px/15px var(--font-ui, inherit);
+  text-align: center;
+  pointer-events: none;
+}
+
+html.visual-calm .notif-bell-count {
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+}
+
+.notif-section-more {
+  display: block;
+  margin: 4px 12px 8px auto;
+}

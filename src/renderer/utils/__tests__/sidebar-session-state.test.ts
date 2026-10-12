@@ -5,6 +5,7 @@ import {
   filterSidebarSessionsByState,
   getSidebarSessionActivity,
   getSidebarSessionRowHeight,
+  withAttentionOverlay,
 } from "../sidebar-session-state";
 
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({
@@ -140,5 +141,30 @@ describe("sidebar status filtering", () => {
 
   it("returns an empty result for a filter with no matches", () => {
     expect(filterSidebarSessionsByState([node(task("finished"))], "running")).toEqual([]);
+  });
+
+  it("marks sessions the shared queue lists as needing you, with the queue's reason", () => {
+    // A task still "running" while it waits on an approval only the queue knows about.
+    const waiting = task("waiting", { status: "executing" });
+    const running = task("running", { status: "executing" });
+    const activityOf = withAttentionOverlay(new Map([["waiting", "Approval needed"]]));
+    expect(activityOf(waiting)).toEqual({ category: "needs-you", label: "Approval needed" });
+    expect(activityOf(running)).toEqual(getSidebarSessionActivity(running));
+
+    const roots = [node(waiting), node(running)];
+    expect(countSidebarSessionStates(roots, activityOf)).toEqual({
+      all: 2,
+      running: 1,
+      "needs-you": 1,
+    });
+    expect(
+      filterSidebarSessionsByState(roots, "needs-you", activityOf).map((entry) => entry.task.id),
+    ).toEqual(["waiting"]);
+    expect(getSidebarSessionRowHeight(waiting, activityOf)).toBe(46);
+  });
+
+  it("falls back to the task rule without a queue", () => {
+    expect(withAttentionOverlay(undefined)).toBe(getSidebarSessionActivity);
+    expect(withAttentionOverlay(new Map())).toBe(getSidebarSessionActivity);
   });
 });

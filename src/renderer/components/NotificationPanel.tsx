@@ -15,6 +15,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import type { AttentionItem } from "../../shared/attention";
 import { normalizeMarkdownForCollab } from "../utils/markdown-inline-lists";
 import { hasHostMethods } from "../host/browser-capabilities";
 import {
@@ -71,6 +72,14 @@ interface NotificationEvent {
 interface NotificationPanelProps {
   onNotificationClick?: (notification: AppNotification) => void;
   /**
+   * The shared needs-you queue. When given, it owns the panel's "Needs you" section and the
+   * bell's count, so they match Today and the sidebar.
+   */
+  attention?: readonly AttentionItem[];
+  onAttentionClick?: (item: AttentionItem) => void;
+  /** Opens Today, for the rest of a long "Needs you" list. */
+  onOpenToday?: () => void;
+  /**
    * `sidebar` renders a compact bell for the sidebar panel header. Its list
    * opens in a portal because the panel clips overflow.
    */
@@ -78,6 +87,8 @@ interface NotificationPanelProps {
 }
 
 const PANEL_WIDTH = 380;
+/** "Needs you" rows in the panel before the rest are left to Today. */
+const NEEDS_YOU_ROWS = 6;
 
 const BellIcon = ({ color = "#6b7280" }: { color?: string }) => (
   <svg
@@ -158,8 +169,13 @@ function formatRelativeTime(timestamp: number): string {
 
 export function NotificationPanel({
   onNotificationClick,
+  attention,
+  onAttentionClick,
+  onOpenToday,
   placement = "title-bar",
 }: NotificationPanelProps) {
+  const queueMode = attention !== undefined;
+  const needsYou = (attention ?? []).filter((item) => item.urgent);
   const canUseNotifications = hasHostMethods(...NOTIFICATION_PANEL_METHODS);
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -301,8 +317,12 @@ export function NotificationPanel({
     }
   };
 
-  const unreadLabel =
-    unreadCount > 0 ? `Notifications, ${unreadCount > 99 ? "99+" : unreadCount} unread` : null;
+  const unreadLabel = [
+    needsYou.length > 0 ? `${needsYou.length} need you` : "",
+    unreadCount > 0 ? `${unreadCount > 99 ? "99+" : unreadCount} unread` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
   const renderDropdown = (dropdown: ReactNode) =>
     inSidebar ? createPortal(dropdown, document.body) : dropdown;
   // Position is measured from the bell; everything else is styled in notification-panel.css.
@@ -317,7 +337,47 @@ export function NotificationPanel({
         visibility: dropdownPosition ? "visible" : "hidden",
       }
     : { position: "absolute", top: "calc(100% + 8px)", right: 0 };
-  const sections = isOpen ? groupNotifications(notifications) : [];
+  const sections = isOpen
+    ? groupNotifications(notifications, Date.now(), { needsYouFromQueue: queueMode })
+    : [];
+
+  const openAttention = (item: AttentionItem) => {
+    setIsOpen(false);
+    onAttentionClick?.(item);
+  };
+
+  const renderAttentionRow = (item: AttentionItem) => (
+    <div
+      key={item.id}
+      role="button"
+      tabIndex={0}
+      className="notif-row tone-request unread"
+      onClick={() => openAttention(item)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openAttention(item);
+        }
+      }}
+      aria-label={`${item.state}: ${item.title}`}
+    >
+      <span className="notif-row-icon" aria-hidden="true">
+        <MessageSquareReply size={14} strokeWidth={2.2} />
+      </span>
+      <div className="notif-row-body">
+        <span className="notif-row-title">{item.title}</span>
+        {item.detail && <span className="notif-row-message">{item.detail}</span>}
+        <div className="notif-row-meta">
+          <span className="notif-row-tag">{item.state}</span>
+          {item.actor.kind !== "you" && <span>{item.actor.name}</span>}
+          <span>{formatRelativeTime(item.createdAt)}</span>
+        </div>
+      </div>
+      <div className="notif-row-side">
+        <span className="notif-row-cta">Open</span>
+      </div>
+    </div>
+  );
 
   const renderGroup = (group: NotificationGroup<AppNotification>) => {
     const ToneIcon = TONE_ICONS[group.tone];
@@ -355,7 +415,7 @@ export function NotificationPanel({
           </div>
         </div>
         <div className="notif-row-side">
-          {group.needsAction ? (
+          {group.needsAction && !queueMode ? (
             <span className="notif-row-cta">Respond</span>
           ) : opensSomething ? (
             <span className="notif-row-open" aria-hidden="true">
@@ -387,7 +447,11 @@ export function NotificationPanel({
         disabled={!canUseNotifications}
         aria-expanded={isOpen}
         aria-label={
-          canUseNotifications ? (unreadLabel ?? "Notifications") : "Notifications unavailable"
+          canUseNotifications
+            ? unreadLabel
+              ? `Notifications, ${unreadLabel}`
+              : "Notifications"
+            : "Notifications unavailable"
         }
         title={
           canUseNotifications
@@ -396,7 +460,13 @@ export function NotificationPanel({
         }
       >
         <BellIcon color="currentColor" />
-        {unreadCount > 0 && <span className="sidebar-panel-icon-dot" aria-hidden="true" />}
+        {needsYou.length > 0 ? (
+          <span className="notif-bell-count" aria-hidden="true">
+            {needsYou.length > 9 ? "9+" : needsYou.length}
+          </span>
+        ) : (
+          unreadCount > 0 && <span className="sidebar-panel-icon-dot" aria-hidden="true" />
+        )}
       </button>
 
       {isOpen &&
@@ -441,7 +511,25 @@ export function NotificationPanel({
             </div>
 
             <div className="notif-panel-list">
-              {sections.length === 0 ? (
+              {needsYou.length > 0 && (
+                <section className="notif-section needs-you" aria-label="Needs you">
+                  <div className="notif-section-label">Needs you</div>
+                  {needsYou.slice(0, NEEDS_YOU_ROWS).map(renderAttentionRow)}
+                  {needsYou.length > NEEDS_YOU_ROWS && onOpenToday && (
+                    <button
+                      type="button"
+                      className="notif-panel-text-btn notif-section-more"
+                      onClick={() => {
+                        setIsOpen(false);
+                        onOpenToday();
+                      }}
+                    >
+                      {needsYou.length - NEEDS_YOU_ROWS} more in Today
+                    </button>
+                  )}
+                </section>
+              )}
+              {sections.length === 0 && needsYou.length === 0 ? (
                 <div className="notif-panel-empty">
                   <BellIcon color="currentColor" />
                   <p>You're all caught up</p>

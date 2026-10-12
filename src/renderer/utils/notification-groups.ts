@@ -160,15 +160,23 @@ function buildGroup<T extends GroupableNotification>(
  * Unread requests for input or approval come first, one row each. Everything else is split
  * by day, and notifications with the same kind and title on the same day collapse into one
  * row (a routine that reported twelve times reads as one line with a count).
+ *
+ * With `needsYouFromQueue`, the shared queue owns "Needs you": requests here stay in their
+ * day, as the record of what was asked, instead of a second "Needs you" list.
  */
 export function groupNotifications<T extends GroupableNotification>(
   notifications: T[],
   now: number = Date.now(),
+  options: { needsYouFromQueue?: boolean } = {},
 ): NotificationSection<T>[] {
   const needsYou: NotificationGroup<T>[] = [];
   const buckets = new Map<NotificationSectionId, Map<string, T[]>>();
   for (const notification of notifications) {
-    if (notification.type === "input_required" && !notification.read) {
+    if (
+      !options.needsYouFromQueue &&
+      notification.type === "input_required" &&
+      !notification.read
+    ) {
       needsYou.push(buildGroup(`needs-you:${notification.id}`, [notification]));
       continue;
     }

@@ -24,6 +24,8 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
 import { useComposerDraft } from "./hooks/useComposerDraft";
+import { useAttentionSnapshot } from "./hooks/useAttentionSnapshot";
+import { attentionWaitingByTask, type AttentionItem } from "../shared/attention";
 import { ArrowLeft, ArrowRight, Globe, Moon, PanelTop, SquareTerminal, Sun } from "lucide-react";
 import { TitleBarMoreMenu } from "./components/TitleBarMoreMenu";
 import { Sidebar } from "./components/Sidebar";
@@ -2405,6 +2407,21 @@ export function App() {
     if (!sameHomeSessions(homeSessionsRef.current, next)) homeSessionsRef.current = next;
     return homeSessionsRef.current;
   }, [selectedTask, tasks]);
+  // The shared needs-you queue (provided once in main.tsx): Today, Work, Team, the bell and
+  // the sidebar all read this snapshot, so their counts agree.
+  const attentionSnapshot = useAttentionSnapshot(true);
+  // Sessions the queue says wait on the user. Same reference while unchanged, so the
+  // memoized sidebar only re-renders when the waiting set or a reason changes.
+  const attentionWaitingRef = useRef<ReadonlyMap<string, string>>(new Map());
+  const attentionWaiting = useMemo(() => {
+    const next = attentionWaitingByTask(attentionSnapshot.items);
+    const previous = attentionWaitingRef.current;
+    const same =
+      previous.size === next.size &&
+      [...next].every(([taskId, label]) => previous.get(taskId) === label);
+    if (!same) attentionWaitingRef.current = next;
+    return attentionWaitingRef.current;
+  }, [attentionSnapshot.items]);
   const selectedBotConversationProjection = useMemo(
     () =>
       selectedTask?.agentConfig?.botConversation && !remoteTaskView
@@ -8027,6 +8044,21 @@ export function App() {
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [openBotConversationByDeepLink]);
 
+  // A "Needs you" item from the bell opens where it is decided: its session, its
+  // automation, or Today for commitments and suggestions.
+  const handleAttentionClick = (item: AttentionItem) => {
+    if (item.ref.type === "workflow_step") {
+      setFocusAutomationRoutineId(item.ref.routineId);
+      setCurrentView("automations");
+      return;
+    }
+    if (item.taskId) {
+      void openTaskById(item.taskId);
+      return;
+    }
+    handleClearTaskView();
+  };
+
   const handleNotificationClick = useCallback(
     (notification: NotificationPanelNotification) => {
       // Prioritize taskId to show the completed task result
@@ -8077,7 +8109,13 @@ export function App() {
   const sidebarNotificationBell = useMemo(
     () =>
       canShowNotifications ? (
-        <NotificationPanel placement="sidebar" onNotificationClick={handleNotificationClick} />
+        <NotificationPanel
+          placement="sidebar"
+          onNotificationClick={handleNotificationClick}
+          attention={attentionSnapshot.fromQueue ? attentionSnapshot.items : undefined}
+          onAttentionClick={handleAttentionClick}
+          onOpenToday={handleClearTaskView}
+        />
       ) : null,
     [canShowNotifications, handleNotificationClick],
   );
@@ -8303,7 +8341,12 @@ export function App() {
         <div className="title-bar-spacer" />
         <div className="title-bar-actions">
           {showTitleBarNotifications && (
-            <NotificationPanel onNotificationClick={handleNotificationClick} />
+            <NotificationPanel
+              onNotificationClick={handleNotificationClick}
+              attention={attentionSnapshot.fromQueue ? attentionSnapshot.items : undefined}
+              onAttentionClick={handleAttentionClick}
+              onOpenToday={handleClearTaskView}
+            />
           )}
           {isBrowserHost && (
             <button
@@ -8488,6 +8531,7 @@ export function App() {
                 isLoadingSessions={isInitialTaskListLoading}
                 isLoadingMoreTasks={isLoadingMoreTasks}
                 completionAttentionTaskIds={unseenCompletedTaskIds}
+                attentionWaiting={attentionWaiting}
                 onSelectTask={handleSelectTaskFromShell}
                 onOpenAgents={() => setCurrentView("agents")}
                 onOpenBot={handleOpenBot}

@@ -92,6 +92,16 @@ describe("groupNotifications", () => {
     expect(sections[2].groups[0]).toMatchObject({ title: "Daily Brief failed", tag: "Routine" });
   });
 
+  it("leaves Needs you to the shared queue when asked, keeping requests in their day", () => {
+    const sections = groupNotifications(
+      [note("ask", { type: "input_required", title: "Input needed · Scribe", read: false })],
+      NOW,
+      { needsYouFromQueue: true },
+    );
+    expect(sections.map((section) => section.id)).toEqual(["today"]);
+    expect(sections[0].groups[0]).toMatchObject({ title: "Scribe", unread: true });
+  });
+
   it("keeps a read request out of Needs you", () => {
     const sections = groupNotifications(
       [note("ask", { type: "input_required", title: "Input needed · Scribe", read: true })],

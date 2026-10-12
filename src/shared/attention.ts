@@ -380,6 +380,23 @@ export function attentionFromSuggestion(
   };
 }
 
+/**
+ * Sessions the queue says wait on the user, by task id, with the reason to show. An
+ * approval or question outranks the plain waiting-session reason for the same task.
+ */
+export function attentionWaitingByTask(items: readonly AttentionItem[]): Map<string, string> {
+  const waiting = new Map<string, string>();
+  for (const item of items) {
+    if (!item.taskId) continue;
+    if (item.kind === "approval" || item.kind === "question") {
+      waiting.set(item.taskId, item.kind === "approval" ? "Approval needed" : "Response needed");
+    } else if (item.kind === "session" && !waiting.has(item.taskId)) {
+      waiting.set(item.taskId, item.state);
+    }
+  }
+  return waiting;
+}
+
 const KIND_RANK: Record<AttentionKind, number> = {
   approval: 0,
   question: 0,

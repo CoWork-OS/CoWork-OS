@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   attentionFromCommitment,
   attentionFromSuggestion,
@@ -20,9 +29,15 @@ export interface AttentionSnapshotState {
   items: AttentionItem[];
   /** Sources the last load could not read; their items are missing, not resolved. */
   failedSources: AttentionSourceName[];
+  /**
+   * Whether the items came from the shared queue. Hosts without it (the browser host, for
+   * now) get suggestions and commitments only, so surfaces that would replace their own
+   * "needs you" with the queue's keep their own there.
+   */
+  fromQueue: boolean;
 }
 
-const EMPTY: AttentionSnapshotState = { items: [], failedSources: [] };
+const EMPTY: AttentionSnapshotState = { items: [], failedSources: [], fromQueue: false };
 
 /**
  * Hosts without the shared queue (the browser host, for now) still get suggestions and
@@ -61,7 +76,11 @@ async function loadWithoutQueue(): Promise<AttentionSnapshotState> {
       failedSources.push("commitments");
       return [];
     });
-  return { items: rankAttention([...suggestions, ...commitments]), failedSources };
+  return {
+    items: rankAttention([...suggestions, ...commitments]),
+    failedSources,
+    fromQueue: false,
+  };
 }
 
 async function loadAttention(): Promise<AttentionSnapshotState> {
@@ -69,17 +88,40 @@ async function loadAttention(): Promise<AttentionSnapshotState> {
   if (typeof api.listAttention !== "function") return loadWithoutQueue();
   const snapshot = await api.listAttention();
   return {
+    fromQueue: true,
     items: Array.isArray(snapshot?.items) ? snapshot.items : [],
     failedSources: Array.isArray(snapshot?.failedSources) ? snapshot.failedSources : [],
   };
 }
 
 /**
- * The shared "needs you" queue. Loads while `enabled`, then again when the main process
- * signals a change, when the window regains focus, and every couple of minutes as a
- * fallback. A failed load keeps the last good snapshot.
+ * The app's one snapshot of the queue. App loads it and provides it here, so Today, Work,
+ * Team, the bell and the sidebar all count from the same snapshot.
+ */
+export const AttentionSnapshotContext = createContext<AttentionSnapshotState | null>(null);
+
+/** Loads the queue once for everything below it (mounted around the app in main.tsx). */
+export function AttentionSnapshotProvider({ children }: { children: ReactNode }) {
+  const snapshot = useAttentionLoader(true);
+  return createElement(AttentionSnapshotContext.Provider, { value: snapshot }, children);
+}
+
+/**
+ * Reads the shared "needs you" queue. Inside App this is the app-wide snapshot; on its own
+ * (tests, isolated surfaces) it loads one while `enabled`.
  */
 export function useAttentionSnapshot(enabled: boolean): AttentionSnapshotState {
+  const shared = useContext(AttentionSnapshotContext);
+  const local = useAttentionLoader(enabled && shared === null);
+  return shared ?? local;
+}
+
+/**
+ * Loads the queue while `enabled`, then again when the main process signals a change, when
+ * the window regains focus, and every couple of minutes as a fallback. A failed load keeps
+ * the last good snapshot.
+ */
+export function useAttentionLoader(enabled: boolean): AttentionSnapshotState {
   const [state, setState] = useState<AttentionSnapshotState>(EMPTY);
   const loadSeq = useRef(0);
 
@@ -97,8 +139,9 @@ export function useAttentionSnapshot(enabled: boolean): AttentionSnapshotState {
       window.clearTimeout(reloadTimer);
       reloadTimer = window.setTimeout(() => void refresh(), RELOAD_DELAY_MS);
     };
-    void refresh();
     const api = window.electronAPI;
+    if (!api) return;
+    void refresh();
     const unsubscribe =
       typeof api.onAttentionChanged === "function" ? api.onAttentionChanged(scheduleReload) : null;
     window.addEventListener("focus", scheduleReload);

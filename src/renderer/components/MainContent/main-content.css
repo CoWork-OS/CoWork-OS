@@ -9143,8 +9143,15 @@ button.collab-timeline-thought-agent:hover {
   transition: color 0.15s ease;
 }
 
-.input-status-workspace:hover {
+.input-status-workspace:not(:disabled):hover {
   color: var(--color-text);
+}
+
+/* Locked once a task has started: the label (and its path tooltip) stays, but
+   it no longer reads as a control. */
+.input-status-workspace:disabled,
+.input-below-actions .folder-selector:disabled {
+  cursor: default;
 }
 
 .input-status-workspace-path {
@@ -12014,7 +12021,7 @@ button.collab-timeline-thought-agent:hover {
   transition: all 0.15s ease;
 }
 
-.folder-selector:hover {
+.folder-selector:not(:disabled):hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
 }

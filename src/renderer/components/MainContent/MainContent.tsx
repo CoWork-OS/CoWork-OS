@@ -11535,10 +11535,9 @@ function MainContentComponent({
               </div>
             )}
             {isCalm &&
-              (homeToday !== EMPTY_HOME_TODAY || homeSessions.recent.length > 0 ? (
+              (homeToday !== EMPTY_HOME_TODAY ? (
                 <CalmHomeToday
                   today={homeToday}
-                  recent={homeSessions.recent}
                   signals={homeTodaySignals}
                   onOpenSession={(taskId) => onSelectTask?.(taskId)}
                   onStartTask={async (title, prompt) =>

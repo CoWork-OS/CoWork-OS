@@ -33,7 +33,6 @@ const sessions: HomeSessions = {
   needsYou: [
     { id: "t1", title: "Deploy preview", updatedAt: NOW - HOUR, attention: "Approval needed" },
   ],
-  recent: [],
   handled: [{ id: "t2", title: "Morning inbox sweep", updatedAt: NOW - 2 * HOUR }],
 };
 

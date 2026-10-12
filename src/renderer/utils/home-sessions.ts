@@ -13,15 +13,13 @@ export interface HomeSessionSummary {
 
 export interface HomeSessions {
   needsYou: HomeSessionSummary[];
-  recent: HomeSessionSummary[];
   /** Automated sessions that finished cleanly in the last day: work handled without the user. */
   handled: HomeSessionSummary[];
 }
 
-export const EMPTY_HOME_SESSIONS: HomeSessions = { needsYou: [], recent: [], handled: [] };
+export const EMPTY_HOME_SESSIONS: HomeSessions = { needsYou: [], handled: [] };
 
 const NEEDS_YOU_LIMIT = 6;
-const RECENT_LIMIT = 4;
 const HANDLED_LIMIT = 4;
 const HANDLED_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -46,10 +44,9 @@ function summarize(task: Task, attention?: string): HomeSessionSummary {
 
 /**
  * What the home screen lists under the composer: sessions waiting on the user
- * (including automated ones, which the sidebar tucks away), automated sessions
- * that finished on their own in the last day, then the most recently touched
- * sessions the user started. Sub-agents are left out; their parent session
- * already represents them.
+ * (including automated ones, which the sidebar tucks away), then automated
+ * sessions that finished on their own in the last day. Sub-agents are left out;
+ * their parent session already represents them.
  */
 export function buildHomeSessions(tasks: readonly Task[], now = Date.now()): HomeSessions {
   const roots = tasks
@@ -57,7 +54,6 @@ export function buildHomeSessions(tasks: readonly Task[], now = Date.now()): Hom
     .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
 
   const needsYou: HomeSessionSummary[] = [];
-  const recent: HomeSessionSummary[] = [];
   const handled: HomeSessionSummary[] = [];
   for (const task of roots) {
     const activity = getSidebarSessionActivity(task);
@@ -65,22 +61,15 @@ export function buildHomeSessions(tasks: readonly Task[], now = Date.now()): Hom
       if (needsYou.length < NEEDS_YOU_LIMIT) needsYou.push(summarize(task, activity.label));
       continue;
     }
-    if (isAutomatedTaskLike(task)) {
-      const finishedAt = task.completedAt || task.updatedAt || task.createdAt;
-      if (
-        handled.length < HANDLED_LIMIT &&
-        finishedCleanly(task) &&
-        now - finishedAt <= HANDLED_WINDOW_MS
-      ) {
-        handled.push({ ...summarize(task), updatedAt: finishedAt });
-      }
-      continue;
+    if (!isAutomatedTaskLike(task) || handled.length >= HANDLED_LIMIT) continue;
+    const finishedAt = task.completedAt || task.updatedAt || task.createdAt;
+    if (finishedCleanly(task) && now - finishedAt <= HANDLED_WINDOW_MS) {
+      handled.push({ ...summarize(task), updatedAt: finishedAt });
     }
-    if (recent.length < RECENT_LIMIT) recent.push(summarize(task));
   }
-  return needsYou.length === 0 && recent.length === 0 && handled.length === 0
+  return needsYou.length === 0 && handled.length === 0
     ? EMPTY_HOME_SESSIONS
-    : { needsYou, recent, handled };
+    : { needsYou, handled };
 }
 
 /** Value equality, so callers can keep a stable reference across task updates. */
@@ -94,11 +83,7 @@ export function sameHomeSessions(a: HomeSessions, b: HomeSessions): boolean {
         item.updatedAt === y[index].updatedAt &&
         item.attention === y[index].attention,
     );
-  return (
-    sameList(a.needsYou, b.needsYou) &&
-    sameList(a.recent, b.recent) &&
-    sameList(a.handled, b.handled)
-  );
+  return sameList(a.needsYou, b.needsYou) && sameList(a.handled, b.handled);
 }
 
 export function formatHomeSessionTime(timestamp: number, now: number): string {

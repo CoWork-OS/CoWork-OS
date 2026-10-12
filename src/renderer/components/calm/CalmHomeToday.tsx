@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { HomeTodaySignals } from "../../hooks/useHomeTodaySignals";
-import { formatHomeSessionTime, type HomeSessionSummary } from "../../utils/home-sessions";
+import { formatHomeSessionTime } from "../../utils/home-sessions";
 import type {
   HomeToday,
   HomeTodayButton,
@@ -43,7 +43,6 @@ const ICONS: Record<HomeTodayIcon, LucideIcon> = {
 
 interface CalmHomeTodayProps {
   today: HomeToday;
-  recent: HomeSessionSummary[];
   signals: Pick<
     HomeTodaySignals,
     "markSuggestionStarted" | "snoozeSuggestion" | "completeCommitment" | "resolve"
@@ -64,12 +63,11 @@ function cardTime(card: HomeTodayCard, now: number): string {
 
 /**
  * The Calm home's Today stack: up to three prepared decisions, one quieter idea,
- * what got handled, then recent sessions. A card that is acted on folds away and
- * leaves a done row behind.
+ * then what got handled. A card that is acted on folds away and leaves a done
+ * row behind.
  */
 export function CalmHomeToday({
   today,
-  recent,
   signals,
   onOpenSession,
   onStartTask,
@@ -270,30 +268,6 @@ export function CalmHomeToday({
             );
           })}
         </ul>
-      )}
-
-      {recent.length > 0 && (
-        <section className="calm-home-group" aria-label="Recent">
-          <h2 className="calm-home-group-title">Recent</h2>
-          <ul className="calm-home-list">
-            {recent.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className="calm-home-row"
-                  onClick={() => onOpenSession(item.id)}
-                  title={item.title}
-                >
-                  <span className="calm-home-row-mark" aria-hidden="true" />
-                  <span className="calm-home-row-title">{item.title}</span>
-                  <span className="calm-home-row-time">
-                    {formatHomeSessionTime(item.updatedAt, now)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
       )}
     </div>
   );

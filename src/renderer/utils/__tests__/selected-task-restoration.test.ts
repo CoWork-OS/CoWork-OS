@@ -5,6 +5,7 @@ import {
   persistSelectedTaskId,
   readPersistedSelectedTaskId,
   selectedTaskStorageKey,
+  selectionRequestOverridesRestore,
 } from "../selected-task-restoration";
 
 function storage() {
@@ -33,5 +34,20 @@ describe("selected task restoration", () => {
     expect(canRestoreSelectedTask(task, "workspace-a")).toBe(true);
     expect(canRestoreSelectedTask(task, "workspace-b")).toBe(false);
     expect(canRestoreSelectedTask(undefined, "workspace-a")).toBe(false);
+  });
+
+  it("lets a requested session in the workspace win over the saved one", () => {
+    const tasks = [
+      { id: "clicked", workspaceId: "workspace-a" },
+      { id: "elsewhere", workspaceId: "workspace-b" },
+    ];
+    // The first click into a workspace switches to it; its saved selection
+    // must not replace the session that was clicked.
+    expect(selectionRequestOverridesRestore("clicked", tasks, "workspace-a")).toBe(true);
+    // A session being opened by id that isn't in the loaded page yet.
+    expect(selectionRequestOverridesRestore("not-loaded", tasks, "workspace-a")).toBe(true);
+    // Nothing requested, or a request for another workspace: restore as usual.
+    expect(selectionRequestOverridesRestore(null, tasks, "workspace-a")).toBe(false);
+    expect(selectionRequestOverridesRestore("elsewhere", tasks, "workspace-a")).toBe(false);
   });
 });

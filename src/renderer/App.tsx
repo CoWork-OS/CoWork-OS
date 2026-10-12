@@ -243,6 +243,7 @@ import {
   canRestoreSelectedTask,
   persistSelectedTaskId,
   readPersistedSelectedTaskId,
+  selectionRequestOverridesRestore,
 } from "./utils/selected-task-restoration";
 import { resolveComposerDraftOwnerContext } from "./utils/composer-draft-owner";
 import { taskSurfaceStore } from "./state/task-surface-store";
@@ -2540,6 +2541,10 @@ export function App() {
   const taskSwitchIdByTaskIdRef = useRef<Map<string, string>>(new Map());
   const taskSwitchSequenceRef = useRef(0);
   const selectedTaskRequestSeqRef = useRef(0);
+  // The task id most recently asked for (set before the draft flush resolves),
+  // so a workspace's selection restore can tell that a session was already
+  // chosen there.
+  const requestedTaskIdRef = useRef<string | null>(null);
   const taskHeaderMarkedRef = useRef<Set<string>>(new Set());
   const sidebarFirstPaintMarkedRef = useRef(false);
   const taskTimelinePageStateRef = useRef<
@@ -2618,6 +2623,7 @@ export function App() {
   const selectTaskAfterDraftFlush = useCallback(
     async (nextTaskId: string | null): Promise<void> => {
       const requestId = ++selectedTaskRequestSeqRef.current;
+      requestedTaskIdRef.current = nextTaskId;
       await composerDraft.flush();
       if (selectedTaskRequestSeqRef.current !== requestId) return;
       setSelectedTaskId(nextTaskId);
@@ -5987,13 +5993,20 @@ export function App() {
     if (restoredSelectionWorkspaceRef.current === workspaceId) return;
     restoredSelectionWorkspaceRef.current = workspaceId;
 
+    // Clicking a session in another workspace switches to that workspace,
+    // which lands here; the clicked session wins over the saved one. Checked
+    // again in restore() for clicks made while the lookup below is in flight.
+    const selectionAlreadyRequested = () =>
+      selectionRequestOverridesRestore(requestedTaskIdRef.current, tasksRef.current, workspaceId);
+
     const persistedTaskId = readPersistedSelectedTaskId(workspaceId);
-    if (!persistedTaskId) {
+    if (!persistedTaskId || selectionAlreadyRequested()) {
       selectionRestorationSettledWorkspaceRef.current = workspaceId;
       return;
     }
 
     const restore = (task: Task | null | undefined): boolean => {
+      if (selectionAlreadyRequested()) return false;
       if (!canRestoreSelectedTask(task, workspaceId)) {
         persistSelectedTaskId(workspaceId, null);
         return false;

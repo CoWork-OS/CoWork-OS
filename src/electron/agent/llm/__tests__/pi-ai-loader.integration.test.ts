@@ -4,12 +4,12 @@ import { describe, expect, it } from "vitest";
 function inspectPackageExports(): { pi: string[]; oauth: string[] } {
   const script = `
     const [pi, oauth] = await Promise.all([
-      import("@earendil-works/pi-ai"),
-      import("@earendil-works/pi-ai/oauth"),
+      import("@earendil-works/pi-ai/compat"),
+      import("@earendil-works/pi-ai/providers/openai-codex").then((mod) => mod.openaiCodexProvider().auth.oauth),
     ]);
     console.log(JSON.stringify({
       pi: ["complete", "getModels", "getProviders"].filter((key) => typeof pi[key] === "function"),
-      oauth: ["getOAuthApiKey", "loginOpenAICodex", "refreshOpenAICodexToken"].filter(
+      oauth: ["login", "refresh", "toAuth"].filter(
         (key) => typeof oauth[key] === "function",
       ),
     }));
@@ -32,6 +32,6 @@ describe("pi-ai package migration", () => {
   it("preserves the OpenAI Codex OAuth API", () => {
     const module = inspectPackageExports();
 
-    expect(module.oauth).toEqual(["getOAuthApiKey", "loginOpenAICodex", "refreshOpenAICodexToken"]);
+    expect(module.oauth).toEqual(["login", "refresh", "toAuth"]);
   });
 });

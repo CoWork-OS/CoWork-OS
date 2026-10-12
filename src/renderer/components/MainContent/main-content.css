@@ -14890,3 +14890,165 @@ html.visual-calm .calm-main .prompt-composer-input[data-has-prediction="true"]:e
   max-height: 360px;
   border-radius: 12px;
 }
+
+/* ==========================================================================
+   Assistant prose typography
+   Reading-first text for assistant replies: system font at a comfortable
+   size and leading, airier paragraph/list rhythm, body-scale headings, and
+   neutral inline code chips (accent stays reserved for links). Bot replies
+   drop their bordered bubble so they read as prose, like the main transcript.
+   ========================================================================== */
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content {
+  --cw-prose-code-bg: color-mix(in srgb, var(--color-text) 6%, transparent);
+  --cw-prose-marker: color-mix(in srgb, var(--color-text) 45%, transparent);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", var(--font-ui);
+  font-size: 15px;
+  line-height: 1.68;
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content p {
+  margin: 0 0 14px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content :is(ul, ol) {
+  margin: 6px 0 16px;
+  padding-left: 24px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content ul {
+  list-style: disc outside;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content li {
+  position: static;
+  margin: 0 0 6px;
+  padding-left: 4px;
+}
+
+/* Native markers replace the visual-oblivion drawn dot, which sat too large and heavy. */
+.chat-message.assistant-message .chat-bubble-content.markdown-content ul > li::before {
+  content: none;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content li::marker {
+  color: var(--cw-prose-marker);
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content li > :is(ul, ol) {
+  margin: 6px 0 4px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content li > p {
+  margin-bottom: 6px;
+}
+
+/* Headings stay close to body size so a reply reads as prose, not a document. */
+.chat-message.assistant-message .chat-bubble-content.markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-text);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content h1 {
+  font-size: 1.25em;
+  margin: 26px 0 10px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content h2 {
+  font-size: 1.12em;
+  margin: 24px 0 8px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content :is(h3, h4, h5, h6) {
+  font-size: 1em;
+  margin: 20px 0 6px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content strong {
+  font-weight: 600;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content :not(pre) > code {
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  background: var(--cw-prose-code-bg);
+  color: var(--color-text);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content pre {
+  margin: 10px 0 16px;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content blockquote {
+  margin: 10px 0 16px;
+  border-left: 2px solid var(--color-border);
+  padding-left: 14px;
+}
+
+.bot-conversation .chat-message.assistant-message .chat-bubble.assistant-bubble {
+  width: auto;
+  max-width: var(--cw-transcript-measure);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* File links: other surfaces keep the plain link; assistant prose shows a
+   tinted, icon-led chip so paths read as openable references. */
+.clickable-file-path-icon {
+  display: none;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content .clickable-file-path {
+  display: inline;
+  color: var(--color-accent);
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content .clickable-file-path-icon {
+  display: inline-flex;
+  margin-right: 0.28em;
+  vertical-align: -0.12em;
+  opacity: 0.85;
+}
+
+.chat-message.assistant-message .chat-bubble-content.markdown-content .clickable-file-path:hover,
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  .clickable-file-path:focus-visible {
+  text-decoration: none;
+}
+
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  .clickable-file-path:is(:hover, :focus-visible)
+  .clickable-file-path-label {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+}
+
+/* A path written as `code` inside the link takes the chip's color, not a code chip. */
+.chat-message.assistant-message .chat-bubble-content.markdown-content .clickable-file-path code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.9em;
+}

@@ -14,6 +14,14 @@ import {
   type ReactNode,
   type TableHTMLAttributes,
 } from "react";
+import {
+  File as FileIcon,
+  FileCode2,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  Folder,
+} from "lucide-react";
 
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
@@ -526,6 +534,33 @@ function normalizeFileHref(href: string): string {
 
 const INLINE_IMAGE_LINK_EXT_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 
+const FILE_CHIP_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|heic)$/i;
+const FILE_CHIP_DATA_EXT_RE = /\.(csv|tsv|xlsx?|numbers|parquet|sqlite|db)$/i;
+const FILE_CHIP_DOC_EXT_RE = /\.(md|mdx|txt|rtf|pdf|docx?|pages|pptx?|key)$/i;
+const FILE_CHIP_CODE_EXT_RE =
+  /\.([cm]?[jt]sx?|json|ya?ml|toml|css|scss|html?|py|rb|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|php|sh|zsh|sql|vue|svelte)$/i;
+
+/** Leading glyph for a file link chip; a `:line` suffix does not change the file type. */
+function FileChipIcon({ filePath }: { filePath: string }) {
+  const path = filePath.replace(/[?#].*$/, "").replace(/(:\d+){1,2}$/, "");
+  const Icon = /[\\/]$/.test(path)
+    ? Folder
+    : FILE_CHIP_IMAGE_EXT_RE.test(path)
+      ? FileImage
+      : FILE_CHIP_DATA_EXT_RE.test(path)
+        ? FileSpreadsheet
+        : FILE_CHIP_DOC_EXT_RE.test(path)
+          ? FileText
+          : FILE_CHIP_CODE_EXT_RE.test(path)
+            ? FileCode2
+            : FileIcon;
+  return (
+    <span className="clickable-file-path-icon" aria-hidden="true">
+      <Icon size={13} strokeWidth={1.9} />
+    </span>
+  );
+}
+
 function hastNodeContainsImage(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
   const record = node as { tagName?: unknown; children?: unknown };
@@ -623,7 +658,8 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
           onContextMenu={handleContextMenu}
           title={`${filePath}\n\nClick to preview - Right-click to show in Finder`}
         >
-          {children}
+          <FileChipIcon filePath={filePath} />
+          <span className="clickable-file-path-label">{children}</span>
         </a>
       );
 

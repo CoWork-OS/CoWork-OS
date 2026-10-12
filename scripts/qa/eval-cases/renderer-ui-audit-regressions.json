@@ -1,0 +1,64 @@
+{
+  "id": "renderer-ui-audit-regressions-2026-10-12",
+  "title": "Inbox request ordering, dialog focus, keyboard controls and floating menus",
+  "source": {
+    "audit": "renderer-source-audit-2026-10-12",
+    "pullRequest": 494
+  },
+  "categories": [
+    {
+      "id": "inbox-newest-selection-wins",
+      "prompt": "Open thread A, switch to B, then resolve B before the delayed A response. Change list filters and deliver the newer result first.",
+      "assertions": {
+        "selectedThreadRemainsB": true,
+        "olderFilterResultMustNotReplaceNewestList": true,
+        "executableTest": "src/renderer/hooks/__tests__/inbox-requests.test.ts",
+        "executableCommand": "node scripts/qa/renderer_ui_audit.mjs"
+      }
+    },
+    {
+      "id": "inbox-unmount-stops-initialization",
+      "prompt": "Unmount Inbox while initialization is awaiting settings, then resolve the settings request. Also remount while old requests are pending.",
+      "assertions": {
+        "oldMountResultsMustNotApply": true,
+        "subsequentMailboxReadsAndAutoSyncMustNotStart": true,
+        "executableTest": "src/renderer/hooks/__tests__/inbox-requests.test.ts",
+        "executableCommand": "node scripts/qa/renderer_ui_audit.mjs"
+      }
+    },
+    {
+      "id": "nested-dialogs-dismiss-only-topmost",
+      "prompt": "Open a dialog, then a nested dialog, image lightbox or access warning. Cycle Tab and Shift+Tab, then press Escape.",
+      "assertions": {
+        "focusRemainsInTopDialog": true,
+        "parentRemainsOpenAfterChildEscape": true,
+        "focusRestoresToConnectedOpener": true,
+        "accessWarningInitiallyFocusesCancel": true,
+        "executableCommand": "node scripts/qa/renderer_ui_audit.mjs"
+      }
+    },
+    {
+      "id": "keyboard-controls-activate-native-actions",
+      "prompt": "Use Enter or Space to activate the import selector, registry tag and scheduled-job expander. Navigate the Calm access menu with arrows, including its unavailable current profile.",
+      "assertions": {
+        "fileSelectionInvoked": true,
+        "registrySearchReceivesSelectedTag": true,
+        "jobExpansionDoesNotInvokeAdjacentActions": true,
+        "unavailableProfileNavigableButNotActivated": true,
+        "executableCommand": "node scripts/qa/renderer_ui_audit.mjs"
+      }
+    },
+    {
+      "id": "floating-menus-fit-and-coalesce-measurements",
+      "prompt": "Open artifact menus near the bottom-right edge in a short window, dispatch 40 resize events together, then close the menu and repeat the events.",
+      "assertions": {
+        "menuRemainsInsideViewport": true,
+        "resizeBurstAnchorMeasurementsAtMostTwo": true,
+        "closedMenuAnchorMeasurements": 0,
+        "executableTest": "src/renderer/utils/__tests__/floating-position.test.ts",
+        "executableCommand": "node scripts/qa/renderer_ui_audit.mjs"
+      }
+    }
+  ],
+  "notes": "This manifest links to executable Vitest regressions and the isolated Electron UI harness. The harness uses fixture APIs and a disposable profile with a Vite server bound to 127.0.0.1; it never connects a real mailbox. These JSON assertions are traceability metadata, not independently graded by run_eval_suite.cjs."
+}

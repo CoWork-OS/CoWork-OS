@@ -35,4 +35,13 @@ describe("WorkspaceDropdownMenu", () => {
     expect(html).toContain("Work in another folder...");
     expect(html).toContain("Work without a folder");
   });
+
+  it("lists every folder, with a filter field once the list is long", () => {
+    const many = Array.from({ length: 12 }, (_, i) => workspace(`w${i}`, `folder-${i}`));
+    const html = render({ workspaces: many });
+    for (let i = 0; i < 12; i++) expect(html).toContain(`>folder-${i}<`);
+    expect(html).toContain('aria-label="Filter folders"');
+    expect(html).not.toContain("Recent Folders");
+    expect(render({})).toContain("Recent Folders");
+  });
 });

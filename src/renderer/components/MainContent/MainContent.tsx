@@ -144,7 +144,6 @@ import { useAgentContext, type AgentContext } from "../../hooks/useAgentContext"
 import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
 import { CalmAccessMenu, type CalmAccessMenuProps } from "../calm/CalmTopBar";
 import { CalmModeToggle } from "../calm/CalmModeToggle";
-import { CalmBriefingCard } from "../calm/CalmBriefingCard";
 import {
   hasTaskOutputs,
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -431,8 +430,16 @@ import {
 import { buildSlashSkillPrompt } from "../skill-parameter-utils";
 import { DocumentAwareFileModal } from "../DocumentAwareFileModal";
 import { ThemeIcon } from "../ThemeIcon";
-import { CalmHomeSessions } from "../calm/CalmHomeSessions";
+import { CalmHomeToday } from "../calm/CalmHomeToday";
 import { EMPTY_HOME_SESSIONS, type HomeSessions } from "../../utils/home-sessions";
+import {
+  EMPTY_HOME_TODAY,
+  buildHomeToday,
+  formatHomeDate,
+  homeGreeting,
+  homeStatusLine,
+} from "../../utils/home-today";
+import { useHomeTodaySignals } from "../../hooks/useHomeTodaySignals";
 import { IntegrationMentionIcon } from "../IntegrationMentionIcon";
 import {
   PromptComposerInput,
@@ -4450,6 +4457,27 @@ function MainContentComponent({
   const isCalm = useIsCalmTheme();
   // Picked once per app session so the chips don't reshuffle on every visit.
   const calmSuggestionCards = useMemo(getCalmSuggestionCards, []);
+  // The Calm home's Today stack: sessions waiting on the user, due commitments and
+  // suggestions, each as one prepared decision, then what was handled without them.
+  const homeTodaySignals = useHomeTodaySignals(isCalm && !task);
+  const homeToday = useMemo(
+    () =>
+      buildHomeToday({
+        sessions: homeSessions,
+        suggestions: homeTodaySignals.suggestions,
+        commitments: homeTodaySignals.commitments,
+        now: Date.now(),
+        resolved: homeTodaySignals.resolved,
+        actedRows: homeTodaySignals.actedRows,
+      }),
+    [
+      homeSessions,
+      homeTodaySignals.suggestions,
+      homeTodaySignals.commitments,
+      homeTodaySignals.resolved,
+      homeTodaySignals.actedRows,
+    ],
+  );
 
   // ── Rotating placeholder prompts (persona-aware engine) ──────────────
   const [rotatingPlaceholders, setRotatingPlaceholders] = useState<string[]>([]);
@@ -10239,9 +10267,9 @@ function MainContentComponent({
     onConfigure: () => onOpenSettings?.("system"),
   };
 
-  const calmGreeting = agentContext.userName
-    ? `Hi ${agentContext.userName}, how can I help?`
-    : agentContext.getMessage("welcomeSubtitle");
+  const calmHomeNow = new Date();
+  const calmGreeting = homeGreeting(calmHomeNow, agentContext.userName);
+  const calmStatusLine = homeStatusLine(homeToday);
 
   // The welcome composer's "More options" menu. Calm places it right after the access
   // shield; other themes keep it later in the left action group.
@@ -10450,7 +10478,18 @@ function MainContentComponent({
           >
             {isCalm && (
               <div className="calm-hero">
-                <h1 className="calm-greeting">{calmGreeting}</h1>
+                {calmStatusLine ? (
+                  <>
+                    <p className="calm-hero-eyebrow">{formatHomeDate(calmHomeNow)}</p>
+                    <h1 className="calm-greeting">{calmGreeting}</h1>
+                    <p className="calm-hero-status">{calmStatusLine}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="calm-hero-eyebrow">{calmGreeting}</p>
+                    <h1 className="calm-greeting">How can I help today?</h1>
+                  </>
+                )}
               </div>
             )}
             {/* Logo */}
@@ -11496,20 +11535,29 @@ function MainContentComponent({
               </div>
             )}
             {isCalm &&
-              (homeSessions.needsYou.length > 0 || homeSessions.recent.length > 0 ? (
-                <CalmHomeSessions
-                  sessions={homeSessions}
-                  onSelect={(taskId) => onSelectTask?.(taskId)}
+              (homeToday !== EMPTY_HOME_TODAY || homeSessions.recent.length > 0 ? (
+                <CalmHomeToday
+                  today={homeToday}
+                  recent={homeSessions.recent}
+                  signals={homeTodaySignals}
+                  onOpenSession={(taskId) => onSelectTask?.(taskId)}
+                  onStartTask={async (title, prompt) =>
+                    onCreateTask
+                      ? (await onCreateTask(
+                          title,
+                          prompt,
+                          newTaskAccessProfileId ? { accessProfileId: newTaskAccessProfileId } : {},
+                        )) !== false
+                      : false
+                  }
+                  onDraftPrompt={(prompt) => {
+                    handleQuickAction(prompt);
+                    promptInputRef.current?.focus();
+                  }}
                 />
               ) : (
                 renderCalmSuggestionChips()
               ))}
-            {isCalm && (
-              <CalmBriefingCard
-                workspaceId={workspace?.id}
-                accessLabel={selectedAccessProfileLabel}
-              />
-            )}
             {renderWelcomeTaskSuggestions()}
             {!isCalm && (
               <button

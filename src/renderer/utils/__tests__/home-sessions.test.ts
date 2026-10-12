@@ -42,14 +42,40 @@ describe("buildHomeSessions", () => {
       task("child", 900, { parentTaskId: "p" }),
       task("auto", 800, { source: "cron" } as Partial<Task>),
       ...Array.from({ length: 6 }, (_, i) => task(`r${i}`, 700 - i)),
-      ...Array.from({ length: 5 }, (_, i) =>
+      ...Array.from({ length: 8 }, (_, i) =>
         task(`n${i}`, 600 - i, { terminalStatus: "awaiting_approval" }),
       ),
     ];
     const result = buildHomeSessions(tasks);
     expect(result.recent.map((item) => item.id)).toEqual(["r0", "r1", "r2", "r3"]);
-    expect(result.needsYou).toHaveLength(3);
+    expect(result.needsYou).toHaveLength(6);
     expect(result.recent.some((item) => item.id === "child")).toBe(false);
+  });
+
+  it("lists automated sessions that finished cleanly in the last day as handled", () => {
+    const now = 10 * 24 * 60 * 60 * 1000;
+    const hour = 60 * 60 * 1000;
+    const result = buildHomeSessions(
+      [
+        task("cron-ok", now - hour, {
+          source: "cron",
+          completedAt: now - 2 * hour,
+        } as Partial<Task>),
+        task("cron-old", now - 30 * hour, { source: "cron" } as Partial<Task>),
+        task("cron-failed", now - hour, { source: "cron", status: "failed" } as Partial<Task>),
+        task("cron-waiting", now - hour, {
+          source: "cron",
+          terminalStatus: "awaiting_approval",
+        } as Partial<Task>),
+        task("manual", now - hour),
+      ],
+      now,
+    );
+    expect(result.handled).toEqual([
+      { id: "cron-ok", title: "Session cron-ok", updatedAt: now - 2 * hour },
+    ]);
+    expect(result.needsYou.map((item) => item.id)).toEqual(["cron-waiting"]);
+    expect(result.recent.map((item) => item.id)).toEqual(["manual"]);
   });
 });
 
@@ -60,6 +86,8 @@ describe("sameHomeSessions", () => {
     expect(
       sameHomeSessions(buildHomeSessions(tasks), buildHomeSessions([...tasks, task("c", 3)])),
     ).toBe(false);
+    const handled = { ...EMPTY_HOME_SESSIONS, handled: [{ id: "h", title: "H", updatedAt: 1 }] };
+    expect(sameHomeSessions(EMPTY_HOME_SESSIONS, handled)).toBe(false);
   });
 });
 

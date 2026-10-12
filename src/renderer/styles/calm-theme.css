@@ -483,10 +483,12 @@ html.visual-calm .calm-task .main-header > .calm-topbar {
 
 /* ---------- Welcome (Home) ---------- */
 
-/* Home is a flat page: one headline, one composer, one row of starters.
-   The column sits a little above centre (the 14vh bottom padding), where the
-   eye lands first. */
+/* Home is a flat page: one headline, one composer, then the Today stack or a
+   row of starters. The column sits a little above centre (the 14vh bottom
+   padding), where the eye lands first. "safe" keeps a column taller than the
+   window from overflowing above the scroll area: it starts at the top instead. */
 html.visual-calm .calm-welcome .welcome-view {
+  align-items: safe center;
   padding: 24px 32px 14vh;
 }
 
@@ -613,17 +615,9 @@ html.visual-calm .calm-folder-label {
   white-space: nowrap;
 }
 
-/* ---------- Home work list ----------
-   Sessions waiting on you, then recent ones: hairline-separated rows in the
+/* ---------- Home recent list ----------
+   Recent sessions under the Today stack: hairline-separated rows in the
    composer's column, like a quiet inbox. */
-html.visual-calm .calm-home-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  margin-top: 44px;
-  text-align: left;
-}
-
 html.visual-calm .calm-home-group-title {
   display: flex;
   align-items: center;
@@ -633,20 +627,6 @@ html.visual-calm .calm-home-group-title {
   font: 500 12px/1.4 var(--font-ui);
   letter-spacing: 0.02em;
   color: var(--calm-text-muted);
-}
-
-html.visual-calm .calm-home-group-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--calm-radius-pill);
-  background: var(--calm-warning-bg);
-  color: var(--calm-warning-text);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
 }
 
 html.visual-calm .calm-home-list {
@@ -694,24 +674,12 @@ html.visual-calm .calm-home-row-mark {
   background: var(--calm-border-strong);
 }
 
-html.visual-calm .calm-home-row.attention .calm-home-row-mark {
-  background: var(--calm-warning-text);
-  box-shadow: 0 0 0 3px var(--calm-warning-bg);
-}
-
 html.visual-calm .calm-home-row-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The dot and the count already carry the colour; the reason stays quiet. */
-html.visual-calm .calm-home-row-reason {
-  flex-shrink: 0;
-  color: var(--calm-text-secondary);
-  font-size: 12.5px;
 }
 
 html.visual-calm .calm-home-row-time {
@@ -1641,124 +1609,327 @@ html.visual-calm .calm-task .task-status-strip-phase {
   color: var(--calm-text-muted);
 }
 
-/* ---------- Result / briefing cards ---------- */
+/* ---------- Home Today stack ----------
+   Each card is one prepared decision: source and state, a headline, why it's
+   here, what will run, then one primary action. Acted-on cards fold away and
+   leave a done row. */
+html.visual-calm .calm-hero-eyebrow {
+  margin: 0 0 10px;
+  font: 500 13px/1.4 var(--font-ui);
+  color: var(--calm-text-muted);
+  text-align: center;
+}
 
-html.visual-calm .calm-result-card {
-  position: relative;
-  overflow: hidden;
-  margin-top: 26px;
-  padding: 22px 24px 18px;
+html.visual-calm .calm-hero-status {
+  margin: 10px 0 0;
+  font: 400 15px/1.45 var(--font-ui);
+  color: var(--calm-text-secondary);
+  text-align: center;
+}
+
+html.visual-calm .calm-today {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 40px;
   text-align: left;
 }
 
-html.visual-calm .calm-result-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(70% 90% at 100% 0%, var(--calm-sky-2), transparent 65%);
-  opacity: 0.6;
-}
-
-html.visual-calm .calm-result-card > * {
-  position: relative;
-}
-
-html.visual-calm .calm-result-when {
-  font-size: 13px;
-  color: var(--calm-text-muted);
-  margin-bottom: 4px;
-}
-
-html.visual-calm .calm-result-headline {
-  font-family: var(--font-ui);
-  font-size: 24px;
-  font-weight: 500;
-  letter-spacing: -0.015em;
-  color: var(--calm-text);
-  margin: 0 0 14px;
-}
-
-html.visual-calm .calm-status-chips {
+html.visual-calm .calm-today-cards {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-html.visual-calm .calm-status-chip {
-  display: inline-flex;
+html.visual-calm .calm-today-card {
+  padding: 16px 20px 18px;
+  background: var(--calm-surface);
+  border: 1px solid var(--calm-border);
+  border-radius: 18px;
+  box-shadow:
+    var(--calm-shadow-soft),
+    0 10px 28px -18px rgba(15, 23, 42, 0.18);
+  animation: calm-home-in 0.32s var(--calm-ease) both;
+}
+
+html.visual-calm .calm-today-card.is-leaving {
+  animation: calm-today-out 0.22s var(--calm-ease) forwards;
+  pointer-events: none;
+}
+
+@keyframes calm-today-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+}
+
+/* The idea is an offer, not a request: flatter, on the page colour. */
+html.visual-calm .calm-today-card-idea {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--calm-border-strong);
+  box-shadow: none;
+}
+
+html.visual-calm .calm-today-card-head {
+  display: flex;
   align-items: center;
-  gap: 7px;
-  max-width: 100%;
-  padding: 7px 12px;
-  border-radius: 12px;
-  background: var(--calm-surface-muted);
-  color: var(--calm-text);
-  font-size: 13px;
+  gap: 10px;
+  min-width: 0;
 }
 
-html.visual-calm .calm-status-chip > span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 280px;
-}
-
-html.visual-calm .calm-status-chip > svg {
+html.visual-calm .calm-today-card-icon {
+  display: inline-grid;
+  place-items: center;
   flex-shrink: 0;
-  color: var(--calm-text-muted);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--calm-accent-subtle);
+  color: var(--calm-accent);
 }
 
-html.visual-calm .calm-status-chip.status-success > svg {
-  color: var(--calm-success);
-}
-
-html.visual-calm .calm-status-chip.status-warning,
-html.visual-calm .calm-status-chip.status-error {
+html.visual-calm .calm-today-card-icon.kind-session {
   background: var(--calm-warning-bg);
   color: var(--calm-warning-text);
 }
 
-html.visual-calm .calm-status-chip.status-warning > svg,
-html.visual-calm .calm-status-chip.status-error > svg {
-  color: currentColor;
+html.visual-calm .calm-today-card-source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11px/1.4 var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--calm-text-muted);
 }
 
-html.visual-calm .calm-result-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-html.visual-calm .calm-trust-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
+html.visual-calm .calm-today-card-state {
   color: var(--calm-text-secondary);
 }
 
-html.visual-calm .calm-trust-badge > svg {
-  color: var(--calm-success);
+html.visual-calm .calm-today-card-time {
+  flex-shrink: 0;
+  font: 400 12.5px/1.4 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--calm-text-muted);
 }
 
-html.visual-calm .calm-link-button {
-  appearance: none;
-  border: none;
-  background: none;
-  padding: 0;
+html.visual-calm .calm-today-card-title {
+  margin: 12px 0 0;
+  font: 600 17px/1.35 var(--font-ui);
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+  text-wrap: pretty;
+}
+
+html.visual-calm .calm-today-card-why {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 6px 0 0;
+  font: 400 13.5px/1.45 var(--font-ui);
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-today-card-why > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
   color: var(--calm-text-muted);
-  font: 500 13px var(--font-ui);
+}
+
+/* The exact prompt a Start button sends, shown before it is sent. */
+html.visual-calm .calm-today-card-preview {
+  margin-top: 12px;
+  padding: 10px 14px 11px;
+  border-radius: 12px;
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-today-card-preview-label {
+  display: block;
+  margin-bottom: 3px;
+  font: 600 11px/1.4 var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-today-card-preview > p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  font: 400 13.5px/1.5 var(--font-ui);
+  color: var(--calm-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+html.visual-calm .calm-today-card-error {
+  margin: 10px 0 0;
+  font: 500 13px/1.4 var(--font-ui);
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .calm-today-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+html.visual-calm .calm-today-button {
+  appearance: none;
+  height: 32px;
+  padding: 0 15px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text);
+  font: 500 13px/1 var(--font-ui);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+html.visual-calm .calm-today-button:hover:not(:disabled) {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-today-button.primary {
+  border-color: var(--calm-accent);
+  background: var(--calm-accent);
+  color: var(--calm-accent-contrast);
+}
+
+html.visual-calm .calm-today-button.primary:hover:not(:disabled) {
+  border-color: var(--calm-accent-hover);
+  background: var(--calm-accent-hover);
+}
+
+html.visual-calm .calm-today-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+html.visual-calm .calm-today-button:focus-visible,
+html.visual-calm .calm-today-more:focus-visible,
+html.visual-calm .calm-today-handled-row:focus-visible {
+  outline: 2px solid var(--calm-accent);
+  outline-offset: 2px;
+}
+
+html.visual-calm .calm-today-more {
+  align-self: center;
+  appearance: none;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--calm-radius-pill);
+  background: none;
+  color: var(--calm-text-muted);
+  font: 500 13px/1 var(--font-ui);
   cursor: pointer;
 }
 
-html.visual-calm .calm-link-button:hover {
+html.visual-calm .calm-today-more:hover {
   color: var(--calm-text);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-today-handled {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+html.visual-calm .calm-today-handled-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 46px;
+  padding: 0 16px;
+  border: 1px solid var(--calm-border);
+  border-radius: 14px;
+  background: var(--calm-surface);
+  color: var(--calm-text);
+  font: 400 13.5px/1.3 var(--font-ui);
+  text-align: left;
+  animation: calm-home-in 0.32s var(--calm-ease) both;
+}
+
+html.visual-calm button.calm-today-handled-row {
+  appearance: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+html.visual-calm button.calm-today-handled-row:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .calm-today-check {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--calm-accent);
+  color: var(--calm-accent-contrast);
+}
+
+html.visual-calm .calm-today-handled-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.visual-calm .calm-today-handled-outcome,
+html.visual-calm .calm-today-handled-time {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-today-handled-time {
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+html.visual-calm:not(.theme-light) .calm-today-card {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset,
+    0 12px 32px -20px rgba(0, 0, 0, 0.7);
+}
+
+html.visual-calm:not(.theme-light) .calm-today-card-idea {
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.visual-calm .calm-today-card,
+  html.visual-calm .calm-today-card.is-leaving,
+  html.visual-calm .calm-today-handled-row {
+    animation: none;
+  }
+
+  html.visual-calm .calm-today-card.is-leaving {
+    opacity: 0;
+  }
 }
 
 /* Summary events in the timeline read as result cards. */

@@ -2,7 +2,7 @@ import React from "react";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   Sidebar,
@@ -17,6 +17,17 @@ const stylesPath = fileURLToPath(new URL("../../styles/index.css", import.meta.u
 const sidebarSourcePath = fileURLToPath(new URL("../Sidebar.tsx", import.meta.url));
 
 describe("Sidebar top-level destinations", () => {
+  // Fixtures are dated relative to Date.now() and the sidebar buckets Recents by
+  // calendar day, so pin the clock mid-day; near midnight "a minute ago" is yesterday.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T12:00:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("shows Bots when the shell selects the Bots list", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Sidebar, {
@@ -418,12 +429,9 @@ describe("Sidebar top-level destinations", () => {
   describe("collapsible recent sessions", () => {
     afterEach(() => {
       vi.unstubAllGlobals();
-      vi.useRealTimers();
     });
 
     const renderWithCollapsedGroups = (collapsedRecentGroups: unknown) => {
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(new Date("2026-10-05T12:00:00"));
       vi.stubGlobal("window", {
         electronAPI: {},
         localStorage: {

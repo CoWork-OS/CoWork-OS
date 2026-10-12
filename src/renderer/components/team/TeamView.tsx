@@ -52,6 +52,8 @@ interface TeamViewProps {
   onOpenRoutine: (routineId: string) => void;
   /** Opens the Devices view, on a remote device when one is given. */
   onOpenDevices: (deviceId?: string) => void;
+  /** Opens the Devices view on its pairing step. */
+  onAddDevice: () => void;
 }
 
 interface TeamSources {
@@ -123,6 +125,7 @@ export function TeamView({
   onOpenSchedules,
   onOpenRoutine,
   onOpenDevices,
+  onAddDevice,
 }: TeamViewProps) {
   const { sources, reloadSchedules } = useTeamSources();
   const attention = useAttentionSnapshot(true);
@@ -228,7 +231,7 @@ export function TeamView({
             <button
               type="button"
               className="team-view-device team-view-device-add"
-              onClick={() => onOpenDevices()}
+              onClick={onAddDevice}
             >
               <span className="team-view-device-head">
                 <Plus size={18} aria-hidden="true" />

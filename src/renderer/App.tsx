@@ -3141,8 +3141,15 @@ export function App() {
     () => ({ isCalm: visualTheme === "calm", isBrowserHost }),
     [visualTheme, isBrowserHost],
   );
-  // The device Team asked the Devices view to open on, if any.
-  const [devicesFocusId, setDevicesFocusId] = useState<string | null>(null);
+  // What Team asked the Devices view to open on: a device, or the pairing step. Read when
+  // the view mounts and cleared once the user leaves it, so a later visit starts fresh.
+  const [devicesFocus, setDevicesFocus] = useState<{
+    deviceId?: string;
+    pairing?: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (currentView !== "devices") setDevicesFocus(null);
+  }, [currentView]);
   const [browserProviderReady, setBrowserProviderReady] = useState(
     () => !isBrowserHost || window.coworkBrowserHostInfo?.providerReady === true,
   );
@@ -8553,7 +8560,8 @@ export function App() {
                 />
               ) : currentView === "devices" ? (
                 <DevicesPanel
-                  initialDeviceId={devicesFocusId ?? undefined}
+                  initialDeviceId={devicesFocus?.deviceId}
+                  openPairing={devicesFocus?.pairing === true}
                   onOpenTask={(taskId, remote) => {
                     if (remote) {
                       void openRemoteTaskView(taskId, remote);
@@ -8707,7 +8715,11 @@ export function App() {
                     setCurrentView("automations");
                   }}
                   onOpenDevices={(deviceId) => {
-                    setDevicesFocusId(deviceId ?? null);
+                    setDevicesFocus(deviceId ? { deviceId } : null);
+                    setCurrentView("devices");
+                  }}
+                  onAddDevice={() => {
+                    setDevicesFocus({ pairing: true });
                     setCurrentView("devices");
                   }}
                 />

@@ -84,6 +84,8 @@ interface DevicesPanelProps {
   onOpenSettings?: (tab?: string) => void;
   /** A remote device to select when the view opens (Team's device cards pass one). */
   initialDeviceId?: string;
+  /** Start on the pairing step (Team's "Add a device" card). */
+  openPairing?: boolean;
 }
 
 type TaskFilter = "selected" | "all" | "attention";
@@ -335,6 +337,7 @@ export function DevicesPanel({
   workspace,
   onOpenSettings,
   initialDeviceId,
+  openPairing = false,
 }: DevicesPanelProps) {
   const overviewRef = useRef<HTMLDivElement | null>(null);
   const tasksRef = useRef<HTMLDivElement | null>(null);
@@ -352,7 +355,9 @@ export function DevicesPanel({
   const [taskPrompt, setTaskPrompt] = useState("");
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("selected");
-  const [overlay, setOverlay] = useState<PanelOverlay>(null);
+  const [overlay, setOverlay] = useState<PanelOverlay>(() =>
+    openPairing ? { type: "pairing" } : null,
+  );
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [overflowSubmenu, setOverflowSubmenu] = useState<"domain" | "profile" | null>(null);

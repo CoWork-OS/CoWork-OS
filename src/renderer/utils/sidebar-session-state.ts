@@ -1,5 +1,5 @@
 import type { Task } from "../../shared/types";
-import { deriveCanonicalTaskStatus } from "../../shared/task-status";
+import { classifyTaskActivity } from "../../shared/attention";
 
 export type SidebarSessionFilter = "all" | "running" | "needs-you";
 
@@ -8,33 +8,12 @@ interface SidebarSessionActivity {
   label: string;
 }
 
-/** Keep the filter, row explanation, and automated activity summary in agreement. */
+/**
+ * Keep the filter, row explanation, and automated activity summary in agreement. The rule
+ * is shared with the attention queue, so the sidebar and Today count the same sessions.
+ */
 export function getSidebarSessionActivity(task: Task): SidebarSessionActivity | null {
-  const status = deriveCanonicalTaskStatus(task);
-  if (status === "failed" || status === "cancelled") return null;
-
-  if (task.terminalStatus === "awaiting_approval") {
-    return { category: "needs-you", label: "Approval needed" };
-  }
-  if (task.terminalStatus === "awaiting_verification") {
-    return { category: "running", label: "Verifying" };
-  }
-  if (task.terminalStatus === "needs_user_action") {
-    return { category: "needs-you", label: "Response needed" };
-  }
-  if (status === "interrupted" || task.terminalStatus === "resume_available") {
-    return { category: "needs-you", label: "Resume available" };
-  }
-  if (status === "blocked") return { category: "needs-you", label: "Action needed" };
-  if (status === "paused") {
-    const waitingForInput =
-      task.stopReasons?.includes("awaiting_user_input") || task.awaitingUserInputReasonCode;
-    return { category: "needs-you", label: waitingForInput ? "Response needed" : "Paused" };
-  }
-  if (status === "planning") return { category: "running", label: "Planning" };
-  if (status === "executing") return { category: "running", label: "Running" };
-  if (status === "pending" || status === "queued") return { category: null, label: "Queued" };
-  return null;
+  return classifyTaskActivity(task);
 }
 
 export function getSidebarSessionRowHeight(task: Task): number {

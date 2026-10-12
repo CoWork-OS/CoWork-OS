@@ -1,20 +1,24 @@
-import type { ProactiveSuggestion, SuggestionType } from "../../shared/types";
+import { rankAttention, type AttentionItem, type AttentionKind } from "../../shared/attention";
+import type { SuggestionType } from "../../shared/types";
 import type { HomeSessionSummary, HomeSessions } from "./home-sessions";
 
 /**
  * The Calm home "Today" stack: what needs the user, already prepared as one card each
  * with one decision, then what was handled without them.
  *
- * Every card action goes through an existing path: opening a session (where its own
- * approval or question UI takes over), starting a suggestion's prompt as a new task
- * (the prompt is shown on the card first), snoozing a suggestion, or marking a
+ * Cards come from the shared attention queue (shared/attention.ts), merged with the waiting
+ * sessions the renderer already knows so a new one shows before the queue reloads. Every
+ * card action goes through an existing path: opening a session (where its own approval or
+ * question UI takes over), opening an automation, starting a suggestion's prompt as a new
+ * task (the prompt is shown on the card first), snoozing a suggestion, or marking a
  * commitment done. Nothing here runs anything on its own.
  */
 
-export type HomeTodayKind = "session" | "commitment" | "suggestion";
+export type HomeTodayKind = AttentionKind;
 
 export type HomeTodayAction =
   | { type: "open-session"; taskId: string }
+  | { type: "open-routine"; routineId: string }
   | {
       type: "start-suggestion";
       workspaceId: string;
@@ -36,15 +40,22 @@ export type HomeTodayIcon =
   | "question"
   | "resume"
   | "blocked"
+  | "flow"
   | "commitment"
   | SuggestionType;
 
+/** A short fact under the card's header: what started the work, where it runs, its risk. */
+export interface HomeTodayChip {
+  kind: "origin" | "place" | "risk";
+  label: string;
+}
+
 export interface HomeTodayCard {
-  /** Stable across refreshes: `${kind}:${source id}`. */
+  /** Stable across refreshes: the attention item's id. */
   id: string;
   kind: HomeTodayKind;
   icon: HomeTodayIcon;
-  /** Where it comes from, e.g. "Session", "Commitment", "Follow-up". */
+  /** Who is asking, or what the card is about, e.g. "Ops bot", "Commitment". */
   source: string;
   /** Where it stands, e.g. "Approval needed", "Due today". */
   state: string;
@@ -52,6 +63,7 @@ export interface HomeTodayCard {
   /** One line on why it is here. */
   why: string;
   at: number;
+  chips: HomeTodayChip[];
   /** The exact prompt a "Start" button will run, shown before it runs. */
   preview?: { label: string; text: string };
   primary: HomeTodayButton;
@@ -68,20 +80,6 @@ export interface HomeTodayHandledRow {
   taskId?: string;
 }
 
-/** A suggestion as the home loads it: the shared shape plus where it lives. */
-export interface HomeTodaySuggestion extends ProactiveSuggestion {
-  workspaceId: string;
-  workspaceName?: string;
-}
-
-/** The fields the home reads from a due-soon commitment. */
-export interface HomeTodayCommitment {
-  id: string;
-  text: string;
-  dueAt?: number;
-  lastTaskId?: string;
-}
-
 export interface HomeToday {
   /** Everything waiting on the user, most pressing first. */
   needsYou: HomeTodayCard[];
@@ -93,9 +91,6 @@ export interface HomeToday {
 export const EMPTY_HOME_TODAY: HomeToday = { needsYou: [], idea: null, handled: [] };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Commitments become cards once they are due within this window, or overdue. */
-export const HOME_COMMITMENT_WINDOW_HOURS = 24;
-const MAX_WHY_CHARS = 180;
 const MAX_PREVIEW_CHARS = 320;
 const MAX_HANDLED_ROWS = 5;
 
@@ -155,13 +150,17 @@ function formatClock(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function weekday(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString(undefined, { weekday: "short" });
+}
+
 /** "Overdue", "Due today", "Due tomorrow", or "Due Thu". */
 export function commitmentDueState(dueAt: number, now: number): string {
   if (dueAt < now) return "Overdue";
   const days = Math.round((startOfDay(dueAt) - startOfDay(now)) / DAY_MS);
   if (days <= 0) return "Due today";
   if (days === 1) return "Due tomorrow";
-  return `Due ${new Date(dueAt).toLocaleDateString(undefined, { weekday: "short" })}`;
+  return `Due ${weekday(dueAt)}`;
 }
 
 function commitmentWhy(dueAt: number, now: number): string {
@@ -172,143 +171,201 @@ function commitmentWhy(dueAt: number, now: number): string {
     return `You said you'd do this. It was due ${when}.`;
   }
   const days = Math.round((startOfDay(dueAt) - startOfDay(now)) / DAY_MS);
-  const day =
-    days <= 0
-      ? "today"
-      : days === 1
-        ? "tomorrow"
-        : `on ${new Date(dueAt).toLocaleDateString(undefined, { weekday: "short" })}`;
+  const day = days <= 0 ? "today" : days === 1 ? "tomorrow" : `on ${weekday(dueAt)}`;
   return `You said you'd do this by ${formatClock(dueAt)} ${day}.`;
 }
 
-function sessionCard(session: HomeSessionSummary): HomeTodayCard {
-  const label = session.attention || "Action needed";
-  const copy = SESSION_COPY[label] || SESSION_COPY["Action needed"];
+/** Facts worth a chip: only the ones that differ from "you started it, here". */
+function chipsFor(item: AttentionItem): HomeTodayChip[] {
+  const chips: HomeTodayChip[] = [];
+  if (item.origin.kind !== "you" && item.origin.kind !== "memory") {
+    chips.push({ kind: "origin", label: item.origin.label });
+  }
+  if (item.place.kind === "remote") chips.push({ kind: "place", label: item.place.label });
+  if (item.risk === "high") chips.push({ kind: "risk", label: "High risk" });
+  return chips;
+}
+
+function askerName(item: AttentionItem): string {
+  return item.actor.kind === "you" ? "Your session" : item.actor.name;
+}
+
+function openSession(taskId: string, label: string): HomeTodayButton {
+  return { label, action: { type: "open-session", taskId } };
+}
+
+/** The card for one attention item, or null when the item has nothing to decide here. */
+export function cardForAttention(item: AttentionItem, now: number): HomeTodayCard | null {
+  const base = { id: item.id, kind: item.kind, at: item.createdAt, chips: chipsFor(item) };
+  switch (item.kind) {
+    case "approval":
+      if (!item.taskId) return null;
+      return {
+        ...base,
+        icon: "approval",
+        source: askerName(item),
+        state: item.state,
+        title: item.title,
+        why: item.detail || "",
+        primary: openSession(item.taskId, "Review"),
+      };
+    case "question":
+      if (!item.taskId) return null;
+      return {
+        ...base,
+        icon: "question",
+        source: askerName(item),
+        state: item.state,
+        title: item.title,
+        why: item.detail || "",
+        primary: openSession(item.taskId, "Answer"),
+      };
+    case "session": {
+      if (!item.taskId) return null;
+      const copy = SESSION_COPY[item.state] || SESSION_COPY["Action needed"];
+      return {
+        ...base,
+        icon: copy.icon,
+        source: askerName(item),
+        state: item.state,
+        title: item.title,
+        why: copy.why,
+        primary: openSession(item.taskId, copy.primary),
+      };
+    }
+    case "flow_approval":
+      if (item.ref.type !== "workflow_step") return null;
+      return {
+        ...base,
+        icon: "flow",
+        source: item.actor.name,
+        state: item.state,
+        title: item.title,
+        why: item.detail || "",
+        primary: {
+          label: "Review",
+          action: { type: "open-routine", routineId: item.ref.routineId },
+        },
+      };
+    case "commitment": {
+      if (item.ref.type !== "commitment" || typeof item.dueAt !== "number") return null;
+      return {
+        ...base,
+        at: item.dueAt,
+        icon: "commitment",
+        source: "Commitment",
+        state: commitmentDueState(item.dueAt, now),
+        title: item.title,
+        why: commitmentWhy(item.dueAt, now),
+        primary: {
+          label: "Mark done",
+          action: { type: "complete-commitment", commitmentId: item.ref.commitmentId },
+        },
+        secondary: {
+          label: "Work on it",
+          action: { type: "draft-prompt", prompt: `Help me finish this commitment: ${item.title}` },
+        },
+      };
+    }
+    case "suggestion": {
+      if (item.ref.type !== "suggestion" || !item.prompt) return null;
+      const { suggestionId, workspaceId } = item.ref;
+      const type = item.suggestionType;
+      return {
+        ...base,
+        icon: type ?? "insight",
+        source: (type && SUGGESTION_SOURCE[type]) || "Suggestion",
+        state: item.state,
+        title: clip(plain(item.title), 140),
+        why: clip(plain(item.detail || ""), 180),
+        preview: { label: "Will run", text: clip(item.prompt, MAX_PREVIEW_CHARS) },
+        primary: {
+          label: "Start",
+          action: {
+            type: "start-suggestion",
+            workspaceId,
+            suggestionId,
+            title: clip(plain(item.title), 140),
+            prompt: item.prompt,
+          },
+        },
+        secondary: {
+          label: "Not now",
+          action: { type: "snooze-suggestion", workspaceId, suggestionId },
+        },
+      };
+    }
+  }
+}
+
+/** A waiting session the renderer knows about, as an attention item. */
+function sessionAttention(session: HomeSessionSummary): AttentionItem {
   return {
     id: `session:${session.id}`,
     kind: "session",
-    icon: copy.icon,
-    source: "Session",
-    state: label,
+    state: session.attention || "Action needed",
     title: session.title,
-    why: copy.why,
-    at: session.updatedAt,
-    primary: { label: copy.primary, action: { type: "open-session", taskId: session.id } },
+    createdAt: session.updatedAt,
+    urgent: true,
+    actor: { kind: "you", name: "You" },
+    origin: { kind: "you", label: "You started it" },
+    place: { kind: "local", label: "This device" },
+    taskId: session.id,
+    ref: { type: "task", taskId: session.id },
   };
-}
-
-function commitmentCard(commitment: HomeTodayCommitment, now: number): HomeTodayCard | null {
-  const text = clip(commitment.text || "", 160);
-  if (!text || typeof commitment.dueAt !== "number") return null;
-  return {
-    id: `commitment:${commitment.id}`,
-    kind: "commitment",
-    icon: "commitment",
-    source: "Commitment",
-    state: commitmentDueState(commitment.dueAt, now),
-    title: text,
-    why: commitmentWhy(commitment.dueAt, now),
-    at: commitment.dueAt,
-    primary: {
-      label: "Mark done",
-      action: { type: "complete-commitment", commitmentId: commitment.id },
-    },
-    secondary: {
-      label: "Work on it",
-      action: { type: "draft-prompt", prompt: `Help me finish this commitment: ${text}` },
-    },
-  };
-}
-
-function suggestionCard(suggestion: HomeTodaySuggestion, urgent: boolean): HomeTodayCard | null {
-  const prompt = suggestion.actionPrompt?.trim();
-  const title = clip(plain(suggestion.title || ""), 140);
-  if (!prompt || !title) return null;
-  return {
-    id: `suggestion:${suggestion.id}`,
-    kind: "suggestion",
-    icon: suggestion.type,
-    source: SUGGESTION_SOURCE[suggestion.type] || "Suggestion",
-    state: urgent ? "Needs you" : "Suggested",
-    title,
-    why: clip(plain(suggestion.description || ""), MAX_WHY_CHARS),
-    at: suggestion.createdAt,
-    preview: { label: "Will run", text: clip(prompt, MAX_PREVIEW_CHARS) },
-    primary: {
-      label: "Start",
-      action: {
-        type: "start-suggestion",
-        workspaceId: suggestion.workspaceId,
-        suggestionId: suggestion.id,
-        title,
-        prompt,
-      },
-    },
-    secondary: {
-      label: "Not now",
-      action: {
-        type: "snooze-suggestion",
-        workspaceId: suggestion.workspaceId,
-        suggestionId: suggestion.id,
-      },
-    },
-  };
-}
-
-function isUrgentSuggestion(suggestion: ProactiveSuggestion): boolean {
-  return suggestion.urgency === "high" || suggestion.recommendedDelivery === "nudge";
 }
 
 /**
- * Builds the Today stack. `resolved` holds card ids the user already acted on in this
- * view, so a card doesn't come back before the next load confirms it is gone, and
- * `actedRows` are the rows those actions left behind.
+ * Builds the Today stack. `attention` is the shared queue's items, most pressing first.
+ * Waiting sessions from `sessions` are added for tasks the queue does not cover yet.
+ * `resolved` holds card ids the user already acted on in this view, so a card doesn't come
+ * back before the next load confirms it is gone, and `actedRows` are the rows those actions
+ * left behind.
  */
 export function buildHomeToday(input: {
+  attention: readonly AttentionItem[];
   sessions: HomeSessions;
-  suggestions: readonly HomeTodaySuggestion[];
-  commitments: readonly HomeTodayCommitment[];
   now: number;
   resolved?: ReadonlySet<string>;
   actedRows?: readonly HomeTodayHandledRow[];
 }): HomeToday {
-  const { sessions, now } = input;
+  const { now } = input;
   const resolved = input.resolved ?? new Set<string>();
-  const keep = (card: HomeTodayCard | null): card is HomeTodayCard =>
-    card !== null && !resolved.has(card.id);
+  const coveredTasks = new Set(input.attention.map((item) => item.taskId).filter(Boolean));
+  const items = rankAttention([
+    ...input.attention,
+    ...input.sessions.needsYou
+      .filter((session) => !coveredTasks.has(session.id))
+      .map(sessionAttention),
+  ]);
 
-  const sessionCards = sessions.needsYou.map(sessionCard).filter(keep);
-
-  const commitmentCards = input.commitments
-    .map((commitment) => commitmentCard(commitment, now))
-    .filter(keep)
-    .sort((a, b) => a.at - b.at);
-
-  const ranked = [...input.suggestions].sort(
-    (a, b) => (b.confidence || 0) - (a.confidence || 0) || b.createdAt - a.createdAt,
-  );
-  const urgentCards = ranked
-    .filter(isUrgentSuggestion)
-    .map((suggestion) => suggestionCard(suggestion, true))
-    .filter(keep);
-  const idea =
-    ranked
-      .filter((suggestion) => !isUrgentSuggestion(suggestion))
-      .map((suggestion) => suggestionCard(suggestion, false))
-      .find(keep) ?? null;
+  const needsYou: HomeTodayCard[] = [];
+  let idea: HomeTodayCard | null = null;
+  for (const item of items) {
+    const card = cardForAttention(item, now);
+    if (!card || resolved.has(card.id)) continue;
+    if (item.kind === "suggestion" && !item.urgent) {
+      idea ??= card;
+      continue;
+    }
+    needsYou.push(card);
+  }
 
   const handled: HomeTodayHandledRow[] = [
     ...(input.actedRows ?? []),
-    ...sessions.handled.map((session) => ({
-      id: `handled:${session.id}`,
-      title: session.title,
-      outcome: "Done",
-      at: session.updatedAt,
-      taskId: session.id,
-    })),
+    // The queue is the authority on what still waits: a session it lists is never "handled",
+    // even when the renderer's copy of the task has not caught up yet.
+    ...input.sessions.handled
+      .filter((session) => !coveredTasks.has(session.id))
+      .map((session) => ({
+        id: `handled:${session.id}`,
+        title: session.title,
+        outcome: "Done",
+        at: session.updatedAt,
+        taskId: session.id,
+      })),
   ].slice(0, MAX_HANDLED_ROWS);
 
-  const needsYou = [...sessionCards, ...commitmentCards, ...urgentCards];
   if (needsYou.length === 0 && !idea && handled.length === 0) return EMPTY_HOME_TODAY;
   return { needsYou, idea, handled };
 }

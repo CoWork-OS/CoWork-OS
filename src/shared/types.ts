@@ -8818,6 +8818,10 @@ export const IPC_CHANNELS = {
   SUGGESTIONS_EDIT: "suggestions:edit",
   SUGGESTIONS_ACT: "suggestions:act",
 
+  // Shared "needs you" queue (shared/attention.ts): the snapshot, and a signal when it changed
+  ATTENTION_LIST: "attention:list",
+  ATTENTION_CHANGED: "attention:changed",
+
   // Self-improvement loop
   IMPROVEMENT_GET_SETTINGS: "improvement:getSettings",
   IMPROVEMENT_GET_ELIGIBILITY: "improvement:getEligibility",

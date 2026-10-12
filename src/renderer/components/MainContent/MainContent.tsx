@@ -4457,23 +4457,22 @@ function MainContentComponent({
   const isCalm = useIsCalmTheme();
   // Picked once per app session so the chips don't reshuffle on every visit.
   const calmSuggestionCards = useMemo(getCalmSuggestionCards, []);
-  // The Calm home's Today stack: sessions waiting on the user, due commitments and
-  // suggestions, each as one prepared decision, then what was handled without them.
+  // The Calm home's Today stack: the shared "needs you" queue (approvals, questions, waiting
+  // sessions, flow steps, due commitments, suggestions), each as one prepared decision, then
+  // what was handled without the user.
   const homeTodaySignals = useHomeTodaySignals(isCalm && !task);
   const homeToday = useMemo(
     () =>
       buildHomeToday({
+        attention: homeTodaySignals.attention,
         sessions: homeSessions,
-        suggestions: homeTodaySignals.suggestions,
-        commitments: homeTodaySignals.commitments,
         now: Date.now(),
         resolved: homeTodaySignals.resolved,
         actedRows: homeTodaySignals.actedRows,
       }),
     [
       homeSessions,
-      homeTodaySignals.suggestions,
-      homeTodaySignals.commitments,
+      homeTodaySignals.attention,
       homeTodaySignals.resolved,
       homeTodaySignals.actedRows,
     ],
@@ -11540,6 +11539,7 @@ function MainContentComponent({
                   today={homeToday}
                   signals={homeTodaySignals}
                   onOpenSession={(taskId) => onSelectTask?.(taskId)}
+                  onOpenRoutine={onViewRoutine}
                   onStartTask={async (title, prompt) =>
                     onCreateTask
                       ? (await onCreateTask(

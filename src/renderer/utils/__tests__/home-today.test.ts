@@ -1,111 +1,198 @@
 import { describe, expect, it } from "vitest";
+import type { AttentionItem } from "../../../shared/attention";
 import { EMPTY_HOME_SESSIONS, type HomeSessions } from "../home-sessions";
 import {
   EMPTY_HOME_TODAY,
   buildHomeToday,
+  cardForAttention,
   commitmentDueState,
   homeGreeting,
   homeStatusLine,
-  type HomeTodaySuggestion,
 } from "../home-today";
 
 const NOW = new Date(2026, 9, 12, 9, 0).getTime();
 const HOUR = 60 * 60 * 1000;
 
-function suggestion(id: string, overrides: Partial<HomeTodaySuggestion> = {}): HomeTodaySuggestion {
+function item(id: string, overrides: Partial<AttentionItem> = {}): AttentionItem {
   return {
     id,
-    type: "follow_up",
-    title: `Suggestion ${id}`,
-    description: `Because **${id}** matters.`,
-    actionPrompt: `Do ${id}`,
-    confidence: 0.7,
+    kind: "session",
+    state: "Response needed",
+    title: `Item ${id}`,
     createdAt: NOW - HOUR,
-    expiresAt: NOW + 24 * HOUR,
-    dismissed: false,
-    actedOn: false,
-    workspaceId: "ws",
+    urgent: true,
+    actor: { kind: "you", name: "You" },
+    origin: { kind: "you", label: "You started it" },
+    place: { kind: "local", label: "This Mac" },
+    taskId: id,
+    ref: { type: "task", taskId: id },
     ...overrides,
-  } as HomeTodaySuggestion;
+  };
 }
 
+const approval = item("approval:a1", {
+  kind: "approval",
+  state: "Approval needed",
+  title: "Run npm publish",
+  detail: "Release is paused until you decide.",
+  taskId: "t1",
+  risk: "high",
+  actor: { kind: "agent", name: "Ops bot" },
+  origin: { kind: "schedule", label: "Started by a schedule" },
+  place: { kind: "remote", label: "Mac mini", deviceId: "n1" },
+  ref: { type: "approval", approvalId: "a1", taskId: "t1" },
+});
+
+const suggestion = (id: string, urgent: boolean) =>
+  item(`suggestion:${id}`, {
+    kind: "suggestion",
+    state: urgent ? "Needs you" : "Suggested",
+    title: `Suggestion **${id}**`,
+    detail: "Because it matters.",
+    prompt: `Do ${id}`,
+    urgent,
+    suggestionType: "follow_up",
+    taskId: undefined,
+    ref: { type: "suggestion", suggestionId: id, workspaceId: "ws" },
+  });
+
 const sessions: HomeSessions = {
-  needsYou: [
-    { id: "t1", title: "Deploy preview", updatedAt: NOW - HOUR, attention: "Approval needed" },
-  ],
-  handled: [{ id: "t2", title: "Morning inbox sweep", updatedAt: NOW - 2 * HOUR }],
+  needsYou: [{ id: "t9", title: "Draft the memo", updatedAt: NOW - HOUR, attention: "Paused" }],
+  handled: [{ id: "h1", title: "Morning inbox sweep", updatedAt: NOW - 2 * HOUR }],
 };
 
 describe("buildHomeToday", () => {
   it("returns the shared empty value when there is nothing", () => {
-    expect(
-      buildHomeToday({ sessions: EMPTY_HOME_SESSIONS, suggestions: [], commitments: [], now: NOW }),
-    ).toBe(EMPTY_HOME_TODAY);
+    expect(buildHomeToday({ attention: [], sessions: EMPTY_HOME_SESSIONS, now: NOW })).toBe(
+      EMPTY_HOME_TODAY,
+    );
   });
 
-  it("orders sessions, then due commitments, then urgent suggestions", () => {
+  it("adds waiting sessions the queue has not covered yet, ranked with the rest", () => {
     const today = buildHomeToday({
+      attention: [suggestion("urgent", true), approval, suggestion("calm", false)],
       sessions,
-      suggestions: [suggestion("calm"), suggestion("urgent", { urgency: "high" })],
-      commitments: [{ id: "c1", text: "Send the Q3 proposal to Dana", dueAt: NOW + 3 * HOUR }],
       now: NOW,
     });
     expect(today.needsYou.map((card) => card.id)).toEqual([
-      "session:t1",
-      "commitment:c1",
+      "approval:a1",
+      "session:t9",
       "suggestion:urgent",
     ]);
     expect(today.idea?.id).toBe("suggestion:calm");
-    expect(today.handled).toEqual([
-      {
-        id: "handled:t2",
-        title: "Morning inbox sweep",
-        outcome: "Done",
-        at: NOW - 2 * HOUR,
-        taskId: "t2",
-      },
-    ]);
+    expect(today.handled.map((row) => row.id)).toEqual(["handled:h1"]);
   });
 
-  it("makes each card a single decision through an existing path", () => {
+  it("does not repeat a session the queue already has an item for", () => {
     const today = buildHomeToday({
+      attention: [item("question:q1", { kind: "question", taskId: "t9" })],
       sessions,
-      suggestions: [suggestion("urgent", { recommendedDelivery: "nudge" })],
-      commitments: [{ id: "c1", text: "Send the proposal", dueAt: NOW - 2 * HOUR }],
       now: NOW,
     });
-    const [session, commitment, nudge] = today.needsYou;
-    expect(session.primary).toEqual({
-      label: "Review",
-      action: { type: "open-session", taskId: "t1" },
-    });
-    expect(commitment.state).toBe("Overdue");
-    expect(commitment.primary.action).toEqual({ type: "complete-commitment", commitmentId: "c1" });
-    expect(commitment.secondary?.action).toEqual({
-      type: "draft-prompt",
-      prompt: "Help me finish this commitment: Send the proposal",
-    });
-    expect(nudge.why).toBe("Because urgent matters.");
-    expect(nudge.preview).toEqual({ label: "Will run", text: "Do urgent" });
-    expect(nudge.primary.action).toMatchObject({ type: "start-suggestion", prompt: "Do urgent" });
-    expect(nudge.secondary?.action).toMatchObject({
-      type: "snooze-suggestion",
-      suggestionId: "urgent",
-    });
+    expect(today.needsYou.map((card) => card.id)).toEqual(["question:q1"]);
   });
 
-  it("leaves out suggestions with nothing to run and cards the user already resolved", () => {
+  it("never lists a session as handled while the queue says it waits", () => {
     const today = buildHomeToday({
+      attention: [item("approval:a9", { kind: "approval", taskId: "h1" })],
       sessions,
-      suggestions: [suggestion("info", { actionPrompt: undefined, urgency: "high" })],
-      commitments: [],
       now: NOW,
-      resolved: new Set(["session:t1"]),
-      actedRows: [{ id: "acted:c9", title: "Pay the invoice", outcome: "Marked done", at: NOW }],
+    });
+    expect(today.handled).toEqual([]);
+  });
+
+  it("hides cards the user already acted on and keeps the rows they left", () => {
+    const today = buildHomeToday({
+      attention: [approval],
+      sessions: EMPTY_HOME_SESSIONS,
+      now: NOW,
+      resolved: new Set(["approval:a1"]),
+      actedRows: [{ id: "acted:x", title: "Pay the invoice", outcome: "Marked done", at: NOW }],
     });
     expect(today.needsYou).toEqual([]);
-    expect(today.idea).toBeNull();
-    expect(today.handled.map((row) => row.id)).toEqual(["acted:c9", "handled:t2"]);
+    expect(today.handled.map((row) => row.id)).toEqual(["acted:x"]);
+  });
+});
+
+describe("cardForAttention", () => {
+  it("shows who asks, what started it, where it runs and its risk", () => {
+    expect(cardForAttention(approval, NOW)).toMatchObject({
+      source: "Ops bot",
+      state: "Approval needed",
+      title: "Run npm publish",
+      why: "Release is paused until you decide.",
+      chips: [
+        { kind: "origin", label: "Started by a schedule" },
+        { kind: "place", label: "Mac mini" },
+        { kind: "risk", label: "High risk" },
+      ],
+      primary: { label: "Review", action: { type: "open-session", taskId: "t1" } },
+    });
+  });
+
+  it("keeps your own local sessions free of chips", () => {
+    expect(cardForAttention(item("t2"), NOW)).toMatchObject({
+      source: "Your session",
+      chips: [],
+      primary: { label: "Reply", action: { type: "open-session", taskId: "t2" } },
+    });
+  });
+
+  it("opens the automation for a waiting flow step", () => {
+    const card = cardForAttention(
+      item("flow_approval:s1", {
+        kind: "flow_approval",
+        state: "Approval needed",
+        title: "Weekly report is waiting for your approval",
+        actor: { kind: "flow", name: "Weekly report" },
+        origin: { kind: "flow", label: "Automation" },
+        taskId: undefined,
+        ref: { type: "workflow_step", routineId: "r1", runId: "run1", stepId: "s1" },
+      }),
+      NOW,
+    );
+    expect(card).toMatchObject({
+      icon: "flow",
+      source: "Weekly report",
+      chips: [{ kind: "origin", label: "Automation" }],
+      primary: { label: "Review", action: { type: "open-routine", routineId: "r1" } },
+    });
+  });
+
+  it("lets a commitment be marked done or drafted into the composer", () => {
+    const card = cardForAttention(
+      item("commitment:c1", {
+        kind: "commitment",
+        title: "Send the proposal",
+        dueAt: NOW - 2 * HOUR,
+        origin: { kind: "memory", label: "Something you said you'd do" },
+        taskId: undefined,
+        ref: { type: "commitment", commitmentId: "c1" },
+      }),
+      NOW,
+    );
+    expect(card).toMatchObject({
+      source: "Commitment",
+      state: "Overdue",
+      chips: [],
+      primary: { action: { type: "complete-commitment", commitmentId: "c1" } },
+      secondary: {
+        action: {
+          type: "draft-prompt",
+          prompt: "Help me finish this commitment: Send the proposal",
+        },
+      },
+    });
+  });
+
+  it("shows the exact prompt a suggestion will run", () => {
+    expect(cardForAttention(suggestion("x", true), NOW)).toMatchObject({
+      source: "Follow-up",
+      title: "Suggestion x",
+      preview: { label: "Will run", text: "Do x" },
+      primary: { label: "Start", action: { type: "start-suggestion", prompt: "Do x" } },
+      secondary: { label: "Not now", action: { type: "snooze-suggestion", suggestionId: "x" } },
+    });
   });
 });
 
@@ -126,7 +213,7 @@ describe("homeGreeting", () => {
 });
 
 describe("homeStatusLine", () => {
-  const card = buildHomeToday({ sessions, suggestions: [], commitments: [], now: NOW }).needsYou[0];
+  const card = cardForAttention(approval, NOW)!;
   it("counts what needs the user and notes when the rest is handled", () => {
     expect(homeStatusLine({ needsYou: [card], idea: null, handled: [] })).toBe(
       "1 thing needs you.",

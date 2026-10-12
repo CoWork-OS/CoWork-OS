@@ -1642,6 +1642,29 @@ html.visual-calm .calm-today-card-time {
   color: var(--calm-text-muted);
 }
 
+/* Who-started-it, where-it-runs and risk facts, only when they differ from "you, here". */
+html.visual-calm .calm-today-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+html.visual-calm .calm-today-chip {
+  padding: 2px 9px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+  font: 500 12px/1.5 var(--font-ui);
+}
+
+html.visual-calm .calm-today-chip.chip-risk {
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+}
+
 html.visual-calm .calm-today-card-title {
   margin: 12px 0 0;
   font: 600 17px/1.35 var(--font-ui);

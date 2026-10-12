@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { HomeTodaySignals } from "../../hooks/useHomeTodaySignals";
@@ -33,6 +34,7 @@ const ICONS: Record<HomeTodayIcon, LucideIcon> = {
   question: MessageCircleQuestion,
   resume: RotateCcw,
   blocked: OctagonAlert,
+  flow: Workflow,
   commitment: CalendarClock,
   follow_up: CornerUpRight,
   recurring_pattern: Repeat,
@@ -48,6 +50,8 @@ interface CalmHomeTodayProps {
     "markSuggestionStarted" | "snoozeSuggestion" | "completeCommitment" | "resolve"
   >;
   onOpenSession: (taskId: string) => void;
+  /** Opens an automation in the Automations view; absent where it can't be opened. */
+  onOpenRoutine?: (routineId: string) => void;
   /** Starts a new task with this exact prompt; false when no task was created. */
   onStartTask: (title: string, prompt: string) => Promise<boolean>;
   /** Puts a prompt in the composer for the user to edit and send. */
@@ -70,6 +74,7 @@ export function CalmHomeToday({
   today,
   signals,
   onOpenSession,
+  onOpenRoutine,
   onStartTask,
   onDraftPrompt,
 }: CalmHomeTodayProps) {
@@ -105,6 +110,10 @@ export function CalmHomeToday({
     const { action } = button;
     if (action.type === "open-session") {
       onOpenSession(action.taskId);
+      return;
+    }
+    if (action.type === "open-routine") {
+      onOpenRoutine?.(action.routineId);
       return;
     }
     if (action.type === "draft-prompt") {
@@ -171,6 +180,18 @@ export function CalmHomeToday({
           </span>
           <span className="calm-today-card-time">{cardTime(card, now)}</span>
         </header>
+        {card.chips.length > 0 && (
+          <ul className="calm-today-card-chips" aria-label="Details">
+            {card.chips.map((chip) => (
+              <li
+                key={`${chip.kind}:${chip.label}`}
+                className={`calm-today-chip chip-${chip.kind}`}
+              >
+                {chip.label}
+              </li>
+            ))}
+          </ul>
+        )}
         <h3 className="calm-today-card-title" id={titleId}>
           {card.title}
         </h3>
@@ -195,7 +216,7 @@ export function CalmHomeToday({
           <button
             type="button"
             className="calm-today-button primary"
-            disabled={isBusy}
+            disabled={isBusy || (card.primary.action.type === "open-routine" && !onOpenRoutine)}
             onClick={() => void run(card, card.primary)}
           >
             {card.primary.label}

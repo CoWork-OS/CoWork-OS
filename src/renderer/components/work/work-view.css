@@ -1,0 +1,556 @@
+/* Work view (Calm only): every session grouped by project, a status toolbar, and a
+   detail panel for the selected row. Colours come from the Calm tokens, so light and
+   dark follow the theme. */
+
+html.visual-calm .work-view .work-view-inner {
+  max-width: 1200px;
+}
+
+/* ---------- Toolbar ---------- */
+
+html.visual-calm .work-view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+html.visual-calm .work-view-tabs,
+html.visual-calm .work-view-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+html.visual-calm .work-view-filters {
+  gap: 10px;
+}
+
+html.visual-calm .work-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text);
+  font: 500 13px/1 var(--font-ui);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+html.visual-calm .work-view-tab:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .work-view-tab.active {
+  border-color: var(--calm-ink);
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .work-view-tab-count {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+html.visual-calm .work-view-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: var(--calm-radius-pill);
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .work-view-search input {
+  width: 160px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--calm-text);
+  font: 400 13px/1 var(--font-ui);
+}
+
+html.visual-calm .work-view-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--calm-text-secondary);
+  font: 400 13px/1 var(--font-ui);
+}
+
+html.visual-calm .work-view-select select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: var(--calm-radius-item);
+  background: var(--calm-surface);
+  color: var(--calm-text);
+  font: inherit;
+}
+
+/* ---------- Body: list + detail ---------- */
+
+html.visual-calm .work-view-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+html.visual-calm .work-view-list {
+  flex: 999 1 520px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+html.visual-calm .work-view-empty {
+  margin: 0;
+  padding: 28px;
+  border: 1px dashed var(--calm-border-strong);
+  border-radius: var(--calm-radius-card);
+  color: var(--calm-text-secondary);
+  text-align: center;
+}
+
+html.visual-calm .work-view-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+html.visual-calm .work-view-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 4px 2px;
+}
+
+html.visual-calm .work-view-group-header h2 {
+  margin: 0;
+  font: 600 15px/1.3 var(--font-ui);
+  color: var(--calm-text);
+}
+
+html.visual-calm .work-view-group-header span {
+  font-size: 13px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .work-view-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--calm-border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--calm-surface);
+}
+
+html.visual-calm .work-view-rows > li + li {
+  border-top: 1px solid var(--calm-border);
+}
+
+html.visual-calm .work-view-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 9px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--calm-text);
+  font: 400 14px/1.35 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+html.visual-calm .work-view-row:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .work-view-row.selected {
+  background: var(--calm-accent-subtle);
+}
+
+html.visual-calm .work-view-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 78px;
+  padding: 2px 8px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+  font: 600 12px/1.5 var(--font-ui);
+  white-space: nowrap;
+}
+
+html.visual-calm .work-view-status.status-needs {
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .work-view-status.status-running {
+  background: color-mix(in srgb, var(--calm-success) 16%, transparent);
+  color: var(--calm-success);
+}
+
+html.visual-calm .work-view-status.status-failed {
+  background: color-mix(in srgb, #dc2626 14%, transparent);
+  color: #b91c1c;
+}
+
+html.visual-calm:not(.theme-light) .work-view-status.status-failed {
+  color: #fca5a5;
+}
+
+html.visual-calm .work-view-row-title {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+html.visual-calm .work-view-row-title > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.visual-calm .work-view-runs {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+html.visual-calm .work-view-actor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--calm-text);
+}
+
+html.visual-calm .work-view-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+  font: 700 10px/1 var(--font-ui);
+}
+
+html.visual-calm .work-view-avatar.actor-agent,
+html.visual-calm .work-view-avatar.actor-bot {
+  background: var(--calm-accent-subtle);
+  color: var(--calm-accent);
+}
+
+html.visual-calm .work-view-avatar.actor-background,
+html.visual-calm .work-view-avatar.actor-schedule,
+html.visual-calm .work-view-avatar.actor-flow {
+  background: var(--calm-warning-bg);
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .work-view-chip {
+  padding: 2px 8px;
+  border-radius: var(--calm-radius-pill);
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+html.visual-calm .work-view-time {
+  min-width: 44px;
+  margin-left: auto;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--calm-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+html.visual-calm .work-view-more {
+  align-self: center;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text-secondary);
+  font: 500 13px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+html.visual-calm .work-view-more:hover {
+  background: var(--calm-surface-muted);
+  color: var(--calm-text);
+}
+
+/* ---------- Detail panel ---------- */
+
+html.visual-calm .work-view-detail {
+  flex: 1 1 320px;
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--calm-border);
+  border-radius: var(--calm-radius-card);
+  background: var(--calm-surface);
+  box-shadow: var(--calm-shadow-soft);
+}
+
+html.visual-calm .work-view-detail-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+html.visual-calm .work-view-detail-head h2 {
+  margin: 0;
+  font: 600 19px/1.3 var(--font-ui);
+  letter-spacing: -0.01em;
+  color: var(--calm-text);
+}
+
+html.visual-calm .work-view-detail-project {
+  font-size: 13px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .work-view-decision {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--calm-warning-bg);
+}
+
+html.visual-calm .work-view-decision-label {
+  font: 600 11px/1.4 var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .work-view-decision p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--calm-text);
+}
+
+html.visual-calm .work-view-decision button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--calm-warning-text);
+  font: 600 13px/1.4 var(--font-ui);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+html.visual-calm .work-view-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0;
+}
+
+html.visual-calm .work-view-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+html.visual-calm .work-view-facts dt {
+  font-size: 12px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .work-view-facts dd {
+  margin: 0;
+  font-size: 14px;
+  color: var(--calm-text);
+  overflow-wrap: anywhere;
+}
+
+html.visual-calm .work-view-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+html.visual-calm .work-view-section h3 {
+  margin: 0;
+  font: 600 12px/1.4 var(--font-ui);
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .work-view-result {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--calm-text);
+  white-space: pre-wrap;
+}
+
+html.visual-calm .work-view-outputs,
+html.visual-calm .work-view-run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+html.visual-calm .work-view-outputs li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--calm-border);
+  border-radius: var(--calm-radius-item);
+  font-size: 13px;
+  color: var(--calm-text);
+  overflow-wrap: anywhere;
+}
+
+html.visual-calm .work-view-outputs svg {
+  flex-shrink: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .work-view-run-list button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--calm-radius-item);
+  background: transparent;
+  color: var(--calm-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+html.visual-calm .work-view-run-list button:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .work-view-run-time {
+  font-size: 13px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .work-view-note {
+  font-size: 12px;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .work-view-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .work-view-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+html.visual-calm .work-view-actions button {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: var(--calm-radius-pill);
+  background: transparent;
+  color: var(--calm-text);
+  font: 500 13px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+html.visual-calm .work-view-actions button:hover {
+  background: var(--calm-surface-muted);
+}
+
+html.visual-calm .work-view-actions button.primary {
+  border-color: var(--calm-ink);
+  background: var(--calm-ink);
+  color: var(--calm-ink-contrast);
+}
+
+html.visual-calm .work-view-actions button.danger {
+  border-color: var(--calm-warning-text);
+  color: var(--calm-warning-text);
+}
+
+html.visual-calm .work-view-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .work-view :is(button, input, select):focus-visible {
+  outline: 2px solid var(--calm-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  html.visual-calm .work-view-detail {
+    position: static;
+  }
+
+  html.visual-calm .work-view-search input {
+    width: 120px;
+  }
+}

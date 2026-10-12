@@ -34,6 +34,7 @@ describe("getActiveSidebarDestination", () => {
   it("maps app views to rail destinations", () => {
     expect(getActiveSidebarDestination("main", "sessions")).toBe("home");
     expect(getActiveSidebarDestination("home", "sessions")).toBe("home");
+    expect(getActiveSidebarDestination("work", "sessions")).toBe("work");
     expect(getActiveSidebarDestination("inboxAgent", "sessions")).toBe("inbox");
     expect(getActiveSidebarDestination("agents", "sessions")).toBe("agents");
     expect(getActiveSidebarDestination("missionControl", "sessions")).toBe("missionControl");
@@ -55,6 +56,7 @@ describe("getSidebarRailLayout", () => {
     expect(ids(desktop.more)).toEqual(["devices", "missionControl", "addTools"]);
 
     const calm = getSidebarRailLayout({ isCalm: true, isBrowserHost: false }, []);
+    expect(ids(calm.rail).slice(0, 2)).toEqual(["home", "work"]);
     expect(ids(calm.rail)).toContain("library");
     expect(ids(calm.more)).toContain("build");
   });
@@ -93,8 +95,9 @@ describe("rail shortcuts and reordering", () => {
     ]);
     const targets = getSidebarRailShortcutTargets(layout);
     expect(targets).toHaveLength(9);
-    expect(ids(targets).slice(0, 6)).toEqual([
+    expect(ids(targets).slice(0, 7)).toEqual([
       "home",
+      "work",
       "inbox",
       "agents",
       "automations",
@@ -129,12 +132,20 @@ describe("rail shortcuts and reordering", () => {
     expect(
       isCustomSidebarRailOrder({ isCalm: true, isBrowserHost: false }, [
         "home",
+        "work",
         "inbox",
         "agents",
         "automations",
         "library",
       ]),
     ).toBe(false);
+    // An order saved before Work existed puts Work after the items it names.
+    const saved = getSidebarRailLayout(
+      { isCalm: true, isBrowserHost: false },
+      [],
+      ["home", "inbox", "agents", "automations", "library"],
+    );
+    expect(ids(saved.rail).at(-1)).toBe("work");
   });
 
   it("shifts an item one place and stops at the ends", () => {

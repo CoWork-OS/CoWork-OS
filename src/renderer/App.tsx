@@ -24,7 +24,8 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
 import { useComposerDraft } from "./hooks/useComposerDraft";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe, Moon, PanelTop, SquareTerminal, Sun } from "lucide-react";
+import { TitleBarMoreMenu } from "./components/TitleBarMoreMenu";
 import { Sidebar } from "./components/Sidebar";
 import {
   EMPTY_HOME_SESSIONS,
@@ -8241,117 +8242,6 @@ export function App() {
         )}
         <div className="title-bar-spacer" />
         <div className="title-bar-actions">
-          {titleBarBrowserTaskId && !isBrowserHost && (
-            <button
-              type="button"
-              className="title-bar-btn title-bar-browser-toggle"
-              onClick={() => {
-                setBrowserWorkbenchRequest({
-                  taskId: titleBarBrowserTaskId,
-                  sessionId: "default",
-                  requestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                });
-              }}
-              title="Open browser"
-              aria-label="Open browser"
-            >
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M3 12h18" />
-                <path d="M12 3a13.5 13.5 0 0 1 0 18" />
-                <path d="M12 3a13.5 13.5 0 0 0 0 18" />
-              </svg>
-            </button>
-          )}
-          {showTitleBarTerminalToggle &&
-            (!isBrowserHost || (Boolean(selectedTaskId) && hasHostMethod("createTerminalTab"))) && (
-              <button
-                type="button"
-                className={`title-bar-btn title-bar-terminal-toggle ${terminalTabsOpen ? "active" : ""}`}
-                onClick={() => setTerminalTabsOpen((open) => !open)}
-                title={terminalTabsOpen ? "Close terminal" : "Open terminal"}
-                aria-label={terminalTabsOpen ? "Close terminal" : "Open terminal"}
-                aria-pressed={terminalTabsOpen}
-              >
-                <svg
-                  aria-hidden="true"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#6b7280"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ display: "block", flexShrink: 0 }}
-                >
-                  <path d="m7 11 2 2-2 2" />
-                  <path d="M11 15h4" />
-                  <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
-                </svg>
-              </button>
-            )}
-          <button
-            type="button"
-            className="title-bar-btn title-bar-theme-toggle"
-            onClick={() => {
-              const effectiveTheme = getEffectiveTheme(themeMode);
-              handleThemeChange(effectiveTheme === "dark" ? "light" : "dark");
-            }}
-            title={`Switch to ${getEffectiveTheme(themeMode) === "dark" ? "light" : "dark"} mode`}
-            aria-label={`Switch to ${getEffectiveTheme(themeMode) === "dark" ? "light" : "dark"} mode`}
-          >
-            {getEffectiveTheme(themeMode) === "dark" ? (
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
-              >
-                <circle cx="12" cy="12" r="5" />
-                <line x1="12" y1="1" x2="12" y2="3" />
-                <line x1="12" y1="21" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="3" y2="12" />
-                <line x1="21" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-              </svg>
-            ) : (
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
-              >
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
-          </button>
           {showTitleBarNotifications && (
             <NotificationPanel onNotificationClick={handleNotificationClick} />
           )}
@@ -8366,49 +8256,61 @@ export function App() {
               Sign out
             </button>
           )}
-          <button
-            type="button"
-            className={`title-bar-btn density-toggle ${uiDensity}`}
-            onClick={() => handleUiDensityChange(uiDensity === "focused" ? "full" : "focused")}
-            title={uiDensity === "focused" ? "Switch to Full mode" : "Switch to Focused mode"}
-            aria-label={uiDensity === "focused" ? "Switch to Full mode" : "Switch to Focused mode"}
-          >
-            {uiDensity === "focused" ? (
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
-              >
-                <rect x="4" y="5" width="16" height="14" rx="2" />
-                <line x1="4" y1="12" x2="20" y2="12" />
-              </svg>
-            ) : (
-              <svg
-                aria-hidden="true"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#6b7280"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ display: "block", flexShrink: 0 }}
-              >
-                <rect x="4" y="4" width="16" height="16" rx="2" />
-                <line x1="4" y1="9" x2="20" y2="9" />
-                <line x1="4" y1="14" x2="20" y2="14" />
-                <line x1="12" y1="4" x2="12" y2="20" />
-              </svg>
-            )}
-          </button>
+          {/* Browser, terminal, theme and density sit behind one "More" button;
+              the panel toggle stays on the bar. */}
+          <TitleBarMoreMenu
+            items={[
+              ...(titleBarBrowserTaskId && !isBrowserHost
+                ? [
+                    {
+                      id: "browser",
+                      label: "Open browser",
+                      icon: <Globe />,
+                      onSelect: () =>
+                        setBrowserWorkbenchRequest({
+                          taskId: titleBarBrowserTaskId,
+                          sessionId: "default",
+                          requestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                        }),
+                    },
+                  ]
+                : []),
+              ...(showTitleBarTerminalToggle &&
+              (!isBrowserHost || (Boolean(selectedTaskId) && hasHostMethod("createTerminalTab")))
+                ? [
+                    {
+                      id: "terminal",
+                      label: "Terminal",
+                      icon: <SquareTerminal />,
+                      active: terminalTabsOpen,
+                      onSelect: () => setTerminalTabsOpen((open) => !open),
+                    },
+                  ]
+                : []),
+              {
+                id: "theme",
+                label:
+                  getEffectiveTheme(themeMode) === "dark"
+                    ? "Switch to light mode"
+                    : "Switch to dark mode",
+                icon: getEffectiveTheme(themeMode) === "dark" ? <Sun /> : <Moon />,
+                onSelect: () =>
+                  handleThemeChange(getEffectiveTheme(themeMode) === "dark" ? "light" : "dark"),
+              },
+              // Focused density offers no way back from the title bar (it is
+              // changed in Settings), as with the old standalone toggle.
+              ...(uiDensity === "full"
+                ? [
+                    {
+                      id: "density",
+                      label: "Switch to Focused mode",
+                      icon: <PanelTop />,
+                      onSelect: () => handleUiDensityChange("focused"),
+                    },
+                  ]
+                : []),
+            ]}
+          />
           {currentView === "main" &&
             (uiDensity === "full" || Boolean(selectedTaskId)) &&
             hasHostMethod("readFileForViewer") && (

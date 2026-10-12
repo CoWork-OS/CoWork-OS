@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./react-refresh-ignored-exports";
 import { App } from "./App";
+// Montserrat is the CoWork OS logo's wordmark face; only the weight the sidebar
+// wordmark uses is bundled.
+import "@fontsource/montserrat/latin-500.css";
 import "./styles/index.css";
 import "./styles/browser-workbench.css";
 import "./components/right-panel.css";

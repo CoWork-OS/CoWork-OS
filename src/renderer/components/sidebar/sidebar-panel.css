@@ -1,5 +1,8 @@
 /* Sidebar panel: the list beside the rail, drawn as a card that starts below
-   the title bar. Every block shares one grid so edges line up:
+   the title bar. Type uses three sizes: 14px for the New and Search actions,
+   13px for every row (projects, sessions, sub-agents), 12px for secondary text
+   (section and day headers, activity lines, the sub-agent count). Every block
+   shares one grid so edges line up:
    - 8px panel inset: the segmented switch, search field, chips and row fills
    - 16px text column: the title, section and day labels, chip text and icons
    - 40px label column (16px icon + 8px gap): "New session", the search
@@ -155,15 +158,18 @@ html.visual-calm .app-layout .spreadsheet-resizable-sidebar {
   grid-area: actions;
 }
 
+/* The product name is set as the logo's wordmark: Montserrat, uppercase and
+   tracked out, in ink rather than the logo's lavender. */
 .sidebar-panel-title {
   min-width: 0;
   overflow: hidden;
   color: var(--color-text-primary);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
+  font-family: "Montserrat", var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 18px;
+  text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -260,6 +266,31 @@ html.visual-calm .app-layout .spreadsheet-resizable-sidebar {
   color: var(--sidebar-accent);
 }
 
+/* The primary action leads with a filled ink circle and a white plus. */
+/* The circle is wider than the 16px icon slot, so it overhangs the slot evenly
+   (3px each side) and the label stays on the 40px column with the rows. */
+.sidebar-panel-new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: 0 -3px;
+  border-radius: 50%;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary, #fff);
+}
+
+.sidebar-panel-new-badge > svg.sidebar-panel-new-icon {
+  color: inherit;
+}
+
+.sidebar-panel-new .sidebar-panel-new-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .sidebar-panel-new-label {
   flex: 1;
   min-width: 0;
@@ -298,29 +329,45 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   padding: 0;
 }
 
-/* The magnifier sits on the icon column and the text on the label column:
-   1px border + 7px padding = 16px, then 14px icon + 10px gap = 40px. The
-   filter toggle sits inside the field's right end. */
+/* Search reads as a row under "New": the magnifier sits in the same 16px icon
+   slot as New's plus badge and the text on the 40px label column, with no box
+   until it is hovered or focused. Typing happens in place. The filter toggle
+   sits at the row's right end. */
 .sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search {
   flex: 1;
   min-width: 0;
   height: 32px;
   margin-top: 0;
-  gap: 10px;
-  padding: 0 3px 0 7px;
-  border: 1px solid var(--sidebar-panel-border);
+  gap: 8px;
+  /* 2px right puts the filter toggle's centre on the trailing-icon line
+     (14px from the panel edge), with the bell and the menu buttons. */
+  padding: 0 2px 0 8px;
+  border: 0;
   border-radius: 8px;
-  background: var(--sidebar-panel-chip-bg);
-  color: var(--color-text-muted);
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: text;
 }
 
+.sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search:hover,
 .sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search:focus-within {
-  border-color: color-mix(in srgb, var(--sidebar-accent) 45%, var(--sidebar-panel-border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sidebar-accent) 12%, transparent);
-  color: var(--color-text-secondary);
+  background: var(--sidebar-panel-row-hover);
+  box-shadow: none;
 }
 
-.sidebar.sidebar-panel.cli-sidebar .sidebar-panel-search .sidebar-sessions-search > svg {
+.sidebar-search-icon-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 22px;
+  color: var(--color-text-primary);
+}
+
+/* The 18px glyph overhangs the 16px slot by 1px each side; without this the
+   flex slot squeezes it to 16px. */
+.sidebar-search-icon-slot > svg {
   flex-shrink: 0;
 }
 
@@ -330,7 +377,22 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   input[type="search"] {
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 13px;
+  font-size: 14px;
+}
+
+.sidebar.sidebar-panel.cli-sidebar
+  .sidebar-panel-search
+  .sidebar-sessions-search
+  input[type="search"]::placeholder {
+  color: var(--color-text-primary);
+  opacity: 1;
+}
+
+.sidebar.sidebar-panel.cli-sidebar
+  .sidebar-panel-search
+  .sidebar-sessions-search
+  input[type="search"]:focus::placeholder {
+  color: var(--color-text-muted);
 }
 
 /* Replace WebKit's blue clear glyph with a muted cross. */
@@ -709,12 +771,14 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   gap: 8px;
 }
 
-.sidebar-panel .cli-task-item {
+/* The extra classes outrank index.css's density-focused and visual-oblivion
+   row rules, which load later and would otherwise make rows 28px tall in
+   Focused density and shift titles 2px right in Full density. */
+.sidebar.sidebar-panel.cli-sidebar .cli-task-item {
   min-height: 32px;
   /* The modern theme spaces rows with side margins; the panel grid owns that. */
   margin: 0 !important;
-  padding-left: var(--cli-task-padding-left, 8px) !important;
-  padding-right: 6px !important;
+  padding: 0 3px 0 var(--cli-task-padding-left, 8px) !important;
   border-radius: 8px !important;
 }
 
@@ -745,8 +809,8 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 .sidebar-panel .cli-task-activity {
   overflow: hidden;
   color: var(--color-text-muted);
-  font-size: 11.5px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -781,9 +845,10 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   font-size: inherit;
 }
 
+/* Sub-agents use the row size; their indent and avatar set them apart. */
 .sidebar.sidebar-panel .task-item-subagent .cli-task-title {
   color: var(--color-text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .sidebar.sidebar-panel .cli-task-agent-name {
@@ -796,12 +861,13 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 
 /* Parent rows keep the menu's width reserved so their chevron doesn't slide
    left, under the pointer, when the menu appears on hover. */
-.sidebar-panel .cli-task-title-row:has(.cli-collapse-btn) .cli-task-actions {
+.sidebar-panel .cli-task-title-row:has(.cli-subagent-toggle) .cli-task-actions {
   width: 22px;
 }
 
 /* Multi-agent marker: sub-agent count beside the title, so a collapsed parent
-   still reads as a multi-agent session. */
+   still reads as a multi-agent session. It is also the expand toggle, with a
+   chevron that turns when open, so the row spends one control's width on it. */
 .cli-task-subagent-count {
   display: inline-flex;
   align-items: center;
@@ -809,12 +875,32 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   flex-shrink: 0;
   margin-left: 4px;
   padding: 1px 5px;
+  border: 0;
   border-radius: 999px;
   background: var(--color-bg-secondary);
   color: var(--color-text-muted);
-  font-size: 11px;
+  font: inherit;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 16px;
+}
+
+.sidebar.sidebar-panel .cli-subagent-toggle {
+  padding: 1px 4px 1px 6px;
+  cursor: pointer;
+}
+
+.sidebar.sidebar-panel .cli-subagent-toggle:hover,
+.sidebar.sidebar-panel .cli-subagent-toggle:focus-visible {
+  color: var(--color-text-primary);
+}
+
+.cli-subagent-toggle-chevron {
+  transition: transform 0.15s ease;
+}
+
+.cli-subagent-toggle[aria-expanded="true"] .cli-subagent-toggle-chevron {
+  transform: rotate(90deg);
 }
 
 /* The parent's show/hide toggle is a small chevron that turns when open. */

@@ -1109,7 +1109,10 @@ html.visual-calm .calm-sidebar .cli-task-title-row {
   position: relative;
 }
 
-html.visual-calm .calm-sidebar .cli-task-title-row:not(:has(.cli-subagent-toggle)) .cli-task-actions {
+html.visual-calm
+  .calm-sidebar
+  .cli-task-title-row:not(:has(.cli-subagent-toggle))
+  .cli-task-actions {
   position: absolute;
   top: 50%;
   right: 0;

@@ -52,3 +52,19 @@ export function canRestoreSelectedTask(
 ): boolean {
   return Boolean(task?.id && task.workspaceId === workspaceId);
 }
+
+/**
+ * A workspace's saved selection is only a default: when a session in that
+ * workspace has already been asked for (a sidebar click that also switched the
+ * current workspace to it), restoring must not replace it. A requested id
+ * that isn't loaded yet still counts, since it is being opened directly.
+ */
+export function selectionRequestOverridesRestore(
+  requestedTaskId: string | null,
+  tasks: ReadonlyArray<Pick<Task, "id" | "workspaceId">>,
+  workspaceId: string,
+): boolean {
+  if (!requestedTaskId) return false;
+  const requested = tasks.find((task) => task.id === requestedTaskId);
+  return !requested || requested.workspaceId === workspaceId;
+}

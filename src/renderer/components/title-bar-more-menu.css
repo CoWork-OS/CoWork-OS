@@ -1,0 +1,92 @@
+/* Title bar "More" menu: one button for the secondary title bar actions. */
+.title-bar-more {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-more-btn {
+  color: #6b7280;
+}
+
+.title-bar-more-btn.active {
+  background-color: var(--color-bg-hover);
+}
+
+.title-bar-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.title-bar-more-item {
+  display: flex;
+  align-items: center;
+  /* Outranks the global button rule that centres button content. */
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.title-bar-more-item:hover,
+.title-bar-more-item:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+.title-bar-more-item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.title-bar-more-item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.title-bar-more-item.active .title-bar-more-item-icon {
+  color: var(--color-text-primary);
+}
+
+html.visual-calm .title-bar-more-menu {
+  border-color: var(--calm-border);
+  border-radius: var(--calm-radius-item, 10px);
+  background: var(--calm-surface-raised);
+  box-shadow: var(--calm-shadow-pop);
+}
+
+html.visual-calm .title-bar-more .title-bar-more-item {
+  justify-content: flex-start;
+  color: var(--calm-text);
+}
+
+html.visual-calm .title-bar-more-item:hover,
+html.visual-calm .title-bar-more-item:focus-visible {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .title-bar-more-item-icon {
+  color: var(--calm-text-secondary);
+}

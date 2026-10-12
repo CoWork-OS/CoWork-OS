@@ -6,17 +6,24 @@ const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
 const stylesPath = fileURLToPath(new URL("../styles/index.css", import.meta.url));
 
 describe("App title bar actions", () => {
-  it("keeps browser and terminal toggles next to the theme toggle when the right panel is visible", () => {
+  it("groups browser, terminal, theme and density in the More menu, before the panel toggle", () => {
     const source = readFileSync(appPath, "utf8");
 
     const actionsIndex = source.indexOf('<div className="title-bar-actions">');
-    const browserIndex = source.indexOf("title-bar-browser-toggle", actionsIndex);
-    const terminalIndex = source.indexOf("title-bar-terminal-toggle", actionsIndex);
-    const themeIndex = source.indexOf("title-bar-theme-toggle", actionsIndex);
+    const menuIndex = source.indexOf("<TitleBarMoreMenu", actionsIndex);
+    const browserIndex = source.indexOf('id: "browser"', menuIndex);
+    const terminalIndex = source.indexOf('id: "terminal"', menuIndex);
+    const themeIndex = source.indexOf('id: "theme"', menuIndex);
+    const densityIndex = source.indexOf('id: "density"', menuIndex);
+    const panelIndex = source.indexOf("title-bar-panel-toggle", actionsIndex);
 
-    expect(browserIndex).toBeGreaterThan(actionsIndex);
+    expect(menuIndex).toBeGreaterThan(actionsIndex);
     expect(terminalIndex).toBeGreaterThan(browserIndex);
     expect(themeIndex).toBeGreaterThan(terminalIndex);
+    expect(densityIndex).toBeGreaterThan(themeIndex);
+    // The panel toggle stays a separate title bar button after the menu.
+    expect(panelIndex).toBeGreaterThan(densityIndex);
+    expect(source).not.toContain("title-bar-theme-toggle");
     expect(source).toContain("showTitleBarTerminalToggle");
     expect(source).toContain("titleBarBrowserTaskId");
   });

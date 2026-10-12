@@ -181,7 +181,7 @@ export function CalmAccessMenu({
           access.notice ? `Access: ${access.label} — ${access.notice}` : `Access: ${access.label}`
         }
       >
-        <Icon size={17} aria-hidden="true" />
+        <Icon size={18} aria-hidden="true" />
       </button>
       {open && (
         <div

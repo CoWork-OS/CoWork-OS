@@ -2245,7 +2245,7 @@ function SidebarComponent({
             label: "New build",
             onClick: () => window.dispatchEvent(new Event(BUILD_FOCUS_COMPOSER_EVENT)),
           }
-        : { kind: "session", label: "New session", onClick: handleNewTask };
+        : { kind: "session", label: "New", onClick: handleNewTask };
 
   const navigateDevicesSection = useCallback(
     (section: "overview" | "tasks" | "devices" | "apps" | "storage" | "alerts") => {
@@ -2534,32 +2534,42 @@ function SidebarComponent({
                   />
                 )}
               </TaskTitleSelect>
-              {hasChildren && (
-                <span
-                  className="cli-task-subagent-count"
-                  title={`Multi-agent session · ${children.length} sub-agent${
+              {hasChildren &&
+                (() => {
+                  const subagentLabel = `Multi-agent session with ${children.length} sub-agent${
                     children.length === 1 ? "" : "s"
-                  }`}
-                  aria-label={`Multi-agent session with ${children.length} sub-agent${
-                    children.length === 1 ? "" : "s"
-                  }`}
-                >
-                  <Users size={12} strokeWidth={2} aria-hidden="true" />
-                  {children.length}
-                </span>
-              )}
-              {hasChildren && !hasSessionSearch && !hasSessionStateFilter && (
-                <button
-                  type="button"
-                  className="cli-collapse-btn cli-collapse-btn-inline"
-                  onClick={(e) => toggleCollapse(e, task.id)}
-                  aria-expanded={!isCollapsed}
-                  aria-label={isCollapsed ? "Show subagents" : "Hide subagents"}
-                  title={isCollapsed ? "Expand" : "Collapse"}
-                >
-                  <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
-                </button>
-              )}
+                  }`;
+                  // One compact control marks the session as multi-agent and
+                  // expands it; while a search or filter forces the tree open
+                  // it is a plain marker.
+                  if (hasSessionSearch || hasSessionStateFilter) {
+                    return (
+                      <span className="cli-task-subagent-count" title={subagentLabel}>
+                        <Users size={12} strokeWidth={2} aria-hidden="true" />
+                        {children.length}
+                      </span>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      className="cli-task-subagent-count cli-subagent-toggle"
+                      onClick={(e) => toggleCollapse(e, task.id)}
+                      aria-expanded={!isCollapsed}
+                      aria-label={`${isCollapsed ? "Show" : "Hide"} subagents. ${subagentLabel}`}
+                      title={`${subagentLabel}. ${isCollapsed ? "Expand" : "Collapse"}`}
+                    >
+                      <Users size={12} strokeWidth={2} aria-hidden="true" />
+                      {children.length}
+                      <ChevronRight
+                        className="cli-subagent-toggle-chevron"
+                        size={11}
+                        strokeWidth={2.4}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  );
+                })()}
               <span className="cli-task-time-wrap">
                 {showCompletionAttention && (
                   <span className="task-completion-unread-dot" aria-hidden="true" />
@@ -2736,7 +2746,7 @@ function SidebarComponent({
                 aria-haspopup="menu"
                 aria-expanded={workspaceSectionMenuOpen}
               >
-                <EllipsisVertical size={15} strokeWidth={2.2} aria-hidden="true" />
+                <EllipsisVertical size={16} strokeWidth={2.2} aria-hidden="true" />
               </button>
               {workspaceSectionMenuOpen && (
                 <div
@@ -2857,7 +2867,7 @@ function SidebarComponent({
                   );
                 }}
               >
-                <EllipsisVertical size={15} strokeWidth={2.2} />
+                <EllipsisVertical size={16} strokeWidth={2.2} />
               </button>
               {renderWorkspaceMenu(row.workspaceId)}
             </div>
@@ -3015,8 +3025,11 @@ function SidebarComponent({
           className="sidebar-panel-row sidebar-panel-new"
           onClick={primaryAction.onClick}
           data-action={primaryAction.kind}
+          aria-label={primaryAction.kind === "session" ? "New session" : primaryAction.label}
         >
-          <Plus className="sidebar-panel-new-icon" size={16} strokeWidth={2} aria-hidden="true" />
+          <span className="sidebar-panel-new-badge" aria-hidden="true">
+            <Plus className="sidebar-panel-new-icon" size={14} strokeWidth={2.4} />
+          </span>
           <span className="sidebar-panel-new-label">{primaryAction.label}</span>
         </button>
       </div>
@@ -3215,13 +3228,15 @@ function SidebarComponent({
 
                 <div className="sidebar-panel-search">
                   <label className="sidebar-sessions-search">
-                    <Search size={14} aria-hidden="true" />
+                    <span className="sidebar-search-icon-slot" aria-hidden="true">
+                      <Search size={18} strokeWidth={1.75} />
+                    </span>
                     <input
                       ref={sessionSearchInputRef}
                       type="search"
                       aria-label="Search sessions"
                       aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
-                      placeholder="Find sessions…"
+                      placeholder="Search"
                       title={
                         hasMoreTasks
                           ? `Search loaded sessions by title, prompt, or ID (${sessionSearchShortcut}). Load older sessions to search more history.`
@@ -3261,7 +3276,7 @@ function SidebarComponent({
                         }
                         title="Filter sessions"
                       >
-                        <ListFilter size={15} strokeWidth={1.9} />
+                        <ListFilter size={16} strokeWidth={1.9} />
                         {isCalm &&
                           !hasSessionStateFilter &&
                           sessionStateCounts["needs-you"] > 0 && (

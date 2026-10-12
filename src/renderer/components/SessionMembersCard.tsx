@@ -200,6 +200,8 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
     }
   };
 
+  const activeMemberCount = snapshot.members.filter((member) => member.status === "active").length;
+
   return (
     <section className="session-members-card" aria-label="Session members">
       <div className="session-members-card-header">
@@ -213,7 +215,7 @@ export function SessionMembersCard({ task, refreshKey }: SessionMembersCardProps
           Shared session
         </button>
         <span className="session-members-card-count">
-          {snapshot.members.filter((member) => member.status === "active").length} members
+          {activeMemberCount} {activeMemberCount === 1 ? "member" : "members"}
         </span>
       </div>
       <div className="session-members-card-list">

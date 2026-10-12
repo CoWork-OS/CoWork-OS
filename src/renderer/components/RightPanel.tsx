@@ -83,6 +83,7 @@ import {
   Film,
   Music,
   Presentation,
+  ChevronDown,
 } from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { measureRendererPerf, recordRendererRender } from "../utils/renderer-perf";
@@ -527,7 +528,9 @@ const CostSection = memo(function CostSection({
         </span>
         <span className="cli-section-toggle">
           <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-          <span className="modern-only">{expanded ? "−" : "+"}</span>
+          <span className="modern-only cli-section-chevron">
+            <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+          </span>
         </span>
       </button>
       {expanded && (
@@ -1127,7 +1130,9 @@ const ProgressSection = memo(
           </span>
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
+            <span className="modern-only cli-section-chevron">
+              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
           </span>
         </button>
         <ProgressSectionContent
@@ -1200,7 +1205,9 @@ const ChecklistSection = memo(
           </span>
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
+            <span className="modern-only cli-section-chevron">
+              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
           </span>
         </button>
         {expanded && (
@@ -1302,7 +1309,9 @@ const FolderSection = memo(
           )}
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
+            <span className="modern-only cli-section-chevron">
+              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
           </span>
         </button>
         {expanded && (
@@ -1417,7 +1426,9 @@ const ActiveContextSection = memo(
           <span className="cli-active-context-badge">{connectedActiveConnectors.length}</span>
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
+            <span className="modern-only cli-section-chevron">
+              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
           </span>
         </button>
         {expanded && (
@@ -1501,7 +1512,9 @@ const ContextSection = memo(
           </span>
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
+            <span className="modern-only cli-section-chevron">
+              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
           </span>
         </button>
         {expanded && (
@@ -1633,7 +1646,9 @@ const CollaborativeAgentsSection = memo(
           <span className="cli-active-context-badge">{totals.total}</span>
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
-            <span className="modern-only">{expanded ? "−" : "+"}</span>
+            <span className="modern-only cli-section-chevron">
+              <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
+            </span>
           </span>
         </button>
         {expanded && (

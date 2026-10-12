@@ -57,7 +57,9 @@ function RailItemContent({
 }) {
   return (
     <span className="sidebar-rail-icon" aria-hidden="true">
-      <Icon size={16} strokeWidth={active ? 2.1 : 1.75} />
+      {/* 18px: the rail is primary navigation, on the same tier as the panel's
+          New and Search icons; row and trailing icons in the panel are 16px. */}
+      <Icon size={18} strokeWidth={active ? 2.1 : 1.75} />
       {dot && <span className={`sidebar-rail-dot sidebar-rail-dot-${dot}`} />}
     </span>
   );

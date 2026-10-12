@@ -12,7 +12,9 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: calc(var(--title-bar-height) + 6px) 0 10px;
+  /* 8px puts the first tile's centre on the panel header's centre line (the
+     "CoWork OS" title and the bell), so the two columns start level. */
+  padding: calc(var(--title-bar-height) + 8px) 0 10px;
   background: var(--color-bg-sidebar);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));

@@ -201,6 +201,7 @@
     "@chenglou/pretext": "^0.0.9",
     "@earendil-works/pi-ai": "^1.1.0",
     "@electron/rebuild": "4.2.1",
+    "@fontsource/montserrat": "^5.3.0",
     "@google/generative-ai": "^0.24.1",
     "@grammyjs/runner": "^2.0.3",
     "@grammyjs/transformer-throttler": "^1.2.1",

@@ -69,7 +69,7 @@ describe("Sidebar top-level destinations", () => {
 
     it("names the primary button after what the panel shows", () => {
       const home = renderCalm("home");
-      expect(home).toMatch(/data-action="session"[\s\S]*>New session<\/span>/);
+      expect(home).toMatch(/data-action="session"[\s\S]*>New<\/span>/);
       expect(home).not.toContain("sidebar-panel-kbd");
 
       const build = renderCalm("build");
@@ -280,7 +280,7 @@ describe("Sidebar top-level destinations", () => {
         onTasksChanged: () => {},
       }),
     );
-    expect(markup).toContain('placeholder="Find sessions…"');
+    expect(markup).toContain('placeholder="Search"');
     expect(markup).toContain("aria-keyshortcuts=");
     expect(markup).toContain('aria-label="Session status"');
     expect(markup).toContain('aria-pressed="true"><span>All</span>');

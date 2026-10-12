@@ -568,7 +568,6 @@ html.visual-calm .calm-below-composer {
   display: flex;
   align-items: center;
   margin-top: 10px;
-  padding-left: 4px;
 }
 
 html.visual-calm .workspace-dropdown-container.calm-below-folder {
@@ -835,6 +834,60 @@ html.visual-calm .calm-main .voice-input-btn:hover {
   color: var(--calm-text);
 }
 
+/* Composer controls share one size: 34px round icon buttons with 18px
+   glyphs (attach keeps a 20px "+", whose thin cross reads smaller), a 34px
+   Ask/Do switch, and the 36px send button as the one larger target. */
+html.visual-calm .calm-main .welcome-input-footer .overflow-menu-btn,
+html.visual-calm .calm-main .voice-input-btn {
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+html.visual-calm .calm-main .welcome-input-footer .overflow-menu-btn svg,
+html.visual-calm .calm-main .voice-input-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+html.visual-calm .calm-main .welcome-input-footer .calm-mode-toggle > button {
+  height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Task composer footer row (folder, domain): 12px muted labels with 14px
+   icons. 33px side padding centres the folder icon under the composer's "+"
+   and ends the domain label under the status strip's chevron, so the strip,
+   composer and footer share one set of edges. */
+html.visual-calm .calm-task .input-status-text,
+html.visual-calm .calm-task .composer-status-strip ~ .input-status-text {
+  min-height: 24px;
+  margin-top: 6px;
+  padding: 0 33px;
+}
+
+html.visual-calm .calm-task .input-status-workspace,
+html.visual-calm .calm-task .input-status-domain {
+  gap: 6px;
+  color: var(--calm-text-muted);
+  font: 500 12px/18px var(--font-ui);
+}
+
+html.visual-calm .calm-task .input-status-workspace:hover,
+html.visual-calm .calm-task .input-status-domain:hover {
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-task .input-status-workspace svg,
+html.visual-calm .calm-task .input-status-domain svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
 /* Task composer rhythm: the access shield sits 4px tighter to what precedes it
    and 4px further from the prompt, so the visible gaps around it match (20px
    glyph to glyph, and glyph to text). The model name and its effort level read
@@ -844,14 +897,28 @@ html.visual-calm .calm-task .input-row .calm-access-menu {
   margin-right: 4px;
 }
 
-html.visual-calm .calm-task .input-actions .model-selector {
+/* The model name reads the same in every Calm composer (home and task, both
+   densities): a 13px UI-font label, its effort level muted. */
+html.visual-calm .calm-main .model-selector,
+html.visual-calm .calm-main .model-label-subtle {
+  font-family: var(--font-ui);
   font-size: 13px;
 }
 
-html.visual-calm .calm-task .input-actions .model-selector-effort {
+html.visual-calm .calm-main .model-selector-effort {
   padding-left: 4px;
   color: var(--calm-text-muted);
+  font-family: var(--font-ui);
   font-size: inherit;
+}
+
+/* Full density's "/" skills button matches the other 34px composer buttons. */
+html.visual-calm .calm-main .skills-menu-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  font-family: var(--font-ui);
 }
 
 /* Round ink send button (welcome + task composers). */
@@ -991,10 +1058,10 @@ html.visual-calm .calm-sidebar .cli-task-item.selected {
   background: var(--calm-surface-muted);
 }
 
-/* Icon column: every session carries a mark on the same 16px column as the
-   New session "+" and the search glyph, so titles start on one line whether
-   or not a session has a status. Idle sessions get a faint dot; sessions
-   waiting on you get the warm dot the home list uses. */
+/* Icon column: every session keeps the 16px slot on the same column as the
+   New "+" and the search glyph, so titles start on one line whether or not a
+   session has a status. Idle sessions leave the slot empty; only sessions
+   with a state (running, waiting on you, failed) carry a mark. */
 html.visual-calm .calm-sidebar .cli-task-status {
   justify-content: center;
 }
@@ -1006,7 +1073,7 @@ html.visual-calm .calm-sidebar .cli-task-status:empty::before {
   height: 5px;
   border: none;
   border-radius: 50%;
-  background: var(--calm-border-strong);
+  background: transparent;
   opacity: 1;
 }
 
@@ -1042,7 +1109,7 @@ html.visual-calm .calm-sidebar .cli-task-title-row {
   position: relative;
 }
 
-html.visual-calm .calm-sidebar .cli-task-title-row:not(:has(.cli-collapse-btn)) .cli-task-actions {
+html.visual-calm .calm-sidebar .cli-task-title-row:not(:has(.cli-subagent-toggle)) .cli-task-actions {
   position: absolute;
   top: 50%;
   right: 0;
@@ -1068,8 +1135,9 @@ html.visual-calm .calm-sidebar .sidebar-date-group-toggle[aria-expanded="false"]
 }
 
 /* Ink, not accent: the panel stays black and white like the rest of calm. */
-html.visual-calm .calm-sidebar .sidebar-panel-row > svg.sidebar-panel-new-icon {
-  color: var(--calm-text);
+html.visual-calm .calm-sidebar .sidebar-panel-new-badge {
+  background: var(--calm-text);
+  color: var(--calm-page);
 }
 
 /* An empty filter bucket needs no "0". */
@@ -1114,7 +1182,7 @@ html.visual-calm .calm-sidebar .sidebar-search-state-chip {
   order: -1;
 }
 
-html.visual-calm .calm-sidebar .sidebar-sessions-search > svg {
+html.visual-calm .calm-sidebar .sidebar-sessions-search > .sidebar-search-icon-slot {
   order: -2;
 }
 
@@ -1456,20 +1524,97 @@ html.visual-calm .calm-build-starter:hover {
 
 /* ---------- Working view ---------- */
 
-/* The status strip is a tab tucked behind the composer: a quiet tinted surface
-   with smaller type than the prompt, so it doesn't read as a second field. */
+/* The status strip is a quiet tinted shell behind the composer: the same width
+   and 26px top radius as the composer, tucked under it by that same 26px, so
+   its sides run straight into the composer's sides and the two read as one
+   stacked card (no notch where an inset tab met the composer's corner curve).
+   Smaller type than the prompt keeps it from reading as a second field. */
+html.visual-calm .calm-task .composer-status-strip {
+  --composer-status-tuck: 26px;
+  padding: 0;
+}
+
 html.visual-calm .calm-task .task-status-strip-shell {
   border-color: var(--calm-border);
+  border-radius: 26px 26px 0 0;
   background: var(--calm-surface-muted);
 }
 
+/* 1px border + 32px puts the status icon's centre over the composer's "+";
+   33px on the right puts the chevron over send. */
 html.visual-calm .calm-task .task-status-strip {
-  min-height: 32px;
-  padding: 4px 12px 4px 11px;
+  min-height: 36px;
+  padding: 4px 33px 4px 32px;
   gap: 8px;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+/* Drawer: the same inset as the strip, sentence-case 12px labels instead of
+   tiny capitals, and plain text for the impact metrics. */
+html.visual-calm .calm-task .task-status-drawer {
+  /* Text starts on the strip's icon column; hover fills reach 8px past it. */
+  padding: 16px 33px 10px 32px;
+  border-bottom-color: var(--calm-border);
+}
+
+html.visual-calm .calm-task .task-status-drawer-header strong {
+  color: var(--calm-text);
+  font: 600 13px/18px var(--font-ui);
+}
+
+html.visual-calm .calm-task .task-status-drawer-header span,
+html.visual-calm .calm-task .task-status-verification {
+  color: var(--calm-text-muted);
+  font: 400 12px/18px var(--font-ui);
+}
+
+html.visual-calm .calm-task .task-status-drawer-section {
+  gap: 2px;
+  margin-top: 14px;
+}
+
+html.visual-calm .calm-task .task-status-drawer-section h3 {
+  color: var(--calm-text-muted);
+  font: 500 12px/18px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.visual-calm .calm-task .task-status-plan-list button,
+html.visual-calm .calm-task .task-status-latest-activity,
+html.visual-calm .calm-task .task-status-output-list button {
+  min-height: 28px;
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--calm-text);
+  font: 400 13px/18px var(--font-ui);
+}
+
+html.visual-calm .calm-task .task-status-plan-list button:hover:not(:disabled),
+html.visual-calm .calm-task .task-status-latest-activity:hover,
+html.visual-calm .calm-task .task-status-output-list button:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .calm-task .task-status-step-state,
+html.visual-calm .calm-task .task-status-latest-activity > :last-child {
+  color: var(--calm-text-muted);
+  font: 400 12px/18px var(--font-ui);
+}
+
+html.visual-calm .calm-task .task-status-impact-grid {
+  gap: 0 12px;
+}
+
+html.visual-calm .calm-task .task-status-impact-grid span {
+  padding: 0;
+  border: 0;
+  color: var(--calm-text);
+  font: 400 13px/24px var(--font-ui);
 }
 
 html.visual-calm .calm-task .task-status-strip:hover {
@@ -1814,6 +1959,15 @@ html.visual-calm .studio-primary:hover:not(:disabled) {
 /* ---------- Narrow layouts ----------
    .main-content is an inline-size container, so these respond to the space the
    main column actually has (sidebar and right panel included). */
+
+/* The task title reads in the UI font at every density (Full density's base
+   rule is monospace, from the terminal theme). */
+html.visual-calm .calm-task .main-header-title {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
 
 /* The task title keeps priority over header controls. */
 html.visual-calm .calm-task .main-header-title-group {
@@ -2169,15 +2323,16 @@ html.visual-calm .calm-sidebar .calm-segmented > button.active {
   background: var(--calm-sidebar-active);
 }
 
-/* Search box in the sessions list. */
+/* Search in the sessions list is a borderless row like "New"; it only gains a
+   surface on hover or while typing. */
 html.visual-calm .calm-sidebar .sidebar-sessions-search,
 html.visual-calm .calm-sidebar .sidebar-sessions-search input {
-  background: var(--calm-surface);
+  background: transparent;
 }
 
-html.visual-calm:not(.theme-light) .calm-sidebar .sidebar-sessions-search,
-html.visual-calm:not(.theme-light) .calm-sidebar .sidebar-sessions-search input {
-  background: rgba(255, 255, 255, 0.05);
+html.visual-calm .calm-sidebar .sidebar-sessions-search:hover,
+html.visual-calm .calm-sidebar .sidebar-sessions-search:focus-within {
+  background: var(--sidebar-panel-row-hover);
 }
 
 /* ---------- Icon buttons vs. the global button rule ----------
@@ -2633,6 +2788,319 @@ html.visual-calm .app-layout .selected-workspace-main-row {
 html.visual-calm .right-panel .cli-section,
 html.visual-calm .right-panel [class*="-section-card"] {
   background: transparent;
+}
+
+/* Inspector grid, matching the left sidebar: a 12px inset for cards, row fills
+   and notes; row icons and text on a column 8px inside that; three type sizes
+   (13px section titles and rows, 12px labels and meta). Rows are plain 32px
+   lines with a hover fill instead of bordered cards, and colour stays ink, so
+   tool names don't read as links. The base right-panel rules use !important,
+   hence the !important here. */
+html.visual-calm .right-panel .cli-section {
+  padding: 20px 12px 0 !important;
+}
+
+html.visual-calm .right-panel .cli-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  min-height: 28px;
+  margin: 0 0 4px;
+  padding: 0 8px !important;
+  border-radius: 8px;
+}
+
+html.visual-calm .right-panel .cli-section-header:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .right-panel .cli-section-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--calm-text);
+  font: 600 13px/18px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Counts read as quiet numbers beside the title, not a coloured bubble. */
+html.visual-calm .right-panel .cli-output-count-badge {
+  order: 0;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--calm-text-muted);
+  font: 500 12px/18px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+html.visual-calm .right-panel .cli-output-count-badge * {
+  color: inherit;
+  font: inherit;
+}
+
+html.visual-calm .right-panel .cli-section-toggle {
+  display: inline-flex;
+  width: auto;
+  margin: 0;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .right-panel .cli-section-chevron {
+  display: inline-flex;
+  transition: transform 0.15s ease;
+}
+
+html.visual-calm .right-panel .cli-section-header[aria-expanded="false"] .cli-section-chevron {
+  transform: rotate(-90deg);
+}
+
+html.visual-calm .right-panel .cli-file-list,
+html.visual-calm .right-panel .cli-context-tool-usage-list,
+html.visual-calm .right-panel .cli-context-file-list,
+html.visual-calm .right-panel .cli-context-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Context lists keep their four-row window (now 32px rows, no gaps), without
+   a reserved scrollbar gutter, so they are as wide as the Files list. */
+html.visual-calm .right-panel .cli-context-tool-usage-list,
+html.visual-calm .right-panel .cli-context-file-list {
+  --right-panel-context-row-height: 32px;
+  --right-panel-context-row-gap: 0px;
+  padding-right: 0;
+  scrollbar-gutter: auto;
+}
+
+html.visual-calm .right-panel .cli-progress-item,
+html.visual-calm .right-panel .cli-file-item,
+html.visual-calm .right-panel .cli-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 0 !important;
+  padding: 0 8px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html.visual-calm .right-panel .cli-file-item:hover,
+html.visual-calm .right-panel .cli-context-item:hover {
+  background: var(--calm-surface-hover) !important;
+}
+
+/* The primary output keeps a quiet selected fill, like a selected session. */
+html.visual-calm .right-panel .cli-file-item.primary-output,
+html.visual-calm .right-panel .cli-file-item.highlight-output {
+  background: var(--calm-surface-muted) !important;
+}
+
+html.visual-calm .right-panel .cli-file-action,
+html.visual-calm .right-panel .cli-file-type-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 16px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .right-panel .cli-file-name,
+html.visual-calm .right-panel .cli-context-key,
+html.visual-calm .right-panel .cli-context-file,
+html.visual-calm .right-panel .cli-progress-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--calm-text);
+  font: 400 13px/18px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.visual-calm .right-panel .cli-context-key {
+  flex: 1;
+}
+
+/* "parse_document  8×": the colon separator goes, the count is quiet. */
+html.visual-calm .right-panel .cli-context-sep {
+  display: none;
+}
+
+html.visual-calm .right-panel .cli-context-val {
+  flex-shrink: 0;
+  color: var(--calm-text-muted);
+  font: 500 12px/18px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+html.visual-calm .right-panel .cli-context-label {
+  margin: 4px 0 2px;
+  padding: 0 8px;
+  color: var(--calm-text-muted);
+  font: 500 12px/24px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.visual-calm .right-panel .cli-workspace-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 4px 0 0;
+  padding: 0 8px;
+  border-radius: 8px;
+  font: 400 12px/18px var(--font-ui);
+}
+
+html.visual-calm .right-panel .cli-workspace-path:hover {
+  background: var(--calm-surface-hover);
+}
+
+html.visual-calm .right-panel .cli-workspace-path .cli-label,
+html.visual-calm .right-panel .cli-workspace-path .cli-label * {
+  color: var(--calm-text-muted);
+  font-weight: 500;
+}
+
+html.visual-calm .right-panel .cli-workspace-path .cli-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--calm-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Outcome note: same inset and width as the rows above it. */
+html.visual-calm .right-panel .right-panel-preserved-line {
+  min-height: 0;
+  margin: 16px 12px 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--calm-surface-muted);
+  color: var(--calm-text-secondary);
+  font: 400 12px/18px var(--font-ui);
+}
+
+html.visual-calm .right-panel .cli-panel-footer {
+  margin: 12px 12px 0;
+  padding: 0 8px;
+  color: var(--calm-text-muted);
+  font: 400 12px/18px var(--font-ui);
+}
+
+/* ---- Shared session ---- */
+html.visual-calm .right-panel .session-members-card-trigger {
+  justify-content: flex-start;
+  gap: 8px;
+  width: calc(100% - 24px);
+  height: 32px;
+  margin: 12px 12px 0;
+  padding: 0 8px;
+  border: 1px solid var(--calm-border);
+  border-radius: 8px;
+  color: var(--calm-text-secondary);
+  font: 500 13px/18px var(--font-ui);
+}
+
+html.visual-calm .right-panel .session-members-card-trigger:hover {
+  background: var(--calm-surface-hover);
+  color: var(--calm-text);
+}
+
+/* 7px side padding + the 1px border puts the card's text on the rows' 8px
+   text column. */
+html.visual-calm .right-panel .session-members-card {
+  gap: 10px;
+  margin: 12px 12px 0;
+  padding: 10px 7px;
+  border: 1px solid var(--calm-border);
+  border-radius: 12px;
+}
+
+html.visual-calm .right-panel .session-members-card-toggle {
+  gap: 8px;
+  color: var(--calm-text);
+  font: 600 13px/18px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.visual-calm .right-panel .session-members-card-toggle:hover {
+  color: var(--calm-text);
+}
+
+html.visual-calm .right-panel .session-members-card-toggle svg {
+  width: 16px;
+  height: 16px;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .right-panel .session-members-card-count,
+html.visual-calm .right-panel .session-member-role,
+html.visual-calm .right-panel .session-member-presence {
+  color: var(--calm-text-muted);
+  font: 400 12px/18px var(--font-ui);
+}
+
+/* One line per member: dot, name, then "Owner · Active now" at the end. */
+html.visual-calm .right-panel .session-member-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+html.visual-calm .right-panel .session-member-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--calm-text);
+  font: 400 13px/18px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.visual-calm .right-panel .session-member-presence::before {
+  content: "· ";
+}
+
+html.visual-calm .right-panel .session-members-card-actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--calm-border);
+}
+
+html.visual-calm .right-panel .session-members-card-actions select,
+html.visual-calm .right-panel .session-members-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--calm-border-strong);
+  border-radius: 999px;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--calm-text);
+  font: 500 12px/1 var(--font-ui);
+}
+
+html.visual-calm .right-panel .session-members-card-actions select {
+  padding-right: 6px;
+}
+
+html.visual-calm .right-panel .session-members-card-actions button:hover:not(:disabled) {
+  background: var(--calm-surface-hover);
 }
 
 /* ---------- Task status banners (paused / blocked / cancelled) ----------

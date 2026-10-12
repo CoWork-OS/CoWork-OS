@@ -22,7 +22,8 @@ describe("Sidebar creation controls", () => {
     );
 
     expect(markup).toContain('data-action="session"');
-    expect(markup).toContain('class="sidebar-panel-new-label">New session</span>');
+    expect(markup).toContain('class="sidebar-panel-new-label">New</span>');
+    expect(markup).toContain('aria-label="New session"');
     expect(markup).toContain('aria-label="Organize projects"');
     expect(markup).not.toContain('title="New project"');
     expect(markup).not.toContain('aria-label="New project"');
@@ -34,7 +35,7 @@ describe("Sidebar creation controls", () => {
     expect(sessionHandler).toContain("onNewSession();");
     expect(sessionHandler).toContain("onSelectTask(null);");
     expect(sessionHandler).not.toContain("handleAddWorkspace");
-    expect(source).toContain('{ kind: "session", label: "New session", onClick: handleNewTask }');
+    expect(source).toContain('{ kind: "session", label: "New", onClick: handleNewTask }');
     expect(source).toMatch(
       /className="sidebar-panel-row sidebar-panel-new"\s+onClick=\{primaryAction.onClick\}/,
     );

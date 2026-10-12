@@ -3136,6 +3136,13 @@ export function App() {
   const isBrowserHost =
     typeof window !== "undefined" &&
     (window as Window & { coworkBrowserHost?: boolean }).coworkBrowserHost === true;
+  // Which rail destinations exist depends on the theme (Calm folds Devices into Team).
+  const sidebarDestinationContext = useMemo(
+    () => ({ isCalm: visualTheme === "calm", isBrowserHost }),
+    [visualTheme, isBrowserHost],
+  );
+  // The device Team asked the Devices view to open on, if any.
+  const [devicesFocusId, setDevicesFocusId] = useState<string | null>(null);
   const [browserProviderReady, setBrowserProviderReady] = useState(
     () => !isBrowserHost || window.coworkBrowserHostInfo?.providerReady === true,
   );
@@ -7702,7 +7709,11 @@ export function App() {
   // menu read the same everywhere.
   const sidebarRail = (
     <SidebarRail
-      activeId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+      activeId={getActiveSidebarDestination(
+        currentView,
+        sidebarPanelTab,
+        sidebarDestinationContext,
+      )}
       settingsActive={currentView === "settings"}
       onNavigate={handleSidebarNavigate}
       onOpenSettings={handleSidebarRailOpenSettings}
@@ -8447,7 +8458,11 @@ export function App() {
                 botConversationProjections={botConversationProjections}
                 activeTab={sidebarPanelTab}
                 headerAccessory={sidebarNotificationBell}
-                activeDestinationId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+                activeDestinationId={getActiveSidebarDestination(
+                  currentView,
+                  sidebarPanelTab,
+                  sidebarDestinationContext,
+                )}
                 onNavigate={handleSidebarNavigate}
                 isDevicesActive={currentView === "devices"}
                 isLoadingSessions={isInitialTaskListLoading}
@@ -8538,6 +8553,7 @@ export function App() {
                 />
               ) : currentView === "devices" ? (
                 <DevicesPanel
+                  initialDeviceId={devicesFocusId ?? undefined}
                   onOpenTask={(taskId, remote) => {
                     if (remote) {
                       void openRemoteTaskView(taskId, remote);
@@ -8690,7 +8706,10 @@ export function App() {
                     setFocusAutomationRoutineId(routineId);
                     setCurrentView("automations");
                   }}
-                  onOpenDevices={() => setCurrentView("devices")}
+                  onOpenDevices={(deviceId) => {
+                    setDevicesFocusId(deviceId ?? null);
+                    setCurrentView("devices");
+                  }}
                 />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />

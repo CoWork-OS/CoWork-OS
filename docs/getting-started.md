@@ -181,7 +181,7 @@ Once the app opens, the most important places to know are:
 - **Automations**: open the main-sidebar Automation Studio to discover templates, build a versioned structured flow, test it without external writes, turn it on, and inspect step-level activity. See [Automation Studio](automation-studio.md).
 - **Workspace agents**: select **Bots** on the left icon rail and expand **Workspace agents** to create and inspect reusable managed agents (called Agents Hub before 0.5.60). The clicked-agent detail page is for configuration and actions, not a separate chat. **Test this agent**, **Preview**, and starter prompts start a normal managed-session task and open it in the main task window, where follow-ups, approvals, responses, and outputs work like any other task. See [Managed Agents](managed-agents.md).
 - **Bots**: select **Bots** on the left icon rail to open the Bots page and the bot list, create reusable bot identities and keep multiple conversations under each one. Selecting a bot reuses its latest unarchived conversation or opens a dormant one; the first message starts execution. Edit the profile from the bot row or conversation header, and use conversation history for older streams. See [Bots, conversations, and tasks](bots-and-conversations.md).
-- **More > Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
+- **More > Devices** (in the Calm theme, **Team**, then a device): manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
 - **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, and Event Triggers; Daily Briefing has its own **Settings > Daily Briefing** tab
 - **Settings > System & Security > Profiles**: create, switch, export, and import isolated app profiles
 - **More > Mission Control**: company and operator monitoring, Heartbeat-agent state, global runtime queue status, workspace Mission Board, feed, and Ops view
@@ -227,7 +227,7 @@ Use this when you want CoWork OS to run tasks on another machine, such as a Mac 
    - SSH tunnel
    - Tailscale
    - reverse proxy only when the Control Plane stays loopback/private and `COWORK_CONTROL_PLANE_ALLOWED_ORIGINS` is set
-3. On your main machine, open **More > Devices**.
+3. On your main machine, open **More > Devices** (in the Calm theme, **Team > Add a device**).
 4. Click **Add new device**.
 5. Enter the gateway URL, token, display name, and purpose.
 6. Connect the device and confirm it appears in the device list.

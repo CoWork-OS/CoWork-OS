@@ -244,7 +244,7 @@ Later, add the more personal or operational channels once you know the trust mod
 
 ### 2. Add a remote device
 
-If you want work to run on another machine, open **More > Devices** and connect a remote CoWork node. This is useful for persistent environments, isolated workloads, and automation that should not depend on your main laptop.
+If you want work to run on another machine, open **More > Devices** (in the Calm theme, **Team > Add a device**) and connect a remote CoWork node. This is useful for persistent environments, isolated workloads, and automation that should not depend on your main laptop.
 
 ### 3. Build a governed company loop
 

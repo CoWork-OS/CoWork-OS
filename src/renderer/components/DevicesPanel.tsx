@@ -82,6 +82,8 @@ interface DevicesPanelProps {
   onCreateTaskHere?: (prompt: string, options?: DeviceTaskOptions) => Promise<void>;
   workspace?: Workspace | null;
   onOpenSettings?: (tab?: string) => void;
+  /** A remote device to select when the view opens (Team's device cards pass one). */
+  initialDeviceId?: string;
 }
 
 type TaskFilter = "selected" | "all" | "attention";
@@ -332,6 +334,7 @@ export function DevicesPanel({
   onCreateTaskHere,
   workspace,
   onOpenSettings,
+  initialDeviceId,
 }: DevicesPanelProps) {
   const overviewRef = useRef<HTMLDivElement | null>(null);
   const tasksRef = useRef<HTMLDivElement | null>(null);
@@ -344,6 +347,8 @@ export function DevicesPanel({
   const [deviceTasks, setDeviceTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  // Used once, on the first load that lists that device.
+  const pendingInitialDeviceId = useRef(initialDeviceId);
   const [taskPrompt, setTaskPrompt] = useState("");
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("selected");
@@ -463,7 +468,15 @@ export function DevicesPanel({
         settingsData as ControlPlaneSettingsData | null | undefined,
       );
       setDevices(nextDevices);
+      const requested = pendingInitialDeviceId.current;
+      const requestedDevice =
+        requested &&
+        nextDevices.some((device) => device.role === "remote" && device.id === requested)
+          ? requested
+          : null;
+      if (requestedDevice) pendingInitialDeviceId.current = undefined;
       setSelectedDeviceId((current) => {
+        if (requestedDevice) return requestedDevice;
         const nextRemoteDevices = nextDevices.filter((device) => device.role === "remote");
         if (current && nextRemoteDevices.some((device) => device.id === current)) return current;
         const preferredId =

@@ -94,6 +94,17 @@ html.visual-calm .team-view-device.offline .team-view-device-status {
   color: var(--calm-warning-text);
 }
 
+html.visual-calm .team-view-device-add {
+  border-style: dashed;
+  border-color: var(--calm-border-strong);
+  background: transparent;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .team-view-device-add .team-view-device-name {
+  color: var(--calm-text);
+}
+
 html.visual-calm .team-view-device-line {
   font-size: 13px;
   color: var(--calm-text-secondary);

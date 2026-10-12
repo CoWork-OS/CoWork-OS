@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, CalendarClock, Laptop, Server, Workflow, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, Laptop, Plus, Server, Workflow, type LucideIcon } from "lucide-react";
 import type { Task, Workspace } from "../../../shared/types";
 import { useAttentionSnapshot } from "../../hooks/useAttentionSnapshot";
 import { formatHomeSessionTime } from "../../utils/home-sessions";
@@ -50,7 +50,8 @@ interface TeamViewProps {
   onOpenBots: () => void;
   onOpenSchedules: () => void;
   onOpenRoutine: (routineId: string) => void;
-  onOpenDevices: () => void;
+  /** Opens the Devices view, on a remote device when one is given. */
+  onOpenDevices: (deviceId?: string) => void;
 }
 
 interface TeamSources {
@@ -184,7 +185,7 @@ export function TeamView({
           <h1 className="calm-view-title">Team</h1>
           <p className="calm-view-subtitle">
             Your agents, schedules, automations and devices: what each is doing, what it needs from
-            you, and how it's set up.
+            you, and how it's set up. Pick a device to manage it and see its work.
           </p>
         </header>
 
@@ -198,7 +199,7 @@ export function TeamView({
                 key={device.id}
                 type="button"
                 className={`team-view-device${device.online ? "" : " offline"}`}
-                onClick={onOpenDevices}
+                onClick={() => onOpenDevices(device.local ? undefined : device.id)}
               >
                 <span className="team-view-device-head">
                   {device.local ? (
@@ -224,6 +225,19 @@ export function TeamView({
                 </span>
               </button>
             ))}
+            <button
+              type="button"
+              className="team-view-device team-view-device-add"
+              onClick={() => onOpenDevices()}
+            >
+              <span className="team-view-device-head">
+                <Plus size={18} aria-hidden="true" />
+                <span className="team-view-device-name">Add a device</span>
+              </span>
+              <span className="team-view-device-line">
+                Connect another computer to run work there.
+              </span>
+            </button>
           </div>
         </section>
 

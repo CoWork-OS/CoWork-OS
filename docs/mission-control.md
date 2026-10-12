@@ -197,7 +197,7 @@ It exposes:
 
 Use its **Planner** sub-tab to watch company-level planning move into executable task work.
 
-If the work itself is being executed on another machine, pair Mission Control with **More > Devices**: Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
+If the work itself is being executed on another machine, pair Mission Control with **More > Devices** (**Team** in the Calm theme): Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
 
 ### Core Harness
 

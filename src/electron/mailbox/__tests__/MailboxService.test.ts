@@ -194,6 +194,56 @@ describeWithSqlite("MailboxService", () => {
     expect(status.commitmentCount).toBeGreaterThan(0);
   });
 
+  it("re-summarizes a thread whose stored summary no key can decrypt", async () => {
+    await service.summarizeThread("gmail-thread:alpha");
+    // As if written under another Keychain identity: still encrypted, but unreadable here.
+    const unreadable = `mbox:os:${Buffer.from("other identity").toString("base64")}`;
+    db.prepare("UPDATE mailbox_summaries SET summary_text = ? WHERE thread_id = ?").run(
+      unreadable,
+      "gmail-thread:alpha",
+    );
+
+    const detail = await service.getThread("gmail-thread:alpha");
+    expect(detail?.summary?.summary).toContain("Can you send the revised launch plan");
+    const row = db
+      .prepare("SELECT summary_text FROM mailbox_summaries WHERE thread_id = ?")
+      .get("gmail-thread:alpha") as { summary_text: string };
+    expect(row.summary_text).not.toBe(unreadable);
+    expect(row.summary_text.startsWith("mbox:")).toBe(true);
+  });
+
+  it("lists OS-encrypted values and replaces one only while it is unchanged", async () => {
+    await service.summarizeThread("gmail-thread:alpha");
+    const legacy = `mbox:os:${Buffer.from("legacy").toString("base64")}`;
+    db.prepare("UPDATE mailbox_summaries SET summary_text = ? WHERE thread_id = ?").run(
+      legacy,
+      "gmail-thread:alpha",
+    );
+
+    expect(await service.listOsEncryptedValues("summaries.summary_text")).toEqual([
+      { key: "gmail-thread:alpha", value: legacy },
+    ]);
+    expect(
+      await service.replaceEncryptedValueIfUnchanged(
+        "summaries.summary_text",
+        "gmail-thread:alpha",
+        "mbox:os:bmV3",
+        "mbox:os:c3RhbGU=",
+      ),
+    ).toBe(false);
+    expect(
+      await service.replaceEncryptedValueIfUnchanged(
+        "summaries.summary_text",
+        "gmail-thread:alpha",
+        "mbox:os:bmV3",
+        legacy,
+      ),
+    ).toBe(true);
+    expect(await service.listOsEncryptedValues("summaries.summary_text")).toEqual([
+      { key: "gmail-thread:alpha", value: "mbox:os:bmV3" },
+    ]);
+  });
+
   it("stores schedule suggestions in a thread proposal preview", async () => {
     const scheduled = await service.scheduleReply("gmail-thread:alpha");
     expect(scheduled.threadId).toBe("gmail-thread:alpha");

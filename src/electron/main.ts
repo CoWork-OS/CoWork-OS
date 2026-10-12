@@ -216,6 +216,10 @@ import { MailboxAutomationHub } from "./mailbox/MailboxAutomationHub";
 import { MailboxAutomationRegistry } from "./mailbox/MailboxAutomationRegistry";
 import { MailboxForwardingService } from "./mailbox/MailboxForwardingService";
 import { getMailboxServiceInstance, MailboxService } from "./mailbox/MailboxService";
+import {
+  MAILBOX_ENCRYPTED_COLUMNS,
+  type MailboxEncryptedColumnTarget,
+} from "./mailbox/mailbox-statements";
 import { setMailboxForwardingServiceInstance } from "./mailbox/mailbox-forwarding-singleton";
 import {
   ControlPlaneSettingsManager,
@@ -354,6 +358,8 @@ import {
 import {
   runMacSafeStorageMigrationWorker,
   migrateLegacyMacSafeStorageChannels,
+  migrateLegacyMacSafeStorageMailbox,
+  createMailboxMigrationAttemptStore,
   migrateLegacyMacSafeStorageSettings,
 } from "./utils/mac-safe-storage-migration";
 
@@ -2264,6 +2270,27 @@ if (isMacSafeStorageMigrationWorker) {
           executable: process.execPath,
           appPath: app.getAppPath(),
           logger,
+        });
+        // Mailbox content can be large, so it moves after the window is up.
+        deferStartupTask("mailbox-keychain-migration", async () => {
+          const mailbox = getMailboxServiceInstance();
+          if (!mailbox) return;
+          await migrateLegacyMacSafeStorageMailbox({
+            platform: process.platform,
+            store: {
+              targets: Object.keys(MAILBOX_ENCRYPTED_COLUMNS) as MailboxEncryptedColumnTarget[],
+              list: (target) => mailbox.listOsEncryptedValues(target),
+              replaceIfUnchanged: (target, key, next, previous) =>
+                mailbox.replaceEncryptedValueIfUnchanged(target, key, next, previous),
+            },
+            safeStorage: getSafeStorage(),
+            executable: process.execPath,
+            appPath: app.getAppPath(),
+            logger,
+            attempts: createMailboxMigrationAttemptStore(
+              path.join(getUserDataDir(), "mailbox-keychain-migration.json"),
+            ),
+          });
         });
       }
       keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();

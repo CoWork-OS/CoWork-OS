@@ -150,6 +150,41 @@ const THREAD_LIST_CONDITIONS: Readonly<
         )`,
 };
 
+/**
+ * Mailbox columns written with `encryptMailboxValue`, by migration target name. The legacy
+ * Keychain migration re-encrypts `mbox:os:` values a former app identity wrote.
+ */
+export const MAILBOX_ENCRYPTED_COLUMNS = {
+  "messages.body_text": { table: "mailbox_messages", key: "id", column: "body_text" },
+  "messages.body_html": { table: "mailbox_messages", key: "id", column: "body_html" },
+  "summaries.summary_text": {
+    table: "mailbox_summaries",
+    key: "thread_id",
+    column: "summary_text",
+  },
+  "drafts.body_text": { table: "mailbox_drafts", key: "id", column: "body_text" },
+  "attachment_text.text_content": {
+    table: "mailbox_attachment_text",
+    key: "attachment_id",
+    column: "text_content",
+  },
+  "commitments.source_excerpt": {
+    table: "mailbox_commitments",
+    key: "id",
+    column: "source_excerpt",
+  },
+} as const;
+export type MailboxEncryptedColumnTarget = keyof typeof MAILBOX_ENCRYPTED_COLUMNS;
+const MAILBOX_ENCRYPTED_COLUMN_TARGETS = Object.keys(
+  MAILBOX_ENCRYPTED_COLUMNS,
+) as MailboxEncryptedColumnTarget[];
+
+function encryptedColumn(shape: StatementShape) {
+  return MAILBOX_ENCRYPTED_COLUMNS[
+    requireShapeEnum(shape, "target", MAILBOX_ENCRYPTED_COLUMN_TARGETS)
+  ];
+}
+
 function listThreadsSql(shape: StatementShape): string {
   const keys =
     typeof shape.conditions === "string" && shape.conditions ? shape.conditions.split(",") : [];
@@ -1327,6 +1362,16 @@ export const MAILBOX_STATEMENTS = {
              attachment_filename = excluded.attachment_filename,
              attachment_text = excluded.attachment_text`,
   addSavedViewThread: `INSERT OR REPLACE INTO mailbox_saved_view_threads (view_id, thread_id, score) VALUES (?, ?, ?)`,
+  // Legacy Keychain migration. Shape: `target` (a MAILBOX_ENCRYPTED_COLUMNS key).
+  legacyKeychainEncryptedValues: (shape: StatementShape) => {
+    const { table, key, column } = encryptedColumn(shape);
+    return `SELECT ${key} AS key, ${column} AS value FROM ${table} WHERE ${column} LIKE 'mbox:os:%'`;
+  },
+  // Replaces a value only if it is still the one that was read (new value, key, old value).
+  legacyKeychainReplaceValue: (shape: StatementShape) => {
+    const { table, key, column } = encryptedColumn(shape);
+    return `UPDATE ${table} SET ${column} = ? WHERE ${key} = ? AND ${column} = ?`;
+  },
 } satisfies StatementCatalog;
 
 export type MailboxStatementName = keyof typeof MAILBOX_STATEMENTS;

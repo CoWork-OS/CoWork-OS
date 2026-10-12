@@ -479,7 +479,7 @@ function SidebarWordBoundaryTitle({
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [text]);
+  }, [text, normalizedText]);
 
   return (
     <span
@@ -828,7 +828,7 @@ export function compareSidebarWorkspaceGroups(
   return sidebarWorkspaceCollator.compare(left.workspaceId, right.workspaceId);
 }
 
-function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
+export function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
   return (
     prev.workspace?.id === next.workspace?.id &&
     prev.selectedTaskId === next.selectedTaskId &&
@@ -839,8 +839,9 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
       next.selectedBotConversationProjection?.activityLabel &&
     prev.selectedBotConversationProjection?.lastActivityAt ===
       next.selectedBotConversationProjection?.lastActivityAt &&
-    getBotProjectionSignature(prev.botConversationProjections) ===
-      getBotProjectionSignature(next.botConversationProjections) &&
+    (prev.botConversationProjections === next.botConversationProjections ||
+      getBotProjectionSignature(prev.botConversationProjections) ===
+        getBotProjectionSignature(next.botConversationProjections)) &&
     prev.activeTab === next.activeTab &&
     prev.headerAccessory === next.headerAccessory &&
     prev.activeDestinationId === next.activeDestinationId &&
@@ -850,11 +851,14 @@ function areSidebarPropsEqual(prev: SidebarProps, next: SidebarProps): boolean {
     prev.isLoadingMoreTasks === next.isLoadingMoreTasks &&
     prev.hasMoreTasks === next.hasMoreTasks &&
     prev.uiDensity === next.uiDensity &&
-    getSidebarTaskListSignature(prev.tasks) === getSidebarTaskListSignature(next.tasks) &&
-    getSidebarTaskListSignature(prev.botTasks || []) ===
-      getSidebarTaskListSignature(next.botTasks || []) &&
-    (prev.completionAttentionTaskIds || []).join(",") ===
-      (next.completionAttentionTaskIds || []).join(",") &&
+    (prev.tasks === next.tasks ||
+      getSidebarTaskListSignature(prev.tasks) === getSidebarTaskListSignature(next.tasks)) &&
+    (prev.botTasks === next.botTasks ||
+      getSidebarTaskListSignature(prev.botTasks || []) ===
+        getSidebarTaskListSignature(next.botTasks || [])) &&
+    (prev.completionAttentionTaskIds === next.completionAttentionTaskIds ||
+      (prev.completionAttentionTaskIds || []).join(",") ===
+        (next.completionAttentionTaskIds || []).join(",")) &&
     prev.onSelectTask === next.onSelectTask &&
     prev.onOpenBot === next.onOpenBot &&
     prev.onReopenBot === next.onReopenBot &&
@@ -1096,7 +1100,7 @@ function SidebarComponent({
       console.error("Failed to add sidebar workspace:", error);
       setWorkspaceActionError(message);
     }
-  }, [updateWorkspaceNavSettings]);
+  }, [updateWorkspaceNavSettings, isBrowserHost]);
 
   const handleAddAllWorkspaces = useCallback(() => {
     const workspaceIds = knownSidebarWorkspaces

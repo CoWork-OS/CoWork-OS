@@ -1,4 +1,6 @@
-import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { usePositionUpdates } from "../hooks/usePositionUpdates";
+import { getFloatingPosition, type FloatingPosition } from "../utils/floating-position";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -165,26 +167,32 @@ export function NotificationPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const bellButtonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(
-    null,
-  );
+  const [dropdownPosition, setDropdownPosition] = useState<FloatingPosition | null>(null);
   const inSidebar = placement === "sidebar";
 
-  useLayoutEffect(() => {
-    if (!isOpen || !inSidebar) return;
-    const updatePosition = () => {
+  usePositionUpdates(
+    isOpen && inSidebar,
+    () => {
       const rect = bellButtonRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = PANEL_WIDTH;
-      setDropdownPosition({
-        top: rect.bottom + 8,
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
-      });
-    };
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    return () => window.removeEventListener("resize", updatePosition);
-  }, [inSidebar, isOpen]);
+      const next = getFloatingPosition(
+        { top: rect.top, bottom: rect.bottom, right: rect.left + PANEL_WIDTH },
+        { width: PANEL_WIDTH, height: dropdownRef.current?.getBoundingClientRect().height || 420 },
+        { width: window.innerWidth, height: window.innerHeight },
+      );
+      setDropdownPosition((current) =>
+        current &&
+        current.top === next.top &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.maxHeight === next.maxHeight
+          ? current
+          : next,
+      );
+    },
+    bellButtonRef,
+    dropdownRef,
+  );
 
   // Load notifications on mount
   useEffect(() => {
@@ -303,6 +311,9 @@ export function NotificationPanel({
         position: "fixed",
         top: dropdownPosition?.top ?? 0,
         left: dropdownPosition?.left ?? 0,
+        width: dropdownPosition?.width,
+        maxHeight: dropdownPosition?.maxHeight,
+        overflowY: "auto",
         visibility: dropdownPosition ? "visible" : "hidden",
       }
     : { position: "absolute", top: "calc(100% + 8px)", right: 0 };

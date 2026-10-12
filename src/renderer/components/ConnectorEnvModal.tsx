@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState } from "react";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 
@@ -73,7 +74,12 @@ export function ConnectorEnvModal({
 
   return (
     <div className="mcp-modal-overlay" onClick={onClose}>
-      <div className="mcp-modal connector-setup-modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog
+        onClose={onClose}
+        aria-label={`${serverName} configuration`}
+        className="mcp-modal connector-setup-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mcp-modal-header">
           <div className="registry-details-title">
             <h3>{serverName} Configuration</h3>
@@ -118,7 +124,7 @@ export function ConnectorEnvModal({
             </div>
           )}
         </div>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

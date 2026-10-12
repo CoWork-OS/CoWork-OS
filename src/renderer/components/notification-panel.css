@@ -3,7 +3,7 @@
 
 .notif-anchor {
   position: relative;
-  z-index: 9999;
+  z-index: var(--layer-popover);
   overflow: visible;
 }
 
@@ -16,7 +16,7 @@
   --notif-hover: var(--color-bg-hover);
   --notif-accent: var(--color-accent);
 
-  z-index: 10000;
+  z-index: var(--layer-popover);
   display: flex;
   flex-direction: column;
   max-height: min(540px, calc(100vh - 80px));

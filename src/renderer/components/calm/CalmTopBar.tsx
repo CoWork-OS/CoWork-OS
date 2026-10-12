@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import type { Workspace } from "../../../shared/types";
+import { useMenuKeyboard } from "./useMenuKeyboard";
 import { useDismissable } from "./useDismissable";
 
 export interface CalmAccessOption {
@@ -62,6 +63,7 @@ export function CalmFolderMenu({ scope }: { scope: CalmFolderMenuProps }) {
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(ref, open, close);
+  useMenuKeyboard(ref, open, close);
   const newFolderAvailability = getFolderActionAvailability(scope);
 
   return (
@@ -117,6 +119,7 @@ export function CalmFolderMenu({ scope }: { scope: CalmFolderMenuProps }) {
           )}
           <button
             type="button"
+            role="menuitem"
             className="calm-popover-item calm-popover-footer-item"
             disabled={!newFolderAvailability.available}
             title={newFolderAvailability.reason || undefined}
@@ -161,6 +164,7 @@ export function CalmAccessMenu({
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable(ref, open, close);
+  useMenuKeyboard(ref, open, close);
   const Icon = access.isFullAccess ? ShieldAlert : ShieldCheck;
 
   return (
@@ -191,7 +195,8 @@ export function CalmAccessMenu({
           <div className="calm-popover-heading">What CoWork can do</div>
           {/* A profile that no longer exists still shows as the current, checked choice. */}
           {!access.options.some((option) => option.id === access.selectedId) && (
-            <div
+            <button
+              type="button"
               className="calm-popover-item selected current-only"
               role="menuitemradio"
               aria-checked="true"
@@ -202,7 +207,7 @@ export function CalmAccessMenu({
                 <span className="calm-popover-item-title">{access.label}</span>
               </span>
               <Check size={15} className="calm-popover-item-check" aria-hidden="true" />
-            </div>
+            </button>
           )}
           {access.options.map((option) => {
             const active = option.id === access.selectedId;
@@ -235,6 +240,7 @@ export function CalmAccessMenu({
           <div className="calm-popover-divider" />
           <button
             type="button"
+            role="menuitem"
             className="calm-popover-item calm-popover-footer-item"
             onClick={() => {
               close();

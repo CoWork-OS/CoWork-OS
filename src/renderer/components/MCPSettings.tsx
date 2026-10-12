@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import { MCPRegistryBrowser } from "./MCPRegistryBrowser";
@@ -1432,7 +1433,12 @@ export function MCPSettings({
       {/* Tools Modal */}
       {viewingToolsFor && (
         <div className="mcp-modal-overlay" onClick={() => setViewingToolsFor(null)}>
-          <div className="mcp-modal" onClick={(e) => e.stopPropagation()}>
+          <ModalDialog
+            onClose={() => setViewingToolsFor(null)}
+            aria-label="Available tools"
+            className="mcp-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mcp-modal-header">
               <h3>Available Tools</h3>
               <button className="mcp-modal-close" onClick={() => setViewingToolsFor(null)}>
@@ -1470,14 +1476,19 @@ export function MCPSettings({
                 </div>
               )}
             </div>
-          </div>
+          </ModalDialog>
         </div>
       )}
 
       {/* Edit Server Modal */}
       {editingServer && (
         <div className="mcp-modal-overlay" onClick={() => setEditingServer(null)}>
-          <div className="mcp-modal mcp-modal-wide" onClick={(e) => e.stopPropagation()}>
+          <ModalDialog
+            onClose={() => setEditingServer(null)}
+            aria-label="Configure MCP server"
+            className="mcp-modal mcp-modal-wide"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mcp-modal-header">
               <h3>Configure Server</h3>
               <button className="mcp-modal-close" onClick={() => setEditingServer(null)}>
@@ -1623,7 +1634,7 @@ export function MCPSettings({
                 </button>
               </div>
             </div>
-          </div>
+          </ModalDialog>
         </div>
       )}
 

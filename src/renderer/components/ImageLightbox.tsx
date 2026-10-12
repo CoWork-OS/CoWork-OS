@@ -1,3 +1,4 @@
+import { isTopModal, useModalDialog } from "./ModalDialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -33,9 +34,6 @@ const ZOOM_STEP = 1.25;
 
 const clampScale = (value: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 /**
  * Index of the element Tab should move to so focus stays inside the dialog, or null when the
  * browser's default order already does. `currentIndex` is -1 when focus is outside the list.
@@ -68,6 +66,7 @@ export function ImageLightbox({
   onOpenExternal,
 }: ImageLightboxProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  useModalDialog(rootRef, onClose);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; origin: Offset; moved: boolean } | null>(
@@ -99,16 +98,6 @@ export function ImageLightbox({
   useEffect(() => {
     return () => {
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-    };
-  }, []);
-
-  // Move focus into the dialog while it is open and hand it back to the opener on close.
-  useEffect(() => {
-    const previouslyFocused =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    rootRef.current?.focus({ preventScroll: true });
-    return () => {
-      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     };
   }, []);
 
@@ -149,31 +138,8 @@ export function ImageLightbox({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        const root = rootRef.current;
-        if (!root) return;
-        const focusables = Array.from(
-          root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-        ).filter((element) => element.getClientRects().length > 0);
-        if (focusables.length === 0) {
-          event.preventDefault();
-          root.focus({ preventScroll: true });
-          return;
-        }
-        const active = document.activeElement as HTMLElement | null;
-        const next = resolveFocusTrapIndex(
-          focusables.length,
-          active ? focusables.indexOf(active) : -1,
-          event.shiftKey,
-        );
-        if (next !== null) {
-          event.preventDefault();
-          focusables[next].focus();
-        }
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      } else if (event.key === "+" || event.key === "=") {
+      if (!isTopModal(rootRef.current) || event.defaultPrevented) return;
+      if (event.key === "+" || event.key === "=") {
         event.preventDefault();
         zoomTo(scaleRef.current * ZOOM_STEP);
       } else if (event.key === "-" || event.key === "_") {

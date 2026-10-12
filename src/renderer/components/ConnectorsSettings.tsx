@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search, X } from "lucide-react";
 import { ConnectorSetupModal, ConnectorProvider } from "./ConnectorSetupModal";
@@ -1347,7 +1348,12 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
 
       {integrationModal && (
         <div className="mcp-modal-overlay" onClick={() => setIntegrationModal(null)}>
-          <div className="cm-integration-modal" onClick={(e) => e.stopPropagation()}>
+          <ModalDialog
+            onClose={() => setIntegrationModal(null)}
+            aria-label="Connector details"
+            className="cm-integration-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="cm-detail-header">
               <ConnectorBrandIcon
                 connectorKey={integrationModal.key}
@@ -1363,7 +1369,7 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
               </button>
             </div>
             <div className="cm-integration-modal-body">{integrationModal.component}</div>
-          </div>
+          </ModalDialog>
         </div>
       )}
 
@@ -1391,7 +1397,12 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
 
       {showCustomForm && (
         <div className="mcp-modal-overlay" onClick={() => setShowCustomForm(false)}>
-          <div className="cm-custom-modal" onClick={(e) => e.stopPropagation()}>
+          <ModalDialog
+            onClose={() => setShowCustomForm(false)}
+            aria-label="Custom connector"
+            className="cm-custom-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="cm-custom-modal-header">
               <h3>Custom connector</h3>
               <button className="mcp-modal-close" onClick={() => setShowCustomForm(false)}>
@@ -1445,7 +1456,7 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
                 {customSaving ? "Adding..." : "Add connector"}
               </button>
             </div>
-          </div>
+          </ModalDialog>
         </div>
       )}
 

@@ -1,3 +1,17 @@
+/* Global layers. Component-local ordering can use small integers within its own stacking context.
+   See docs/renderer-layers.md before adding an overlay or body portal. */
+:root {
+  --layer-shell: 100;
+  --layer-popover: 1000;
+  --layer-modal: 2000;
+  --layer-modal-raised: 2100;
+  --layer-modal-warning: 2200;
+  --layer-lightbox: 2300;
+  --layer-onboarding: 2400;
+  --layer-toast: 2500;
+  --layer-system-notice: 2600;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -1053,7 +1067,7 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 1000;
+  z-index: var(--layer-shell);
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -2060,7 +2074,7 @@ a,
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--layer-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5800,7 +5814,7 @@ a,
 /* When dropdown is open: remove glassy effect and stack above Running Tasks */
 .dp-input-box.dropdown-open {
   position: relative;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   background: #1a1d23 !important;
@@ -5927,7 +5941,7 @@ a,
   border: 1px solid rgba(255, 255, 255, 0.12);
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   isolation: isolate;
   opacity: 1;
 }
@@ -5970,7 +5984,7 @@ a,
   background-image: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  z-index: 9999 !important;
+  z-index: var(--layer-popover);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
@@ -6538,7 +6552,7 @@ a,
   align-items: center;
   justify-content: center;
   padding: 24px;
-  z-index: 2000;
+  z-index: var(--layer-modal);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
@@ -7383,7 +7397,7 @@ a,
 .dp-drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2100;
+  z-index: var(--layer-modal-raised);
   background: rgb(15 23 42 / 18%);
 }
 
@@ -8422,7 +8436,7 @@ a,
   border: 1px solid var(--color-border);
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
+  z-index: var(--layer-popover);
   overflow: hidden;
 }
 
@@ -8449,7 +8463,7 @@ a,
   display: flex;
   flex-direction: column;
   gap: 10px;
-  z-index: 10000;
+  z-index: var(--layer-toast);
   pointer-events: none;
 }
 
@@ -9607,7 +9621,7 @@ a,
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--layer-modal);
 }
 
 .mcp-modal {
@@ -11470,7 +11484,7 @@ a,
   justify-content: center;
   padding: 20px 12px;
   overflow-y: auto;
-  z-index: 10000;
+  z-index: var(--layer-modal);
   backdrop-filter: blur(4px);
 }
 
@@ -11713,7 +11727,7 @@ a,
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10000;
+  z-index: var(--layer-modal-raised);
   backdrop-filter: blur(10px);
 }
 
@@ -12288,7 +12302,7 @@ a,
 .disclaimer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--layer-onboarding);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -14944,7 +14958,7 @@ a,
   color: var(--color-bg-darker);
   border-radius: var(--radius-md);
   font-size: 13px;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   animation: fadeIn 0.2s ease;
 }
 
@@ -15432,7 +15446,7 @@ a,
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   cursor: pointer;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   transition: all 0.2s ease;
 }
 
@@ -16223,7 +16237,7 @@ a,
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  z-index: 10001;
+  z-index: var(--layer-onboarding);
   transition: opacity 0.8s ease-out;
   overflow-x: hidden;
   overflow-y: auto;
@@ -23010,7 +23024,7 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   overflow-y: hidden;
   overflow-x: hidden;
   scrollbar-gutter: stable;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   animation: dropdownFadeIn 0.15s ease;
 }
 
@@ -24030,7 +24044,7 @@ html:not(.theme-light) .selected-workspace-main-row {
 }
 .browser-host .browser-host-update-banner {
   position: fixed;
-  z-index: 20000;
+  z-index: var(--layer-system-notice);
   top: 0.75rem;
   left: 50%;
   display: flex;
@@ -24054,4 +24068,29 @@ html:not(.theme-light) .selected-workspace-main-row {
   background: var(--accent-color, #5d68d8);
   color: #fff;
   cursor: pointer;
+}
+
+/* Native keyboard controls retain the appearance of the original clickable surfaces. */
+button.registry-tag {
+  font-family: inherit;
+}
+button.chatgpt-import-dropzone {
+  width: 100%;
+  background: transparent;
+  font-family: inherit;
+}
+.scheduled-job-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+}
+button.registry-tag:focus-visible,
+button.chatgpt-import-dropzone:focus-visible,
+.scheduled-job-expand:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }

@@ -123,7 +123,7 @@
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   min-width: 220px;
   padding: 4px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -488,7 +488,7 @@
 .task-automation-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 3000;
+  z-index: var(--layer-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -6863,7 +6863,7 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .spreadsheet-artifact-menu {
-  z-index: 80;
+  z-index: var(--layer-popover);
   width: 230px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
@@ -7045,7 +7045,7 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .document-artifact-menu {
-  z-index: 80;
+  z-index: var(--layer-popover);
   width: 250px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
@@ -7224,7 +7224,7 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .presentation-artifact-menu {
-  z-index: 80;
+  z-index: var(--layer-popover);
   width: 270px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
@@ -7421,7 +7421,7 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .web-artifact-menu {
-  z-index: 80;
+  z-index: var(--layer-popover);
   width: 240px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
@@ -9797,7 +9797,7 @@ button.collab-timeline-thought-agent:hover {
   width: min(560px, calc(100vw - 24px));
   min-width: min(460px, calc(100vw - 24px));
   max-height: min(500px, calc(100dvh - 160px), var(--model-dropdown-room, 100dvh));
-  z-index: 1000;
+  z-index: var(--layer-popover);
   animation: dropdownFadeIn 0.15s ease;
   overflow: visible;
 }
@@ -10552,7 +10552,7 @@ button.collab-timeline-thought-agent:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: var(--layer-modal-raised);
 }
 
 .remote-file-picker {
@@ -11475,7 +11475,7 @@ button.collab-timeline-thought-agent:hover {
   overflow-y: hidden;
   overflow-x: hidden;
   scrollbar-gutter: stable;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   animation: dropdownFadeIn 0.15s ease;
 }
 
@@ -12060,7 +12060,7 @@ button.collab-timeline-thought-agent:hover {
   /* The menu sets top (opening down) or bottom (opening up) itself. */
   top: auto;
   bottom: auto;
-  z-index: 1200;
+  z-index: var(--layer-popover);
   -webkit-app-region: no-drag;
 }
 
@@ -14488,7 +14488,7 @@ button.collab-timeline-thought-agent:hover {
    text (two lines) above a reply field. The quote stays highlighted while the field has focus. */
 .selection-reply-popover {
   position: fixed;
-  z-index: 1200;
+  z-index: var(--layer-popover);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -14641,7 +14641,7 @@ button.collab-timeline-thought-agent:hover {
 .build-changes-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: var(--layer-modal);
   display: flex;
   align-items: center;
   justify-content: center;

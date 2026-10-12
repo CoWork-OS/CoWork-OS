@@ -1292,7 +1292,7 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
                 }}
               >
                 {/* Job Header */}
-                <div style={styles.jobHeader} onClick={() => handleExpandJob(job)}>
+                <div style={styles.jobHeader}>
                   {/* Status Indicator */}
                   <div
                     style={{
@@ -1441,7 +1441,13 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
                   </div>
 
                   {/* Expand Arrow */}
-                  <span
+                  <button
+                    type="button"
+                    className="scheduled-job-expand"
+                    aria-label={`${isExpanded ? "Collapse" : "Expand"} ${job.name}`}
+                    aria-expanded={isExpanded}
+                    aria-controls={`scheduled-job-details-${job.id}`}
+                    onClick={() => handleExpandJob(job)}
                     style={{
                       color: "var(--color-text-muted)",
                       transform: isExpanded ? "rotate(180deg)" : "rotate(0)",
@@ -1449,12 +1455,12 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
                     }}
                   >
                     {Icons.chevronDown}
-                  </span>
+                  </button>
                 </div>
 
                 {/* Expanded Content */}
                 {isExpanded && (
-                  <div style={styles.expandedContent}>
+                  <div id={`scheduled-job-details-${job.id}`} style={styles.expandedContent}>
                     <div style={styles.runResults}>
                       <div style={styles.latestRunPanel}>
                         <div style={styles.latestRunTitle}>

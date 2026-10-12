@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -303,18 +304,6 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   // Images render in ImageLightbox, which handles its own keyboard shortcuts.
   const showImageLightbox =
     fileData?.fileType === "image" || (loading && !fileData && IMAGE_PATH_RE.test(filePath));
-
-  // Handle Escape key
-  useEffect(() => {
-    if (showImageLightbox) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, showImageLightbox]);
 
   // Prepare video / audio playback URL
   useEffect(() => {
@@ -881,7 +870,9 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
 
   return createPortal(
     <div className="file-viewer-overlay" onClick={onClose}>
-      <div
+      <ModalDialog
+        onClose={onClose}
+        aria-label={fileData?.fileName || "File viewer"}
         className="file-viewer-modal"
         data-format={fileType || "loading"}
         onClick={(e) => e.stopPropagation()}
@@ -985,7 +976,7 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
 
           {!loading && !error && renderContent()}
         </div>
-      </div>
+      </ModalDialog>
     </div>,
     document.body,
   );

@@ -1,5 +1,6 @@
+import { useModalDialog } from "./ModalDialog";
 import { AlertTriangle, FolderOpen, Globe, ShieldAlert, Terminal } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./FullAccessConfirmationDialog.css";
 
@@ -31,40 +32,13 @@ export function FullAccessConfirmationDialog({
   onCancel: () => void;
 }) {
   const card = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const previousFocus = document.activeElement as HTMLElement | null;
-    const cancel = card.current?.querySelector<HTMLButtonElement>("button");
-    cancel?.focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      } else if (event.key === "Tab") {
-        const controls = Array.from(
-          card.current?.querySelectorAll<HTMLElement>("button, a[href]") || [],
-        );
-        const first = controls[0];
-        const last = controls[controls.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("keydown", handleKey);
-      previousFocus?.focus();
-    };
-  }, [onCancel]);
+  useModalDialog(card, onCancel);
 
   return (
     <div className="full-access-overlay">
       <div
         ref={card}
+        tabIndex={-1}
         className="full-access-dialog"
         role="alertdialog"
         aria-modal="true"

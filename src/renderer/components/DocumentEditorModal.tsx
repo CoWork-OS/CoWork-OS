@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
@@ -204,7 +205,12 @@ export function DocumentEditorModal({
 
   return createPortal(
     <div className="file-viewer-overlay" onClick={onClose}>
-      <div className="document-editor-modal" onClick={(event) => event.stopPropagation()}>
+      <ModalDialog
+        onClose={onClose}
+        aria-label="Document editor"
+        className="document-editor-modal"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="document-editor-header">
           <div>
             <div className="document-editor-title">
@@ -385,7 +391,7 @@ export function DocumentEditorModal({
             </div>
           </aside>
         </div>
-      </div>
+      </ModalDialog>
     </div>,
     document.body,
   );

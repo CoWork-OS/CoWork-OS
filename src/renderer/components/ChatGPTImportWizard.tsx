@@ -315,7 +315,7 @@ export function ChatGPTImportWizard({
       {/* Step 2: File selection */}
       {step === "select" && (
         <div className="chatgpt-import-step">
-          <div className="chatgpt-import-dropzone" onClick={handleSelectFile}>
+          <button type="button" className="chatgpt-import-dropzone" onClick={handleSelectFile}>
             <svg
               width="40"
               height="40"
@@ -329,15 +329,15 @@ export function ChatGPTImportWizard({
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <p
+            <span
               style={{ margin: "12px 0 4px", color: "var(--color-text-primary)", fontWeight: 500 }}
             >
               Click to select conversations.json
-            </p>
-            <p style={{ margin: 0, fontSize: "13px", color: "var(--color-text-tertiary)" }}>
+            </span>
+            <span style={{ margin: 0, fontSize: "13px", color: "var(--color-text-tertiary)" }}>
               From your ChatGPT data export
-            </p>
-          </div>
+            </span>
+          </button>
 
           {error && <div className="chatgpt-import-error">{error}</div>}
 

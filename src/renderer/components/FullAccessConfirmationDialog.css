@@ -1,7 +1,7 @@
 .full-access-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--layer-modal-warning);
   display: flex;
   align-items: center;
   justify-content: center;

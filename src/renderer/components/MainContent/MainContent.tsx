@@ -273,6 +273,7 @@ import {
   buildWrittenFileResolver,
   collectTurnOutputSummaries,
   collectWrittenFilePaths,
+  getFinishedTurnAutoOpen,
   isArtifactEventCoveredByFileWrite,
 } from "./turn-outputs";
 import { TurnOutputsRow } from "./TurnOutputsRow";
@@ -695,6 +696,8 @@ interface MainContentProps {
   uiDensity?: "focused" | "full" | "power";
   homeResearchVaultEnabled?: boolean;
   homeNextActionsEnabled?: boolean;
+  /** Open a finished turn's single new document, sheet, deck or page in the right panel. */
+  autoOpenTurnOutput?: boolean;
   rendererPerfLoggingEnabled?: boolean;
   taskSwitchId?: string | null;
   hasMoreTimelineHistory?: boolean;
@@ -4092,6 +4095,7 @@ function MainContentComponent({
   uiDensity = "focused",
   homeResearchVaultEnabled = false,
   homeNextActionsEnabled = false,
+  autoOpenTurnOutput = false,
   rendererPerfLoggingEnabled = false,
   taskSwitchId = null,
   hasMoreTimelineHistory = false,
@@ -5584,6 +5588,30 @@ function MainContentComponent({
       voiceInput.state === "idle" &&
       !talkMode.isActive,
   );
+
+  // Opt-in: when a turn the user watched finishes with exactly one new file that has a
+  // side-panel viewer, open it there. Turns already finished on load or loaded with older
+  // history never open, so reopening a task does not pop files.
+  const autoOpenEventsRef = useRef(events);
+  autoOpenEventsRef.current = events;
+  const sawTurnWorkingRef = useRef(false);
+  const autoOpenedTurnKeysRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (isTaskWorking) {
+      sawTurnWorkingRef.current = true;
+      return;
+    }
+    if (!sawTurnWorkingRef.current) return;
+    sawTurnWorkingRef.current = false;
+    if (!autoOpenTurnOutput || isReplayMode || !workspace?.path) return;
+    const target = getFinishedTurnAutoOpen(
+      autoOpenEventsRef.current,
+      autoOpenedTurnKeysRef.current,
+    );
+    if (!target) return;
+    autoOpenedTurnKeysRef.current.add(target.turnKey);
+    openFileInPanel(target.path);
+  }, [autoOpenTurnOutput, isReplayMode, isTaskWorking, openFileInPanel, workspace?.path]);
 
   // Reset wrappingUp state when task stops working or task changes
   useEffect(() => {
@@ -13214,6 +13242,7 @@ function areMainContentPropsEqual(prev: MainContentProps, next: MainContentProps
     prev.uiDensity === next.uiDensity &&
     prev.homeResearchVaultEnabled === next.homeResearchVaultEnabled &&
     prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
+    prev.autoOpenTurnOutput === next.autoOpenTurnOutput &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.taskSwitchId === next.taskSwitchId &&
     prev.hasMoreTimelineHistory === next.hasMoreTimelineHistory &&

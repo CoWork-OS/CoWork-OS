@@ -822,6 +822,7 @@ type SelectedTaskWorkspaceViewProps = {
   homeNextActionsEnabled: boolean;
   costReceiptEnabled: boolean;
   subAgentStatsEnabled: boolean;
+  autoOpenTurnOutput: boolean;
   rendererPerfLoggingEnabled: boolean;
   taskSwitchId: string | null;
   hasMoreTimelineHistory: boolean;
@@ -998,6 +999,7 @@ const SelectedTaskWorkspaceView = memo(
     homeNextActionsEnabled,
     costReceiptEnabled,
     subAgentStatsEnabled,
+    autoOpenTurnOutput,
     rendererPerfLoggingEnabled,
     taskSwitchId,
     hasMoreTimelineHistory,
@@ -1737,6 +1739,7 @@ const SelectedTaskWorkspaceView = memo(
             <Suspense fallback={<TaskViewSkeleton />}>
               <MainContent
                 key={task?.id || "empty"}
+                autoOpenTurnOutput={autoOpenTurnOutput}
                 headerPlacement="title-bar"
                 rightPanelOpen={!effectiveRightCollapsed && !remoteTaskView}
                 task={task}
@@ -2053,6 +2056,7 @@ const SelectedTaskWorkspaceView = memo(
     prev.homeNextActionsEnabled === next.homeNextActionsEnabled &&
     prev.costReceiptEnabled === next.costReceiptEnabled &&
     prev.subAgentStatsEnabled === next.subAgentStatsEnabled &&
+    prev.autoOpenTurnOutput === next.autoOpenTurnOutput &&
     prev.subAgentsFocusRequest === next.subAgentsFocusRequest &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
@@ -2470,6 +2474,7 @@ export function App() {
   const [homeNextActionsEnabled, setHomeNextActionsEnabled] = useState(false);
   const [costReceiptEnabled, setCostReceiptEnabled] = useState(false);
   const [subAgentStatsEnabled, setSubAgentStatsEnabled] = useState(false);
+  const [autoOpenTurnOutput, setAutoOpenTurnOutput] = useState(false);
 
   // Queue state
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
@@ -3578,6 +3583,7 @@ export function App() {
         setHomeNextActionsEnabled(settings.homeNextActionsEnabled === true);
         setCostReceiptEnabled(settings.costReceiptEnabled === true);
         setSubAgentStatsEnabled(settings.subAgentStatsEnabled === true);
+        setAutoOpenTurnOutput(settings.autoOpenTurnOutput === true);
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
         setOnboardingCompleted(settings.onboardingCompleted ?? false);
         setOnboardingCompletedAt(settings.onboardingCompletedAt);
@@ -7275,6 +7281,13 @@ export function App() {
     });
   };
 
+  const handleAutoOpenTurnOutputChange = (enabled: boolean) => {
+    setAutoOpenTurnOutput(enabled);
+    void window.electronAPI?.saveAppearanceSettings?.({
+      autoOpenTurnOutput: enabled,
+    });
+  };
+
   const handleSubAgentStatsEnabledChange = (enabled: boolean) => {
     setSubAgentStatsEnabled(enabled);
     void window.electronAPI?.saveAppearanceSettings?.({
@@ -8728,6 +8741,7 @@ export function App() {
                   homeNextActionsEnabled={homeNextActionsEnabled}
                   costReceiptEnabled={costReceiptEnabled}
                   subAgentStatsEnabled={subAgentStatsEnabled}
+                  autoOpenTurnOutput={autoOpenTurnOutput}
                   rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
                   taskSwitchId={selectedTaskSwitchId}
                   hasMoreTimelineHistory={selectedTaskTimelineHistory.hasMoreHistory}
@@ -8883,6 +8897,8 @@ export function App() {
               onCostReceiptEnabledChange={handleCostReceiptEnabledChange}
               subAgentStatsEnabled={subAgentStatsEnabled}
               onSubAgentStatsEnabledChange={handleSubAgentStatsEnabledChange}
+              autoOpenTurnOutput={autoOpenTurnOutput}
+              onAutoOpenTurnOutputChange={handleAutoOpenTurnOutputChange}
               initialTab={settingsTab}
               memoryReviewRequest={memoryReviewRequest}
               focusAutomation={focusAutomationOwner}

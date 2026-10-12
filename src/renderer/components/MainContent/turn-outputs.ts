@@ -1,6 +1,7 @@
 import type { TaskEvent } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { dedupeOutputPaths } from "../../utils/task-outputs";
+import { getSidePanelViewerKind } from "../../utils/open-file-in-panel";
 
 export type TurnOutputAction = "created" | "updated";
 
@@ -135,6 +136,32 @@ export function collectWrittenFilePaths(events: TaskEvent[]): string[] {
     }
   }
   return [...paths];
+}
+
+/**
+ * The file to open in the side panel when a turn finishes: the turn's one newly created
+ * document, sheet, deck or page. Edits, or several such files, are ambiguous and open nothing.
+ */
+export function pickTurnOutputToAutoOpen(summary: TurnOutputSummary): string | null {
+  const candidates = summary.files.filter(
+    (file) => file.action === "created" && getSidePanelViewerKind(file.path) !== null,
+  );
+  return candidates.length === 1 ? candidates[0].path : null;
+}
+
+/**
+ * The file to auto-open for the turn that just finished: only the stream's final turn, and
+ * only once per turn (`openedTurnKeys` holds the turns already handled).
+ */
+export function getFinishedTurnAutoOpen(
+  events: TaskEvent[],
+  openedTurnKeys: ReadonlySet<string>,
+): { turnKey: string; path: string } | null {
+  const lastTurn = collectTurnOutputSummaries(events, { isTaskWorking: false }).at(-1);
+  if (!lastTurn || lastTurn.endIndex !== events.length - 1) return null;
+  if (openedTurnKeys.has(lastTurn.key)) return null;
+  const path = pickTurnOutputToAutoOpen(lastTurn);
+  return path ? { turnKey: lastTurn.key, path } : null;
 }
 
 /**

@@ -7906,6 +7906,7 @@ export interface ElectronAPI {
     homeResearchVaultEnabled?: boolean;
     homeNextActionsEnabled?: boolean;
     costReceiptEnabled?: boolean;
+    autoOpenTurnOutput?: boolean;
     subAgentStatsEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
@@ -7939,6 +7940,7 @@ export interface ElectronAPI {
     homeResearchVaultEnabled?: boolean;
     homeNextActionsEnabled?: boolean;
     costReceiptEnabled?: boolean;
+    autoOpenTurnOutput?: boolean;
     subAgentStatsEnabled?: boolean;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;

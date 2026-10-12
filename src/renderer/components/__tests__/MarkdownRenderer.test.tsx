@@ -89,6 +89,19 @@ describe("MarkdownRenderer workspace image links", () => {
     expect(markup).not.toContain("markdown-image-link-preview");
   });
 
+  it("renders file links as an icon-led chip and keeps web links plain", () => {
+    const markup = renderMarkdown("See [`MainContent.tsx:42`](src/MainContent.tsx:42).");
+    expect(markup).toMatch(
+      /<a [^>]*class="clickable-file-path"[^>]*><span class="clickable-file-path-icon" aria-hidden="true"><svg [^>]*lucide-file-code[^>]*>/,
+    );
+    expect(markup).toMatch(
+      /<span class="clickable-file-path-label"><code[^>]*>MainContent\.tsx:42<\/code><\/span>/,
+    );
+    expect(renderMarkdown("[docs](https://example.com/a.ts)")).not.toContain(
+      "clickable-file-path-icon",
+    );
+  });
+
   it("decodes percent-encoded relative file links", () => {
     const markup = renderMarkdown("[my image](<my image.png>)");
     expect(markup).toContain('href="my%20image.png"');

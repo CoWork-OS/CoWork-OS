@@ -800,6 +800,23 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   width: 22px;
 }
 
+/* Multi-agent marker: sub-agent count beside the title, so a collapsed parent
+   still reads as a multi-agent session. */
+.cli-task-subagent-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+
 /* The parent's show/hide toggle is a small chevron that turns when open. */
 .sidebar.sidebar-panel.cli-sidebar .cli-collapse-btn {
   display: inline-flex;

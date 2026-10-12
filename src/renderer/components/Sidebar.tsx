@@ -34,6 +34,7 @@ import {
   EllipsisVertical,
   Plus,
   Repeat2,
+  Users,
   X,
 } from "lucide-react";
 import { resolveTwinIcon } from "../utils/twin-icons";
@@ -1770,56 +1771,53 @@ function SidebarComponent({
   const useVirtualizedTaskRows = sidebarVirtualRows.length > SIDEBAR_VIRTUALIZATION_MIN_ROWS;
   const hasSessionResults = filteredTaskTree.length > 0 || filteredAutomatedTaskTree.length > 0;
 
-  // Auto-collapse sub-agent trees in focused mode
-  const hasInitializedCollapse = useRef(false);
+  // Multi-agent sessions start collapsed: a parent is collapsed the first time it is
+  // seen with sub-agents, and the user's expand/collapse choice is kept after that.
+  // Ancestors of pinned or selected sessions stay open so those rows remain visible.
+  const seenParentTaskIds = useRef(new Set<string>());
+  const previousSelectedTaskId = useRef<string | null>(null);
   useEffect(() => {
     const parentByTaskId = new Map<string, string>();
-    const parentsWithChildren = new Set<string>();
+    const newParents = new Set<string>();
 
     for (const task of tasks) {
       if (task.parentTaskId) {
         parentByTaskId.set(task.id, task.parentTaskId);
-        parentsWithChildren.add(task.parentTaskId);
+        if (!seenParentTaskIds.current.has(task.parentTaskId)) {
+          newParents.add(task.parentTaskId);
+        }
       }
     }
 
-    const expandAncestorsForPinned = (collapsed: Set<string>): void => {
-      for (const task of tasks) {
-        if (!task.pinned) continue;
-
-        let currentParent = task.parentTaskId;
-        const seen = new Set<string>();
-        while (currentParent && !seen.has(currentParent)) {
-          seen.add(currentParent);
-          collapsed.delete(currentParent);
-          const nextParent = parentByTaskId.get(currentParent);
-          if (!nextParent) break;
-          currentParent = nextParent;
-        }
+    const collectAncestors = (task: Task, into: Set<string>): void => {
+      let currentParent = task.parentTaskId;
+      while (currentParent && !into.has(currentParent)) {
+        into.add(currentParent);
+        currentParent = parentByTaskId.get(currentParent);
       }
     };
+    const pinnedAncestors = new Set<string>();
+    const selectedAncestors = new Set<string>();
+    // Open the selected session's ancestors only when the selection changes, so a
+    // parent the user collapses stays collapsed while its sub-agent is open.
+    const selectionChanged = previousSelectedTaskId.current !== selectedTaskId;
+    previousSelectedTaskId.current = selectedTaskId;
+    for (const task of tasks) {
+      if (task.pinned) collectAncestors(task, pinnedAncestors);
+      if (selectionChanged && task.id === selectedTaskId) collectAncestors(task, selectedAncestors);
+    }
 
-    if (uiDensity === "focused") {
-      if (!hasInitializedCollapse.current) {
-        expandAncestorsForPinned(parentsWithChildren);
-        if (parentsWithChildren.size > 0) {
-          setCollapsedTasks((prev) =>
-            areStringSetsEqual(prev, parentsWithChildren) ? prev : parentsWithChildren,
-          );
-        }
-        hasInitializedCollapse.current = true;
-      } else {
-        setCollapsedTasks((prev) => {
-          const next = new Set(prev);
-          expandAncestorsForPinned(next);
-          return areStringSetsEqual(prev, next) ? prev : next;
-        });
+    for (const parentId of newParents) seenParentTaskIds.current.add(parentId);
+
+    setCollapsedTasks((prev) => {
+      const next = new Set(prev);
+      for (const parentId of newParents) {
+        if (!pinnedAncestors.has(parentId)) next.add(parentId);
       }
-    }
-    if (uiDensity === "full") {
-      hasInitializedCollapse.current = false;
-    }
-  }, [uiDensity, tasks]);
+      for (const parentId of selectedAncestors) next.delete(parentId);
+      return areStringSetsEqual(prev, next) ? prev : next;
+    });
+  }, [tasks, selectedTaskId]);
 
   // Infinite scroll — load the next page when the user scrolls near the bottom
   useEffect(() => {
@@ -2536,6 +2534,20 @@ function SidebarComponent({
                   />
                 )}
               </TaskTitleSelect>
+              {hasChildren && (
+                <span
+                  className="cli-task-subagent-count"
+                  title={`Multi-agent session · ${children.length} sub-agent${
+                    children.length === 1 ? "" : "s"
+                  }`}
+                  aria-label={`Multi-agent session with ${children.length} sub-agent${
+                    children.length === 1 ? "" : "s"
+                  }`}
+                >
+                  <Users size={12} strokeWidth={2} aria-hidden="true" />
+                  {children.length}
+                </span>
+              )}
               {hasChildren && !hasSessionSearch && !hasSessionStateFilter && (
                 <button
                   type="button"

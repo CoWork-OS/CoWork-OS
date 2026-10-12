@@ -563,12 +563,17 @@ html.visual-calm .calm-welcome .input-right-actions {
   gap: 6px;
 }
 
-/* Folder pill: the project the task works in, inside the composer. */
-html.visual-calm
-  .calm-main
-  .welcome-input-footer
-  .workspace-dropdown-container.calm-composer-folder {
+/* Folder pill: the project the task works in, in a row under the composer. */
+html.visual-calm .calm-below-composer {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+  padding-left: 4px;
+}
+
+html.visual-calm .workspace-dropdown-container.calm-below-folder {
   display: block;
+  position: relative;
 }
 
 html.visual-calm .calm-folder-button {

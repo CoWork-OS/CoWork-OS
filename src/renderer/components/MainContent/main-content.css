@@ -12032,10 +12032,15 @@ button.collab-timeline-thought-agent:hover {
   display: none;
 }
 
+/* A column, so when the menu is capped to the space it has only the list scrolls and
+   the header and actions stay visible. WorkspaceDropdownMenu sets the cap, flips it
+   below its button when that has more room, and keeps it inside the window. */
 .workspace-dropdown {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
+  display: flex;
+  flex-direction: column;
   min-width: 280px;
   max-width: 360px;
   background: #1a1d23;
@@ -12046,6 +12051,21 @@ button.collab-timeline-thought-agent:hover {
     0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: 100;
   overflow: hidden;
+}
+
+/* Rendered in a portal on <body> with viewport coordinates, so no composer, card or
+   scroll area can clip it. It sits above the title bar's drag region. */
+.workspace-dropdown.workspace-dropdown-floating {
+  position: fixed;
+  /* The menu sets top (opening down) or bottom (opening up) itself. */
+  top: auto;
+  bottom: auto;
+  z-index: 1200;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-dropdown > :not(.workspace-dropdown-list) {
+  flex-shrink: 0;
 }
 
 .theme-light .workspace-dropdown {
@@ -12073,15 +12093,62 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .workspace-dropdown-list {
+  flex: 0 1 auto;
+  min-height: 0;
   max-height: 320px;
   overflow-y: auto;
   padding: 4px 0;
   overscroll-behavior: contain;
 }
 
-/* More folders than fit: a row cut by the edge reads as more to scroll, not as clipped. */
-.workspace-dropdown-list.workspace-dropdown-list-scrolls {
+/* More folders than fit: a row cut by an edge fades, so it reads as more to scroll, not
+   as clipped. Each edge fades only while there is more beyond it. */
+.workspace-dropdown-list.fade-bottom {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+
+.workspace-dropdown-list.fade-top {
+  mask-image: linear-gradient(to top, #000 calc(100% - 22px), transparent);
+}
+
+.workspace-dropdown-list.fade-top.fade-bottom {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 22px,
+    #000 calc(100% - 22px),
+    transparent
+  );
+}
+
+.workspace-dropdown-filter {
+  padding: 6px 8px;
+}
+
+.workspace-dropdown-filter input {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  outline: none;
+}
+
+.workspace-dropdown-filter input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.workspace-dropdown-empty {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .workspace-dropdown-item {

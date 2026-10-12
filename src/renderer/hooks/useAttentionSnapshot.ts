@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   attentionFromCommitment,
   attentionFromSuggestion,
@@ -75,11 +84,33 @@ async function loadAttention(): Promise<AttentionSnapshotState> {
 }
 
 /**
- * The shared "needs you" queue. Loads while `enabled`, then again when the main process
- * signals a change, when the window regains focus, and every couple of minutes as a
- * fallback. A failed load keeps the last good snapshot.
+ * The app's one snapshot of the queue. App loads it and provides it here, so Today, Work,
+ * Team, the bell and the sidebar all count from the same snapshot.
+ */
+export const AttentionSnapshotContext = createContext<AttentionSnapshotState | null>(null);
+
+/** Loads the queue once for everything below it (mounted around the app in main.tsx). */
+export function AttentionSnapshotProvider({ children }: { children: ReactNode }) {
+  const snapshot = useAttentionLoader(true);
+  return createElement(AttentionSnapshotContext.Provider, { value: snapshot }, children);
+}
+
+/**
+ * Reads the shared "needs you" queue. Inside App this is the app-wide snapshot; on its own
+ * (tests, isolated surfaces) it loads one while `enabled`.
  */
 export function useAttentionSnapshot(enabled: boolean): AttentionSnapshotState {
+  const shared = useContext(AttentionSnapshotContext);
+  const local = useAttentionLoader(enabled && shared === null);
+  return shared ?? local;
+}
+
+/**
+ * Loads the queue while `enabled`, then again when the main process signals a change, when
+ * the window regains focus, and every couple of minutes as a fallback. A failed load keeps
+ * the last good snapshot.
+ */
+export function useAttentionLoader(enabled: boolean): AttentionSnapshotState {
   const [state, setState] = useState<AttentionSnapshotState>(EMPTY);
   const loadSeq = useRef(0);
 
@@ -97,8 +128,9 @@ export function useAttentionSnapshot(enabled: boolean): AttentionSnapshotState {
       window.clearTimeout(reloadTimer);
       reloadTimer = window.setTimeout(() => void refresh(), RELOAD_DELAY_MS);
     };
-    void refresh();
     const api = window.electronAPI;
+    if (!api) return;
+    void refresh();
     const unsubscribe =
       typeof api.onAttentionChanged === "function" ? api.onAttentionChanged(scheduleReload) : null;
     window.addEventListener("focus", scheduleReload);

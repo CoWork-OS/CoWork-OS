@@ -9,6 +9,7 @@ import {
   attentionFromTask,
   attentionOriginForTask,
   attentionPlaceForTask,
+  attentionWaitingByTask,
   classifyTaskActivity,
   rankAttention,
   type AttentionItem,
@@ -219,6 +220,59 @@ describe("rankAttention", () => {
       "later",
       "nudge",
       "idea",
+    ]);
+  });
+});
+
+describe("attentionWaitingByTask", () => {
+  it("maps waiting sessions to a reason, approvals and questions first", () => {
+    const base = {
+      createdAt: NOW,
+      urgent: true,
+      actor: { kind: "you", name: "You" },
+      origin: { kind: "you", label: "" },
+      place: { kind: "local", label: "" },
+    } as const;
+    const items = [
+      {
+        ...base,
+        id: "session:t1",
+        kind: "session",
+        state: "Paused",
+        title: "",
+        taskId: "t1",
+        ref: { type: "task", taskId: "t1" },
+      },
+      {
+        ...base,
+        id: "approval:a1",
+        kind: "approval",
+        state: "Approval needed",
+        title: "",
+        taskId: "t1",
+        ref: { type: "approval", approvalId: "a1", taskId: "t1" },
+      },
+      {
+        ...base,
+        id: "question:q1",
+        kind: "question",
+        state: "2 questions",
+        title: "",
+        taskId: "t2",
+        ref: { type: "input_request", requestId: "q1", taskId: "t2" },
+      },
+      {
+        ...base,
+        id: "commitment:c1",
+        kind: "commitment",
+        state: "Overdue",
+        title: "",
+        ref: { type: "commitment", commitmentId: "c1" },
+      },
+    ] as AttentionItem[];
+    expect([...attentionWaitingByTask(items)]).toEqual([
+      ["t1", "Approval needed"],
+      ["t2", "Response needed"],
     ]);
   });
 });

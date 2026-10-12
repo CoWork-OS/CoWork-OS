@@ -6,14 +6,11 @@ import { fileURLToPath } from "node:url";
 
 import type { EventType, Task, TaskEvent, Workspace } from "../../../shared/types";
 import {
-  collectEndOfTaskArtifactCardStacks,
-  collectLatestEndOfTaskArtifactCards,
   collectInlineRunCommandSessionIds,
   composeMessageWithAttachments,
   deriveAgentReasoningPanelState,
   deriveTaskHeaderPresentation,
   estimateTaskFeedRowHeight,
-  extractGeneratedArtifactPathsFromText,
   formatStepFailedTitleForDisplay,
   formatTimelineErrorTitleForDisplay,
   getWorkspaceStatusFolderLabel,
@@ -23,13 +20,11 @@ import {
   getBotTranscriptSpeaker,
   getBootstrapProgressTitle,
   getDefaultTranscriptMode,
-  getVisibleEndOfTaskArtifactCards,
   hasInactiveStringSetEntries,
   isCompletionSummaryCoveredByAssistantEvent,
   pruneStringSetToActiveIds,
   selectVisibleTaskFeedRows,
   shouldCreateFreshTaskForSend,
-  shouldRenderOpenArtifactCardAtEvent,
   shouldSuppressInitialPromptUserEvent,
   shouldShowBootstrapProgressRow,
   shouldScheduleAutoScrollWrite,
@@ -834,58 +829,6 @@ describe("isTaskActivelyWorking", () => {
     ).toBe("presentation");
   });
 
-  it("extracts generated office artifact paths from assistant text", () => {
-    expect(
-      extractGeneratedArtifactPathsFromText(
-        "Validated:\n- File: `artifacts/sample_presentation.pptx`\n- Also saved reports/summary.docx, docs/channels.md, and sample.xlsx.",
-      ),
-    ).toEqual([
-      "artifacts/sample_presentation.pptx",
-      "reports/summary.docx",
-      "docs/channels.md",
-      "sample.xlsx",
-    ]);
-  });
-
-  it("does not promote remote office links as local artifact cards", () => {
-    expect(
-      extractGeneratedArtifactPathsFromText(
-        "Reference: https://example.com/artifacts/sample_presentation.pptx and local/output.pptx",
-      ),
-    ).toEqual(["local/output.pptx"]);
-  });
-
-  it("does not promote planned or failed artifact paths as generated cards", () => {
-    expect(
-      extractGeneratedArtifactPathsFromText(
-        [
-          "This export step is defined, but not successfully written to disk.",
-          "What I attempted:",
-          "- Three.js `viewer.html`",
-          "Intended export contract:",
-          "```txt",
-          "CityRepresentation -> neo-harbor.viewer.html browser-based Three.js preview",
-          "```",
-          "Planned artifacts:",
-          "- `x-test/zoning-plan/neo-harbor.zoning-plan.json`",
-        ].join("\n"),
-      ),
-    ).toEqual([]);
-  });
-
-  it("still promotes recovered artifact paths when text says they are now saved", () => {
-    expect(
-      extractGeneratedArtifactPathsFromText(
-        [
-          "The first write failed to create the preview.",
-          "Saved files:",
-          "- `artifacts/neo-harbor.viewer.html`",
-          "Previously failed to write, now saved `artifacts/recovered-viewer.html`.",
-        ].join("\n"),
-      ),
-    ).toEqual(["artifacts/neo-harbor.viewer.html", "artifacts/recovered-viewer.html"]);
-  });
-
   it("treats file lifecycle html events as previewable", () => {
     expect(
       getInlinePreviewKindForTaskEvent(
@@ -903,187 +846,6 @@ describe("isTaskActivelyWorking", () => {
         }),
       ),
     ).toBe("html");
-  });
-
-  it("only renders repeated office artifact cards at the last reference", () => {
-    const created = makeEvent("created", 100, "file_created", {
-      path: "artifacts/sample_presentation.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    });
-    const emitted = makeEvent("artifact", 200, "artifact_created", {
-      path: "artifacts/sample_presentation.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    });
-    const completed = makeEvent("completed", 300, "task_completed", {
-      outputSummary: {
-        created: ["artifacts/sample_presentation.pptx"],
-        primaryOutputPath: "artifacts/sample_presentation.pptx",
-        outputCount: 1,
-      },
-    });
-    const eventStream = [created, emitted, completed];
-
-    expect(
-      shouldRenderOpenArtifactCardAtEvent({
-        path: "artifacts/sample_presentation.pptx",
-        event: created,
-        eventStream,
-      }),
-    ).toBe(false);
-    expect(
-      shouldRenderOpenArtifactCardAtEvent({
-        path: "artifacts/sample_presentation.pptx",
-        event: emitted,
-        eventStream,
-      }),
-    ).toBe(false);
-    expect(
-      shouldRenderOpenArtifactCardAtEvent({
-        path: "artifacts/sample_presentation.pptx",
-        event: completed,
-        eventStream,
-      }),
-    ).toBe(true);
-  });
-
-  it("collects the latest office artifact cards for bottom rendering", () => {
-    const created = makeEvent("created", 100, "file_created", {
-      path: "artifacts/sample.xlsx",
-      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const assistant = makeEvent("assistant", 200, "assistant_message", {
-      message: "Done: artifacts/sample.xlsx",
-    });
-    const laterUser = makeEvent("user", 300, "user_message", {
-      message: "change Lisbon to Porto",
-    });
-
-    expect(collectLatestEndOfTaskArtifactCards([created, assistant, laterUser])).toEqual([
-      {
-        path: "artifacts/sample.xlsx",
-        kind: "spreadsheet",
-        eventId: "assistant",
-        lastReferenceIndex: 1,
-        lastReferenceTimestamp: 200,
-      },
-    ]);
-  });
-
-  it("anchors generated artifact stacks before later follow-up messages", () => {
-    const completed = makeEvent("completed", 100, "task_completed", {
-      outputSummary: {
-        created: ["docs/managed-agents.md", "docs/getting-started.md"],
-        primaryOutputPath: "docs/managed-agents.md",
-        outputCount: 2,
-      },
-    });
-    const laterUser = makeEvent("user", 200, "user_message", {
-      message: "turn this into a routine",
-    });
-
-    expect(collectEndOfTaskArtifactCardStacks([completed, laterUser])).toEqual([
-      {
-        anchorEventIndex: 0,
-        artifacts: [
-          {
-            path: "docs/managed-agents.md",
-            kind: "document",
-            eventId: "completed",
-            lastReferenceIndex: 0,
-            lastReferenceTimestamp: 100,
-          },
-          {
-            path: "docs/getting-started.md",
-            kind: "document",
-            eventId: "completed",
-            lastReferenceIndex: 0,
-            lastReferenceTimestamp: 100,
-          },
-        ],
-      },
-    ]);
-  });
-
-  it("collects markdown artifacts as document cards for bottom rendering", () => {
-    const created = makeEvent("created", 100, "file_created", {
-      path: "docs/channels.md",
-      mimeType: "text/markdown",
-    });
-    const assistant = makeEvent("assistant", 200, "assistant_message", {
-      message: "Done: docs/channels.md",
-    });
-
-    expect(collectLatestEndOfTaskArtifactCards([created, assistant])).toEqual([
-      {
-        path: "docs/channels.md",
-        kind: "document",
-        eventId: "assistant",
-        lastReferenceIndex: 1,
-        lastReferenceTimestamp: 200,
-      },
-    ]);
-  });
-
-  it("limits generated artifact stacks to five cards until expanded", () => {
-    const artifacts = Array.from({ length: 7 }, (_, index) => ({
-      path: `artifacts/output-${index + 1}.md`,
-      kind: "document" as const,
-      eventId: `event-${index + 1}`,
-      lastReferenceIndex: index,
-      lastReferenceTimestamp: 100 + index,
-    }));
-
-    expect(getVisibleEndOfTaskArtifactCards(artifacts, false)).toEqual({
-      visibleArtifacts: artifacts.slice(0, 5),
-      hiddenCount: 2,
-    });
-    expect(getVisibleEndOfTaskArtifactCards(artifacts, true)).toEqual({
-      visibleArtifacts: artifacts,
-      hiddenCount: 0,
-    });
-  });
-
-  it("collapses matching artifact filenames to one bottom card", () => {
-    const relative = makeEvent("relative", 100, "artifact_created", {
-      path: "cowork-os-presentation.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    });
-    const absolute = makeEvent("absolute", 200, "assistant_message", {
-      message:
-        "Updated /Users/alex/Downloads/app/cowork/cowork-os-presentation.pptx and verified the deck.",
-    });
-
-    expect(collectLatestEndOfTaskArtifactCards([relative, absolute])).toEqual([
-      {
-        path: "/Users/alex/Downloads/app/cowork/cowork-os-presentation.pptx",
-        kind: "presentation",
-        eventId: "absolute",
-        lastReferenceIndex: 1,
-        lastReferenceTimestamp: 200,
-      },
-    ]);
-  });
-
-  it("continues to render image artifact cards inline", () => {
-    const created = makeEvent("image", 100, "file_created", {
-      path: "artifacts/screenshot.png",
-      mimeType: "image/png",
-    });
-    const completed = makeEvent("completed", 200, "task_completed", {
-      outputSummary: {
-        created: ["artifacts/screenshot.png"],
-        primaryOutputPath: "artifacts/screenshot.png",
-        outputCount: 1,
-      },
-    });
-
-    expect(
-      shouldRenderOpenArtifactCardAtEvent({
-        path: "artifacts/screenshot.png",
-        event: created,
-        eventStream: [created, completed],
-      }),
-    ).toBe(true);
   });
 
   it("hides the header title when it only repeats the initial prompt", () => {
@@ -1854,19 +1616,11 @@ describe("isTaskActivelyWorking", () => {
         },
       },
       {
-        kind: "artifact-stack",
-        key: "end-artifact-stack",
-        estimatedHeight: 114,
-        artifacts: [
-          {
-            path: "sample.xlsx",
-            kind: "spreadsheet",
-            eventId: "assistant-1",
-            lastReferenceIndex: 2,
-            lastReferenceTimestamp: 400,
-          },
-        ],
-        revision: "sample.xlsx:spreadsheet:assistant-1",
+        kind: "turn-outputs",
+        key: "turn-outputs:user-1",
+        estimatedHeight: 44,
+        files: [{ path: "sample.xlsx", action: "created" }],
+        revision: "created:sample.xlsx",
         visiblePerfEventId: null,
       },
     ] as Any[];
@@ -1876,7 +1630,7 @@ describe("isTaskActivelyWorking", () => {
     expect(result.visibleFeedRows.map((row) => row.key)).toEqual([
       "user-1",
       "assistant-1",
-      "end-artifact-stack",
+      "turn-outputs:user-1",
     ]);
     // The activity block sits behind the "Worked for" header.
     expect(result.hiddenLiveFeedRowCount).toBe(1);

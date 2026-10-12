@@ -1,11 +1,9 @@
 const MAIN_CONTENT_REFRESH_IGNORED_EXPORTS = [
   "getWorkspaceStatusFolderLabel",
-  "getVisibleEndOfTaskArtifactCards",
+  "getVisibleGeneratedImageCards",
   "getInlinePreviewKindForGeneratedFile",
-  "extractGeneratedArtifactPathsFromText",
   "getInlinePreviewKindForTaskEvent",
-  "shouldRenderOpenArtifactCardAtEvent",
-  "collectLatestEndOfTaskArtifactCards",
+  "collectGeneratedImageStacks",
   "shouldSuppressInitialPromptUserEvent",
   "deriveTaskHeaderPresentation",
   "shouldCreateFreshTaskForSend",

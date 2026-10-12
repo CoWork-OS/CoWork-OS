@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { TaskEvent } from "../../../shared/types";
 import {
-  collectEndOfTaskArtifactCardStacks,
-  collectLatestEndOfTaskArtifactCards,
-  estimateEndOfTaskArtifactStackHeight,
+  collectGeneratedImageStacks,
+  estimateGeneratedImageStackHeight,
   getGeneratedImagePathForTaskEvent,
+  getVisibleGeneratedImageCards,
+  type GeneratedImageCard,
 } from "../MainContent/artifact-logic";
+
+function collectImagePaths(events: TaskEvent[]): string[] {
+  return collectGeneratedImageStacks(events).flatMap((stack) =>
+    stack.images.map((image) => image.path),
+  );
+}
 
 function makeEvent(
   id: string,
@@ -29,18 +36,10 @@ describe("generated image artifact cards", () => {
     });
 
     expect(getGeneratedImagePathForTaskEvent(created)).toBe("sunset.png");
-    expect(collectEndOfTaskArtifactCardStacks([call, created, assistant])).toEqual([
+    expect(collectGeneratedImageStacks([call, created, assistant])).toEqual([
       {
         anchorEventIndex: 1,
-        artifacts: [
-          {
-            path: "sunset.png",
-            kind: "image",
-            eventId: "created",
-            lastReferenceIndex: 1,
-            lastReferenceTimestamp: 200,
-          },
-        ],
+        images: [{ path: "sunset.png", eventId: "created", eventIndex: 1 }],
       },
     ]);
   });
@@ -59,7 +58,7 @@ describe("generated image artifact cards", () => {
       mimeType: "image/png",
     });
 
-    expect(collectLatestEndOfTaskArtifactCards([mcpImage, legacyMcp]).map((c) => c.path)).toEqual([
+    expect(collectImagePaths([mcpImage, legacyMcp])).toEqual([
       "qwen-generate-image-1.png",
       "mcp-screenshot-123.png",
     ]);
@@ -80,7 +79,7 @@ describe("generated image artifact cards", () => {
     expect(getGeneratedImagePathForTaskEvent(browserShot)).toBeNull();
     expect(getGeneratedImagePathForTaskEvent(plainImage)).toBeNull();
     expect(getGeneratedImagePathForTaskEvent(mcpVideo)).toBeNull();
-    expect(collectLatestEndOfTaskArtifactCards([browserShot, plainImage, mcpVideo])).toEqual([]);
+    expect(collectGeneratedImageStacks([browserShot, plainImage, mcpVideo])).toEqual([]);
   });
 
   it("skips an image card when an assistant answer already embeds the image inline", () => {
@@ -93,9 +92,7 @@ describe("generated image artifact cards", () => {
       message: "Done!\n\n![Sunset](images/my%20sunset.png)",
     });
 
-    expect(
-      collectLatestEndOfTaskArtifactCards([created, other, assistant]).map((c) => c.path),
-    ).toEqual(["other.png"]);
+    expect(collectImagePaths([created, other, assistant])).toEqual(["other.png"]);
   });
 
   it("skips an image card when an assistant answer links the image (the link shows a thumbnail)", () => {
@@ -105,12 +102,10 @@ describe("generated image artifact cards", () => {
       message: "Saved [cat.png](cat.png) and [logo](logo.svg).",
     });
 
-    expect(
-      collectLatestEndOfTaskArtifactCards([created, vector, assistant]).map((c) => c.path),
-    ).toEqual(["logo.svg"]);
+    expect(collectImagePaths([created, vector, assistant])).toEqual(["logo.svg"]);
   });
 
-  it("keeps image cards from crowding out file cards and estimates their taller height", () => {
+  it("keeps the latest eight images, never document cards, and folds past five", () => {
     const images = Array.from({ length: 10 }, (_, index) =>
       makeEvent(`img-${index}`, 100 + index, "file_created", {
         path: `img-${index}.png`,
@@ -118,18 +113,20 @@ describe("generated image artifact cards", () => {
       }),
     );
     const doc = makeEvent("doc", 500, "file_created", { path: "report.docx" });
-    const assistant = makeEvent("assistant", 600, "assistant_message", {
-      message: "Saved files: report.docx",
+
+    const paths = collectImagePaths([...images, doc]);
+    expect(paths).toHaveLength(8);
+    expect(paths[0]).toBe("img-2.png");
+    expect(paths).not.toContain("report.docx");
+
+    const cards: GeneratedImageCard[] = paths.map((path, eventIndex) => ({ path, eventIndex }));
+    expect(getVisibleGeneratedImageCards(cards, false)).toEqual({
+      visibleImages: cards.slice(0, 5),
+      hiddenCount: 3,
     });
-
-    const cards = collectLatestEndOfTaskArtifactCards([...images, doc, assistant]);
-    expect(cards.filter((c) => c.kind === "document").map((c) => c.path)).toEqual(["report.docx"]);
-    expect(cards.filter((c) => c.kind === "image")).toHaveLength(8);
-
-    const imageCard = cards.find((c) => c.kind === "image")!;
-    const docCard = cards.find((c) => c.kind === "document")!;
-    expect(estimateEndOfTaskArtifactStackHeight([imageCard], false)).toBeGreaterThan(
-      estimateEndOfTaskArtifactStackHeight([docCard], false) + 150,
+    expect(getVisibleGeneratedImageCards(cards, true).hiddenCount).toBe(0);
+    expect(estimateGeneratedImageStackHeight(cards, true)).toBeGreaterThan(
+      estimateGeneratedImageStackHeight(cards, false),
     );
   });
 });

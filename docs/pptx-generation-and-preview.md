@@ -31,15 +31,7 @@ The shared detection and labels live in `src/shared/presentation-formats.ts`. Ca
 
 Generated presentations can appear from `file_created`, `file_modified`, `artifact_created`, task primary-output metadata, and assistant text that mentions a local presentation path such as `artifacts/output.pptx`.
 
-The task feed renders a compact presentation card:
-
-- orange PowerPoint-style icon
-- filename
-- `Presentation · <format>` metadata
-- default **Open** action
-- dropdown actions for external apps and **Open in folder**
-
-For `.pptx`, default **Open** routes to the in-app right-sidebar preview. For legacy or non-previewable PowerPoint formats, default opening falls back to the external app path.
+In the transcript, a generated presentation is a file reference, not a card. Each finished turn ends with one `Created N files` line (`TurnOutputsRow`) listing the files that turn wrote, and inline code in the answer that names a written file (for example `deck.pptx`) renders as a file chip. Clicking either opens `.pptx` files in the in-app right-sidebar preview; legacy or non-previewable PowerPoint formats fall back to the external app. Right-clicking any file reference, or the `…` button on a right-panel Files row, offers `Open with default app`, `Show in Finder` and `Copy path`. The compact `PresentationArtifactCard` card still appears in the fullscreen viewer's latest-turn context.
 
 ## Viewer Experience
 

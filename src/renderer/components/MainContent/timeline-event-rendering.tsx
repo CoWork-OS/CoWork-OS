@@ -7,16 +7,8 @@ import {
   stripHtmlTags,
 } from "./markdown-normalization";
 import { humanizeTimelineMessage, condenseStepText } from "./task-event-presentation";
-import {
-  shouldRenderOpenArtifactCardAtEvent,
-  getInlinePreviewKindForGeneratedFile,
-  extractGeneratedArtifactPathsFromText,
-  type GeneratedInlinePreviewKind,
-} from "./artifact-logic";
-import { SpreadsheetArtifactCard } from "../SpreadsheetArtifactCard";
-import { DocumentArtifactCard } from "../DocumentArtifactCard";
-import { PresentationArtifactCard } from "../PresentationArtifactCard";
-import { WebArtifactCard } from "../WebArtifactCard";
+import { getInlinePreviewKindForGeneratedFile } from "./artifact-logic";
+import { useFileActionMenu } from "../FileActionMenu";
 import { InlineVideoPreview } from "../InlineVideoPreview";
 import { InlineImagePreview } from "../InlineImagePreview";
 import { InlineDocumentPreview } from "../InlineDocumentPreview";
@@ -31,10 +23,6 @@ import {
 } from "../AssistantMessageContent";
 import { formatProviderErrorForDisplay } from "../../../shared/provider-error-format";
 import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
-import {
-  hasTaskOutputs,
-  resolveTaskOutputSummaryFromCompletionEvent,
-} from "../../utils/task-outputs";
 import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
 import {
   buildSpawnInstructionsPreview,
@@ -42,7 +30,6 @@ import {
   formatSpawnedAgentLabel,
 } from "../../../shared/subagent-presentation";
 import { isVerificationStepDescription } from "../../../shared/plan-utils";
-import { isWordDocumentArtifactFile } from "../../../shared/document-formats";
 import { getMessage } from "../../utils/agentMessages";
 import type { AgentContext } from "../../hooks/useAgentContext";
 import { DEFAULT_QUIRKS } from "../../../shared/types";
@@ -58,22 +45,9 @@ import {
   MessageSpeakButton,
 } from "./message-ui";
 import type { CommandOutputSession } from "../../utils/task-event-derived";
-import {
-  VIDEO_FILE_EXT_RE,
-  HTML_FILE_EXT_RE,
-  SPREADSHEET_FILE_EXT_RE,
-  PRESENTATION_FILE_EXT_RE,
-  DOCUMENT_PREVIEW_EXT_RE,
-} from "./main-content-constants";
+import { DOCUMENT_PREVIEW_EXT_RE } from "./main-content-constants";
 
 type Any = Record<string, any>;
-
-const END_OF_TASK_ARTIFACT_KINDS = new Set<GeneratedInlinePreviewKind>([
-  "html",
-  "spreadsheet",
-  "presentation",
-  "document",
-]);
 
 function getEvidenceSiteLabel(hostname: string): string {
   const normalized = hostname.replace(/^www\./i, "");
@@ -115,6 +89,10 @@ export function ClickableFilePath({
   className?: string;
   onOpenViewer?: (path: string) => void;
 }) {
+  const { openFileActionMenu, menu: fileActionMenu } = useFileActionMenu({
+    workspacePath,
+    onOpenInPanel: workspacePath ? onOpenViewer : undefined,
+  });
   const handleClick = async (e: React.MouseEvent | React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -136,15 +114,7 @@ export function ClickableFilePath({
     }
   };
 
-  const handleContextMenu = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      await window.electronAPI.showInFinder(path, workspacePath);
-    } catch (err) {
-      console.error("Error showing in Finder:", err);
-    }
-  };
+  const handleContextMenu = (e: React.MouseEvent) => openFileActionMenu(e, path);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") void handleClick(e);
@@ -154,18 +124,21 @@ export function ClickableFilePath({
   const fileName = path.split("/").pop() || path;
 
   return (
-    <span
-      className={`clickable-file-path ${className}`}
-      role="link"
-      tabIndex={0}
-      aria-label={`Open ${fileName}`}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      onContextMenu={handleContextMenu}
-      title={`${path}\n\nClick to preview • Right-click to show in Finder`}
-    >
-      {fileName}
-    </span>
+    <>
+      <span
+        className={`clickable-file-path ${className}`}
+        role="link"
+        tabIndex={0}
+        aria-label={`Open ${fileName}`}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        onContextMenu={handleContextMenu}
+        title={`${path}\n\nClick to open • Right-click for more options`}
+      >
+        {fileName}
+      </span>
+      {fileActionMenu}
+    </>
   );
 }
 
@@ -745,12 +718,12 @@ export function renderEventTitle(
         : path;
     return path ? (
       <span>
-        Output ready:{" "}
+        Created:{" "}
         <ClickableFilePath path={path} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
         {label && label !== path && <span className="event-title-meta"> ({label})</span>}
       </span>
     ) : (
-      "Output ready"
+      "Created a file"
     );
   }
 
@@ -1015,7 +988,7 @@ export function renderEventTitle(
       const acType = typeof acp.type === "string" ? acp.type : "artifact";
       return acPath ? (
         <span>
-          Output ready:{" "}
+          Created:{" "}
           <ClickableFilePath
             path={acPath}
             workspacePath={workspacePath}
@@ -1024,7 +997,7 @@ export function renderEventTitle(
           <span className="event-title-meta"> ({acType})</span>
         </span>
       ) : (
-        `Output ready (${acType})`
+        `Created ${acType}`
       );
     }
     case "diagram_created": {
@@ -1111,14 +1084,8 @@ export function renderEventDetails(
   options?: {
     workspacePath?: string;
     onOpenViewer?: (path: string) => void;
-    onOpenSpreadsheetArtifact?: (path: string) => void;
-    onOpenDocumentArtifact?: (path: string) => void;
-    onOpenPresentationArtifact?: (path: string) => void;
-    onOpenWebArtifact?: (path: string) => void;
     onForkTaskSession?: (event: TaskEvent) => void;
     isLastAssistantMessage?: boolean;
-    events?: TaskEvent[];
-    onViewOutputs?: (taskId: string, primaryOutputPath?: string) => void;
     hideVerificationSteps?: boolean;
     summaryMode?: boolean;
     task?: Task | null;
@@ -1126,18 +1093,11 @@ export function renderEventDetails(
     onOpenAgent?: (taskId: string) => void;
     commandOutputSessions?: CommandOutputSession[];
     renderCommandOutput?: (sessions: CommandOutputSession[]) => React.ReactNode;
-    deferEndOfTaskArtifactCards?: boolean;
   },
 ) {
   const workspacePath = options?.workspacePath;
   const onOpenViewer = options?.onOpenViewer;
-  const onOpenSpreadsheetArtifact = options?.onOpenSpreadsheetArtifact;
-  const onOpenDocumentArtifact = options?.onOpenDocumentArtifact;
-  const onOpenPresentationArtifact = options?.onOpenPresentationArtifact;
-  const onOpenWebArtifact = options?.onOpenWebArtifact;
   const onForkTaskSession = options?.onForkTaskSession;
-  const eventStream = options?.events || [];
-  const onViewOutputs = options?.onViewOutputs;
   const summaryMode = options?.summaryMode === true;
   const taskForEvent =
     options?.task?.id === event.taskId
@@ -1165,78 +1125,6 @@ export function renderEventDetails(
     ) : null;
   const effectiveType = getEffectiveTaskEventType(event);
   const stepCompletionPreviewPath = getStepCompletionPreviewPath(event);
-  const shouldRenderOpenArtifactCard = (artifactPath: string) => {
-    const previewKind = getInlinePreviewKindForGeneratedFile({ path: artifactPath });
-    if (
-      options?.deferEndOfTaskArtifactCards &&
-      previewKind &&
-      END_OF_TASK_ARTIFACT_KINDS.has(previewKind)
-    ) {
-      return false;
-    }
-    return shouldRenderOpenArtifactCardAtEvent({
-      path: artifactPath,
-      event,
-      eventStream,
-    });
-  };
-  const renderLinkedArtifactCards = (text: string) => {
-    if (!workspacePath) return null;
-    const artifactPaths = extractGeneratedArtifactPathsFromText(text).filter((artifactPath) =>
-      shouldRenderOpenArtifactCard(artifactPath),
-    );
-    if (artifactPaths.length === 0) return null;
-
-    return (
-      <div className="assistant-artifact-cards">
-        {artifactPaths.map((artifactPath) => {
-          const previewKind = getInlinePreviewKindForGeneratedFile({ path: artifactPath });
-          if (previewKind === "spreadsheet") {
-            return (
-              <SpreadsheetArtifactCard
-                key={artifactPath}
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
-              />
-            );
-          }
-          if (previewKind === "document") {
-            return (
-              <DocumentArtifactCard
-                key={artifactPath}
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
-              />
-            );
-          }
-          if (previewKind === "presentation") {
-            return (
-              <PresentationArtifactCard
-                key={artifactPath}
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
-              />
-            );
-          }
-          if (previewKind === "html") {
-            return (
-              <WebArtifactCard
-                key={artifactPath}
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenWebArtifact || onOpenViewer}
-              />
-            );
-          }
-          return null;
-        })}
-      </div>
-    );
-  };
-
   if (
     effectiveType === "context_compaction_started" ||
     effectiveType === "context_compaction_completed" ||
@@ -1420,28 +1308,7 @@ export function renderEventDetails(
 
   switch (effectiveType) {
     case "task_completed": {
-      const outputSummary = resolveTaskOutputSummaryFromCompletionEvent(event, eventStream);
-      const isNeedsUserAction = event.payload?.terminalStatus === "needs_user_action";
-      if (!hasTaskOutputs(outputSummary) && !isNeedsUserAction) return null;
-
-      const primaryOutputPath = outputSummary?.primaryOutputPath;
-      const primaryOutputName = primaryOutputPath
-        ? primaryOutputPath.split("/").pop() || primaryOutputPath
-        : "";
-      const primaryOutputIsVideo =
-        typeof primaryOutputPath === "string" && VIDEO_FILE_EXT_RE.test(primaryOutputPath);
-      const primaryOutputIsHtml =
-        typeof primaryOutputPath === "string" && HTML_FILE_EXT_RE.test(primaryOutputPath);
-      const primaryOutputIsPresentation =
-        typeof primaryOutputPath === "string" && PRESENTATION_FILE_EXT_RE.test(primaryOutputPath);
-      const primaryOutputIsSpreadsheet =
-        typeof primaryOutputPath === "string" && SPREADSHEET_FILE_EXT_RE.test(primaryOutputPath);
-      const primaryOutputIsDocument =
-        typeof primaryOutputPath === "string" && isWordDocumentArtifactFile(primaryOutputPath);
-      const latexPair = findLatexPdfPair(eventStream, outputSummary);
-      const outputCount = outputSummary?.outputCount ?? 0;
-      const outputLabel = outputCount === 1 ? `1 output ready` : `${outputCount} outputs ready`;
-
+      if (event.payload?.terminalStatus !== "needs_user_action") return null;
       const pendingChecklist: string[] = Array.isArray(event.payload?.pendingChecklist)
         ? event.payload.pendingChecklist.filter(
             (item: unknown): item is string => typeof item === "string",
@@ -1449,139 +1316,10 @@ export function renderEventDetails(
         : [];
       return (
         <div className="event-details completion-output-card">
-          <div className="completion-output-header">
-            {isNeedsUserAction ? "Action required" : "Output ready"}
+          <div className="completion-output-header">Action required</div>
+          <div className="completion-output-subtitle">
+            Complete the pending verification items to fully close this task.
           </div>
-          {isNeedsUserAction && (
-            <div className="completion-output-subtitle">
-              Complete the pending verification items to fully close this task.
-            </div>
-          )}
-          {hasTaskOutputs(outputSummary) && (
-            <>
-              {latexPair && workspacePath && (
-                <div className="completion-output-preview">
-                  <LatexArtifactWorkbench
-                    sourcePath={latexPair.sourcePath}
-                    pdfPath={latexPair.pdfPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenViewer}
-                  />
-                </div>
-              )}
-              {!latexPair && primaryOutputIsVideo && primaryOutputPath && workspacePath && (
-                <div className="completion-output-preview">
-                  <InlineVideoPreview
-                    filePath={primaryOutputPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenViewer}
-                  />
-                </div>
-              )}
-              {!latexPair &&
-                primaryOutputIsHtml &&
-                primaryOutputPath &&
-                workspacePath &&
-                shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                  <div className="completion-output-preview">
-                    <WebArtifactCard
-                      filePath={primaryOutputPath}
-                      workspacePath={workspacePath}
-                      onOpenViewer={onOpenWebArtifact || onOpenViewer}
-                    />
-                  </div>
-                )}
-              {!latexPair &&
-                primaryOutputIsPresentation &&
-                primaryOutputPath &&
-                workspacePath &&
-                shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                  <div className="completion-output-preview">
-                    <PresentationArtifactCard
-                      filePath={primaryOutputPath}
-                      workspacePath={workspacePath}
-                      onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
-                    />
-                  </div>
-                )}
-              {!latexPair &&
-                primaryOutputIsSpreadsheet &&
-                primaryOutputPath &&
-                workspacePath &&
-                shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                  <div className="completion-output-preview">
-                    <SpreadsheetArtifactCard
-                      filePath={primaryOutputPath}
-                      workspacePath={workspacePath}
-                      onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
-                    />
-                  </div>
-                )}
-              {!latexPair &&
-                primaryOutputIsDocument &&
-                primaryOutputPath &&
-                workspacePath &&
-                shouldRenderOpenArtifactCard(primaryOutputPath) && (
-                  <div className="completion-output-preview">
-                    <DocumentArtifactCard
-                      filePath={primaryOutputPath}
-                      workspacePath={workspacePath}
-                      onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
-                    />
-                  </div>
-                )}
-              <div className="completion-output-subtitle">{outputLabel}</div>
-              {primaryOutputPath && (
-                <div className="completion-output-primary">
-                  Primary file:{" "}
-                  <ClickableFilePath
-                    path={primaryOutputPath}
-                    workspacePath={workspacePath}
-                    onOpenViewer={onOpenViewer}
-                  />
-                  {primaryOutputName && (
-                    <span className="event-title-meta"> ({primaryOutputName})</span>
-                  )}
-                </div>
-              )}
-              <div className="completion-output-actions">
-                <button
-                  className="completion-output-btn"
-                  disabled={!primaryOutputPath}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!primaryOutputPath) return;
-                    void window.electronAPI.openFile(primaryOutputPath, workspacePath);
-                  }}
-                >
-                  Open file
-                </button>
-                <button
-                  className="completion-output-btn secondary"
-                  disabled={!primaryOutputPath}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!primaryOutputPath) return;
-                    void window.electronAPI.showInFinder(primaryOutputPath, workspacePath);
-                  }}
-                >
-                  Show in Finder
-                </button>
-                <button
-                  className="completion-output-btn secondary"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onViewOutputs?.(event.taskId, primaryOutputPath);
-                  }}
-                >
-                  View in Files
-                </button>
-              </div>
-            </>
-          )}
           {pendingChecklist.length > 0 && (
             <ul style={{ marginTop: 8, paddingLeft: 18 }}>
               {pendingChecklist.map((item, idx) => (
@@ -1607,7 +1345,6 @@ export function renderEventDetails(
               </DeferredMarkdown>
             </div>
           )}
-          {renderLinkedArtifactCards(followUpMessage)}
         </div>
       );
     }
@@ -1756,7 +1493,6 @@ export function renderEventDetails(
               taskId={event.taskId}
             />
           </div>
-          {renderLinkedArtifactCards(linkedMessage)}
           <div className="message-actions">
             <MessageSpeakButton text={event.payload.message} voiceEnabled={voiceEnabled} />
             {event.id && onForkTaskSession && options?.isLastAssistantMessage && (
@@ -1979,74 +1715,6 @@ export function renderEventDetails(
         );
       }
 
-      if (
-        fcPreviewKind === "html" &&
-        fcPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fcPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <WebArtifactCard
-              filePath={fcPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenWebArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
-      if (
-        fcPreviewKind === "spreadsheet" &&
-        fcPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fcPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <SpreadsheetArtifactCard
-              filePath={fcPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
-      if (
-        fcPreviewKind === "document" &&
-        fcPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fcPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <DocumentArtifactCard
-              filePath={fcPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
-      if (
-        fcPreviewKind === "presentation" &&
-        fcPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fcPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <PresentationArtifactCard
-              filePath={fcPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
       const fcMimeType =
         typeof fcPayload?.mimeType === "string" ? fcPayload.mimeType.toLowerCase() : "";
       const fcIsMarkdown =
@@ -2187,74 +1855,6 @@ export function renderEventDetails(
         );
       }
 
-      if (
-        fmPreviewKind === "html" &&
-        fmPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fmPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <WebArtifactCard
-              filePath={fmPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenWebArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
-      if (
-        fmPreviewKind === "spreadsheet" &&
-        fmPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fmPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <SpreadsheetArtifactCard
-              filePath={fmPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
-      if (
-        fmPreviewKind === "document" &&
-        fmPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fmPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <DocumentArtifactCard
-              filePath={fmPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
-      if (
-        fmPreviewKind === "presentation" &&
-        fmPath &&
-        workspacePath &&
-        shouldRenderOpenArtifactCard(String(fmPath))
-      ) {
-        return (
-          <div className="event-details event-details-file-preview">
-            <PresentationArtifactCard
-              filePath={fmPath}
-              workspacePath={workspacePath}
-              onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
-            />
-          </div>
-        );
-      }
-
       // Edit diff preview
       if (fmPayload?.type === "edit" && (fmPayload?.oldPreview || fmPayload?.newPreview)) {
         const oldDiffPreview =
@@ -2384,70 +1984,6 @@ export function renderEventDetails(
                 filePath={artifactPath}
                 workspacePath={workspacePath}
                 onOpenViewer={onOpenViewer}
-              />
-            </div>
-          );
-        }
-
-        if (
-          artifactPreviewKind === "html" &&
-          workspacePath &&
-          shouldRenderOpenArtifactCard(artifactPath)
-        ) {
-          return (
-            <div className="event-details event-details-file-preview">
-              <WebArtifactCard
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenWebArtifact || onOpenViewer}
-              />
-            </div>
-          );
-        }
-
-        if (
-          artifactPreviewKind === "spreadsheet" &&
-          workspacePath &&
-          shouldRenderOpenArtifactCard(artifactPath)
-        ) {
-          return (
-            <div className="event-details event-details-file-preview">
-              <SpreadsheetArtifactCard
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenSpreadsheetArtifact || onOpenViewer}
-              />
-            </div>
-          );
-        }
-
-        if (
-          artifactPreviewKind === "document" &&
-          workspacePath &&
-          shouldRenderOpenArtifactCard(artifactPath)
-        ) {
-          return (
-            <div className="event-details event-details-file-preview">
-              <DocumentArtifactCard
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenDocumentArtifact || onOpenViewer}
-              />
-            </div>
-          );
-        }
-
-        if (
-          artifactPreviewKind === "presentation" &&
-          workspacePath &&
-          shouldRenderOpenArtifactCard(artifactPath)
-        ) {
-          return (
-            <div className="event-details event-details-file-preview">
-              <PresentationArtifactCard
-                filePath={artifactPath}
-                workspacePath={workspacePath}
-                onOpenViewer={onOpenPresentationArtifact || onOpenViewer}
               />
             </div>
           );

@@ -6114,6 +6114,79 @@ button.collab-timeline-thought-agent:hover {
   max-width: 100%;
 }
 
+/* One quiet line at the end of a finished turn listing the files it wrote. */
+.turn-outputs {
+  display: flex;
+  font-family: var(--cw-transcript-font, var(--font-ui));
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 4px 0 12px;
+  color: var(--color-text-muted);
+  font-size: var(--cw-transcript-meta-size, 13px);
+  line-height: 1.4;
+}
+
+.turn-outputs-label {
+  flex: 0 0 auto;
+}
+
+.turn-outputs-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.turn-outputs-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.turn-outputs-file:hover,
+.turn-outputs-file:focus-visible {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+}
+
+.turn-outputs-file .clickable-file-path-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.turn-outputs-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-outputs-view-all {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+.turn-outputs-view-all:hover {
+  color: var(--color-text);
+}
+
 .conversation-artifact-stack {
   margin: 4px 0 14px;
 }
@@ -15081,8 +15154,12 @@ html.visual-calm .calm-main .prompt-composer-input[data-has-prediction="true"]:e
   text-underline-offset: 2px;
 }
 
-/* A path written as `code` inside the link takes the chip's color, not a code chip. */
-.chat-message.assistant-message .chat-bubble-content.markdown-content .clickable-file-path code {
+/* A path written as `code` inside the link takes the chip's color, not a code chip.
+   The :not() matches the prose inline-code rule's specificity so this one wins. */
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  .clickable-file-path
+  code:not(.answer-surface *) {
   padding: 0;
   background: none;
   color: inherit;

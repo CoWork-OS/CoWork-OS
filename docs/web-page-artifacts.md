@@ -34,15 +34,7 @@ V1 does not auto-run React, Vite, or Next dev servers. It previews local generat
 
 ## User Experience
 
-When a task creates or updates a web page, the task feed renders a compact artifact card:
-
-- web/browser-style icon
-- filename
-- `Web page · <format>` metadata, for example `Web page · HTML` or `Web page · HTM`
-- primary `Open` button
-- dropdown actions for `Open in browser`, `Open in folder`, and `Copy path`
-
-Clicking the main `Open` action opens previewable local web pages in the right sidebar by default. Generated web rows expand by default so the artifact card is visible without clicking the `Output ready` row first.
+In the transcript, a generated web page is a file reference, not a card. Each finished turn ends with one `Created N files` line (`TurnOutputsRow`) listing the files that turn wrote, and inline code in the answer that names a written file (for example `index.html`) renders as a file chip. Clicking either opens previewable local web pages in the right sidebar. Right-clicking any file reference, or the `…` button on a right-panel Files row, offers `Open with default app`, `Show in Finder` and `Copy path`. The compact `WebArtifactCard` card still appears in the fullscreen viewer's latest-turn context.
 
 The right sidebar can be resized by dragging its left edge. The resized width is shared with the other artifact workbenches and persisted globally, so later artifact opens use the last chosen width while keeping the main task pane above a mobile-sized minimum.
 

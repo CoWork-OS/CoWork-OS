@@ -106,12 +106,13 @@ describe("timeline indicators", () => {
     expect(step.label).toBe("Step cancelled");
   });
 
-  it("maps artifacts to FileOutput success icon", () => {
+  it("maps artifacts to a neutral FileOutput file-created icon", () => {
     const indicator = resolveTimelineIndicator(
       makeEvent("timeline_artifact_emitted", { path: "docs/report.md" }),
     );
     expect(indicator.icon).toBe(FileOutput);
-    expect(indicator.tone).toBe("success");
+    expect(indicator.tone).toBe("neutral");
+    expect(indicator.label).toBe("File created");
   });
 
   it("maps verification failures to Shield warning icon", () => {

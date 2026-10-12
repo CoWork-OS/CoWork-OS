@@ -855,6 +855,33 @@
   color: var(--color-error);
 }
 
+/* Per-file actions (open with another app, Finder, copy path); shown on row hover/focus. */
+.cli-file-more {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.cli-file-item:hover .cli-file-more,
+.cli-file-more:focus-visible {
+  opacity: 1;
+}
+
+.cli-file-more:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
 .cli-file-name {
   flex: 1;
   color: var(--color-text-secondary);

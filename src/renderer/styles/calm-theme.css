@@ -543,6 +543,20 @@ html.visual-calm .calm-welcome .cli-rotating-placeholder {
   transform: none;
 }
 
+/* The rotating placeholder stays while the empty composer has focus: the native caret
+   marks where typing starts, so the placeholder drops its own trailing caret. */
+html.visual-calm .calm-welcome .cli-input.input-textarea-empty-placeholder {
+  caret-color: auto;
+}
+
+html.visual-calm
+  .calm-welcome
+  .mention-autocomplete-wrapper:has(.prompt-composer-input:focus)
+  > .cli-rotating-placeholder {
+  border-right-color: transparent;
+  animation: none;
+}
+
 html.visual-calm .calm-main.calm-welcome .cli-input,
 html.visual-calm .calm-main.calm-welcome .cli-rotating-placeholder,
 html.visual-calm .calm-main.calm-welcome .welcome-input {

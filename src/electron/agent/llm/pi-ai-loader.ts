@@ -33,10 +33,6 @@ export type PiAiModule = {
 };
 
 export type PiAiOAuthModule = {
-  getOAuthApiKey: (
-    providerId: "openai-codex",
-    credentials: Record<string, OAuthCredentials>,
-  ) => Promise<{ newCredentials: OAuthCredentials; apiKey: string } | null>;
   loginOpenAICodex: (callbacks: {
     onAuth: (info: OAuthAuthInfo) => void;
     onPrompt: (prompt: OAuthPrompt) => Promise<string>;
@@ -45,6 +41,29 @@ export type PiAiOAuthModule = {
     originator?: string;
   }) => Promise<OAuthCredentials>;
   refreshOpenAICodexToken: (refreshToken: string) => Promise<OAuthCredentials>;
+};
+
+type PiAiAuthPrompt = {
+  type: "text" | "secret" | "select" | "manual_code";
+  message: string;
+  placeholder?: string;
+  options?: readonly { id: string }[];
+  signal?: AbortSignal;
+};
+
+type PiAiCodexOAuth = {
+  login(
+    interaction: {
+      signal: AbortSignal;
+      prompt(prompt: PiAiAuthPrompt): Promise<string>;
+      notify(event: { type: string; [key: string]: unknown }): void;
+    },
+    options?: { agentName?: string },
+  ): Promise<OAuthCredentials>;
+  refresh(
+    credential: OAuthCredentials & { type: "oauth" },
+    signal: AbortSignal,
+  ): Promise<OAuthCredentials>;
 };
 
 // pi-ai is ESM-only via package exports. Use native import() so the
@@ -58,16 +77,63 @@ let piAiOAuthModulePromise: Promise<PiAiOAuthModule> | null = null;
 
 export function loadPiAiModule(): Promise<PiAiModule> {
   if (!piAiModulePromise) {
-    piAiModulePromise = nativeDynamicImport("@earendil-works/pi-ai") as Promise<PiAiModule>;
+    // pi-ai 1.x moved the global complete()/getModels()/getProviders() API to /compat.
+    piAiModulePromise = nativeDynamicImport("@earendil-works/pi-ai/compat") as Promise<PiAiModule>;
   }
   return piAiModulePromise;
 }
 
 export function loadPiAiOAuthModule(): Promise<PiAiOAuthModule> {
   if (!piAiOAuthModulePromise) {
+    // pi-ai 1.x exposes Codex OAuth only through the provider's auth object.
     piAiOAuthModulePromise = nativeDynamicImport(
-      "@earendil-works/pi-ai/oauth",
-    ) as Promise<PiAiOAuthModule>;
+      "@earendil-works/pi-ai/providers/openai-codex",
+    ).then((mod: { openaiCodexProvider: () => { auth: { oauth?: PiAiCodexOAuth } } }) => {
+      const oauth = mod.openaiCodexProvider().auth.oauth;
+      if (!oauth) throw new Error("pi-ai OpenAI Codex provider has no OAuth support");
+      return createCodexOAuthAdapter(oauth);
+    });
   }
   return piAiOAuthModulePromise;
+}
+
+function createCodexOAuthAdapter(oauth: PiAiCodexOAuth): PiAiOAuthModule {
+  return {
+    loginOpenAICodex: (callbacks) =>
+      oauth.login(
+        {
+          signal: new AbortController().signal,
+          prompt: async (prompt) => {
+            if (prompt.type === "select") return "browser";
+            if (prompt.type === "manual_code") {
+              if (callbacks.onManualCodeInput) return callbacks.onManualCodeInput();
+              // No manual entry: wait for the localhost callback, which aborts this prompt.
+              return new Promise<string>((_resolve, reject) => {
+                prompt.signal?.addEventListener("abort", () => reject(new Error("cancelled")), {
+                  once: true,
+                });
+              });
+            }
+            return callbacks.onPrompt({ message: prompt.message, placeholder: prompt.placeholder });
+          },
+          notify: (event) => {
+            if (event.type === "auth_url") {
+              callbacks.onAuth({
+                url: String(event.url),
+                instructions:
+                  typeof event.instructions === "string" ? event.instructions : undefined,
+              });
+            } else if (typeof event.message === "string") {
+              callbacks.onProgress?.(event.message);
+            }
+          },
+        },
+        { agentName: callbacks.originator },
+      ),
+    refreshOpenAICodexToken: (refreshToken) =>
+      oauth.refresh(
+        { type: "oauth", refresh: refreshToken, access: "", expires: 0 },
+        new AbortController().signal,
+      ),
+  };
 }

@@ -8112,7 +8112,7 @@ export function App() {
         <NotificationPanel
           placement="sidebar"
           onNotificationClick={handleNotificationClick}
-          attention={attentionSnapshot.items}
+          attention={attentionSnapshot.fromQueue ? attentionSnapshot.items : undefined}
           onAttentionClick={handleAttentionClick}
           onOpenToday={handleClearTaskView}
         />
@@ -8343,7 +8343,7 @@ export function App() {
           {showTitleBarNotifications && (
             <NotificationPanel
               onNotificationClick={handleNotificationClick}
-              attention={attentionSnapshot.items}
+              attention={attentionSnapshot.fromQueue ? attentionSnapshot.items : undefined}
               onAttentionClick={handleAttentionClick}
               onOpenToday={handleClearTaskView}
             />

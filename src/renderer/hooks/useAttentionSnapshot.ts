@@ -29,9 +29,15 @@ export interface AttentionSnapshotState {
   items: AttentionItem[];
   /** Sources the last load could not read; their items are missing, not resolved. */
   failedSources: AttentionSourceName[];
+  /**
+   * Whether the items came from the shared queue. Hosts without it (the browser host, for
+   * now) get suggestions and commitments only, so surfaces that would replace their own
+   * "needs you" with the queue's keep their own there.
+   */
+  fromQueue: boolean;
 }
 
-const EMPTY: AttentionSnapshotState = { items: [], failedSources: [] };
+const EMPTY: AttentionSnapshotState = { items: [], failedSources: [], fromQueue: false };
 
 /**
  * Hosts without the shared queue (the browser host, for now) still get suggestions and
@@ -70,7 +76,11 @@ async function loadWithoutQueue(): Promise<AttentionSnapshotState> {
       failedSources.push("commitments");
       return [];
     });
-  return { items: rankAttention([...suggestions, ...commitments]), failedSources };
+  return {
+    items: rankAttention([...suggestions, ...commitments]),
+    failedSources,
+    fromQueue: false,
+  };
 }
 
 async function loadAttention(): Promise<AttentionSnapshotState> {
@@ -78,6 +88,7 @@ async function loadAttention(): Promise<AttentionSnapshotState> {
   if (typeof api.listAttention !== "function") return loadWithoutQueue();
   const snapshot = await api.listAttention();
   return {
+    fromQueue: true,
     items: Array.isArray(snapshot?.items) ? snapshot.items : [],
     failedSources: Array.isArray(snapshot?.failedSources) ? snapshot.failedSources : [],
   };

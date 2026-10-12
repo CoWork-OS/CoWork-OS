@@ -10245,6 +10245,162 @@ function MainContentComponent({
     ? `Hi ${agentContext.userName}, how can I help?`
     : agentContext.getMessage("welcomeSubtitle");
 
+  // The welcome composer's "More options" menu. Calm places it right after the access
+  // shield; other themes keep it later in the left action group.
+  const renderWelcomeOverflowMenu = () => (
+    <div className="overflow-menu-container" ref={overflowMenuRef}>
+      <button
+        ref={overflowToggleBtnRef}
+        className={`overflow-menu-btn ${showOverflowMenu ? "active" : ""}`}
+        onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+        onKeyDown={handleOverflowButtonKeyDown}
+        title="More options"
+        aria-label="More options"
+        aria-haspopup="menu"
+        aria-expanded={showOverflowMenu}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <circle cx="12" cy="12" r="1" />
+          <circle cx="19" cy="12" r="1" />
+          <circle cx="5" cy="12" r="1" />
+        </svg>
+      </button>
+      {showOverflowMenu && (
+        <div
+          className="overflow-menu-dropdown"
+          role="menu"
+          aria-label="More options"
+          onKeyDown={handleOverflowMenuKeyDown}
+        >
+          <div className="overflow-menu-item" role="none">
+            <button
+              className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
+              style={{ margin: 0 }}
+              onClick={() => {
+                setOverflowSubmenu(null);
+                setAutonomousModeSelection(!autonomousModeEnabled);
+              }}
+              data-tooltip="Runs without asking for approval"
+              role="menuitemcheckbox"
+              aria-checked={autonomousModeEnabled}
+              data-overflow-menu-item
+            >
+              <span className="goal-mode-toggle-switch-content">
+                <span className="goal-mode-toggle-text">
+                  <span className="goal-mode-label">Autonomous</span>
+                </span>
+                <span
+                  className={`goal-mode-switch-track ${autonomousModeEnabled ? "on" : ""}`}
+                  aria-hidden="true"
+                >
+                  <span className="goal-mode-switch-thumb" />
+                </span>
+              </span>
+            </button>
+          </div>
+          <div className="overflow-menu-item" role="none">
+            <button
+              className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
+              style={{ margin: 0 }}
+              onClick={() => {
+                setOverflowSubmenu(null);
+                setClarifyingCheckinsEnabled(!clarifyingCheckinsEnabled);
+              }}
+              data-tooltip="Allow optional clarification pauses during this task"
+              role="menuitemcheckbox"
+              aria-checked={clarifyingCheckinsEnabled}
+              disabled={autonomousModeEnabled}
+              data-overflow-menu-item
+            >
+              <span className="goal-mode-toggle-switch-content">
+                <span className="goal-mode-toggle-text">
+                  <span className="goal-mode-label">Check-ins</span>
+                </span>
+                <span
+                  className={`goal-mode-switch-track ${clarifyingCheckinsEnabled ? "on" : ""}`}
+                  aria-hidden="true"
+                >
+                  <span className="goal-mode-switch-thumb" />
+                </span>
+              </span>
+            </button>
+          </div>
+          <div className="overflow-menu-item" role="none">
+            <button
+              className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
+              style={{ margin: 0 }}
+              onClick={() => {
+                setOverflowSubmenu(null);
+                setCollaborativeModeSelection(!collaborativeModeEnabled);
+              }}
+              data-tooltip="Multiple agents share perspectives"
+              role="menuitemcheckbox"
+              aria-checked={collaborativeModeEnabled}
+              data-overflow-menu-item
+            >
+              <span className="goal-mode-toggle-switch-content">
+                <span className="goal-mode-toggle-text">
+                  <span className="goal-mode-label">Collab</span>
+                </span>
+                <span
+                  className={`goal-mode-switch-track ${collaborativeModeEnabled ? "on" : ""}`}
+                  aria-hidden="true"
+                >
+                  <span className="goal-mode-switch-thumb" />
+                </span>
+              </span>
+            </button>
+          </div>
+          {renderWelcomeTaskDomainRow()}
+          <div className="overflow-menu-item" role="none">
+            <button
+              className="goal-mode-toggle menu-tooltip-target"
+              style={{ margin: 0 }}
+              onClick={() => {
+                setOverflowSubmenu(null);
+                setVerificationAgentEnabled(!verificationAgentEnabled);
+              }}
+              data-tooltip="Double-checks results before finishing"
+              role="menuitemcheckbox"
+              aria-checked={verificationAgentEnabled}
+              data-overflow-menu-item
+            >
+              <span className="goal-mode-label">
+                Verify {verificationAgentEnabled ? "ON" : "OFF"}
+              </span>
+            </button>
+          </div>
+          <div className="overflow-menu-item" role="none">
+            <button
+              className="goal-mode-toggle menu-tooltip-target"
+              style={{ margin: 0 }}
+              onClick={() => {
+                setOverflowSubmenu(null);
+                setChronicleEnabledForTask(!chronicleEnabledForTask);
+              }}
+              data-tooltip="Allow Chronicle screen context for this task"
+              role="menuitemcheckbox"
+              aria-checked={chronicleEnabledForTask}
+              data-overflow-menu-item
+            >
+              <span className="goal-mode-label">
+                Chronicle {chronicleEnabledForTask ? "ON" : "OFF"}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+      {showOverflowMenu && renderWelcomeOverflowSubmenu()}
+    </div>
+  );
+
   // Three starters and one way into the full gallery; the gallery replaces the old
   // inline "…" expansion and the separate "See how people use" link.
   const renderCalmSuggestionChips = () => (
@@ -10671,50 +10827,23 @@ function MainContentComponent({
                   >
                     <Plus size={24} aria-hidden="true" />
                   </button>
-                  {/* Calm groups the composer by role: what the task works on (files,
-                      folder, options) on the left; how it runs (mode, access, model)
-                      on the right. */}
+                  {/* Calm keeps the task controls (mode, access, options) together on the
+                      left; the right side holds only model, voice and send. */}
                   {isCalm && (
-                    <div
-                      className="workspace-dropdown-container calm-composer-folder"
-                      ref={workspaceDropdownRef}
-                    >
-                      <button
-                        type="button"
-                        className="calm-folder-button"
-                        onClick={handleWorkspaceDropdownToggle}
-                        aria-haspopup="menu"
-                        aria-expanded={showWorkspaceDropdown}
-                        title={
-                          isBrowserHost
-                            ? workspace?.name || "Select project"
-                            : getWorkspaceStatusFolderLabel(workspace)
-                        }
-                      >
-                        <FolderIcon size={15} />
-                        <span className="calm-folder-label">
-                          {isBrowserHost
-                            ? workspace?.name || "Select project"
-                            : getWorkspaceStatusFolderLabel(workspace)}
-                        </span>
-                        <ChevronDown size={12} aria-hidden="true" />
-                      </button>
-                      {showWorkspaceDropdown && (
-                        <WorkspaceDropdownMenu
-                          workspaces={workspacesList}
-                          currentWorkspaceId={workspace?.id}
-                          onSelect={handleWorkspaceSelect}
-                          onSelectNewFolder={handleSelectNewFolder}
-                          onUseTempWorkspace={
-                            canSwitchToTempWorkspace
-                              ? () => void handleUseTempWorkspace()
-                              : undefined
-                          }
-                          onRemove={handleWorkspaceRemove}
-                          onClose={() => setShowWorkspaceDropdown(false)}
-                        />
+                    <>
+                      <CalmModeToggle
+                        selection={displayedInteractionMode}
+                        onChange={setInteractionMode}
+                      />
+                      {isBrowserHost ? (
+                        <div ref={calmAccessMenuRef}>
+                          <CalmAccessMenu access={calmAccess} placement="up" />
+                        </div>
+                      ) : (
+                        <CalmAccessMenu access={calmAccess} placement="up" />
                       )}
-                    </div>
+                      {renderWelcomeOverflowMenu()}
+                    </>
                   )}
                   <div className="permission-dropdown-container" ref={permissionDropdownRef}>
                     <button
@@ -10880,163 +11009,7 @@ function MainContentComponent({
                           )}
                         </div>
                       )}
-                      <div className="overflow-menu-container" ref={overflowMenuRef}>
-                        <button
-                          ref={overflowToggleBtnRef}
-                          className={`overflow-menu-btn ${showOverflowMenu ? "active" : ""}`}
-                          onClick={() => setShowOverflowMenu(!showOverflowMenu)}
-                          onKeyDown={handleOverflowButtonKeyDown}
-                          title="More options"
-                          aria-label="More options"
-                          aria-haspopup="menu"
-                          aria-expanded={showOverflowMenu}
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                          >
-                            <circle cx="12" cy="12" r="1" />
-                            <circle cx="19" cy="12" r="1" />
-                            <circle cx="5" cy="12" r="1" />
-                          </svg>
-                        </button>
-                        {showOverflowMenu && (
-                          <div
-                            className="overflow-menu-dropdown"
-                            role="menu"
-                            aria-label="More options"
-                            onKeyDown={handleOverflowMenuKeyDown}
-                          >
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  setOverflowSubmenu(null);
-                                  setAutonomousModeSelection(!autonomousModeEnabled);
-                                }}
-                                data-tooltip="Runs without asking for approval"
-                                role="menuitemcheckbox"
-                                aria-checked={autonomousModeEnabled}
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-toggle-switch-content">
-                                  <span className="goal-mode-toggle-text">
-                                    <span className="goal-mode-label">Autonomous</span>
-                                  </span>
-                                  <span
-                                    className={`goal-mode-switch-track ${
-                                      autonomousModeEnabled ? "on" : ""
-                                    }`}
-                                    aria-hidden="true"
-                                  >
-                                    <span className="goal-mode-switch-thumb" />
-                                  </span>
-                                </span>
-                              </button>
-                            </div>
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  setOverflowSubmenu(null);
-                                  setClarifyingCheckinsEnabled(!clarifyingCheckinsEnabled);
-                                }}
-                                data-tooltip="Allow optional clarification pauses during this task"
-                                role="menuitemcheckbox"
-                                aria-checked={clarifyingCheckinsEnabled}
-                                disabled={autonomousModeEnabled}
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-toggle-switch-content">
-                                  <span className="goal-mode-toggle-text">
-                                    <span className="goal-mode-label">Check-ins</span>
-                                  </span>
-                                  <span
-                                    className={`goal-mode-switch-track ${
-                                      clarifyingCheckinsEnabled ? "on" : ""
-                                    }`}
-                                    aria-hidden="true"
-                                  >
-                                    <span className="goal-mode-switch-thumb" />
-                                  </span>
-                                </span>
-                              </button>
-                            </div>
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle goal-mode-toggle-switch-row menu-tooltip-target"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  setOverflowSubmenu(null);
-                                  setCollaborativeModeSelection(!collaborativeModeEnabled);
-                                }}
-                                data-tooltip="Multiple agents share perspectives"
-                                role="menuitemcheckbox"
-                                aria-checked={collaborativeModeEnabled}
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-toggle-switch-content">
-                                  <span className="goal-mode-toggle-text">
-                                    <span className="goal-mode-label">Collab</span>
-                                  </span>
-                                  <span
-                                    className={`goal-mode-switch-track ${
-                                      collaborativeModeEnabled ? "on" : ""
-                                    }`}
-                                    aria-hidden="true"
-                                  >
-                                    <span className="goal-mode-switch-thumb" />
-                                  </span>
-                                </span>
-                              </button>
-                            </div>
-                            {renderWelcomeTaskDomainRow()}
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle menu-tooltip-target"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  setOverflowSubmenu(null);
-                                  setVerificationAgentEnabled(!verificationAgentEnabled);
-                                }}
-                                data-tooltip="Double-checks results before finishing"
-                                role="menuitemcheckbox"
-                                aria-checked={verificationAgentEnabled}
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-label">
-                                  Verify {verificationAgentEnabled ? "ON" : "OFF"}
-                                </span>
-                              </button>
-                            </div>
-                            <div className="overflow-menu-item" role="none">
-                              <button
-                                className="goal-mode-toggle menu-tooltip-target"
-                                style={{ margin: 0 }}
-                                onClick={() => {
-                                  setOverflowSubmenu(null);
-                                  setChronicleEnabledForTask(!chronicleEnabledForTask);
-                                }}
-                                data-tooltip="Allow Chronicle screen context for this task"
-                                role="menuitemcheckbox"
-                                aria-checked={chronicleEnabledForTask}
-                                data-overflow-menu-item
-                              >
-                                <span className="goal-mode-label">
-                                  Chronicle {chronicleEnabledForTask ? "ON" : "OFF"}
-                                </span>
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        {showOverflowMenu && renderWelcomeOverflowSubmenu()}
-                      </div>
+                      {!isCalm && renderWelcomeOverflowMenu()}
                       <ModelDropdown
                         models={availableModels}
                         selectedModel={selectedModel}
@@ -11050,21 +11023,6 @@ function MainContentComponent({
                   )}
                 </div>
                 <div className="input-right-actions">
-                  {isCalm && (
-                    <>
-                      <CalmModeToggle
-                        selection={displayedInteractionMode}
-                        onChange={setInteractionMode}
-                      />
-                      {isBrowserHost ? (
-                        <div ref={calmAccessMenuRef}>
-                          <CalmAccessMenu access={calmAccess} placement="up" />
-                        </div>
-                      ) : (
-                        <CalmAccessMenu access={calmAccess} placement="up" />
-                      )}
-                    </>
-                  )}
                   {uiDensity === "focused" ? (
                     <>
                       {(collaborativeModeEnabled || clarifyingCheckinsEnabled) && (
@@ -11310,6 +11268,50 @@ function MainContentComponent({
                 </div>
               </div>
             </div>
+            {/* Calm keeps the folder picker under the composer, where it sat before the
+                Calm home redesign. */}
+            {isCalm && (
+              <div className="calm-below-composer">
+                <div
+                  className="workspace-dropdown-container calm-below-folder"
+                  ref={workspaceDropdownRef}
+                >
+                  <button
+                    type="button"
+                    className="calm-folder-button"
+                    onClick={handleWorkspaceDropdownToggle}
+                    aria-haspopup="menu"
+                    aria-expanded={showWorkspaceDropdown}
+                    title={
+                      isBrowserHost
+                        ? workspace?.name || "Select project"
+                        : getWorkspaceStatusFolderLabel(workspace)
+                    }
+                  >
+                    <FolderIcon size={15} />
+                    <span className="calm-folder-label">
+                      {isBrowserHost
+                        ? workspace?.name || "Select project"
+                        : getWorkspaceStatusFolderLabel(workspace)}
+                    </span>
+                    <ChevronDown size={12} aria-hidden="true" />
+                  </button>
+                  {showWorkspaceDropdown && (
+                    <WorkspaceDropdownMenu
+                      workspaces={workspacesList}
+                      currentWorkspaceId={workspace?.id}
+                      onSelect={handleWorkspaceSelect}
+                      onSelectNewFolder={handleSelectNewFolder}
+                      onUseTempWorkspace={
+                        canSwitchToTempWorkspace ? () => void handleUseTempWorkspace() : undefined
+                      }
+                      onRemove={handleWorkspaceRemove}
+                      onClose={() => setShowWorkspaceDropdown(false)}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
             {uiDensity === "focused" && !isCalm && (
               <div className="input-status-text welcome-input-status">
                 <div className="input-status-left">

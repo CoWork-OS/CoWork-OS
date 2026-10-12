@@ -34,7 +34,7 @@ describe("Composer styles", () => {
     const source = readFileSync(stylesPath, "utf8");
 
     expect(source).toMatch(
-      /\.mention-autocomplete-wrapper:has\(\.prompt-composer-input:not\(:empty\)\)\s*>\s*\.cli-rotating-placeholder,\s*\.mention-autocomplete-wrapper:has\(\.prompt-composer-input:not\(:empty\)\)\s*~\s*\.cli-cursor\s*\{[^}]*display:\s*none;[^}]*animation:\s*none;/s,
+      /\.mention-autocomplete-wrapper:has\(\.prompt-composer-input:not\(:empty, \.input-whitespace-only\)\)\s*>\s*\.cli-rotating-placeholder,\s*\.mention-autocomplete-wrapper:has\(\.prompt-composer-input:not\(:empty, \.input-whitespace-only\)\)\s*~\s*\.cli-cursor\s*\{[^}]*display:\s*none;[^}]*animation:\s*none;/s,
     );
   });
 

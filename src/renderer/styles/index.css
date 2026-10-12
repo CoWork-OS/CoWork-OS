@@ -22883,9 +22883,13 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
 
 /* Native paste can briefly populate the contentEditable before React receives
  * the corresponding state update. Remove both animated caret surfaces as soon
- * as real editor content is present. */
-.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty)) > .cli-rotating-placeholder,
-.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty)) ~ .cli-cursor {
+ * as real editor content is present. A composer holding only whitespace (say, a
+ * restored draft that is one line break) is marked .input-whitespace-only and
+ * keeps its placeholder. */
+.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty, .input-whitespace-only))
+  > .cli-rotating-placeholder,
+.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty, .input-whitespace-only))
+  ~ .cli-cursor {
   display: none;
   animation: none;
 }

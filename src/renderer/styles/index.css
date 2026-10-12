@@ -20175,7 +20175,8 @@ a,
   font-family: var(--font-ui);
 }
 
-.density-focused .chat-bubble-content p {
+/* Answer surfaces space their own blocks; prose margins would stack on their gaps. */
+.density-focused .chat-bubble-content p:not(.answer-surface *) {
   margin-bottom: 8px;
 }
 

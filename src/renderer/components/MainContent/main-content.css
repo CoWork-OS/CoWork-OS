@@ -12997,7 +12997,7 @@ button.collab-timeline-thought-agent:hover {
   margin-bottom: 0;
 }
 
-.chat-message.assistant-message .chat-bubble-content p {
+.chat-message.assistant-message .chat-bubble-content p:not(.answer-surface *) {
   margin: 0 0 14px;
 }
 
@@ -14897,87 +14897,114 @@ html.visual-calm .calm-main .prompt-composer-input[data-has-prediction="true"]:e
    size and leading, airier paragraph/list rhythm, body-scale headings, and
    neutral inline code chips (accent stays reserved for links). Bot replies
    drop their bordered bubble so they read as prose, like the main transcript.
+   Element rules skip answer surfaces (cowork-ui cards), which space their own
+   blocks with gaps and would otherwise inherit stacked prose margins.
    ========================================================================== */
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content {
+.chat-message.assistant-message .chat-bubble-content.markdown-content:not(.answer-surface *) {
   --cw-prose-code-bg: color-mix(in srgb, var(--color-text) 6%, transparent);
   --cw-prose-marker: color-mix(in srgb, var(--color-text) 45%, transparent);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", var(--font-ui);
-  font-size: 15px;
+  font-family: var(--cw-transcript-font);
+  font-size: var(--cw-transcript-body-size);
   line-height: 1.68;
   letter-spacing: -0.003em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content p {
+.chat-message.assistant-message .chat-bubble-content.markdown-content p:not(.answer-surface *) {
   margin: 0 0 14px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content :is(ul, ol) {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  :is(ul, ol):not(.answer-surface *) {
   margin: 6px 0 16px;
   padding-left: 24px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content ul {
+.chat-message.assistant-message .chat-bubble-content.markdown-content ul:not(.answer-surface *) {
   list-style: disc outside;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content li {
+.chat-message.assistant-message .chat-bubble-content.markdown-content li:not(.answer-surface *) {
   position: static;
   margin: 0 0 6px;
   padding-left: 4px;
 }
 
 /* Native markers replace the visual-oblivion drawn dot, which sat too large and heavy. */
-.chat-message.assistant-message .chat-bubble-content.markdown-content ul > li::before {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  ul
+  > li:not(.answer-surface *)::before {
   content: none;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content li::marker {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  li:not(.answer-surface *)::marker {
   color: var(--cw-prose-marker);
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content ol > li::marker {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  ol
+  > li:not(.answer-surface *)::marker {
   font-variant-numeric: tabular-nums;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content li > :is(ul, ol) {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  li
+  > :is(ul, ol):not(.answer-surface *) {
   margin: 6px 0 4px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content li > p {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  li
+  > p:not(.answer-surface *) {
   margin-bottom: 6px;
 }
 
 /* Headings stay close to body size so a reply reads as prose, not a document. */
-.chat-message.assistant-message .chat-bubble-content.markdown-content :is(h1, h2, h3, h4, h5, h6) {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  :is(h1, h2, h3, h4, h5, h6):not(.answer-surface *) {
   color: var(--color-text);
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.35;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content h1 {
+.chat-message.assistant-message .chat-bubble-content.markdown-content h1:not(.answer-surface *) {
   font-size: 1.25em;
   margin: 26px 0 10px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content h2 {
+.chat-message.assistant-message .chat-bubble-content.markdown-content h2:not(.answer-surface *) {
   font-size: 1.12em;
   margin: 24px 0 8px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content :is(h3, h4, h5, h6) {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  :is(h3, h4, h5, h6):not(.answer-surface *) {
   font-size: 1em;
   margin: 20px 0 6px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content strong {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  strong:not(.answer-surface *) {
   font-weight: 600;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content :not(pre) > code {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  :not(pre)
+  > code:not(.answer-surface *) {
   padding: 0.12em 0.4em;
   border-radius: 5px;
   background: var(--cw-prose-code-bg);
@@ -14986,11 +15013,13 @@ html.visual-calm .calm-main .prompt-composer-input[data-has-prediction="true"]:e
   overflow-wrap: anywhere;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content pre {
+.chat-message.assistant-message .chat-bubble-content.markdown-content pre:not(.answer-surface *) {
   margin: 10px 0 16px;
 }
 
-.chat-message.assistant-message .chat-bubble-content.markdown-content blockquote {
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  blockquote:not(.answer-surface *) {
   margin: 10px 0 16px;
   border-left: 2px solid var(--color-border);
   padding-left: 14px;
@@ -15051,4 +15080,43 @@ html.visual-calm .calm-main .prompt-composer-input[data-has-prediction="true"]:e
   background: none;
   color: inherit;
   font-size: 0.9em;
+}
+
+/* ==========================================================================
+   Transcript type scale
+   User turns, assistant prose and agent activity share one family. User and
+   assistant text share the body size; activity rows and the turn header sit
+   one step below, with durations and counts one step below that.
+   ========================================================================== */
+
+:root {
+  --cw-transcript-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", var(--font-ui);
+  --cw-transcript-body-size: 15px;
+  --cw-transcript-activity-size: 14px;
+  --cw-transcript-meta-size: 13px;
+}
+
+/* Outranks the generic 13px `.chat-message.user-message .chat-bubble` rule. */
+.chat-message.user-message .chat-bubble.user-bubble,
+.chat-message.user-message .quoted-follow-up-reply {
+  font-family: var(--cw-transcript-font);
+  font-size: var(--cw-transcript-body-size);
+  line-height: 1.6;
+  font-variation-settings: normal;
+  letter-spacing: -0.003em;
+}
+
+.turn-header-label,
+.action-block-header,
+.action-block-minimal-label,
+.action-block-summary,
+.action-block-last-step-label {
+  font-family: var(--cw-transcript-font);
+  font-size: var(--cw-transcript-activity-size);
+}
+
+.action-block-meta {
+  font-family: var(--cw-transcript-font);
+  font-size: var(--cw-transcript-meta-size);
 }

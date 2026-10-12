@@ -363,10 +363,15 @@
   box-shadow: none;
 }
 
+/* The chip centers on the heading block, so a lone title sits level with it. */
 .answer-surface .as-card-header-icon {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
+}
+
+.answer-surface .as-card-header-icon .as-card-title {
+  margin-top: 0;
 }
 
 .answer-surface .as-card-header-icon .as-icon-chip {
@@ -411,6 +416,11 @@
   font-size: 1.08em;
   font-weight: 650;
   letter-spacing: -0.005em;
+}
+
+/* A heading belongs to the block under it, so it sits closer to it than to the one above. */
+.answer-surface .as-stack > .as-heading + * {
+  margin-top: -6px;
 }
 
 .answer-surface .as-heading-small {

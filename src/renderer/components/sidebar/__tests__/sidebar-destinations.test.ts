@@ -35,6 +35,7 @@ describe("getActiveSidebarDestination", () => {
     expect(getActiveSidebarDestination("main", "sessions")).toBe("home");
     expect(getActiveSidebarDestination("home", "sessions")).toBe("home");
     expect(getActiveSidebarDestination("work", "sessions")).toBe("work");
+    expect(getActiveSidebarDestination("team", "sessions")).toBe("team");
     expect(getActiveSidebarDestination("inboxAgent", "sessions")).toBe("inbox");
     expect(getActiveSidebarDestination("agents", "sessions")).toBe("agents");
     expect(getActiveSidebarDestination("missionControl", "sessions")).toBe("missionControl");
@@ -56,7 +57,7 @@ describe("getSidebarRailLayout", () => {
     expect(ids(desktop.more)).toEqual(["devices", "missionControl", "addTools"]);
 
     const calm = getSidebarRailLayout({ isCalm: true, isBrowserHost: false }, []);
-    expect(ids(calm.rail).slice(0, 2)).toEqual(["home", "work"]);
+    expect(ids(calm.rail).slice(0, 3)).toEqual(["home", "work", "team"]);
     expect(ids(calm.rail)).toContain("library");
     expect(ids(calm.more)).toContain("build");
   });
@@ -95,9 +96,10 @@ describe("rail shortcuts and reordering", () => {
     ]);
     const targets = getSidebarRailShortcutTargets(layout);
     expect(targets).toHaveLength(9);
-    expect(ids(targets).slice(0, 7)).toEqual([
+    expect(ids(targets).slice(0, 8)).toEqual([
       "home",
       "work",
+      "team",
       "inbox",
       "agents",
       "automations",
@@ -133,6 +135,7 @@ describe("rail shortcuts and reordering", () => {
       isCustomSidebarRailOrder({ isCalm: true, isBrowserHost: false }, [
         "home",
         "work",
+        "team",
         "inbox",
         "agents",
         "automations",
@@ -145,7 +148,7 @@ describe("rail shortcuts and reordering", () => {
       [],
       ["home", "inbox", "agents", "automations", "library"],
     );
-    expect(ids(saved.rail).at(-1)).toBe("work");
+    expect(ids(saved.rail).slice(-2)).toEqual(["work", "team"]);
   });
 
   it("shifts an item one place and stops at the ends", () => {

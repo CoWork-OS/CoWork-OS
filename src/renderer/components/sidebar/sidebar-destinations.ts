@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import {
+  ContactRound,
   GitBranch,
   Hammer,
   House,
@@ -17,6 +18,7 @@ import { hasHostCapability, hasHostMethods } from "../../host/browser-capabiliti
 export type SidebarDestinationId =
   | "home"
   | "work"
+  | "team"
   | "inbox"
   | "agents"
   | "automations"
@@ -61,6 +63,15 @@ export const SIDEBAR_DESTINATIONS: readonly SidebarDestination[] = [
     icon: Layers,
     placement: "rail",
     views: ["work"],
+    isVisible: calmOnly,
+  },
+  {
+    // Agents, schedules, automations and devices as teammates; Calm only, like Work.
+    id: "team",
+    label: "Team",
+    icon: ContactRound,
+    placement: "rail",
+    views: ["team"],
     isVisible: calmOnly,
   },
   {

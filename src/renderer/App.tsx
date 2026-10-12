@@ -307,6 +307,9 @@ const HomeDashboard = lazy(() =>
 const WorkView = lazy(() =>
   import("./components/work/WorkView").then((module) => ({ default: module.WorkView })),
 );
+const TeamView = lazy(() =>
+  import("./components/team/TeamView").then((module) => ({ default: module.TeamView })),
+);
 const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
 const DevicesPanel = lazy(() =>
   import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
@@ -737,6 +740,7 @@ function appendSidebarTaskPage(tasks: Task[], page: Task[]): Task[] {
 type AppView =
   | "home"
   | "work"
+  | "team"
   | "automations"
   | "main"
   | "settings"
@@ -753,6 +757,7 @@ const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
   "main",
   "home",
   "work",
+  "team",
   "automations",
   "devices",
   "inboxAgent",
@@ -7643,6 +7648,9 @@ export function App() {
         case "work":
           setCurrentView("work");
           return;
+        case "team":
+          setCurrentView("team");
+          return;
         case "inbox":
           setCurrentView("inboxAgent");
           return;
@@ -8665,6 +8673,24 @@ export function App() {
                   onTasksChanged={refreshTaskLists}
                   hasMoreTasks={hasMoreTasks}
                   onLoadMoreTasks={loadMoreTasks}
+                />
+              ) : currentView === "team" ? (
+                <TeamView
+                  tasks={tasks}
+                  onOpenTask={(taskId) => {
+                    void selectTaskAfterDraftFlush(taskId);
+                    setCurrentView("main");
+                  }}
+                  onOpenBots={() => setCurrentView("agents")}
+                  onOpenSchedules={() => {
+                    setSettingsTab("scheduled");
+                    setCurrentView("settings");
+                  }}
+                  onOpenRoutine={(routineId) => {
+                    setFocusAutomationRoutineId(routineId);
+                    setCurrentView("automations");
+                  }}
+                  onOpenDevices={() => setCurrentView("devices")}
                 />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />

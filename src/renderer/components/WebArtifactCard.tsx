@@ -1,3 +1,5 @@
+import { usePositionUpdates } from "../hooks/usePositionUpdates";
+import { getFloatingPosition, type FloatingPosition } from "../utils/floating-position";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Clipboard, ExternalLink, FolderOpen } from "lucide-react";
@@ -15,7 +17,7 @@ function getFileName(filePath: string): string {
 
 export function WebArtifactCard({ filePath, workspacePath, onOpenViewer }: WebArtifactCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [menuPosition, setMenuPosition] = useState<FloatingPosition | null>(null);
   const actionsRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const fileName = getFileName(filePath);
@@ -33,30 +35,29 @@ export function WebArtifactCard({ filePath, workspacePath, onOpenViewer }: WebAr
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [menuOpen]);
 
-  useEffect(() => {
-    if (!menuOpen) {
-      setMenuPosition(null);
-      return;
-    }
-    const updateMenuPosition = () => {
+  usePositionUpdates(
+    menuOpen,
+    () => {
       const rect = actionsRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const menuWidth = 240;
-      const viewportPadding = 12;
-      const left = Math.min(
-        Math.max(viewportPadding, rect.right - menuWidth),
-        window.innerWidth - menuWidth - viewportPadding,
+      const next = getFloatingPosition(
+        rect,
+        { width: 240, height: menuRef.current?.getBoundingClientRect().height || 200 },
+        { width: window.innerWidth, height: window.innerHeight },
       );
-      setMenuPosition({ top: rect.bottom + 8, left });
-    };
-    updateMenuPosition();
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-    return () => {
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [menuOpen]);
+      setMenuPosition((current) =>
+        current &&
+        current.top === next.top &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.maxHeight === next.maxHeight
+          ? current
+          : next,
+      );
+    },
+    actionsRef,
+    menuRef,
+  );
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -154,6 +155,9 @@ export function WebArtifactCard({ filePath, workspacePath, onOpenViewer }: WebAr
               top: menuPosition.top,
               left: menuPosition.left,
               right: "auto",
+              width: menuPosition.width,
+              maxHeight: menuPosition.maxHeight,
+              overflowY: "auto",
             }}
           >
             <button type="button" role="menuitem" onClick={handleOpenBrowser}>

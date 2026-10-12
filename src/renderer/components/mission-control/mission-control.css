@@ -2365,7 +2365,7 @@ button.mc-v2-ops-row-main:hover .mc-v2-ops-row-title {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--layer-modal);
 }
 
 .mc-v2-editor-modal {

@@ -7,7 +7,7 @@
 .image-lightbox {
   position: fixed;
   inset: 0;
-  z-index: 10020;
+  z-index: var(--layer-lightbox);
   display: flex;
   flex-direction: column;
   background: rgba(8, 8, 10, 0.88);

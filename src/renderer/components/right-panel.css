@@ -1299,7 +1299,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--layer-modal);
   backdrop-filter: blur(4px);
 }
 
@@ -1599,7 +1599,7 @@ button {
 .session-approval-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2100;
+  z-index: var(--layer-modal-raised);
   padding: 16px;
   box-sizing: border-box;
   display: flex;
@@ -2119,7 +2119,7 @@ button {
 
 /* Approve-all warning: same card chrome, stacked above other session modals */
 .session-approval-overlay--warning-layer {
-  z-index: 2200;
+  z-index: var(--layer-modal-warning);
 }
 
 .session-approval-btn-danger-primary {

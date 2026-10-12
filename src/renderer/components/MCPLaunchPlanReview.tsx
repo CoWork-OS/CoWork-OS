@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 export interface MCPLaunchPlan {
   entryId: string;
   name: string;
@@ -37,7 +38,8 @@ export function MCPLaunchPlanReview({
 
   return (
     <div className="mcp-modal-overlay" onClick={onCancel}>
-      <div
+      <ModalDialog
+        onClose={onCancel}
         className="mcp-modal registry-details-modal"
         role="dialog"
         aria-modal="true"
@@ -121,7 +123,7 @@ export function MCPLaunchPlanReview({
             </button>
           </div>
         </div>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

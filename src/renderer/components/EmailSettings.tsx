@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useCallback } from "react";
 import { ChannelData } from "../../shared/types";
 import {
@@ -896,7 +897,12 @@ function EmailProviderModal({
 
   return (
     <div className="mcp-modal-overlay" onClick={onClose}>
-      <div className="mcp-modal email-provider-modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog
+        onClose={onClose}
+        aria-label="Email provider settings"
+        className="mcp-modal email-provider-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mcp-modal-header">
           <div className="email-modal-header-content">
             <div className="email-modal-header-icon">{def.icon}</div>
@@ -1223,7 +1229,7 @@ function EmailProviderModal({
             {saving ? "Adding..." : "Add Email"}
           </button>
         </div>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

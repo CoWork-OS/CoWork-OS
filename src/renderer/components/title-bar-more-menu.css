@@ -16,7 +16,7 @@
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 1100;
+  z-index: var(--layer-popover);
   display: flex;
   flex-direction: column;
   gap: 2px;

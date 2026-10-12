@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useRef } from "react";
 import { CustomSkill, SkillParameter } from "../../shared/types";
 
@@ -90,24 +91,6 @@ export function SkillParameterModal({
     setValues(initialValues);
     setTouched({});
   }, [skill]);
-
-  // Focus first input on mount
-  useEffect(() => {
-    setTimeout(() => {
-      firstInputRef.current?.focus();
-    }, 100);
-  }, []);
-
-  // Handle escape key
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onCancel();
-      }
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [onCancel]);
 
   const handleChange = (name: string, value: string | number | boolean) => {
     setTouched((prev) => ({ ...prev, [name]: true }));
@@ -210,7 +193,12 @@ export function SkillParameterModal({
 
   return (
     <div className="skill-param-modal-overlay" onClick={onCancel}>
-      <div className="skill-param-modal" onClick={(e) => e.stopPropagation()}>
+      <ModalDialog
+        onClose={onCancel}
+        aria-label={`${skill.name} parameters`}
+        className="skill-param-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="skill-param-modal-header">
           <span className="skill-param-modal-icon">{skill.icon}</span>
           <div className="skill-param-modal-title">
@@ -251,7 +239,7 @@ export function SkillParameterModal({
             </button>
           </div>
         </form>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

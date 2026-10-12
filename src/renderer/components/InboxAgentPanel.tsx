@@ -1,3 +1,9 @@
+import {
+  InboxManualCompose,
+  splitMailboxRecipients,
+  type ManualComposeDraft,
+  type ManualComposeMode,
+} from "./InboxManualCompose";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -63,6 +69,7 @@ import {
 import type { AgentRoleData } from "../../electron/preload";
 import type { Company } from "../../shared/types";
 import { GOOGLE_SCOPE_GMAIL_MODIFY, hasScope } from "../../shared/google-workspace";
+import { useInboxRequests } from "../hooks/useInboxRequests";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import {
   computeEmailFitScale,
@@ -118,7 +125,6 @@ function latestMailboxAskStepEvents(events: MailboxAskRunEvent[]): MailboxAskRun
 type FocusFilter = "unread" | "needsReply" | "queue" | "commitments" | null;
 type ThreadMailboxView = MailboxThreadMailboxView;
 type DomainFilter = MailboxDomainCategory | "all" | "work";
-type ManualComposeMode = "reply" | "reply_all" | "forward";
 type AskInboxRun = {
   runId: string;
   query: string;
@@ -323,13 +329,6 @@ function isShortMailboxThread(messages: MailboxThreadDetail["messages"]): boolea
   if (!text) return false;
   const nonEmptyLines = text.split("\n").filter((line) => line.trim().length > 0);
   return text.length <= 280 && nonEmptyLines.length <= 4;
-}
-
-function splitMailboxRecipients(value: string): string[] {
-  return value
-    .split(/[,\n;]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 }
 
 function prefixMailboxSubject(subject: string, prefix: "Re:" | "Fwd:"): string {
@@ -763,7 +762,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [threads, setThreads] = useState<MailboxThreadListItem[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [selectedThreadIds, setSelectedThreadIds] = useState<string[]>([]);
-  const [selectedThread, setSelectedThread] = useState<MailboxThreadDetail | null>(null);
+  const [threadDetail, setSelectedThread] = useState<MailboxThreadDetail | null>(null);
+  const selectedThread = threadDetail?.id === selectedThreadId ? threadDetail : null;
   const [query, setQuery] = useState("");
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [category, setCategory] = useState<
@@ -822,12 +822,9 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [editableDraftId, setEditableDraftId] = useState<string | null>(null);
   const [editableDraftSubject, setEditableDraftSubject] = useState("");
   const [editableDraftBody, setEditableDraftBody] = useState("");
-  const [manualComposeMode, setManualComposeMode] = useState<ManualComposeMode | null>(null);
-  const [manualComposeTo, setManualComposeTo] = useState("");
-  const [manualComposeCc, setManualComposeCc] = useState("");
-  const [manualComposeBcc, setManualComposeBcc] = useState("");
-  const [manualComposeSubject, setManualComposeSubject] = useState("");
-  const [manualComposeBody, setManualComposeBody] = useState("");
+  const [manualCompose, setManualCompose] = useState<ManualComposeDraft | null>(null);
+  const [manualComposeVersion, setManualComposeVersion] = useState(0);
+  const manualComposeMode = manualCompose?.mode;
   const [classificationWarningAcknowledged, setClassificationWarningAcknowledged] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -856,6 +853,27 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const [snippetModalOpen, setSnippetModalOpen] = useState(false);
   const [snippetShortcutDraft, setSnippetShortcutDraft] = useState("");
   const [snippetBodyDraft, setSnippetBodyDraft] = useState("");
+  const requests = useInboxRequests();
+  const filtersRef = useRef({
+    query,
+    category,
+    focusFilter,
+    threadSortOrder,
+    mailboxView,
+    selectedAccountId,
+    domainFilter,
+  });
+  filtersRef.current = {
+    query,
+    category,
+    focusFilter,
+    threadSortOrder,
+    mailboxView,
+    selectedAccountId,
+    domainFilter,
+  };
+  const handoffPanelOpenRef = useRef(handoffPanelOpen);
+  handoffPanelOpenRef.current = handoffPanelOpen;
   const autoSyncInFlightRef = useRef(false);
   const autoMarkReadInFlightRef = useRef<Set<string>>(new Set());
   const unreadFilterRetainedThreadRef = useRef<MailboxThreadListItem | null>(null);
@@ -888,67 +906,100 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   };
 
   const loadSnippets = async () => {
+    const isCurrent = requests.capture("loadSnippets");
     const snip = await window.electronAPI.listMailboxSnippets().catch(() => []);
+    if (!isCurrent()) return;
     setSnippets(snip);
   };
 
   const loadStatus = async () => {
+    const isCurrent = requests.capture("loadStatus");
     const [next, clientState] = await Promise.all([
       window.electronAPI.getMailboxSyncStatus(),
       window.electronAPI.getMailboxClientState().catch(() => null),
     ]);
+    if (!isCurrent()) return;
     setStatus(next);
     setMailboxClientState(clientState);
   };
 
   const loadMissionControlOptions = async () => {
+    const isCurrent = requests.capture("loadMissionControlOptions");
     const [nextCompanies, nextRoles] = await Promise.all([
       window.electronAPI.listCompanies().catch(() => []),
       window.electronAPI.getAgentRoles(true).catch(() => []),
     ]);
+    if (!isCurrent()) return;
     setCompanies(nextCompanies);
     setAgentRoles(nextRoles);
   };
 
   const loadDigest = async () => {
+    const isCurrent = requests.capture("loadDigest");
     const [next, today, senders] = await Promise.all([
       window.electronAPI.getMailboxDigest().catch(() => null),
       window.electronAPI.getMailboxTodayDigest({ limitPerBucket: 8 }).catch(() => null),
       window.electronAPI.getMailboxSenderCleanupDigest({ limit: 6 }).catch(() => null),
     ]);
+    if (!isCurrent()) return;
     setDigest(next);
     setTodayDigest(today);
     setSenderCleanupDigest(senders);
   };
 
   const loadAutomations = async (threadId?: string) => {
+    const isCurrent = requests.capture("loadAutomations");
     const next = await window.electronAPI
       .listMailboxAutomations({
         threadId,
       })
       .catch(() => []);
+    if (!isCurrent()) return;
     setAutomations(next);
   };
 
   const loadThreads = async (opts?: {
     accountId?: string | undefined;
     query?: string;
-    category?: string;
+    category?: typeof category;
     domainFilter?: DomainFilter;
     mailboxView?: ThreadMailboxView | undefined;
     focusFilter?: FocusFilter | undefined;
     sortBy?: ThreadSortOrder | undefined;
   }) => {
+    const currentFilters = filtersRef.current;
     const hasFocusFilter = opts && Object.prototype.hasOwnProperty.call(opts, "focusFilter");
-    const nextFocus = hasFocusFilter ? (opts?.focusFilter ?? null) : focusFilter;
+    const nextFocus = hasFocusFilter ? (opts?.focusFilter ?? null) : currentFilters.focusFilter;
     const hasMailboxView = opts && Object.prototype.hasOwnProperty.call(opts, "mailboxView");
-    const nextMailboxView = hasMailboxView ? (opts?.mailboxView ?? mailboxView) : mailboxView;
+    const nextMailboxView = hasMailboxView
+      ? (opts?.mailboxView ?? currentFilters.mailboxView)
+      : currentFilters.mailboxView;
     const hasSortBy = opts && Object.prototype.hasOwnProperty.call(opts, "sortBy");
-    const nextSort = hasSortBy ? (opts?.sortBy ?? threadSortOrder) : threadSortOrder;
+    const nextSort = hasSortBy
+      ? (opts?.sortBy ?? currentFilters.threadSortOrder)
+      : currentFilters.threadSortOrder;
     const hasAccountId = opts && Object.prototype.hasOwnProperty.call(opts, "accountId");
-    const nextAccountId = hasAccountId ? (opts?.accountId ?? selectedAccountId) : selectedAccountId;
+    const nextAccountId = hasAccountId
+      ? (opts?.accountId ?? currentFilters.selectedAccountId)
+      : currentFilters.selectedAccountId;
     const hasDomainFilter = opts && Object.prototype.hasOwnProperty.call(opts, "domainFilter");
-    const nextDomainFilter = hasDomainFilter ? (opts?.domainFilter ?? domainFilter) : domainFilter;
+    const nextDomainFilter = hasDomainFilter
+      ? (opts?.domainFilter ?? currentFilters.domainFilter)
+      : currentFilters.domainFilter;
+    const expectedFilters = {
+      query: opts?.query ?? currentFilters.query,
+      category: opts?.category ?? currentFilters.category,
+      focusFilter: nextFocus,
+      threadSortOrder: nextSort,
+      mailboxView: nextMailboxView,
+      selectedAccountId: nextAccountId,
+      domainFilter: nextDomainFilter,
+    };
+    const filterKey = JSON.stringify(expectedFilters);
+    const isCurrent = requests.capture(
+      "threads",
+      () => JSON.stringify(filtersRef.current) === filterKey,
+    );
     const workDomains: MailboxDomainCategory[] = [
       "customer",
       "hiring",
@@ -958,8 +1009,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     ];
     const list = await window.electronAPI.listMailboxThreads({
       accountId: nextAccountId !== ALL_MAILBOX_ACCOUNTS_FILTER ? nextAccountId : undefined,
-      query: opts?.query ?? query,
-      category: (opts?.category as Any) ?? category,
+      query: expectedFilters.query,
+      category: expectedFilters.category,
       domainCategory:
         nextDomainFilter !== "all" && nextDomainFilter !== "work" ? nextDomainFilter : undefined,
       mailboxView: nextMailboxView,
@@ -970,6 +1021,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       sortBy: nextSort,
       limit: 40,
     });
+    if (!isCurrent()) return;
     const filteredList =
       nextDomainFilter === "work"
         ? list.filter((thread) => workDomains.includes(thread.domainCategory))
@@ -995,15 +1047,25 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   };
 
   const loadThread = async (threadId: string) => {
-    const detail = await window.electronAPI.getMailboxThread(threadId);
-    setSelectedThread(detail);
+    const isCurrent = requests.capture("thread", () => selectedThreadIdRef.current === threadId);
+    try {
+      const detail = await window.electronAPI.getMailboxThread(threadId);
+      if (isCurrent()) setSelectedThread(detail);
+    } catch (cause) {
+      if (isCurrent()) setError(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   const loadHandoffContext = async (threadId: string) => {
+    const isCurrent = requests.capture(
+      "handoff",
+      () => selectedThreadIdRef.current === threadId && handoffPanelOpenRef.current,
+    );
     const [preview, records] = await Promise.all([
       window.electronAPI.previewMailboxMissionControlHandoff(threadId).catch(() => null),
       window.electronAPI.listMailboxMissionControlHandoffs(threadId).catch(() => []),
     ]);
+    if (!isCurrent()) return;
     setHandoffPreview(preview);
     setHandoffRecords(records);
     if (preview) {
@@ -1032,12 +1094,12 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       loadStatus(),
       loadDigest(),
       loadThreads(),
-      loadAutomations(threadId || selectedThreadId || undefined),
+      loadAutomations(threadId || selectedThreadIdRef.current || undefined),
     ]);
-    const nextId = threadId || selectedThreadId;
+    const nextId = selectedThreadIdRef.current;
     if (nextId) {
       await loadThread(nextId);
-      if (handoffPanelOpen) {
+      if (handoffPanelOpenRef.current) {
         await loadHandoffContext(nextId);
       }
     }
@@ -1270,13 +1332,32 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     });
   };
 
+  const refreshRef = useRef({
+    loadStatus,
+    loadDigest,
+    loadThreads,
+    loadThread,
+    loadAutomations,
+    loadHandoffContext,
+  });
+  refreshRef.current = {
+    loadStatus,
+    loadDigest,
+    loadThreads,
+    loadThread,
+    loadAutomations,
+    loadHandoffContext,
+  };
+
   useEffect(() => {
+    const isCurrent = requests.capture("initialize");
     void (async () => {
       setBusy(true);
       try {
         const googleSettings = await window.electronAPI
           .getGoogleWorkspaceSettings()
           .catch(() => null);
+        if (!isCurrent()) return;
         setGoogleWorkspaceEnabled(Boolean(googleSettings?.enabled));
         setGoogleWorkspaceConfigured(
           Boolean(
@@ -1286,13 +1367,20 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
         );
         setGoogleWorkspaceScopes(googleSettings?.scopes ?? null);
         await loadMissionControlOptions();
+        if (!isCurrent()) return;
         await loadStatus();
+        if (!isCurrent()) return;
         const nextStatus = await window.electronAPI.getMailboxSyncStatus();
+        if (!isCurrent()) return;
         setStatus(nextStatus);
         await loadDigest();
+        if (!isCurrent()) return;
         await loadSnippets();
+        if (!isCurrent()) return;
         await loadThreads();
+        if (!isCurrent()) return;
         await loadAutomations();
+        if (!isCurrent()) return;
         const shouldAutoSync =
           nextStatus.connected &&
           !nextStatus.syncInFlight &&
@@ -1303,15 +1391,19 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           void syncMailboxInBackground();
         }
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : String(nextError));
+        if (isCurrent())
+          setError(nextError instanceof Error ? nextError.message : String(nextError));
       } finally {
-        setBusy(false);
+        if (isCurrent()) setBusy(false);
       }
     })();
   }, []);
 
   useEffect(() => {
-    if (!selectedThreadId) return;
+    if (!selectedThreadId) {
+      setSelectedThread(null);
+      return;
+    }
     cancelCommitmentEdit();
     setReplyChannelType(null);
     setReplyTargetHandleId(null);
@@ -1430,6 +1522,8 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
     focusFilter,
     threadSortOrder,
     selectedAccountId,
+    handoffPanelOpen,
+    companies,
   ]);
 
   useEffect(() => {
@@ -1676,8 +1770,10 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
   const syncMailboxInBackground = async () => {
     if (autoSyncInFlightRef.current) return;
     autoSyncInFlightRef.current = true;
+    const isCurrent = requests.capture("backgroundSync");
     try {
       const currentStatus = await window.electronAPI.getMailboxSyncStatus();
+      if (!isCurrent()) return;
       setStatus(currentStatus);
       if (!currentStatus.connected || currentStatus.syncInFlight) return;
       const stale =
@@ -1685,14 +1781,17 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
         Date.now() - currentStatus.lastSyncedAt >= MAILBOX_AUTO_SYNC_INTERVAL_MS;
       if (!stale) return;
       await window.electronAPI.syncMailbox(MAILBOX_AUTO_SYNC_LIMIT, "auto");
-      await Promise.all([loadStatus(), loadDigest(), loadThreads()]);
-      const nextId = selectedThreadId;
+      if (!isCurrent()) return;
+      const refresh = refreshRef.current;
+      await Promise.all([refresh.loadStatus(), refresh.loadDigest(), refresh.loadThreads()]);
+      if (!isCurrent()) return;
+      const nextId = selectedThreadIdRef.current;
       if (nextId) {
-        await loadThread(nextId);
+        await refreshRef.current.loadThread(nextId);
       }
     } catch {
       // Background sync should never interrupt inbox work. Manual sync still reports errors.
-      await loadStatus().catch(() => undefined);
+      if (isCurrent()) await refreshRef.current.loadStatus().catch(() => undefined);
     } finally {
       autoSyncInFlightRef.current = false;
     }
@@ -1900,6 +1999,7 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
       setError(selectedThreadCapabilityReason);
       return;
     }
+    const draft: ManualComposeDraft = { mode, to: "", cc: "", bcc: "", subject: "", body: "" };
     const latestIncoming =
       [...selectedThread.messages].reverse().find((message) => message.direction === "incoming") ||
       selectedThread.messages[selectedThread.messages.length - 1];
@@ -1929,48 +2029,39 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
           );
         });
       }
-      setManualComposeTo(Array.from(recipientMap.values()).join(", "));
-      setManualComposeCc(Array.from(ccMap.values()).join(", "));
-      setManualComposeBody("");
-      setManualComposeSubject(prefixMailboxSubject(selectedThread.subject, "Re:"));
+      draft.to = Array.from(recipientMap.values()).join(", ");
+      draft.cc = Array.from(ccMap.values()).join(", ");
+      draft.body = "";
+      draft.subject = prefixMailboxSubject(selectedThread.subject, "Re:");
     } else {
       const source = latestIncoming || selectedThread.messages[selectedThread.messages.length - 1];
-      setManualComposeTo("");
-      setManualComposeCc("");
-      setManualComposeBody(
-        source
-          ? `\n\n---------- Forwarded message ---------\nFrom: ${source.from?.name || source.from?.email || "Unknown"}${source.from?.email && source.from?.name ? ` <${source.from.email}>` : ""}\nDate: ${formatFullTime(source.receivedAt)}\nSubject: ${source.subject || selectedThread.subject}\n\n${source.body}`
-          : "",
-      );
-      setManualComposeSubject(prefixMailboxSubject(selectedThread.subject, "Fwd:"));
+      draft.to = "";
+      draft.cc = "";
+      draft.body = source
+        ? `\n\n---------- Forwarded message ---------\nFrom: ${source.from?.name || source.from?.email || "Unknown"}${source.from?.email && source.from?.name ? ` <${source.from.email}>` : ""}\nDate: ${formatFullTime(source.receivedAt)}\nSubject: ${source.subject || selectedThread.subject}\n\n${source.body}`
+        : "";
+      draft.subject = prefixMailboxSubject(selectedThread.subject, "Fwd:");
     }
-    setManualComposeMode(mode);
-    setManualComposeBcc("");
+    setManualCompose(draft);
+    setManualComposeVersion((current) => current + 1);
   };
 
-  const closeManualCompose = () => {
-    setManualComposeMode(null);
-    setManualComposeTo("");
-    setManualComposeCc("");
-    setManualComposeBcc("");
-    setManualComposeSubject("");
-    setManualComposeBody("");
-  };
+  const closeManualCompose = () => setManualCompose(null);
 
-  const sendManualCompose = async () => {
+  const sendManualCompose = async (draft: ManualComposeDraft) => {
     if (!selectedThread || !manualComposeMode) return;
     await runAction(async () => {
       await window.electronAPI.applyMailboxAction({
         threadId: selectedThread.id,
         type: "send_message",
-        messageMode: manualComposeMode,
-        messageTo: splitMailboxRecipients(manualComposeTo),
-        messageCc: splitMailboxRecipients(manualComposeCc),
-        messageBcc: splitMailboxRecipients(manualComposeBcc),
-        messageSubject: manualComposeSubject.trim(),
-        messageBody: manualComposeBody,
+        messageMode: draft.mode,
+        messageTo: splitMailboxRecipients(draft.to),
+        messageCc: splitMailboxRecipients(draft.cc),
+        messageBcc: splitMailboxRecipients(draft.bcc),
+        messageSubject: draft.subject.trim(),
+        messageBody: draft.body,
       });
-      const mode = manualComposeMode;
+      const mode = draft.mode;
       closeManualCompose();
       if (mode !== "forward") {
         setSelectedThread((current) =>
@@ -3845,98 +3936,15 @@ export function InboxAgentPanel(props: InboxAgentPanelProps = {}) {
                   </div>
                 )}
 
-                {manualComposeMode && (
-                  <div className="ibx-compose">
-                    <div className="ibx-compose-head">
-                      <div className="ibx-segmented" role="group" aria-label="Compose mode">
-                        {(["reply", "reply_all", "forward"] as ManualComposeMode[]).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            aria-pressed={manualComposeMode === mode}
-                            onClick={() => openManualCompose(mode)}
-                          >
-                            {mode === "reply_all"
-                              ? "Reply all"
-                              : mode === "forward"
-                                ? "Forward"
-                                : "Reply"}
-                          </button>
-                        ))}
-                      </div>
-                      <IconBtn
-                        onClick={closeManualCompose}
-                        icon={<X size={14} />}
-                        title="Close"
-                        disabled={busy}
-                      />
-                    </div>
-                    <label className="ibx-compose-field">
-                      <span>To</span>
-                      <input
-                        aria-label="To"
-                        value={manualComposeTo}
-                        onChange={(event) => setManualComposeTo(event.target.value)}
-                      />
-                    </label>
-                    <div className="ibx-compose-split">
-                      <label className="ibx-compose-field">
-                        <span>Cc</span>
-                        <input
-                          aria-label="Cc"
-                          value={manualComposeCc}
-                          onChange={(event) => setManualComposeCc(event.target.value)}
-                        />
-                      </label>
-                      <label className="ibx-compose-field">
-                        <span>Bcc</span>
-                        <input
-                          aria-label="Bcc"
-                          value={manualComposeBcc}
-                          onChange={(event) => setManualComposeBcc(event.target.value)}
-                        />
-                      </label>
-                    </div>
-                    <label className="ibx-compose-field">
-                      <span>Subject</span>
-                      <input
-                        aria-label="Subject"
-                        value={manualComposeSubject}
-                        onChange={(event) => setManualComposeSubject(event.target.value)}
-                      />
-                    </label>
-                    <textarea
-                      aria-label="Message"
-                      placeholder="Write your message…"
-                      className={manualComposeMode === "forward" ? "is-tall" : undefined}
-                      value={manualComposeBody}
-                      onChange={(event) => setManualComposeBody(event.target.value)}
-                    />
-                    <div className="ibx-compose-foot">
-                      <div className="ibx-compose-foot-actions">
-                        <ActionBtn
-                          onClick={closeManualCompose}
-                          label="Cancel"
-                          variant="ghost"
-                          disabled={busy}
-                        />
-                        <ActionBtn
-                          onClick={() => void sendManualCompose()}
-                          icon={<Send size={13} />}
-                          label={manualComposeMode === "forward" ? "Forward" : "Send"}
-                          variant="primary"
-                          disabled={
-                            busy ||
-                            !manualComposeBody.trim() ||
-                            splitMailboxRecipients(manualComposeTo).length +
-                              splitMailboxRecipients(manualComposeCc).length +
-                              splitMailboxRecipients(manualComposeBcc).length ===
-                              0
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
+                {manualCompose && (
+                  <InboxManualCompose
+                    key={manualComposeVersion}
+                    initialDraft={manualCompose}
+                    busy={busy}
+                    onModeChange={openManualCompose}
+                    onClose={closeManualCompose}
+                    onSend={(draft) => void sendManualCompose(draft)}
+                  />
                 )}
 
                 {activeGeneratedDraft && (

@@ -1,3 +1,4 @@
+import { usePositionUpdates } from "../../hooks/usePositionUpdates";
 import { useComposerPrediction } from "../../hooks/useComposerPredictions";
 import { predictionRevision } from "../../../shared/composer-predictions";
 import { useFullAccessConfirmation } from "../FullAccessConfirmationDialog";
@@ -7331,10 +7332,9 @@ function MainContentComponent({
 
   // Keep the empty focused cursor attached to the editable area instead of
   // relying on theme-specific padding and prompt-width constants.
-  useLayoutEffect(() => {
-    if (!showCliEmptyCursor) return;
-
-    const updateEmptyCursor = () => {
+  usePositionUpdates(
+    showCliEmptyCursor,
+    () => {
       const inputAreaEl = mentionContainerRef.current;
       const wrapperEl = cliInputWrapperRef.current;
       if (!inputAreaEl || !wrapperEl) return;
@@ -7342,12 +7342,10 @@ function MainContentComponent({
       const inputAreaRect = inputAreaEl.getBoundingClientRect();
       const wrapperRect = wrapperEl.getBoundingClientRect();
       setCursorLeft(inputAreaRect.left - wrapperRect.left);
-    };
-
-    updateEmptyCursor();
-    window.addEventListener("resize", updateEmptyCursor);
-    return () => window.removeEventListener("resize", updateEmptyCursor);
-  }, [showCliEmptyCursor]);
+    },
+    mentionContainerRef,
+    cliInputWrapperRef,
+  );
 
   // Check if user is near the bottom of the scroll container
   const isNearBottom = useCallback((element: HTMLElement, threshold = 100) => {

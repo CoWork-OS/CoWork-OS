@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -178,19 +179,6 @@ export function TaskPauseBanner({
     setPendingAction(null);
   }, [reasonCode, displayMessage]);
 
-  useEffect(() => {
-    if (!showDetails) return undefined;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setShowDetails(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showDetails]);
-
   const runBannerAction = async (
     action: "switch_access_profile" | "continue_without_commands",
     handler?: (() => void | Promise<void>) | undefined,
@@ -279,7 +267,8 @@ export function TaskPauseBanner({
         preview.showDetails &&
         createPortal(
           <div className="modal-overlay" onClick={() => setShowDetails(false)}>
-            <div
+            <ModalDialog
+              onClose={() => setShowDetails(false)}
               className="modal task-pause-details-modal"
               onClick={(event) => event.stopPropagation()}
               role="dialog"
@@ -303,7 +292,7 @@ export function TaskPauseBanner({
                   markdownComponents={markdownComponents}
                 />
               </div>
-            </div>
+            </ModalDialog>
           </div>,
           document.body,
         )}

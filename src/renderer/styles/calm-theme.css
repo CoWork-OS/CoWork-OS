@@ -2236,7 +2236,7 @@ html.visual-calm .calm-popover.calm-popover-up {
   bottom: calc(100% + 8px);
   left: 0;
   right: auto;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   transform-origin: bottom left;
 }
 

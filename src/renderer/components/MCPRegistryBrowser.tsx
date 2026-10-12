@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useRef } from "react";
 import { invokeMcpApi } from "../host/browser-mcp-bridge";
 import { MCPLaunchPlanReview } from "./MCPLaunchPlanReview";
@@ -288,9 +289,14 @@ export function MCPRegistryBrowser({
 
               <div className="registry-server-tags">
                 {entry.tags.slice(0, 5).map((tag) => (
-                  <span key={tag} className="registry-tag" onClick={() => setSelectedTags([tag])}>
+                  <button
+                    type="button"
+                    key={tag}
+                    className="registry-tag"
+                    onClick={() => setSelectedTags([tag])}
+                  >
                     {tag}
-                  </span>
+                  </button>
                 ))}
               </div>
 
@@ -343,7 +349,12 @@ export function MCPRegistryBrowser({
       {/* Details modal */}
       {viewingDetails && (
         <div className="mcp-modal-overlay" onClick={() => setViewingDetails(null)}>
-          <div className="mcp-modal registry-details-modal" onClick={(e) => e.stopPropagation()}>
+          <ModalDialog
+            onClose={() => setViewingDetails(null)}
+            aria-label="MCP server details"
+            className="mcp-modal registry-details-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mcp-modal-header">
               <div className="registry-details-title">
                 <h3>{viewingDetails.name}</h3>
@@ -471,7 +482,7 @@ export function MCPRegistryBrowser({
                 )}
               </div>
             </div>
-          </div>
+          </ModalDialog>
         </div>
       )}
 

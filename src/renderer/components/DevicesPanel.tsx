@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { InteractionModePicker } from "./MainContent/InteractionModePicker";
 import type { InteractionModeSelection } from "../../shared/interaction-mode";
@@ -1965,7 +1966,12 @@ function ModalShell({
 }) {
   return (
     <div className="devices-onboarding-overlay" onClick={onClose}>
-      <div className="devices-remote-modal" onClick={(event) => event.stopPropagation()}>
+      <ModalDialog
+        onClose={onClose}
+        aria-label={title}
+        className="devices-remote-modal"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="devices-remote-header">
           <div>
             <h2>{title}</h2>
@@ -1976,7 +1982,7 @@ function ModalShell({
           </button>
         </div>
         {children}
-      </div>
+      </ModalDialog>
     </div>
   );
 }
@@ -2342,7 +2348,12 @@ function DeviceDetailsDrawer({
   const { device } = summary;
   return (
     <div className="dp-drawer-overlay" onClick={onClose}>
-      <aside className="dp-drawer" onClick={(event) => event.stopPropagation()}>
+      <ModalDialog
+        onClose={onClose}
+        aria-label={`${device.name} details`}
+        className="dp-drawer"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="dp-drawer-header">
           <div>
             <span className="dp-support-eyebrow">Device details</span>
@@ -2433,7 +2444,7 @@ function DeviceDetailsDrawer({
             </div>
           </div>
         </div>
-      </aside>
+      </ModalDialog>
     </div>
   );
 }

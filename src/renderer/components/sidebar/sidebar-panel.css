@@ -584,7 +584,7 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 .task-item-menu.sidebar-session-menu {
   position: fixed;
   right: auto;
-  z-index: 1000;
+  z-index: var(--layer-popover);
   width: 220px;
   margin: 0;
 }

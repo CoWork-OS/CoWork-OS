@@ -1,3 +1,4 @@
+import { ModalDialog } from "./ModalDialog";
 import { useState, useEffect, useCallback } from "react";
 import { Folder, File, ChevronRight, ArrowLeft, Loader2 } from "lucide-react";
 
@@ -102,7 +103,8 @@ export function RemoteFilePicker({
 
   return (
     <div className="remote-file-picker-overlay" onClick={onCancel}>
-      <div
+      <ModalDialog
+        onClose={onCancel}
         className="remote-file-picker"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -236,7 +238,7 @@ export function RemoteFilePicker({
             </button>
           </div>
         </div>
-      </div>
+      </ModalDialog>
     </div>
   );
 }

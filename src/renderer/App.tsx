@@ -307,6 +307,9 @@ const HomeDashboard = lazy(() =>
 const WorkView = lazy(() =>
   import("./components/work/WorkView").then((module) => ({ default: module.WorkView })),
 );
+const TeamView = lazy(() =>
+  import("./components/team/TeamView").then((module) => ({ default: module.TeamView })),
+);
 const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
 const DevicesPanel = lazy(() =>
   import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
@@ -737,6 +740,7 @@ function appendSidebarTaskPage(tasks: Task[], page: Task[]): Task[] {
 type AppView =
   | "home"
   | "work"
+  | "team"
   | "automations"
   | "main"
   | "settings"
@@ -753,6 +757,7 @@ const SIDEBAR_SHELL_VIEWS: ReadonlySet<AppView> = new Set<AppView>([
   "main",
   "home",
   "work",
+  "team",
   "automations",
   "devices",
   "inboxAgent",
@@ -3136,6 +3141,20 @@ export function App() {
   const isBrowserHost =
     typeof window !== "undefined" &&
     (window as Window & { coworkBrowserHost?: boolean }).coworkBrowserHost === true;
+  // Which rail destinations exist depends on the theme (Calm folds Devices into Team).
+  const sidebarDestinationContext = useMemo(
+    () => ({ isCalm: visualTheme === "calm", isBrowserHost }),
+    [visualTheme, isBrowserHost],
+  );
+  // What Team asked the Devices view to open on: a device, or the pairing step. Read when
+  // the view mounts and cleared once the user leaves it, so a later visit starts fresh.
+  const [devicesFocus, setDevicesFocus] = useState<{
+    deviceId?: string;
+    pairing?: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (currentView !== "devices") setDevicesFocus(null);
+  }, [currentView]);
   const [browserProviderReady, setBrowserProviderReady] = useState(
     () => !isBrowserHost || window.coworkBrowserHostInfo?.providerReady === true,
   );
@@ -7656,6 +7675,9 @@ export function App() {
         case "work":
           setCurrentView("work");
           return;
+        case "team":
+          setCurrentView("team");
+          return;
         case "inbox":
           setCurrentView("inboxAgent");
           return;
@@ -7707,7 +7729,11 @@ export function App() {
   // menu read the same everywhere.
   const sidebarRail = (
     <SidebarRail
-      activeId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+      activeId={getActiveSidebarDestination(
+        currentView,
+        sidebarPanelTab,
+        sidebarDestinationContext,
+      )}
       settingsActive={currentView === "settings"}
       onNavigate={handleSidebarNavigate}
       onOpenSettings={handleSidebarRailOpenSettings}
@@ -8452,7 +8478,11 @@ export function App() {
                 botConversationProjections={botConversationProjections}
                 activeTab={sidebarPanelTab}
                 headerAccessory={sidebarNotificationBell}
-                activeDestinationId={getActiveSidebarDestination(currentView, sidebarPanelTab)}
+                activeDestinationId={getActiveSidebarDestination(
+                  currentView,
+                  sidebarPanelTab,
+                  sidebarDestinationContext,
+                )}
                 onNavigate={handleSidebarNavigate}
                 isDevicesActive={currentView === "devices"}
                 isLoadingSessions={isInitialTaskListLoading}
@@ -8543,6 +8573,8 @@ export function App() {
                 />
               ) : currentView === "devices" ? (
                 <DevicesPanel
+                  initialDeviceId={devicesFocus?.deviceId}
+                  openPairing={devicesFocus?.pairing === true}
                   onOpenTask={(taskId, remote) => {
                     if (remote) {
                       void openRemoteTaskView(taskId, remote);
@@ -8678,6 +8710,31 @@ export function App() {
                   onTasksChanged={refreshTaskLists}
                   hasMoreTasks={hasMoreTasks}
                   onLoadMoreTasks={loadMoreTasks}
+                />
+              ) : currentView === "team" ? (
+                <TeamView
+                  tasks={tasks}
+                  onOpenTask={(taskId) => {
+                    void selectTaskAfterDraftFlush(taskId);
+                    setCurrentView("main");
+                  }}
+                  onOpenBots={() => setCurrentView("agents")}
+                  onOpenSchedules={() => {
+                    setSettingsTab("scheduled");
+                    setCurrentView("settings");
+                  }}
+                  onOpenRoutine={(routineId) => {
+                    setFocusAutomationRoutineId(routineId);
+                    setCurrentView("automations");
+                  }}
+                  onOpenDevices={(deviceId) => {
+                    setDevicesFocus(deviceId ? { deviceId } : null);
+                    setCurrentView("devices");
+                  }}
+                  onAddDevice={() => {
+                    setDevicesFocus({ pairing: true });
+                    setCurrentView("devices");
+                  }}
                 />
               ) : currentView === "library" ? (
                 <LibraryPanel workspaceId={currentWorkspace?.id} />

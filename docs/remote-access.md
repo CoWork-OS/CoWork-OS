@@ -2,7 +2,7 @@
 
 CoWork OS provides multiple options for remote access to your Control Plane, allowing you to manage tasks, monitor progress, and interact with agents from anywhere.
 
-Remote access is now also the foundation for the desktop **Devices** view (More > Devices on the left icon rail). The same Control Plane connection can be saved as a managed remote device, letting you:
+Remote access is now also the foundation for the desktop **Devices** view (More > Devices on the left icon rail; in the Calm theme, open it from **Team**). The same Control Plane connection can be saved as a managed remote device, letting you:
 
 - connect and reconnect a remote CoWork node from the desktop UI
 - launch tasks on that machine
@@ -284,7 +284,7 @@ In Settings > Access > Control Plane > Remote Connection:
 
 Once the remote endpoint is reachable:
 
-1. Open **More > Devices** in the desktop app.
+1. Open **More > Devices** in the desktop app (in the Calm theme, **Team > Add a device**).
 2. Click **Add new device**.
 3. Enter the gateway URL, token, device name, and optional purpose.
 4. Save and connect the device.

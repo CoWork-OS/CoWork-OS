@@ -7326,8 +7326,10 @@ function MainContentComponent({
   // Active placeholder: rotating prompt when available, personality fallback otherwise
   const personalityPlaceholder = agentContext.getPlaceholder();
   const hasCliInputContent = inputValue.length > 0 || hasCliInputDomContent;
-  const showCliPlaceholder = !hasCliInputContent && !isCliInputFocused;
-  const showCliEmptyCursor = !hasCliInputContent && isCliInputFocused;
+  // Calm keeps the rotating placeholder while the empty composer has focus and uses the
+  // native caret; other themes swap the placeholder for their own cursor.
+  const showCliPlaceholder = !hasCliInputContent && (isCalm || !isCliInputFocused);
+  const showCliEmptyCursor = !hasCliInputContent && isCliInputFocused && !isCalm;
   const placeholderPlaylist = useMemo(
     () => (rotatingPlaceholders.length > 0 ? rotatingPlaceholders : [personalityPlaceholder]),
     [personalityPlaceholder, rotatingPlaceholders],

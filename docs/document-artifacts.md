@@ -14,15 +14,7 @@ or another external app is still an explicit cross-application action.
 
 ## User Experience
 
-When a task creates or updates a Word-style document, the task feed renders a compact artifact card by default:
-
-- Word-style document icon
-- filename
-- `Document · <format>` metadata, for example `Document · DOCX`, `Document · DOC`, `Document · RTF`, `Document · ODT`, or `Document · Pages`
-- primary `Open` button
-- dropdown options for installed document-capable apps and `Open in folder`
-
-Clicking the main `Open` action opens supported local document previews in the right sidebar by default. The dropdown is reserved for explicit external app actions such as Microsoft Word, Pages, TextEdit, and folder reveal. Generated document rows expand by default so the artifact card is visible without clicking the `Output ready` row first.
+In the transcript, a generated document is a file reference, not a card. Each finished turn ends with one `Created N files` line (`TurnOutputsRow`) listing the files that turn wrote, and inline code in the answer that names a written file (for example `report.docx`) renders as a file chip. Clicking either opens supported local document previews in the right sidebar. Right-clicking any file reference, or the `…` button on a right-panel Files row, offers `Open with default app`, `Show in Finder` and `Copy path`. The compact `DocumentArtifactCard` card still appears in the fullscreen viewer's latest-turn context.
 
 The right sidebar can be resized by dragging its left edge. The resized width is persisted globally, so later artifact sidebar opens use the last chosen width while keeping the main task pane above a mobile-sized minimum.
 

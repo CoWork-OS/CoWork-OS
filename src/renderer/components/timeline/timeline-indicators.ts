@@ -252,7 +252,7 @@ export function resolveTimelineIndicator(
   }
 
   if (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") {
-    return { icon: FileOutput, tone: "success", label: "Output ready" };
+    return { icon: FileOutput, tone: "neutral", label: "File created" };
   }
 
   if (

@@ -1,7 +1,9 @@
 import {
   Children,
   Suspense,
+  createContext,
   lazy,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -27,6 +29,7 @@ import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { CitationBadge } from "./CitationPanel";
 import { MarkdownImagePreview } from "./MarkdownImagePreview";
+import { useFileActionMenu } from "./FileActionMenu";
 
 const LazyHighlightedCodeBlock = lazy(() =>
   import("./HighlightedCode").then((module) => ({ default: module.HighlightedCodeBlock })),
@@ -44,6 +47,11 @@ type MarkdownComponentsOptions = {
   onOpenWebLinkInSidebar?: (url: string) => void;
   /** Show an inline thumbnail after links to local image files (default true). */
   inlineImageLinks?: boolean;
+  /**
+   * Maps inline `code` text to a file this task wrote, so a final answer that names an output
+   * as `report.docx` gets the same openable chip as a markdown link.
+   */
+  resolveInlineCodeFilePath?: (text: string) => string | null;
   citations?: Array<{
     index: number;
     url: string;
@@ -541,7 +549,7 @@ const FILE_CHIP_CODE_EXT_RE =
   /\.([cm]?[jt]sx?|json|ya?ml|toml|css|scss|html?|py|rb|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|php|sh|zsh|sql|vue|svelte)$/i;
 
 /** Leading glyph for a file link chip; a `:line` suffix does not change the file type. */
-function FileChipIcon({ filePath }: { filePath: string }) {
+export function FileChipIcon({ filePath }: { filePath: string }) {
   const path = filePath.replace(/[?#].*$/, "").replace(/(:\d+){1,2}$/, "");
   const Icon = /[\\/]$/.test(path)
     ? Folder
@@ -588,6 +596,97 @@ function resolveFileLinkTarget(href: string, linkText: string): string | null {
 
 const CITATION_REF_REGEX = /\[(\d+)\]/g;
 
+/** Set inside a rendered link so inline `code` in its label is not turned into a second chip. */
+const InsideMarkdownLinkContext = createContext(false);
+
+function MarkdownFileLink({
+  href,
+  filePath,
+  linkText,
+  node,
+  workspacePath,
+  onOpenViewer,
+  inlineImageLinks,
+  children,
+  ...props
+}: MarkdownAnchorProps & {
+  href: string;
+  filePath: string;
+  linkText: string;
+  workspacePath?: string;
+  onOpenViewer?: (path: string) => void;
+  inlineImageLinks: boolean;
+}) {
+  const { openFileActionMenu, menu: fileActionMenu } = useFileActionMenu({
+    workspacePath,
+    onOpenInPanel: onOpenViewer,
+  });
+
+  const handleClick = async (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (onOpenViewer && workspacePath) {
+      onOpenViewer(filePath);
+      return;
+    }
+
+    if (!workspacePath) return;
+
+    try {
+      const error = await window.electronAPI.openFile(filePath, workspacePath);
+      if (error) {
+        console.error("Failed to open file:", error);
+      }
+    } catch (err) {
+      console.error("Error opening file:", err);
+    }
+  };
+
+  const handleContextMenu = (event: ReactMouseEvent) => {
+    if (!workspacePath) return;
+    openFileActionMenu(event, filePath);
+  };
+
+  const fileLink = (
+    <>
+      <a
+        {...props}
+        href={href}
+        className={`clickable-file-path ${props.className || ""}`.trim()}
+        onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        title={`${filePath}\n\nClick to open - Right-click for more options`}
+      >
+        <FileChipIcon filePath={filePath} />
+        <InsideMarkdownLinkContext.Provider value>
+          <span className="clickable-file-path-label">{children}</span>
+        </InsideMarkdownLinkContext.Provider>
+      </a>
+      {fileActionMenu}
+    </>
+  );
+
+  // Links to workspace images also show the image inline (unless the link already wraps one).
+  if (
+    inlineImageLinks &&
+    workspacePath &&
+    INLINE_IMAGE_LINK_EXT_RE.test(filePath) &&
+    !hastNodeContainsImage(node)
+  ) {
+    return (
+      <>
+        {fileLink}
+        <span className="markdown-image-link-preview">
+          <MarkdownImagePreview src={filePath} alt={linkText} workspacePath={workspacePath} quiet />
+        </span>
+      </>
+    );
+  }
+
+  return fileLink;
+}
+
 export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
   const {
     workspacePath,
@@ -595,6 +694,7 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
     onOpenWebLinkInSidebar,
     citations,
     inlineImageLinks = true,
+    resolveInlineCodeFilePath,
   } = options;
   const citationMap = new Map((citations || []).map((citation) => [citation.index, citation]));
   const citationUrlMap = new Map(
@@ -616,76 +716,20 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
     const fileTarget = externalHref ? null : resolveFileLinkTarget(href, linkText);
 
     if (!externalHref && (fileTarget || isFileLink(href))) {
-      const filePath = fileTarget ?? normalizeFileHref(href);
-      const handleClick = async (event: ReactMouseEvent) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (onOpenViewer && workspacePath) {
-          onOpenViewer(filePath);
-          return;
-        }
-
-        if (!workspacePath) return;
-
-        try {
-          const error = await window.electronAPI.openFile(filePath, workspacePath);
-          if (error) {
-            console.error("Failed to open file:", error);
-          }
-        } catch (err) {
-          console.error("Error opening file:", err);
-        }
-      };
-
-      const handleContextMenu = async (event: ReactMouseEvent) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!workspacePath) return;
-        try {
-          await window.electronAPI.showInFinder(filePath, workspacePath);
-        } catch (err) {
-          console.error("Error showing in Finder:", err);
-        }
-      };
-
-      const fileLink = (
-        <a
+      return (
+        <MarkdownFileLink
           {...props}
           href={href}
-          className={`clickable-file-path ${props.className || ""}`.trim()}
-          onClick={handleClick}
-          onContextMenu={handleContextMenu}
-          title={`${filePath}\n\nClick to preview - Right-click to show in Finder`}
+          filePath={fileTarget ?? normalizeFileHref(href)}
+          linkText={linkText}
+          node={node}
+          workspacePath={workspacePath}
+          onOpenViewer={onOpenViewer}
+          inlineImageLinks={inlineImageLinks}
         >
-          <FileChipIcon filePath={filePath} />
-          <span className="clickable-file-path-label">{children}</span>
-        </a>
+          {children}
+        </MarkdownFileLink>
       );
-
-      // Links to workspace images also show the image inline (unless the link already wraps one).
-      if (
-        inlineImageLinks &&
-        workspacePath &&
-        INLINE_IMAGE_LINK_EXT_RE.test(filePath) &&
-        !hastNodeContainsImage(node)
-      ) {
-        return (
-          <>
-            {fileLink}
-            <span className="markdown-image-link-preview">
-              <MarkdownImagePreview
-                src={filePath}
-                alt={linkText}
-                workspacePath={workspacePath}
-                quiet
-              />
-            </span>
-          </>
-        );
-      }
-
-      return fileLink;
     }
 
     if (externalHref) {
@@ -865,8 +909,23 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
     });
   };
 
+  const MarkdownCode = (props: CodeBlockProps) => {
+    const insideLink = useContext(InsideMarkdownLinkContext);
+    const isBlock = /(?:^|\s)language-/.test(props.className || "");
+    const filePath =
+      !insideLink && !isBlock && resolveInlineCodeFilePath
+        ? resolveInlineCodeFilePath(getTextContent(props.children))
+        : null;
+    if (!filePath) return <CodeBlock {...props} />;
+    return (
+      <MarkdownLink href={filePath}>
+        <code>{props.children}</code>
+      </MarkdownLink>
+    );
+  };
+
   return {
-    code: CodeBlock,
+    code: resolveInlineCodeFilePath ? MarkdownCode : CodeBlock,
     h1: renderHeading("h1"),
     h2: renderHeading("h2"),
     h3: renderHeading("h3"),

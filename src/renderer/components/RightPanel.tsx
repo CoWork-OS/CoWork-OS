@@ -33,14 +33,8 @@ import {
   type SharedTaskEventUiState,
   type ToolUsage,
 } from "../utils/task-event-derived";
-import {
-  getInlinePreviewKindForGeneratedFile,
-  type GeneratedInlinePreviewKind,
-} from "./MainContent/artifact-logic";
-import { canPreviewWebPageInApp } from "../../shared/web-page-formats";
-import { canOpenSpreadsheetInApp } from "../../shared/spreadsheet-formats";
-import { canPreviewDocumentInApp } from "../../shared/document-formats";
-import { canPreviewPresentationInApp } from "../../shared/presentation-formats";
+import { openPreviewableFileInSidebar } from "../utils/open-file-in-panel";
+import { useFileActionMenu } from "./FileActionMenu";
 import {
   getProgressSectionMaterialSignature,
   getPlanStepsSignature,
@@ -84,6 +78,7 @@ import {
   Music,
   Presentation,
   ChevronDown,
+  MoreHorizontal,
 } from "lucide-react";
 import { getEmojiIcon } from "../utils/emoji-icon-map";
 import { measureRendererPerf, recordRendererRender } from "../utils/renderer-perf";
@@ -225,7 +220,6 @@ const PRESENTATION_FILE_EXTENSIONS = new Set(["key", "odp", "potx", "ppsx", "ppt
 const VIDEO_FILE_EXTENSIONS = new Set(["avi", "m4v", "mov", "mp4", "mpeg", "mpg", "webm"]);
 const AUDIO_FILE_EXTENSIONS = new Set(["aac", "flac", "m4a", "mp3", "ogg", "wav"]);
 const ARCHIVE_FILE_EXTENSIONS = new Set(["7z", "bz2", "dmg", "gz", "rar", "tar", "tgz", "zip"]);
-type ArtifactOpeners = Partial<Record<GeneratedInlinePreviewKind, (path: string) => void>>;
 
 function getFileExtension(path: string): string {
   const fileName = path.split(/[\\/]/).pop() || path;
@@ -791,7 +785,7 @@ function getTaskEventActivityText(event: TaskEvent | null): string | null {
   return null;
 }
 
-// Clickable file path component - opens file viewer on click, shows in Finder on right-click
+// Clickable file path component - opens file viewer on click, file actions on right-click
 function ClickableFilePath({
   path,
   workspacePath,
@@ -803,6 +797,10 @@ function ClickableFilePath({
   className?: string;
   onOpenViewer?: (path: string) => void;
 }) {
+  const { openFileActionMenu, menu } = useFileActionMenu({
+    workspacePath,
+    onOpenInPanel: workspacePath ? onOpenViewer : undefined,
+  });
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -824,27 +822,20 @@ function ClickableFilePath({
     }
   };
 
-  const handleContextMenu = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      await window.electronAPI.showInFinder(path, workspacePath);
-    } catch (err) {
-      console.error("Error showing in Finder:", err);
-    }
-  };
-
   const fileName = path.split("/").pop() || path;
 
   return (
-    <span
-      className={`clickable-file-path ${className}`}
-      onClick={handleClick}
-      onContextMenu={handleContextMenu}
-      title={`${path}\n\nClick to preview • Right-click to show in Finder`}
-    >
-      {fileName}
-    </span>
+    <>
+      <span
+        className={`clickable-file-path ${className}`}
+        onClick={handleClick}
+        onContextMenu={(e) => openFileActionMenu(e, path)}
+        title={`${path}\n\nClick to open • Right-click for more options`}
+      >
+        {fileName}
+      </span>
+      {menu}
+    </>
   );
 }
 
@@ -873,41 +864,6 @@ interface RightPanelProps {
   onSubAgentsFocusConsumed?: () => void;
   highlightOutputPath?: string | null;
   onHighlightConsumed?: () => void;
-}
-
-export function openPreviewableFileInSidebar(
-  filePath: string,
-  openers: ArtifactOpeners,
-  fallback: (path: string) => void,
-): void {
-  const kind = getInlinePreviewKindForGeneratedFile({ path: filePath });
-  switch (kind) {
-    case "html":
-      if (canPreviewWebPageInApp(filePath) && openers.html) {
-        openers.html(filePath);
-        return;
-      }
-      break;
-    case "spreadsheet":
-      if (canOpenSpreadsheetInApp(filePath) && openers.spreadsheet) {
-        openers.spreadsheet(filePath);
-        return;
-      }
-      break;
-    case "document":
-      if (canPreviewDocumentInApp(filePath) && openers.document) {
-        openers.document(filePath);
-        return;
-      }
-      break;
-    case "presentation":
-      if (canPreviewPresentationInApp(filePath) && openers.presentation) {
-        openers.presentation(filePath);
-        return;
-      }
-      break;
-  }
-  fallback(filePath);
 }
 
 function getRightPanelTaskSignature(task: Task | undefined): string {
@@ -1281,6 +1237,10 @@ const FolderSection = memo(
     rendererPerfLoggingEnabled: boolean;
     getFileActionSymbol: (action: FileInfo["action"]) => string;
   }) {
+    const { openFileActionMenuAt, menu: fileActionMenu } = useFileActionMenu({
+      workspacePath: workspace?.path,
+      onOpenInPanel: onOpenFile,
+    });
     if (!visible) return null;
     recordRendererRender("RightPanel.section", "folder", rendererPerfLoggingEnabled);
     const fileCount = files.length || outputSummary?.outputCount || 0;
@@ -1343,6 +1303,18 @@ const FolderSection = memo(
                       className="cli-file-name"
                       onOpenViewer={onOpenFile}
                     />
+                    <button
+                      type="button"
+                      className="cli-file-more"
+                      aria-label={`More actions for ${file.path.split("/").pop() || file.path}`}
+                      title="Open with another app, show in Finder…"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openFileActionMenuAt(event.currentTarget, file.path);
+                      }}
+                    >
+                      <MoreHorizontal size={14} aria-hidden="true" />
+                    </button>
                   </div>
                 );
               })}
@@ -1371,6 +1343,7 @@ const FolderSection = memo(
             )}
           </div>
         )}
+        {fileActionMenu}
       </div>
     );
   },

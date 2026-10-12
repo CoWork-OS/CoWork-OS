@@ -1,0 +1,43 @@
+/* Right-click / "…" menu shared by file chips, the turn file summary and the Files list. */
+.file-action-menu {
+  position: fixed;
+  z-index: var(--layer-popover);
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-primary);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.file-action-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.file-action-menu button:hover,
+.file-action-menu button:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+.file-action-menu button svg {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.file-action-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-border-subtle);
+}

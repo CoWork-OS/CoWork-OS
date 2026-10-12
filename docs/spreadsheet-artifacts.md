@@ -14,15 +14,9 @@ Excel, Numbers, or another external app is still an explicit action.
 
 ## User Experience
 
-When a task creates a spreadsheet, the task feed renders a compact artifact card:
+In the transcript, a generated spreadsheet is a file reference, not a card. Each finished turn ends with one `Created N files` line (`TurnOutputsRow`) listing the files that turn wrote, and inline code in the answer that names a written file (for example `budget.xlsx`) renders as a file chip. Clicking either opens supported editable spreadsheets in the right sidebar; native app-owned formats that cannot be parsed locally open externally. Right-clicking any file reference, or the `…` button on a right-panel Files row, offers `Open with default app`, `Show in Finder` and `Copy path`. The compact `SpreadsheetArtifactCard` card still appears in the fullscreen viewer's latest-turn context.
 
-- spreadsheet file icon
-- filename
-- `Spreadsheet · <format>` metadata, for example `Spreadsheet · XLSX`, `Spreadsheet · CSV`, or `Spreadsheet · Numbers`
-- primary `Open` button
-- dropdown options for installed spreadsheet-capable apps and `Open in folder`
-
-Clicking the main `Open` action opens supported editable spreadsheets in the right sidebar by default. For native app-owned formats that cannot be parsed locally, the same action opens the file externally. The right sidebar can be resized by dragging its left edge. The resized width is persisted globally, so later spreadsheet sidebar opens use the last chosen width while keeping the main task pane above a mobile-sized minimum.
+The right sidebar can be resized by dragging its left edge. The resized width is persisted globally, so later spreadsheet sidebar opens use the last chosen width while keeping the main task pane above a mobile-sized minimum.
 
 The sidebar viewer includes:
 

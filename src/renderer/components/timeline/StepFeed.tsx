@@ -117,7 +117,7 @@ export function StepFeed({
         ) : (
           // A row with nothing to expand is not a control. Rendering it as a
           // disabled button would also disable and hide any link in its title
-          // (such as an "Output ready" file) from keyboard and accessibility users.
+          // (such as a created file) from keyboard and accessibility users.
           <div
             className="event-header"
             aria-describedby={`step-feed-status-${generatedId}`}

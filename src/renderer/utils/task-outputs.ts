@@ -61,7 +61,7 @@ function outputPathIdentity(value: string): {
   };
 }
 
-function dedupeOutputPaths(paths: string[]): string[] {
+export function dedupeOutputPaths(paths: string[]): string[] {
   const kept: Array<ReturnType<typeof outputPathIdentity>> = [];
   const result: string[] = [];
   for (const path of paths) {

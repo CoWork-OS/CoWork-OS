@@ -4,15 +4,12 @@ export { ModelDropdown } from "./ModelDropdown";
 export { TaskAutomationModal } from "./TaskAutomationModal";
 export { getWorkspaceStatusFolderLabel } from "./welcome-suggestions";
 export {
-  getVisibleEndOfTaskArtifactCards,
+  getVisibleGeneratedImageCards,
   getInlinePreviewKindForGeneratedFile,
-  extractGeneratedArtifactPathsFromText,
   getInlinePreviewKindForTaskEvent,
-  shouldRenderOpenArtifactCardAtEvent,
-  collectLatestEndOfTaskArtifactCards,
-  collectEndOfTaskArtifactCardStacks,
+  collectGeneratedImageStacks,
 } from "./artifact-logic";
-export type { EndOfTaskArtifactCard, EndOfTaskArtifactStack } from "./artifact-logic";
+export type { GeneratedImageCard, GeneratedImageStack } from "./artifact-logic";
 export {
   shouldSuppressInitialPromptUserEvent,
   getBotTranscriptSpeaker,

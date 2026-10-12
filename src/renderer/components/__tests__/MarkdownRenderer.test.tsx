@@ -22,7 +22,7 @@ describe("MarkdownRenderer file links", () => {
   it("routes sandbox file links through the existing file preview component", () => {
     const markup = renderLink("sandbox:/private/tmp/qa/result.txt");
     expect(markup).toContain('href="/private/tmp/qa/result.txt"');
-    expect(markup).toContain("Click to preview");
+    expect(markup).toContain("Click to open");
     expect(markup).not.toContain("sandbox:");
   });
 
@@ -60,7 +60,7 @@ describe("MarkdownRenderer workspace image links", () => {
 
   it("adds an inline thumbnail after a link to a workspace image", () => {
     const markup = renderMarkdown("Saved [the image](qwen-image.png).");
-    expect(markup).toContain("Click to preview");
+    expect(markup).toContain("Click to open");
     expect(markup).toContain("markdown-image-link-preview");
   });
 
@@ -79,7 +79,7 @@ describe("MarkdownRenderer workspace image links", () => {
       inlineImageLinks: false,
     });
     const markup = renderMarkdown("Created [image](qwen-image.png)", titleComponents);
-    expect(markup).toContain("Click to preview");
+    expect(markup).toContain("Click to open");
     expect(markup).not.toContain("markdown-image-link-preview");
   });
 

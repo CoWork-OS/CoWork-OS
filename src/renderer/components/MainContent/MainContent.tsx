@@ -226,10 +226,6 @@ import {
   Clock,
   X,
 } from "lucide-react";
-import { SpreadsheetArtifactCard } from "../SpreadsheetArtifactCard";
-import { DocumentArtifactCard } from "../DocumentArtifactCard";
-import { PresentationArtifactCard } from "../PresentationArtifactCard";
-import { WebArtifactCard } from "../WebArtifactCard";
 import { InlineImagePreview } from "../InlineImagePreview";
 import { ReplayControlsBar } from "../ReplayControls";
 import { DebugSessionPanel } from "../DebugSessionPanel";
@@ -267,16 +263,23 @@ import {
   formatWelcomeModules,
 } from "./welcome-suggestions";
 import {
-  type EndOfTaskArtifactStack,
-  END_OF_TASK_ARTIFACT_KINDS,
-  getVisibleEndOfTaskArtifactCards,
-  estimateEndOfTaskArtifactStackHeight,
-  getInlinePreviewKindForGeneratedFile,
+  type GeneratedImageStack,
+  getVisibleGeneratedImageCards,
+  estimateGeneratedImageStackHeight,
   getInlinePreviewKindForTaskEvent,
-  shouldRenderOpenArtifactCardAtEvent,
-  collectEndOfTaskArtifactCardStacks,
-  getTaskEventArtifactPaths,
+  collectGeneratedImageStacks,
 } from "./artifact-logic";
+import {
+  buildWrittenFileResolver,
+  collectTurnOutputSummaries,
+  collectWrittenFilePaths,
+  isArtifactEventCoveredByFileWrite,
+} from "./turn-outputs";
+import { TurnOutputsRow } from "./TurnOutputsRow";
+import {
+  getSidePanelViewerKind,
+  openPreviewableFileInSidebar,
+} from "../../utils/open-file-in-panel";
 import {
   isVerificationNoiseEvent,
   shouldRevealInternalAssistantMessageInVerbose,
@@ -1758,6 +1761,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const wrappingUp = props.wrappingUp as boolean;
   const workspace = props.workspace as Workspace | null;
   const returnToDefaultTranscript = props.returnToDefaultTranscript as () => void;
+  const openFileInPanel = props.openFileInPanel as (path: string) => void;
 
   recordRendererRender(
     "MainContent.taskConversationShell",
@@ -1856,63 +1860,100 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   );
   const feedRows = useMemo<TaskFeedRow[]>(() => {
     const rows: TaskFeedRow[] = [];
-    const artifactStacks = collectEndOfTaskArtifactCardStacks(events);
-    const artifactStacksByAnchorIndex = new Map<number, EndOfTaskArtifactStack[]>();
+    const imageStacks = collectGeneratedImageStacks(events);
+    const imageStacksByAnchorIndex = new Map<number, GeneratedImageStack[]>();
     // Timeline item indices refer to the filtered live stream while stacks are computed
     // over all events, so anchor by event id when the anchor event has one.
-    const artifactStacksByAnchorEventId = new Map<string, EndOfTaskArtifactStack[]>();
-    for (const stack of artifactStacks) {
+    const imageStacksByAnchorEventId = new Map<string, GeneratedImageStack[]>();
+    for (const stack of imageStacks) {
       const anchorEventId = events[stack.anchorEventIndex]?.id;
       if (anchorEventId) {
-        const existing = artifactStacksByAnchorEventId.get(anchorEventId) || [];
+        const existing = imageStacksByAnchorEventId.get(anchorEventId) || [];
         existing.push(stack);
-        artifactStacksByAnchorEventId.set(anchorEventId, existing);
+        imageStacksByAnchorEventId.set(anchorEventId, existing);
         continue;
       }
-      const existing = artifactStacksByAnchorIndex.get(stack.anchorEventIndex) || [];
+      const existing = imageStacksByAnchorIndex.get(stack.anchorEventIndex) || [];
       existing.push(stack);
-      artifactStacksByAnchorIndex.set(stack.anchorEventIndex, existing);
+      imageStacksByAnchorIndex.set(stack.anchorEventIndex, existing);
     }
-    const pushedArtifactStackKeys = new Set<string>();
-    const pushArtifactStacksForTimelineItem = (item: any) => {
+    const getTimelineItemEvents = (item: any): TaskEvent[] =>
+      item.kind === "event"
+        ? [item.event]
+        : item.kind === "action_block" && Array.isArray(item.events)
+          ? item.events
+          : [];
+    const pushedImageStackKeys = new Set<string>();
+    const pushImageStacksForTimelineItem = (item: any) => {
       const eventIndices =
         item.kind === "event"
           ? [item.eventIndex]
           : item.kind === "action_block" && Array.isArray(item.eventIndices)
             ? item.eventIndices
             : [];
-      const itemEvents: TaskEvent[] =
-        item.kind === "event"
-          ? [item.event]
-          : item.kind === "action_block" && Array.isArray(item.events)
-            ? item.events
-            : [];
-      const itemStacks: EndOfTaskArtifactStack[] = [];
-      for (const itemEvent of itemEvents) {
-        const stacks = itemEvent?.id ? artifactStacksByAnchorEventId.get(itemEvent.id) : undefined;
+      const itemStacks: GeneratedImageStack[] = [];
+      for (const itemEvent of getTimelineItemEvents(item)) {
+        const stacks = itemEvent?.id ? imageStacksByAnchorEventId.get(itemEvent.id) : undefined;
         if (stacks) itemStacks.push(...stacks);
       }
       for (const eventIndex of eventIndices) {
         if (typeof eventIndex !== "number") continue;
-        const stacks = artifactStacksByAnchorIndex.get(eventIndex);
+        const stacks = imageStacksByAnchorIndex.get(eventIndex);
         if (stacks) itemStacks.push(...stacks);
       }
       for (const stack of itemStacks) {
-        const rowKey = `end-artifact-stack:${stack.anchorEventIndex}`;
-        if (pushedArtifactStackKeys.has(rowKey)) continue;
-        pushedArtifactStackKeys.add(rowKey);
+        const rowKey = `image-stack:${stack.anchorEventIndex}`;
+        if (pushedImageStackKeys.has(rowKey)) continue;
+        pushedImageStackKeys.add(rowKey);
         const expanded = expandedArtifactStacks.has(rowKey);
         rows.push({
-          kind: "artifact-stack",
+          kind: "image-stack",
           key: rowKey,
-          estimatedHeight: estimateEndOfTaskArtifactStackHeight(stack.artifacts, expanded),
-          artifacts: stack.artifacts,
+          estimatedHeight: estimateGeneratedImageStackHeight(stack.images, expanded),
+          images: stack.images,
           revision: [
             expanded ? "expanded" : "collapsed",
-            stack.artifacts
-              .map((artifact) => `${artifact.path}:${artifact.kind}:${artifact.eventId ?? "none"}`)
-              .join("|"),
+            stack.images.map((image) => `${image.path}:${image.eventId ?? "none"}`).join("|"),
           ].join(":"),
+          visiblePerfEventId: null,
+        });
+      }
+    };
+
+    // Each finished turn gets one file line, placed after the last row that shows any of
+    // the turn's events, so it sits under the turn's answer and never moves mid-turn.
+    const turnOutputs = collectTurnOutputSummaries(events, { isTaskWorking });
+    const turnIndexByEventId = new Map<string, number>();
+    turnOutputs.forEach((summary, turnIndex) => {
+      for (let index = summary.startIndex; index <= summary.endIndex; index += 1) {
+        const eventId = events[index]?.id;
+        if (eventId) turnIndexByEventId.set(eventId, turnIndex);
+      }
+    });
+    const turnOutputsByLastTimelineIndex = new Map<number, number[]>();
+    if (turnOutputs.length > 0) {
+      const lastTimelineIndexByTurn = new Map<number, number>();
+      timelineItems.forEach((item, timelineIndex) => {
+        for (const itemEvent of getTimelineItemEvents(item)) {
+          const turnIndex = itemEvent?.id ? turnIndexByEventId.get(itemEvent.id) : undefined;
+          if (turnIndex !== undefined) lastTimelineIndexByTurn.set(turnIndex, timelineIndex);
+        }
+      });
+      for (const [turnIndex, timelineIndex] of lastTimelineIndexByTurn) {
+        const existing = turnOutputsByLastTimelineIndex.get(timelineIndex) || [];
+        existing.push(turnIndex);
+        turnOutputsByLastTimelineIndex.set(timelineIndex, existing);
+      }
+    }
+    const pushTurnOutputsAfterTimelineItem = (timelineIndex: number) => {
+      for (const turnIndex of turnOutputsByLastTimelineIndex.get(timelineIndex) ?? []) {
+        const summary = turnOutputs[turnIndex];
+        rows.push({
+          kind: "turn-outputs",
+          key: `turn-outputs:${summary.key}`,
+          estimatedHeight: 44,
+          files: summary.files,
+          revision: summary.files.map((file) => `${file.action}:${file.path}`).join("|"),
           visiblePerfEventId: null,
         });
       }
@@ -1959,8 +2000,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
           item.blockId,
         );
         if (actionBlockState.renderableCount === 0 && !actionBlockState.hasBlockCommandOutputs) {
-          // Generated-file cards anchored in a hidden block still surface in the conversation.
-          pushArtifactStacksForTimelineItem(item);
+          // Generated images and turn file lines anchored in a hidden block still surface.
+          pushImageStacksForTimelineItem(item);
+          pushTurnOutputsAfterTimelineItem(timelineIndex);
           return;
         }
         const visibleBlockEvents = actionBlockState.visibleBlockEvents;
@@ -2032,7 +2074,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         revision,
         visiblePerfEventId,
       });
-      pushArtifactStacksForTimelineItem(item);
+      pushImageStacksForTimelineItem(item);
+      pushTurnOutputsAfterTimelineItem(timelineIndex);
     });
 
     return rows;
@@ -2065,7 +2108,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         if (row.kind === "leading-command-outputs") {
           return !isConversationOnlySurface && row.sessions.length > 0;
         }
-        if (row.kind === "artifact-stack") return Boolean(workspace?.path);
+        if (row.kind === "image-stack" || row.kind === "turn-outputs") {
+          return Boolean(workspace?.path);
+        }
         if (row.kind !== "timeline") return true;
 
         const { item } = row;
@@ -2216,7 +2261,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               if (row.kind === "leading-command-outputs") {
                 return row.revision;
               }
-              if (row.kind === "artifact-stack" || row.kind === "turn-header") {
+              if (
+                row.kind === "image-stack" ||
+                row.kind === "turn-outputs" ||
+                row.kind === "turn-header"
+              ) {
                 return row.revision;
               }
 
@@ -2295,75 +2344,45 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               if (row.kind === "leading-command-outputs") {
                 return renderCommandOutputs(row.sessions);
               }
-              if (row.kind === "artifact-stack") {
+              if (row.kind === "turn-outputs") {
+                if (!workspace?.path) return null;
+                return (
+                  <TurnOutputsRow
+                    files={row.files}
+                    workspacePath={workspace.path}
+                    onOpenFile={openFileInPanel}
+                    onViewAll={
+                      task && onViewTaskOutputs
+                        ? (primaryPath) => onViewTaskOutputs(task.id, primaryPath)
+                        : undefined
+                    }
+                  />
+                );
+              }
+              if (row.kind === "image-stack") {
                 if (!workspace?.path) return null;
                 const expanded = expandedArtifactStacks.has(row.key);
-                const { visibleArtifacts, hiddenCount } = getVisibleEndOfTaskArtifactCards(
-                  row.artifacts,
+                const { visibleImages, hiddenCount } = getVisibleGeneratedImageCards(
+                  row.images,
                   expanded,
                 );
                 return (
-                  <div className="conversation-artifact-stack assistant-artifact-cards">
-                    {visibleArtifacts.map((artifact) => {
-                      if (artifact.kind === "spreadsheet") {
-                        return (
-                          <SpreadsheetArtifactCard
-                            key={artifact.path}
-                            filePath={artifact.path}
-                            workspacePath={workspace.path}
-                            onOpenViewer={onOpenSpreadsheetArtifact || setViewerFilePath}
-                          />
-                        );
-                      }
-                      if (artifact.kind === "document") {
-                        return (
-                          <DocumentArtifactCard
-                            key={artifact.path}
-                            filePath={artifact.path}
-                            workspacePath={workspace.path}
-                            onOpenViewer={onOpenDocumentArtifact || setViewerFilePath}
-                          />
-                        );
-                      }
-                      if (artifact.kind === "presentation") {
-                        return (
-                          <PresentationArtifactCard
-                            key={artifact.path}
-                            filePath={artifact.path}
-                            workspacePath={workspace.path}
-                            onOpenViewer={onOpenPresentationArtifact || setViewerFilePath}
-                          />
-                        );
-                      }
-                      if (artifact.kind === "html") {
-                        return (
-                          <WebArtifactCard
-                            key={artifact.path}
-                            filePath={artifact.path}
-                            workspacePath={workspace.path}
-                            onOpenViewer={onOpenWebArtifact || setViewerFilePath}
-                          />
-                        );
-                      }
-                      if (artifact.kind === "image") {
-                        return (
-                          <div key={artifact.path} className="conversation-artifact-image">
-                            <InlineImagePreview
-                              filePath={artifact.path}
-                              workspacePath={workspace.path}
-                              onOpenViewer={setViewerFilePath}
-                            />
-                          </div>
-                        );
-                      }
-                      return null;
-                    })}
+                  <div className="conversation-artifact-stack">
+                    {visibleImages.map((image) => (
+                      <div key={image.path} className="conversation-artifact-image">
+                        <InlineImagePreview
+                          filePath={image.path}
+                          workspacePath={workspace.path}
+                          onOpenViewer={setViewerFilePath}
+                        />
+                      </div>
+                    ))}
                     {hiddenCount > 0 && (
                       <button
                         type="button"
                         className="conversation-artifact-stack-show-more"
                         onClick={() => expandArtifactStack(row.key)}
-                        aria-label={`Show ${hiddenCount} more generated files`}
+                        aria-label={`Show ${hiddenCount} more generated images`}
                       >
                         <span>Show {hiddenCount} more</span>
                         <ChevronDown size={17} aria-hidden="true" />
@@ -2586,7 +2605,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   ? renderEventTitle(
                       lastVisibleRenderEvent,
                       workspace?.path,
-                      setViewerFilePath,
+                      openFileInPanel,
                       agentContext,
                       { summaryMode: !verboseSteps },
                     )
@@ -2853,13 +2872,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               change={fileChange}
                               pending={!toolCallResultEvent && isTaskWorking}
                               workspacePath={workspace?.path}
-                              onOpenViewer={setViewerFilePath}
+                              onOpenViewer={openFileInPanel}
                             />
                           ) : (
                             renderEventTitle(
                               renderEvent,
                               workspace?.path,
-                              setViewerFilePath,
+                              openFileInPanel,
                               agentContext,
                               { summaryMode: !verboseSteps },
                             )
@@ -2868,11 +2887,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                           const eventDetails = hasEventDetails(event)
                             ? renderEventDetails(event, voiceEnabled, markdownComponents, {
                                 workspacePath: workspace?.path,
-                                onOpenViewer: setViewerFilePath,
-                                onOpenSpreadsheetArtifact,
-                                onOpenDocumentArtifact,
-                                onOpenPresentationArtifact,
-                                onOpenWebArtifact,
+                                onOpenViewer: openFileInPanel,
                                 onOpenAgent: onOpenChildAgentSidebar ?? onSelectChildTask,
                                 onForkTaskSession: isBotConversation
                                   ? undefined
@@ -2881,8 +2896,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                   event,
                                   lastAssistantMessage,
                                 ),
-                                events,
-                                onViewOutputs: onViewTaskOutputs,
                                 hideVerificationSteps: true,
                                 summaryMode: !verboseSteps,
                                 task,
@@ -2890,7 +2903,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 commandOutputSessions:
                                   commandOutputSessionsByInsertIndex.get(eventIndex) ?? [],
                                 renderCommandOutput: renderCommandOutputs,
-                                deferEndOfTaskArtifactCards: true,
                               })
                             : undefined;
 
@@ -3020,7 +3032,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               message={cleanAssistantMessageForDisplay(streamingText)}
                               markdownComponents={markdownComponents}
                               workspacePath={workspace?.path}
-                              onOpenViewer={setViewerFilePath}
+                              onOpenViewer={openFileInPanel}
                               taskId={event.taskId}
                               streaming
                             />
@@ -3154,7 +3166,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       <UserMessageImageGallery
                         attachments={attachmentMetadata}
                         workspacePath={workspace?.path}
-                        onOpenViewer={setViewerFilePath}
+                        onOpenViewer={openFileInPanel}
                       />
                       {quotedAssistantMessage?.message ? (
                         <div className="quoted-follow-up-shell">
@@ -3327,7 +3339,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 message={cleanedMessageText}
                                 markdownComponents={markdownComponents}
                                 workspacePath={workspace?.path}
-                                onOpenViewer={setViewerFilePath}
+                                onOpenViewer={openFileInPanel}
                                 taskId={event.taskId}
                                 surfacesSuperseded={
                                   Boolean(event.id) && supersededSurfaceEventIds.has(event.id)
@@ -3604,7 +3616,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
               const eventTitle = renderEventTitle(
                 renderEvent2,
                 workspace?.path,
-                setViewerFilePath,
+                openFileInPanel,
                 agentContext,
                 { summaryMode: !verboseSteps },
               );
@@ -3641,25 +3653,18 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       isExpanded
                         ? renderEventDetails(event, voiceEnabled, markdownComponents, {
                             workspacePath: workspace?.path,
-                            onOpenViewer: setViewerFilePath,
-                            onOpenSpreadsheetArtifact,
-                            onOpenDocumentArtifact,
-                            onOpenPresentationArtifact,
-                            onOpenWebArtifact,
+                            onOpenViewer: openFileInPanel,
                             onOpenAgent: onOpenChildAgentSidebar ?? onSelectChildTask,
                             isLastAssistantMessage: isLastAssistantMessageEvent(
                               event,
                               lastAssistantMessage,
                             ),
-                            events,
-                            onViewOutputs: onViewTaskOutputs,
                             hideVerificationSteps: true,
                             summaryMode: !verboseSteps,
                             task,
                             childTasks,
                             commandOutputSessions: commandOutputsAfterEvent ?? [],
                             renderCommandOutput: renderCommandOutputs,
-                            deferEndOfTaskArtifactCards: true,
                           })
                         : undefined
                     }
@@ -3769,6 +3774,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       setStepFeedbackOpen,
       setStepFeedbackText,
       setViewerFilePath,
+      openFileInPanel,
       stepFeedbackOpen,
       stepFeedbackSending,
       stepFeedbackText,
@@ -4982,6 +4988,22 @@ function MainContentComponent({
     },
     [onOpenWebArtifact],
   );
+  // File references in the transcript open in CoWork: documents, sheets, decks and pages in
+  // the right-panel viewer, anything else in the preview modal.
+  const openFileInPanel = useCallback(
+    (path: string) =>
+      openPreviewableFileInSidebar(
+        path,
+        {
+          html: openWebArtifact,
+          spreadsheet: openSpreadsheetArtifact,
+          document: openDocumentArtifact,
+          presentation: openPresentationArtifact,
+        },
+        setViewerFilePath,
+      ),
+    [openDocumentArtifact, openPresentationArtifact, openSpreadsheetArtifact, openWebArtifact],
+  );
   const [llmWikiVaultSummary, setLlmWikiVaultSummary] = useState<LlmWikiVaultSummary | null>(null);
   const [llmWikiVaultLoading, setLlmWikiVaultLoading] = useState(false);
   const [welcomeTaskSuggestions, setWelcomeTaskSuggestions] = useState<WelcomeTaskSuggestion[]>([]);
@@ -5266,15 +5288,29 @@ function MainContentComponent({
     };
   }, [homeNextActionsEnabled, pendingInputRequests, task, workspace?.id, workspace?.isTemp]);
 
+  // Keyed by the written paths, not the event list, so streaming events do not rebuild
+  // (and remount) every rendered markdown component.
+  const writtenFilePathsKey = useMemo(() => collectWrittenFilePaths(events).join("\n"), [events]);
+  const resolveInlineCodeFilePath = useMemo(
+    () => buildWrittenFileResolver(writtenFilePathsKey ? writtenFilePathsKey.split("\n") : []),
+    [writtenFilePathsKey],
+  );
   const markdownComponents = useMemo(
     () =>
       buildMarkdownComponents({
         workspacePath: workspace?.path,
-        onOpenViewer: setViewerFilePath,
+        onOpenViewer: openFileInPanel,
         onOpenWebLinkInSidebar,
         citations,
+        resolveInlineCodeFilePath,
       }),
-    [workspace?.path, setViewerFilePath, onOpenWebLinkInSidebar, citations],
+    [
+      workspace?.path,
+      openFileInPanel,
+      onOpenWebLinkInSidebar,
+      citations,
+      resolveInlineCodeFilePath,
+    ],
   );
   const eventTitleMarkdownComponents = useMemo(
     () => ({
@@ -5282,7 +5318,7 @@ function MainContentComponent({
       // Timeline titles stay one line: image links render as plain links, no thumbnail.
       a: buildMarkdownComponents({
         workspacePath: workspace?.path,
-        onOpenViewer: setViewerFilePath,
+        onOpenViewer: openFileInPanel,
         onOpenWebLinkInSidebar,
         citations,
         inlineImageLinks: false,
@@ -5290,7 +5326,7 @@ function MainContentComponent({
       // Keep timeline titles inline; replace emoji with Lucide icons.
       p: ({ children }: Any) => <>{replaceEmojisInChildren(children, 14)}</>,
     }),
-    [markdownComponents, workspace?.path, setViewerFilePath, onOpenWebLinkInSidebar, citations],
+    [markdownComponents, workspace?.path, openFileInPanel, onOpenWebLinkInSidebar, citations],
   );
   // Canvas sessions state - track active canvas sessions for current task
   const [canvasSessions, setCanvasSessions] = useState<CanvasSession[]>([]);
@@ -6991,45 +7027,9 @@ function MainContentComponent({
     return getInlinePreviewKindForTaskEvent(event) === "image";
   }, []);
 
-  const isSpreadsheetFileEvent = useCallback((event: TaskEvent): boolean => {
-    return getInlinePreviewKindForTaskEvent(event) === "spreadsheet";
-  }, []);
-
   const isVideoFileEvent = useCallback((event: TaskEvent): boolean => {
     return getInlinePreviewKindForTaskEvent(event) === "video";
   }, []);
-
-  const isHtmlFileEvent = useCallback((event: TaskEvent): boolean => {
-    return getInlinePreviewKindForTaskEvent(event) === "html";
-  }, []);
-
-  const isDocumentFileEvent = useCallback((event: TaskEvent): boolean => {
-    return getInlinePreviewKindForTaskEvent(event) === "document";
-  }, []);
-
-  const isPresentationFileEvent = useCallback((event: TaskEvent): boolean => {
-    return getInlinePreviewKindForTaskEvent(event) === "presentation";
-  }, []);
-
-  const shouldExposeEndOfTaskArtifactCard = useCallback(
-    (event: TaskEvent): boolean => {
-      const previewKind = getInlinePreviewKindForTaskEvent(event);
-      if (!previewKind || !END_OF_TASK_ARTIFACT_KINDS.has(previewKind)) return true;
-      const artifactPath = getTaskEventArtifactPaths(event, events).find((path) => {
-        const kind = getInlinePreviewKindForGeneratedFile({ path });
-        return Boolean(kind && END_OF_TASK_ARTIFACT_KINDS.has(kind));
-      });
-      return Boolean(
-        artifactPath &&
-        shouldRenderOpenArtifactCardAtEvent({
-          path: artifactPath,
-          event,
-          eventStream: events,
-        }),
-      );
-    },
-    [events],
-  );
 
   const shouldRenderTimelineEventInStepFeed = useCallback(
     (event: TaskEvent): boolean => {
@@ -7061,12 +7061,17 @@ function MainContentComponent({
         return false;
       }
       // Compact rows list each file change once, on its write/edit/delete call. The separate
-      // "Created:"/"Updated:" event stays when it carries a rich preview (image, sheet, page…).
+      // "Created:"/"Updated:" event stays when it carries an inline image or video preview.
+      const filePreviewKind = getInlinePreviewKindForTaskEvent(event);
       if (
         !verboseSteps &&
-        !getInlinePreviewKindForTaskEvent(event) &&
+        filePreviewKind !== "image" &&
+        filePreviewKind !== "video" &&
         isFileEventCoveredByToolCall(event, events, workspace?.path)
       ) {
+        return false;
+      }
+      if (isArtifactEventCoveredByFileWrite(event, events)) {
         return false;
       }
       return true;
@@ -7104,11 +7109,7 @@ function MainContentComponent({
       const effectiveType = getEffectiveTaskEventType(event);
       if (getTruncatedTaskEventDetailId(event)) return true;
       if (isImageFileEvent(event)) return true;
-      if (isHtmlFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
       if (isVideoFileEvent(event)) return true;
-      if (isSpreadsheetFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-      if (isDocumentFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
-      if (isPresentationFileEvent(event)) return shouldExposeEndOfTaskArtifactCard(event);
       if (workspace?.path && getStepCompletionPreviewPath(event)) return true;
       if (effectiveType === "follow_up_completed") return true;
       if (
@@ -7119,12 +7120,10 @@ function MainContentComponent({
       ) {
         return true;
       }
+      // Outputs are listed by the turn's file line; the completion row only expands to
+      // the checklist when the user still has to act.
       if (effectiveType === "task_completed") {
-        return (
-          hasTaskOutputs(resolveTaskOutputSummaryFromCompletionEvent(event, events)) ||
-          event.payload?.terminalStatus === "needs_user_action" ||
-          event.payload?.terminalStatus === "partial_success"
-        );
+        return event.payload?.terminalStatus === "needs_user_action";
       }
       if (shouldHideApprovalEventInStepFeed(event)) {
         return false;
@@ -7144,27 +7143,11 @@ function MainContentComponent({
         return true;
       }
       if (effectiveType === "diagram_created") return true;
-      if (
-        (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") &&
-        typeof event.payload?.path === "string"
-      ) {
-        const artifactPreviewKind = getInlinePreviewKindForGeneratedFile({
-          path: event.payload.path,
-          mimeType: event.payload?.mimeType,
-          type: event.payload?.type,
-        });
-        if (
-          artifactPreviewKind &&
-          END_OF_TASK_ARTIFACT_KINDS.has(artifactPreviewKind) &&
-          !shouldRenderOpenArtifactCardAtEvent({
-            path: event.payload.path,
-            event,
-            eventStream: events,
-          })
-        ) {
-          return false;
-        }
-        return true;
+      // A document, sheet, deck or page artifact opens in the side panel from its title and
+      // is listed on the turn's file line, so only other artifacts (images, PDFs, logs) expand.
+      if (event.type === "timeline_artifact_emitted" || effectiveType === "artifact_created") {
+        const artifactPath = typeof event.payload?.path === "string" ? event.payload.path : "";
+        return Boolean(artifactPath) && !getSidePanelViewerKind(artifactPath);
       }
       if (
         effectiveType === "file_created" &&
@@ -7202,18 +7185,7 @@ function MainContentComponent({
         "agent_interrupt_confirmed",
       ].includes(effectiveType);
     },
-    [
-      events,
-      isHtmlFileEvent,
-      isImageFileEvent,
-      isDocumentFileEvent,
-      isPresentationFileEvent,
-      isSpreadsheetFileEvent,
-      isVideoFileEvent,
-      shouldExposeEndOfTaskArtifactCard,
-      verboseSteps,
-      workspace?.path,
-    ],
+    [events, isImageFileEvent, isVideoFileEvent, verboseSteps, workspace?.path],
   );
 
   // Check if an event is currently expanded using its ID
@@ -11596,6 +11568,7 @@ function MainContentComponent({
       onOpenDocumentArtifact={openDocumentArtifact}
       onOpenPresentationArtifact={openPresentationArtifact}
       onOpenWebArtifact={openWebArtifact}
+      openFileInPanel={openFileInPanel}
       botName={botName}
       botIcon={botIcon}
       botMascotForSender={botMascotForSender}

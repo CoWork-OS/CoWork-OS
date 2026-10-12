@@ -565,8 +565,8 @@ The smoke subject should be fake test data only. The skill stores sensitive PII 
 
 The shared positioning and UX contract is documented in [Everything Workbench](./everything-workbench.md). Treat generated documents, spreadsheets, presentations, web pages, PDFs, and previews as one artifact workbench family:
 
-- task outputs should render as compact artifact cards when a dedicated surface exists
-- default **Open** should prefer the in-app sidebar for previewable/editable artifacts
+- task outputs appear in the transcript as file references: one `Created N files` line per finished turn (`TurnOutputsRow`, built by `collectTurnOutputSummaries` in `MainContent/turn-outputs.ts`) and chips for written files named in the answer; never as a stack of cards
+- default **Open** should prefer the in-app sidebar for previewable/editable artifacts (`openPreviewableFileInSidebar` in `utils/open-file-in-panel.ts`); `FileActionMenu` offers the default app, Finder and copy path
 - fullscreen mode should keep the functional follow-up composer and latest-turn/working context
 - active follow-up work should keep the current preview visible and defer refresh until the relevant output is updated or the task completes
 - external app and folder actions should remain available for advanced native workflows

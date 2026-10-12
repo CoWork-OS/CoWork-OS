@@ -7,7 +7,8 @@ import {
   resolveTaskOutputSummaryFromCompletionEvent,
   hasTaskOutputs,
 } from "../../utils/task-outputs";
-import type { EndOfTaskArtifactCard } from "./artifact-logic";
+import type { GeneratedImageCard } from "./artifact-logic";
+import type { TurnOutputFile } from "./turn-outputs";
 import type { CommandOutputSession } from "../../utils/task-event-derived";
 
 export const VIRTUALIZED_FEED_ROW_THRESHOLD = 18;
@@ -32,10 +33,19 @@ export type TaskFeedRow =
       visiblePerfEventId: null;
     }
   | {
-      kind: "artifact-stack";
+      kind: "image-stack";
       key: string;
       estimatedHeight: number;
-      artifacts: EndOfTaskArtifactCard[];
+      images: GeneratedImageCard[];
+      revision: string;
+      visiblePerfEventId: null;
+    }
+  | {
+      /** The one "Created N files" line at the end of a finished turn. */
+      kind: "turn-outputs";
+      key: string;
+      estimatedHeight: number;
+      files: TurnOutputFile[];
       revision: string;
       visiblePerfEventId: null;
     }
@@ -83,13 +93,11 @@ export type SelectedSkillModalState = {
 export type TranscriptMode = "live" | "inspect" | "delivery";
 
 export function getTaskFeedRowEventType(row: TaskFeedRow): string | null {
-  if (row.kind === "artifact-stack" || row.kind === "history-control") return null;
   if (row.kind !== "timeline" || row.item.kind !== "event") return null;
   return getEffectiveTaskEventType(row.item.event as TaskEvent);
 }
 
 export function getTaskFeedRowEvent(row: TaskFeedRow): TaskEvent | null {
-  if (row.kind === "artifact-stack" || row.kind === "history-control") return null;
   if (row.kind !== "timeline" || row.item.kind !== "event") return null;
   return row.item.event as TaskEvent;
 }
@@ -298,7 +306,6 @@ export function getTaskFeedRowEvents(row: TaskFeedRow): Array<{
   eventIndex?: number;
   eventOrder: number;
 }> {
-  if (row.kind === "artifact-stack" || row.kind === "history-control") return [];
   if (row.kind !== "timeline") return [];
   if (row.item.kind === "event") {
     return [{ event: row.item.event as TaskEvent, eventIndex: row.item.eventIndex, eventOrder: 0 }];
@@ -482,13 +489,13 @@ export function selectVisibleTaskFeedRows(
 
     for (const [rowIndex, row] of feedRows.entries()) {
       if (row.kind === "history-control" || row.kind === "turn-header") continue;
-      if (row.kind === "artifact-stack") {
+      if (row.kind === "image-stack" || row.kind === "turn-outputs") {
         pushCandidate(rowIndex, row);
         continue;
       }
       // Collapsed like a finished turn: activity blocks stay behind the "Worked for" header,
       // and only the critical events inside them (errors, needed actions) surface. Outputs
-      // are already shown by the artifact stack under the answer.
+      // are already listed by the turn's file line under the answer.
       const isActivityBlock = row.kind === "timeline" && row.item.kind === "action_block";
       const rowEvents = getTaskFeedRowEvents(row);
       for (const { event, eventIndex, eventOrder } of rowEvents) {
@@ -576,6 +583,7 @@ export function selectVisibleTaskFeedRows(
   for (const [index, row] of feedRows.entries()) {
     if (
       row.kind === "turn-header" ||
+      row.kind === "turn-outputs" ||
       isConversationMessageRow(row) ||
       (row.kind === "timeline" &&
         (row.item.kind === "action_block" || row.item.kind === "agent-lifecycle"))

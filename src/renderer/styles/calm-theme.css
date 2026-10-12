@@ -859,14 +859,13 @@ html.visual-calm .calm-main .welcome-input-footer .calm-mode-toggle > button {
 }
 
 /* Task composer footer row (folder, domain): 12px muted labels with 14px
-   icons. 33px side padding centres the folder icon under the composer's "+"
-   and ends the domain label under the status strip's chevron, so the strip,
-   composer and footer share one set of edges. */
+   icons. No side padding, so the folder icon starts on the composer's left
+   edge and the domain label ends on its right edge. */
 html.visual-calm .calm-task .input-status-text,
 html.visual-calm .calm-task .composer-status-strip ~ .input-status-text {
   min-height: 24px;
   margin-top: 6px;
-  padding: 0 33px;
+  padding: 0;
 }
 
 html.visual-calm .calm-task .input-status-workspace,
@@ -876,7 +875,7 @@ html.visual-calm .calm-task .input-status-domain {
   font: 500 12px/18px var(--font-ui);
 }
 
-html.visual-calm .calm-task .input-status-workspace:hover,
+html.visual-calm .calm-task .input-status-workspace:not(:disabled):hover,
 html.visual-calm .calm-task .input-status-domain:hover {
   color: var(--calm-text);
 }

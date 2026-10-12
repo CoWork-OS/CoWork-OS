@@ -6851,7 +6851,10 @@ function MainContentComponent({
     }
   };
 
+  // A started task is bound to its workspace, so the picker only opens before one exists.
+  const isWorkspaceLocked = Boolean(task);
   const handleWorkspaceDropdownToggle = async () => {
+    if (isWorkspaceLocked) return;
     if (!showWorkspaceDropdown) {
       await loadRecentWorkspaces();
     }
@@ -12963,6 +12966,7 @@ function MainContentComponent({
                   <button
                     className="folder-selector"
                     onClick={handleWorkspaceDropdownToggle}
+                    disabled={isWorkspaceLocked}
                     title={workspace?.path || "Select a workspace folder"}
                   >
                     <svg
@@ -13024,6 +13028,7 @@ function MainContentComponent({
             <button
               className="input-status-workspace"
               onClick={handleWorkspaceDropdownToggle}
+              disabled={isWorkspaceLocked}
               title={
                 isBrowserHost
                   ? workspace?.name || "Select project"

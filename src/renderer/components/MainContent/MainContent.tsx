@@ -3916,9 +3916,12 @@ function usePrefersReducedMotion(): boolean {
 
 function useTypewriterPlaceholder(phrases: string[], active: boolean): string {
   const prefersReducedMotion = usePrefersReducedMotion();
+  // Keyed by content, not array identity: a parent re-render that rebuilds an equal list
+  // must not restart the animation from an empty placeholder.
+  const phrasesKey = phrases.filter((phrase) => phrase.trim().length > 0).join("\u0000");
   const normalizedPhrases = useMemo(
-    () => phrases.filter((phrase) => phrase.trim().length > 0),
-    [phrases],
+    () => (phrasesKey ? phrasesKey.split("\u0000") : []),
+    [phrasesKey],
   );
   const [displayText, setDisplayText] = useState(normalizedPhrases[0] ?? "");
 
@@ -7350,9 +7353,18 @@ function MainContentComponent({
     autoResizeTextarea(undefined, true);
   }, [inputValue, autoResizeTextarea]);
 
-  // Active placeholder: rotating prompt when available, personality fallback otherwise
-  const personalityPlaceholder = agentContext.getPlaceholder();
-  const hasCliInputContent = inputValue.length > 0 || hasCliInputDomContent;
+  // Active placeholder: rotating prompt when available, personality fallback otherwise.
+  // getPlaceholder picks at random, so pick once per personality instead of every render.
+  const getPersonalityPlaceholder = agentContext.getPlaceholder;
+  const personalityPlaceholder = useMemo(
+    () => getPersonalityPlaceholder(),
+    [getPersonalityPlaceholder],
+  );
+  // Whitespace alone (a restored draft that is just a line break) reads as empty, so the
+  // placeholder is not hidden behind an invisible newline. The DOM flag still covers typing
+  // that has not reached inputValue yet.
+  const hasCliInputContent =
+    inputValue.trim().length > 0 || (hasCliInputDomContent && inputValue.length === 0);
   // Calm keeps the rotating placeholder while the empty composer has focus and uses the
   // native caret; other themes swap the placeholder for their own cursor.
   const showCliPlaceholder = !hasCliInputContent && (isCalm || !isCliInputFocused);
@@ -10814,6 +10826,8 @@ function MainContentComponent({
                     ref={promptInputRef}
                     className={`welcome-input cli-input input-textarea${
                       !hasCliInputContent ? " input-textarea-empty-placeholder" : ""
+                    }${
+                      inputValue.length > 0 && !hasCliInputContent ? " input-whitespace-only" : ""
                     }`}
                     value={inputValue}
                     mentions={integrationMentionSpans}

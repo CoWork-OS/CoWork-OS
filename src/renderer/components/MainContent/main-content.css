@@ -11411,11 +11411,13 @@ button.collab-timeline-thought-agent:hover {
 /* Native paste can briefly populate the contentEditable before React receives
  * the corresponding state update. Never let the rotating copy sit over real
  * editor content during that handoff. */
-.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty)) > .cli-rotating-placeholder {
+.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty, .input-whitespace-only))
+  > .cli-rotating-placeholder {
   display: none;
 }
 
-.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty)) ~ .cli-cursor {
+.mention-autocomplete-wrapper:has(.prompt-composer-input:not(:empty, .input-whitespace-only))
+  ~ .cli-cursor {
   display: none;
   animation: none;
 }

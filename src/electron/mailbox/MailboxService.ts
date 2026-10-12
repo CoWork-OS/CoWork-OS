@@ -9,6 +9,7 @@ import {
 } from "../database/statements/statement-burst";
 import type Database from "better-sqlite3";
 import { createMailboxStatementPort, type MailboxStatementPort } from "./mailbox-statement-port";
+import type { MailboxEncryptedColumnTarget } from "./mailbox-statements";
 import {
   createCipheriv,
   createDecipheriv,
@@ -781,6 +782,34 @@ function encryptMailboxValue(value: string | null | undefined): string | null {
   return `${MAILBOX_CIPHER_PREFIX}app:${iv.toString("base64")}:${authTag.toString("base64")}:${encrypted}`;
 }
 
+// Values encrypted under another Keychain identity fail on every read. Warn once per
+// kind (the startup migration recovers what a former identity can still read), then
+// keep the rest at debug level instead of a stack trace per value.
+const reportedMailboxDecryptFailures = new Set<"os-unavailable" | "os" | "app">();
+
+function reportMailboxDecryptFailure(kind: "os-unavailable" | "os" | "app", error?: unknown) {
+  if (reportedMailboxDecryptFailures.has(kind)) {
+    mailboxLogger.debug(`Mailbox value unreadable (${kind}):`, error);
+    return;
+  }
+  reportedMailboxDecryptFailures.add(kind);
+  const reason =
+    kind === "os-unavailable"
+      ? "it was encrypted with the OS keychain, which is unavailable"
+      : kind === "os"
+        ? "it was encrypted with a different Keychain key (the app ran under another name)"
+        : "its app-level key no longer matches";
+  mailboxLogger.warn(
+    `Some mailbox content can't be decrypted because ${reason}; it is shown as empty. Further failures are logged at debug level.`,
+    error instanceof Error ? error.message : undefined,
+  );
+}
+
+/** True when a stored mailbox value is encrypted but reads back as nothing. */
+function isUnreadableMailboxValue(stored: string | null | undefined, decrypted: string): boolean {
+  return !decrypted && typeof stored === "string" && stored.startsWith(MAILBOX_CIPHER_PREFIX);
+}
+
 function decryptMailboxValue(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   if (!value.startsWith(MAILBOX_CIPHER_PREFIX)) return value;
@@ -789,14 +818,14 @@ function decryptMailboxValue(value: string | null | undefined): string | null {
 
   if (value.startsWith(`${MAILBOX_CIPHER_PREFIX}os:`)) {
     if (!state.encryptionAvailable || !state.safeStorage) {
-      mailboxLogger.warn("Mailbox value was encrypted with OS keychain but it is unavailable.");
+      reportMailboxDecryptFailure("os-unavailable");
       return "";
     }
     try {
       const encrypted = Buffer.from(value.slice(`${MAILBOX_CIPHER_PREFIX}os:`.length), "base64");
       return state.safeStorage.decryptString(encrypted);
     } catch (error) {
-      mailboxLogger.warn("Failed to decrypt OS-encrypted mailbox value:", error);
+      reportMailboxDecryptFailure("os", error);
       return "";
     }
   }
@@ -818,7 +847,7 @@ function decryptMailboxValue(value: string | null | undefined): string | null {
       decrypted += decipher.final("utf8");
       return decrypted;
     } catch (error) {
-      mailboxLogger.warn("Failed to decrypt app-encrypted mailbox value:", error);
+      reportMailboxDecryptFailure("app", error);
       return "";
     }
   }
@@ -8388,12 +8417,38 @@ export class MailboxService {
     ]);
   }
 
+  /** Encrypted (`mbox:os:`) values of one column, for the legacy Keychain migration. */
+  async listOsEncryptedValues(
+    target: MailboxEncryptedColumnTarget,
+  ): Promise<Array<{ key: string; value: string }>> {
+    return this.sql.all<{ key: string; value: string }>("legacyKeychainEncryptedValues", [], {
+      target,
+    });
+  }
+
+  /** Replaces an encrypted value only if it is unchanged since it was read. */
+  async replaceEncryptedValueIfUnchanged(
+    target: MailboxEncryptedColumnTarget,
+    key: string,
+    next: string,
+    previous: string,
+  ): Promise<boolean> {
+    const result = await this.sql.run("legacyKeychainReplaceValue", [next, key, previous], {
+      target,
+    });
+    return result.changes > 0;
+  }
+
   private async getSummaryForThread(threadId: string): Promise<MailboxSummaryCard | null> {
     const row = (await this.sql.get("getSummaryForThread_1", [threadId])) as
       | MailboxSummaryRow
       | undefined;
     if (!row) return null;
-    return this.mapSummaryRow(row);
+    const summary = this.mapSummaryRow(row);
+    // A summary no key can read is treated as missing, so callers fall back to the
+    // snippet or summarize the thread again (re-encrypting it with the current key).
+    if (isUnreadableMailboxValue(row.summary_text, summary.summary)) return null;
+    return summary;
   }
 
   private async getMessagesForThread(threadId: string): Promise<MailboxMessage[]> {

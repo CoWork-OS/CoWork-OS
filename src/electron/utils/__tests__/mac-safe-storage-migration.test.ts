@@ -7,6 +7,7 @@ import {
   decryptLegacyMacSafeStorageRows,
   MAC_SAFE_STORAGE_MIGRATION_RESULT_PREFIX,
   migrateLegacyMacSafeStorageChannels,
+  migrateLegacyMacSafeStorageMailbox,
   migrateLegacyMacSafeStorageSettings,
   runMacSafeStorageMigrationWorker,
   type DecryptedSecureSetting,
@@ -374,5 +375,213 @@ describe("macOS safeStorage legacy migration", () => {
     expect(writeResult).toHaveBeenCalledOnce();
     expect(writeResult.mock.calls[0]?.[0]).toContain(MAC_SAFE_STORAGE_MIGRATION_RESULT_PREFIX);
     expect(writeResult.mock.calls[0]?.[0]).toContain('"category":"user-profile"');
+  });
+});
+
+describe("macOS safeStorage legacy migration: mailbox content", () => {
+  const b64 = (value: string) => Buffer.from(value).toString("base64");
+  // The current identity reads "current:" ciphertexts; the "cowork-os" worker reads "legacy:".
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (text: string) => Buffer.from(`current:${text}`),
+    decryptString: (buffer: Buffer) => {
+      const value = buffer.toString("utf8");
+      if (!value.startsWith("current:")) throw new Error("wrong Keychain identity");
+      return value.slice("current:".length);
+    },
+  };
+
+  function fakeStore(columns: Record<string, Record<string, string>>) {
+    const writes: string[] = [];
+    const store = {
+      targets: Object.keys(columns),
+      list: vi.fn(async (target: string) =>
+        Object.entries(columns[target] ?? {}).map(([key, value]) => ({ key, value })),
+      ),
+      replaceIfUnchanged: vi.fn(
+        async (target: string, key: string, next: string, previous: string) => {
+          writes.push(key);
+          if (columns[target]?.[key] !== previous) return false;
+          columns[target][key] = next;
+          return true;
+        },
+      ),
+    };
+    return { store, columns, writes };
+  }
+
+  function fakeWorkers() {
+    const attempted: string[] = [];
+    const spawnProcess = vi.fn((_executable: string, args: string[]) => {
+      const identity = args.at(-1) || "";
+      attempted.push(identity);
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const child = new EventEmitter() as ChildProcess;
+      Object.assign(child, { stdin: input, stdout: output, kill: vi.fn() });
+      let body = "";
+      input.on("data", (chunk) => (body += String(chunk)));
+      input.once("finish", () => {
+        const rows = JSON.parse(body) as EncryptedSecureSettingRow[];
+        const result = rows.flatMap((item) => {
+          const plain = Buffer.from(item.encrypted_data.slice(3), "base64").toString("utf8");
+          return identity === "cowork-os" && plain.startsWith("legacy:") && item.format === "text"
+            ? [{ category: item.category, settings: { text: plain.slice("legacy:".length) } }]
+            : [];
+        });
+        output.end(`${MAC_SAFE_STORAGE_MIGRATION_RESULT_PREFIX}${JSON.stringify(result)}\n`);
+        output.once("end", () => child.emit("close", 0));
+      });
+      return child;
+    });
+    return { spawnProcess, attempted };
+  }
+
+  const baseOptions = {
+    platform: "darwin" as const,
+    safeStorage,
+    executable: "/Applications/CoWork OS.app/Contents/MacOS/CoWork OS",
+    appPath: "/Applications/CoWork OS.app/Contents/Resources/app.asar",
+    legacyAppNames: ["Electron", "cowork-os"],
+  };
+
+  it("returns text rows from the worker as { text } without parsing JSON", () => {
+    const encrypted_data = `os:${b64("plain mail body")}`;
+    const result = decryptLegacyMacSafeStorageRows(
+      [{ category: "m1", encrypted_data, checksum: sha256(encrypted_data), format: "text" }],
+      {
+        isEncryptionAvailable: () => true,
+        encryptString: vi.fn(),
+        decryptString: (buffer: Buffer) => buffer.toString("utf8"),
+      },
+    );
+    expect(result).toEqual([{ category: "m1", settings: { text: "plain mail body" } }]);
+  });
+
+  it("re-encrypts values a former identity can read and leaves readable ones alone", async () => {
+    const database = fakeStore({
+      "mailbox_messages.body_text": {
+        m1: `mbox:os:${b64("legacy:hello")}`,
+        m2: `mbox:os:${b64("current:already fine")}`,
+        m3: "plain, not encrypted",
+      },
+      "mailbox_summaries.summary_text": { t1: `mbox:os:${b64("legacy:summary")}` },
+    });
+    const { spawnProcess, attempted } = fakeWorkers();
+    const attempts = { value: null as string | null, read: () => null, write: vi.fn() };
+    const logger = { info: vi.fn(), warn: vi.fn() };
+
+    const migrated = await migrateLegacyMacSafeStorageMailbox({
+      ...baseOptions,
+      store: database.store,
+      logger,
+      attempts,
+      spawnProcess: spawnProcess as never,
+    });
+
+    expect(migrated).toBe(2);
+    expect(attempted).toEqual(["Electron", "cowork-os"]);
+    expect(database.columns["mailbox_messages.body_text"].m1).toBe(
+      `mbox:os:${b64("current:hello")}`,
+    );
+    expect(database.columns["mailbox_summaries.summary_text"].t1).toBe(
+      `mbox:os:${b64("current:summary")}`,
+    );
+    expect(database.writes).not.toContain("m2");
+    expect(database.writes).not.toContain("m3");
+    expect(attempts.write).toHaveBeenCalledWith("");
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a value that changed while the worker ran", async () => {
+    const database = fakeStore({
+      "mailbox_summaries.summary_text": { t1: `mbox:os:${b64("legacy:old")}` },
+    });
+    const { spawnProcess } = fakeWorkers();
+    spawnProcess.mockImplementationOnce(((executable: string, args: string[]) => {
+      database.columns["mailbox_summaries.summary_text"].t1 = `mbox:os:${b64("current:newer")}`;
+      return fakeWorkers().spawnProcess(executable, args);
+    }) as never);
+
+    const migrated = await migrateLegacyMacSafeStorageMailbox({
+      ...baseOptions,
+      legacyAppNames: ["cowork-os"],
+      store: database.store,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      spawnProcess: spawnProcess as never,
+    });
+
+    expect(migrated).toBe(0);
+    expect(database.columns["mailbox_summaries.summary_text"].t1).toBe(
+      `mbox:os:${b64("current:newer")}`,
+    );
+  });
+
+  it("remembers values no identity can read and skips them on the next launch", async () => {
+    const columns = {
+      "mailbox_messages.body_html": { m9: `mbox:os:${b64("mock:unknown key")}` },
+    };
+    let stored: string | null = null;
+    const attempts = { read: () => stored, write: (value: string) => (stored = value || null) };
+    const logger = { info: vi.fn(), warn: vi.fn() };
+
+    const first = fakeWorkers();
+    await migrateLegacyMacSafeStorageMailbox({
+      ...baseOptions,
+      store: fakeStore(columns).store,
+      logger,
+      attempts,
+      spawnProcess: first.spawnProcess as never,
+    });
+    expect(first.attempted).toEqual(["Electron", "cowork-os"]);
+    expect(stored).toMatch(/^[0-9a-f]{64}$/);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("no known identity can read"),
+      { unreadableCount: 1 },
+    );
+
+    const second = fakeWorkers();
+    await migrateLegacyMacSafeStorageMailbox({
+      ...baseOptions,
+      store: fakeStore(columns).store,
+      logger,
+      attempts,
+      spawnProcess: second.spawnProcess as never,
+    });
+    expect(second.attempted).toEqual([]);
+
+    // A new unreadable value changes the set, so the next launch tries again.
+    const third = fakeWorkers();
+    await migrateLegacyMacSafeStorageMailbox({
+      ...baseOptions,
+      store: fakeStore({
+        "mailbox_messages.body_html": {
+          ...columns["mailbox_messages.body_html"],
+          m10: `mbox:os:${b64("legacy:new")}`,
+        },
+      }).store,
+      logger,
+      attempts,
+      spawnProcess: third.spawnProcess as never,
+    });
+    expect(third.attempted).toEqual(["Electron", "cowork-os"]);
+  });
+
+  it("does nothing off macOS or without OS encryption", async () => {
+    const database = fakeStore({ "mailbox_messages.body_text": {} });
+    for (const options of [
+      { platform: "linux" as const, safeStorage },
+      { platform: "darwin" as const, safeStorage: null },
+    ]) {
+      expect(
+        await migrateLegacyMacSafeStorageMailbox({
+          ...baseOptions,
+          ...options,
+          store: database.store,
+          logger: { info: vi.fn(), warn: vi.fn() },
+        }),
+      ).toBe(0);
+    }
+    expect(database.store.list).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,7 @@ import {
   attentionFromCommitment,
   attentionFromFlowStep,
   attentionFromInputRequest,
+  attentionFromMemoryChange,
   attentionFromSuggestion,
   attentionFromTask,
   rankAttention,
@@ -22,6 +23,7 @@ import {
   type AttentionSourceName,
   type AttentionTaskContext,
 } from "../../shared/attention";
+import type { MemoryCurationChange } from "../../shared/memory-review-types";
 import type { ApprovalRequest, InputRequest, ProactiveSuggestion, Task } from "../../shared/types";
 
 export interface AttentionSources {
@@ -37,6 +39,8 @@ export interface AttentionSources {
   listWaitingFlowSteps: () => Promise<AttentionFlowStep[]>;
   listDueCommitments: () => Promise<AttentionCommitment[]>;
   listSuggestions: () => Promise<Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>>;
+  /** Commitments memory closed recently, with whether undo is still possible. */
+  listMemoryChanges?: () => Promise<Array<{ workspaceId: string; change: MemoryCurationChange }>>;
   /** What this machine is called in the UI, e.g. "This Mac". */
   localLabel: string;
   now?: () => number;
@@ -51,6 +55,7 @@ const LIMITS = {
   flows: 20,
   commitments: 20,
   suggestions: 20,
+  memory: 20,
   /** Task lookups for approvals and questions whose session is not among the recent ones. */
   taskLookups: 50,
   /** Parent lookups while finding the agent roles an item's work belongs to. */
@@ -85,6 +90,7 @@ export class AttentionService {
       flowSteps,
       commitments,
       suggestions,
+      memoryChanges,
     ] = await Promise.all([
       read("approvals", this.sources.listPendingApprovals, [] as ApprovalRequest[]),
       read("questions", this.sources.listPendingInputRequests, [] as InputRequest[]),
@@ -99,6 +105,11 @@ export class AttentionService {
         "suggestions",
         this.sources.listSuggestions,
         [] as Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>,
+      ),
+      read(
+        "memory",
+        this.sources.listMemoryChanges ?? (async () => []),
+        [] as Array<{ workspaceId: string; change: MemoryCurationChange }>,
       ),
     ]);
 
@@ -159,6 +170,10 @@ export class AttentionService {
         )
         .filter((item): item is AttentionItem => item !== null)
         .slice(0, LIMITS.suggestions),
+      ...memoryChanges
+        .map(({ workspaceId, change }) => attentionFromMemoryChange(change, workspaceId, context))
+        .filter((item): item is AttentionItem => item !== null)
+        .slice(0, LIMITS.memory),
     ];
 
     const ranked = rankAttention(items).slice(0, LIMITS.total);

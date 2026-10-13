@@ -7,6 +7,7 @@ import type {
   RoutineWorkflowRunRecord,
   RoutineWorkflowStepRecord,
 } from "../../shared/routine-workflow";
+import type { MemoryCurationChange } from "../../shared/memory-review-types";
 import type { ProactiveSuggestion, Workspace } from "../../shared/types";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -94,4 +95,41 @@ export async function listSuggestionsAcross(
     workspaceId: suggestion.workspaceId || ids[0],
     suggestion,
   }));
+}
+
+/** How long an automatic commitment expiry stays in the queue for undo. */
+export const MEMORY_CHANGE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+type MemoryChangeEntry = { workspaceId: string; change: MemoryCurationChange };
+
+/**
+ * Recent automatic commitment expiries across the saved workspaces, newest first. A
+ * workspace that cannot be read is skipped; if none can be read the error is passed on, so
+ * the queue reports the source as failed.
+ */
+export async function listMemoryChangesAcross(
+  workspaces: Workspace[],
+  recentSince: (workspaceId: string, since: number) => Promise<MemoryCurationChange[]>,
+  now = Date.now(),
+): Promise<MemoryChangeEntry[]> {
+  const saved = suggestionWorkspaces(workspaces);
+  const since = now - MEMORY_CHANGE_WINDOW_MS;
+  const results = await Promise.allSettled(
+    saved.map(async (workspace) =>
+      (await recentSince(workspace.id, since)).map((change) => ({
+        workspaceId: workspace.id,
+        change,
+      })),
+    ),
+  );
+  const read = results.filter(
+    (result): result is PromiseFulfilledResult<MemoryChangeEntry[]> =>
+      result.status === "fulfilled",
+  );
+  if (saved.length > 0 && read.length === 0) {
+    throw (results[0] as PromiseRejectedResult).reason;
+  }
+  return read
+    .flatMap((result) => result.value)
+    .sort((a, b) => b.change.appliedAt - a.change.appliedAt);
 }

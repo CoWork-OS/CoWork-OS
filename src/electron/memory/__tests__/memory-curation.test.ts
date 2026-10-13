@@ -153,6 +153,11 @@ describeWithSqlite("commitment expiry (SQLite)", () => {
       }),
     ]);
     expect((await hub.state("ws-2")).recent).toEqual([]);
+    // The needs-you queue reads only expiries applied since a time.
+    expect((await hub.recentSince("ws-1", log.appliedAt)).map((change) => change.id)).toEqual([
+      log.id,
+    ]);
+    expect(await hub.recentSince("ws-1", log.appliedAt + 1)).toEqual([]);
     await expect(hub.undo("ws-2", log.id)).rejects.toThrow(/not found/);
 
     expect(await hub.undo("ws-1", log.id)).toMatchObject({ success: true });

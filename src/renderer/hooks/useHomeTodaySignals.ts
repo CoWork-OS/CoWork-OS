@@ -18,6 +18,11 @@ export interface HomeTodaySignals {
   markSuggestionStarted: (workspaceId: string, suggestionId: string) => Promise<void>;
   snoozeSuggestion: (workspaceId: string, suggestionId: string) => Promise<void>;
   completeCommitment: (commitmentId: string) => Promise<boolean>;
+  /** Reopens a commitment memory closed on its own; the error says why it could not. */
+  undoMemoryChange: (
+    workspaceId: string,
+    changeId: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Hides a card right away and, when given, records the row it leaves behind. */
   resolve: (cardId: string, row?: HomeTodayHandledRow) => void;
 }
@@ -49,6 +54,13 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     return Boolean(updated);
   }, []);
 
+  const undoMemoryChange = useCallback(async (workspaceId: string, changeId: string) => {
+    const result = await window.electronAPI.undoMemoryChange({ workspaceId, id: changeId });
+    return result?.success
+      ? ({ ok: true } as const)
+      : ({ ok: false, error: result?.error || "It could not be undone." } as const);
+  }, []);
+
   return {
     attention: snapshot.items,
     failedSources: snapshot.failedSources,
@@ -57,6 +69,7 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     markSuggestionStarted,
     snoozeSuggestion,
     completeCommitment,
+    undoMemoryChange,
     resolve,
   };
 }

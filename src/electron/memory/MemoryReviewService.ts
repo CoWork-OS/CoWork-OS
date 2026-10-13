@@ -64,9 +64,22 @@ export class MemoryReviewService {
     return { recent: writer ? await this.recent(workspaceId, writer) : [] };
   }
 
-  private async recent(workspaceId: string, writer: MemoryWriter): Promise<MemoryCurationChange[]> {
+  /**
+   * Expiries applied since `since`, newest first. The needs-you queue lists these as handled
+   * work with undo, so only recent ones are checked for whether undo is still possible.
+   */
+  async recentSince(workspaceId: string, since: number): Promise<MemoryCurationChange[]> {
+    const writer = this.deps.getWriter();
+    return writer ? this.recent(workspaceId, writer, since) : [];
+  }
+
+  private async recent(
+    workspaceId: string,
+    writer: MemoryWriter,
+    since = 0,
+  ): Promise<MemoryCurationChange[]> {
     const logs = (await this.deps.curation.listLog(workspaceId, LOG_SCAN))
-      .filter(isExpiry)
+      .filter((log) => isExpiry(log) && log.appliedAt >= since)
       .slice(0, MAX_RECENT);
     const changes: MemoryCurationChange[] = [];
     for (const log of logs) {

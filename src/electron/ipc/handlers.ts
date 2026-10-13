@@ -570,6 +570,7 @@ import { setupAttentionHandlers } from "./attention-handlers";
 import { createAgentRoleAssignmentHandler } from "./agent-role-assignment-handlers";
 import { AttentionService } from "../attention/AttentionService";
 import {
+  listMemoryChangesAcross,
   listSuggestionsAcross,
   listWaitingFlowSteps,
   toAttentionCommitment,
@@ -11184,8 +11185,12 @@ export async function setupIpcHandlers(
     },
   });
 
+  // Shared by Memory Hub "Review" and the needs-you queue, which lists recent expiries.
+  const memoryReviewService = createMemoryReviewService(db);
+
   // Shared "needs you" queue: one snapshot of everything waiting on the user (approvals,
-  // agent questions, paused sessions, flow steps, due commitments and suggestions).
+  // agent questions, paused sessions, flow steps, due commitments and suggestions), plus
+  // commitments memory recently closed, which can still be undone.
   setupAttentionHandlers({
     service: new AttentionService({
       listPendingApprovals: () => approvalRepo.findAllPending(),
@@ -11215,6 +11220,10 @@ export async function setupIpcHandlers(
           ProactiveSuggestionsService.listActive(id, opts, ids),
         );
       },
+      listMemoryChanges: async () =>
+        listMemoryChangesAcross(await workspaceRepo.findAll(), (id, since) =>
+          memoryReviewService.recentSince(id, since),
+        ),
       localLabel: process.platform === "darwin" ? "This Mac" : "This computer",
       log: (message, error) => logger.warn(message, error),
     }),
@@ -11224,7 +11233,7 @@ export async function setupIpcHandlers(
 
   // Memory Hub "Review": automatic commitment expiries with undo.
   setupMemoryReviewHandlers({
-    service: createMemoryReviewService(db),
+    service: memoryReviewService,
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 

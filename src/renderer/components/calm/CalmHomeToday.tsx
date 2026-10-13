@@ -47,7 +47,11 @@ interface CalmHomeTodayProps {
   today: HomeToday;
   signals: Pick<
     HomeTodaySignals,
-    "markSuggestionStarted" | "snoozeSuggestion" | "completeCommitment" | "resolve"
+    | "markSuggestionStarted"
+    | "snoozeSuggestion"
+    | "completeCommitment"
+    | "undoMemoryChange"
+    | "resolve"
   >;
   onOpenSession: (taskId: string) => void;
   /** Opens an automation in the Automations view; absent where it can't be opened. */
@@ -155,6 +159,30 @@ export function CalmHomeToday({
       setErrors((current) => ({ ...current, [card.id]: "That didn't go through. Try again." }));
     } finally {
       setBusy((current) => (current === card.id ? null : current));
+    }
+  };
+
+  /** Reopens a commitment memory closed on its own; the row then says it was reopened. */
+  const undoRow = async (row: HomeTodayHandledRow) => {
+    if (!row.undo) return;
+    setBusy(row.id);
+    setErrors(({ [row.id]: _cleared, ...rest }) => rest);
+    try {
+      const result = await signals.undoMemoryChange(row.undo.workspaceId, row.undo.changeId);
+      if (!result.ok) {
+        setErrors((current) => ({ ...current, [row.id]: result.error }));
+        return;
+      }
+      signals.resolve(row.id, {
+        id: `acted:${row.id}`,
+        title: row.title,
+        outcome: "Reopened",
+        at: Date.now(),
+      });
+    } catch {
+      setErrors((current) => ({ ...current, [row.id]: "That didn't go through. Try again." }));
+    } finally {
+      setBusy((current) => (current === row.id ? null : current));
     }
   };
 
@@ -281,9 +309,28 @@ export function CalmHomeToday({
                     {content}
                   </button>
                 ) : (
-                  <div className="calm-today-handled-row" title={row.title}>
+                  <div
+                    className="calm-today-handled-row"
+                    title={row.detail ? `${row.title}\n${row.detail}` : row.title}
+                  >
                     {content}
+                    {row.undo && (
+                      <button
+                        type="button"
+                        className="calm-today-handled-undo"
+                        disabled={busy === row.id}
+                        aria-label={`Undo: reopen "${row.title}"`}
+                        onClick={() => void undoRow(row)}
+                      >
+                        Undo
+                      </button>
+                    )}
                   </div>
+                )}
+                {errors[row.id] && (
+                  <p className="calm-today-handled-error" role="alert">
+                    {errors[row.id]}
+                  </p>
                 )}
               </li>
             );

@@ -7,6 +7,7 @@
  * Items describe and point; they never act. Every decision still goes through the surface
  * that owns it (the approval review, the session, the flow run), with its own checks.
  */
+import type { MemoryCurationChange } from "./memory-review-types";
 import { deriveCanonicalTaskStatus } from "./task-status";
 import { LOCAL_MANAGED_DEVICE_NODE_ID } from "./types";
 import type {
@@ -24,7 +25,9 @@ export type AttentionKind =
   | "session"
   | "flow_approval"
   | "commitment"
-  | "suggestion";
+  | "suggestion"
+  /** A commitment memory closed on its own, kept for a while so it can be undone. */
+  | "memory_change";
 
 /** Who is asking. */
 export interface AttentionActor {
@@ -53,7 +56,8 @@ export type AttentionRef =
   | { type: "task"; taskId: string }
   | { type: "workflow_step"; routineId: string; runId: string; stepId: string }
   | { type: "commitment"; commitmentId: string }
-  | { type: "suggestion"; suggestionId: string; workspaceId: string };
+  | { type: "suggestion"; suggestionId: string; workspaceId: string }
+  | { type: "memory_change"; changeId: string; workspaceId: string };
 
 export interface AttentionItem {
   /** Stable across snapshots: `${kind}:${source id}`. */
@@ -94,7 +98,8 @@ export type AttentionSourceName =
   | "sessions"
   | "flows"
   | "commitments"
-  | "suggestions";
+  | "suggestions"
+  | "memory";
 
 export interface AttentionSnapshot {
   generatedAt: number;
@@ -484,6 +489,36 @@ export function attentionFromSuggestion(
 }
 
 /**
+ * A commitment that memory upkeep closed because it looked done. It is not a decision: it is
+ * handled work the user can undo while undo is still possible, so it is never urgent.
+ */
+export function attentionFromMemoryChange(
+  change: MemoryCurationChange,
+  workspaceId: string,
+  context: AttentionTaskContext,
+): AttentionItem | null {
+  if (change.op !== "expire_commitment" || change.undoneAt !== null || !change.canUndo) {
+    return null;
+  }
+  const title = clip(change.items[0]?.content || change.summary, 160);
+  if (!title) return null;
+  return {
+    id: `memory_change:${change.id}`,
+    kind: "memory_change",
+    state: "Closed for you",
+    title,
+    detail: clip(change.summary, 200) || undefined,
+    createdAt: change.appliedAt,
+    urgent: false,
+    actor: { kind: "background", name: "Memory" },
+    origin: { kind: "memory", label: "Closed because it looked done" },
+    place: { kind: "local", label: context.localLabel },
+    workspaceId,
+    ref: { type: "memory_change", changeId: change.id, workspaceId },
+  };
+}
+
+/**
  * Sessions the queue says wait on the user, by task id, with the reason to show. An
  * approval or question outranks the plain waiting-session reason for the same task.
  */
@@ -507,6 +542,7 @@ const KIND_RANK: Record<AttentionKind, number> = {
   session: 1,
   commitment: 2,
   suggestion: 3,
+  memory_change: 4,
 };
 
 /**

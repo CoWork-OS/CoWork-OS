@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
+  CalendarPlus,
+  CalendarX2,
   Check,
   CornerUpRight,
   Lightbulb,
@@ -11,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Target,
+  Users,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -36,6 +39,9 @@ const ICONS: Record<HomeTodayIcon, LucideIcon> = {
   blocked: OctagonAlert,
   flow: Workflow,
   commitment: CalendarClock,
+  calendar_hold: CalendarPlus,
+  calendar_conflict: CalendarX2,
+  calendar_prep: Users,
   follow_up: CornerUpRight,
   recurring_pattern: Repeat,
   goal_aligned: Target,
@@ -54,6 +60,9 @@ interface CalmHomeTodayProps {
     | "completeCommitment"
     | "undoMemoryChange"
     | "answerQuestion"
+    | "acceptCalendarProposal"
+    | "dismissCalendarProposal"
+    | "holdCalendarTimeForSuggestion"
     | "resolve"
   >;
   onOpenSession: (taskId: string) => void;
@@ -73,11 +82,20 @@ interface CalmHomeTodayProps {
    * on, and as edited when the prompt changed.
    */
   onEditSuggestion?: (prompt: string, workspaceId: string, suggestionId: string) => void;
+  /** Opens a calendar event in the browser. */
+  onOpenLink?: (url: string) => void;
 }
 
 function cardTime(card: HomeTodayCard, now: number): string {
-  if (card.kind === "commitment") {
-    return new Date(card.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const clock = new Date(card.at).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  if (card.kind === "commitment") return clock;
+  if (card.kind === "calendar") {
+    // When it happens: the clock today, with the day after that.
+    if (new Date(card.at).toDateString() === new Date(now).toDateString()) return clock;
+    return `${new Date(card.at).toLocaleDateString(undefined, { weekday: "short" })} ${clock}`;
   }
   return formatHomeSessionTime(card.at, now);
 }
@@ -96,6 +114,7 @@ export function CalmHomeToday({
   onStartTask,
   onDraftPrompt,
   onEditSuggestion,
+  onOpenLink,
 }: CalmHomeTodayProps) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -142,6 +161,10 @@ export function CalmHomeToday({
     }
     if (action.type === "draft-prompt") {
       onDraftPrompt(action.prompt);
+      return;
+    }
+    if (action.type === "open-link") {
+      onOpenLink?.(action.url);
       return;
     }
     if (action.type === "edit-suggestion") {
@@ -208,6 +231,49 @@ export function CalmHomeToday({
             ? { taskId: card.primary.action.taskId }
             : {}),
         });
+      } else if (action.type === "accept-calendar") {
+        const result = await signals.acceptCalendarProposal(action.proposalId);
+        if (!result.ok) {
+          setErrors((current) => ({ ...current, [card.id]: result.message }));
+          return;
+        }
+        foldAway(card, {
+          id: `acted:${card.id}`,
+          title: card.title,
+          outcome: action.done,
+          at: Date.now(),
+        });
+      } else if (action.type === "dismiss-calendar") {
+        await signals.dismissCalendarProposal(action.proposalId);
+        foldAway(card);
+      } else if (action.type === "prepare-meeting") {
+        // Same as a suggestion: run exactly the prompt the card showed.
+        if (!(await onStartTask(action.title, action.prompt))) return;
+        // Prep has started; retiring the card is best effort.
+        await signals.acceptCalendarProposal(action.proposalId).catch(() => {});
+        foldAway(card, {
+          id: `acted:${card.id}`,
+          title: card.title,
+          outcome: "Prep started",
+          at: Date.now(),
+        });
+      } else if (action.type === "hold-for-suggestion") {
+        const result = await signals.holdCalendarTimeForSuggestion({
+          workspaceId: action.workspaceId,
+          suggestionId: action.suggestionId,
+          start: action.start,
+          end: action.end,
+        });
+        if (!result.ok) {
+          setErrors((current) => ({ ...current, [card.id]: result.message }));
+          return;
+        }
+        foldAway(card, {
+          id: `acted:${card.id}`,
+          title: card.title,
+          outcome: "Time held",
+          at: Date.now(),
+        });
       } else if (action.type === "complete-commitment") {
         if (!(await signals.completeCommitment(action.commitmentId))) {
           throw new Error("not updated");
@@ -249,6 +315,11 @@ export function CalmHomeToday({
       setBusy((current) => (current === row.id ? null : current));
     }
   };
+
+  /** Buttons whose handler this view wasn't given stay disabled. */
+  const canRun = (button: HomeTodayButton) =>
+    !(button.action.type === "open-routine" && !onOpenRoutine) &&
+    !(button.action.type === "open-link" && !onOpenLink);
 
   const renderCard = (card: HomeTodayCard, variant: "decision" | "idea") => {
     const Icon = ICONS[card.icon] || Sparkles;
@@ -324,7 +395,8 @@ export function CalmHomeToday({
           <button
             type="button"
             className={card.choices ? "calm-today-button" : "calm-today-button primary"}
-            disabled={isBusy || (card.primary.action.type === "open-routine" && !onOpenRoutine)}
+            title={card.primary.hint}
+            disabled={isBusy || !canRun(card.primary)}
             onClick={() => void run(card, card.primary)}
           >
             {card.primary.label}
@@ -333,7 +405,8 @@ export function CalmHomeToday({
             <button
               type="button"
               className="calm-today-button"
-              disabled={isBusy}
+              title={card.secondary.hint}
+              disabled={isBusy || !canRun(card.secondary)}
               onClick={() => void run(card, card.secondary!)}
             >
               {card.secondary.label}
@@ -344,7 +417,8 @@ export function CalmHomeToday({
               key={button.label}
               type="button"
               className="calm-today-button quiet"
-              disabled={isBusy}
+              title={button.hint}
+              disabled={isBusy || !canRun(button)}
               onClick={() => void run(card, button)}
             >
               {button.label}
@@ -363,7 +437,7 @@ export function CalmHomeToday({
     <div className="calm-today">
       {(visible.length > 0 || showIdea) && (
         <section className="calm-today-cards" aria-label="Needs you">
-          {visible.map((card) => renderCard(card, "decision"))}
+          {visible.map((card) => renderCard(card, card.offer ? "idea" : "decision"))}
           {hiddenCount > 0 && (
             <button type="button" className="calm-today-more" onClick={() => setExpanded(true)}>
               Show {hiddenCount} more

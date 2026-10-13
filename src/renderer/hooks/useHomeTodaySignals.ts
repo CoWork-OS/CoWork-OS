@@ -5,6 +5,14 @@ import { useAttentionSnapshot } from "./useAttentionSnapshot";
 
 const SNOOZE_MS = 24 * 60 * 60 * 1000;
 
+/** What a calendar card's action did; `message` says why it didn't go through. */
+export type CalendarCardResult = { ok: true } | { ok: false; message: string };
+
+const CALENDAR_UNAVAILABLE: CalendarCardResult = {
+  ok: false,
+  message: "Calendar actions aren't available here.",
+};
+
 export interface HomeTodaySignals {
   /** The shared queue's items, most pressing first. */
   attention: AttentionItem[];
@@ -36,6 +44,17 @@ export interface HomeTodaySignals {
     questionId: string,
     optionLabel: string,
   ) => Promise<"handled" | "duplicate" | "not_found" | "in_progress">;
+  /** Holds the time or declines the event a calendar card names, after a fresh check. */
+  acceptCalendarProposal: (proposalId: string) => Promise<CalendarCardResult>;
+  /** Stops showing a calendar card. */
+  dismissCalendarProposal: (proposalId: string) => Promise<void>;
+  /** Holds a free stretch on the calendar for a suggestion about making time. */
+  holdCalendarTimeForSuggestion: (hold: {
+    workspaceId: string;
+    suggestionId: string;
+    start: number;
+    end: number;
+  }) => Promise<CalendarCardResult>;
   /** Hides a card right away and, when given, records the row it leaves behind. */
   resolve: (cardId: string, row?: HomeTodayHandledRow) => void;
 }
@@ -100,6 +119,31 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     [],
   );
 
+  const acceptCalendarProposal = useCallback(async (proposalId: string) => {
+    const api = window.electronAPI;
+    if (typeof api.acceptCalendarProposal !== "function") return CALENDAR_UNAVAILABLE;
+    const outcome = await api.acceptCalendarProposal(proposalId);
+    return outcome.ok ? ({ ok: true } as const) : { ok: false as const, message: outcome.message };
+  }, []);
+
+  const dismissCalendarProposal = useCallback(async (proposalId: string) => {
+    const api = window.electronAPI;
+    if (typeof api.dismissCalendarProposal !== "function") return;
+    await api.dismissCalendarProposal(proposalId);
+  }, []);
+
+  const holdCalendarTimeForSuggestion = useCallback(
+    async (hold: { workspaceId: string; suggestionId: string; start: number; end: number }) => {
+      const api = window.electronAPI;
+      if (typeof api.holdCalendarTimeForSuggestion !== "function") return CALENDAR_UNAVAILABLE;
+      const outcome = await api.holdCalendarTimeForSuggestion(hold);
+      return outcome.ok
+        ? ({ ok: true } as const)
+        : { ok: false as const, message: outcome.message };
+    },
+    [],
+  );
+
   return {
     attention: snapshot.items,
     failedSources: snapshot.failedSources,
@@ -112,6 +156,9 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     completeCommitment,
     undoMemoryChange,
     answerQuestion,
+    acceptCalendarProposal,
+    dismissCalendarProposal,
+    holdCalendarTimeForSuggestion,
     resolve,
   };
 }

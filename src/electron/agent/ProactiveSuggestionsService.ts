@@ -404,8 +404,22 @@ export class ProactiveSuggestionsService {
   }
 
   /**
-   * Mark a suggestion as acted-on and return its actionPrompt.
+   * A suggestion by id while it is still shown (not expired, snoozed, dismissed or acted on,
+   * and not private), for a card action to read its stored text.
    */
+  static async getActive(
+    workspaceId: string,
+    suggestionId: string,
+    now = Date.now(),
+  ): Promise<ProactiveSuggestion | null> {
+    this.loadDismissed();
+    const suggestion = await this.findSuggestionById(workspaceId, suggestionId);
+    if (!suggestion) return null;
+    if (suggestion.expiresAt < now || (suggestion.snoozedUntil || 0) > now) return null;
+    if (this.dismissedIds.has(suggestion.id) || this.actedOnIds.has(suggestion.id)) return null;
+    return suggestion;
+  }
+
   /**
    * Keeps a follow-up suggestion as one of the user's commitments, due a day from now, and
    * records the suggestion as acted on. Only follow-ups qualify: they are about something
@@ -430,6 +444,9 @@ export class ProactiveSuggestionsService {
     return { ok: true };
   }
 
+  /**
+   * Mark a suggestion as acted-on and return its actionPrompt.
+   */
   static async actOn(workspaceId: string, suggestionId: string): Promise<string | null> {
     this.loadDismissed();
 

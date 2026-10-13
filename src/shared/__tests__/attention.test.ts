@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attentionActorForTask,
   attentionFromApproval,
+  attentionFromCalendarProposal,
   attentionFromCommitment,
   attentionFromFlowStep,
   attentionFromInputRequest,
@@ -15,6 +16,7 @@ import {
   attentionWaitingByTask,
   classifyTaskActivity,
   rankAttention,
+  suggestsCalendarHold,
   type AttentionItem,
 } from "../attention";
 import type { ApprovalRequest, InputRequest, ProactiveSuggestion, Task } from "../types";
@@ -353,6 +355,98 @@ describe("rankAttention", () => {
       "nudge",
       "idea",
     ]);
+  });
+
+  it("puts calendar conflicts with commitments and calendar offers with the offers, soonest first", () => {
+    const ranked = rankAttention([
+      item("idea", "suggestion", { urgent: false }),
+      item("nudge", "suggestion"),
+      item("prep-late", "calendar", { urgent: false, createdAt: NOW + 20 }),
+      item("prep-soon", "calendar", { urgent: false, createdAt: NOW + 10 }),
+      item("conflict", "calendar", { createdAt: NOW + 30 }),
+      item("due", "commitment", { dueAt: NOW + 1, createdAt: NOW - 1 }),
+    ]);
+    expect(ranked.map((entry) => entry.id)).toEqual([
+      "conflict",
+      "due",
+      "nudge",
+      "prep-soon",
+      "prep-late",
+      "idea",
+    ]);
+  });
+});
+
+describe("calendar items", () => {
+  const event = (eventId: string, start: number) => ({
+    eventId,
+    title: `Event ${eventId}`,
+    start,
+    end: start + 3_600_000,
+  });
+
+  it("asks about a conflict and only offers holds and prep", () => {
+    expect(
+      attentionFromCalendarProposal(
+        {
+          kind: "conflict",
+          id: "conflict:a:b",
+          first: event("a", NOW + 10),
+          second: event("b", NOW + 20),
+          canDeclineSecond: true,
+        },
+        context,
+      ),
+    ).toMatchObject({
+      id: "calendar:conflict:a:b",
+      kind: "calendar",
+      state: "Conflict",
+      title: "Event a overlaps Event b",
+      createdAt: NOW + 10,
+      urgent: true,
+      actor: { kind: "background", name: "Calendar" },
+      origin: { kind: "event", label: "From your calendar" },
+      place: { kind: "local", label: "This Mac" },
+      ref: { type: "calendar_proposal", proposalId: "conflict:a:b" },
+    });
+    expect(
+      attentionFromCalendarProposal(
+        {
+          kind: "focus_hold",
+          id: "hold:c1",
+          title: "Send the SOW",
+          commitmentId: "c1",
+          dueAt: NOW + 100,
+          start: NOW + 10,
+          end: NOW + 20,
+        },
+        context,
+      ),
+    ).toMatchObject({
+      state: "Suggested hold",
+      title: "Send the SOW",
+      urgent: false,
+      dueAt: NOW + 100,
+    });
+    expect(
+      attentionFromCalendarProposal(
+        { kind: "meeting_prep", id: "prep:e:1", event: event("e", NOW + 50), attendees: ["Ana"] },
+        context,
+      ),
+    ).toMatchObject({
+      state: "Meeting soon",
+      title: "Event e",
+      urgent: false,
+      createdAt: NOW + 50,
+    });
+  });
+
+  it("recognizes suggestions about making time", () => {
+    expect(suggestsCalendarHold({ title: "Block focus time for the launch deck" })).toBe(true);
+    expect(suggestsCalendarHold({ title: "Plan", prompt: "Set aside time for deep work" })).toBe(
+      true,
+    );
+    expect(suggestsCalendarHold({ title: "Reply to Ana about the invoice" })).toBe(false);
   });
 });
 

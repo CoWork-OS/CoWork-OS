@@ -263,6 +263,20 @@ describe("ProactiveSuggestionsService", () => {
     vi.doUnmock("../../memory/RelationshipMemoryService");
   });
 
+  it("reads a suggestion for a card action only while it is still shown", async () => {
+    seedSuggestion("ws-1", "s6", "Block focus time for the deck");
+    seedSuggestion("ws-1", "s7", "Old idea", Date.now() - 2 * SEVEN_DAYS);
+    const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
+
+    expect((await ProactiveSuggestionsService.getActive("ws-1", "s6"))?.title).toBe(
+      "Block focus time for the deck",
+    );
+    expect(await ProactiveSuggestionsService.getActive("ws-1", "missing")).toBeNull();
+    expect(await ProactiveSuggestionsService.getActive("ws-1", "s7")).toBeNull();
+    await ProactiveSuggestionsService.actOn("ws-1", "s6");
+    expect(await ProactiveSuggestionsService.getActive("ws-1", "s6")).toBeNull();
+  });
+
   it("stores nothing when memory settings do not allow it", async () => {
     gate.enabled = false;
     const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");

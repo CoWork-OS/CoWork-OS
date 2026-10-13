@@ -334,6 +334,67 @@ describe("AttentionService", () => {
     expect((await failing.snapshot()).failedSources).toEqual(["memory"]);
   });
 
+  it("adds calendar proposals, and offers a hold on the first suggestion about making time", async () => {
+    const suggestionOf = (id: string, title: string) => ({
+      workspaceId: "ws",
+      suggestion: {
+        id,
+        type: "insight",
+        title,
+        description: "",
+        actionPrompt: "Do it",
+        confidence: 0.5,
+        createdAt: NOW,
+        expiresAt: NOW + 1,
+      } as ProactiveSuggestion,
+    });
+    const findCalendarHold = vi.fn(async () => ({ start: NOW + 10, end: NOW + 20 }));
+    const service = new AttentionService(
+      sources({
+        listSuggestions: async () => [
+          suggestionOf("s1", "Reply to Ana"),
+          suggestionOf("s2", "Block focus time for the deck"),
+          suggestionOf("s3", "Set aside time for planning"),
+        ],
+        listCalendarProposals: async () => [
+          {
+            kind: "conflict",
+            id: "conflict:a:b",
+            first: { eventId: "a", title: "A", start: NOW + 5, end: NOW + 50 },
+            second: { eventId: "b", title: "B", start: NOW + 10, end: NOW + 60 },
+            canDeclineSecond: false,
+          },
+        ],
+        findCalendarHold,
+      }),
+    );
+    const { items, failedSources } = await service.snapshot();
+    expect(failedSources).toEqual([]);
+    expect(items[0]).toMatchObject({ id: "calendar:conflict:a:b", urgent: true });
+    const held = items.filter((item) => item.calendarHold);
+    expect(held.map((item) => item.id)).toEqual(["suggestion:s2"]);
+    expect(held[0].calendarHold).toEqual({ start: NOW + 10, end: NOW + 20 });
+    expect(findCalendarHold).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the rest when the calendar can't be read", async () => {
+    const service = new AttentionService(
+      sources({
+        listPendingApprovals: async () => [approval("a1", "t1")],
+        listRecentTasks: async () => [task("t1", { status: "blocked" })],
+        listCalendarProposals: async () => {
+          throw new Error("offline");
+        },
+        findCalendarHold: async () => {
+          throw new Error("offline");
+        },
+      }),
+    );
+    const snapshot = await service.snapshot();
+    expect(snapshot.failedSources).toEqual(["calendar"]);
+    expect(snapshot.items.map((item) => item.id)).toEqual(["approval:a1"]);
+  });
+
   it("stops at a cycle of parent links", async () => {
     const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
     const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });

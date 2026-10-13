@@ -8105,6 +8105,15 @@ export function App() {
   const canShowNotifications =
     !isBrowserHost ||
     (hasHostCapability("notifications.read") && hasHostCapability("notifications.manage"));
+  // The memoized sidebar bell calls the latest navigation handlers, so its memo only has to
+  // follow its data: the queue snapshot.
+  const bellHandlersRef = useRef({ attention: handleAttentionClick, today: handleClearTaskView });
+  bellHandlersRef.current = { attention: handleAttentionClick, today: handleClearTaskView };
+  const openAttentionFromBell = useCallback(
+    (item: AttentionItem) => bellHandlersRef.current.attention(item),
+    [],
+  );
+  const openTodayFromBell = useCallback(() => bellHandlersRef.current.today(), []);
   // The bell lives in the panel header; the title bar shows it when the panel is hidden.
   const sidebarNotificationBell = useMemo(
     () =>
@@ -8113,11 +8122,17 @@ export function App() {
           placement="sidebar"
           onNotificationClick={handleNotificationClick}
           attention={attentionSnapshot.fromQueue ? attentionSnapshot.items : undefined}
-          onAttentionClick={handleAttentionClick}
-          onOpenToday={handleClearTaskView}
+          onAttentionClick={openAttentionFromBell}
+          onOpenToday={openTodayFromBell}
         />
       ) : null,
-    [canShowNotifications, handleNotificationClick],
+    [
+      attentionSnapshot,
+      canShowNotifications,
+      handleNotificationClick,
+      openAttentionFromBell,
+      openTodayFromBell,
+    ],
   );
   const showTitleBarNotifications =
     canShowNotifications && (leftSidebarCollapsed || !SIDEBAR_SHELL_VIEWS.has(currentView));

@@ -85,7 +85,10 @@ const LIMITS = {
  * Sources read over the network get a time limit, so a slow one never holds up the
  * approvals and questions read from the local database.
  */
-const SOURCE_TIMEOUT_MS: Partial<Record<AttentionSourceName, number>> = { calendar: 5000 };
+const SOURCE_TIMEOUT_MS: Partial<Record<AttentionSourceName, number>> = {
+  calendar: 5000,
+  mail: 5000,
+};
 
 function withTimeout<T>(load: Promise<T>, ms: number | undefined): Promise<T> {
   if (!ms) return load;
@@ -156,7 +159,10 @@ export class AttentionService {
         [] as MailReplyDraftCard[],
       ),
       // Only decides whether an offer shows; not reading it hides nothing that waits.
-      (this.sources.shouldOfferMailReplyDrafts?.() ?? Promise.resolve(false)).catch(() => false),
+      withTimeout(
+        this.sources.shouldOfferMailReplyDrafts?.() ?? Promise.resolve(false),
+        SOURCE_TIMEOUT_MS.mail,
+      ).catch(() => false),
     ]);
 
     const newestFirst = <T extends { requestedAt: number }>(rows: T[]) =>

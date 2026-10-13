@@ -63,14 +63,12 @@ export function createMailReplyDraftIpcHandlers(
     },
     [IPC_CHANNELS.MAIL_REPLY_DRAFTS_SET_ENABLED]: async (raw) => {
       limit(IPC_CHANNELS.MAIL_REPLY_DRAFTS_SET_ENABLED);
-      deps.drafts.setEnabled(validateInput(EnabledSchema, raw, "enabled"));
-      return changed({ ok: true });
+      return changed({ ok: deps.drafts.setEnabled(validateInput(EnabledSchema, raw, "enabled")) });
     },
     [IPC_CHANNELS.MAIL_REPLY_DRAFTS_DISMISS_OFFER]: async (raw) => {
       limit(IPC_CHANNELS.MAIL_REPLY_DRAFTS_DISMISS_OFFER);
       if (raw !== undefined) throw new Error("Dismissing the offer takes no arguments");
-      deps.drafts.dismissOffer();
-      return changed({ ok: true });
+      return changed({ ok: deps.drafts.dismissOffer() });
     },
   };
 }

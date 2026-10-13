@@ -66,7 +66,12 @@ function thread(id: string, overrides: Partial<MailboxThreadDetail> = {}): Mailb
 
 function setup(
   threads: MailboxThreadDetail[],
-  options: { state?: Partial<MailReplyDraftsState>; now?: () => number } = {},
+  options: {
+    state?: Partial<MailReplyDraftsState>;
+    now?: () => number;
+    saves?: boolean;
+    recipient?: string;
+  } = {},
 ) {
   let state: MailReplyDraftsState | undefined = options.state
     ? { enabled: false, prepared: [], hiddenThreads: {}, ...options.state }
@@ -98,7 +103,10 @@ function setup(
         threadId: input.threadId,
         subject: "Re: x",
         bodyText: input.bodyText ?? "",
-        to: input.threadId === "t-empty" ? [] : [{ email: "ana@example.com", name: "Ana" }],
+        to:
+          input.threadId === "t-empty"
+            ? []
+            : [{ email: options.recipient ?? "ana@example.com", name: "Ana" }],
         cc: [],
         bcc: [],
         attachments: [],
@@ -109,8 +117,10 @@ function setup(
       return draft;
     }),
     getMailboxDraft: vi.fn(async (id: string) => drafts.get(id) ?? null),
+    hasActiveDraftSend: vi.fn(async (id: string) => drafts.get(id)?.status === "queued"),
     sendMailboxDraft: vi.fn(async (id: string) => {
       drafts.get(id)!.status = "queued";
+      drafts.get(id)!.sendAfter = NOW + 30_000;
       return {
         id: "out",
         draftId: id,
@@ -140,8 +150,10 @@ function setup(
     mailbox,
     writeReply,
     loadState: () => state,
-    saveState: (next) => {
-      state = next;
+    updateState: (mutate) => {
+      if (options.saves === false) return false;
+      state = mutate(state ?? { enabled: false, prepared: [], hiddenThreads: {} });
+      return true;
     },
     onPrepared,
     now: options.now ?? (() => NOW),
@@ -174,12 +186,15 @@ describe("MailReplyDraftsService", () => {
     });
     await expect(service.draftReplies()).resolves.toBe(3);
     expect(onPrepared).toHaveBeenCalledWith(3);
-    expect(mailbox.createMailboxDraft).toHaveBeenCalledWith({
-      mode: "reply",
-      threadId: "t1",
-      accountId: ACCOUNT,
-      bodyText: "Thanks, I'll look at t1.",
-    });
+    expect(mailbox.createMailboxDraft).toHaveBeenCalledWith(
+      {
+        mode: "reply",
+        threadId: "t1",
+        accountId: ACCOUNT,
+        bodyText: "Thanks, I'll look at t1.",
+      },
+      { source: "today_reply_draft" },
+    );
     expect(writeReply.mock.calls[0][0]).toMatchObject({
       threadId: "t1",
       subject: "Re: Thread t1",
@@ -196,7 +211,9 @@ describe("MailReplyDraftsService", () => {
       accountId: ACCOUNT,
       provider: "gmail",
       subject: "Thread t1",
-      to: ["Ana"],
+      to: ["Ana <ana@example.com>"],
+      copies: 0,
+      attachments: 0,
       sender: "ana",
       bodyText: "Thanks, I'll look at t1.",
     });
@@ -211,6 +228,7 @@ describe("MailReplyDraftsService", () => {
     await expect(service.draftReplies()).resolves.toBe(1);
     expect(mailbox.createMailboxDraft).toHaveBeenLastCalledWith(
       expect.objectContaining({ threadId: "t4" }),
+      { source: "today_reply_draft" },
     );
   });
 
@@ -248,14 +266,109 @@ describe("MailReplyDraftsService", () => {
     expect(writeReply).toHaveBeenCalledOnce();
   });
 
-  it("hides drafts that were sent, or whose thread no longer needs a reply", async () => {
+  it("hides drafts that went out, or whose thread no longer needs a reply", async () => {
     const threads = [thread("t1"), thread("t2")];
     const { service, drafts } = setup(threads, { state: { enabled: true } });
     await service.draftReplies();
     const [first] = [...drafts.values()];
-    first.status = "queued";
+    first.status = "sent";
     threads[1].needsReply = false;
     expect(await service.list()).toEqual([]);
+  });
+
+  it("lists a reply in the outbox until it goes out, so it can still be undone", async () => {
+    let now = NOW;
+    const { service, drafts } = setup([thread("t1")], {
+      state: { enabled: true },
+      now: () => now,
+    });
+    await service.draftReplies();
+    const [draft] = [...drafts.values()];
+    await service.send(draft.id);
+    expect(await service.list()).toEqual([
+      expect.objectContaining({ draftId: draft.id, sendingUntil: NOW + 30_000 }),
+    ]);
+    now = NOW + 31_000;
+    expect(await service.list()).toEqual([]);
+  });
+
+  it("says a reply is out of date when a newer message arrived", async () => {
+    const threads = [thread("t1")];
+    const { service } = setup(threads, { state: { enabled: true } });
+    await service.draftReplies();
+    threads[0].lastMessageAt = NOW;
+    expect(await service.list()).toEqual([expect.objectContaining({ outdated: true })]);
+  });
+
+  it("marks a failed send the outbox will retry", async () => {
+    const { service, drafts, mailbox } = setup([thread("t1")], { state: { enabled: true } });
+    await service.draftReplies();
+    const [draft] = [...drafts.values()];
+    draft.status = "failed";
+    draft.latestError = "Timed out.";
+    mailbox.hasActiveDraftSend.mockResolvedValue(true);
+    expect(await service.list()).toEqual([
+      expect.objectContaining({ failed: "Timed out.", retrying: true }),
+    ]);
+    // Sending again while it retries would deliver it twice.
+    await expect(service.send(draft.id)).resolves.toMatchObject({ ok: false });
+  });
+
+  it("stops a run when drafting is turned off part way", async () => {
+    const threads = ["t1", "t2", "t3"].map((id) => thread(id));
+    const { service, writeReply, mailbox } = setup(threads, { state: { enabled: true } });
+    writeReply.mockImplementationOnce(async (input: { threadId: string }) => {
+      service.setEnabled(false);
+      return { body: `Thanks, I'll look at ${input.threadId}.` };
+    });
+    await expect(service.draftReplies()).resolves.toBe(0);
+    expect(writeReply).toHaveBeenCalledOnce();
+    expect(mailbox.createMailboxDraft).not.toHaveBeenCalled();
+    expect(service.isEnabled()).toBe(false);
+  });
+
+  it("sets aside a thread whose reply came back unusable, and goes on", async () => {
+    const { service, writeReply, state } = setup([thread("t1"), thread("t2")], {
+      state: { enabled: true },
+    });
+    writeReply.mockResolvedValueOnce({ unusable: true } as never);
+    await expect(service.draftReplies()).resolves.toBe(1);
+    expect(state()?.hiddenThreads).toHaveProperty("t1");
+    expect(state()?.prepared.map((entry) => entry.threadId)).toEqual(["t2"]);
+  });
+
+  it("pauses drafting for a while after the model fails", async () => {
+    let now = NOW;
+    const { service, writeReply } = setup([thread("t1")], {
+      state: { enabled: true },
+      now: () => now,
+    });
+    writeReply.mockResolvedValueOnce({ error: "No AI model is set up." } as never);
+    await expect(service.draftReplies()).resolves.toBe(0);
+    await expect(service.draftReplies()).resolves.toBe(0);
+    expect(writeReply).toHaveBeenCalledOnce();
+    now = NOW + 2 * 3600_000 + 1;
+    await expect(service.draftReplies()).resolves.toBe(1);
+  });
+
+  it("discards a draft whose recipient could hide another address", async () => {
+    const { service, mailbox, state } = setup([thread("t1")], {
+      state: { enabled: true },
+      recipient: "ana@example.com;eve@example.com",
+    });
+    await expect(service.draftReplies()).resolves.toBe(0);
+    expect(mailbox.discardMailboxDraft).toHaveBeenCalledOnce();
+    expect(state()?.hiddenThreads).toHaveProperty("t1");
+  });
+
+  it("undoes a draft it couldn't record, so the daily cap holds", async () => {
+    const { service, mailbox } = setup([thread("t1"), thread("t2")], {
+      state: { enabled: true },
+      saves: false,
+    });
+    await expect(service.draftReplies()).resolves.toBe(0);
+    expect(mailbox.createMailboxDraft).toHaveBeenCalledOnce();
+    expect(mailbox.discardMailboxDraft).toHaveBeenCalledOnce();
   });
 
   it("brings back a reply whose send failed, with why", async () => {
@@ -290,7 +403,10 @@ describe("MailReplyDraftsService", () => {
     await expect(service.discard(stranger)).resolves.toMatchObject({ reason: "not_found" });
     expect(mailbox.sendMailboxDraft).not.toHaveBeenCalled();
 
-    await expect(service.send(draft.id)).resolves.toEqual({ ok: true, sendAfter: NOW + 30_000 });
+    const [first, second] = await Promise.all([service.send(draft.id), service.send(draft.id)]);
+    expect(first).toEqual({ ok: true, sendAfter: NOW + 30_000 });
+    expect(second).toMatchObject({ ok: false, reason: "gone" });
+    expect(mailbox.sendMailboxDraft).toHaveBeenCalledOnce();
     await expect(service.send(draft.id)).resolves.toMatchObject({ ok: false, reason: "gone" });
     await expect(service.undoSend(draft.id)).resolves.toEqual({ ok: true });
     expect(draft.status).toBe("local");

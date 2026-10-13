@@ -133,8 +133,17 @@ export function CalmHomeToday({
   const [errors, setErrors] = useState<Record<string, string>>({});
   /** The reply being edited on its card, with the text so far. */
   const [editing, setEditing] = useState<{ cardId: string; text: string } | null>(null);
-  /** Reply text saved here, shown until the queue reloads with it. */
-  const [savedBodies, setSavedBodies] = useState<Record<string, string>>({});
+  /**
+   * Reply text saved here, shown until the queue reloads with it. `base` is the text the
+   * card had when it was saved; once the queue's text changes, the queue's text wins.
+   */
+  const [savedBodies, setSavedBodies] = useState<Record<string, { text: string; base: string }>>(
+    {},
+  );
+  const shownBody = (card: HomeTodayCard): string | undefined => {
+    const saved = savedBodies[card.id];
+    return saved && saved.base === card.preview?.text ? saved.text : card.preview?.text;
+  };
   const [, setTick] = useState(0);
   const timers = useRef<number[]>([]);
   const now = Date.now();
@@ -195,8 +204,7 @@ export function CalmHomeToday({
       return;
     }
     if (action.type === "edit-mail-draft") {
-      const text = savedBodies[card.id] ?? card.mailDraft?.bodyText ?? "";
-      setEditing({ cardId: card.id, text });
+      setEditing({ cardId: card.id, text: shownBody(card) ?? card.mailDraft?.bodyText ?? "" });
       return;
     }
     if (action.type === "edit-suggestion") {
@@ -323,6 +331,14 @@ export function CalmHomeToday({
             until: result.sendAfter ?? Date.now() + DEFAULT_SEND_DELAY_MS,
           },
         });
+      } else if (action.type === "undo-mail-send") {
+        const result = await signals.undoMailReplyDraftSend(action.draftId);
+        if (!result.ok) {
+          setErrors((current) => ({ ...current, [card.id]: result.message }));
+          return;
+        }
+        // The reply comes back as a draft to edit or send again.
+        foldAway(card);
       } else if (action.type === "discard-mail-draft") {
         const result = await signals.discardMailReplyDraft(action.draftId);
         if (!result.ok) {
@@ -369,7 +385,8 @@ export function CalmHomeToday({
     setErrors(({ [card.id]: _cleared, ...rest }) => rest);
     try {
       await signals.saveMailDraftBody(card.mailDraft.draftId, text);
-      setSavedBodies((current) => ({ ...current, [card.id]: text }));
+      const base = card.preview?.text ?? "";
+      setSavedBodies((current) => ({ ...current, [card.id]: { text, base } }));
       setEditing(null);
     } catch {
       setErrors((current) => ({ ...current, [card.id]: "The draft couldn't be saved." }));
@@ -491,7 +508,7 @@ export function CalmHomeToday({
           card.preview && (
             <div className="calm-today-card-preview">
               <span className="calm-today-card-preview-label">{card.preview.label}</span>
-              <p>{savedBodies[card.id] ?? card.preview.text}</p>
+              <p>{shownBody(card)}</p>
             </div>
           )
         )}

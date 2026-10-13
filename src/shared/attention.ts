@@ -579,22 +579,49 @@ export function attentionFromCalendarProposal(
   };
 }
 
-/** A drafted reply waiting on Send: the thread needs a reply, so it counts as needing you. */
+/**
+ * A drafted reply waiting on Send: the thread needs a reply, so it counts as needing you.
+ * A reply in the outbox only waits to go out (it can still be undone), so it doesn't.
+ */
 export function attentionFromMailReplyDraft(
   draft: MailReplyDraftCard,
   context: AttentionTaskContext,
 ): AttentionItem {
+  const variant = draft.retrying
+    ? {
+        suffix: ":retrying",
+        state: "Retrying",
+        detail: `It couldn't be sent yet: ${clip(draft.failed ?? "", 160)} It will try again.`,
+      }
+    : draft.failed
+      ? {
+          suffix: ":failed",
+          state: "Not sent",
+          detail: `It couldn't be sent: ${clip(draft.failed, 160)}`,
+        }
+      : draft.sendingUntil
+        ? { suffix: ":sending", state: "Sending", detail: "It's in the outbox." }
+        : draft.outdated
+          ? {
+              suffix: ":outdated",
+              state: "Out of date",
+              detail: "A newer message arrived after this was drafted. Read it before sending.",
+            }
+          : {
+              suffix: "",
+              state: "Reply drafted",
+              detail: `${clip(draft.sender, 80)} is waiting on a reply.`,
+            };
   return {
-    // A failed send is a new decision, so it doesn't stay hidden as already acted on.
-    id: `mail_reply:${draft.draftId}${draft.failed ? ":failed" : ""}`,
+    // Each state is a new decision, so a card acted on earlier doesn't hide it.
+    id: `mail_reply:${draft.draftId}${variant.suffix}`,
     kind: "mail_reply",
-    state: draft.failed ? "Not sent" : "Reply drafted",
+    state: variant.state,
     title: clip(draft.subject, 200),
-    detail: draft.failed
-      ? `It couldn't be sent: ${clip(draft.failed, 160)}`
-      : `${clip(draft.sender, 80)} is waiting on a reply.`,
+    detail: variant.detail,
     createdAt: draft.createdAt,
-    urgent: true,
+    // Waiting to go out, or being retried, is not a decision.
+    urgent: !draft.sendingUntil && !draft.retrying,
     actor: { kind: "background", name: "Mail" },
     origin: { kind: "event", label: "From your inbox" },
     place: { kind: "local", label: context.localLabel },
@@ -611,8 +638,8 @@ export function attentionMailReplyOffer(now: number, context: AttentionTaskConte
     state: "Suggested",
     title: "Draft replies to mail that needs you?",
     detail:
-      "CoWork can draft up to 3 replies a day to threads waiting on you, using your AI model. " +
-      "Nothing is sent until you press Send.",
+      "CoWork can draft up to 3 replies a day to threads waiting on you. Your AI provider " +
+      "reads those threads to write them. Nothing is sent until you press Send.",
     createdAt: now,
     urgent: false,
     actor: { kind: "background", name: "Mail" },

@@ -4,7 +4,7 @@
  * renderer after task, approval and question events, so surfaces reload the snapshot
  * instead of trusting pushed data.
  */
-import { ipcMain, type BrowserWindow } from "electron";
+import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import { createDebouncedSignal, type AttentionService } from "../attention/AttentionService";
 
@@ -50,13 +50,21 @@ export interface AttentionSetupDeps extends AttentionIpcDeps {
   /** The daemon, whose task, approval and question events can change the queue. */
   events: EventSource;
   getMainWindow: () => BrowserWindow | null;
+  /**
+   * Throws unless the call comes from the main app window. The queue carries drafted
+   * replies and calendar details, so other windows don't get it.
+   */
+  assertTrustedSender?: (event: IpcMainInvokeEvent) => void;
 }
 
 /** Registers the handlers and starts signalling changes. Returns the change trigger. */
 export function setupAttentionHandlers(deps: AttentionSetupDeps): { notifyChanged: () => void } {
   const handlers = createAttentionIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
-    ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));
+    ipcMain.handle(channel, (event, raw: unknown) => {
+      deps.assertTrustedSender?.(event);
+      return handle(raw);
+    });
   }
   const signal = createDebouncedSignal(() => {
     const window = deps.getMainWindow();

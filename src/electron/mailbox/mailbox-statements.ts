@@ -280,6 +280,9 @@ export const MAILBOX_STATEMENTS = {
   cancelMailboxDraftSend_2: `UPDATE mailbox_outgoing_messages SET status = 'cancelled', updated_at = ? WHERE draft_id = ? AND status = 'queued'`,
   cancelMailboxDraftSend_3: `UPDATE mailbox_compose_drafts SET status = 'local', send_after = NULL, updated_at = ?
          WHERE id = ? AND status IN ('queued', 'scheduled')`,
+  activeDraftSendCount: `SELECT COUNT(*) AS count FROM mailbox_queued_actions
+         WHERE draft_id = ? AND action_type = 'send' AND status IN ('queued', 'running')`,
+  skipQueuedDraftSend_1: `UPDATE mailbox_queued_actions SET status = 'cancelled', updated_at = ? WHERE id = ?`,
   retryMailboxAction_1: `UPDATE mailbox_queued_actions
          SET status = 'queued', next_attempt_at = ?, latest_error = NULL, updated_at = ?
          WHERE id = ?`,

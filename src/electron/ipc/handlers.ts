@@ -11254,10 +11254,13 @@ export async function setupIpcHandlers(
       SecureSettingsRepository.isInitialized()
         ? SecureSettingsRepository.getInstance().load<MailReplyDraftsState>("mail-reply-drafts")
         : undefined,
-    saveState: (state) => {
-      if (SecureSettingsRepository.isInitialized()) {
-        SecureSettingsRepository.getInstance().save("mail-reply-drafts", state);
-      }
+    updateState: (mutate) => {
+      if (!SecureSettingsRepository.isInitialized()) return false;
+      SecureSettingsRepository.getInstance().update<MailReplyDraftsState>(
+        "mail-reply-drafts",
+        (current) => mutate(current ?? { enabled: false, prepared: [], hiddenThreads: {} }),
+      );
+      return true;
     },
     onPrepared: () => notifyAttentionChanged(),
   });
@@ -11330,6 +11333,7 @@ export async function setupIpcHandlers(
     }),
     events: agentDaemon,
     getMainWindow,
+    assertTrustedSender: assertTrustedMailboxSender,
   });
 
   // Today's calendar cards: accept or dismiss a proposal, hold time for a suggestion.

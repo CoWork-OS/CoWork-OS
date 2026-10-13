@@ -61,11 +61,19 @@ describe("mailboxLlmReplyDraft", () => {
     });
   });
 
+  it("keeps at most one blank line in a row", async () => {
+    createMessage.mockResolvedValueOnce(reply(JSON.stringify({ body: "Hi\n\n\n\n  \nThanks" })));
+    await expect(mailboxLlmReplyDraft(input)).resolves.toEqual({ body: "Hi\n\nThanks" });
+  });
+
   it("passes on a skip, and reports a missing model or a failed call", async () => {
     createMessage.mockResolvedValueOnce(reply('{"skip": true}'));
     await expect(mailboxLlmReplyDraft(input)).resolves.toEqual({ skip: true });
+    // A reply that isn't usable is about that thread, not the model.
     createMessage.mockResolvedValueOnce(reply("not json"));
-    await expect(mailboxLlmReplyDraft(input)).resolves.toHaveProperty("error");
+    await expect(mailboxLlmReplyDraft(input)).resolves.toEqual({ unusable: true });
+    createMessage.mockResolvedValueOnce(reply('{"body": "  "}'));
+    await expect(mailboxLlmReplyDraft(input)).resolves.toEqual({ unusable: true });
     createMessage.mockRejectedValueOnce(new Error("401"));
     await expect(mailboxLlmReplyDraft(input)).resolves.toHaveProperty("error");
     resolveTaskModelSelection.mockImplementationOnce(() => {

@@ -120,7 +120,15 @@ export async function mailboxLlmQuickReplies(input: {
 const REPLY_DRAFT_MAX_TOKENS = 700;
 const REPLY_DRAFT_MESSAGE_CHARS = 2000;
 
-export type MailboxReplyDraftResult = { body: string } | { skip: true } | { error: string };
+/**
+ * `unusable`: the model answered but not with a usable reply (the thread may have steered
+ * it), so that thread is set aside. `error`: the model couldn't be reached or isn't set up.
+ */
+export type MailboxReplyDraftResult =
+  | { body: string }
+  | { skip: true }
+  | { unusable: true }
+  | { error: string };
 
 /**
  * A reply body for the user to review before anything is sent. The thread is passed as
@@ -178,6 +186,7 @@ export async function mailboxLlmReplyDraft(input: {
     modelId: modelSelection.modelId,
   };
 
+  let text: string;
   try {
     const response = await provider.createMessage({
       model: modelSelection.modelId,
@@ -186,18 +195,25 @@ export async function mailboxLlmReplyDraft(input: {
       messages,
     });
     recordLlmCallSuccess(telemetry, response.usage);
-    const text = response.content
+    text = response.content
       .map((block) => (block.type === "text" ? block.text : ""))
       .join("\n")
       .trim();
-    const parsed = JSON.parse(extractJsonObject(text)) as { body?: unknown; skip?: unknown };
-    if (parsed.skip === true) return { skip: true };
-    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
-    return body ? { body: body.slice(0, 4000) } : { error: "The model returned no reply." };
   } catch (error) {
     recordLlmCallError(telemetry, error);
     return { error: "Could not draft a reply. Check your AI connection." };
   }
+  let parsed: { body?: unknown; skip?: unknown };
+  try {
+    parsed = JSON.parse(extractJsonObject(text)) as typeof parsed;
+  } catch {
+    return { unusable: true };
+  }
+  if (parsed.skip === true) return { skip: true };
+  // No padding that could push a line out of the card's view: at most one blank line.
+  const body =
+    typeof parsed.body === "string" ? parsed.body.replace(/\n\s*\n(\s*\n)+/g, "\n\n").trim() : "";
+  return body ? { body: body.slice(0, 4000) } : { unusable: true };
 }
 
 export type SimilarThreadCandidate = { threadId: string; subject: string; snippet: string };

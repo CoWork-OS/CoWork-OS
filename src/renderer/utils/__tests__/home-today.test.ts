@@ -486,7 +486,9 @@ describe("mail reply cards", () => {
     accountId: "gmail:me@example.com",
     provider: "gmail" as const,
     subject: "Q3 proposal",
-    to: ["Dana", "Lee", "Kim", "Ray"],
+    to: ["Dana <dana@example.com>", "Lee", "Kim", "Ray"],
+    copies: 2,
+    attachments: 1,
     sender: "Dana",
     bodyText: "Thanks Dana, sending it Friday.",
     createdAt: NOW - 60_000,
@@ -502,7 +504,7 @@ describe("mail reply cards", () => {
       why: "Dana is waiting on a reply.",
       chips: [],
       preview: {
-        label: "Will send to Dana, Lee, Kim and 1 more",
+        label: "To Dana <dana@example.com>, Lee, Kim and 1 more · 2 more in copy · 1 attachment",
         text: "Thanks Dana, sending it Friday.",
       },
       mailDraft: { draftId: "d1", bodyText: "Thanks Dana, sending it Friday." },
@@ -524,6 +526,53 @@ describe("mail reply cards", () => {
       state: "Not sent",
       why: "It couldn't be sent: Gmail refused it.",
       primary: { label: "Send again", action: { type: "send-mail-draft", draftId: "d1" } },
+    });
+  });
+
+  it("offers Undo on a reply in the outbox, unless this view's row already does", () => {
+    const sending = attentionFromMailReplyDraft({ ...draft, sendingUntil: NOW + 30_000 }, context);
+    expect(sending).toMatchObject({ id: "mail_reply:d1:sending", urgent: false });
+    expect(cardForAttention(sending, NOW)).toMatchObject({
+      state: "Sending",
+      offer: true,
+      primary: { label: "Undo send", action: { type: "undo-mail-send", draftId: "d1" } },
+    });
+    const row = {
+      id: "acted:mail_reply:d1",
+      title: "Q3 proposal",
+      outcome: "Sent",
+      at: NOW,
+      undoSend: { cardId: "mail_reply:d1", draftId: "d1", until: NOW + 30_000 },
+    };
+    const today = buildHomeToday({
+      attention: [sending],
+      sessions: EMPTY_HOME_SESSIONS,
+      now: NOW,
+      actedRows: [row],
+    });
+    expect(today.needsYou).toEqual([]);
+  });
+
+  it("lets a retrying send be stopped, without counting it as needing the user", () => {
+    const item = attentionFromMailReplyDraft(
+      { ...draft, failed: "Timed out.", retrying: true },
+      context,
+    );
+    expect(item).toMatchObject({ id: "mail_reply:d1:retrying", urgent: false });
+    expect(cardForAttention(item, NOW)).toMatchObject({
+      state: "Retrying",
+      why: "It couldn't be sent yet: Timed out. It will try again.",
+      offer: true,
+      primary: { label: "Cancel send", action: { type: "undo-mail-send", draftId: "d1" } },
+    });
+  });
+
+  it("warns when a newer message arrived after the reply was drafted", () => {
+    const item = attentionFromMailReplyDraft({ ...draft, outdated: true }, context);
+    expect(cardForAttention(item, NOW)).toMatchObject({
+      state: "Out of date",
+      why: "A newer message arrived after this was drafted. Read it before sending.",
+      primary: { label: "Send" },
     });
   });
 

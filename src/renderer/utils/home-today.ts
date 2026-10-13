@@ -61,6 +61,8 @@ export type HomeTodayAction =
   /** Edit a drafted reply's text right on the card. */
   | { type: "edit-mail-draft"; draftId: string }
   | { type: "discard-mail-draft"; draftId: string }
+  /** Take back a reply waiting in the outbox. */
+  | { type: "undo-mail-send"; draftId: string }
   /** Turn reply drafts on or off. */
   | { type: "set-mail-drafts"; enabled: boolean }
   | { type: "dismiss-mail-offer" };
@@ -560,14 +562,41 @@ function mailReplyCard(
     };
   }
   if (item.ref.type !== "mail_draft" || !item.mailDraft) return null;
-  const { draftId, bodyText, to, failed } = item.mailDraft;
+  const { draftId, bodyText, to, failed, copies, attachments, sendingUntil } = item.mailDraft;
+  const extras = [
+    copies > 0 ? `${copies} more in copy` : "",
+    attachments > 0 ? (attachments === 1 ? "1 attachment" : `${attachments} attachments`) : "",
+  ].filter(Boolean);
+  // The whole reply and every recipient's address, exactly as it will be sent.
+  const preview = {
+    label: [to.length > 0 ? `To ${namesList(to)}` : "", ...extras].filter(Boolean).join(" · "),
+    text: bodyText,
+  };
+  if (item.mailDraft.retrying) {
+    return {
+      ...common,
+      offer: true,
+      preview,
+      primary: {
+        label: "Cancel send",
+        hint: "Stops the retries. The reply stays as a draft.",
+        action: { type: "undo-mail-send", draftId },
+      },
+    };
+  }
+  if (sendingUntil) {
+    return {
+      ...common,
+      why: `It goes out at ${formatClock(sendingUntil)}.`,
+      // Waiting to go out is not a decision; it only stays undoable until then.
+      offer: true,
+      preview,
+      primary: { label: "Undo send", action: { type: "undo-mail-send", draftId } },
+    };
+  }
   return {
     ...common,
-    // The whole reply, exactly as it will be sent.
-    preview: {
-      label: to.length > 0 ? `Will send to ${namesList(to)}` : "Will send",
-      text: bodyText,
-    },
+    preview,
     mailDraft: { draftId, bodyText },
     primary: {
       label: failed ? "Send again" : "Send",
@@ -627,11 +656,16 @@ export function buildHomeToday(input: {
       .map(sessionAttention),
   ]);
 
+  // A reply this view just sent already has a row with Undo; no second card for it.
+  const sentHere = new Set(
+    (input.actedRows ?? []).flatMap((row) => (row.undoSend ? [row.undoSend.draftId] : [])),
+  );
   const needsYou: HomeTodayCard[] = [];
   let idea: HomeTodayCard | null = null;
   for (const item of items) {
     const card = cardForAttention(item, now);
     if (!card || resolved.has(card.id)) continue;
+    if (item.mailDraft?.sendingUntil && sentHere.has(item.mailDraft.draftId)) continue;
     if (item.kind === "suggestion" && !item.urgent) {
       idea ??= card;
       continue;

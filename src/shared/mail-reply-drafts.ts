@@ -16,14 +16,23 @@ export interface MailReplyDraftCard {
   provider: MailboxProvider;
   /** The thread's subject, without "Re:". */
   subject: string;
-  /** Who the reply goes to, by name or address. */
+  /** Who the reply goes to, as "Name <address>" or the address. */
   to: string[];
+  /** How many more people get a copy (cc and bcc). */
+  copies: number;
+  attachments: number;
   /** Who is waiting on the reply. */
   sender: string;
   bodyText: string;
   createdAt: number;
   /** Set when sending failed: why, so the card can say it wasn't sent. */
   failed?: string;
+  /** With `failed`: the outbox will try again on its own. */
+  retrying?: boolean;
+  /** Set while the reply waits in the outbox: when it goes out (it can be undone until then). */
+  sendingUntil?: number;
+  /** A newer message arrived in the thread after the reply was drafted. */
+  outdated?: boolean;
 }
 
 export type MailReplyDraftOutcome =

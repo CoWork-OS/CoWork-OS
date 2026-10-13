@@ -490,6 +490,39 @@ describeWithSqlite("MailboxService", () => {
     expect((await service.getMailboxDraft(draft.id))?.status).toBe("queued");
   });
 
+  it("refuses a second send while one is queued, and never sends a sent draft again", async () => {
+    await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+    const draft = await service.createMailboxDraft(
+      { threadId: "gmail-thread:alpha", mode: "reply", bodyText: "Just once." },
+      { source: "today_reply_draft" },
+    );
+    expect(
+      JSON.parse(
+        (
+          db
+            .prepare("SELECT metadata_json FROM mailbox_compose_drafts WHERE id = ?")
+            .get(draft.id) as { metadata_json: string }
+        ).metadata_json,
+      ),
+    ).toMatchObject({ source: "today_reply_draft" });
+    await service.sendMailboxDraft(draft.id);
+    expect(await service.hasActiveDraftSend(draft.id)).toBe(true);
+    await expect(service.sendMailboxDraft(draft.id)).rejects.toThrow("already being sent");
+
+    const { id } = db
+      .prepare("SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'")
+      .get(draft.id) as { id: string };
+    db.prepare("UPDATE mailbox_compose_drafts SET status = 'sent' WHERE id = ?").run(draft.id);
+    const send = vi.spyOn(service as Any, "sendComposeDraftThroughProvider");
+    await (service as Any).processMailboxQueuedAction(
+      await (service as Any).getMailboxQueuedAction(id),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT status FROM mailbox_queued_actions WHERE id = ?").get(id)).toEqual({
+      status: "cancelled",
+    });
+  });
+
   it("doesn't run a queued send that was cancelled after the outbox read it", async () => {
     await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
     const draft = await service.createMailboxDraft({

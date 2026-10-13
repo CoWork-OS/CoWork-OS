@@ -9691,8 +9691,8 @@ export interface ElectronAPI {
   sendMailReplyDraft: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
   undoMailReplyDraftSend: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
   discardMailReplyDraft: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
-  setMailReplyDraftsEnabled: (enabled: boolean) => Promise<{ ok: true }>;
-  dismissMailReplyDraftsOffer: () => Promise<{ ok: true }>;
+  setMailReplyDraftsEnabled: (enabled: boolean) => Promise<{ ok: boolean }>;
+  dismissMailReplyDraftsOffer: () => Promise<{ ok: boolean }>;
   dismissCalendarProposal: (proposalId: string) => Promise<{ ok: boolean }>;
   holdCalendarTimeForSuggestion: (data: {
     workspaceId: string;

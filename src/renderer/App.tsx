@@ -8834,7 +8834,11 @@ export function App() {
               ) : currentView === "missionControl" ? (
                 <main className="main-content mission-control-main">
                   <MissionControlPanel
-                    onOpenAgents={() => setCurrentView("agents")}
+                    // In Calm, Team is where agents live: what each does, waits on and runs on.
+                    onOpenAgents={() =>
+                      setCurrentView(sidebarDestinationContext.isCalm ? "team" : "agents")
+                    }
+                    agentsLabel={sidebarDestinationContext.isCalm ? "Team" : undefined}
                     onOpenAttention={handleAttentionClick}
                     initialCompanyId={missionControlInitialCompanyId}
                     initialIssueId={missionControlInitialIssueId}

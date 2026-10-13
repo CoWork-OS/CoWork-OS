@@ -1728,12 +1728,6 @@ const CollaborativeAgentsSection = memo(
                 ))}
               </span>
               <span className="collab-agents-roster-summary">{rosterSummary}</span>
-              <ChevronDown
-                size={13}
-                strokeWidth={2}
-                className={`collab-agents-roster-chevron${listOpen ? " open" : ""}`}
-                aria-hidden="true"
-              />
             </button>
             {listOpen ? (
               <div className="collab-agents-list">

@@ -2554,26 +2554,6 @@ button {
   white-space: nowrap;
 }
 
-.collab-agents-roster-chevron {
-  flex-shrink: 0;
-  color: var(--right-panel-text-muted, var(--color-text-muted));
-  opacity: 0;
-  transform: rotate(-90deg);
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-}
-
-.collab-agents-roster:hover .collab-agents-roster-chevron,
-.collab-agents-roster:focus-visible .collab-agents-roster-chevron,
-.collab-agents-roster-chevron.open {
-  opacity: 1;
-}
-
-.collab-agents-roster-chevron.open {
-  transform: none;
-}
-
 .collab-agents-roster:hover .collab-agents-roster-summary {
   color: var(--right-panel-text-primary, var(--color-text));
 }

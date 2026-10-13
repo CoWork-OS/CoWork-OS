@@ -30,7 +30,7 @@ Mission Control has two main areas:
 
 | Panel                      | Purpose                                                                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Center — Mission Board** | Kanban board with 5 columns for tracked work lifecycle management                                                                          |
+| **Center — Mission Board** | The **Work** tab: a 5-column Kanban board of the workspace's tasks                                                                         |
 | **Right — Feed & Details** | Live activity feed and selected task details with comments/mentions                                                                        |
 
 The header bar shows workspace selector, current time, and operational counters grouped by source:
@@ -54,31 +54,43 @@ Mission Control doesn't keep its own agent list. Agents are created and configur
 
 ---
 
-## Mission Board — Kanban Board (Center)
+## Mission Board — Work Tab (Center)
 
-A 5-column Kanban board for managing tracked work. Drag tasks between columns to change their status. This board is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
+The **Work** tab is a 5-column Kanban board of the recent tasks in the selected workspace (every workspace when **All workspaces** is selected). Nothing is added to it by hand: a task started from the composer, by an agent's heartbeat, a team or the planner shows up on its own, in the column that matches its state. So the board has no **New task** or **Link existing** buttons; start work from the composer and it appears here. This board is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
 
-| Column          | Status         | Description                                    |
-| --------------- | -------------- | ---------------------------------------------- |
-| **INBOX**       | Backlog        | Unassigned items waiting for triage            |
-| **ASSIGNED**    | Todo           | Assigned board work ready to start             |
-| **IN PROGRESS** | Active         | Board work currently being executed or planned |
-| **REVIEW**      | Pending review | Awaiting approval or human review              |
-| **DONE**        | Completed      | Finished tasks                                 |
+| Column             | What lands here                                                          |
+| ------------------ | ------------------------------------------------------------------------ |
+| **Not started**    | Open tasks with no owner that aren't running                             |
+| **Ready to start** | Open tasks with an assigned agent that aren't running, or moved here     |
+| **Working**        | Tasks being planned or executed, and tasks moved here                    |
+| **Needs review**   | Tasks moved here for approval or human review                            |
+| **Done**           | Completed, failed, cancelled and interrupted tasks, and tasks moved here |
+
+A finished task always sits in **Done**, and a running one in **Working** unless it was moved to **Needs review** or **Done**.
+
+### Views and Filters
+
+- **Active** shows open tasks, **Needs attention** shows failed, interrupted and flagged ones, and **All tasks** shows everything. **Done** stays hidden until **History** is on or **All tasks** is picked.
+- Search matches title, brief, label, owner, flag reason and workspace. Filter by agent, label, priority, status and (with **All workspaces**) workspace, and sort by urgency, last update, due date or priority.
+- **Show empty** keeps empty columns visible; turn it off to hide them.
+- The header counts what needs attention, is overdue, is stale or has no owner. A column's count turns red past its limit (8 in **Ready to start**, 5 in **Working**, 4 in **Needs review**).
 
 ### Task Cards
 
 Each card shows:
 
-- Task title
-- Assigned agent (avatar + name)
-- Status pill with color coding
-- Time since last update (relative: "5m ago", "2h ago")
+- Task title, status pill and time since the last update
+- Priority and up to two labels
+- Why it needs attention, when it does (for example _Waiting on you_, _Needs owner_, _Overdue_, _Stale_)
+- The assigned agent's character, name and status
+- Due date, estimate and a stale chip, when set
+- The workspace, when **All workspaces** is selected
 
 ### Interactions
 
-- **Drag and drop** tasks between columns to change status
-- **Click** a task card to view its details in the right panel
+- **Drag and drop** a card between columns to move it
+- **Click** a card to open its details in the right panel, where you can change its owner, stage, priority, estimate, due date and labels
+- Card buttons: **Open details**, **Cycle priority**, **Wake owner** (runs the owner's heartbeat review now) and **Move to next stage**
 
 ---
 
@@ -261,7 +273,8 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Configure the company planner       | Open the `Ops` tab, then its `Planner` sub-tab                             |
 | Inspect company ops                 | Open the `Ops` tab in the right panel                                      |
 | Trigger immediate heartbeat review  | Click **Wake owner** on the agent's board card                             |
-| Move a task to a new stage          | Drag the task card to the target column                                    |
+| Move a task to a new stage          | Drag the card to the target column, or use its **Move to next stage**      |
+| Put new work on the board           | Start a task from the composer; it appears on **Work** by itself           |
 | View task details                   | Click any task card                                                        |
 | Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
 | Filter feed by agent                | Click an agent chip in the feed panel                                      |

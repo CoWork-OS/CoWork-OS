@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("electron", () => ({ ipcMain: { handle: vi.fn() } }));
+const handle = vi.fn();
+vi.mock("electron", () => ({ ipcMain: { handle: (...args: unknown[]) => handle(...args) } }));
 
 import { IPC_CHANNELS } from "../../../shared/types";
-import { createCalendarIpcHandlers, type CalendarIpcDeps } from "../calendar-handlers";
+import {
+  createCalendarIpcHandlers,
+  setupCalendarHandlers,
+  type CalendarIpcDeps,
+} from "../calendar-handlers";
 
 const WS = "11111111-1111-4111-8111-111111111111";
 const SUGGESTION = "22222222-2222-4222-8222-222222222222";
@@ -12,7 +17,7 @@ function setup(overrides: Partial<CalendarIpcDeps> = {}) {
   const deps = {
     proposals: {
       accept: vi.fn(async () => ({ ok: true as const, kind: "focus_hold" as const })),
-      dismiss: vi.fn(),
+      dismiss: vi.fn(() => true),
       bookHold: vi.fn(async () => ({ ok: true as const, kind: "focus_hold" as const })),
     },
     getSuggestionTitle: vi.fn(async () => "Block focus time for the deck"),
@@ -63,6 +68,26 @@ describe("calendar IPC", () => {
     });
     expect(deps.proposals.dismiss).toHaveBeenCalledWith("prep:e1:123");
     expect(deps.onChanged).toHaveBeenCalledOnce();
+    deps.proposals.dismiss.mockReturnValueOnce(false);
+    await expect(handlers[IPC_CHANNELS.CALENDAR_PROPOSAL_DISMISS]("prep:e1:123")).resolves.toEqual({
+      ok: false,
+    });
+    expect(deps.onChanged).toHaveBeenCalledOnce();
+  });
+
+  it("only takes changes from the app's top-level window", async () => {
+    const { deps } = setup();
+    setupCalendarHandlers(deps);
+    const registered = new Map(
+      handle.mock.calls.map(([channel, fn]) => [channel as string, fn as Function]),
+    );
+    const accept = registered.get(IPC_CHANNELS.CALENDAR_PROPOSAL_ACCEPT)!;
+    expect(() => accept({ senderFrame: { parent: {} } }, "hold:c1")).toThrow("app window");
+    expect(() => accept({}, "hold:c1")).toThrow("app window");
+    await expect(accept({ senderFrame: { parent: null } }, "hold:c1")).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(deps.proposals.accept).toHaveBeenCalledOnce();
   });
 
   it("holds time under the stored suggestion's title, then records it as acted on", async () => {

@@ -22,6 +22,7 @@ function setup(
     connected?: boolean;
     state?: CalendarProposalsState;
     now?: () => number;
+    saves?: boolean;
   } = {},
 ) {
   let state = options.state;
@@ -38,7 +39,9 @@ function setup(
     listCommitments: () => [{ id: "c1", text: "Send the SOW", dueAt: at(13, 17) }],
     loadState: () => state,
     saveState: (next) => {
+      if (options.saves === false) return false;
       state = next;
+      return true;
     },
     now: options.now ?? (() => NOW),
   };
@@ -63,6 +66,32 @@ describe("CalendarProposalsService", () => {
     service.dismiss("hold:c1");
     expect(state()).toEqual({ hidden: { "hold:c1": NOW + 14 * DAY } });
     expect(await service.list()).toEqual([]);
+  });
+
+  it("says when a dismissal couldn't be saved, and keeps at most 200 hidden ids", async () => {
+    expect(setup({ saves: false }).service.dismiss("hold:c1")).toBe(false);
+    const hidden = Object.fromEntries(
+      Array.from({ length: 250 }, (_, i) => [`hold:x${i}`, NOW + 1000 + i]),
+    );
+    const { service, state } = setup({ state: { hidden } });
+    expect(service.dismiss("hold:c1")).toBe(true);
+    const kept = state()!.hidden;
+    expect(Object.keys(kept)).toHaveLength(200);
+    expect(kept).toHaveProperty("hold:c1");
+    // The ones that expire soonest are dropped first.
+    expect(kept).not.toHaveProperty("hold:x0");
+    expect(kept).toHaveProperty("hold:x249");
+  });
+
+  it("makes one change for a double click", async () => {
+    const { service, calendar } = setup();
+    const [first, second] = await Promise.all([
+      service.accept("hold:c1"),
+      service.accept("hold:c1"),
+    ]);
+    expect(first).toEqual({ ok: true, kind: "focus_hold" });
+    expect(second).toMatchObject({ ok: false, reason: "failed" });
+    expect(calendar.createHold).toHaveBeenCalledOnce();
   });
 
   it("books the hold a focus card offered, from fresh events, and hides the card", async () => {
@@ -145,6 +174,9 @@ describe("CalendarProposalsService", () => {
     await expect(tryHold(at(12, 10), at(12, 14))).resolves.toMatchObject({ reason: "not_allowed" });
     await expect(tryHold(at(20, 10), at(20, 11))).resolves.toMatchObject({ reason: "not_allowed" });
     await expect(tryHold(at(12, 11), at(12, 10))).resolves.toMatchObject({ reason: "not_allowed" });
+    await expect(tryHold(at(12, 11), at(12, 11, 5))).resolves.toMatchObject({
+      reason: "not_allowed",
+    });
     await expect(tryHold(at(12, 13, 30), at(12, 15))).resolves.toMatchObject({ reason: "gone" });
     expect(calendar.createHold).not.toHaveBeenCalled();
     await expect(tryHold(at(12, 15), at(12, 16, 30))).resolves.toEqual({

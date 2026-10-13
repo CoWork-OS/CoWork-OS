@@ -66,7 +66,7 @@ export function createCalendarIpcHandlers(deps: CalendarIpcDeps): Record<string,
     [IPC_CHANNELS.CALENDAR_PROPOSAL_DISMISS]: async (raw) => {
       limit(IPC_CHANNELS.CALENDAR_PROPOSAL_DISMISS);
       const id = validateInput(ProposalIdSchema, raw, "calendar proposal");
-      deps.proposals.dismiss(id);
+      if (!deps.proposals.dismiss(id)) return { ok: false };
       deps.onChanged?.();
       return { ok: true };
     },
@@ -97,6 +97,12 @@ export function setupCalendarHandlers(deps: CalendarIpcDeps): void {
   }
   const handlers = createCalendarIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
-    ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));
+    // These change the user's calendar: only the app's own top-level window may ask.
+    ipcMain.handle(channel, (event, raw: unknown) => {
+      if (!event.senderFrame || event.senderFrame.parent !== null) {
+        throw new Error("Calendar changes are only available to the app window");
+      }
+      return handle(raw);
+    });
   }
 }

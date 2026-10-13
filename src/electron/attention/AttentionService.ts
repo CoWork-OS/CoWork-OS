@@ -73,6 +73,21 @@ const LIMITS = {
   total: 100,
 } as const;
 
+/**
+ * Sources read over the network get a time limit, so a slow one never holds up the
+ * approvals and questions read from the local database.
+ */
+const SOURCE_TIMEOUT_MS: Partial<Record<AttentionSourceName, number>> = { calendar: 5000 };
+
+function withTimeout<T>(load: Promise<T>, ms: number | undefined): Promise<T> {
+  if (!ms) return load;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([load, timeout]).finally(() => clearTimeout(timer));
+}
+
 export class AttentionService {
   constructor(private readonly sources: AttentionSources) {}
 
@@ -81,7 +96,7 @@ export class AttentionService {
     const failedSources: AttentionSourceName[] = [];
     const read = async <T>(name: AttentionSourceName, load: () => Promise<T>, empty: T) => {
       try {
-        return await load();
+        return await withTimeout(load(), SOURCE_TIMEOUT_MS[name]);
       } catch (error) {
         failedSources.push(name);
         this.sources.log?.(`[Attention] Could not read ${name}`, error);
@@ -219,7 +234,10 @@ export class AttentionService {
       (item) => item.kind === "suggestion" && suggestsCalendarHold(item),
     );
     if (index < 0) return;
-    const slot = await this.sources.findCalendarHold().catch(() => null);
+    const slot = await withTimeout(
+      this.sources.findCalendarHold(),
+      SOURCE_TIMEOUT_MS.calendar,
+    ).catch(() => null);
     if (slot) items[index] = { ...items[index], calendarHold: slot };
   }
 

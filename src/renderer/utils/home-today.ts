@@ -133,7 +133,6 @@ export interface HomeToday {
 export const EMPTY_HOME_TODAY: HomeToday = { needsYou: [], idea: null, handled: [] };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_PREVIEW_CHARS = 320;
 const MAX_HANDLED_ROWS = 5;
 
 const SUGGESTION_SOURCE: Record<SuggestionType, string> = {
@@ -339,7 +338,8 @@ function calendarCard(
         ...common,
         icon: "calendar_prep",
         why: `It starts ${dayPhrase(proposal.event.start, now)} at ${formatClock(proposal.event.start)}${people}.`,
-        preview: { label: "Will run", text: clip(prompt, MAX_PREVIEW_CHARS) },
+        // The whole prompt, exactly as it will run.
+        preview: { label: "Will run", text: prompt },
         primary: {
           label: "Prepare",
           action: {
@@ -461,7 +461,7 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         state: item.state,
         title: clip(plain(item.title), 140),
         why: clip(plain(item.detail || ""), 180),
-        preview: { label: "Will run", text: clip(item.prompt, MAX_PREVIEW_CHARS) },
+        preview: { label: "Will run", text: item.prompt },
         primary: {
           label: "Start",
           action: {

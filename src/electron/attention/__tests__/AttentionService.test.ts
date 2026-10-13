@@ -395,6 +395,26 @@ describe("AttentionService", () => {
     expect(snapshot.items.map((item) => item.id)).toEqual(["approval:a1"]);
   });
 
+  it("doesn't wait on a calendar that never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = new AttentionService(
+        sources({
+          listPendingApprovals: async () => [approval("a1", "t1")],
+          listRecentTasks: async () => [task("t1", { status: "blocked" })],
+          listCalendarProposals: () => new Promise(() => {}),
+        }),
+      );
+      const pending = service.snapshot();
+      await vi.advanceTimersByTimeAsync(5000);
+      const snapshot = await pending;
+      expect(snapshot.failedSources).toEqual(["calendar"]);
+      expect(snapshot.items.map((item) => item.id)).toEqual(["approval:a1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops at a cycle of parent links", async () => {
     const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
     const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });

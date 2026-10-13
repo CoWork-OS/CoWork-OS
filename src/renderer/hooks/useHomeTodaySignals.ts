@@ -129,7 +129,8 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
   const dismissCalendarProposal = useCallback(async (proposalId: string) => {
     const api = window.electronAPI;
     if (typeof api.dismissCalendarProposal !== "function") return;
-    await api.dismissCalendarProposal(proposalId);
+    const result = await api.dismissCalendarProposal(proposalId);
+    if (result?.ok === false) throw new Error("not saved");
   }, []);
 
   const holdCalendarTimeForSuggestion = useCallback(

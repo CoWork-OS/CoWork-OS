@@ -9672,7 +9672,7 @@ export interface ElectronAPI {
     suggestionId: string,
   ) => Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_eligible" | "unavailable" }>;
   acceptCalendarProposal: (proposalId: string) => Promise<CalendarCardOutcome>;
-  dismissCalendarProposal: (proposalId: string) => Promise<{ ok: true }>;
+  dismissCalendarProposal: (proposalId: string) => Promise<{ ok: boolean }>;
   holdCalendarTimeForSuggestion: (data: {
     workspaceId: string;
     suggestionId: string;

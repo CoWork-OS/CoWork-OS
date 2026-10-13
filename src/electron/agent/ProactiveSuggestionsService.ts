@@ -416,6 +416,7 @@ export class ProactiveSuggestionsService {
     const suggestion = await this.findSuggestionById(workspaceId, suggestionId);
     if (!suggestion) return null;
     if (suggestion.expiresAt < now || (suggestion.snoozedUntil || 0) > now) return null;
+    if (suggestion.dismissed || suggestion.actedOn) return null;
     if (this.dismissedIds.has(suggestion.id) || this.actedOnIds.has(suggestion.id)) return null;
     return suggestion;
   }

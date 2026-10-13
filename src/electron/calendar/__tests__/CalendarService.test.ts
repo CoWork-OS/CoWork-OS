@@ -152,12 +152,14 @@ describe("CalendarService", () => {
       method: "GET",
       path: "/calendars/primary/events/e%2F1",
     });
+    // Only the user's own response: guests changed meanwhile are left alone.
     expect(request.mock.calls[1][0]).toEqual({
       method: "PATCH",
       path: "/calendars/primary/events/e%2F1",
       query: { sendUpdates: "all" },
       body: {
-        attendees: [attendees[0], { ...attendees[1], responseStatus: "declined" }],
+        attendeesOmitted: true,
+        attendees: [{ email: "me@example.com", responseStatus: "declined" }],
       },
     });
   });
@@ -169,7 +171,65 @@ describe("CalendarService", () => {
     await expect(organizer.calendar.declineEvent("e")).rejects.toThrow("invited to");
     const notInvited = service(() => ({ attendees: [{ email: "ana@example.com" }] }));
     await expect(notInvited.calendar.declineEvent("e")).rejects.toThrow("invited to");
+    const ownEvent = service(() => ({
+      organizer: { self: true },
+      attendees: [{ email: "me@example.com", self: true }],
+    }));
+    await expect(ownEvent.calendar.declineEvent("e")).rejects.toThrow("invited to");
     expect(organizer.request).toHaveBeenCalledOnce();
     expect(notInvited.request).toHaveBeenCalledOnce();
+    expect(ownEvent.request).toHaveBeenCalledOnce();
+  });
+
+  it("keeps invite text to one short, clean line", () => {
+    const event = toCalendarEvent(
+      raw("a", "2026-10-12T10:00:00Z", "2026-10-12T11:00:00Z", {
+        summary: `Sync\n"now"${"x".repeat(200)}`,
+        attendees: [{ email: "ana@example.com", displayName: "Ana\u0007 `Admin`" }],
+      }),
+    );
+    expect(event?.title.startsWith("Sync 'now'")).toBe(true);
+    expect(event?.title.length).toBe(120);
+    expect(event?.attendees[0].name).toBe("Ana 'Admin'");
+  });
+
+  it("gives background reads a short time limit and backs off after a failure", async () => {
+    let now = NOW;
+    let fail = true;
+    const { calendar, request } = service(
+      () => {
+        if (fail) throw new Error("offline");
+        return { items: [] };
+      },
+      { now: () => now },
+    );
+    await expect(calendar.listUpcoming()).rejects.toThrow("offline");
+    expect(request.mock.calls[0][0].timeoutMs).toBe(4000);
+    // The queue asks again right away: fail fast instead of waiting on the network.
+    await expect(calendar.listUpcoming()).rejects.toThrow("a moment ago");
+    expect(request).toHaveBeenCalledOnce();
+    // A change the user asked for still reads, with the normal time limit.
+    fail = false;
+    await calendar.listUpcoming(3, { fresh: true });
+    expect(request.mock.calls[1][0].timeoutMs).toBeUndefined();
+    now += 61_000;
+    await expect(calendar.listUpcoming()).resolves.toEqual([]);
+  });
+
+  it("drops the cache when the connected account changes", async () => {
+    let account = "a@example.com";
+    const request = vi.fn(async () => ({ data: { items: [] } }));
+    const calendar = new CalendarService({
+      isConnected: () => true,
+      request,
+      accountKey: () => account,
+      now: () => NOW,
+    });
+    await calendar.listUpcoming();
+    await calendar.listUpcoming();
+    expect(request).toHaveBeenCalledOnce();
+    account = "b@example.com";
+    await calendar.listUpcoming();
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

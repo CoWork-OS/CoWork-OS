@@ -275,6 +275,10 @@ describe("ProactiveSuggestionsService", () => {
     expect(await ProactiveSuggestionsService.getActive("ws-1", "s7")).toBeNull();
     await ProactiveSuggestionsService.actOn("ws-1", "s6");
     expect(await ProactiveSuggestionsService.getActive("ws-1", "s6")).toBeNull();
+    // The stored status counts too, not only the ids this run remembers.
+    seedSuggestion("ws-1", "s8", "Plan the offsite");
+    profile.db!.prepare("UPDATE suggestions SET status = 'dismissed' WHERE id = 's8'").run();
+    expect(await ProactiveSuggestionsService.getActive("ws-1", "s8")).toBeNull();
   });
 
   it("stores nothing when memory settings do not allow it", async () => {

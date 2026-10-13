@@ -11234,6 +11234,10 @@ export async function setupIpcHandlers(
       ),
     request: (request) =>
       googleCalendarRequest(GoogleWorkspaceSettingsManager.loadSettings(), request),
+    accountKey: () => {
+      const settings = GoogleWorkspaceSettingsManager.loadSettings();
+      return settings.activeAccountEmail || settings.loginHint || "";
+    },
   });
   const calendarProposals = new CalendarProposalsService({
     calendar: calendarService,
@@ -11247,11 +11251,9 @@ export async function setupIpcHandlers(
             "calendar-proposals",
           )
         : undefined,
-    saveState: (state) => {
-      if (SecureSettingsRepository.isInitialized()) {
-        SecureSettingsRepository.getInstance().save("calendar-proposals", state);
-      }
-    },
+    saveState: (state) =>
+      SecureSettingsRepository.isInitialized() &&
+      SecureSettingsRepository.getInstance().save("calendar-proposals", state),
   });
 
   // Shared "needs you" queue: one snapshot of everything waiting on the user (approvals,

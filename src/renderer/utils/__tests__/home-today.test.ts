@@ -428,7 +428,10 @@ describe("calendar cards", () => {
     });
     const action = card?.primary.action;
     expect(action?.type === "prepare-meeting" && action.prompt).toContain(
-      `"Event e" at ${clock(at(12, 15))} today with Ana, Ben, Cy, Di.`,
+      `at ${clock(at(12, 15))} today.\n`,
+    );
+    expect(action?.type === "prepare-meeting" && action.prompt).toContain(
+      "\ntitle: Event e\nguests: Ana, Ben, Cy, Di\n",
     );
     expect(card?.preview?.text).toBe(action?.type === "prepare-meeting" ? action.prompt : "");
   });

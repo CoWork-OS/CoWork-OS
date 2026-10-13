@@ -767,6 +767,42 @@ describe("access profile resolver", () => {
       expect(limited.permissions.accessFilesystemRules?.[0]?.access).toBe("write");
     });
 
+    it("keeps an older session asking under a limit, and never reads a sandboxed never as no-ask", () => {
+      const legacy = resolveEffectiveAccessProfile({
+        task: {
+          agentConfig: {
+            permissionMode: "default",
+            accessCeilingProfileId: BUILTIN_ACCESS_PROFILE_IDS.approveForMe,
+          },
+        },
+        workspace,
+        settings,
+      });
+      expect(legacy.accessLimited).toBe(true);
+      expect(legacy.definition.approval).toBe("untrusted");
+      expect(legacy.permissionMode).not.toBe("bypass_permissions");
+
+      const denyAll: AccessProfileDefinition = {
+        ...resolveAccessProfileDefinitionWithStatus(BUILTIN_ACCESS_PROFILE_IDS.askForApproval, [])
+          .definition!,
+        id: "deny-all",
+        label: "Deny all",
+        approval: "never",
+      };
+      const limited = resolveEffectiveAccessProfile({
+        task: {
+          agentConfig: {
+            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+            accessCeilingProfileId: "deny-all",
+          },
+        },
+        workspace,
+        settings: withProfiles([denyAll]),
+      });
+      expect(limited.definition.approval).toBe("never");
+      expect(limited.permissionMode).toBe("default");
+    });
+
     it("fails closed when the limit no longer exists", () => {
       const profile = limited(BUILTIN_ACCESS_PROFILE_IDS.fullAccess, "deleted-profile");
       expect(profile.profileUnavailable).toBe(true);

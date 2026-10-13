@@ -1682,10 +1682,11 @@ export class AgentDaemon extends EventEmitter {
       const task = this.taskRepo.findById(taskId);
       if (!task || task.assignedAgentRoleId !== roleId) return;
       this.applyAgentRoleOverrides(task);
-      // The executor keeps its own copy of the task's config; give it the new limit too.
-      const stored = this.taskRepo.findById(taskId);
+      // The executor keeps its own copy of the task's config; give it the new limit too,
+      // keeping any narrower override the current turn runs with.
+      const current = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
       try {
-        cached.executor?.updateTaskAgentConfig?.(stored?.agentConfig);
+        cached.executor?.updateTaskAgentConfig?.(current?.agentConfig);
       } catch (error) {
         console.warn(`[AgentDaemon] Failed to update the access limit for task ${taskId}:`, error);
       }
@@ -5400,6 +5401,23 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
+    // Access limits come only from the parent (below), never from the caller: drop any the
+    // caller passed before the child's requested profile is compared with the parent's.
+    if (
+      params.agentConfig &&
+      (Object.prototype.hasOwnProperty.call(params.agentConfig, "accessCeilingProfileId") ||
+        Object.prototype.hasOwnProperty.call(
+          params.agentConfig,
+          "inheritedAccessCeilingProfileIds",
+        ))
+    ) {
+      const {
+        accessCeilingProfileId: _ownLimit,
+        inheritedAccessCeilingProfileIds: _inheritedLimits,
+        ...rest
+      } = params.agentConfig;
+      params = { ...params, agentConfig: rest };
+    }
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
     const workerRole = requestedWorkerRole || resolveDefaultWorkerRoleKind();

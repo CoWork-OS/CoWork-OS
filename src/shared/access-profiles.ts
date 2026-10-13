@@ -764,6 +764,9 @@ export function accessCeilingsOf(
   return [...own, ...inherited];
 }
 
+/** Stands in for a malformed limit; the resolver never resolves it, so it fails closed. */
+export const INVALID_ACCESS_LIMIT_ID = "invalid-access-limit";
+
 /** The well-formed limits a child or scheduled task inherits from the task that started it. */
 export function inheritableAccessCeilings(
   config:
@@ -774,7 +777,7 @@ export function inheritableAccessCeilings(
     typeof value === "string" ? value.trim() : "",
   );
   // A malformed entry becomes a name no profile has, so the child fails closed too.
-  return Array.from(new Set(ids.map((id) => id || "invalid-access-limit")));
+  return Array.from(new Set(ids.map((id) => id || INVALID_ACCESS_LIMIT_ID)));
 }
 
 export function getLegacyPermissionModeForAccessProfile(

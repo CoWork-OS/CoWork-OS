@@ -6,6 +6,7 @@ import type {
 } from "../../shared/access-profiles";
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
+  INVALID_ACCESS_LIMIT_ID,
   getLegacyPermissionModeForAccessProfile,
   accessCeilingsOf,
   narrowAccessProfileToCeiling,
@@ -258,7 +259,9 @@ export function resolveEffectiveAccessProfile(
   let accessLimitUnavailable = false;
   for (const rawCeiling of ceilings) {
     accessLimited = true;
-    const ceilingId = typeof rawCeiling === "string" ? rawCeiling.trim() : "";
+    const rawId = typeof rawCeiling === "string" ? rawCeiling.trim() : "";
+    // The placeholder for a malformed limit never resolves, even if a profile shares its name.
+    const ceilingId = rawId === INVALID_ACCESS_LIMIT_ID ? "" : rawId;
     const ceiling = ceilingId
       ? resolveAccessProfileDefinitionWithStatus(ceilingId, settings.accessProfiles || [])
       : undefined;
@@ -268,7 +271,7 @@ export function resolveEffectiveAccessProfile(
         : null;
     if (!narrowed) {
       definition = unavailableProfileForId(
-        ceilingId || "invalid-access-limit",
+        ceilingId || INVALID_ACCESS_LIMIT_ID,
         ceiling?.status === "invalid" ? "invalid" : "missing",
       );
       profileUnavailable = true;
@@ -295,7 +298,26 @@ export function resolveEffectiveAccessProfile(
         .join(" ");
     }
   }
-  if (accessLimited) permissionMode = getLegacyPermissionModeForAccessProfile(definition);
+  if (accessLimited) {
+    // A limited session is governed by its narrowed definition, as a named profile (so the
+    // limit's own rules reach the workspace). An older session without a named profile kept
+    // asking before writes and commands in its legacy mode; it keeps asking under the limit.
+    if (
+      !explicitProfile &&
+      !hasConfiguredDefaultProfile &&
+      permissionMode !== "bypass_permissions" &&
+      !accessLimitUnavailable &&
+      !(definition.approval === "never" && definition.sandbox !== "danger-full-access")
+    ) {
+      definition = { ...definition, approval: "untrusted" };
+    }
+    permissionMode = getLegacyPermissionModeForAccessProfile(definition);
+    // "never" only means "allow without asking" with full access. Under a sandbox it denies
+    // every ask, which must not read as an explicit no-ask authority elsewhere.
+    if (permissionMode === "bypass_permissions" && !isFullAccessProfile(definition)) {
+      permissionMode = "default";
+    }
+  }
 
   // Researcher/verifier roles and internal read-only helpers are a separate
   // trust boundary from the task that requested them. Check the persisted role

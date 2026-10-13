@@ -566,6 +566,12 @@ import {
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupAttentionHandlers } from "./attention-handlers";
 import { setupCalendarHandlers } from "./calendar-handlers";
+import { setupMailReplyDraftHandlers } from "./mail-reply-draft-handlers";
+import {
+  MailReplyDraftsService,
+  type MailReplyDraftsState,
+} from "../mailbox/MailReplyDraftsService";
+import { mailboxLlmReplyDraft } from "../mailbox/mailbox-inbox-product-llm";
 import { CalendarService } from "../calendar/CalendarService";
 import { CalendarProposalsService } from "../calendar/CalendarProposalsService";
 import { googleCalendarRequest } from "../utils/google-calendar-api";
@@ -11239,6 +11245,29 @@ export async function setupIpcHandlers(
       return settings.activeAccountEmail || settings.loginHint || "";
     },
   });
+  // Reply drafts on Today (opt-in): a few drafted replies a day, sent only on the user's click.
+  let notifyAttentionChanged = () => {};
+  const mailReplyDrafts = new MailReplyDraftsService({
+    mailbox: mailboxService,
+    writeReply: mailboxLlmReplyDraft,
+    loadState: () =>
+      SecureSettingsRepository.isInitialized()
+        ? SecureSettingsRepository.getInstance().load<MailReplyDraftsState>("mail-reply-drafts")
+        : undefined,
+    saveState: (state) => {
+      if (SecureSettingsRepository.isInitialized()) {
+        SecureSettingsRepository.getInstance().save("mail-reply-drafts", state);
+      }
+    },
+    onPrepared: () => notifyAttentionChanged(),
+  });
+  if (!shouldDisableBackgroundAutostart()) {
+    // Off until the user turns it on; each run stops at the day's allowance.
+    const draftMailReplies = () => void mailReplyDrafts.draftReplies().catch(() => 0);
+    setTimeout(draftMailReplies, 2 * 60 * 1000).unref?.();
+    setInterval(draftMailReplies, 20 * 60 * 1000).unref?.();
+  }
+
   const calendarProposals = new CalendarProposalsService({
     calendar: calendarService,
     listCommitments: () =>
@@ -11290,6 +11319,8 @@ export async function setupIpcHandlers(
       },
       listCalendarProposals: () => calendarProposals.list(),
       findCalendarHold: () => calendarProposals.suggestedHold(),
+      listMailReplyDrafts: () => mailReplyDrafts.list(),
+      shouldOfferMailReplyDrafts: () => mailReplyDrafts.shouldOffer(),
       listMemoryChanges: async () =>
         listMemoryChangesAcross(await workspaceRepo.findAll(), (id, since) =>
           memoryReviewService.recentSince(id, since),
@@ -11314,6 +11345,14 @@ export async function setupIpcHandlers(
       await ProactiveSuggestionsService.actOn(workspaceId, suggestionId);
     },
     onChanged: attentionSignal.notifyChanged,
+  });
+  notifyAttentionChanged = attentionSignal.notifyChanged;
+
+  // Reply drafts on Today: send, undo a send, discard, turn drafting on or off.
+  setupMailReplyDraftHandlers({
+    drafts: mailReplyDrafts,
+    onChanged: attentionSignal.notifyChanged,
+    assertTrustedSender: assertTrustedMailboxSender,
   });
 
   // Memory Hub "Review": automatic commitment expiries with undo.

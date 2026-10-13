@@ -2608,6 +2608,19 @@ export class MailboxService {
     return result.changes > 0;
   }
 
+  /**
+   * Takes back a send that hasn't started and returns the draft to editing, unlike
+   * discarding it. False when the outbox already picked the send up, or it is due within
+   * the next second.
+   */
+  async cancelMailboxDraftSend(draftId: string, now = Date.now()): Promise<boolean> {
+    const cancelled = await this.sql.run("cancelMailboxDraftSend_1", [now, draftId, now + 1000]);
+    if (cancelled.changes === 0) return false;
+    await this.sql.run("cancelMailboxDraftSend_2", [now, draftId]);
+    await this.sql.run("cancelMailboxDraftSend_3", [now, draftId]);
+    return true;
+  }
+
   async undoMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
     const existing = await this.getMailboxQueuedAction(actionId);
     if (!existing) throw new Error("Mailbox action not found");
@@ -10282,7 +10295,9 @@ export class MailboxService {
 
   private async processMailboxQueuedAction(action: MailboxQueuedAction): Promise<void> {
     const now = Date.now();
-    await this.sql.run("processMailboxQueuedAction_1", [now, action.id]);
+    const claimed = await this.sql.run("processMailboxQueuedAction_1", [now, action.id]);
+    // Cancelled (undone or discarded) after it was read: it must not run.
+    if (claimed.changes === 0) return;
 
     if (action.type === "send") {
       await this.executeQueuedDraftSend(action);

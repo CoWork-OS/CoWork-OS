@@ -9,6 +9,7 @@
  */
 import { isApprovalDecisionQuestionId } from "./approval-draft-presentation";
 import type { CalendarProposal } from "./calendar-proposals";
+import type { MailReplyDraftCard } from "./mail-reply-drafts";
 import type { MemoryCurationChange } from "./memory-review-types";
 import { deriveCanonicalTaskStatus } from "./task-status";
 import { LOCAL_MANAGED_DEVICE_NODE_ID } from "./types";
@@ -31,7 +32,9 @@ export type AttentionKind =
   /** A commitment memory closed on its own, kept for a while so it can be undone. */
   | "memory_change"
   /** Something on the user's calendar to decide: a conflict, a focus hold, meeting prep. */
-  | "calendar";
+  | "calendar"
+  /** A reply CoWork drafted to mail that needs one, or the offer to draft them. */
+  | "mail_reply";
 
 /** Who is asking. */
 export interface AttentionActor {
@@ -62,7 +65,9 @@ export type AttentionRef =
   | { type: "commitment"; commitmentId: string }
   | { type: "suggestion"; suggestionId: string; workspaceId: string }
   | { type: "memory_change"; changeId: string; workspaceId: string }
-  | { type: "calendar_proposal"; proposalId: string };
+  | { type: "calendar_proposal"; proposalId: string }
+  | { type: "mail_draft"; draftId: string }
+  | { type: "mail_offer" };
 
 export interface AttentionItem {
   /** Stable across snapshots: `${kind}:${source id}`. */
@@ -87,6 +92,8 @@ export interface AttentionItem {
   calendar?: CalendarProposal;
   /** A free stretch the user can hold for a suggestion that is about making time. */
   calendarHold?: { start: number; end: number };
+  /** The drafted reply itself (mail_reply items only), for the card to show before sending. */
+  mailDraft?: MailReplyDraftCard;
   createdAt: number;
   dueAt?: number;
   /** Wants a decision soon; non-urgent items are offers, not requests. */
@@ -115,7 +122,8 @@ export type AttentionSourceName =
   | "commitments"
   | "suggestions"
   | "memory"
-  | "calendar";
+  | "calendar"
+  | "mail";
 
 export interface AttentionSnapshot {
   generatedAt: number;
@@ -571,6 +579,49 @@ export function attentionFromCalendarProposal(
   };
 }
 
+/** A drafted reply waiting on Send: the thread needs a reply, so it counts as needing you. */
+export function attentionFromMailReplyDraft(
+  draft: MailReplyDraftCard,
+  context: AttentionTaskContext,
+): AttentionItem {
+  return {
+    // A failed send is a new decision, so it doesn't stay hidden as already acted on.
+    id: `mail_reply:${draft.draftId}${draft.failed ? ":failed" : ""}`,
+    kind: "mail_reply",
+    state: draft.failed ? "Not sent" : "Reply drafted",
+    title: clip(draft.subject, 200),
+    detail: draft.failed
+      ? `It couldn't be sent: ${clip(draft.failed, 160)}`
+      : `${clip(draft.sender, 80)} is waiting on a reply.`,
+    createdAt: draft.createdAt,
+    urgent: true,
+    actor: { kind: "background", name: "Mail" },
+    origin: { kind: "event", label: "From your inbox" },
+    place: { kind: "local", label: context.localLabel },
+    ref: { type: "mail_draft", draftId: draft.draftId },
+    mailDraft: draft,
+  };
+}
+
+/** The offer to start drafting replies: an offer, so never urgent. */
+export function attentionMailReplyOffer(now: number, context: AttentionTaskContext): AttentionItem {
+  return {
+    id: "mail_reply:offer",
+    kind: "mail_reply",
+    state: "Suggested",
+    title: "Draft replies to mail that needs you?",
+    detail:
+      "CoWork can draft up to 3 replies a day to threads waiting on you, using your AI model. " +
+      "Nothing is sent until you press Send.",
+    createdAt: now,
+    urgent: false,
+    actor: { kind: "background", name: "Mail" },
+    origin: { kind: "event", label: "From your inbox" },
+    place: { kind: "local", label: context.localLabel },
+    ref: { type: "mail_offer" },
+  };
+}
+
 /** Suggestions about making time, which a calendar hold can answer. */
 const TIME_BLOCK_PATTERN =
   /\b(focus (time|block|session)|block (out |off )?(some )?time|time block|hold (some )?time|deep work|set aside time)\b/i;
@@ -635,6 +686,7 @@ const KIND_RANK: Record<AttentionKind, number> = {
   suggestion: 3,
   memory_change: 4,
   calendar: 2,
+  mail_reply: 2,
 };
 
 /**
@@ -659,8 +711,8 @@ export function rankAttention(items: readonly AttentionItem[]): AttentionItem[] 
   const offset = (item: AttentionItem) => {
     if (item.urgent) return 0;
     if (item.kind === "suggestion") return 1;
-    // Calendar offers come after urgent suggestions, with the other offers.
-    return item.kind === "calendar" ? 2 : 0;
+    // Calendar and mail offers come after urgent suggestions, with the other offers.
+    return item.kind === "calendar" || item.kind === "mail_reply" ? 2 : 0;
   };
   const rank = (item: AttentionItem) => KIND_RANK[item.kind] + offset(item);
   return kept.sort((a, b) => {

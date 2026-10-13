@@ -395,6 +395,43 @@ describe("AttentionService", () => {
     expect(snapshot.items.map((item) => item.id)).toEqual(["approval:a1"]);
   });
 
+  it("lists drafted replies, and the offer to draft them when asked", async () => {
+    const draft = {
+      draftId: "d1",
+      threadId: "t1",
+      accountId: "gmail:me@example.com",
+      provider: "gmail" as const,
+      subject: "Q3 proposal",
+      to: ["Dana", "Lee", "Kim", "Ray"],
+      sender: "Dana",
+      bodyText: "Thanks Dana, sending it Friday.",
+      createdAt: NOW - 60_000,
+    };
+    const service = new AttentionService(
+      sources({
+        listMailReplyDrafts: async () => [draft],
+        shouldOfferMailReplyDrafts: async () => true,
+      }),
+    );
+    const { items, failedSources } = await service.snapshot();
+    expect(failedSources).toEqual([]);
+    expect(items.map((item) => item.id)).toEqual(["mail_reply:d1", "mail_reply:offer"]);
+
+    const failing = new AttentionService(
+      sources({
+        listMailReplyDrafts: async () => {
+          throw new Error("locked");
+        },
+        shouldOfferMailReplyDrafts: async () => {
+          throw new Error("locked");
+        },
+      }),
+    );
+    const snapshot = await failing.snapshot();
+    expect(snapshot.failedSources).toEqual(["mail"]);
+    expect(snapshot.items).toEqual([]);
+  });
+
   it("doesn't wait on a calendar that never answers", async () => {
     vi.useFakeTimers();
     try {

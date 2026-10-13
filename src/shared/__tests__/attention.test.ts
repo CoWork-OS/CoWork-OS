@@ -183,6 +183,43 @@ describe("attention mappers", () => {
     });
   });
 
+  it("offers a single question's plain options as choices, never an approval's", () => {
+    const request = (questions: InputRequest["questions"]): InputRequest => ({
+      id: "q1",
+      taskId: "t1",
+      questions,
+      status: "pending",
+      requestedAt: NOW,
+    });
+    const question = (overrides: Partial<InputRequest["questions"][number]> = {}) => ({
+      header: "Region",
+      id: "region",
+      question: "Which region?",
+      options: [
+        { label: "us-east (default)", description: "Closest to most users" },
+        { label: "eu-west", description: "" },
+      ],
+      ...overrides,
+    });
+    expect(attentionFromInputRequest(request([question()]), task("t1"), context).choices).toEqual({
+      questionId: "region",
+      // Labels go back as the answer, so they stay exactly as written.
+      options: [
+        { label: "us-east (default)", description: "Closest to most users" },
+        { label: "eu-west" },
+      ],
+    });
+    const none = (questions: InputRequest["questions"]) =>
+      attentionFromInputRequest(request(questions), task("t1"), context).choices;
+    expect(none([question(), question({ id: "size" })])).toBeUndefined();
+    expect(none([question({ id: "approval_decision" })])).toBeUndefined();
+    expect(none([question({ id: "responsibility_action_review_decision" })])).toBeUndefined();
+    expect(
+      none([question({ preview: { label: "Script", text: "rm -rf build" } })]),
+    ).toBeUndefined();
+    expect(none([question({ options: [{ label: "Only one", description: "" }] })])).toBeUndefined();
+  });
+
   it("only makes session items for sessions waiting on the user", () => {
     expect(
       attentionFromTask(

@@ -668,6 +668,8 @@ interface MainContentProps {
   onSelectWorkspace?: (workspace: Workspace) => void;
   onOpenSettings?: (tab?: SettingsTab) => void;
   onViewRoutine?: (routineId: string) => void;
+  /** Shows an approval's review dialog in place; false when the app doesn't hold it. */
+  onReviewApproval?: (approvalId: string) => boolean;
   onStopTask?: () => void;
   onContinueWithoutCommandsForPausedTask?: () => void | Promise<void>;
   onWrapUpTask?: () => void;
@@ -4082,6 +4084,7 @@ function MainContentComponent({
   onSelectWorkspace,
   onOpenSettings,
   onViewRoutine,
+  onReviewApproval,
   onStopTask,
   onContinueWithoutCommandsForPausedTask,
   onWrapUpTask,
@@ -11564,6 +11567,7 @@ function MainContentComponent({
                   today={homeToday}
                   signals={homeTodaySignals}
                   onOpenSession={(taskId) => onSelectTask?.(taskId)}
+                  onReviewApproval={onReviewApproval}
                   onOpenRoutine={onViewRoutine}
                   onStartTask={async (title, prompt) =>
                     onCreateTask

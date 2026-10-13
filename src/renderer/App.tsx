@@ -913,6 +913,8 @@ type SelectedTaskWorkspaceViewProps = {
   /** Reports which approval the open browser shows, so the dialog is not shown twice. */
   onBrowserApprovalDockedChange: (approvalId: string | null) => void;
   onViewRoutine: (routineId: string) => void;
+  /** Shows an approval's review dialog over the current view; false when it isn't held. */
+  onReviewApproval: (approvalId: string) => boolean;
   onStopTask: () => Promise<void>;
   onContinueWithoutCommandsForPausedTask: () => Promise<void>;
   onWrapUpTask: () => Promise<void>;
@@ -1051,6 +1053,7 @@ const SelectedTaskWorkspaceView = memo(
     onBrowserApprovalRespond,
     onBrowserApprovalDockedChange,
     onViewRoutine,
+    onReviewApproval,
     onStopTask,
     onContinueWithoutCommandsForPausedTask,
     onWrapUpTask,
@@ -1788,6 +1791,7 @@ const SelectedTaskWorkspaceView = memo(
                 onSelectWorkspace={onSelectWorkspace}
                 onOpenSettings={onOpenSettings as Any}
                 onViewRoutine={onViewRoutine}
+                onReviewApproval={onReviewApproval}
                 onStopTask={onStopTask}
                 onContinueWithoutCommandsForPausedTask={onContinueWithoutCommandsForPausedTask}
                 onWrapUpTask={onWrapUpTask}
@@ -4118,6 +4122,16 @@ export function App() {
       durationMs: 7000,
     });
   };
+
+  // Today's approval cards reopen the approval's own review dialog over the home view, with
+  // every check the dialog makes. An approval the app no longer holds opens its session.
+  const reviewApprovalInPlace = useCallback((approvalId: string) => {
+    const approval = pendingApprovalsRef.current.get(approvalId);
+    if (!approval) return false;
+    if (isComputerUseAppGrantApproval(approval)) setComputerUseAppGrantApproval(approval);
+    else setGenericApproval(approval);
+    return true;
+  }, []);
 
   const reshowPendingApprovalToasts = () => {
     setComputerUseAppGrantApproval(
@@ -8854,6 +8868,7 @@ export function App() {
                     setFocusAutomationRoutineId(routineId);
                     setCurrentView("automations");
                   }}
+                  onReviewApproval={reviewApprovalInPlace}
                   replayControls={replayControls}
                   sharedTaskEventUi={sharedTaskEventUi}
                   remoteTaskView={remoteTaskView}

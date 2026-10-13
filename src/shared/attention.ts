@@ -7,6 +7,7 @@
  * Items describe and point; they never act. Every decision still goes through the surface
  * that owns it (the approval review, the session, the flow run), with its own checks.
  */
+import { isApprovalDecisionQuestionId } from "./approval-draft-presentation";
 import type { MemoryCurationChange } from "./memory-review-types";
 import { deriveCanonicalTaskStatus } from "./task-status";
 import { LOCAL_MANAGED_DEVICE_NODE_ID } from "./types";
@@ -72,6 +73,12 @@ export interface AttentionItem {
   prompt?: string;
   /** What kind of suggestion it is (suggestions only). */
   suggestionType?: SuggestionType;
+  /**
+   * A single question that can be answered by picking one of its options (questions only).
+   * Approval decisions in question form, and questions that show content to review, never
+   * get choices: they are answered where their full review is shown.
+   */
+  choices?: { questionId: string; options: Array<{ label: string; description?: string }> };
   createdAt: number;
   dueAt?: number;
   /** Wants a decision soon; non-urgent items are offers, not requests. */
@@ -324,8 +331,30 @@ export function attentionFromInputRequest(
 ): AttentionItem {
   const first = request.questions[0];
   const count = request.questions.length;
+  const options = (first?.options ?? []).filter(
+    (option) => typeof option?.label === "string" && option.label.trim(),
+  );
+  const answerable =
+    count === 1 &&
+    first &&
+    !first.preview &&
+    !isApprovalDecisionQuestionId(first.id) &&
+    options.length >= 2 &&
+    options.length <= 4;
   return {
     id: `question:${request.id}`,
+    ...(answerable
+      ? {
+          choices: {
+            questionId: first.id,
+            options: options.map((option) => ({
+              // Sent back as the answer, so it must stay exactly as the agent wrote it.
+              label: option.label,
+              ...(option.description ? { description: clip(option.description, 160) } : {}),
+            })),
+          },
+        }
+      : {}),
     kind: "question",
     state: count > 1 ? `${count} questions` : "Question",
     title: clip(first?.question, 200) || "An agent has a question for you",

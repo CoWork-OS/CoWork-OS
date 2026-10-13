@@ -4418,6 +4418,8 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN max_autonomous_outputs_per_cycle INTEGER DEFAULT 1",
       "ALTER TABLE agent_roles ADD COLUMN last_useful_output_at INTEGER",
       "ALTER TABLE agent_roles ADD COLUMN operator_health_score REAL",
+      // "May do alone": the most access this agent's work may get (a ceiling, never a grant).
+      "ALTER TABLE agent_roles ADD COLUMN access_profile_id TEXT",
     ];
 
     for (const sql of missionControlColumns) {

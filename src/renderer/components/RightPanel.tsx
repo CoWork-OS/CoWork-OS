@@ -1,5 +1,6 @@
 import { hasHostMethod } from "../host/browser-capabilities";
 import {
+  Fragment,
   memo,
   useState,
   useEffect,
@@ -1624,16 +1625,14 @@ const CollaborativeAgentsSection = memo(
 
     const openAgent = onOpenAgent ?? onSelectTask;
     const totalTokens = totals.inputTokens + totals.outputTokens;
-    const rosterSummary =
-      [
-        totals.running > 0 ? `${totals.running} running` : null,
-        totals.pending > 0 ? `${totals.pending} pending` : null,
-        totals.completed > 0 ? `${totals.completed} done` : null,
-        totals.warning > 0 ? `${totals.warning} warning` : null,
-        totals.failed > 0 ? `${totals.failed} failed` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || `${totals.total} agents`;
+    const rosterCounts = [
+      totals.running > 0 ? `${totals.running} running` : null,
+      totals.pending > 0 ? `${totals.pending} pending` : null,
+      totals.completed > 0 ? `${totals.completed} done` : null,
+      totals.warning > 0 ? `${totals.warning} warning` : null,
+      totals.failed > 0 ? `${totals.failed} failed` : null,
+    ].filter((count): count is string => Boolean(count));
+    const rosterSummary = rosterCounts.length > 0 ? rosterCounts : [`${totals.total} agents`];
     const statusSummary = [
       totals.completed > 0 ? `${totals.completed} done` : null,
       totals.warning > 0 ? `${totals.warning} warning` : null,
@@ -1722,12 +1721,22 @@ const CollaborativeAgentsSection = memo(
                   <AgentGlyph
                     key={row.task.id}
                     glyph={glyphs.get(row.task.id) ?? getAgentGlyphForSeed(row.task.id)}
-                    size={18}
+                    size={16}
                     state={AGENT_GLYPH_STATE[row.statusKind]}
                   />
                 ))}
               </span>
-              <span className="collab-agents-roster-summary">{rosterSummary}</span>
+              <span className="collab-agents-roster-summary">
+                {/* Each count wraps as a whole, so "1 failed" never splits across lines. */}
+                {rosterSummary.map((count, index) => (
+                  <Fragment key={count}>
+                    {index > 0 ? " " : null}
+                    <span className="collab-agents-roster-count">
+                      {index < rosterSummary.length - 1 ? `${count} ·` : count}
+                    </span>
+                  </Fragment>
+                ))}
+              </span>
             </button>
             {listOpen ? (
               <div className="collab-agents-list">

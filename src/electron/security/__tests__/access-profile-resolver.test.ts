@@ -663,4 +663,151 @@ describe("access profile resolver", () => {
       definition: { workspaceRoots: ["../shared-docs"] },
     });
   });
+
+  describe("an agent's access limit", () => {
+    const limited = (accessProfileId: string, accessCeilingProfileId: string) =>
+      resolveEffectiveAccessProfile({
+        task: { agentConfig: { accessProfileId, accessCeilingProfileId } },
+        workspace,
+        settings,
+      });
+
+    it("narrows a session that asked for more than its agent may do alone", () => {
+      const profile = limited(
+        BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
+        BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+      );
+      expect(profile.id).toBe(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+      expect(profile.permissionMode).toBe("default");
+      expect(profile.adminConstrained).toBe(true);
+      expect(profile.constraintReason).toContain("access limit");
+      expect(profile.definition.approval).toBe("on-request");
+    });
+
+    it("leaves a session within the limit as it is", () => {
+      const profile = limited(
+        BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+        BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
+      );
+      expect(profile.id).toBe(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+      expect(profile.adminConstrained).toBe(false);
+    });
+
+    it("applies every limit a task inherits from the sessions that started it", () => {
+      const profile = resolveEffectiveAccessProfile({
+        task: {
+          agentConfig: {
+            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
+            inheritedAccessCeilingProfileIds: [
+              BUILTIN_ACCESS_PROFILE_IDS.approveForMe,
+              BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+            ],
+          },
+        },
+        workspace,
+        settings,
+      });
+      expect(profile.id).toBe(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+      expect(profile.accessLimited).toBe(true);
+    });
+
+    it("fails closed on a malformed limit and on rules that can't be combined", () => {
+      const malformed = resolveEffectiveAccessProfile({
+        task: { agentConfig: { accessCeilingProfileId: "   " } as Any },
+        workspace,
+        settings,
+      });
+      expect(malformed.profileUnavailable).toBe(true);
+      expect(malformed.accessLimitUnavailable).toBe(true);
+      const docsOnly: AccessProfileDefinition = {
+        ...resolveAccessProfileDefinitionWithStatus(BUILTIN_ACCESS_PROFILE_IDS.approveForMe, [])
+          .definition!,
+        id: "docs-only",
+        label: "Docs only",
+        filesystemRules: [{ path: "docs", access: "write" }],
+      };
+      const guarded: AccessProfileDefinition = {
+        ...resolveAccessProfileDefinitionWithStatus(BUILTIN_ACCESS_PROFILE_IDS.fullAccess, [])
+          .definition!,
+        id: "guarded",
+        label: "Guarded",
+        filesystemRules: [{ path: "secrets", access: "deny" }],
+      };
+      const conflict = resolveEffectiveAccessProfile({
+        task: { agentConfig: { accessProfileId: "guarded", accessCeilingProfileId: "docs-only" } },
+        workspace,
+        settings: withProfiles([docsOnly, guarded]),
+      });
+      expect(conflict.profileUnavailable).toBe(true);
+      expect(conflict.accessLimitUnavailable).toBe(true);
+      expect(conflict.definition.sandbox).toBe("read-only");
+    });
+
+    it("applies the limit's own rules to an older session saved without a profile", () => {
+      const docsOnly: AccessProfileDefinition = {
+        ...resolveAccessProfileDefinitionWithStatus(BUILTIN_ACCESS_PROFILE_IDS.askForApproval, [])
+          .definition!,
+        id: "docs-only",
+        label: "Docs only",
+        filesystemRules: [{ path: "docs", access: "write" }],
+      };
+      const profile = resolveEffectiveAccessProfile({
+        task: {
+          agentConfig: {
+            permissionMode: "bypass_permissions",
+            accessCeilingProfileId: "docs-only",
+          },
+        },
+        workspace,
+        settings: withProfiles([docsOnly]),
+      });
+      expect(profile.accessLimited).toBe(true);
+      const limited = applyAccessProfileToWorkspace(workspace, profile);
+      expect(limited.permissions.accessProfileId).toBe("docs-only");
+      expect(limited.permissions.accessFilesystemRules?.[0]?.access).toBe("write");
+    });
+
+    it("keeps an older session asking under a limit, and never reads a sandboxed never as no-ask", () => {
+      const legacy = resolveEffectiveAccessProfile({
+        task: {
+          agentConfig: {
+            permissionMode: "default",
+            accessCeilingProfileId: BUILTIN_ACCESS_PROFILE_IDS.approveForMe,
+          },
+        },
+        workspace,
+        settings,
+      });
+      expect(legacy.accessLimited).toBe(true);
+      expect(legacy.definition.approval).toBe("untrusted");
+      expect(legacy.permissionMode).not.toBe("bypass_permissions");
+
+      const denyAll: AccessProfileDefinition = {
+        ...resolveAccessProfileDefinitionWithStatus(BUILTIN_ACCESS_PROFILE_IDS.askForApproval, [])
+          .definition!,
+        id: "deny-all",
+        label: "Deny all",
+        approval: "never",
+      };
+      const limited = resolveEffectiveAccessProfile({
+        task: {
+          agentConfig: {
+            accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+            accessCeilingProfileId: "deny-all",
+          },
+        },
+        workspace,
+        settings: withProfiles([denyAll]),
+      });
+      expect(limited.definition.approval).toBe("never");
+      expect(limited.permissionMode).toBe("default");
+    });
+
+    it("fails closed when the limit no longer exists", () => {
+      const profile = limited(BUILTIN_ACCESS_PROFILE_IDS.fullAccess, "deleted-profile");
+      expect(profile.profileUnavailable).toBe(true);
+      expect(profile.definition.sandbox).toBe("read-only");
+      expect(profile.networkEnabled).toBe(false);
+    });
+  });
 });

@@ -134,6 +134,46 @@ describe("CronTools.schedule_create workspace behavior", () => {
     expect(result.job?.taskAgentConfig).toBeUndefined();
   });
 
+  it("keeps a limited agent's scheduled runs within every limit it works under", async () => {
+    const daemon = {
+      ...makeDaemonStub(),
+      getTask: vi.fn(() => ({
+        assignedAgentRoleId: "role-ops",
+        agentConfig: {
+          accessProfileId: "full_access",
+          accessCeilingProfileId: "ask_for_approval",
+          inheritedAccessCeilingProfileIds: ["approve_for_me"],
+        },
+      })),
+    } as Any;
+    const workspace: Workspace = {
+      id: "ws-limited",
+      name: "Limited",
+      path: "/tmp/limited-workspace",
+      createdAt: 0,
+      permissions: { read: true, write: true, delete: false, network: true, shell: true },
+    };
+    const tools = new CronTools(workspace, daemon, "task-limited");
+    const result = await tools.createJob({
+      name: "Limited follow-up",
+      prompt: "Check again tomorrow.",
+      schedule: { type: "interval", every: "1h" },
+    });
+    expect(result.success).toBe(true);
+    expect(result.job?.assignedAgentRoleId).toBe("role-ops");
+    expect(result.job?.taskAgentConfig).toEqual({
+      inheritedAccessCeilingProfileIds: ["ask_for_approval", "approve_for_me"],
+    });
+    // The stored job keeps them for its runs.
+    const stored = (await service.list({ includeDisabled: true })).find(
+      (job) => job.id === result.job!.id,
+    );
+    expect(stored?.taskAgentConfig?.inheritedAccessCeilingProfileIds).toEqual([
+      "ask_for_approval",
+      "approve_for_me",
+    ]);
+  });
+
   it("creates current-thread jobs as thread follow-ups", async () => {
     const daemon = makeDaemonStub();
     const workspaceId = "ws-5678";

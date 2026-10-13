@@ -1408,6 +1408,24 @@
   border-color: color-mix(in srgb, var(--color-success, #22c55e) 38%, var(--color-border));
 }
 
+/* Needs You rows are buttons that open where the decision is made. */
+.mc-v2-needs-you-item {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mc-v2-needs-you-item:hover:not(:disabled) {
+  border-color: var(--color-accent);
+}
+
+.mc-v2-needs-you-item:disabled {
+  cursor: default;
+}
+
 .mc-v2-brief-item-top {
   display: flex;
   align-items: center;

@@ -8819,6 +8819,7 @@ export function App() {
                 <main className="main-content mission-control-main">
                   <MissionControlPanel
                     onOpenAgents={() => setCurrentView("agents")}
+                    onOpenAttention={handleAttentionClick}
                     initialCompanyId={missionControlInitialCompanyId}
                     initialIssueId={missionControlInitialIssueId}
                   />

@@ -107,6 +107,46 @@ describe("MCOverviewTab", () => {
     expect(markup).toContain("<strong>0</strong><span>open board work</span>");
   });
 
+  it("counts and lists the queue's decisions when the queue is available", () => {
+    const decision = (id: string, title: string) => ({
+      id,
+      kind: "approval",
+      state: "Approval needed",
+      title,
+      detail: "Weekly report is paused until you decide.",
+      createdAt: Date.UTC(2026, 4, 26, 10, 0, 0),
+      urgent: true,
+      actor: { kind: "agent", name: "Ops bot" },
+      origin: { kind: "you", label: "You started it" },
+      place: { kind: "local", label: "This Mac" },
+      workspaceId: "ws-1",
+      taskId: `task-${id}`,
+      ref: { type: "approval", approvalId: id, taskId: `task-${id}` },
+    });
+    const markup = renderOverview({
+      needsYouItems: Array.from({ length: 7 }, (_, index) =>
+        decision(`a${index}`, `Send report ${index}`),
+      ),
+    } as Partial<MissionControlData>);
+
+    expect(markup).toContain("<strong>7</strong><span>need you</span>");
+    expect(markup).not.toContain("need attention");
+    expect(markup).toContain("Needs You");
+    expect(markup).toContain("Send report 5");
+    expect(markup).not.toContain("Send report 6");
+    expect(markup).toContain("+1 more in Today");
+    // Mission Control's own flags stay, under their own name.
+    expect(markup).toContain("Flagged");
+  });
+
+  it("keeps the brief's attention count without the queue", () => {
+    const markup = renderOverview({ needsYouItems: null } as Partial<MissionControlData>);
+
+    expect(markup).toContain("need attention");
+    expect(markup).toContain("Needs Attention");
+    expect(markup).not.toContain("Needs You");
+  });
+
   it("stacks metric values and labels despite the shared button flex rule", () => {
     const styles = readFileSync(stylesPath, "utf8");
     const metricRule = styles.match(/\.mc-v2-brief-metric\s*\{([^}]*)\}/s)?.[1] || "";

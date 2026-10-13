@@ -77,6 +77,8 @@ import { createBrowserQueueDefinitions } from "./browser-queue-methods";
 import { createBrowserDeviceDefinitions } from "./browser-device-methods";
 import { getFirstRunReadiness } from "../../shared/first-run-readiness";
 import { createBrowserNotificationDefinitions } from "./browser-notification-methods";
+import { createBrowserAttentionDefinitions } from "./browser-attention-methods";
+import type { AttentionSnapshot } from "../../shared/attention";
 import { createBrowserReportDefinitions } from "./browser-report-methods";
 import { createBrowserMemoryDefinitions } from "./browser-memory-methods";
 import { createBrowserPactDefinitions } from "./browser-pact-methods";
@@ -99,6 +101,8 @@ export interface BrowserHostApplicationOptions {
   getEventTriggerService?: () => EventTriggerService | null;
   getHeartbeatService?: () => HeartbeatService | null;
   notificationService?: NotificationService;
+  /** The desktop app's needs-you queue; absent where the host doesn't run one (the daemon). */
+  getAttentionService?: () => { snapshot(): Promise<AttentionSnapshot> } | null;
   taskCommands?: Pick<BrowserTaskCommands, "createTaskIdempotent" | "startAdmittedTask"> &
     BrowserApprovalCommands &
     Pick<AgentDaemon, "sendMessage" | "getDurableTaskFollowUpReceipt" | "cancelTask">;
@@ -256,6 +260,13 @@ export function createBrowserHostApplication(
     }),
     ...createBrowserQueueDefinitions(options.agentDaemon),
     ...notifications,
+    ...(options.getAttentionService
+      ? createBrowserAttentionDefinitions({
+          getAttention: options.getAttentionService,
+          resolveWorkspace: resolveBrowserWorkspace,
+          getTask: async (taskId) => (await taskRepository.findById(taskId)) ?? null,
+        })
+      : {}),
     ...mailbox.definitions,
     ...devices.definitions,
     ...navigation?.definitions,

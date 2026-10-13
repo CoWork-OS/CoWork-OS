@@ -404,6 +404,46 @@ describe("browser host bridge", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("polls the needs-you queue and signals only when its items change", async () => {
+    vi.useFakeTimers();
+    const fakeWindow = stubBrowserWindow();
+    let items = [{ id: "approval:a1", state: "Approval needed" }];
+    const request = vi.fn(async (method: string) => {
+      if (method === "desktop.listAttention")
+        return { generatedAt: Date.now(), items, failedSources: [] };
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
+    const dispose = installBrowserHostBridge(
+      { request } as unknown as BrowserHostTransport,
+      {
+        ...session,
+        desktopMethods: { listAttention: { mutation: false } },
+      } as WebSessionBootstrap,
+    );
+    const api = fakeWindow.electronAPI as unknown as {
+      listAttention: () => Promise<{ items: unknown[] }>;
+      onAttentionChanged: (listener: () => void) => () => void;
+    };
+    expect(typeof api.listAttention).toBe("function");
+    const onChange = vi.fn();
+    const unsubscribe = api.onAttentionChanged(onChange);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // The first read is the baseline, and an unchanged queue says nothing.
+    expect(onChange).not.toHaveBeenCalled();
+    items = [...items, { id: "question:q1", state: "Question" }];
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    const calls = request.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(request).toHaveBeenCalledTimes(calls);
+    api.onAttentionChanged(vi.fn());
+    dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("polls cron snapshots and emits bounded change events while Scheduled Tasks is mounted", async () => {
     vi.useFakeTimers();
     const fakeWindow = stubBrowserWindow();

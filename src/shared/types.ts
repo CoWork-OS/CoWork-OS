@@ -8839,6 +8839,10 @@ export const IPC_CHANNELS = {
   SUGGESTIONS_ACT: "suggestions:act",
   /** Keep a follow-up suggestion as a commitment. */
   SUGGESTIONS_ADD_COMMITMENT: "suggestions:addCommitment",
+  // Today's calendar cards
+  CALENDAR_PROPOSAL_ACCEPT: "calendar:acceptProposal",
+  CALENDAR_PROPOSAL_DISMISS: "calendar:dismissProposal",
+  CALENDAR_HOLD_FOR_SUGGESTION: "calendar:holdForSuggestion",
 
   // Shared "needs you" queue (shared/attention.ts): the snapshot, and a signal when it changed
   ATTENTION_LIST: "attention:list",

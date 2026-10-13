@@ -1634,6 +1634,11 @@ interface AgentToolRestrictions {
   deniedTools?: string[];
 }
 
+/** What a calendar card's action did (see CalendarProposalsService). */
+type CalendarCardOutcome =
+  | { ok: true; kind: "focus_hold" | "conflict" | "meeting_prep" }
+  | { ok: false; reason: "not_connected" | "gone" | "not_allowed" | "failed"; message: string };
+
 type AgentAutonomyLevel = "intern" | "specialist" | "lead";
 
 interface AgentRoleData {
@@ -5662,6 +5667,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_EDIT, workspaceId, suggestionId, editedPrompt),
   addSuggestionAsCommitment: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, workspaceId, suggestionId),
+  // Today's calendar cards
+  acceptCalendarProposal: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_PROPOSAL_ACCEPT, proposalId),
+  dismissCalendarProposal: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_PROPOSAL_DISMISS, proposalId),
+  holdCalendarTimeForSuggestion: (data: {
+    workspaceId: string;
+    suggestionId: string;
+    start: number;
+    end: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_HOLD_FOR_SUGGESTION, data),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
@@ -9660,6 +9676,14 @@ export interface ElectronAPI {
     workspaceId: string,
     suggestionId: string,
   ) => Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_eligible" | "unavailable" }>;
+  acceptCalendarProposal: (proposalId: string) => Promise<CalendarCardOutcome>;
+  dismissCalendarProposal: (proposalId: string) => Promise<{ ok: boolean }>;
+  holdCalendarTimeForSuggestion: (data: {
+    workspaceId: string;
+    suggestionId: string;
+    start: number;
+    end: number;
+  }) => Promise<CalendarCardOutcome>;
   snoozeSuggestion: (
     workspaceId: string,
     suggestionId: string,

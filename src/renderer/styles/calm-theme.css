@@ -1718,12 +1718,11 @@ html.visual-calm .calm-today-card-preview-label {
   color: var(--calm-text-muted);
 }
 
+/* The whole prompt that will run, never cut off: long ones scroll. */
 html.visual-calm .calm-today-card-preview > p {
-  display: -webkit-box;
+  max-height: 9em;
   margin: 0;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  overflow-y: auto;
   font: 400 13.5px/1.5 var(--font-ui);
   color: var(--calm-text);
   white-space: pre-wrap;

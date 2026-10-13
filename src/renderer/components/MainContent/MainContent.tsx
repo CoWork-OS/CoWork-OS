@@ -11593,6 +11593,7 @@ function MainContentComponent({
                     });
                     promptInputRef.current?.focus();
                   }}
+                  onOpenLink={(url) => void window.electronAPI.openExternal(url).catch(() => {})}
                 />
               ) : (
                 renderCalmSuggestionChips()

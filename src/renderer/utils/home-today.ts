@@ -1,4 +1,5 @@
 import { rankAttention, type AttentionItem, type AttentionKind } from "../../shared/attention";
+import { meetingPrepPrompt, type CalendarProposal } from "../../shared/calendar-proposals";
 import type { SuggestionType } from "../../shared/types";
 import type { HomeSessionSummary, HomeSessions } from "./home-sessions";
 
@@ -10,8 +11,9 @@ import type { HomeSessionSummary, HomeSessions } from "./home-sessions";
  * sessions the renderer already knows so a new one shows before the queue reloads. Every
  * card action goes through an existing path: opening a session (where its own approval or
  * question UI takes over), opening an automation, starting a suggestion's prompt as a new
- * task (the prompt is shown on the card first), snoozing a suggestion, or marking a
- * commitment done. Nothing here runs anything on its own.
+ * task (the prompt is shown on the card first), snoozing a suggestion, marking a
+ * commitment done, or a calendar change the card names (the main process checks the
+ * calendar again before making it). Nothing here runs anything on its own.
  */
 
 export type HomeTodayKind = AttentionKind;
@@ -38,7 +40,22 @@ export type HomeTodayAction =
   /** Keep a follow-up suggestion as a commitment. */
   | { type: "add-commitment"; workspaceId: string; suggestionId: string }
   | { type: "complete-commitment"; commitmentId: string }
-  | { type: "draft-prompt"; prompt: string };
+  | { type: "draft-prompt"; prompt: string }
+  /** Hold the time or decline the event the calendar card names; `done` labels the row. */
+  | { type: "accept-calendar"; proposalId: string; done: string }
+  /** Stop showing a calendar card. */
+  | { type: "dismiss-calendar"; proposalId: string }
+  /** Start the meeting-prep prompt the card shows, then retire the card. */
+  | { type: "prepare-meeting"; proposalId: string; title: string; prompt: string }
+  /** Hold a free stretch on the calendar for a suggestion about making time. */
+  | {
+      type: "hold-for-suggestion";
+      workspaceId: string;
+      suggestionId: string;
+      start: number;
+      end: number;
+    }
+  | { type: "open-link"; url: string };
 
 export interface HomeTodayButton {
   label: string;
@@ -54,6 +71,9 @@ export type HomeTodayIcon =
   | "blocked"
   | "flow"
   | "commitment"
+  | "calendar_hold"
+  | "calendar_conflict"
+  | "calendar_prep"
   | SuggestionType;
 
 /** A short fact under the card's header: what started the work, where it runs, its risk. */
@@ -84,6 +104,8 @@ export interface HomeTodayCard {
   choices?: HomeTodayButton[];
   /** Quieter actions after the main two (suggestions: Edit, Add as commitment, Dismiss). */
   more?: HomeTodayButton[];
+  /** An offer, not a request: shown with the cards, but nothing counts it as needing you. */
+  offer?: boolean;
 }
 
 export interface HomeTodayHandledRow {
@@ -111,7 +133,6 @@ export interface HomeToday {
 export const EMPTY_HOME_TODAY: HomeToday = { needsYou: [], idea: null, handled: [] };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_PREVIEW_CHARS = 320;
 const MAX_HANDLED_ROWS = 5;
 
 const SUGGESTION_SOURCE: Record<SuggestionType, string> = {
@@ -184,6 +205,25 @@ export function commitmentDueState(dueAt: number, now: number): string {
   return `Due ${weekday(dueAt)}`;
 }
 
+/** "today", "tomorrow" or "Thu". */
+function dayWord(timestamp: number, now: number): string {
+  const days = Math.round((startOfDay(timestamp) - startOfDay(now)) / DAY_MS);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return weekday(timestamp);
+}
+
+/** "today", "tomorrow" or "on Thu". */
+function dayPhrase(timestamp: number, now: number): string {
+  const word = dayWord(timestamp, now);
+  return word === "today" || word === "tomorrow" ? word : `on ${word}`;
+}
+
+/** A button label for holding time, e.g. "Hold 2:00 PM tomorrow". */
+function holdLabel(start: number, now: number): string {
+  return `Hold ${formatClock(start)} ${dayWord(start, now)}`;
+}
+
 function commitmentWhy(dueAt: number, now: number): string {
   if (dueAt < now) {
     const days = Math.round((startOfDay(now) - startOfDay(dueAt)) / DAY_MS);
@@ -213,6 +253,106 @@ function askerName(item: AttentionItem): string {
 
 function openSession(taskId: string, label: string): HomeTodayButton {
   return { label, action: { type: "open-session", taskId } };
+}
+
+function namesList(names: readonly string[]): string {
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+}
+
+function calendarCard(
+  item: AttentionItem,
+  proposal: CalendarProposal,
+  base: Pick<HomeTodayCard, "id" | "kind" | "at" | "chips">,
+  now: number,
+): HomeTodayCard {
+  const common = {
+    ...base,
+    // "From your calendar" would only repeat the source.
+    chips: base.chips.filter((chip) => chip.kind !== "origin"),
+    source: "Calendar",
+    state: item.state,
+    title: item.title,
+    ...(item.urgent ? {} : { offer: true }),
+  };
+  const dismiss = (label: string): HomeTodayButton => ({
+    label,
+    action: { type: "dismiss-calendar", proposalId: proposal.id },
+  });
+  switch (proposal.kind) {
+    case "focus_hold":
+      return {
+        ...common,
+        icon: "calendar_hold",
+        why:
+          `It's due by ${formatClock(proposal.dueAt)} ${dayPhrase(proposal.dueAt, now)}. ` +
+          `You're free ${dayPhrase(proposal.start, now)} ` +
+          `${formatClock(proposal.start)}–${formatClock(proposal.end)}.`,
+        primary: {
+          label: holdLabel(proposal.start, now),
+          hint: "Adds a private, busy block to your calendar. Nobody is invited.",
+          action: { type: "accept-calendar", proposalId: proposal.id, done: "Time held" },
+        },
+        secondary: dismiss("Not now"),
+      };
+    case "conflict": {
+      const { first, second } = proposal;
+      const link = second.htmlLink || first.htmlLink;
+      const openLink: HomeTodayButton | null = link
+        ? { label: "Open in Calendar", action: { type: "open-link", url: link } }
+        : null;
+      const why =
+        `${first.title} runs ${formatClock(first.start)}–${formatClock(first.end)} and ` +
+        `${second.title} ${formatClock(second.start)}–${formatClock(second.end)}, ` +
+        `${dayPhrase(first.start, now)}.`;
+      if (proposal.canDeclineSecond) {
+        return {
+          ...common,
+          icon: "calendar_conflict",
+          why,
+          primary: {
+            label: `Decline ${clip(second.title, 40)}`,
+            hint: "Declines the invitation and lets the organizer know.",
+            action: { type: "accept-calendar", proposalId: proposal.id, done: "Declined" },
+          },
+          secondary: dismiss("Keep both"),
+          ...(openLink ? { more: [openLink] } : {}),
+        };
+      }
+      // The user organizes the later event, or isn't on its guest list: CoWork won't change it.
+      return {
+        ...common,
+        icon: "calendar_conflict",
+        why,
+        primary: openLink ?? dismiss("Got it"),
+        ...(openLink ? { secondary: dismiss("Keep both") } : {}),
+      };
+    }
+    case "meeting_prep": {
+      const prompt = meetingPrepPrompt(
+        proposal,
+        (at) => `${formatClock(at)} ${dayPhrase(at, now)}`,
+      );
+      const people = proposal.attendees.length > 0 ? ` with ${namesList(proposal.attendees)}` : "";
+      return {
+        ...common,
+        icon: "calendar_prep",
+        why: `It starts ${dayPhrase(proposal.event.start, now)} at ${formatClock(proposal.event.start)}${people}.`,
+        // The whole prompt, exactly as it will run.
+        preview: { label: "Will run", text: prompt },
+        primary: {
+          label: "Prepare",
+          action: {
+            type: "prepare-meeting",
+            proposalId: proposal.id,
+            title: clip(`Prep: ${proposal.event.title}`, 140),
+            prompt,
+          },
+        },
+        secondary: dismiss("Not now"),
+      };
+    }
+  }
 }
 
 /** The card for one attention item, or null when the item has nothing to decide here. */
@@ -321,7 +461,7 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         state: item.state,
         title: clip(plain(item.title), 140),
         why: clip(plain(item.detail || ""), 180),
-        preview: { label: "Will run", text: clip(item.prompt, MAX_PREVIEW_CHARS) },
+        preview: { label: "Will run", text: item.prompt },
         primary: {
           label: "Start",
           action: {
@@ -337,6 +477,22 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
           action: { type: "snooze-suggestion", workspaceId, suggestionId },
         },
         more: [
+          // A suggestion about making time can hold a free stretch on the calendar.
+          ...(item.calendarHold
+            ? [
+                {
+                  label: holdLabel(item.calendarHold.start, now),
+                  hint: "Adds a private, busy block to your calendar. Nobody is invited.",
+                  action: {
+                    type: "hold-for-suggestion" as const,
+                    workspaceId,
+                    suggestionId,
+                    start: item.calendarHold.start,
+                    end: item.calendarHold.end,
+                  },
+                },
+              ]
+            : []),
           {
             label: "Edit",
             action: { type: "edit-suggestion", workspaceId, suggestionId, prompt: item.prompt },
@@ -360,6 +516,9 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
     case "memory_change":
       // Handled work, not a decision: Today lists it with the handled rows.
       return null;
+    case "calendar":
+      if (item.ref.type !== "calendar_proposal" || !item.calendar) return null;
+      return calendarCard(item, item.calendar, base, now);
   }
 }
 
@@ -467,13 +626,16 @@ export function formatHomeDate(now: Date): string {
   return now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
-/** The line under the greeting: how much needs the user, and whether the rest is handled. */
+/**
+ * The line under the greeting: how much needs the user, and whether the rest is handled.
+ * Offers (a suggested hold, meeting prep) are shown but not counted.
+ */
 export function homeStatusLine(today: HomeToday): string | null {
-  const count = today.needsYou.length;
+  const count = today.needsYou.filter((card) => !card.offer).length;
   const handled = today.handled.length > 0;
   if (count === 0) {
     if (handled) return "Nothing needs you. The rest is handled.";
-    return today.idea ? "Nothing needs you right now." : null;
+    return today.idea || today.needsYou.length > 0 ? "Nothing needs you right now." : null;
   }
   const needs = count === 1 ? "1 thing needs you." : `${count} things need you.`;
   return handled ? `${needs} The rest is handled.` : needs;

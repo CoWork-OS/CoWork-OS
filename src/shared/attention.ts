@@ -8,6 +8,7 @@
  * that owns it (the approval review, the session, the flow run), with its own checks.
  */
 import { isApprovalDecisionQuestionId } from "./approval-draft-presentation";
+import type { CalendarProposal } from "./calendar-proposals";
 import type { MemoryCurationChange } from "./memory-review-types";
 import { deriveCanonicalTaskStatus } from "./task-status";
 import { LOCAL_MANAGED_DEVICE_NODE_ID } from "./types";
@@ -28,7 +29,9 @@ export type AttentionKind =
   | "commitment"
   | "suggestion"
   /** A commitment memory closed on its own, kept for a while so it can be undone. */
-  | "memory_change";
+  | "memory_change"
+  /** Something on the user's calendar to decide: a conflict, a focus hold, meeting prep. */
+  | "calendar";
 
 /** Who is asking. */
 export interface AttentionActor {
@@ -58,7 +61,8 @@ export type AttentionRef =
   | { type: "workflow_step"; routineId: string; runId: string; stepId: string }
   | { type: "commitment"; commitmentId: string }
   | { type: "suggestion"; suggestionId: string; workspaceId: string }
-  | { type: "memory_change"; changeId: string; workspaceId: string };
+  | { type: "memory_change"; changeId: string; workspaceId: string }
+  | { type: "calendar_proposal"; proposalId: string };
 
 export interface AttentionItem {
   /** Stable across snapshots: `${kind}:${source id}`. */
@@ -79,6 +83,10 @@ export interface AttentionItem {
    * get choices: they are answered where their full review is shown.
    */
   choices?: { questionId: string; options: Array<{ label: string; description?: string }> };
+  /** The calendar proposal itself (calendar items only), for the card to describe. */
+  calendar?: CalendarProposal;
+  /** A free stretch the user can hold for a suggestion that is about making time. */
+  calendarHold?: { start: number; end: number };
   createdAt: number;
   dueAt?: number;
   /** Wants a decision soon; non-urgent items are offers, not requests. */
@@ -106,7 +114,8 @@ export type AttentionSourceName =
   | "flows"
   | "commitments"
   | "suggestions"
-  | "memory";
+  | "memory"
+  | "calendar";
 
 export interface AttentionSnapshot {
   generatedAt: number;
@@ -518,6 +527,59 @@ export function attentionFromSuggestion(
 }
 
 /**
+ * A calendar card. A conflict needs a decision; a focus hold or meeting prep is an offer,
+ * so it is not urgent and no "needs you" count includes it.
+ */
+export function attentionFromCalendarProposal(
+  proposal: CalendarProposal,
+  context: AttentionTaskContext,
+): AttentionItem {
+  const base = {
+    id: `calendar:${proposal.id}`,
+    kind: "calendar" as const,
+    actor: { kind: "background" as const, name: "Calendar" },
+    origin: { kind: "event" as const, label: "From your calendar" },
+    place: { kind: "local" as const, label: context.localLabel },
+    ref: { type: "calendar_proposal" as const, proposalId: proposal.id },
+    calendar: proposal,
+  };
+  if (proposal.kind === "conflict") {
+    return {
+      ...base,
+      state: "Conflict",
+      title: clip(`${proposal.first.title} overlaps ${proposal.second.title}`, 200),
+      createdAt: proposal.first.start,
+      urgent: true,
+    };
+  }
+  if (proposal.kind === "focus_hold") {
+    return {
+      ...base,
+      state: "Suggested hold",
+      title: clip(proposal.title, 160),
+      createdAt: proposal.start,
+      dueAt: proposal.dueAt,
+      urgent: false,
+    };
+  }
+  return {
+    ...base,
+    state: "Meeting soon",
+    title: clip(proposal.event.title, 160),
+    createdAt: proposal.event.start,
+    urgent: false,
+  };
+}
+
+/** Suggestions about making time, which a calendar hold can answer. */
+const TIME_BLOCK_PATTERN =
+  /\b(focus (time|block|session)|block (out |off )?(some )?time|time block|hold (some )?time|deep work|set aside time)\b/i;
+
+export function suggestsCalendarHold(item: Pick<AttentionItem, "title" | "prompt">): boolean {
+  return TIME_BLOCK_PATTERN.test(`${item.title} ${item.prompt ?? ""}`);
+}
+
+/**
  * A commitment that memory upkeep closed because it looked done. It is not a decision: it is
  * handled work the user can undo while undo is still possible, so it is never urgent.
  */
@@ -572,12 +634,15 @@ const KIND_RANK: Record<AttentionKind, number> = {
   commitment: 2,
   suggestion: 3,
   memory_change: 4,
+  calendar: 2,
 };
 
 /**
  * Drops a session item when an approval or question already stands for the same task, then
- * orders the rest: blocked work first, then waiting sessions, due commitments (soonest first),
- * urgent suggestions and finally offers. Within a group the newest comes first.
+ * orders the rest: blocked work first, then waiting sessions, due commitments (soonest first)
+ * and calendar conflicts, urgent suggestions, and finally offers (a suggested hold or meeting
+ * prep, then other suggestions). Within a group the newest comes first, except calendar
+ * items, soonest first.
  */
 export function rankAttention(items: readonly AttentionItem[]): AttentionItem[] {
   const decided = new Set(
@@ -591,14 +656,21 @@ export function rankAttention(items: readonly AttentionItem[]): AttentionItem[] 
     seen.add(item.id);
     return !(item.kind === "session" && decided.has(item.taskId));
   });
-  const rank = (item: AttentionItem) =>
-    KIND_RANK[item.kind] + (item.kind === "suggestion" && !item.urgent ? 1 : 0);
+  const offset = (item: AttentionItem) => {
+    if (item.urgent) return 0;
+    if (item.kind === "suggestion") return 1;
+    // Calendar offers come after urgent suggestions, with the other offers.
+    return item.kind === "calendar" ? 2 : 0;
+  };
+  const rank = (item: AttentionItem) => KIND_RANK[item.kind] + offset(item);
   return kept.sort((a, b) => {
     const byRank = rank(a) - rank(b);
     if (byRank !== 0) return byRank;
     if (a.kind === "commitment" && b.kind === "commitment") {
       return (a.dueAt ?? 0) - (b.dueAt ?? 0);
     }
+    // A calendar item's time is when it happens, so the soonest comes first.
+    if (a.kind === "calendar" && b.kind === "calendar") return a.createdAt - b.createdAt;
     return b.createdAt - a.createdAt;
   });
 }

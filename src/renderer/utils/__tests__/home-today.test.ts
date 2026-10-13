@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AttentionItem } from "../../../shared/attention";
+import { attentionFromCalendarProposal, type AttentionItem } from "../../../shared/attention";
+import type { CalendarProposal } from "../../../shared/calendar-proposals";
 import { EMPTY_HOME_SESSIONS, type HomeSessions } from "../home-sessions";
 import {
   EMPTY_HOME_TODAY,
@@ -318,6 +319,157 @@ describe("cardForAttention", () => {
       primary: { label: "Start", action: { type: "start-suggestion", prompt: "Do x" } },
       secondary: { label: "Not now", action: { type: "snooze-suggestion", suggestionId: "x" } },
     });
+  });
+});
+
+describe("calendar cards", () => {
+  const at = (day: number, hour: number, minute = 0) =>
+    new Date(2026, 9, day, hour, minute).getTime();
+  const calendarItem = (proposal: CalendarProposal) =>
+    attentionFromCalendarProposal(proposal, { localLabel: "This Mac", agentNames: new Map() });
+  const event = (eventId: string, start: number, end: number, htmlLink?: string) => ({
+    eventId,
+    title: `Event ${eventId}`,
+    start,
+    end,
+    ...(htmlLink ? { htmlLink } : {}),
+  });
+  const clock = (timestamp: number) =>
+    new Date(timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+  it("offers to hold free time before a commitment is due", () => {
+    const card = cardForAttention(
+      calendarItem({
+        kind: "focus_hold",
+        id: "hold:c1",
+        title: "Send the SOW",
+        commitmentId: "c1",
+        dueAt: at(13, 17),
+        start: at(12, 12),
+        end: at(12, 13, 30),
+      }),
+      NOW,
+    );
+    expect(card).toMatchObject({
+      icon: "calendar_hold",
+      source: "Calendar",
+      chips: [],
+      state: "Suggested hold",
+      title: "Send the SOW",
+      offer: true,
+      why: `It's due by ${clock(at(13, 17))} tomorrow. You're free today ${clock(at(12, 12))}–${clock(at(12, 13, 30))}.`,
+      primary: {
+        label: `Hold ${clock(at(12, 12))} today`,
+        action: { type: "accept-calendar", proposalId: "hold:c1", done: "Time held" },
+      },
+      secondary: { label: "Not now", action: { type: "dismiss-calendar", proposalId: "hold:c1" } },
+    });
+    expect(card?.primary.hint).toMatch(/private/);
+  });
+
+  it("declines the later event of a conflict only when the user was invited to it", () => {
+    const conflict = (canDeclineSecond: boolean, link?: string): CalendarProposal => ({
+      kind: "conflict",
+      id: "conflict:a:b",
+      first: event("a", at(12, 13), at(12, 14)),
+      second: event("b", at(12, 13, 30), at(12, 14, 30), link),
+      canDeclineSecond,
+    });
+    const declinable = cardForAttention(calendarItem(conflict(true, "https://cal/b")), NOW);
+    expect(declinable).toMatchObject({
+      icon: "calendar_conflict",
+      state: "Conflict",
+      title: "Event a overlaps Event b",
+      primary: {
+        label: "Decline Event b",
+        action: { type: "accept-calendar", proposalId: "conflict:a:b", done: "Declined" },
+      },
+      secondary: { label: "Keep both", action: { type: "dismiss-calendar" } },
+      more: [{ label: "Open in Calendar", action: { type: "open-link", url: "https://cal/b" } }],
+    });
+    expect(declinable?.offer).toBeUndefined();
+    expect(declinable?.primary.hint).toMatch(/organizer/);
+
+    const ownWithLink = cardForAttention(calendarItem(conflict(false, "https://cal/b")), NOW);
+    expect(ownWithLink?.primary).toEqual({
+      label: "Open in Calendar",
+      action: { type: "open-link", url: "https://cal/b" },
+    });
+    expect(ownWithLink?.secondary?.label).toBe("Keep both");
+    const ownNoLink = cardForAttention(calendarItem(conflict(false)), NOW);
+    expect(ownNoLink?.primary).toMatchObject({
+      label: "Got it",
+      action: { type: "dismiss-calendar" },
+    });
+    expect(ownNoLink?.secondary).toBeUndefined();
+  });
+
+  it("shows the prep prompt before it runs", () => {
+    const card = cardForAttention(
+      calendarItem({
+        kind: "meeting_prep",
+        id: "prep:e:1",
+        event: event("e", at(12, 15), at(12, 16)),
+        attendees: ["Ana", "Ben", "Cy", "Di"],
+      }),
+      NOW,
+    );
+    expect(card).toMatchObject({
+      icon: "calendar_prep",
+      state: "Meeting soon",
+      offer: true,
+      why: `It starts today at ${clock(at(12, 15))} with Ana, Ben, Cy and 1 more.`,
+      preview: { label: "Will run" },
+      primary: {
+        label: "Prepare",
+        action: { type: "prepare-meeting", proposalId: "prep:e:1", title: "Prep: Event e" },
+      },
+      secondary: { label: "Not now", action: { type: "dismiss-calendar" } },
+    });
+    const action = card?.primary.action;
+    expect(action?.type === "prepare-meeting" && action.prompt).toContain(
+      `at ${clock(at(12, 15))} today.\n`,
+    );
+    expect(action?.type === "prepare-meeting" && action.prompt).toContain(
+      "\ntitle: Event e\nguests: Ana, Ben, Cy, Di\n",
+    );
+    expect(card?.preview?.text).toBe(action?.type === "prepare-meeting" ? action.prompt : "");
+  });
+
+  it("offers a suggestion about making time the free stretch the queue found", () => {
+    const card = cardForAttention(
+      { ...suggestion("t1", false), calendarHold: { start: at(13, 10), end: at(13, 11, 30) } },
+      NOW,
+    );
+    expect(card?.more?.[0]).toMatchObject({
+      label: `Hold ${clock(at(13, 10))} tomorrow`,
+      action: {
+        type: "hold-for-suggestion",
+        workspaceId: "ws",
+        suggestionId: "t1",
+        start: at(13, 10),
+        end: at(13, 11, 30),
+      },
+    });
+  });
+
+  it("shows offers with the cards without counting them as needing the user", () => {
+    const prep = cardForAttention(
+      calendarItem({
+        kind: "meeting_prep",
+        id: "prep:e:1",
+        event: event("e", at(12, 15), at(12, 16)),
+        attendees: ["Ana"],
+      }),
+      NOW,
+    )!;
+    const decision = cardForAttention(approval, NOW)!;
+    expect(homeStatusLine({ needsYou: [prep], idea: null, handled: [] })).toBe(
+      "Nothing needs you right now.",
+    );
+    expect(homeStatusLine({ needsYou: [decision, prep], idea: null, handled: [] })).toBe(
+      "1 thing needs you.",
+    );
   });
 });
 

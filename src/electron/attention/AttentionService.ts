@@ -11,6 +11,8 @@ import {
   attentionFromFlowStep,
   attentionFromInputRequest,
   attentionFromMemoryChange,
+  attentionFromCalendarProposal,
+  suggestsCalendarHold,
   attentionFromSuggestion,
   attentionFromTask,
   rankAttention,
@@ -23,6 +25,7 @@ import {
   type AttentionSourceName,
   type AttentionTaskContext,
 } from "../../shared/attention";
+import type { CalendarProposal } from "../../shared/calendar-proposals";
 import type { MemoryCurationChange } from "../../shared/memory-review-types";
 import type { ApprovalRequest, InputRequest, ProactiveSuggestion, Task } from "../../shared/types";
 
@@ -41,6 +44,10 @@ export interface AttentionSources {
   listSuggestions: () => Promise<Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>>;
   /** Commitments memory closed recently, with whether undo is still possible. */
   listMemoryChanges?: () => Promise<Array<{ workspaceId: string; change: MemoryCurationChange }>>;
+  /** Calendar cards: conflicts, focus holds before due commitments, meeting prep. */
+  listCalendarProposals?: () => Promise<CalendarProposal[]>;
+  /** A free stretch to offer as a hold on a suggestion about making time. */
+  findCalendarHold?: () => Promise<{ start: number; end: number } | null>;
   /** What this machine is called in the UI, e.g. "This Mac". */
   localLabel: string;
   now?: () => number;
@@ -56,6 +63,7 @@ const LIMITS = {
   commitments: 20,
   suggestions: 20,
   memory: 20,
+  calendar: 8,
   /** Task lookups for approvals and questions whose session is not among the recent ones. */
   taskLookups: 50,
   /** Parent lookups while finding the agent roles an item's work belongs to. */
@@ -65,6 +73,21 @@ const LIMITS = {
   total: 100,
 } as const;
 
+/**
+ * Sources read over the network get a time limit, so a slow one never holds up the
+ * approvals and questions read from the local database.
+ */
+const SOURCE_TIMEOUT_MS: Partial<Record<AttentionSourceName, number>> = { calendar: 5000 };
+
+function withTimeout<T>(load: Promise<T>, ms: number | undefined): Promise<T> {
+  if (!ms) return load;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([load, timeout]).finally(() => clearTimeout(timer));
+}
+
 export class AttentionService {
   constructor(private readonly sources: AttentionSources) {}
 
@@ -73,7 +96,7 @@ export class AttentionService {
     const failedSources: AttentionSourceName[] = [];
     const read = async <T>(name: AttentionSourceName, load: () => Promise<T>, empty: T) => {
       try {
-        return await load();
+        return await withTimeout(load(), SOURCE_TIMEOUT_MS[name]);
       } catch (error) {
         failedSources.push(name);
         this.sources.log?.(`[Attention] Could not read ${name}`, error);
@@ -91,6 +114,7 @@ export class AttentionService {
       commitments,
       suggestions,
       memoryChanges,
+      calendarProposals,
     ] = await Promise.all([
       read("approvals", this.sources.listPendingApprovals, [] as ApprovalRequest[]),
       read("questions", this.sources.listPendingInputRequests, [] as InputRequest[]),
@@ -110,6 +134,11 @@ export class AttentionService {
         "memory",
         this.sources.listMemoryChanges ?? (async () => []),
         [] as Array<{ workspaceId: string; change: MemoryCurationChange }>,
+      ),
+      read(
+        "calendar",
+        this.sources.listCalendarProposals ?? (async () => []),
+        [] as CalendarProposal[],
       ),
     ]);
 
@@ -174,7 +203,11 @@ export class AttentionService {
         .map(({ workspaceId, change }) => attentionFromMemoryChange(change, workspaceId, context))
         .filter((item): item is AttentionItem => item !== null)
         .slice(0, LIMITS.memory),
+      ...calendarProposals
+        .slice(0, LIMITS.calendar)
+        .map((proposal) => attentionFromCalendarProposal(proposal, context)),
     ];
+    await this.offerCalendarHold(items);
 
     const ranked = rankAttention(items).slice(0, LIMITS.total);
     const owners = await this.ownersFor(
@@ -189,6 +222,23 @@ export class AttentionService {
       }),
       failedSources,
     };
+  }
+
+  /**
+   * The first suggestion about making time gets the next free stretch on the calendar, so
+   * its card can offer to hold it. One only: booking it changes what's free for the rest.
+   */
+  private async offerCalendarHold(items: AttentionItem[]): Promise<void> {
+    if (!this.sources.findCalendarHold) return;
+    const index = items.findIndex(
+      (item) => item.kind === "suggestion" && suggestsCalendarHold(item),
+    );
+    if (index < 0) return;
+    const slot = await withTimeout(
+      this.sources.findCalendarHold(),
+      SOURCE_TIMEOUT_MS.calendar,
+    ).catch(() => null);
+    if (slot) items[index] = { ...items[index], calendarHold: slot };
   }
 
   /**

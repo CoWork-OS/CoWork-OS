@@ -568,6 +568,11 @@ import {
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupAttentionHandlers } from "./attention-handlers";
 import { createAgentRoleAssignmentHandler } from "./agent-role-assignment-handlers";
+import { setupCalendarHandlers } from "./calendar-handlers";
+import { CalendarService } from "../calendar/CalendarService";
+import { CalendarProposalsService } from "../calendar/CalendarProposalsService";
+import { googleCalendarRequest } from "../utils/google-calendar-api";
+import { googleWorkspaceScopeReady } from "../agent/tools/integration-effect-guard";
 import { AttentionService } from "../attention/AttentionService";
 import {
   listMemoryChangesAcross,
@@ -11204,10 +11209,43 @@ export async function setupIpcHandlers(
   // Shared by Memory Hub "Review" and the needs-you queue, which lists recent expiries.
   const memoryReviewService = createMemoryReviewService(db);
 
+  // Today's calendar cards read the connected Google Calendar (cached briefly) and change it
+  // only on the user's click, after re-reading it.
+  const calendarService = new CalendarService({
+    isConnected: () =>
+      googleWorkspaceScopeReady(
+        GoogleWorkspaceSettingsManager.loadSettings(),
+        "workspace",
+        "workspace",
+      ),
+    request: (request) =>
+      googleCalendarRequest(GoogleWorkspaceSettingsManager.loadSettings(), request),
+    accountKey: () => {
+      const settings = GoogleWorkspaceSettingsManager.loadSettings();
+      return settings.activeAccountEmail || settings.loginHint || "";
+    },
+  });
+  const calendarProposals = new CalendarProposalsService({
+    calendar: calendarService,
+    listCommitments: () =>
+      RelationshipMemoryService.listDueSoonCommitments(72).flatMap((item) =>
+        typeof item.dueAt === "number" ? [{ id: item.id, text: item.text, dueAt: item.dueAt }] : [],
+      ),
+    loadState: () =>
+      SecureSettingsRepository.isInitialized()
+        ? SecureSettingsRepository.getInstance().load<{ hidden: Record<string, number> }>(
+            "calendar-proposals",
+          )
+        : undefined,
+    saveState: (state) =>
+      SecureSettingsRepository.isInitialized() &&
+      SecureSettingsRepository.getInstance().save("calendar-proposals", state),
+  });
+
   // Shared "needs you" queue: one snapshot of everything waiting on the user (approvals,
   // agent questions, paused sessions, flow steps, due commitments and suggestions), plus
   // commitments memory recently closed, which can still be undone.
-  setupAttentionHandlers({
+  const attentionSignal = setupAttentionHandlers({
     service: new AttentionService({
       listPendingApprovals: () => approvalRepo.findAllPending(),
       listPendingInputRequests: () => inputRequestRepo.findAllPending(),
@@ -11236,6 +11274,8 @@ export async function setupIpcHandlers(
           ProactiveSuggestionsService.listActive(id, opts, ids),
         );
       },
+      listCalendarProposals: () => calendarProposals.list(),
+      findCalendarHold: () => calendarProposals.suggestedHold(),
       listMemoryChanges: async () =>
         listMemoryChangesAcross(await workspaceRepo.findAll(), (id, since) =>
           memoryReviewService.recentSince(id, since),
@@ -11245,6 +11285,21 @@ export async function setupIpcHandlers(
     }),
     events: agentDaemon,
     getMainWindow,
+  });
+
+  // Today's calendar cards: accept or dismiss a proposal, hold time for a suggestion.
+  setupCalendarHandlers({
+    proposals: calendarProposals,
+    getSuggestionTitle: async (workspaceId, suggestionId) => {
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      const suggestion = await ProactiveSuggestionsService.getActive(workspaceId, suggestionId);
+      return suggestion?.title?.trim() || null;
+    },
+    markSuggestionActedOn: async (workspaceId, suggestionId) => {
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      await ProactiveSuggestionsService.actOn(workspaceId, suggestionId);
+    },
+    onChanged: attentionSignal.notifyChanged,
   });
 
   // Memory Hub "Review": automatic commitment expiries with undo.

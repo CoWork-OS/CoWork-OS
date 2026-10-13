@@ -360,7 +360,7 @@ Offers, such as a suggested hold, meeting prep or the offer to draft replies, us
 
 **Work** lists every session, automated ones included, grouped by project. Filter by status, **Started by** and **Owner**, or search. Repeated runs of the same work are collapsed into one row, and the detail panel shows the next decision, where the work runs, its last activity, result and outputs.
 
-**Team** shows each agent, bot, scheduled task and automation as a teammate: what it is responsible for, what it is waiting on you for, its recent work and how it is set up. For an agent, **May do alone** sets its [access limit](access-profiles.md#agent-access-limits). Schedules can be paused or resumed here, and your devices (this computer and paired remote nodes) are listed with the work running on each.
+**Team** shows each agent, bot, scheduled task and automation as a teammate: what it is responsible for, what it is waiting on you for, its recent work and how it is set up. For an agent, **May do alone** sets its [access limit](access-profiles.md#agent-access-limits), and **Edit agent** opens its full settings (seniority, capabilities, tools, model and personality). Schedules can be paused or resumed here, and your devices (this computer and paired remote nodes) are listed with the work running on each.
 
 ### Task View (Right)
 

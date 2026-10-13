@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Mission Control**: the header's agents link opens Team in the Calm theme and the Bots page otherwise; the Agents tab and agent detail view are removed. Brief's **need you** count and **Needs You** section read the needs-you queue, and Mission Control's own flags are listed under **Flagged**.
 - **Calm session panel**: keeps pinned items, projects and the five most recent sessions; **All work** opens Work. Devices moved into Team in the Calm theme.
-- **Outbox**: undoing a send from Today returns the reply to editing instead of discarding it. A draft that is already queued or being sent can't be sent again, a send cancelled after the outbox picked it up no longer goes out, and discarding cancels a queued send first.
+- **Outbox**: undoing a send (from Today, a compose card or the Inbox) returns the draft to editing instead of discarding it, and is refused once the outbox has picked the send up. A draft that is already queued or being sent can't be sent again, a send cancelled after the outbox picked it up no longer goes out, and discarding cancels a queued send first.
 
 ### Removed
 

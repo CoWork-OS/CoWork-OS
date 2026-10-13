@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { buildMailboxComposeDraftInputFromPrompt } from "../../../shared/mailbox";
@@ -261,5 +263,21 @@ describe("MailComposeFrame recipient helpers", () => {
       ].join("\n"),
       to: [],
     });
+  });
+});
+
+describe("MailComposeFrame undo send", () => {
+  it("takes the send back to a draft instead of discarding it", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../MailComposeFrame.tsx", import.meta.url)),
+      "utf8",
+    );
+    const undo = source.slice(
+      source.indexOf("const handleUndoSend"),
+      source.indexOf("const handleDiscard"),
+    );
+    expect(undo).toContain("cancelMailboxDraftSend");
+    expect(undo).not.toContain("discardMailboxDraft");
+    expect(source).toContain("onClick={handleUndoSend}");
   });
 });

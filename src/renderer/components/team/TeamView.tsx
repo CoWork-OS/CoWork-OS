@@ -15,6 +15,7 @@ import {
   type TeamRole,
   type TeamRoutine,
 } from "../../utils/team-view";
+import { AgentRoleEditorDialog } from "../AgentRoleEditorDialog";
 import "./team-view.css";
 
 const LOCAL_LABEL = navigator.userAgent.includes("Mac") ? "This Mac" : "This computer";
@@ -171,6 +172,8 @@ export function TeamView({
   const accessChoices = useAccessProfileChoices();
   const [accessError, setAccessError] = useState<string | null>(null);
   const [savingAccess, setSavingAccess] = useState(false);
+  /** The agent whose full settings are open, if any. */
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const attention = useAttentionSnapshot(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -369,6 +372,14 @@ export function TeamView({
                     <button type="button" className="primary" onClick={() => open(selected.open)}>
                       {OPEN_LABEL[selected.open.type]}
                     </button>
+                    {selected.access && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingRoleId(selected.access!.roleId)}
+                      >
+                        Edit agent
+                      </button>
+                    )}
                     {selected.schedule && (
                       <button
                         type="button"
@@ -464,8 +475,9 @@ export function TeamView({
                         ))}
                       </dl>
                       <p className="team-view-note">
-                        Change these where they're set:{" "}
-                        {OPEN_LABEL[selected.open.type].replace("Open in ", "")}.
+                        {selected.access
+                          ? "Change these with Edit agent."
+                          : `Change these where they're set: ${OPEN_LABEL[selected.open.type].replace("Open in ", "")}.`}
                       </p>
                     </div>
                   )}
@@ -504,6 +516,13 @@ export function TeamView({
           )}
         </section>
       </div>
+      {editingRoleId && (
+        <AgentRoleEditorDialog
+          roleId={editingRoleId}
+          onClose={() => setEditingRoleId(null)}
+          onSaved={() => reloadRoles()}
+        />
+      )}
     </main>
   );
 }

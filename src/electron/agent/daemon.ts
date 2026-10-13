@@ -1641,7 +1641,44 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // "May do alone": stamp the role's access limit so every profile resolution for this task
+    // narrows to it. It is persisted right away, because some resolutions read the stored
+    // task, and it follows the role: a cleared limit is removed again.
+    const ceiling =
+      typeof role.accessProfileId === "string" && role.accessProfileId.trim()
+        ? role.accessProfileId.trim()
+        : undefined;
+    if (nextAgentConfig.accessCeilingProfileId !== ceiling) {
+      if (ceiling) nextAgentConfig.accessCeilingProfileId = ceiling;
+      else delete nextAgentConfig.accessCeilingProfileId;
+      changed = true;
+      try {
+        const stored = this.taskRepo.findById(task.id);
+        if (stored) {
+          const storedConfig: AgentConfig = { ...(stored.agentConfig ?? {}) };
+          if (ceiling) storedConfig.accessCeilingProfileId = ceiling;
+          else delete storedConfig.accessCeilingProfileId;
+          this.taskRepo.update(task.id, { agentConfig: storedConfig });
+        }
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist the agent's access limit:", error);
+      }
+    }
+
     return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
+  }
+
+  /**
+   * After an agent's access limit changes, re-stamps it on that agent's active sessions and
+   * refreshes their executors, so running work follows the new limit right away.
+   */
+  refreshAgentRoleAccessCeiling(roleId: string): void {
+    this.activeTasks.forEach((_cached, taskId) => {
+      const task = this.taskRepo.findById(taskId);
+      if (!task || task.assignedAgentRoleId !== roleId) return;
+      this.applyAgentRoleOverrides(task);
+    });
+    this.refreshActiveExecutorsForAccessProfiles();
   }
 
   private maybeCaptureMentionedAgentRoleIds(task: Task): void {
@@ -16256,6 +16293,9 @@ export class AgentDaemon extends EventEmitter {
           agentConfig: {
             ...persistentWorkerRoleBoundary.task.agentConfig,
             ...effectiveOptions.agentConfigOverride,
+            // A follow-up override never lifts the agent's access limit.
+            accessCeilingProfileId:
+              persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
           },
         }
       : persistentWorkerRoleBoundary.task;

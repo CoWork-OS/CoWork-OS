@@ -658,6 +658,51 @@ export function isAccessProfileAtMostPrivileged(
   );
 }
 
+const SANDBOX_ORDER = ["read-only", "workspace-write", "danger-full-access"] as const;
+const APPROVAL_ORDER = ["untrusted", "on-request", "never"] as const;
+const NETWORK_ORDER = ["disabled", "on-request", "enabled"] as const;
+const REVIEWER_ORDER = ["user", "auto-review", "none"] as const;
+
+function lessPrivileged<T extends string>(a: T, b: T, order: readonly string[]): T {
+  return accessDimensionRank(a, order) <= accessDimensionRank(b, order) ? a : b;
+}
+
+/**
+ * Narrows a profile so it grants no more than `ceiling` (an agent's "May do alone" limit).
+ * A profile already within the ceiling is returned as is. Otherwise each dimension takes the
+ * less privileged of the two; the ceiling's filesystem and domain scope is the outer bound,
+ * and the profile keeps its own scope only when the ceiling has none. If the result still
+ * isn't within the ceiling (for example two different scopes), the ceiling itself is used.
+ * Never widens anything.
+ */
+export function narrowAccessProfileToCeiling(
+  profile: AccessProfileDefinition,
+  ceiling: AccessProfileDefinition,
+): AccessProfileDefinition {
+  if (isAccessProfileAtMostPrivileged(profile, ceiling)) return profile;
+  const scopeSource = hasAccessProfileScope(ceiling) ? ceiling : profile;
+  const narrowed: AccessProfileDefinition = {
+    id: ceiling.id,
+    label: ceiling.label,
+    description: ceiling.description,
+    sandbox: lessPrivileged(profile.sandbox, ceiling.sandbox, SANDBOX_ORDER),
+    approval: lessPrivileged(profile.approval, ceiling.approval, APPROVAL_ORDER),
+    network: lessPrivileged(profile.network, ceiling.network, NETWORK_ORDER),
+    reviewer: lessPrivileged(profile.reviewer, ceiling.reviewer, REVIEWER_ORDER),
+    ...(profile.shellAccess === false || ceiling.shellAccess === false
+      ? { shellAccess: false }
+      : {}),
+    ...(scopeSource.workspaceRoots ? { workspaceRoots: scopeSource.workspaceRoots } : {}),
+    ...(scopeSource.filesystemRules ? { filesystemRules: scopeSource.filesystemRules } : {}),
+    ...(scopeSource.domainRules ? { domainRules: scopeSource.domainRules } : {}),
+  };
+  // A scoped boundary needs the sandboxed execution path (see the resolver).
+  if (narrowed.sandbox === "danger-full-access" && hasAccessProfileScope(narrowed)) {
+    narrowed.sandbox = "workspace-write";
+  }
+  return isAccessProfileAtMostPrivileged(narrowed, ceiling) ? narrowed : ceiling;
+}
+
 export function getLegacyPermissionModeForAccessProfile(
   profile: AccessProfileDefinition,
 ): "default" | "plan" | "dangerous_only" | "bypass_permissions" {

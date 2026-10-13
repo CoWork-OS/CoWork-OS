@@ -26,6 +26,8 @@ export interface TeamRole {
   roleKind?: string;
   sourceTemplateId?: string;
   autonomyLevel?: AgentAutonomyLevel;
+  /** "May do alone": the most access this agent's work gets. */
+  accessProfileId?: string;
   heartbeatEnabled?: boolean;
   pulseEveryMinutes?: number;
   heartbeatIntervalMinutes?: number;
@@ -116,6 +118,8 @@ export interface TeamMember {
   open: TeamOpenTarget;
   /** Scheduled tasks can be paused and resumed from here. */
   schedule?: { cronJobId: string; enabled: boolean };
+  /** Agents and bots: their "May do alone" limit, set from here; none means no limit. */
+  access?: { roleId: string; profileId?: string };
   lastActiveAt: number;
 }
 
@@ -299,7 +303,9 @@ export function buildTeamModel(input: {
 
     const facts: TeamMember["facts"] = [];
     if (role.autonomyLevel) {
-      facts.push({ label: "Autonomy level", value: AUTONOMY_LABEL[role.autonomyLevel] });
+      // The level sets check-in pacing and who leads shared work; it grants no access. What an
+      // agent may do alone is its access limit, set in the panel.
+      facts.push({ label: "Seniority", value: AUTONOMY_LABEL[role.autonomyLevel] });
     }
     if (role.heartbeatEnabled) {
       const minutes = role.pulseEveryMinutes || role.heartbeatIntervalMinutes || 15;
@@ -325,6 +331,10 @@ export function buildTeamModel(input: {
         at: task.updatedAt || task.createdAt,
       })),
       open: { type: "bots" },
+      access: {
+        roleId: role.id,
+        ...(role.accessProfileId ? { profileId: role.accessProfileId } : {}),
+      },
       lastActiveAt,
     });
   }

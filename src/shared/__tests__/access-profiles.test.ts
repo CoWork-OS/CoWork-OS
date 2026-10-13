@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
   isAccessProfileAtMostPrivileged,
+  narrowAccessProfileToCeiling,
   resolveAccessProfileDefinition,
   validateAccessProfileInheritance,
   type AccessProfileDefinition,
@@ -243,5 +244,44 @@ describe("access profile inheritance", () => {
     };
 
     expect(validateAccessProfileInheritance([childProfile])).toEqual([]);
+  });
+});
+
+describe("narrowing to an agent's access limit", () => {
+  const ask = resolveAccessProfileDefinition(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+  const approve = resolveAccessProfileDefinition(BUILTIN_ACCESS_PROFILE_IDS.approveForMe);
+  const full = resolveAccessProfileDefinition(BUILTIN_ACCESS_PROFILE_IDS.fullAccess);
+
+  it("keeps a profile already within the limit", () => {
+    expect(narrowAccessProfileToCeiling(ask, approve)).toBe(ask);
+    expect(narrowAccessProfileToCeiling(approve, approve)).toBe(approve);
+  });
+
+  it("narrows a wider profile to the limit, never widening a dimension", () => {
+    const narrowed = narrowAccessProfileToCeiling(full, ask);
+    expect(narrowed).toMatchObject({
+      id: ask.id,
+      sandbox: ask.sandbox,
+      approval: ask.approval,
+      network: ask.network,
+      reviewer: ask.reviewer,
+    });
+    expect(isAccessProfileAtMostPrivileged(narrowed, ask)).toBe(true);
+    // A profile narrower in one dimension keeps that dimension.
+    const offline: AccessProfileDefinition = { ...full, id: "offline", network: "disabled" };
+    expect(narrowAccessProfileToCeiling(offline, approve).network).toBe("disabled");
+  });
+
+  it("uses the limit's scope as the outer bound", () => {
+    const scopedLimit: AccessProfileDefinition = {
+      ...approve,
+      id: "docs-only",
+      label: "Docs only",
+      workspaceRoots: ["docs"],
+    };
+    const narrowed = narrowAccessProfileToCeiling(full, scopedLimit);
+    expect(narrowed.workspaceRoots).toEqual(["docs"]);
+    expect(narrowed.sandbox).toBe("workspace-write");
+    expect(isAccessProfileAtMostPrivileged(narrowed, scopedLimit)).toBe(true);
   });
 });

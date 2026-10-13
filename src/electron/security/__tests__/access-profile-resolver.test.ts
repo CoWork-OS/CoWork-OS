@@ -663,4 +663,41 @@ describe("access profile resolver", () => {
       definition: { workspaceRoots: ["../shared-docs"] },
     });
   });
+
+  describe("an agent's access limit", () => {
+    const limited = (accessProfileId: string, accessCeilingProfileId: string) =>
+      resolveEffectiveAccessProfile({
+        task: { agentConfig: { accessProfileId, accessCeilingProfileId } },
+        workspace,
+        settings,
+      });
+
+    it("narrows a session that asked for more than its agent may do alone", () => {
+      const profile = limited(
+        BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
+        BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+      );
+      expect(profile.id).toBe(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+      expect(profile.permissionMode).toBe("default");
+      expect(profile.adminConstrained).toBe(true);
+      expect(profile.constraintReason).toContain("access limit");
+      expect(profile.definition.approval).toBe("on-request");
+    });
+
+    it("leaves a session within the limit as it is", () => {
+      const profile = limited(
+        BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+        BUILTIN_ACCESS_PROFILE_IDS.fullAccess,
+      );
+      expect(profile.id).toBe(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
+      expect(profile.adminConstrained).toBe(false);
+    });
+
+    it("fails closed when the limit no longer exists", () => {
+      const profile = limited(BUILTIN_ACCESS_PROFILE_IDS.fullAccess, "deleted-profile");
+      expect(profile.profileUnavailable).toBe(true);
+      expect(profile.definition.sandbox).toBe("read-only");
+      expect(profile.networkEnabled).toBe(false);
+    });
+  });
 });

@@ -7,6 +7,8 @@ import type {
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
   getLegacyPermissionModeForAccessProfile,
+  isAccessProfileAtMostPrivileged,
+  narrowAccessProfileToCeiling,
   hasAccessProfileFilesystemScope,
   hasAccessProfileScope,
   isFullAccessProfile,
@@ -183,7 +185,7 @@ export function resolveEffectiveAccessProfile(
     requestedId,
     settings.accessProfiles || [],
   );
-  const profileUnavailable =
+  let profileUnavailable =
     !legacyTaskWithoutProfile &&
     (explicitProfile || Boolean(hasConfiguredDefaultProfile)) &&
     profileResolution.status !== "resolved";
@@ -237,6 +239,39 @@ export function resolveEffectiveAccessProfile(
     definition = profileForMode(adminMode);
     adminConstrained = true;
     constraintReason = "Requested permission mode is blocked by administrator policy.";
+  }
+
+  // An agent's "May do alone" limit, stamped on its tasks by the daemon, is a ceiling: the
+  // task keeps its own profile when that is within the limit and is narrowed otherwise. A
+  // limit that no longer resolves fails closed, like a missing task profile.
+  const ceilingId = input.task?.agentConfig?.accessCeilingProfileId;
+  if (typeof ceilingId === "string" && ceilingId.trim()) {
+    const ceiling = resolveAccessProfileDefinitionWithStatus(
+      ceilingId.trim(),
+      settings.accessProfiles || [],
+    );
+    if (ceiling.status !== "resolved" || !ceiling.definition) {
+      definition = unavailableProfileForId(
+        ceiling.profileId,
+        ceiling.status === "resolved" ? "missing" : ceiling.status,
+      );
+      permissionMode = getLegacyPermissionModeForAccessProfile(definition);
+      profileUnavailable = true;
+      adminConstrained = true;
+      constraintReason = [constraintReason, "This agent's access limit is no longer available."]
+        .filter(Boolean)
+        .join(" ");
+    } else if (!isAccessProfileAtMostPrivileged(definition, ceiling.definition)) {
+      definition = narrowAccessProfileToCeiling(definition, ceiling.definition);
+      permissionMode = getLegacyPermissionModeForAccessProfile(definition);
+      adminConstrained = true;
+      constraintReason = [
+        constraintReason,
+        "This agent's access limit allows less than the session asked for.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
   }
 
   // Researcher/verifier roles and internal read-only helpers are a separate

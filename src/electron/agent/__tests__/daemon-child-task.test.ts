@@ -674,6 +674,40 @@ describe("AgentDaemon.createChildTask", () => {
     expect(child.agentConfig?.externalRuntime?.permissionMode).toBe("approve-reads");
   });
 
+  it("stamps the agent's access limit on its tasks, persists it, and clears it with the role", () => {
+    let stored: Any = { id: "task-1", agentConfig: { modelKey: "m" } };
+    let role: Any = {
+      id: "role-bot",
+      name: "bot",
+      displayName: "Bot",
+      accessProfileId: "ask_for_approval",
+    };
+    const daemonLike = {
+      agentRoleRepo: { findById: vi.fn(() => role) },
+      taskRepo: {
+        findById: vi.fn(() => stored),
+        update: vi.fn((_id: string, patch: Any) => {
+          stored = { ...stored, ...patch };
+        }),
+      },
+    } as Any;
+    const apply = (task: Any) =>
+      (AgentDaemon.prototype as Any).applyAgentRoleOverrides.call(daemonLike, task);
+
+    const limited = apply({ ...stored, assignedAgentRoleId: "role-bot" });
+    expect(limited.changed).toBe(true);
+    expect(limited.task.agentConfig.accessCeilingProfileId).toBe("ask_for_approval");
+    expect(stored.agentConfig).toEqual({
+      modelKey: "m",
+      accessCeilingProfileId: "ask_for_approval",
+    });
+
+    role = { ...role, accessProfileId: undefined };
+    const cleared = apply({ ...stored, assignedAgentRoleId: "role-bot" });
+    expect(cleared.task.agentConfig.accessCeilingProfileId).toBeUndefined();
+    expect(stored.agentConfig).toEqual({ modelKey: "m" });
+  });
+
   it("normalizes legacy read-only system role restrictions so shell permission can carry to subagents", () => {
     const daemonLike = {
       agentRoleRepo: {

@@ -1,5 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Loader2, Mail, Paperclip, Send, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Mail,
+  Paperclip,
+  Send,
+  Trash2,
+  Undo2,
+  X,
+} from "lucide-react";
 import { extractMailboxComposeDraftInputFromText } from "../../shared/mailbox";
 import type {
   ChatInlineFrame,
@@ -311,6 +322,20 @@ export const MailComposeFrame = memo(function MailComposeFrame({ frame }: MailCo
     }
   }, [draft, editable, loadDraft, persistEditable, sendDisabled]);
 
+  /** Takes back a queued send; the draft comes back to edit or send again. */
+  const handleUndoSend = useCallback(async () => {
+    if (!draft) return;
+    setError(null);
+    try {
+      if (!(await window.electronAPI.cancelMailboxDraftSend(draft.id))) {
+        setError("It's already on its way and can't be undone.");
+      }
+      await loadDraft();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not undo this send.");
+    }
+  }, [draft, loadDraft]);
+
   const handleDiscard = useCallback(async () => {
     if (!draft) return;
     setError(null);
@@ -515,17 +540,22 @@ export const MailComposeFrame = memo(function MailComposeFrame({ frame }: MailCo
             <span>{locked ? primaryStatus : "Saved locally"}</span>
           )}
         </div>
-        <button
-          type="button"
-          className="mail-compose-discard-btn"
-          onClick={handleDiscard}
-          disabled={draft.status === "sent" || draft.status === "discarded"}
-        >
-          <Trash2 size={14} aria-hidden="true" />
-          <span>
-            {draft.status === "queued" || draft.status === "scheduled" ? "Undo send" : "Discard"}
-          </span>
-        </button>
+        {draft.status === "queued" || draft.status === "scheduled" ? (
+          <button type="button" className="mail-compose-discard-btn" onClick={handleUndoSend}>
+            <Undo2 size={14} aria-hidden="true" />
+            <span>Undo send</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="mail-compose-discard-btn"
+            onClick={handleDiscard}
+            disabled={draft.status === "sent" || draft.status === "discarded"}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            <span>Discard</span>
+          </button>
+        )}
       </div>
     </section>
   );

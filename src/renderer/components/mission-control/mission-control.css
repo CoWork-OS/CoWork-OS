@@ -694,35 +694,6 @@
   padding: 0 8px;
 }
 
-/* Column footer with add actions */
-.mc-v2-column-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 6px 8px 2px;
-}
-
-.mc-v2-column-footer-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background 0.12s ease,
-    color 0.12s ease;
-}
-
-.mc-v2-column-footer-btn:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
-}
-
 .mc-v2-task-card {
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-light);

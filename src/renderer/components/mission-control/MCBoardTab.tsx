@@ -161,8 +161,8 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
         Number(isTaskAttentionRequired(b)) - Number(isTaskAttentionRequired(a));
       if (attentionCompare !== 0) return attentionCompare;
       const overdueCompare =
-        Number(Boolean(getTaskDueInfo(b.dueDate)?.isOverdue)) -
-        Number(Boolean(getTaskDueInfo(a.dueDate)?.isOverdue));
+        Number(Boolean(getTaskDueInfo(b)?.isOverdue)) -
+        Number(Boolean(getTaskDueInfo(a)?.isOverdue));
       if (overdueCompare !== 0) return overdueCompare;
       const priorityCompare = (b.priority ?? 0) - (a.priority ?? 0);
       if (priorityCompare !== 0) return priorityCompare;
@@ -183,9 +183,7 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
   }, [getMissionColumnForTask, sortedTasks, tasks]);
 
   const summary = useMemo(() => {
-    const overdue = filteredTasks.filter((task) =>
-      Boolean(getTaskDueInfo(task.dueDate)?.isOverdue),
-    ).length;
+    const overdue = filteredTasks.filter((task) => Boolean(getTaskDueInfo(task)?.isOverdue)).length;
     const stale = filteredTasks.filter((task) => isTaskStale(task)).length;
     const attention = filteredTasks.filter((task) => isTaskAttentionRequired(task)).length;
     const unassigned = filteredTasks.filter(
@@ -341,7 +339,7 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
           const columnTasks = tasksByColumn.get(column.id) || [];
           const attentionCount = columnTasks.filter((task) => isTaskAttentionRequired(task)).length;
           const overdueCount = columnTasks.filter((task) =>
-            Boolean(getTaskDueInfo(task.dueDate)?.isOverdue),
+            Boolean(getTaskDueInfo(task)?.isOverdue),
           ).length;
           const staleCount = columnTasks.filter((task) => isTaskStale(task)).length;
           const wipLimit =
@@ -401,7 +399,7 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                 {columnTasks.map((task) => {
                   const assignedAgent = getAgent(task.assignedAgentRoleId);
                   const labels = getTaskLabels(task);
-                  const dueInfo = getTaskDueInfo(task.dueDate);
+                  const dueInfo = getTaskDueInfo(task);
                   const priority = getTaskPriorityMeta(task.priority);
                   const attentionReason = getTaskAttentionReason(task);
                   const stale = isTaskStale(task);

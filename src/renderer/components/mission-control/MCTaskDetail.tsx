@@ -179,7 +179,7 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
   const currentLabels = getTaskLabels(task);
   const availableLabels = taskLabels.filter((label) => !task.labels?.includes(label.id));
   const attentionReason = getTaskAttentionReason(task);
-  const dueInfo = getTaskDueInfo(task.dueDate);
+  const dueInfo = getTaskDueInfo(task);
   const priority = getTaskPriorityMeta(task.priority);
   const estimate = formatTaskEstimate(task.estimatedMinutes);
   const stale = isTaskStale(task);

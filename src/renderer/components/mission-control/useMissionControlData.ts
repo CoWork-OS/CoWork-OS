@@ -269,6 +269,34 @@ export function isTaskStaleForUi(
 }
 
 /**
+ * Completed or cancelled: work with nothing left to do. Failed and interrupted runs are terminal
+ * too, but their work still isn't done, so the board keeps flagging them.
+ */
+export function isFinishedTaskStatus(status: Task["status"]): boolean {
+  return status === "completed" || status === "cancelled";
+}
+
+/**
+ * A task's due date as the board shows it. Finished work has no deadline left to meet, so it
+ * shows the plain date and never counts as overdue or due soon.
+ */
+export function resolveTaskDueInfo(
+  task: Pick<Task, "status" | "dueDate">,
+  now = Date.now(),
+): TaskDueInfo | null {
+  if (!task.dueDate) return null;
+  if (isFinishedTaskStatus(task.status)) {
+    return {
+      label: new Date(task.dueDate).toLocaleDateString(),
+      tone: "muted",
+      isOverdue: false,
+      isDueSoon: false,
+    };
+  }
+  return getTaskDueInfo(task.dueDate, now);
+}
+
+/**
  * Why a task needs attention on the board, or null when it doesn't. `waitingReason` is what
  * the attention queue says waits on the task (a pending approval or question), and it wins.
  */
@@ -294,7 +322,7 @@ export function resolveTaskAttentionReason(
   // after a denied or timed-out approval keeps its "needs user action" outcome with nothing
   // pending, and a missing owner, past due date or age means nothing once it is done. Failed
   // and interrupted runs are terminal too, but still say so below.
-  if (task.status === "completed" || task.status === "cancelled") return null;
+  if (isFinishedTaskStatus(task.status)) return null;
   if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
   if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
   if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
@@ -307,7 +335,7 @@ export function resolveTaskAttentionReason(
   if (task.failureClass === "provider_quota") return "Provider quota issue";
   if (task.failureClass === "user_blocker") return "Needs decision";
   if (!task.assignedAgentRoleId) return "Needs owner";
-  if (getTaskDueInfo(task.dueDate, now)?.isOverdue) return "Overdue";
+  if (resolveTaskDueInfo(task, now)?.isOverdue) return "Overdue";
   if (resolveMissionColumnForTask(task) === "review") return "Needs review";
   if (isTaskStaleForUi(task, now)) return "Stale";
   return null;
@@ -1764,7 +1792,7 @@ export function useMissionControlData(
     toggleMissionControlEvidence,
     formatRelativeTime,
     formatTaskEstimate,
-    getTaskDueInfo,
+    getTaskDueInfo: resolveTaskDueInfo,
     getTaskPriorityMeta,
     agentContext,
   };

@@ -7,6 +7,7 @@ import {
   isTaskStaleForUi,
   resolveMissionColumnForTask,
   resolveTaskAttentionReason,
+  resolveTaskDueInfo,
 } from "../useMissionControlData";
 
 describe("Mission Control board helpers", () => {
@@ -78,6 +79,36 @@ describe("Mission Control board helpers", () => {
       isDueSoon: true,
       label: "Due in 2h",
     });
+  });
+
+  it("shows finished work's due date without counting it as overdue or due soon", () => {
+    const now = Date.UTC(2026, 2, 30, 12, 0, 0);
+    const pastDue = now - 5 * 24 * 60 * 60 * 1000;
+    const dueSoon = now + 2 * 60 * 60 * 1000;
+
+    for (const status of ["completed", "cancelled"] as const) {
+      expect(resolveTaskDueInfo({ status, dueDate: pastDue }, now)).toEqual({
+        label: new Date(pastDue).toLocaleDateString(),
+        tone: "muted",
+        isOverdue: false,
+        isDueSoon: false,
+      });
+      expect(resolveTaskDueInfo({ status, dueDate: dueSoon }, now)).toMatchObject({
+        tone: "muted",
+        isDueSoon: false,
+      });
+    }
+
+    expect(resolveTaskDueInfo({ status: "failed", dueDate: pastDue }, now)).toMatchObject({
+      tone: "overdue",
+      isOverdue: true,
+      label: "5d overdue",
+    });
+    expect(resolveTaskDueInfo({ status: "executing", dueDate: dueSoon }, now)).toMatchObject({
+      tone: "soon",
+      isDueSoon: true,
+    });
+    expect(resolveTaskDueInfo({ status: "completed" }, now)).toBeNull();
   });
 
   it("formats estimates and priority metadata for decision-ready cards", () => {

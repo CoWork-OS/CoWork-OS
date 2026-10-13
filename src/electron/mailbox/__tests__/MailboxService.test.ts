@@ -417,7 +417,7 @@ describeWithSqlite("MailboxService", () => {
     expect(updated.attachments[0]?.filename).toBe("allowed.txt");
   });
 
-  it("can undo a queued compose send before the external provider send runs", async () => {
+  it("undoes a queued compose send by returning the draft to editing", async () => {
     await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
     const draft = await service.createMailboxDraft({
       threadId: "gmail-thread:alpha",
@@ -431,18 +431,42 @@ describeWithSqlite("MailboxService", () => {
 
     await service.undoMailboxAction(queuedAction.id);
 
-    const cancelledDraft = db
-      .prepare("SELECT status FROM mailbox_compose_drafts WHERE id = ?")
-      .get(draft.id) as { status: string };
+    const restored = await service.getMailboxDraft(draft.id);
+    expect(restored).toMatchObject({ status: "local", bodyText: "Hold this send." });
     const cancelledOutgoing = db
       .prepare("SELECT status FROM mailbox_outgoing_messages WHERE draft_id = ?")
       .get(draft.id) as { status: string };
     const cancelledAction = db
       .prepare("SELECT status FROM mailbox_queued_actions WHERE id = ?")
       .get(queuedAction.id) as { status: string };
-    expect(cancelledDraft.status).toBe("discarded");
     expect(cancelledOutgoing.status).toBe("cancelled");
     expect(cancelledAction.status).toBe("cancelled");
+    await expect(service.undoMailboxAction(queuedAction.id)).rejects.toThrow("already undone");
+  });
+
+  it("refuses to undo a send the outbox already picked up, and keeps a failed send's draft", async () => {
+    await service.updateMailboxClientSettings({ sendDelaySeconds: 3600 });
+    const draft = await service.createMailboxDraft({
+      threadId: "gmail-thread:alpha",
+      mode: "reply",
+      bodyText: "Already going.",
+    });
+    await service.sendMailboxDraft(draft.id);
+    const { id } = db
+      .prepare("SELECT id FROM mailbox_queued_actions WHERE draft_id = ? AND action_type = 'send'")
+      .get(draft.id) as { id: string };
+
+    db.prepare("UPDATE mailbox_queued_actions SET status = 'running' WHERE id = ?").run(id);
+    await expect(service.undoMailboxAction(id)).rejects.toThrow("already on its way");
+    expect((await service.getMailboxDraft(draft.id))?.status).toBe("queued");
+
+    db.prepare("UPDATE mailbox_queued_actions SET status = 'failed' WHERE id = ?").run(id);
+    db.prepare("UPDATE mailbox_compose_drafts SET status = 'failed' WHERE id = ?").run(draft.id);
+    await service.undoMailboxAction(id);
+    expect((await service.getMailboxDraft(draft.id))?.status).toBe("failed");
+    expect(db.prepare("SELECT status FROM mailbox_queued_actions WHERE id = ?").get(id)).toEqual({
+      status: "cancelled",
+    });
   });
 
   it("takes back a queued send and returns the draft to editing", async () => {

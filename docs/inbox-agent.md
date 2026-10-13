@@ -73,7 +73,7 @@ Current compose boundary:
 
 - The replacement-grade compose/outbox schema and IPC APIs exist for provider-backed drafts, scheduled send, undo send, and queued sends.
 - The visible thread-level manual composer currently sends directly through the existing provider path.
-- Sent compose drafts wait in the outbox for the send delay (30 seconds by default), then go out through the provider on the outbox's next pass (every 30 seconds). A failed send is retried, up to five attempts. A draft that is already queued or being sent can't be sent a second time.
+- Sent compose drafts wait in the outbox for the send delay (30 seconds by default), then go out through the provider on the outbox's next pass (every 30 seconds). A failed send is retried, up to five attempts. A draft that is already queued or being sent can't be sent a second time. **Undo send** returns the draft to editing until the outbox picks the send up; undoing a failed send keeps the draft so it can be fixed and sent again.
 
 ## Read, Unread, Done, And Commitments
 

@@ -2869,6 +2869,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) as Promise<MailboxQueuedAction>,
   discardMailboxDraft: (draftId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, { draftId }) as Promise<boolean>,
+  cancelMailboxDraftSend: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_CANCEL_SEND, { draftId }) as Promise<boolean>,
   undoMailboxAction: (actionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UNDO_ACTION, {
       actionId,
@@ -6717,6 +6719,8 @@ export interface ElectronAPI {
     resolution: MailboxSendOutcomeResolution,
   ) => Promise<MailboxQueuedAction>;
   discardMailboxDraft: (draftId: string) => Promise<boolean>;
+  /** Takes back a queued send and returns the draft to editing; false when it's too late. */
+  cancelMailboxDraftSend: (draftId: string) => Promise<boolean>;
   undoMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   summarizeMailboxThread: (threadId: string) => Promise<MailboxSummaryCard | null>;
   generateMailboxDraft: (

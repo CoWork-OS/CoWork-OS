@@ -1627,6 +1627,7 @@ const MAILBOX_ATTACHMENT_TEXT_MAX_CHARS = 24000;
 const MAILBOX_COMPOSE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const MAILBOX_OUTBOX_POLL_INTERVAL_MS = 30_000;
 const MAILBOX_OUTBOX_MAX_ATTEMPTS = 5;
+const MAILBOX_SEND_TOO_LATE_MESSAGE = "This message is already on its way and can't be undone.";
 const MAILBOX_ASK_MAX_TOKENS = 900;
 
 function sha256(value: string): string {
@@ -2639,14 +2640,27 @@ export class MailboxService {
     return true;
   }
 
+  /**
+   * Undoes a queued action. Undoing a send returns its draft to editing instead of
+   * discarding it, and is refused once the outbox has picked the send up.
+   */
   async undoMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
     const existing = await this.getMailboxQueuedAction(actionId);
     if (!existing) throw new Error("Mailbox action not found");
     const now = Date.now();
-    if (existing.type === "send" && existing.draftId) {
-      await this.discardMailboxDraft(existing.draftId);
+    if (existing.type === "send" && existing.draftId && existing.status === "queued") {
+      if (!(await this.cancelMailboxDraftSend(existing.draftId, now))) {
+        throw new Error(MAILBOX_SEND_TOO_LATE_MESSAGE);
+      }
+    } else if (existing.type === "send" && existing.status === "cancelled") {
+      throw new Error("This send was already undone.");
+    } else if (existing.type === "send" && existing.status !== "failed") {
+      // Running, sent or with an unknown outcome: there is nothing left to take back.
+      throw new Error(MAILBOX_SEND_TOO_LATE_MESSAGE);
+    } else {
+      // A failed send keeps its draft, so it can be fixed and sent again.
+      await this.sql.run("undoMailboxAction_1", [now, actionId]);
     }
-    await this.sql.run("undoMailboxAction_1", [now, actionId]);
     return this.enqueueMailboxAction({
       accountId: existing.accountId,
       threadId: existing.threadId,

@@ -4022,6 +4022,14 @@ export async function setupIpcHandlers(
     return mailboxService.discardMailboxDraft(draftId);
   });
 
+  // Undo send: returns a queued draft to editing; false once the outbox has picked it up.
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_CANCEL_SEND, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const draftId = typeof data?.draftId === "string" ? data.draftId : "";
+    if (!draftId) throw new Error("Missing mailbox draft id");
+    return mailboxService.cancelMailboxDraftSend(draftId);
+  });
+
   ipcMain.handle(IPC_CHANNELS.MAILBOX_UNDO_ACTION, async (event, data?: Any) => {
     assertTrustedMailboxSender(event);
     const actionId = typeof data?.actionId === "string" ? data.actionId : "";

@@ -7826,6 +7826,7 @@ export const IPC_CHANNELS = {
   MAILBOX_RETRY_ACTION: "mailbox:retryAction",
   MAILBOX_RESOLVE_SEND_OUTCOME: "mailbox:resolveSendOutcome",
   MAILBOX_DISCARD_COMPOSE_DRAFT: "mailbox:discardComposeDraft",
+  MAILBOX_CANCEL_SEND: "mailbox:cancelSend",
   MAILBOX_UNDO_ACTION: "mailbox:undoAction",
   MAILBOX_SUMMARIZE_THREAD: "mailbox:summarizeThread",
   MAILBOX_GENERATE_DRAFT: "mailbox:generateDraft",

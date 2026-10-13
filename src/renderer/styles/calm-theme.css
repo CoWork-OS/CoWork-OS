@@ -1729,6 +1729,27 @@ html.visual-calm .calm-today-card-preview > p {
   overflow-wrap: anywhere;
 }
 
+/* A drafted reply edited right on its card. */
+html.visual-calm .calm-today-card-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 7.5em;
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--calm-border);
+  border-radius: 8px;
+  background: var(--calm-surface);
+  color: var(--calm-text);
+  font: 400 13.5px/1.5 var(--font-ui);
+  resize: vertical;
+}
+
+html.visual-calm .calm-today-card-editor:focus {
+  outline: none;
+  border-color: var(--calm-text-muted);
+}
+
 html.visual-calm .calm-today-card-error {
   margin: 10px 0 0;
   font: 500 13px/1.4 var(--font-ui);

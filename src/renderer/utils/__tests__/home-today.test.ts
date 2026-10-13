@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { attentionFromCalendarProposal, type AttentionItem } from "../../../shared/attention";
+import {
+  attentionFromCalendarProposal,
+  attentionFromMailReplyDraft,
+  attentionMailReplyOffer,
+  type AttentionItem,
+} from "../../../shared/attention";
 import type { CalendarProposal } from "../../../shared/calendar-proposals";
 import { EMPTY_HOME_SESSIONS, type HomeSessions } from "../home-sessions";
 import {
@@ -468,6 +473,88 @@ describe("calendar cards", () => {
       "Nothing needs you right now.",
     );
     expect(homeStatusLine({ needsYou: [decision, prep], idea: null, handled: [] })).toBe(
+      "1 thing needs you.",
+    );
+  });
+});
+
+describe("mail reply cards", () => {
+  const context = { localLabel: "This Mac", agentNames: new Map<string, string>() };
+  const draft = {
+    draftId: "d1",
+    threadId: "t1",
+    accountId: "gmail:me@example.com",
+    provider: "gmail" as const,
+    subject: "Q3 proposal",
+    to: ["Dana", "Lee", "Kim", "Ray"],
+    sender: "Dana",
+    bodyText: "Thanks Dana, sending it Friday.",
+    createdAt: NOW - 60_000,
+  };
+
+  it("shows the whole reply and who it goes to before Send", () => {
+    const card = cardForAttention(attentionFromMailReplyDraft(draft, context), NOW);
+    expect(card).toMatchObject({
+      icon: "mail_reply",
+      source: "Mail",
+      state: "Reply drafted",
+      title: "Q3 proposal",
+      why: "Dana is waiting on a reply.",
+      chips: [],
+      preview: {
+        label: "Will send to Dana, Lee, Kim and 1 more",
+        text: "Thanks Dana, sending it Friday.",
+      },
+      mailDraft: { draftId: "d1", bodyText: "Thanks Dana, sending it Friday." },
+      primary: { label: "Send", action: { type: "send-mail-draft", draftId: "d1" } },
+      secondary: { label: "Edit", action: { type: "edit-mail-draft", draftId: "d1" } },
+    });
+    expect(card?.offer).toBeUndefined();
+    expect(card?.primary.hint).toMatch(/undo/);
+    expect(card?.more?.map((button) => button.action)).toEqual([
+      { type: "discard-mail-draft", draftId: "d1" },
+      { type: "set-mail-drafts", enabled: false },
+    ]);
+  });
+
+  it("says when a reply couldn't be sent, as a new card", () => {
+    const item = attentionFromMailReplyDraft({ ...draft, failed: "Gmail refused it." }, context);
+    expect(item.id).toBe("mail_reply:d1:failed");
+    expect(cardForAttention(item, NOW)).toMatchObject({
+      state: "Not sent",
+      why: "It couldn't be sent: Gmail refused it.",
+      primary: { label: "Send again", action: { type: "send-mail-draft", draftId: "d1" } },
+    });
+  });
+
+  it("drops the Sent row when the reply comes back unsent", () => {
+    const sentRow = {
+      id: "acted:mail_reply:d1",
+      title: "Q3 proposal",
+      outcome: "Sent",
+      at: NOW,
+      undoSend: { cardId: "mail_reply:d1", draftId: "d1", until: NOW - 1 },
+    };
+    const today = buildHomeToday({
+      attention: [attentionFromMailReplyDraft({ ...draft, failed: "Refused." }, context)],
+      sessions: EMPTY_HOME_SESSIONS,
+      now: NOW,
+      resolved: new Set(["mail_reply:d1"]),
+      actedRows: [sentRow],
+    });
+    expect(today.needsYou.map((card) => card.id)).toEqual(["mail_reply:d1:failed"]);
+    expect(today.handled).toEqual([]);
+  });
+
+  it("offers to start drafting without counting it as needing the user", () => {
+    const offer = cardForAttention(attentionMailReplyOffer(NOW, context), NOW)!;
+    expect(offer).toMatchObject({
+      offer: true,
+      primary: { label: "Turn on", action: { type: "set-mail-drafts", enabled: true } },
+      secondary: { label: "Not now", action: { type: "dismiss-mail-offer" } },
+    });
+    const reply = cardForAttention(attentionFromMailReplyDraft(draft, context), NOW)!;
+    expect(homeStatusLine({ needsYou: [reply, offer], idea: null, handled: [] })).toBe(
       "1 thing needs you.",
     );
   });

@@ -6,6 +6,7 @@ import {
   Check,
   CornerUpRight,
   Lightbulb,
+  Mail,
   MessageCircleQuestion,
   OctagonAlert,
   Repeat,
@@ -31,6 +32,8 @@ import type {
 const VISIBLE_CARDS = 3;
 /** Matches the card's exit animation in calm-theme.css. */
 const EXIT_MS = 220;
+/** When the outbox doesn't say, a queued reply goes out after this long. */
+const DEFAULT_SEND_DELAY_MS = 30_000;
 
 const ICONS: Record<HomeTodayIcon, LucideIcon> = {
   approval: ShieldCheck,
@@ -42,6 +45,7 @@ const ICONS: Record<HomeTodayIcon, LucideIcon> = {
   calendar_hold: CalendarPlus,
   calendar_conflict: CalendarX2,
   calendar_prep: Users,
+  mail_reply: Mail,
   follow_up: CornerUpRight,
   recurring_pattern: Repeat,
   goal_aligned: Target,
@@ -63,7 +67,14 @@ interface CalmHomeTodayProps {
     | "acceptCalendarProposal"
     | "dismissCalendarProposal"
     | "holdCalendarTimeForSuggestion"
+    | "sendMailReplyDraft"
+    | "undoMailReplyDraftSend"
+    | "discardMailReplyDraft"
+    | "saveMailDraftBody"
+    | "setMailReplyDraftsEnabled"
+    | "dismissMailReplyDraftsOffer"
     | "resolve"
+    | "unresolve"
   >;
   onOpenSession: (taskId: string) => void;
   /**
@@ -120,8 +131,24 @@ export function CalmHomeToday({
   const [busy, setBusy] = useState<string | null>(null);
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(() => new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /** The reply being edited on its card, with the text so far. */
+  const [editing, setEditing] = useState<{ cardId: string; text: string } | null>(null);
+  /** Reply text saved here, shown until the queue reloads with it. */
+  const [savedBodies, setSavedBodies] = useState<Record<string, string>>({});
+  const [, setTick] = useState(0);
   const timers = useRef<number[]>([]);
   const now = Date.now();
+
+  // Re-render when a queued reply's undo window closes, so its Undo button goes away.
+  const nextUndoEnd = today.handled.reduce<number | null>((soonest, row) => {
+    const until = row.undoSend?.until;
+    return until && until > now && (soonest === null || until < soonest) ? until : soonest;
+  }, null);
+  useEffect(() => {
+    if (nextUndoEnd === null) return undefined;
+    const timer = window.setTimeout(() => setTick((tick) => tick + 1), nextUndoEnd - Date.now());
+    return () => window.clearTimeout(timer);
+  }, [nextUndoEnd]);
 
   useEffect(
     () => () => {
@@ -165,6 +192,11 @@ export function CalmHomeToday({
     }
     if (action.type === "open-link") {
       onOpenLink?.(action.url);
+      return;
+    }
+    if (action.type === "edit-mail-draft") {
+      const text = savedBodies[card.id] ?? card.mailDraft?.bodyText ?? "";
+      setEditing({ cardId: card.id, text });
       return;
     }
     if (action.type === "edit-suggestion") {
@@ -274,6 +306,44 @@ export function CalmHomeToday({
           outcome: "Time held",
           at: Date.now(),
         });
+      } else if (action.type === "send-mail-draft") {
+        const result = await signals.sendMailReplyDraft(action.draftId);
+        if (!result.ok) {
+          setErrors((current) => ({ ...current, [card.id]: result.message }));
+          return;
+        }
+        foldAway(card, {
+          id: `acted:${card.id}`,
+          title: card.title,
+          outcome: "Sent",
+          at: Date.now(),
+          undoSend: {
+            cardId: card.id,
+            draftId: action.draftId,
+            until: result.sendAfter ?? Date.now() + DEFAULT_SEND_DELAY_MS,
+          },
+        });
+      } else if (action.type === "discard-mail-draft") {
+        const result = await signals.discardMailReplyDraft(action.draftId);
+        if (!result.ok) {
+          setErrors((current) => ({ ...current, [card.id]: result.message }));
+          return;
+        }
+        foldAway(card);
+      } else if (action.type === "set-mail-drafts") {
+        await signals.setMailReplyDraftsEnabled(action.enabled);
+        const row: HomeTodayHandledRow = {
+          id: "acted:mail-drafts",
+          title: "Reply drafts",
+          outcome: action.enabled ? "Turned on" : "Turned off",
+          at: Date.now(),
+        };
+        // Turning it on answers the offer; turning it off leaves this draft where it is.
+        if (action.enabled) foldAway(card, row);
+        else signals.resolve("mail_reply:drafting", row);
+      } else if (action.type === "dismiss-mail-offer") {
+        await signals.dismissMailReplyDraftsOffer();
+        foldAway(card);
       } else if (action.type === "complete-commitment") {
         if (!(await signals.completeCommitment(action.commitmentId))) {
           throw new Error("not updated");
@@ -289,6 +359,41 @@ export function CalmHomeToday({
       setErrors((current) => ({ ...current, [card.id]: "That didn't go through. Try again." }));
     } finally {
       setBusy((current) => (current === card.id ? null : current));
+    }
+  };
+
+  const saveEdit = async (card: HomeTodayCard) => {
+    if (!editing || editing.cardId !== card.id || !card.mailDraft) return;
+    const text = editing.text;
+    setBusy(card.id);
+    setErrors(({ [card.id]: _cleared, ...rest }) => rest);
+    try {
+      await signals.saveMailDraftBody(card.mailDraft.draftId, text);
+      setSavedBodies((current) => ({ ...current, [card.id]: text }));
+      setEditing(null);
+    } catch {
+      setErrors((current) => ({ ...current, [card.id]: "The draft couldn't be saved." }));
+    } finally {
+      setBusy((current) => (current === card.id ? null : current));
+    }
+  };
+
+  /** Takes back a reply still in the outbox; its card comes back to edit or send again. */
+  const undoSendRow = async (row: HomeTodayHandledRow) => {
+    if (!row.undoSend) return;
+    setBusy(row.id);
+    setErrors(({ [row.id]: _cleared, ...rest }) => rest);
+    try {
+      const result = await signals.undoMailReplyDraftSend(row.undoSend.draftId);
+      if (!result.ok) {
+        setErrors((current) => ({ ...current, [row.id]: result.message }));
+        return;
+      }
+      signals.unresolve(row.undoSend.cardId, row.id);
+    } catch {
+      setErrors((current) => ({ ...current, [row.id]: "That didn't go through. Try again." }));
+    } finally {
+      setBusy((current) => (current === row.id ? null : current));
     }
   };
 
@@ -325,6 +430,7 @@ export function CalmHomeToday({
     const Icon = ICONS[card.icon] || Sparkles;
     const titleId = `calm-today-${card.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const isBusy = busy === card.id;
+    const isEditing = editing?.cardId === card.id;
     return (
       <article
         key={card.id}
@@ -364,11 +470,30 @@ export function CalmHomeToday({
             <span>{card.why}</span>
           </p>
         )}
-        {card.preview && (
+        {isEditing ? (
           <div className="calm-today-card-preview">
-            <span className="calm-today-card-preview-label">{card.preview.label}</span>
-            <p>{card.preview.text}</p>
+            <label className="calm-today-card-preview-label" htmlFor={`${titleId}-reply`}>
+              Your reply
+            </label>
+            <textarea
+              id={`${titleId}-reply`}
+              className="calm-today-card-editor"
+              value={editing.text}
+              rows={6}
+              autoFocus
+              onChange={(event) => {
+                const text = event.target.value;
+                setEditing((current) => (current ? { ...current, text } : current));
+              }}
+            />
           </div>
+        ) : (
+          card.preview && (
+            <div className="calm-today-card-preview">
+              <span className="calm-today-card-preview-label">{card.preview.label}</span>
+              <p>{savedBodies[card.id] ?? card.preview.text}</p>
+            </div>
+          )
         )}
         {errors[card.id] && (
           <p className="calm-today-card-error" role="alert">
@@ -391,40 +516,61 @@ export function CalmHomeToday({
             ))}
           </div>
         )}
-        <div className="calm-today-card-actions">
-          <button
-            type="button"
-            className={card.choices ? "calm-today-button" : "calm-today-button primary"}
-            title={card.primary.hint}
-            disabled={isBusy || !canRun(card.primary)}
-            onClick={() => void run(card, card.primary)}
-          >
-            {card.primary.label}
-          </button>
-          {card.secondary && (
+        {isEditing ? (
+          <div className="calm-today-card-actions">
+            <button
+              type="button"
+              className="calm-today-button primary"
+              disabled={isBusy || !editing.text.trim()}
+              onClick={() => void saveEdit(card)}
+            >
+              Save
+            </button>
             <button
               type="button"
               className="calm-today-button"
-              title={card.secondary.hint}
-              disabled={isBusy || !canRun(card.secondary)}
-              onClick={() => void run(card, card.secondary!)}
+              disabled={isBusy}
+              onClick={() => setEditing(null)}
             >
-              {card.secondary.label}
+              Cancel
             </button>
-          )}
-          {card.more?.map((button) => (
+          </div>
+        ) : (
+          <div className="calm-today-card-actions">
             <button
-              key={button.label}
               type="button"
-              className="calm-today-button quiet"
-              title={button.hint}
-              disabled={isBusy || !canRun(button)}
-              onClick={() => void run(card, button)}
+              className={card.choices ? "calm-today-button" : "calm-today-button primary"}
+              title={card.primary.hint}
+              disabled={isBusy || !canRun(card.primary)}
+              onClick={() => void run(card, card.primary)}
             >
-              {button.label}
+              {card.primary.label}
             </button>
-          ))}
-        </div>
+            {card.secondary && (
+              <button
+                type="button"
+                className="calm-today-button"
+                title={card.secondary.hint}
+                disabled={isBusy || !canRun(card.secondary)}
+                onClick={() => void run(card, card.secondary!)}
+              >
+                {card.secondary.label}
+              </button>
+            )}
+            {card.more?.map((button) => (
+              <button
+                key={button.label}
+                type="button"
+                className="calm-today-button quiet"
+                title={button.hint}
+                disabled={isBusy || !canRun(button)}
+                onClick={() => void run(card, button)}
+              >
+                {button.label}
+              </button>
+            ))}
+          </div>
+        )}
       </article>
     );
   };
@@ -456,7 +602,9 @@ export function CalmHomeToday({
                   <Check size={12} strokeWidth={3} />
                 </span>
                 <span className="calm-today-handled-title">{row.title}</span>
-                <span className="calm-today-handled-outcome">{row.outcome}</span>
+                <span className="calm-today-handled-outcome">
+                  {row.undoSend && row.undoSend.until > now ? "Sending" : row.outcome}
+                </span>
                 <span className="calm-today-handled-time">
                   {formatHomeSessionTime(row.at, now)}
                 </span>
@@ -486,6 +634,17 @@ export function CalmHomeToday({
                         disabled={busy === row.id}
                         aria-label={`Undo: reopen "${row.title}"`}
                         onClick={() => void undoRow(row)}
+                      >
+                        Undo
+                      </button>
+                    )}
+                    {row.undoSend && row.undoSend.until > now && (
+                      <button
+                        type="button"
+                        className="calm-today-handled-undo"
+                        disabled={busy === row.id}
+                        aria-label={`Undo: don't send the reply to "${row.title}"`}
+                        onClick={() => void undoSendRow(row)}
                       >
                         Undo
                       </button>

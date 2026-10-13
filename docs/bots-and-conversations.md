@@ -30,7 +30,8 @@ you open it from a temporary workspace with nothing in it, it starts on the busi
 saved workspace. Opening the view does not create a conversation or execute a task.
 
 - **Needs you** shows pending approvals, input requests, pauses, and interruptions
-  that need review. **Respond** opens the task and its decision controls.
+  that need review, from the same queue that Today and the bell count. **Respond**
+  opens the task and its decision controls.
 - **Working** includes assigned tasks and their delegated descendants, including
   persisted child, external, and reconnect waits. Delegated rows are labeled separately.
 - **Scheduled** includes queued tasks, enabled saved cron jobs directly assigned to the

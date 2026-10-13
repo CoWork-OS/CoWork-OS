@@ -85,6 +85,8 @@ const PermissionModeSchema = z.enum([
   "bypass_permissions",
 ]);
 const AccessProfileIdSchema = z.string().trim().min(1).max(120);
+/** An agent role's "May do alone" access limit. */
+export const AgentRoleAccessProfileIdSchema = AccessProfileIdSchema;
 const AccessFilesystemRuleSchema = z
   .object({
     path: z.string().trim().min(1).max(MAX_PATH_LENGTH),

@@ -183,6 +183,14 @@ describe("worker-role-registry", () => {
     expect(lane.toolRestrictions).toEqual(expect.arrayContaining(["group:write", "spawn_agent"]));
     expect(lane.toolRestrictions).not.toContain("group:destructive");
 
+    // An override can never set or clear an access limit either.
+    expect(
+      stripTeamWorkItemLaneOverride({
+        accessCeilingProfileId: "full_access",
+        inheritedAccessCeilingProfileIds: [],
+        maxTurns: 2,
+      }),
+    ).toEqual({ maxTurns: 2 });
     expect(stripTeamWorkItemLaneOverride({ teamWorkItemLane: true, maxTurns: 3 })).toEqual({
       maxTurns: 3,
     });

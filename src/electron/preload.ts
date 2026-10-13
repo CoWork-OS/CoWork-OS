@@ -1670,6 +1670,8 @@ interface AgentRoleData {
   updatedAt: number;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** "May do alone": the most access this agent's work gets. */
+  accessProfileId?: string;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1741,6 +1743,8 @@ interface UpdateAgentRoleRequest {
   sortOrder?: number;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** The agent's access limit; null clears it. */
+  accessProfileId?: string | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -5046,6 +5050,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     toolRestrictions?: { allowedTools?: string[]; deniedTools?: string[] };
     isActive?: boolean;
     sortOrder?: number;
+    accessProfileId?: string | null;
   }) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_UPDATE, request),
   deleteAgentRole: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_DELETE, id),
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) =>

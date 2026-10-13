@@ -184,6 +184,7 @@ import {
   type PendingBotHandoff,
 } from "../../shared/bot-handoff";
 import {
+  inheritableAccessCeilings,
   BUILTIN_ACCESS_PROFILE_IDS,
   hasAccessProfileScope,
   isAccessProfileAtMostPrivileged,
@@ -392,6 +393,10 @@ export const BOT_HANDOFF_REPLY_TIMEOUT_MS = 120_000;
 function hashBotMessage(message: string): string {
   return crypto.createHash("sha256").update(message, "utf8").digest("hex");
 }
+
+/** Shown when an agent's "May do alone" limit stops a session from running. */
+const ACCESS_LIMIT_UNAVAILABLE_MESSAGE =
+  "This agent's access limit is unavailable or can't be combined with this session's access. Change it in Team before continuing.";
 
 const FORK_REPLAY_EVENT_TYPES = new Set([
   "user_message",
@@ -1641,7 +1646,52 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // "May do alone": stamp the role's access limit so every profile resolution for this task
+    // narrows to it. It is persisted right away, because some resolutions read the stored
+    // task, and it follows the role: a cleared limit is removed again.
+    const ceiling =
+      typeof role.accessProfileId === "string" && role.accessProfileId.trim()
+        ? role.accessProfileId.trim()
+        : undefined;
+    if (nextAgentConfig.accessCeilingProfileId !== ceiling) {
+      if (ceiling) nextAgentConfig.accessCeilingProfileId = ceiling;
+      else delete nextAgentConfig.accessCeilingProfileId;
+      changed = true;
+      try {
+        const stored = this.taskRepo.findById(task.id);
+        if (stored) {
+          const storedConfig: AgentConfig = { ...(stored.agentConfig ?? {}) };
+          if (ceiling) storedConfig.accessCeilingProfileId = ceiling;
+          else delete storedConfig.accessCeilingProfileId;
+          this.taskRepo.update(task.id, { agentConfig: storedConfig });
+        }
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist the agent's access limit:", error);
+      }
+    }
+
     return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
+  }
+
+  /**
+   * After an agent's access limit changes, re-stamps it on that agent's active sessions and
+   * refreshes their executors, so running work follows the new limit right away.
+   */
+  refreshAgentRoleAccessCeiling(roleId: string): void {
+    this.activeTasks.forEach((cached, taskId) => {
+      const task = this.taskRepo.findById(taskId);
+      if (!task || task.assignedAgentRoleId !== roleId) return;
+      this.applyAgentRoleOverrides(task);
+      // The executor keeps its own copy of the task's config; give it the new limit too,
+      // keeping any narrower override the current turn runs with.
+      const current = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
+      try {
+        cached.executor?.updateTaskAgentConfig?.(current?.agentConfig);
+      } catch (error) {
+        console.warn(`[AgentDaemon] Failed to update the access limit for task ${taskId}:`, error);
+      }
+    });
+    this.refreshActiveExecutorsForAccessProfiles();
   }
 
   private maybeCaptureMentionedAgentRoleIds(task: Task): void {
@@ -2992,8 +3042,9 @@ export class AgentDaemon extends EventEmitter {
         adminPolicies: loadPolicies(),
       });
       if (effectiveAccessProfile.profileUnavailable) {
-        const errorMessage =
-          "The selected access profile is unavailable. Choose a valid profile before running this task.";
+        const errorMessage = effectiveAccessProfile.accessLimitUnavailable
+          ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+          : "The selected access profile is unavailable. Choose a valid profile before running this task.";
         this.updateTask(executionTask.id, {
           status: "paused",
           terminalStatus: "needs_user_action",
@@ -5350,6 +5401,23 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
+    // Access limits come only from the parent (below), never from the caller: drop any the
+    // caller passed before the child's requested profile is compared with the parent's.
+    if (
+      params.agentConfig &&
+      (Object.prototype.hasOwnProperty.call(params.agentConfig, "accessCeilingProfileId") ||
+        Object.prototype.hasOwnProperty.call(
+          params.agentConfig,
+          "inheritedAccessCeilingProfileIds",
+        ))
+    ) {
+      const {
+        accessCeilingProfileId: _ownLimit,
+        inheritedAccessCeilingProfileIds: _inheritedLimits,
+        ...rest
+      } = params.agentConfig;
+      params = { ...params, agentConfig: rest };
+    }
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
     const workerRole = requestedWorkerRole || resolveDefaultWorkerRoleKind();
@@ -5694,6 +5762,13 @@ export class AgentDaemon extends EventEmitter {
           next.permissionMode = accessProfileInheritance.fallbackPermissionMode;
         }
       }
+      // A child works under every access limit its parent does: the parent's own agent limit
+      // and the ones the parent inherited. Caller-supplied limits are dropped first, so only
+      // the parent's stored ones count; the child's own role adds its limit when it starts.
+      delete next.accessCeilingProfileId;
+      delete next.inheritedAccessCeilingProfileIds;
+      const inheritedCeilings = inheritableAccessCeilings(parent?.agentConfig);
+      if (inheritedCeilings.length > 0) next.inheritedAccessCeilingProfileIds = inheritedCeilings;
       // ACP has its own execution and consent boundary. A native CoWork
       // profile must not silently promote the adapter to approve-all.
       return Object.keys(next).length > 0 ? next : undefined;
@@ -16256,6 +16331,9 @@ export class AgentDaemon extends EventEmitter {
           agentConfig: {
             ...persistentWorkerRoleBoundary.task.agentConfig,
             ...effectiveOptions.agentConfigOverride,
+            // A follow-up override never lifts the agent's access limit.
+            accessCeilingProfileId:
+              persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
           },
         }
       : persistentWorkerRoleBoundary.task;
@@ -16314,8 +16392,9 @@ export class AgentDaemon extends EventEmitter {
       adminPolicies: loadPolicies(),
     });
     if (effectiveAccessProfile.profileUnavailable) {
-      const errorMessage =
-        "The selected access profile is unavailable. Choose a valid profile before continuing.";
+      const errorMessage = effectiveAccessProfile.accessLimitUnavailable
+        ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+        : "The selected access profile is unavailable. Choose a valid profile before continuing.";
       this.updateTask(taskId, {
         status: "paused",
         terminalStatus: "needs_user_action",
@@ -16991,7 +17070,9 @@ export class AgentDaemon extends EventEmitter {
     });
     if (effectiveAccessProfile.profileUnavailable) {
       throw new Error(
-        "The selected access profile is unavailable. Choose a valid profile before continuing.",
+        effectiveAccessProfile.accessLimitUnavailable
+          ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+          : "The selected access profile is unavailable. Choose a valid profile before continuing.",
       );
     }
 

@@ -173,6 +173,7 @@ export function installBrowserHostBridge(
   let providerSettingsSnapshot: unknown;
   let providerSettingsSnapshotLoaded = false;
   let disposeQueueUpdatePolling: () => void = () => undefined;
+  let disposeAttentionPolling: () => void = () => undefined;
   let disposeCronEventPolling: () => void = () => undefined;
   let disposeMailboxEventPolling: () => void = () => undefined;
   let disposePersonalitySettingsPolling: () => void = () => undefined;
@@ -1407,6 +1408,66 @@ export function installBrowserHostBridge(
     };
   }
 
+  // The desktop app signals queue changes over IPC; a browser polls instead and tells its
+  // listeners only when the queue's items changed, so they reload once per change.
+  if (Object.hasOwn(session.desktopMethods ?? {}, "listAttention")) {
+    const attentionListeners = new Set<() => void>();
+    let attentionPollTimer: ReturnType<typeof setInterval> | null = null;
+    let attentionPollInFlight = false;
+    let lastAttention: string | null = null;
+    disposeAttentionPolling = () => {
+      if (attentionPollTimer) clearInterval(attentionPollTimer);
+      attentionPollTimer = null;
+      attentionListeners.clear();
+    };
+    const pollAttention = async () => {
+      if (!active || attentionPollInFlight || attentionListeners.size === 0) return;
+      attentionPollInFlight = true;
+      try {
+        const snapshot = await rpc<{ items?: Array<{ id: string; state: string }> }>(
+          "desktop.listAttention",
+          { args: [] },
+        );
+        const fingerprint = JSON.stringify(
+          (snapshot?.items ?? []).map((item) => [item.id, item.state]),
+        );
+        const changed = lastAttention !== null && fingerprint !== lastAttention;
+        lastAttention = fingerprint;
+        if (!changed || !active) return;
+        for (const listener of attentionListeners) {
+          try {
+            listener();
+          } catch {
+            // One subscriber must not stop the others.
+          }
+        }
+      } catch {
+        // A later poll reconciles after a transient host or network failure.
+      } finally {
+        attentionPollInFlight = false;
+      }
+    };
+    supported.onAttentionChanged = (listener: () => void) => {
+      attentionListeners.add(listener);
+      if (!attentionPollTimer) {
+        void pollAttention();
+        attentionPollTimer = setInterval(() => void pollAttention(), 10_000);
+      }
+      return () => {
+        attentionListeners.delete(listener);
+        if (attentionListeners.size === 0 && attentionPollTimer) {
+          clearInterval(attentionPollTimer);
+          attentionPollTimer = null;
+          lastAttention = null;
+        }
+      };
+    };
+    browserInfo.desktopMethods = {
+      ...browserInfo.desktopMethods,
+      onAttentionChanged: { mutation: false },
+    };
+  }
+
   if (Object.hasOwn(session.desktopMethods ?? {}, "listMailboxEvents")) {
     type MailboxEventListener = Parameters<ElectronAPI["onMailboxEvent"]>[0];
     const mailboxListeners = new Set<MailboxEventListener>();
@@ -1730,6 +1791,7 @@ export function installBrowserHostBridge(
     if (!active) return;
     terminals.dispose();
     disposeQueueUpdatePolling();
+    disposeAttentionPolling();
     disposeCronEventPolling();
     for (const dispose of disposeIntegrationPolling) dispose();
     disposeMailboxEventPolling();

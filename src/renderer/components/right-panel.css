@@ -2542,15 +2542,18 @@ button {
 .collab-agents-roster-glyphs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
 }
 
+/* Wraps instead of truncating, so every count stays readable in a narrow panel. */
 .collab-agents-roster-summary {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.collab-agents-roster-count {
   white-space: nowrap;
 }
 

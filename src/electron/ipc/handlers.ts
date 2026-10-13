@@ -567,6 +567,7 @@ import {
 } from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupAttentionHandlers } from "./attention-handlers";
+import { createAgentRoleAssignmentHandler } from "./agent-role-assignment-handlers";
 import { AttentionService } from "../attention/AttentionService";
 import {
   listSuggestionsAcross,
@@ -9681,55 +9682,19 @@ export async function setupIpcHandlers(
     return true;
   });
 
+  const assignAgentRoleToTask = createAgentRoleAssignmentHandler({
+    authorizeTask: authorizeTaskForEvent,
+    sessionMembershipService,
+    taskRepo,
+    agentRoleRepo,
+    activityRepo,
+    getMainWindow,
+  });
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK,
-    async (_, taskId: string, agentRoleId: string | null) => {
+    async (event, taskId: unknown, agentRoleId: unknown) => {
       checkRateLimit(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK);
-      const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-      if (agentRoleId !== null) {
-        const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-        const role = await agentRoleRepo.findById(validatedRoleId);
-        if (!role) {
-          throw new Error("Agent role not found");
-        }
-      }
-      const taskUpdate: Partial<Task> = {
-        assignedAgentRoleId: agentRoleId ?? undefined,
-      };
-      await taskRepo.update(validatedTaskId, taskUpdate);
-      const task = await taskRepo.findById(validatedTaskId);
-      if (task) {
-        if (agentRoleId) {
-          const role = await agentRoleRepo.findById(agentRoleId);
-          const activity = await activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            agentRoleId,
-            actorType: "system",
-            activityType: "agent_assigned",
-            title: `Assigned to ${role?.displayName || "agent"}`,
-            description: task.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
-            type: "created",
-            activity,
-          });
-        } else {
-          const activity = await activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            actorType: "system",
-            activityType: "info",
-            title: "Task unassigned",
-            description: task.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
-            type: "created",
-            activity,
-          });
-        }
-      }
-      return { success: true };
+      return assignAgentRoleToTask(event, taskId, agentRoleId);
     },
   );
 

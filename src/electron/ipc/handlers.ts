@@ -377,6 +377,7 @@ import { buildTaskExportJson } from "../reports/task-export";
 import { listIntegrationMentionOptions } from "../integrations/integration-mention-options";
 import { ProfileManager } from "../profiles/ProfileManager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { resolveAccessProfileDefinitionWithStatus } from "../../shared/access-profiles";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import {
   appendWorkspacePermissionManifestRule,
@@ -427,6 +428,7 @@ import {
   UUIDSchema,
   WorkspaceIdSchema,
   StringIdSchema,
+  AgentRoleAccessProfileIdSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -565,6 +567,7 @@ import {
 } from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupAttentionHandlers } from "./attention-handlers";
+import { createAgentRoleAssignmentHandler } from "./agent-role-assignment-handlers";
 import { AttentionService } from "../attention/AttentionService";
 import {
   listMemoryChangesAcross,
@@ -9644,10 +9647,29 @@ export async function setupIpcHandlers(
         "company ID",
       );
     }
+    // "May do alone": a limit must name an access profile that exists right now; null clears
+    // it. The limit only narrows the agent's work (see the access profile resolver).
+    const accessLimitChanged = normalizedRequest.accessProfileId !== undefined;
+    if (accessLimitChanged && normalizedRequest.accessProfileId !== null) {
+      const profileId = validateInput(
+        AgentRoleAccessProfileIdSchema,
+        normalizedRequest.accessProfileId,
+        "access profile ID",
+      );
+      const resolution = resolveAccessProfileDefinitionWithStatus(
+        profileId,
+        PermissionSettingsManager.loadSettings().accessProfiles || [],
+      );
+      if (resolution.status !== "resolved") {
+        throw new Error("That access profile does not exist.");
+      }
+      normalizedRequest.accessProfileId = profileId;
+    }
     const result = await agentRoleRepo.update(normalizedRequest);
     if (!result) {
       throw new Error("Agent role not found");
     }
+    if (accessLimitChanged) agentDaemon.refreshAgentRoleAccessCeiling(result.id);
     return result;
   });
 
@@ -9661,55 +9683,19 @@ export async function setupIpcHandlers(
     return true;
   });
 
+  const assignAgentRoleToTask = createAgentRoleAssignmentHandler({
+    authorizeTask: authorizeTaskForEvent,
+    sessionMembershipService,
+    taskRepo,
+    agentRoleRepo,
+    activityRepo,
+    getMainWindow,
+  });
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK,
-    async (_, taskId: string, agentRoleId: string | null) => {
+    async (event, taskId: unknown, agentRoleId: unknown) => {
       checkRateLimit(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK);
-      const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-      if (agentRoleId !== null) {
-        const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-        const role = await agentRoleRepo.findById(validatedRoleId);
-        if (!role) {
-          throw new Error("Agent role not found");
-        }
-      }
-      const taskUpdate: Partial<Task> = {
-        assignedAgentRoleId: agentRoleId ?? undefined,
-      };
-      await taskRepo.update(validatedTaskId, taskUpdate);
-      const task = await taskRepo.findById(validatedTaskId);
-      if (task) {
-        if (agentRoleId) {
-          const role = await agentRoleRepo.findById(agentRoleId);
-          const activity = await activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            agentRoleId,
-            actorType: "system",
-            activityType: "agent_assigned",
-            title: `Assigned to ${role?.displayName || "agent"}`,
-            description: task.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
-            type: "created",
-            activity,
-          });
-        } else {
-          const activity = await activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            actorType: "system",
-            activityType: "info",
-            title: "Task unassigned",
-            description: task.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
-            type: "created",
-            activity,
-          });
-        }
-      }
-      return { success: true };
+      return assignAgentRoleToTask(event, taskId, agentRoleId);
     },
   );
 

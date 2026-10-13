@@ -47,19 +47,44 @@ function approval(id: string, overrides: Partial<ApprovalRequest> = {}): Approva
 
 describe("classifyTaskActivity", () => {
   it("names why a session waits on the user", () => {
-    expect(classifyTaskActivity(task("a", { terminalStatus: "awaiting_approval" }))).toEqual({
+    expect(
+      classifyTaskActivity(task("a", { status: "blocked", terminalStatus: "awaiting_approval" })),
+    ).toEqual({
       category: "needs-you",
       label: "Approval needed",
     });
-    expect(classifyTaskActivity(task("b", { terminalStatus: "needs_user_action" }))?.label).toBe(
-      "Response needed",
-    );
+    expect(
+      classifyTaskActivity(task("b", { status: "paused", terminalStatus: "needs_user_action" }))
+        ?.label,
+    ).toBe("Response needed");
     expect(classifyTaskActivity(task("c", { status: "interrupted" }))?.label).toBe(
       "Resume available",
     );
     expect(classifyTaskActivity(task("d", { status: "executing" }))?.category).toBe("running");
     expect(classifyTaskActivity(task("e", { status: "failed" }))).toBeNull();
     expect(classifyTaskActivity(task("f"))).toBeNull();
+  });
+
+  it("never counts a finished run as waiting, whatever outcome it ended with", () => {
+    // A run whose approval timed out is finalized as completed with "needs user action";
+    // its approval is closed, so there is nothing to reply to.
+    const stoppedShort = task("s", {
+      status: "completed",
+      completedAt: 1,
+      terminalStatus: "needs_user_action",
+      error: "Approval request timed out",
+    });
+    expect(classifyTaskActivity(stoppedShort)).toBeNull();
+    expect(
+      classifyTaskActivity(task("a", { status: "completed", terminalStatus: "awaiting_approval" })),
+    ).toBeNull();
+    // An active status with a completion time is a finished run too.
+    expect(
+      classifyTaskActivity(
+        task("x", { status: "executing", completedAt: 1, terminalStatus: "needs_user_action" }),
+      ),
+    ).toBeNull();
+    expect(attentionFromTask(stoppedShort, context)).toBeNull();
   });
 });
 
@@ -130,7 +155,10 @@ describe("attention mappers", () => {
 
   it("only makes session items for sessions waiting on the user", () => {
     expect(
-      attentionFromTask(task("w", { terminalStatus: "resume_available" }), context),
+      attentionFromTask(
+        task("w", { status: "interrupted", terminalStatus: "resume_available" }),
+        context,
+      ),
     ).toMatchObject({ id: "session:w", state: "Resume available" });
     expect(attentionFromTask(task("x", { status: "executing" }), context)).toBeNull();
   });

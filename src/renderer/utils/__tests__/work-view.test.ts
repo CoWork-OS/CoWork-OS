@@ -45,7 +45,7 @@ function build(tasks: Task[], filters: Partial<WorkFilters> = {}, attention: Att
 describe("buildWorkModel", () => {
   it("names each session's status from the shared rules", () => {
     const model = build([
-      task("waiting", { terminalStatus: "needs_user_action" }),
+      task("waiting", { status: "paused", terminalStatus: "needs_user_action" }),
       task("running", { status: "executing" }),
       task("failed", { status: "failed" }),
       task("partial", { terminalStatus: "partial_success" }),
@@ -138,7 +138,7 @@ describe("buildWorkModel", () => {
 describe("helpers", () => {
   it("summarizes a group and makes avatar initials", () => {
     const group = build([
-      task("w", { terminalStatus: "needs_user_action" }),
+      task("w", { status: "paused", terminalStatus: "needs_user_action" }),
       task("r", { status: "executing" }),
     ]).groups[0];
     expect(workGroupSummary(group)).toBe("1 needs you · 1 running");

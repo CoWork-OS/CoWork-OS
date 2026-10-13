@@ -56,11 +56,14 @@ function sources(overrides: Partial<AttentionSources> = {}): AttentionSources {
 
 describe("AttentionService", () => {
   it("merges every source into one ranked snapshot", async () => {
-    const waiting = task("t1", { terminalStatus: "awaiting_approval" });
+    const waiting = task("t1", { status: "blocked", terminalStatus: "awaiting_approval" });
     const service = new AttentionService(
       sources({
         listPendingApprovals: async () => [approval("a1", "t1")],
-        listRecentTasks: async () => [waiting, task("t2", { terminalStatus: "resume_available" })],
+        listRecentTasks: async () => [
+          waiting,
+          task("t2", { status: "interrupted", terminalStatus: "resume_available" }),
+        ],
         listDueCommitments: async () => [{ id: "c1", text: "Send SOW", dueAt: NOW + 1000 }],
         listSuggestions: async () => [
           {
@@ -138,7 +141,11 @@ describe("AttentionService", () => {
     const service = new AttentionService(
       sources({
         listRecentTasks: async () => [
-          task("child", { parentTaskId: "p", terminalStatus: "needs_user_action" }),
+          task("child", {
+            parentTaskId: "p",
+            status: "paused",
+            terminalStatus: "needs_user_action",
+          }),
         ],
       }),
     );
@@ -146,7 +153,11 @@ describe("AttentionService", () => {
   });
 
   it("names agents when it can and carries on when it cannot", async () => {
-    const waiting = task("t1", { terminalStatus: "needs_user_action", assignedAgentRoleId: "r" });
+    const waiting = task("t1", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      assignedAgentRoleId: "r",
+    });
     const named = new AttentionService(
       sources({
         listRecentTasks: async () => [waiting],
@@ -182,7 +193,7 @@ describe("AttentionService", () => {
       assignedAgentRoleId: "other-role",
     });
     const stray = task("stray", { status: "executing", parentTaskId: "elsewhere" });
-    const mine = task("mine", { terminalStatus: "needs_user_action" });
+    const mine = task("mine", { status: "paused", terminalStatus: "needs_user_action" });
     const findTask = vi.fn(async (id: string) =>
       [bot, helper, elsewhere].find((candidate) => candidate.id === id),
     );

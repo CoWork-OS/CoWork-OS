@@ -268,6 +268,51 @@ export function isTaskStaleForUi(
   return now - lastTouchedAt >= STALE_TASK_AGE_MS;
 }
 
+/**
+ * Why a task needs attention on the board, or null when it doesn't. `waitingReason` is what
+ * the attention queue says waits on the task (a pending approval or question), and it wins.
+ */
+export function resolveTaskAttentionReason(
+  task: Pick<
+    Task,
+    | "status"
+    | "terminalStatus"
+    | "awaitingUserInputReasonCode"
+    | "failureClass"
+    | "assignedAgentRoleId"
+    | "dueDate"
+    | "boardColumn"
+    | "updatedAt"
+    | "createdAt"
+  >,
+  waitingReason?: string | null,
+  now = Date.now(),
+): string | null {
+  // A pending approval or question can wait on a task whose status still says running.
+  if (waitingReason) return waitingReason;
+  // Finished work waits on no one, as in classifyTaskActivity: a run finalized as completed
+  // after a denied or timed-out approval keeps its "needs user action" outcome with nothing
+  // pending, and a missing owner, past due date or age means nothing once it is done. Failed
+  // and interrupted runs are terminal too, but still say so below.
+  if (task.status === "completed" || task.status === "cancelled") return null;
+  if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
+  if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
+  if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
+    return "Waiting on you";
+  if (task.status === "blocked") return "Blocked";
+  if (task.status === "paused") return "Paused";
+  if (task.status === "failed") return "Run failed";
+  if (task.status === "interrupted") return "Interrupted";
+  if (task.failureClass === "dependency_unavailable") return "Dependency unavailable";
+  if (task.failureClass === "provider_quota") return "Provider quota issue";
+  if (task.failureClass === "user_blocker") return "Needs decision";
+  if (!task.assignedAgentRoleId) return "Needs owner";
+  if (getTaskDueInfo(task.dueDate, now)?.isOverdue) return "Overdue";
+  if (resolveMissionColumnForTask(task) === "review") return "Needs review";
+  if (isTaskStaleForUi(task, now)) return "Stale";
+  return null;
+}
+
 export function useMissionControlData(
   initialCompanyId: string | null = null,
   initialIssueId: string | null = null,
@@ -1239,29 +1284,8 @@ export function useMissionControlData(
   );
 
   const getTaskAttentionReason = useCallback(
-    (task: Task) => {
-      // A pending approval or question can wait on a task whose status still says running.
-      const waiting = attentionWaiting?.get(task.id);
-      if (waiting) return waiting;
-      if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
-      if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
-      if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
-        return "Waiting on you";
-      if (task.status === "blocked") return "Blocked";
-      if (task.status === "paused") return "Paused";
-      if (task.status === "failed") return "Run failed";
-      if (task.status === "interrupted") return "Interrupted";
-      if (task.failureClass === "dependency_unavailable") return "Dependency unavailable";
-      if (task.failureClass === "provider_quota") return "Provider quota issue";
-      if (task.failureClass === "user_blocker") return "Needs decision";
-      if (!task.assignedAgentRoleId) return "Needs owner";
-      const due = getTaskDueInfo(task.dueDate);
-      if (due?.isOverdue) return "Overdue";
-      if (getMissionColumnForTask(task) === "review") return "Needs review";
-      if (isTaskStale(task)) return "Stale";
-      return null;
-    },
-    [attentionWaiting, getMissionColumnForTask, isTaskStale],
+    (task: Task) => resolveTaskAttentionReason(task, attentionWaiting?.get(task.id)),
+    [attentionWaiting],
   );
 
   const isTaskAttentionRequired = useCallback(

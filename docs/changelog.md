@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Finished sessions were listed as waiting for you when their last approval had timed out.
 - Paused session cards said only "Paused"; they now say why the session stopped.
 - Reading the needs-you queue counted suggestions as shown, skewing suggestion ranking.
+- Mission Control's Work board flagged completed and cancelled tasks as needing attention ("Needs owner", "Waiting on you", "Overdue"), counting them in the Done column and the attention summary. Failed and interrupted runs are still flagged.
 
 ### Security
 

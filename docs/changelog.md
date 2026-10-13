@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **macOS terminal installer**: `curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash` installs the released app without the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. Browsers attach the quarantine attribute that drives that dialog for the ad hoc signed build; `curl` does not. The installer verifies the ZIP's size and SHA-512 against the published updater metadata and the app bundle's code signature before copying it into Applications, re-runs as an updater, and refuses Intel Macs and older macOS versions with a pointer to npm. The macOS release smoke test now installs each build's ZIP through it. See [macOS Installation](macos-installation.md).
 
+- **Today on the Calm home**: Home shows what needs you as one card per decision, most pressing first, then what was handled. Approvals open their own review dialog in place, questions with plain options are answered on the card, paused sessions say why they stopped, commitments can be marked done, and suggestions can be started (the exact prompt is shown first), edited, dismissed or kept as a commitment. Commitments memory closed because they looked done are listed with Undo.
+- **Needs-you queue**: one ranked list of approvals, questions, paused sessions, waiting flow steps, due commitments and suggestions. Today, the bell, the session panel's Needs you badge, the Bots page and Mission Control's Brief all count it, and paired browsers read it too.
+- **Work and Team views (Calm)**: Work lists every session by project with filters, collapsed repeated runs and the next decision for each. Team shows agents, bots, scheduled tasks, automations and devices as teammates, with what each waits on you for.
+- **Calendar cards**: with Google Workspace connected, Today shows conflicts (decline the later event when you were invited to it), private focus holds before commitments are due, and meeting prep. Every change re-reads the calendar first. A suggestion about making time can hold a free stretch.
+- **Reply drafts on Today** (opt-in): up to three drafted replies a day to mail that needs one, with Send through the outbox (undoable until it goes out), inline Edit, Discard, and Retrying or Not sent states when a send fails. See [Inbox Agent](inbox-agent.md#reply-drafts-on-today).
+- **Agent access limits**: **May do alone** in Team gives an agent an access-profile limit that only narrows what its sessions, their child tasks and the schedules they create may do. Sessions stop instead of running unlimited when the limit's profile is unavailable. See [Access Profiles](access-profiles.md#agent-access-limits).
+
+### Changed
+
+- **Mission Control**: the header's agents link opens Team in the Calm theme and the Bots page otherwise; the Agents tab and agent detail view are removed. Brief's **need you** count and **Needs You** section read the needs-you queue, and Mission Control's own flags are listed under **Flagged**.
+- **Calm session panel**: keeps pinned items, projects and the five most recent sessions; **All work** opens Work. Devices moved into Team in the Calm theme.
+- **Outbox**: undoing a send from Today returns the reply to editing instead of discarding it. A draft that is already queued or being sent can't be sent again, a send cancelled after the outbox picked it up no longer goes out, and discarding cancels a queued send first.
+
 ### Removed
 
 - **Everyday Agent**: discontinued the Everyday page, Settings tab, Home card, Mission Control focus, `everydayAgent` admin-policy section, `everydayAgent.*` Control Plane and browser-host methods, IPC channels and shared types. Its compiled policy was never read by the task runtime. Upgrading drops the `everyday_agent_*` tables. See the [decision record](everyday-agent-discontinuation.md).
@@ -24,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Chief-of-staff engine, standup reports and performance reviews**: discontinued the chief-of-staff engine (world model, action policies, pending interventions, the Heartbeat autonomy pulse phase, the chief-of-staff items of the daily briefing, the Proactive switches and details in Settings > Memory, the `autonomy:*` IPC channels), Mission Control's **Standup** and **Reviews** header buttons with their viewers, the report services and the `standup:*` and `review:*` IPC channels. Upgrading deletes the stored chief-of-staff state and drops the `standup_reports` and `agent_performance_reviews` tables. Awareness signals and beliefs, Heartbeat, Dreaming, Review and Suggestions are unchanged. See the [decision record](learning-loop-discontinuation.md).
 - **Comparison mode, Multi-LLM judge mode and Workflow Pipeline**: discontinued Agent Comparison sessions (service, store, `comparison:*` IPC channels, task field and sidebar badge, Worktree settings section), Multi-LLM judge mode (the composer and Devices toggles and model panel, the `multiLlmMode`/`multiLlmConfig` task options, the judge lanes and synthesis in the team orchestrator, the `multi_llm_mode` run flag) and the Workflow Pipeline (the `useWorkflowPipeline` option, the per-phase child-task branch, the `workflow_phase_*`/`pipeline_*` events). Upgrading drops the `comparison_sessions` table and its triggers. Collaborative mode, `/multitask`, agent teams, Mixture of Agents and the Workflow Decomposer's sequential guidance are unchanged. See the [decision record](multi-model-modes-discontinuation.md).
 - **Advanced execution overrides**: discontinued the composer's **Advanced…** menu and the Execute, Analyze, Debug and Verified pins; **Plan** is now the third work choice next to Ask and Do, the pinned override type and its validation accept only `plan`, and the mode suggestion bar proposes only Plan or a collaborative run. The runtime still chooses analysis, verification and debugging strategies under Do. Saved sessions with a folded pin display as Do; no data changes. See the [decision record](execution-overrides-discontinuation.md).
+
+### Fixed
+
+- Finished sessions were listed as waiting for you when their last approval had timed out.
+- Paused session cards said only "Paused"; they now say why the session stopped.
+- Reading the needs-you queue counted suggestions as shown, skewing suggestion ranking.
+
+### Security
+
+- Reassigning a session to another agent requires permission to manage that session and is recorded in the session audit with the access-limit change it makes.
 
 ## [0.5.60] - 2026-10-07
 

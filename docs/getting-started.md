@@ -172,7 +172,7 @@ Workspace Kit is not required for your first task. To add durable workspace cont
 
 Once the app opens, the most important places to know are:
 
-- **Home**: quick launch plus recent sessions and recent automation activity
+- **Home**: quick launch plus recent sessions and recent automation activity. In the Calm visual style, Home is **Today**: what needs you, one decision per card, then what was handled without you. See [Today, Work and Team](#today-work-and-team-calm).
 - **Everything Workbench**: generated documents, spreadsheets, decks, web pages, PDFs, and previews open from task output cards into resizable sidebar or fullscreen artifact workspaces. Use this as the default place for everyday generated knowledge work: review or edit the file, then ask the agent for changes without switching to a separate Word, Excel, PowerPoint, browser, or chat app. See [Everything Workbench](everything-workbench.md).
 - **Uploaded PDFs**: attach a PDF to a task or chat turn when you want CoWork to summarize it, answer questions from it, extract clauses, or transform it. The first prompt includes only a compact PDF excerpt plus page/extraction metadata and the workspace-relative path; CoWork reads the full PDF on demand with the document parser. PDF excerpts are treated as untrusted document data, and visual layout questions use the visual PDF reader instead.
 - **Long-document reviews**: ask for a read-only review of named `.docx`, `.pdf`, `.md`, or `.txt` files to use bounded extraction, full coverage accounting, and evidence reduction. Requests that edit the source remain on the normal task path. See [Long-Document Analysis](document-analysis.md).
@@ -182,6 +182,7 @@ Once the app opens, the most important places to know are:
 - **Workspace agents**: select **Bots** on the left icon rail and expand **Workspace agents** to create and inspect reusable managed agents (called Agents Hub before 0.5.60). The clicked-agent detail page is for configuration and actions, not a separate chat. **Test this agent**, **Preview**, and starter prompts start a normal managed-session task and open it in the main task window, where follow-ups, approvals, responses, and outputs work like any other task. See [Managed Agents](managed-agents.md).
 - **Bots**: select **Bots** on the left icon rail to open the Bots page and the bot list, create reusable bot identities and keep multiple conversations under each one. Selecting a bot reuses its latest unarchived conversation or opens a dormant one; the first message starts execution. Edit the profile from the bot row or conversation header, and use conversation history for older streams. See [Bots, conversations, and tasks](bots-and-conversations.md).
 - **More > Devices** (in the Calm theme, **Team**, then a device): manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
+- **Work** and **Team** (Calm only, on the icon rail): every session in one list, and everyone who works for you with what they wait on you for. See [Today, Work and Team](#today-work-and-team-calm).
 - **Settings > Automations**: advanced prompt-based Routines, Task Queue, Workflow Intelligence, Scheduled Tasks, Webhooks, and Event Triggers; Daily Briefing has its own **Settings > Daily Briefing** tab
 - **Settings > System & Security > Profiles**: create, switch, export, and import isolated app profiles
 - **More > Mission Control**: company and operator monitoring, Heartbeat-agent state, global runtime queue status, workspace Mission Board, feed, and Ops view
@@ -338,10 +339,28 @@ CoWork samples the video into representative still frames for image-capable mode
 
 ### Sidebar (Left)
 
-- **Icon rail**: **Home**, **Inbox**, **Bots** and **Automations**, plus **Library** in the Calm visual style. **More** holds Devices, Mission Control, Add tools and, in Calm, Build; pin any of them to the rail. Use Cmd/Ctrl+number to jump to a rail item, and drag or Alt+Up/Down to reorder. **Settings** is at the bottom of the rail and opens inside the app window.
+- **Icon rail**: **Home**, **Inbox**, **Bots** and **Automations**, plus **Work**, **Team** and **Library** in the Calm visual style. **More** holds Devices, Mission Control, Add tools and, in Calm, Build; pin any of them to the rail. Use Cmd/Ctrl+number to jump to a rail item, and drag or Alt+Up/Down to reorder. **Settings** is at the bottom of the rail and opens inside the app window.
 - **Session panel**: **New session**, an always-visible search (Cmd/Ctrl+K), **Running** and **Needs you** filters, sessions grouped by day (Today, Yesterday, and so on), and a collapsed **Automated sessions** section for scheduled, hook, API and heartbeat runs.
   - In the Calm visual style the panel keeps pinned items, your projects and the five most recent other sessions, then **All work** opens Work, which lists every session, automated ones included. Searching or filtering the panel still lists everything.
 - **Notices**: one dismissable notice area above Automated sessions, for tips such as the use-case gallery.
+
+### Today, Work and Team (Calm)
+
+In the Calm visual style, Home opens on **Today**. Under the greeting, one line says how much needs you ("2 things need you. The rest is handled."), then each decision is a card, most pressing first. Three cards show at a time; **Show N more** lists the rest. The bell, the session panel's **Needs you** badge, the Bots page and Mission Control's Brief count the same decisions.
+
+- **Approvals**: **Review** opens the approval's own review dialog over Today, with the same checks as in the session.
+- **Questions**: a question with two to four plain options is answered right on the card; other questions open the session.
+- **Paused sessions** say why they stopped (for example, an approval that timed out); **Open** or **Reply** continues in the session.
+- **Commitments** due soon: **Mark done**, or **Work on it** to draft a prompt in the composer.
+- **Suggestions**: **Start** runs the exact prompt shown on the card; **Not now** hides it for a day; **Edit** puts the prompt in the composer; **Dismiss** stops showing it. A follow-up can be kept with **Add as commitment** (due a day later), and a suggestion about making time can **Hold** the next free stretch on your calendar.
+- **Calendar** (with Google Workspace connected): conflicts between two events in the next three days (**Decline** the later one when you were invited to it, **Keep both**, or **Open in Calendar**), a suggested 90-minute focus hold before a commitment is due, inside working hours (9:00 to 18:00), and prep for a meeting with other people in the next day (**Prepare** runs the prompt shown on the card). A hold is private and busy, with nobody invited; declining tells the organizer, as declining in Google Calendar does.
+- **Reply drafts** (opt-in): see [Reply drafts on Today](inbox-agent.md#reply-drafts-on-today).
+
+Offers, such as a suggested hold, meeting prep or the offer to draft replies, use a quieter card and aren't counted as needing you. Below the cards, the handled rows list what got done: your actions on the cards, automated sessions that finished in the last day, and commitments memory closed because they looked done, each with **Undo** to reopen it.
+
+**Work** lists every session, automated ones included, grouped by project. Filter by status, **Started by** and **Owner**, or search. Repeated runs of the same work are collapsed into one row, and the detail panel shows the next decision, where the work runs, its last activity, result and outputs.
+
+**Team** shows each agent, bot, scheduled task and automation as a teammate: what it is responsible for, what it is waiting on you for, its recent work and how it is set up. For an agent, **May do alone** sets its [access limit](access-profiles.md#agent-access-limits). Schedules can be paused or resumed here, and your devices (this computer and paired remote nodes) are listed with the work running on each.
 
 ### Task View (Right)
 

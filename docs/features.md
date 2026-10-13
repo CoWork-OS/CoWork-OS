@@ -193,6 +193,7 @@ Local-first inbox workspace for email triage, normal email handling, follow-up, 
 - **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting, saved views, account filters, and domain filters
 - **Normal email actions**: manual reply, reply-all, forward, To/Cc/Bcc, editable subject/body, and provider-backed send
 - **AI draft review**: generated replies can be edited before sending, and the draft card clears after successful send
+- **Reply drafts on Today** (opt-in): up to three drafted replies a day for threads that need one, sent through the outbox with Undo until they go out
 - **Ask Inbox**: right-sidebar mailbox chat with live agentic steps, final answers, matched email evidence, and click-to-open results
 - **Hybrid mailbox search**: Ask Inbox searches local FTS, semantic mailbox embeddings, provider-native Gmail/Outlook search when available, and attachment text for statements, invoices, extracts, PDFs, payment notices, and similar evidence
 - **`@Inbox` composer routing**: type `@Inbox` or `@inbox ...` in the main composer to open Inbox Agent, switch to Ask Inbox, and route the remaining query there
@@ -1478,7 +1479,7 @@ Customize agent behavior via Settings or conversation:
 | ------------ | --------------------------------------------------------------- |
 | **Modern**   | Refined non-terminal UI style with rounded components (default) |
 | **Terminal** | CLI-inspired interface with prompt-style visuals                |
-| **Calm**     | Opt-in cool-neutral style with a Home screen Ask / Do switch, simplified sidebar, and the Library and Build views |
+| **Calm**     | Opt-in cool-neutral style with a Home screen Ask / Do switch, the Today stack of decisions on Home, simplified sidebar, and the Work, Team, Library and Build views |
 
 | Color Mode | Description                                   |
 | ---------- | --------------------------------------------- |
@@ -1487,6 +1488,17 @@ Customize agent behavior via Settings or conversation:
 | **Dark**   | Dark mode for reduced eye strain              |
 
 Configure in **Settings** > **Appearance**.
+
+### Today, Work and Team (Calm)
+
+- **Today**: Home shows what needs you as one card per decision, most pressing first, then what was handled. Approvals and simple questions are answered right on the card; paused sessions say why they stopped; commitments can be marked done; suggestions can be started (the exact prompt is shown first), edited, dismissed or kept as a commitment.
+- **One needs-you queue**: Today, the bell, the session panel's **Needs you** badge, the Bots page and Mission Control's Brief count the same decisions, and paired browsers read the same queue.
+- **Calendar cards** (Google Workspace): conflicts with **Decline** for the later event when you were invited to it, private focus holds before commitments are due, and meeting prep. Every change re-reads the calendar first.
+- **Reply drafts** (opt-in): up to three drafted replies a day to mail that needs one, with Send (undoable until it goes out), Edit and Discard. See [Inbox Agent](inbox-agent.md#reply-drafts-on-today).
+- **Undo for memory**: commitments memory closed because they looked done are listed with **Undo**.
+- **Work** lists every session by project with filters and the next decision for each; **Team** shows agents, bots, schedules, automations and devices, and sets each agent's [access limit](access-profiles.md#agent-access-limits).
+
+See [Getting Started](getting-started.md#today-work-and-team-calm).
 
 ---
 

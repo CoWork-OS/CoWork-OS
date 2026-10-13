@@ -18,6 +18,8 @@ import {
   BOT_PROFILE_INSTRUCTIONS_MAX_LENGTH,
 } from "../utils/bot-profile";
 import { formatNextRun } from "../utils/next-run";
+import { useAttentionSnapshot } from "../hooks/useAttentionSnapshot";
+import { botAttentionItems, botsAttentionCount, withQueueNeedsYou } from "../utils/bot-attention";
 import "./bots-home.css";
 
 export interface BotsHomeProps {
@@ -132,7 +134,8 @@ export function BotsHome({
 }: BotsHomeProps) {
   const [bots, setBots] = useState<BotRole[] | null>(null);
   const [rolesError, setRolesError] = useState<string | null>(null);
-  const [summaries, setSummaries] = useState<Record<string, BotSummary>>({});
+  const [loadedSummaries, setSummaries] = useState<Record<string, BotSummary>>({});
+  const attention = useAttentionSnapshot(true);
   const [filter, setFilter] = useState<StatFilter | null>(null);
   const [createPrefill, setCreatePrefill] = useState<CreateBotPrefill | null>(null);
   const [workBot, setWorkBot] = useState<BotRole | null>(null);
@@ -213,17 +216,42 @@ export function BotsHome({
     };
   }, [bots, workspaceId, summaryToken]);
 
+  // "Needs you" comes from the shared queue, so it matches Today, Team and the bell. The
+  // rest comes from each bot's work store.
+  const summaries = useMemo(() => {
+    if (!attention.fromQueue) return loadedSummaries;
+    return Object.fromEntries(
+      Object.entries(loadedSummaries).map(([botId, summary]) => [
+        botId,
+        {
+          ...summary,
+          counts: withQueueNeedsYou(
+            summary.counts,
+            botAttentionItems(attention.items, { workspaceId: workspaceId ?? "", botId }).length,
+          ),
+        },
+      ]),
+    );
+  }, [attention, loadedSummaries, workspaceId]);
+
   const totals = useMemo(() => {
     const values = Object.values(summaries);
     const sum = (view: BotWorkView) =>
       values.reduce((total, summary) => total + (summary.counts?.[view] ?? 0), 0);
     return {
-      needs_you: sum("needs_you"),
+      // A decision in work one bot delegated to another counts once.
+      needs_you: attention.fromQueue
+        ? botsAttentionCount(
+            attention.items,
+            workspaceId ?? "",
+            (bots ?? []).map((bot) => bot.id),
+          )
+        : sum("needs_you"),
       working: sum("working"),
       scheduled: sum("scheduled"),
       paused: values.filter((summary) => summary.futurePaused).length,
     };
-  }, [summaries]);
+  }, [attention, bots, summaries, workspaceId]);
   const summariesLoaded = Boolean(bots && bots.every((bot) => summaries[bot.id]));
 
   const visibleBots = useMemo(() => {

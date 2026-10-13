@@ -18,6 +18,8 @@ import {
 } from "./bot-mascot/mascot-expressions";
 import { resolveBotMascot } from "../../shared/bot-mascots";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
+import { botAttentionItems, withQueueNeedsYou } from "../utils/bot-attention";
+import { useAttentionSnapshot } from "../hooks/useAttentionSnapshot";
 import type { BotNotificationPolicy, BotWorkView, Task, TaskStatus } from "../../shared/types";
 import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import type { AgentRoleData } from "../../electron/preload";
@@ -130,7 +132,8 @@ export function BotDetailsRail({
   const [copied, setCopied] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [workCounts, setWorkCounts] = useState<Record<BotWorkView, number> | null>(null);
+  const [storeWorkCounts, setWorkCounts] = useState<Record<BotWorkView, number> | null>(null);
+  const attention = useAttentionSnapshot(true);
   const [workTab, setWorkTab] = useState<BotWorkDialogTab | null>(null);
   const [workToken, setWorkToken] = useState(0);
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,6 +219,19 @@ export function BotDetailsRail({
       cancelled = true;
     };
   }, [workAvailable, roleId, task.workspaceId, task.status, workToken]);
+
+  // "Needs you" comes from the shared queue, so it matches Bots home, Today and the bell.
+  const workCounts = useMemo(
+    () =>
+      attention.fromQueue
+        ? withQueueNeedsYou(
+            storeWorkCounts,
+            botAttentionItems(attention.items, { workspaceId: task.workspaceId, botId: roleId })
+              .length,
+          )
+        : storeWorkCounts,
+    [attention, roleId, storeWorkCounts, task.workspaceId],
+  );
 
   // The Setup tab edits the same toggles; follow its changes.
   useEffect(() => {

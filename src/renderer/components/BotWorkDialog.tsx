@@ -27,6 +27,8 @@ import { resolveBotMascot } from "../../shared/bot-mascots";
 import { BotMascot } from "./bot-mascot/BotMascot";
 import type { MascotExpression } from "./bot-mascot/mascot-eyes";
 import { formatNextRun } from "../utils/next-run";
+import { useAttentionSnapshot } from "../hooks/useAttentionSnapshot";
+import { botAttentionItems, botAttentionLine, withQueueNeedsYou } from "../utils/bot-attention";
 import "./bot-work.css";
 
 export type BotWorkDialogTab = BotWorkView | "setup";
@@ -141,7 +143,15 @@ export function BotWorkDialog({
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const view: BotWorkView = tab === "setup" ? "needs_you" : tab;
   const [page, setPage] = useState<BotWorkPage | null>(null);
-  const [counts, setCounts] = useState<Record<BotWorkView, number> | null>(null);
+  const [storeCounts, setCounts] = useState<Record<BotWorkView, number> | null>(null);
+  const attention = useAttentionSnapshot(true);
+  // "Needs you" lists the shared queue's decisions for this bot, so its count and rows match
+  // Bots home, Today and the bell. Hosts without the queue keep the store's list.
+  const queueItems = useMemo(
+    () => (attention.fromQueue ? botAttentionItems(attention.items, { workspaceId, botId }) : null),
+    [attention, workspaceId, botId],
+  );
+  const counts = queueItems ? withQueueNeedsYou(storeCounts, queueItems.length) : storeCounts;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
@@ -589,9 +599,49 @@ export function BotWorkDialog({
         id="bot-work-content"
         role="tabpanel"
         aria-labelledby={`bot-work-tab-${tab}`}
-        aria-busy={tab !== "setup" && loading}
+        aria-busy={tab !== "setup" && !(tab === "needs_you" && queueItems) && loading}
       >
-        {tab === "setup" ? (
+        {tab === "needs_you" && queueItems ? (
+          <>
+            {queueItems.length === 0 && (
+              <div className="bot-work-empty">
+                <ClipboardList size={24} />
+                {views.find((entry) => entry.id === "needs_you")?.empty}
+              </div>
+            )}
+            <ul className="bot-work-list">
+              {queueItems.map((item) => (
+                <li key={item.id}>
+                  <div className="bot-work-item-head">
+                    <strong>{item.title}</strong>
+                    <span className="bot-work-tags">
+                      {item.risk === "high" && <em>High risk</em>}
+                      <time>{ago(item.createdAt)}</time>
+                    </span>
+                  </div>
+                  <p className="bot-work-state">{botAttentionLine(item)}</p>
+                  <div className="bot-work-item-actions">
+                    <button
+                      type="button"
+                      className="bot-work-primary"
+                      onClick={() => openTask(item.taskId)}
+                    >
+                      Respond
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!controlAvailable || controlLocked}
+                      title="Stop this item only"
+                      onClick={() => void controls.start("stop_turn", item.taskId)}
+                    >
+                      Stop
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : tab === "setup" ? (
           <div className="bot-work-setup">
             <BotResponsibilityPanel
               key={`${workspaceId}:${botId}`}

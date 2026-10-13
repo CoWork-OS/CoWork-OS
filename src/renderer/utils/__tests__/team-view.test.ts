@@ -122,6 +122,21 @@ describe("buildTeamModel", () => {
     expect(first.recent[0]).toMatchObject({ taskId: "t1", statusLabel: "Needs you" });
   });
 
+  it("counts a decision in delegated work for every role the queue names", () => {
+    const model = build({
+      roles: [role("lead"), role("helper")],
+      tasks: [
+        task("root", { assignedAgentRoleId: "lead", status: "executing" }),
+        task("sub", { assignedAgentRoleId: "helper", parentTaskId: "root", status: "executing" }),
+      ],
+      attention: [{ ...approval("sub"), ownerAgentRoleIds: ["helper", "lead"] }],
+    });
+    const waiting = Object.fromEntries(
+      model.members.map((member) => [member.id, member.waiting.length]),
+    );
+    expect(waiting).toMatchObject({ "role:lead": 1, "role:helper": 1 });
+  });
+
   it("describes a schedule, leaves automation-made jobs to their automation, and can pause it", () => {
     const model = build({
       cronJobs: [

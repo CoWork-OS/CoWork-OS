@@ -264,7 +264,11 @@ export function buildTeamModel(input: {
     const bot = isBotRole(role);
     if (!bot && !role.heartbeatEnabled && roleTasks.length === 0) continue;
 
+    // The queue attributes each decision to the roles whose work it is in, including work
+    // they delegated, as Bots does. An item without owners falls back to its session's own
+    // assignee.
     const waiting = input.attention.filter((item) => {
+      if (item.ownerAgentRoleIds) return item.ownerAgentRoleIds.includes(role.id);
       const task = item.taskId ? tasksById.get(item.taskId) : undefined;
       return task?.assignedAgentRoleId === role.id;
     });

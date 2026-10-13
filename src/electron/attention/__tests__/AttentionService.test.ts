@@ -166,6 +166,60 @@ describe("AttentionService", () => {
     expect(snapshot.failedSources).toEqual([]);
     expect(snapshot.items[0].actor).toEqual({ kind: "you", name: "You" });
   });
+
+  it("lists the roles an item's work belongs to, nearest first", async () => {
+    const bot = task("bot", { status: "executing", assignedAgentRoleId: "bot-role" });
+    // The sub-agent's own parent is not among the recent sessions, so it is looked up.
+    const helper = task("helper", {
+      status: "executing",
+      parentTaskId: "bot",
+      assignedAgentRoleId: "helper-role",
+    });
+    const worker = task("worker", { status: "executing", parentTaskId: "helper" });
+    const elsewhere = task("elsewhere", {
+      status: "executing",
+      workspaceId: "other",
+      assignedAgentRoleId: "other-role",
+    });
+    const stray = task("stray", { status: "executing", parentTaskId: "elsewhere" });
+    const mine = task("mine", { terminalStatus: "needs_user_action" });
+    const findTask = vi.fn(async (id: string) =>
+      [bot, helper, elsewhere].find((candidate) => candidate.id === id),
+    );
+    const service = new AttentionService(
+      sources({
+        listPendingApprovals: async () => [
+          approval("a-worker", "worker"),
+          approval("a-bot", "bot"),
+          approval("a-stray", "stray"),
+        ],
+        listRecentTasks: async () => [worker, stray, mine],
+        findTask,
+      }),
+    );
+    const owners = Object.fromEntries(
+      (await service.snapshot()).items.map((item) => [item.id, item.ownerAgentRoleIds]),
+    );
+    expect(owners).toEqual({
+      "approval:a-worker": ["helper-role", "bot-role"],
+      "approval:a-bot": ["bot-role"],
+      // Delegation never crosses into another workspace.
+      "approval:a-stray": undefined,
+      "session:mine": undefined,
+    });
+  });
+
+  it("stops at a cycle of parent links", async () => {
+    const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
+    const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });
+    const service = new AttentionService(
+      sources({
+        listPendingApprovals: async () => [approval("x", "a")],
+        listRecentTasks: async () => [a, b],
+      }),
+    );
+    expect((await service.snapshot()).items[0].ownerAgentRoleIds).toEqual(["ra", "rb"]);
+  });
 });
 
 describe("createDebouncedSignal", () => {

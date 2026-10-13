@@ -11,7 +11,7 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 - **CoWork CLI**: Run `cowork` for an interactive terminal UI or `cowork run "task"` for local one-shot work using the same local profile and providers as the desktop app
 - **Personal AI Gateway**: Connect your AI assistant to WhatsApp, Telegram, Discord, Slack, and iMessage
 - **Everything Workbench**: Create, open, review, edit, and revise generated documents, spreadsheets, presentations, web pages, PDFs, and previews from the same local-first task workspace
-- **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices view (More > Devices)
+- **Managed Devices**: Operate local and remote CoWork machines from a dedicated Devices view (More > Devices; in the Calm theme, Team)
 - **Automation Studio**: A main-sidebar Discover/Library/Builder/Activity surface for versioned structured flows, dry runs, variables, branches, approvals, signed webhooks, durable activity, cancellation, and restart recovery; advanced queueing, prompt-based routines, schedules, triggers, briefing, and Workflow Intelligence remain grouped in Settings
 - **Renderer Performance**: Sidebar and timeline virtualization in the `CoWork-OS/CoWork-OS` repo use `@chenglou/pretext` for text measurement and keep long task feeds responsive
 - **Security-First Design**: Extensive automated test coverage, configurable guardrails, layered permission rules, workspace-local policy files, and approval workflows

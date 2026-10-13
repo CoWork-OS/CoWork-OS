@@ -78,6 +78,10 @@ export interface HomeTodayHandledRow {
   at: number;
   /** Session to open when the row is clicked. */
   taskId?: string;
+  /** A commitment memory closed on its own, which the row can reopen. */
+  undo?: { workspaceId: string; changeId: string };
+  /** Why it was handled, for the row's tooltip. */
+  detail?: string;
 }
 
 export interface HomeToday {
@@ -296,6 +300,9 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         },
       };
     }
+    case "memory_change":
+      // Handled work, not a decision: Today lists it with the handled rows.
+      return null;
   }
 }
 
@@ -352,19 +359,37 @@ export function buildHomeToday(input: {
     needsYou.push(card);
   }
 
+  // Commitments memory closed because they looked done: handled, but still undoable.
+  const memoryRows: HomeTodayHandledRow[] = input.attention.flatMap((item) =>
+    item.ref.type === "memory_change" && !resolved.has(item.id)
+      ? [
+          {
+            id: item.id,
+            title: item.title,
+            outcome: "Closed for you",
+            at: item.createdAt,
+            undo: { workspaceId: item.ref.workspaceId, changeId: item.ref.changeId },
+            detail: item.detail,
+          },
+        ]
+      : [],
+  );
   const handled: HomeTodayHandledRow[] = [
     ...(input.actedRows ?? []),
-    // The queue is the authority on what still waits: a session it lists is never "handled",
-    // even when the renderer's copy of the task has not caught up yet.
-    ...input.sessions.handled
-      .filter((session) => !coveredTasks.has(session.id))
-      .map((session) => ({
-        id: `handled:${session.id}`,
-        title: session.title,
-        outcome: "Done",
-        at: session.updatedAt,
-        taskId: session.id,
-      })),
+    ...[
+      ...memoryRows,
+      // The queue is the authority on what still waits: a session it lists is never
+      // "handled", even when the renderer's copy of the task has not caught up yet.
+      ...input.sessions.handled
+        .filter((session) => !coveredTasks.has(session.id))
+        .map((session) => ({
+          id: `handled:${session.id}`,
+          title: session.title,
+          outcome: "Done",
+          at: session.updatedAt,
+          taskId: session.id,
+        })),
+    ].sort((a, b) => b.at - a.at),
   ].slice(0, MAX_HANDLED_ROWS);
 
   if (needsYou.length === 0 && !idea && handled.length === 0) return EMPTY_HOME_TODAY;

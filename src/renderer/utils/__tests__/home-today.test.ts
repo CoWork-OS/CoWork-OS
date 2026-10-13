@@ -150,6 +150,57 @@ describe("cardForAttention", () => {
     expect(unknown?.why).not.toMatch(/question/i);
   });
 
+  it("lists commitments memory closed with the handled rows, newest first, with undo", () => {
+    const closed = item("memory_change:c1", {
+      kind: "memory_change",
+      state: "Closed for you",
+      title: "Send the signed SOW",
+      detail: "Closed: the SOW was sent on Monday.",
+      createdAt: NOW - 2 * HOUR,
+      urgent: false,
+      taskId: undefined,
+      workspaceId: "ws",
+      ref: { type: "memory_change", changeId: "c1", workspaceId: "ws" },
+    });
+    const today = buildHomeToday({
+      attention: [closed],
+      sessions: {
+        ...EMPTY_HOME_SESSIONS,
+        handled: [{ id: "s1", title: "Weekly digest", updatedAt: NOW - HOUR }],
+      },
+      now: NOW,
+    });
+    expect(today.needsYou).toEqual([]);
+    expect(today.handled).toEqual([
+      expect.objectContaining({ id: "handled:s1", outcome: "Done" }),
+      {
+        id: "memory_change:c1",
+        title: "Send the signed SOW",
+        outcome: "Closed for you",
+        at: NOW - 2 * HOUR,
+        undo: { workspaceId: "ws", changeId: "c1" },
+        detail: "Closed: the SOW was sent on Monday.",
+      },
+    ]);
+    expect(homeStatusLine(today)).toBe("Nothing needs you. The rest is handled.");
+    // Once undone, the row gives way to the one the action left.
+    const undone = buildHomeToday({
+      attention: [closed],
+      sessions: EMPTY_HOME_SESSIONS,
+      now: NOW,
+      resolved: new Set(["memory_change:c1"]),
+      actedRows: [
+        {
+          id: "acted:memory_change:c1",
+          title: "Send the signed SOW",
+          outcome: "Reopened",
+          at: NOW,
+        },
+      ],
+    });
+    expect(undone.handled.map((row) => row.outcome)).toEqual(["Reopened"]);
+  });
+
   it("opens the automation for a waiting flow step", () => {
     const card = cardForAttention(
       item("flow_approval:s1", {

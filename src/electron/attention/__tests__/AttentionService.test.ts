@@ -285,6 +285,55 @@ describe("AttentionService", () => {
     expect(snapshot.items[0].place.label).toBe("Another device");
   });
 
+  it("lists undoable memory changes as handled work, and reports a failing read", async () => {
+    const change = (id: string, overrides = {}) => ({
+      id,
+      op: "expire_commitment" as const,
+      origin: "auto" as const,
+      summary: "Closed: the report was sent on Monday.",
+      rationale: null,
+      items: [
+        {
+          id: `m-${id}`,
+          kind: "commitment" as const,
+          content: "Send the report",
+          before: "active",
+          after: "archived",
+        },
+      ],
+      appliedAt: NOW - 1000,
+      undoneAt: null,
+      canUndo: true,
+      ...overrides,
+    });
+    const service = new AttentionService(
+      sources({
+        listMemoryChanges: async () => [
+          { workspaceId: "ws", change: change("c1") },
+          { workspaceId: "ws", change: change("c2", { canUndo: false }) },
+          { workspaceId: "ws", change: change("c3", { undoneAt: NOW }) },
+        ],
+      }),
+    );
+    expect((await service.snapshot()).items).toEqual([
+      expect.objectContaining({
+        id: "memory_change:c1",
+        kind: "memory_change",
+        title: "Send the report",
+        urgent: false,
+        ref: { type: "memory_change", changeId: "c1", workspaceId: "ws" },
+      }),
+    ]);
+    const failing = new AttentionService(
+      sources({
+        listMemoryChanges: async () => {
+          throw new Error("engine not running");
+        },
+      }),
+    );
+    expect((await failing.snapshot()).failedSources).toEqual(["memory"]);
+  });
+
   it("stops at a cycle of parent links", async () => {
     const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
     const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });

@@ -227,6 +227,34 @@ This same ceiling applies to child tasks: a delegated task may choose a
 strictly narrower profile, but it cannot widen the parent task's sandbox,
 approval behavior, network, filesystem, or domain scope.
 
+## Agent access limits
+
+An agent can carry an access limit. In the Calm theme's **Team** view it is
+**May do alone**: either **No limit: each session's own access**, or a profile.
+The limit only narrows what a session may do; it never grants access.
+
+- A session assigned to the agent runs with its own profile when that is within
+  the limit, with the limit when the session's profile is broader, and otherwise
+  with the narrowest combination of the two. When the two can't be combined (for
+  example, both name different filesystem or domain scopes), the session stops
+  and asks you to change the limit in Team.
+- Sub-agents and child tasks the session starts keep the limit, even when they
+  are assigned to another agent. Scheduled tasks it creates with `schedule_task`
+  carry the limit to every run.
+- A legacy session without a named profile asks before acting while a limit
+  applies, and bypass-permissions mode cannot lift a limit.
+- If the limit's profile is deleted or can't be read, the agent's sessions stop
+  instead of running without the limit.
+- Changing the limit applies to the agent's running sessions right away and to
+  its other sessions when they next start. Limits already passed on to child
+  tasks and schedules stay as they were when passed on.
+- Reassigning a session to another agent requires permission to manage that
+  session, and the session's audit records the previous and new agent and the
+  access-limit change (unchanged, added, lifted or changed).
+
+An agent's seniority (lead, specialist or intern) only paces its heartbeat; it
+is not a permission.
+
 ## Resolution and compatibility
 
 Profile resolution happens before individual tool approvals:
@@ -341,6 +369,7 @@ revalidated when the profile changes, and a downgrade prevents further use.
 | Managed Agents                               | `ManagedEnvironment.config.accessProfileId` is the canonical environment setting; `enableShell` is legacy compatibility                   |
 | Task automations and cron                    | New jobs inherit an explicit profile and cannot widen it through a step or trigger setting                                                |
 | Agent Teams and child tasks                  | Child profiles are capped by the parent profile                                                                                           |
+| Agent roles                                  | The role's access limit (**May do alone**) caps its sessions, their child tasks and the schedules they create                             |
 | Side Chat                                    | Does not expose command tools and cannot widen the inherited profile                                                                      |
 | Browser, connector, native, and device tools | Use the same profile, admin policy, and hard guardrails before execution                                                                  |
 | Heartbeat/Dreaming                           | Background memory reads use a profile-derived read guard; unavailable or denied profiles skip analysis rather than bypassing the boundary |

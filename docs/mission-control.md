@@ -19,18 +19,17 @@ or defer work, but they cannot widen the profile or revive an unavailable one.
 
 Mission Control now sits alongside the other operational entry points:
 
-- **Devices** for machine-level task routing and remote execution
+- **Devices** (in **Team** in the Calm theme) for machine-level task routing and remote execution
 - main-sidebar **Automations** for structured flow authoring, activation, approvals, and step-level Activity
 - **Settings > Automations** for prompt-based routines, core automation, queueing, scheduling, triggers, briefing, and Workflow Intelligence policies
 - **Settings > Memory** for the memory folder, structured observations, and dream changes waiting in **Review**
 
 ## Layout
 
-Mission Control is split into three panels:
+Mission Control has two main areas:
 
 | Panel                      | Purpose                                                                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Left — Agents**          | Heartbeat-enabled agent list with Pulse/Dispatch state, automation-profile-backed cadence, idle/running state, and manual trigger controls |
 | **Center — Mission Board** | Kanban board with 5 columns for tracked work lifecycle management                                                                          |
 | **Right — Feed & Details** | Live activity feed and selected task details with comments/mentions                                                                        |
 
@@ -41,49 +40,17 @@ The header bar shows workspace selector, current time, and operational counters 
 - **Board work**: open work items tracked on the Mission Control board.
 - **Mentions**: pending human or agent mentions.
 
+On **Brief**, **need you** counts the approvals, questions and paused sessions waiting on you in the selected workspace (and agent, when one is selected). The **Needs You** section lists them, and each opens where it is decided. Today, Bots and the bell count the same decisions; Mission Control's own flags are listed under **Flagged**.
+
 The header's **Bots** button opens the Bots page, where agents are created and configured. In the Calm theme it reads **Team** and opens Team, which shows each agent with what it is doing, what it waits on you for and where it runs.
 
 These numbers can differ. For example, two Heartbeat agents can be enabled while zero board items are open in the selected workspace and four global runtime tasks are waiting in chat. If the queue service is still loading or unavailable, Mission Control shows that state explicitly instead of reporting `0` or `All clear`.
 
 ---
 
-## Agents Panel (Left)
+## Agents
 
-View and manage enabled agents in the current workspace. An enabled agent is not necessarily executing a task; it may be monitoring, sleeping, or waiting for its next Heartbeat pulse.
-
-### Agent Information
-
-Each agent card shows:
-
-- Display name, role description, and avatar
-- Current running task title, tracked task title, or "No active task"
-- **Autonomy level badge**: LEAD, SPC (Specialist), or INT (Intern)
-- **Heartbeat profile**: `observer`, `operator`, or `dispatcher`
-- **Status indicator**: green dot (working), gray dot (idle), disabled (offline)
-- Next scheduled Pulse time
-- Latest Pulse result and latest Dispatch result
-- Deferred, cooldown, and dispatch-budget state when relevant
-
-### Agent Actions
-
-| Action                   | Result                                                    |
-| ------------------------ | --------------------------------------------------------- |
-| **Click** agent          | Select/deselect — filters the activity feed to that agent |
-| **Double-click** agent   | Open Agent Role Editor to edit configuration              |
-| **Trigger Pulse** button | Manually trigger Heartbeat v3 review immediately          |
-| **"Add Agent"** button   | Create a new agent role with configuration modal          |
-
-### Agent Role Editor
-
-Configure agent roles with:
-
-- Display name, description, icon, and color
-- Personality and model preferences
-- Capabilities and tool restrictions
-- Autonomy level (lead / specialist / intern)
-- link-out to the attached automation profile when the role participates in the always-on core
-
-Heartbeat, Dreaming, and Workflow Intelligence ownership no longer live directly in the general role editor. Core-runtime settings are managed through the dedicated automation and memory surfaces.
+Mission Control doesn't keep its own agent list. Agents are created and configured on the Bots page: the header's **Bots** button, or **Team** in the Calm theme, which also shows what each agent is doing, what it is waiting on you for, its seniority (lead, specialist or intern, which only paces its heartbeat) and **May do alone**, its [access limit](access-profiles.md#agent-access-limits). On the board, **Wake owner** on a card runs the assigned agent's heartbeat review now.
 
 ---
 
@@ -289,14 +256,13 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Action                              | How                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------- |
 | Open Mission Control                | More > Mission Control; see the [release surface reference](release-surface-reference.md)                 |
-| Add a new agent                     | Click "Add Agent" in the agents panel                                      |
+| Add or edit an agent                | Header > Bots (Team in Calm)                                               |
 | Review core automation learning     | Open the `Core Harness` view                                               |
 | Configure the company planner       | Open the `Ops` tab, then its `Planner` sub-tab                             |
 | Inspect company ops                 | Open the `Ops` tab in the right panel                                      |
-| Edit an agent                       | Double-click the agent card                                                |
-| Trigger immediate heartbeat review  | Click `Trigger Pulse` on the agent card                                    |
+| Trigger immediate heartbeat review  | Click **Wake owner** on the agent's board card                             |
 | Move a task to a new stage          | Drag the task card to the target column                                    |
 | View task details                   | Click any task card                                                        |
 | Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
 | Filter feed by agent                | Click an agent chip in the feed panel                                      |
-| Create a team                       | Header > Teams > create team                                               |
+| Create a team                       | Header > Agent teams > create team                                         |

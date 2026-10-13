@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Paused session cards said only "Paused"; they now say why the session stopped.
 - Reading the needs-you queue counted suggestions as shown, skewing suggestion ranking.
 - Mission Control's Work board flagged completed and cancelled tasks as needing attention ("Needs owner", "Waiting on you", "Overdue") and counted them as overdue in the Done column and the summary. They now show their due date plainly. Failed and interrupted runs are still flagged.
+- Mission Control's Work board showed **New task** and **Link existing** under each column, but they only opened an empty detail panel. They are gone: every task in the workspace is already on the board, and new work started from the composer appears on it by itself.
 
 ### Security
 

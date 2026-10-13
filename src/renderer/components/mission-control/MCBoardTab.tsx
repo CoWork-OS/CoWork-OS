@@ -2,12 +2,10 @@ import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
-  ArrowUpRight,
   Calendar,
   Clock3,
   Eye,
   Flag,
-  Plus,
   Search,
   User,
   Zap,
@@ -20,9 +18,6 @@ import { BotMascot } from "../bot-mascot/BotMascot";
 interface MCBoardTabProps {
   data: MissionControlData;
 }
-
-const NEW_TASK_ID_PREFIX = "__new__:";
-const LINK_TASK_ID_PREFIX = "__link__:";
 
 export function MCBoardTab({ data }: MCBoardTabProps) {
   const {
@@ -559,29 +554,6 @@ export function MCBoardTab({ data }: MCBoardTabProps) {
                   </div>
                 )}
               </div>
-              {column.id !== "done" && (
-                <div className="mc-v2-column-footer">
-                  <button
-                    className="mc-v2-column-footer-btn"
-                    onClick={() => {
-                      setDetailPanel({ kind: "task", taskId: `${NEW_TASK_ID_PREFIX}${column.id}` });
-                    }}
-                  >
-                    <Plus size={14} /> New task
-                  </button>
-                  <button
-                    className="mc-v2-column-footer-btn"
-                    onClick={() => {
-                      setDetailPanel({
-                        kind: "task",
-                        taskId: `${LINK_TASK_ID_PREFIX}${column.id}`,
-                      });
-                    }}
-                  >
-                    <ArrowUpRight size={13} /> Link existing
-                  </button>
-                </div>
-              )}
             </div>
           );
         })}

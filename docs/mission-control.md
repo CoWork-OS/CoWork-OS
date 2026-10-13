@@ -84,15 +84,17 @@ The **Mission Board** remains workspace-scoped tracked work. A workspace can hav
 
 ## Work: the Mission Board
 
-The **Work** tab is a five-column board for tracked work. It is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
+The **Work** tab is a five-column board of the recent tasks in the selected workspace (every workspace under **All Workspaces**). Nothing is added to it by hand: a task started from the composer, by an agent's heartbeat, a team or the planner shows up on its own, in the column that matches its state. So the board has no **New task** or **Link existing** buttons; start work from the composer and it appears here. The board is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
 
-| Column             | Meaning                                    |
-| ------------------ | ------------------------------------------ |
-| **Not started**    | Waiting for triage or an owner             |
-| **Ready to start** | Assigned and ready                         |
-| **Working**        | Being executed or planned                  |
-| **Needs review**   | Awaiting approval or human review          |
-| **Done**           | Finished; shown with **History** or **All tasks** |
+| Column             | What lands here                                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| **Not started**    | Open tasks with no owner that aren't running                                                                      |
+| **Ready to start** | Open tasks with an assigned agent that aren't running, or moved here                                              |
+| **Working**        | Tasks being planned or executed, and tasks moved here                                                             |
+| **Needs review**   | Tasks moved here for approval or human review                                                                     |
+| **Done**           | Completed, failed, cancelled and interrupted tasks, and tasks moved here; shown with **History** or **All tasks** |
+
+A finished task always sits in **Done**, and a running one in **Working** unless it was moved to **Needs review** or **Done**.
 
 Column headers show the count (red past the column's work-in-progress limit) and how many cards need attention, are overdue or are stale.
 
@@ -225,7 +227,8 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Configure the company planner       | Operations > **Planner**                                                   |
 | Inspect company ops                 | Operations > **Overview**                                                  |
 | Trigger immediate heartbeat review  | **Wake owner** (lightning icon) on a Work board card                       |
-| Move a task to a new stage          | Drag the task card to the target column                                    |
+| Move a task to a new stage          | Drag the card to the target column, or use its **Move to next stage**      |
+| Put new work on the board           | Start a task from the composer; it appears on **Work** by itself           |
 | View task details                   | Click any task card                                                        |
 | Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
 | Filter feed by agent                | Click an agent chip in the Evidence Feed                                   |

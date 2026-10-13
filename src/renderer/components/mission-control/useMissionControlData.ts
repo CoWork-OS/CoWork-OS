@@ -139,7 +139,7 @@ type RuntimeQueueStatusState = "loading" | "ready" | "unavailable" | "error";
 
 export type MissionControlCategoryFilter = "all" | MissionControlCategory;
 export type MissionControlSeverityFilter = "all" | MissionControlSeverity;
-export type MCTab = "overview" | "agents" | "board" | "intelligence" | "feed" | "ops";
+export type MCTab = "overview" | "board" | "intelligence" | "feed" | "ops";
 export type OpsSubTab =
   | "overview"
   | "operators"
@@ -150,7 +150,6 @@ export type OpsSubTab =
   | "automation";
 export type DetailPanelView =
   | { kind: "task"; taskId: string }
-  | { kind: "agent"; agentId: string }
   | { kind: "issue"; issueId: string }
   | null;
 

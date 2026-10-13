@@ -4,7 +4,6 @@ import "./mission-control.css";
 import { useMissionControlData } from "./useMissionControlData";
 import { MCTopBar } from "./MCTopBar";
 import { MCOverviewTab } from "./MCOverviewTab";
-import { MCAgentsTab } from "./MCAgentsTab";
 import { MCBoardTab } from "./MCBoardTab";
 import { MCFeedTab } from "./MCFeedTab";
 import { MCIntelligenceTab } from "./MCIntelligenceTab";
@@ -21,6 +20,8 @@ interface MissionControlPanelProps {
   initialIssueId?: string | null;
   /** Opens where a needs-you queue item is decided. */
   onOpenAttention?: (item: AttentionItem) => void;
+  /** What the agents link says: "Team" in Calm, where Team lists the agents. */
+  agentsLabel?: string;
 }
 
 export function MissionControlPanel({
@@ -29,6 +30,7 @@ export function MissionControlPanel({
   initialCompanyId = null,
   initialIssueId = null,
   onOpenAttention,
+  agentsLabel,
 }: MissionControlPanelProps) {
   const data = useMissionControlData(initialCompanyId, initialIssueId);
 
@@ -80,7 +82,7 @@ export function MissionControlPanel({
 
   return (
     <div className="mc-v2">
-      <MCTopBar data={data} onOpenAgents={onOpenAgents} />
+      <MCTopBar data={data} onOpenAgents={onOpenAgents} agentsLabel={agentsLabel} />
       {!hasHostMethod("getAllHeartbeatStatus") && (
         <p role="status" className="settings-description">
           This host does not run agent heartbeats. Heartbeat status and controls are unavailable.
@@ -92,7 +94,6 @@ export function MissionControlPanel({
           {activeTab === "overview" && (
             <MCOverviewTab data={data} onOpenAttention={onOpenAttention} />
           )}
-          {activeTab === "agents" && <MCAgentsTab data={data} />}
           {activeTab === "board" && <MCBoardTab data={data} />}
           {activeTab === "intelligence" && <MCIntelligenceTab data={data} />}
           {activeTab === "feed" && <MCFeedTab data={data} />}

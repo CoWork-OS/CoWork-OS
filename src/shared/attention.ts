@@ -116,7 +116,12 @@ export interface TaskActivity {
  */
 export function classifyTaskActivity(task: Task): TaskActivity | null {
   const status = deriveCanonicalTaskStatus(task);
-  if (status === "failed" || status === "cancelled") return null;
+  // A finished run waits on no one. A run that stopped short because an approval was denied
+  // or timed out is finalized as completed with a "needs user action" outcome, but nothing is
+  // pending any more: its approval is closed, and going on means starting a follow-up. Work
+  // that really waits is never completed: the daemon sets it to blocked or paused and clears
+  // its completion time.
+  if (status === "failed" || status === "cancelled" || status === "completed") return null;
 
   if (task.terminalStatus === "awaiting_approval") {
     return { category: "needs-you", label: "Approval needed" };

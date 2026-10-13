@@ -28,7 +28,7 @@ describe("buildHomeSessions", () => {
   it("lists sessions waiting on the user first, newest first, with the reason", () => {
     const result = buildHomeSessions([
       task("old", 100),
-      task("waiting", 200, { terminalStatus: "needs_user_action" }),
+      task("waiting", 200, { status: "paused", terminalStatus: "needs_user_action" }),
       task("new", 300),
     ]);
     expect(result.needsYou).toEqual([
@@ -38,9 +38,13 @@ describe("buildHomeSessions", () => {
 
   it("leaves out sub-agents and caps the waiting list", () => {
     const tasks = [
-      task("child", 900, { parentTaskId: "p", terminalStatus: "needs_user_action" }),
+      task("child", 900, {
+        parentTaskId: "p",
+        status: "paused",
+        terminalStatus: "needs_user_action",
+      }),
       ...Array.from({ length: 8 }, (_, i) =>
-        task(`n${i}`, 600 - i, { terminalStatus: "awaiting_approval" }),
+        task(`n${i}`, 600 - i, { status: "blocked", terminalStatus: "awaiting_approval" }),
       ),
     ];
     const result = buildHomeSessions(tasks);
@@ -65,6 +69,7 @@ describe("buildHomeSessions", () => {
         task("cron-failed", now - hour, { source: "cron", status: "failed" } as Partial<Task>),
         task("cron-waiting", now - hour, {
           source: "cron",
+          status: "blocked",
           terminalStatus: "awaiting_approval",
         } as Partial<Task>),
         task("manual", now - hour),
@@ -80,12 +85,18 @@ describe("buildHomeSessions", () => {
 
 describe("sameHomeSessions", () => {
   it("compares by value", () => {
-    const tasks = [task("a", 1), task("b", 2, { terminalStatus: "needs_user_action" })];
+    const tasks = [
+      task("a", 1),
+      task("b", 2, { status: "paused", terminalStatus: "needs_user_action" }),
+    ];
     expect(sameHomeSessions(buildHomeSessions(tasks), buildHomeSessions(tasks))).toBe(true);
     expect(
       sameHomeSessions(
         buildHomeSessions(tasks),
-        buildHomeSessions([...tasks, task("c", 3, { terminalStatus: "awaiting_approval" })]),
+        buildHomeSessions([
+          ...tasks,
+          task("c", 3, { status: "blocked", terminalStatus: "awaiting_approval" }),
+        ]),
       ),
     ).toBe(false);
     const handled = { ...EMPTY_HOME_SESSIONS, handled: [{ id: "h", title: "H", updatedAt: 1 }] };

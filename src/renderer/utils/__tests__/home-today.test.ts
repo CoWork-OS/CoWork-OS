@@ -85,7 +85,13 @@ describe("buildHomeToday", () => {
 
   it("does not repeat a session the queue already has an item for", () => {
     const today = buildHomeToday({
-      attention: [item("question:q1", { kind: "question", taskId: "t9" })],
+      attention: [
+        item("question:q1", {
+          kind: "question",
+          taskId: "t9",
+          ref: { type: "input_request", requestId: "q1", taskId: "t9" },
+        }),
+      ],
       sessions,
       now: NOW,
     });
@@ -126,7 +132,63 @@ describe("cardForAttention", () => {
         { kind: "place", label: "Mac mini" },
         { kind: "risk", label: "High risk" },
       ],
-      primary: { label: "Review", action: { type: "open-session", taskId: "t1" } },
+      // Review shows the approval's own dialog here; the session stays one click away.
+      primary: {
+        label: "Review",
+        action: { type: "review-approval", approvalId: "a1", taskId: "t1" },
+      },
+      secondary: { label: "Open session", action: { type: "open-session", taskId: "t1" } },
+    });
+  });
+
+  it("answers a question with plain options right on the card", () => {
+    const question = (choices?: AttentionItem["choices"]) =>
+      item("question:q1", {
+        kind: "question",
+        state: "Question",
+        title: "Which region should I deploy to?",
+        taskId: "t5",
+        ref: { type: "input_request", requestId: "q1", taskId: "t5" },
+        ...(choices ? { choices } : {}),
+      });
+    const card = cardForAttention(
+      question({
+        questionId: "region",
+        options: [{ label: "us-east", description: "Closest to most users" }, { label: "eu-west" }],
+      }),
+      NOW,
+    );
+    expect(card?.choices).toEqual([
+      {
+        label: "us-east",
+        hint: "Closest to most users",
+        action: {
+          type: "answer-question",
+          requestId: "q1",
+          questionId: "region",
+          optionLabel: "us-east",
+        },
+      },
+      {
+        label: "eu-west",
+        action: {
+          type: "answer-question",
+          requestId: "q1",
+          questionId: "region",
+          optionLabel: "eu-west",
+        },
+      },
+    ]);
+    expect(card?.primary).toEqual({
+      label: "Open session",
+      action: { type: "open-session", taskId: "t5" },
+    });
+    // Without plain options it is answered in the session, as before.
+    const plain = cardForAttention(question(), NOW);
+    expect(plain?.choices).toBeUndefined();
+    expect(plain?.primary).toEqual({
+      label: "Answer",
+      action: { type: "open-session", taskId: "t5" },
     });
   });
 

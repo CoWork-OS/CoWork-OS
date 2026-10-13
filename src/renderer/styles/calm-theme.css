@@ -1736,6 +1736,18 @@ html.visual-calm .calm-today-card-error {
   color: var(--calm-warning-text);
 }
 
+/* A question's options, answered right on the card. */
+html.visual-calm .calm-today-card-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+html.visual-calm .calm-today-card-choices + .calm-today-card-actions {
+  margin-top: 10px;
+}
+
 html.visual-calm .calm-today-card-actions {
   display: flex;
   flex-wrap: wrap;

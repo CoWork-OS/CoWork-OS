@@ -51,9 +51,15 @@ interface CalmHomeTodayProps {
     | "snoozeSuggestion"
     | "completeCommitment"
     | "undoMemoryChange"
+    | "answerQuestion"
     | "resolve"
   >;
   onOpenSession: (taskId: string) => void;
+  /**
+   * Shows an approval's own review dialog over Today. False when the app doesn't hold the
+   * approval (for example after a reload), and the card opens the session instead.
+   */
+  onReviewApproval?: (approvalId: string) => boolean;
   /** Opens an automation in the Automations view; absent where it can't be opened. */
   onOpenRoutine?: (routineId: string) => void;
   /** Starts a new task with this exact prompt; false when no task was created. */
@@ -78,6 +84,7 @@ export function CalmHomeToday({
   today,
   signals,
   onOpenSession,
+  onReviewApproval,
   onOpenRoutine,
   onStartTask,
   onDraftPrompt,
@@ -116,6 +123,11 @@ export function CalmHomeToday({
       onOpenSession(action.taskId);
       return;
     }
+    if (action.type === "review-approval") {
+      // The same review dialog the session shows, with the same checks; never a shortcut.
+      if (!onReviewApproval?.(action.approvalId)) onOpenSession(action.taskId);
+      return;
+    }
     if (action.type === "open-routine") {
       onOpenRoutine?.(action.routineId);
       return;
@@ -144,6 +156,29 @@ export function CalmHomeToday({
       } else if (action.type === "snooze-suggestion") {
         await signals.snoozeSuggestion(action.workspaceId, action.suggestionId);
         foldAway(card);
+      } else if (action.type === "answer-question") {
+        const status = await signals.answerQuestion(
+          action.requestId,
+          action.questionId,
+          action.optionLabel,
+        );
+        if (status === "not_found") {
+          setErrors((current) => ({
+            ...current,
+            [card.id]: "This question was already answered or closed.",
+          }));
+          return;
+        }
+        foldAway(card, {
+          id: `acted:${card.id}`,
+          title: card.title,
+          outcome: `Answered: ${action.optionLabel}`,
+          at: Date.now(),
+          // The row opens the session, where the agent goes on with the answer.
+          ...(card.primary.action.type === "open-session"
+            ? { taskId: card.primary.action.taskId }
+            : {}),
+        });
       } else if (action.type === "complete-commitment") {
         if (!(await signals.completeCommitment(action.commitmentId))) {
           throw new Error("not updated");
@@ -240,10 +275,26 @@ export function CalmHomeToday({
             {errors[card.id]}
           </p>
         )}
+        {card.choices && (
+          <div className="calm-today-card-choices" role="group" aria-label="Answer">
+            {card.choices.map((choice) => (
+              <button
+                key={choice.label}
+                type="button"
+                className="calm-today-button primary"
+                title={choice.hint}
+                disabled={isBusy}
+                onClick={() => void run(card, choice)}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="calm-today-card-actions">
           <button
             type="button"
-            className="calm-today-button primary"
+            className={card.choices ? "calm-today-button" : "calm-today-button primary"}
             disabled={isBusy || (card.primary.action.type === "open-routine" && !onOpenRoutine)}
             onClick={() => void run(card, card.primary)}
           >

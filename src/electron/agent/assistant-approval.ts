@@ -1,13 +1,11 @@
 import type { ApprovalType, InputRequest, RequestUserInputArgs } from "../../shared/types";
-import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../shared/approval-draft-presentation";
+import {
+  ASSISTANT_APPROVAL_QUESTION_ID,
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+} from "../../shared/approval-draft-presentation";
 
-/**
- * The desktop approval fallback is rendered as a task input card. Keeping a
- * stable question id lets recovery code distinguish an approval decision from
- * an ordinary `request_user_input` question without adding another durable
- * table or reviving the legacy approval modal.
- */
-export const ASSISTANT_APPROVAL_QUESTION_ID = "approval_decision";
+// Shared so the needs-you queue can tell approval decisions from ordinary questions.
+export { ASSISTANT_APPROVAL_QUESTION_ID };
 
 const HIGH_IMPACT_APPROVAL_TYPES = new Set<ApprovalType>([
   "delete_file",

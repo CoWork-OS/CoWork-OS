@@ -23,6 +23,15 @@ export interface HomeTodaySignals {
     workspaceId: string,
     changeId: string,
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Answers a single question with one of its options. "handled" and "duplicate" mean the
+   * answer is in; "not_found" means the question was already answered or closed.
+   */
+  answerQuestion: (
+    requestId: string,
+    questionId: string,
+    optionLabel: string,
+  ) => Promise<"handled" | "duplicate" | "not_found" | "in_progress">;
   /** Hides a card right away and, when given, records the row it leaves behind. */
   resolve: (cardId: string, row?: HomeTodayHandledRow) => void;
 }
@@ -61,6 +70,18 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
       : ({ ok: false, error: result?.error || "It could not be undone." } as const);
   }, []);
 
+  const answerQuestion = useCallback(
+    async (requestId: string, questionId: string, optionLabel: string) => {
+      const response = await window.electronAPI.respondToInputRequest({
+        requestId,
+        status: "submitted",
+        answers: { [questionId]: { optionLabel } },
+      });
+      return response.status;
+    },
+    [],
+  );
+
   return {
     attention: snapshot.items,
     failedSources: snapshot.failedSources,
@@ -70,6 +91,7 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     snoozeSuggestion,
     completeCommitment,
     undoMemoryChange,
+    answerQuestion,
     resolve,
   };
 }

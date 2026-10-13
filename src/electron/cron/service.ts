@@ -474,6 +474,18 @@ export class CronService {
         taskPrompt: input.taskPrompt,
         taskTitle: input.taskTitle,
         assignedAgentRoleId: input.assignedAgentRoleId,
+        // Access limits carried from the session that scheduled the job (only ever narrow).
+        // The rest of a caller's task config is not stored here.
+        ...(Array.isArray(input.taskAgentConfig?.inheritedAccessCeilingProfileIds) &&
+        input.taskAgentConfig.inheritedAccessCeilingProfileIds.length > 0
+          ? {
+              taskAgentConfig: {
+                inheritedAccessCeilingProfileIds: [
+                  ...input.taskAgentConfig.inheritedAccessCeilingProfileIds,
+                ],
+              },
+            }
+          : {}),
         runMode: input.runMode,
         targetTaskId: input.targetTaskId,
         workflowRoutineId: input.workflowRoutineId,
@@ -1250,6 +1262,13 @@ export class CronService {
           ...job.taskAgentConfig,
           ...preparation?.agentConfig,
           ...(job.accessProfileId ? { accessProfileId: job.accessProfileId } : {}),
+          // Access limits carried from the session that scheduled the job always apply.
+          ...(job.taskAgentConfig?.inheritedAccessCeilingProfileIds
+            ? {
+                inheritedAccessCeilingProfileIds:
+                  job.taskAgentConfig.inheritedAccessCeilingProfileIds,
+              }
+            : {}),
           // Profile-selected jobs are governed by the profile resolver. Only
           // legacy jobs without a named profile use the old shell override.
           ...(job.accessProfileId === undefined &&

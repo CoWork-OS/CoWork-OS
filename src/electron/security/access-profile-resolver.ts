@@ -7,7 +7,7 @@ import type {
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
   getLegacyPermissionModeForAccessProfile,
-  isAccessProfileAtMostPrivileged,
+  accessCeilingsOf,
   narrowAccessProfileToCeiling,
   hasAccessProfileFilesystemScope,
   hasAccessProfileScope,
@@ -41,6 +41,13 @@ export interface EffectiveAccessProfile {
   adminConstrained: boolean;
   /** True when the requested named profile could not be resolved safely. */
   profileUnavailable: boolean;
+  /**
+   * True when an agent's access limit applies. Its definition is then authoritative even
+   * for an older task without a named profile, so the limit's own rules reach the workspace.
+   */
+  accessLimited?: boolean;
+  /** True when the task can't run because an access limit is missing or can't be combined. */
+  accessLimitUnavailable?: boolean;
   /** True when a named profile has a finite filesystem or domain boundary. */
   profileScoped: boolean;
   /** True when a named profile has a finite filesystem boundary. */
@@ -241,29 +248,44 @@ export function resolveEffectiveAccessProfile(
     constraintReason = "Requested permission mode is blocked by administrator policy.";
   }
 
-  // An agent's "May do alone" limit, stamped on its tasks by the daemon, is a ceiling: the
-  // task keeps its own profile when that is within the limit and is narrowed otherwise. A
-  // limit that no longer resolves fails closed, like a missing task profile.
-  const ceilingId = input.task?.agentConfig?.accessCeilingProfileId;
-  if (typeof ceilingId === "string" && ceilingId.trim()) {
-    const ceiling = resolveAccessProfileDefinitionWithStatus(
-      ceilingId.trim(),
-      settings.accessProfiles || [],
-    );
-    if (ceiling.status !== "resolved" || !ceiling.definition) {
+  // An agent's "May do alone" limit, stamped on its tasks by the daemon, and the limits a
+  // task inherits from the sessions that started it are ceilings: the task keeps its own
+  // profile when it is within all of them and is narrowed otherwise, never widened. A limit
+  // that does not resolve, is malformed, or can't be combined with the task's folder or site
+  // rules fails closed, like a missing task profile.
+  const ceilings = accessCeilingsOf(input.task?.agentConfig);
+  let accessLimited = false;
+  let accessLimitUnavailable = false;
+  for (const rawCeiling of ceilings) {
+    accessLimited = true;
+    const ceilingId = typeof rawCeiling === "string" ? rawCeiling.trim() : "";
+    const ceiling = ceilingId
+      ? resolveAccessProfileDefinitionWithStatus(ceilingId, settings.accessProfiles || [])
+      : undefined;
+    const narrowed =
+      ceiling?.status === "resolved" && ceiling.definition
+        ? narrowAccessProfileToCeiling(definition, ceiling.definition)
+        : null;
+    if (!narrowed) {
       definition = unavailableProfileForId(
-        ceiling.profileId,
-        ceiling.status === "resolved" ? "missing" : ceiling.status,
+        ceilingId || "invalid-access-limit",
+        ceiling?.status === "invalid" ? "invalid" : "missing",
       );
-      permissionMode = getLegacyPermissionModeForAccessProfile(definition);
       profileUnavailable = true;
+      accessLimitUnavailable = true;
       adminConstrained = true;
-      constraintReason = [constraintReason, "This agent's access limit is no longer available."]
+      constraintReason = [
+        constraintReason,
+        ceiling?.status === "resolved"
+          ? "This agent's access limit and the session's access have different folder or site rules, so they can't be combined safely."
+          : "This agent's access limit is no longer available.",
+      ]
         .filter(Boolean)
         .join(" ");
-    } else if (!isAccessProfileAtMostPrivileged(definition, ceiling.definition)) {
-      definition = narrowAccessProfileToCeiling(definition, ceiling.definition);
-      permissionMode = getLegacyPermissionModeForAccessProfile(definition);
+      break;
+    }
+    if (narrowed !== definition) {
+      definition = narrowed;
       adminConstrained = true;
       constraintReason = [
         constraintReason,
@@ -273,6 +295,7 @@ export function resolveEffectiveAccessProfile(
         .join(" ");
     }
   }
+  if (accessLimited) permissionMode = getLegacyPermissionModeForAccessProfile(definition);
 
   // Researcher/verifier roles and internal read-only helpers are a separate
   // trust boundary from the task that requested them. Check the persisted role
@@ -352,6 +375,8 @@ export function resolveEffectiveAccessProfile(
         workspacePermissions.network === true),
     adminConstrained,
     profileUnavailable,
+    ...(accessLimited ? { accessLimited: true } : {}),
+    ...(accessLimitUnavailable ? { accessLimitUnavailable: true } : {}),
     profileScoped: hasAccessProfileScope(definition),
     filesystemScoped: hasAccessProfileFilesystemScope(definition),
     ...(constraintReason ? { constraintReason } : {}),
@@ -375,7 +400,9 @@ export function applyAccessProfileToWorkspace(
   // The resolved definition is the authority for a named profile. Do not
   // derive this from PermissionMode: mode mapping is retained only for legacy
   // callers and would make a custom `never` profile depend on a retired mode.
-  const namedProfile = Boolean(profile.requestedId || profile.profileUnavailable);
+  const namedProfile = Boolean(
+    profile.requestedId || profile.profileUnavailable || profile.accessLimited,
+  );
   // Both dimensions must line up before the filesystem boundary and the
   // process sandbox come off: a `danger-full-access` profile that still asks
   // for approval on request has chosen to keep the external-file prompt, and

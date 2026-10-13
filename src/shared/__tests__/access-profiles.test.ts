@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   BUILTIN_ACCESS_PROFILE_IDS,
+  accessCeilingsOf,
+  inheritableAccessCeilings,
   isAccessProfileAtMostPrivileged,
+  isWithinAccessCeiling,
   narrowAccessProfileToCeiling,
   resolveAccessProfileDefinition,
   validateAccessProfileInheritance,
@@ -251,37 +254,83 @@ describe("narrowing to an agent's access limit", () => {
   const ask = resolveAccessProfileDefinition(BUILTIN_ACCESS_PROFILE_IDS.askForApproval);
   const approve = resolveAccessProfileDefinition(BUILTIN_ACCESS_PROFILE_IDS.approveForMe);
   const full = resolveAccessProfileDefinition(BUILTIN_ACCESS_PROFILE_IDS.fullAccess);
+  const within = (profile: AccessProfileDefinition | null, outer: AccessProfileDefinition) =>
+    Boolean(profile && isWithinAccessCeiling(profile, outer));
 
-  it("keeps a profile already within the limit", () => {
+  it("keeps a profile within the limit, and uses a limit within the profile", () => {
     expect(narrowAccessProfileToCeiling(ask, approve)).toBe(ask);
-    expect(narrowAccessProfileToCeiling(approve, approve)).toBe(approve);
+    expect(narrowAccessProfileToCeiling(full, ask)).toBe(ask);
   });
 
-  it("narrows a wider profile to the limit, never widening a dimension", () => {
-    const narrowed = narrowAccessProfileToCeiling(full, ask);
-    expect(narrowed).toMatchObject({
-      id: ask.id,
-      sandbox: ask.sandbox,
-      approval: ask.approval,
-      network: ask.network,
-      reviewer: ask.reviewer,
-    });
-    expect(isAccessProfileAtMostPrivileged(narrowed, ask)).toBe(true);
-    // A profile narrower in one dimension keeps that dimension.
+  it("takes the stricter side of each dimension, never more than either", () => {
     const offline: AccessProfileDefinition = { ...full, id: "offline", network: "disabled" };
-    expect(narrowAccessProfileToCeiling(offline, approve).network).toBe("disabled");
+    const narrowed = narrowAccessProfileToCeiling(offline, approve);
+    expect(narrowed).toMatchObject({ sandbox: "workspace-write", network: "disabled" });
+    expect(within(narrowed, approve)).toBe(true);
+    expect(within(narrowed, offline)).toBe(true);
   });
 
-  it("uses the limit's scope as the outer bound", () => {
-    const scopedLimit: AccessProfileDefinition = {
+  it("keeps a no-asking boundary that denies, instead of letting the user approve", () => {
+    // `never` under a sandbox turns every ask into a denial: stricter than asking.
+    const locked: AccessProfileDefinition = {
+      ...ask,
+      id: "locked",
+      sandbox: "read-only",
+      approval: "never",
+      reviewer: "none",
+    };
+    const narrowed = narrowAccessProfileToCeiling(locked, ask);
+    expect(narrowed?.approval).toBe("never");
+    expect(narrowed?.sandbox).toBe("read-only");
+    expect(within(narrowed, ask)).toBe(true);
+    expect(within(narrowed, locked)).toBe(true);
+  });
+
+  it("applies a limit's shell deny even to a profile otherwise within it", () => {
+    const noShell: AccessProfileDefinition = { ...approve, id: "no-shell", shellAccess: false };
+    expect(isWithinAccessCeiling(ask, noShell)).toBe(false);
+    expect(narrowAccessProfileToCeiling(ask, noShell)?.shellAccess).toBe(false);
+  });
+
+  it("keeps a session's own deny rules under a limit without rules", () => {
+    const guarded: AccessProfileDefinition = {
+      ...full,
+      id: "guarded",
+      filesystemRules: [{ path: "secrets", access: "deny" }],
+    };
+    const narrowed = narrowAccessProfileToCeiling(guarded, ask);
+    expect(narrowed?.filesystemRules).toEqual([{ path: "secrets", access: "deny" }]);
+    expect(narrowed).toMatchObject({ sandbox: "workspace-write", approval: "on-request" });
+    expect(within(narrowed, ask)).toBe(true);
+    expect(within(narrowed, guarded)).toBe(true);
+  });
+
+  it("fails closed when both sides have their own folder rules", () => {
+    const docsOnly: AccessProfileDefinition = {
       ...approve,
       id: "docs-only",
       label: "Docs only",
-      workspaceRoots: ["docs"],
+      filesystemRules: [{ path: "docs", access: "write" }],
     };
-    const narrowed = narrowAccessProfileToCeiling(full, scopedLimit);
-    expect(narrowed.workspaceRoots).toEqual(["docs"]);
-    expect(narrowed.sandbox).toBe("workspace-write");
-    expect(isAccessProfileAtMostPrivileged(narrowed, scopedLimit)).toBe(true);
+    const guarded: AccessProfileDefinition = {
+      ...full,
+      id: "guarded",
+      filesystemRules: [{ path: "secrets", access: "deny" }],
+    };
+    expect(narrowAccessProfileToCeiling(guarded, docsOnly)).toBeNull();
+  });
+
+  it("lists a task's limits, and turns a malformed one into a name nothing resolves", () => {
+    expect(
+      accessCeilingsOf({ accessCeilingProfileId: "a", inheritedAccessCeilingProfileIds: ["b"] }),
+    ).toEqual(["a", "b"]);
+    expect(accessCeilingsOf({ inheritedAccessCeilingProfileIds: "x" })).toEqual(["x"]);
+    expect(
+      inheritableAccessCeilings({
+        accessCeilingProfileId: " a ",
+        inheritedAccessCeilingProfileIds: ["a", 7 as unknown as string],
+      }),
+    ).toEqual(["a", "invalid-access-limit"]);
+    expect(inheritableAccessCeilings(undefined)).toEqual([]);
   });
 });

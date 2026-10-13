@@ -38,6 +38,43 @@ describe("AgentDaemon.createChildTask", () => {
     },
   );
 
+  it("keeps a child within every access limit its parent works under", async () => {
+    const taskRepo = {
+      findById: vi.fn(() => ({
+        id: "parent",
+        status: "executing",
+        agentConfig: {
+          accessCeilingProfileId: "ask_for_approval",
+          inheritedAccessCeilingProfileIds: ["approve_for_me"],
+        },
+      })),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({ id: "child", ...task })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+    } as Any;
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Helper",
+      prompt: "Help",
+      workspaceId: "ws",
+      parentTaskId: "parent",
+      agentType: "sub",
+      // A caller can't lift the limits by passing its own.
+      agentConfig: {
+        accessCeilingProfileId: "full_access",
+        inheritedAccessCeilingProfileIds: [],
+      } as Any,
+    });
+    expect(child.agentConfig.accessCeilingProfileId).toBeUndefined();
+    expect(child.agentConfig.inheritedAccessCeilingProfileIds).toEqual([
+      "ask_for_approval",
+      "approve_for_me",
+    ]);
+  });
+
   it.each([false, undefined, true])(
     "inherits parent channel sender evidence without child override (%s)",
     async (owner) => {

@@ -663,44 +663,118 @@ const APPROVAL_ORDER = ["untrusted", "on-request", "never"] as const;
 const NETWORK_ORDER = ["disabled", "on-request", "enabled"] as const;
 const REVIEWER_ORDER = ["user", "auto-review", "none"] as const;
 
+/**
+ * How much an approval setting lets through, in the profile's own context. `never` means
+ * "allow without asking" only with the unsandboxed full-access boundary; with any other
+ * sandbox every ask becomes a denial (PermissionEngine), which is the strictest setting.
+ */
+function approvalLatitude(profile: AccessProfileDefinition): number {
+  if (profile.approval === "never" && profile.sandbox !== "danger-full-access") return -1;
+  return accessDimensionRank(profile.approval, APPROVAL_ORDER);
+}
+
+/**
+ * Whether `profile` grants no more than `ceiling` (an agent's "May do alone" limit) in any
+ * dimension: sandbox, approval (read in each profile's own context), network, reviewer, the
+ * legacy shell deny, and filesystem/domain scope including the ceiling's deny rules.
+ */
+export function isWithinAccessCeiling(
+  profile: AccessProfileDefinition,
+  ceiling: AccessProfileDefinition,
+): boolean {
+  return (
+    accessDimensionRank(profile.sandbox, SANDBOX_ORDER) <=
+      accessDimensionRank(ceiling.sandbox, SANDBOX_ORDER) &&
+    approvalLatitude(profile) <= approvalLatitude(ceiling) &&
+    accessDimensionRank(profile.network, NETWORK_ORDER) <=
+      accessDimensionRank(ceiling.network, NETWORK_ORDER) &&
+    accessDimensionRank(profile.reviewer, REVIEWER_ORDER) <=
+      accessDimensionRank(ceiling.reviewer, REVIEWER_ORDER) &&
+    (ceiling.shellAccess !== false || profile.shellAccess === false) &&
+    isScopedProfileAtMostPrivileged(profile, ceiling)
+  );
+}
+
 function lessPrivileged<T extends string>(a: T, b: T, order: readonly string[]): T {
   return accessDimensionRank(a, order) <= accessDimensionRank(b, order) ? a : b;
 }
 
 /**
- * Narrows a profile so it grants no more than `ceiling` (an agent's "May do alone" limit).
- * A profile already within the ceiling is returned as is. Otherwise each dimension takes the
- * less privileged of the two; the ceiling's filesystem and domain scope is the outer bound,
- * and the profile keeps its own scope only when the ceiling has none. If the result still
- * isn't within the ceiling (for example two different scopes), the ceiling itself is used.
- * Never widens anything.
+ * The most a task may do under an agent's limit: never more than the task's own profile and
+ * never more than the limit.
+ * - A profile within the limit is kept as is; a limit within the profile is used as is.
+ * - Otherwise each dimension takes the more restrictive of the two, and the filesystem and
+ *   domain rules come from whichever side has them (so a session's own deny rules stay).
+ * - When both sides have rules, or the combination isn't within both, there is no safe
+ *   combination: returns null and the caller fails closed.
  */
 export function narrowAccessProfileToCeiling(
   profile: AccessProfileDefinition,
   ceiling: AccessProfileDefinition,
-): AccessProfileDefinition {
-  if (isAccessProfileAtMostPrivileged(profile, ceiling)) return profile;
-  const scopeSource = hasAccessProfileScope(ceiling) ? ceiling : profile;
+): AccessProfileDefinition | null {
+  if (isWithinAccessCeiling(profile, ceiling)) return profile;
+  if (isWithinAccessCeiling(ceiling, profile)) return ceiling;
+  const profileScoped = hasAccessProfileScope(profile);
+  const ceilingScoped = hasAccessProfileScope(ceiling);
+  if (profileScoped && ceilingScoped) return null;
+  const scopeSource = profileScoped ? profile : ceilingScoped ? ceiling : undefined;
   const narrowed: AccessProfileDefinition = {
     id: ceiling.id,
     label: ceiling.label,
     description: ceiling.description,
     sandbox: lessPrivileged(profile.sandbox, ceiling.sandbox, SANDBOX_ORDER),
-    approval: lessPrivileged(profile.approval, ceiling.approval, APPROVAL_ORDER),
+    // Each side's approval is read in its own context (see approvalLatitude); the stricter
+    // one keeps its meaning under the narrowed sandbox, which is never wider than its own.
+    approval:
+      approvalLatitude(profile) <= approvalLatitude(ceiling) ? profile.approval : ceiling.approval,
     network: lessPrivileged(profile.network, ceiling.network, NETWORK_ORDER),
     reviewer: lessPrivileged(profile.reviewer, ceiling.reviewer, REVIEWER_ORDER),
     ...(profile.shellAccess === false || ceiling.shellAccess === false
       ? { shellAccess: false }
       : {}),
-    ...(scopeSource.workspaceRoots ? { workspaceRoots: scopeSource.workspaceRoots } : {}),
-    ...(scopeSource.filesystemRules ? { filesystemRules: scopeSource.filesystemRules } : {}),
-    ...(scopeSource.domainRules ? { domainRules: scopeSource.domainRules } : {}),
+    ...(scopeSource?.workspaceRoots ? { workspaceRoots: scopeSource.workspaceRoots } : {}),
+    ...(scopeSource?.filesystemRules ? { filesystemRules: scopeSource.filesystemRules } : {}),
+    ...(scopeSource?.domainRules ? { domainRules: scopeSource.domainRules } : {}),
   };
   // A scoped boundary needs the sandboxed execution path (see the resolver).
   if (narrowed.sandbox === "danger-full-access" && hasAccessProfileScope(narrowed)) {
     narrowed.sandbox = "workspace-write";
   }
-  return isAccessProfileAtMostPrivileged(narrowed, ceiling) ? narrowed : ceiling;
+  return isWithinAccessCeiling(narrowed, ceiling) && isWithinAccessCeiling(narrowed, profile)
+    ? narrowed
+    : null;
+}
+
+/**
+ * Every access limit a task works under: its own agent's, then those inherited from the
+ * sessions that started it. A malformed entry is kept as is so the resolver fails closed.
+ */
+export function accessCeilingsOf(
+  config:
+    | { accessCeilingProfileId?: unknown; inheritedAccessCeilingProfileIds?: unknown }
+    | undefined,
+): unknown[] {
+  if (!config) return [];
+  const own = config.accessCeilingProfileId === undefined ? [] : [config.accessCeilingProfileId];
+  const inherited = Array.isArray(config.inheritedAccessCeilingProfileIds)
+    ? config.inheritedAccessCeilingProfileIds
+    : config.inheritedAccessCeilingProfileIds === undefined
+      ? []
+      : [config.inheritedAccessCeilingProfileIds];
+  return [...own, ...inherited];
+}
+
+/** The well-formed limits a child or scheduled task inherits from the task that started it. */
+export function inheritableAccessCeilings(
+  config:
+    | { accessCeilingProfileId?: unknown; inheritedAccessCeilingProfileIds?: unknown }
+    | undefined,
+): string[] {
+  const ids = accessCeilingsOf(config).map((value) =>
+    typeof value === "string" ? value.trim() : "",
+  );
+  // A malformed entry becomes a name no profile has, so the child fails closed too.
+  return Array.from(new Set(ids.map((id) => id || "invalid-access-limit")));
 }
 
 export function getLegacyPermissionModeForAccessProfile(

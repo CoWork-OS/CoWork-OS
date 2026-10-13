@@ -2356,6 +2356,12 @@ export interface AgentConfig {
    */
   accessCeilingProfileId?: AccessProfileId;
   /**
+   * Access limits inherited from the sessions that started this one (sub-agents, scheduled
+   * runs an agent created). Set when the task is created and never removed by its own role;
+   * every one of them narrows the task's profile.
+   */
+  inheritedAccessCeilingProfileIds?: AccessProfileId[];
+  /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
    * - 2: draft + refine

@@ -184,6 +184,7 @@ import {
   type PendingBotHandoff,
 } from "../../shared/bot-handoff";
 import {
+  inheritableAccessCeilings,
   BUILTIN_ACCESS_PROFILE_IDS,
   hasAccessProfileScope,
   isAccessProfileAtMostPrivileged,
@@ -392,6 +393,10 @@ export const BOT_HANDOFF_REPLY_TIMEOUT_MS = 120_000;
 function hashBotMessage(message: string): string {
   return crypto.createHash("sha256").update(message, "utf8").digest("hex");
 }
+
+/** Shown when an agent's "May do alone" limit stops a session from running. */
+const ACCESS_LIMIT_UNAVAILABLE_MESSAGE =
+  "This agent's access limit is unavailable or can't be combined with this session's access. Change it in Team before continuing.";
 
 const FORK_REPLAY_EVENT_TYPES = new Set([
   "user_message",
@@ -1673,10 +1678,17 @@ export class AgentDaemon extends EventEmitter {
    * refreshes their executors, so running work follows the new limit right away.
    */
   refreshAgentRoleAccessCeiling(roleId: string): void {
-    this.activeTasks.forEach((_cached, taskId) => {
+    this.activeTasks.forEach((cached, taskId) => {
       const task = this.taskRepo.findById(taskId);
       if (!task || task.assignedAgentRoleId !== roleId) return;
       this.applyAgentRoleOverrides(task);
+      // The executor keeps its own copy of the task's config; give it the new limit too.
+      const stored = this.taskRepo.findById(taskId);
+      try {
+        cached.executor?.updateTaskAgentConfig?.(stored?.agentConfig);
+      } catch (error) {
+        console.warn(`[AgentDaemon] Failed to update the access limit for task ${taskId}:`, error);
+      }
     });
     this.refreshActiveExecutorsForAccessProfiles();
   }
@@ -3029,8 +3041,9 @@ export class AgentDaemon extends EventEmitter {
         adminPolicies: loadPolicies(),
       });
       if (effectiveAccessProfile.profileUnavailable) {
-        const errorMessage =
-          "The selected access profile is unavailable. Choose a valid profile before running this task.";
+        const errorMessage = effectiveAccessProfile.accessLimitUnavailable
+          ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+          : "The selected access profile is unavailable. Choose a valid profile before running this task.";
         this.updateTask(executionTask.id, {
           status: "paused",
           terminalStatus: "needs_user_action",
@@ -5731,6 +5744,13 @@ export class AgentDaemon extends EventEmitter {
           next.permissionMode = accessProfileInheritance.fallbackPermissionMode;
         }
       }
+      // A child works under every access limit its parent does: the parent's own agent limit
+      // and the ones the parent inherited. Caller-supplied limits are dropped first, so only
+      // the parent's stored ones count; the child's own role adds its limit when it starts.
+      delete next.accessCeilingProfileId;
+      delete next.inheritedAccessCeilingProfileIds;
+      const inheritedCeilings = inheritableAccessCeilings(parent?.agentConfig);
+      if (inheritedCeilings.length > 0) next.inheritedAccessCeilingProfileIds = inheritedCeilings;
       // ACP has its own execution and consent boundary. A native CoWork
       // profile must not silently promote the adapter to approve-all.
       return Object.keys(next).length > 0 ? next : undefined;
@@ -16354,8 +16374,9 @@ export class AgentDaemon extends EventEmitter {
       adminPolicies: loadPolicies(),
     });
     if (effectiveAccessProfile.profileUnavailable) {
-      const errorMessage =
-        "The selected access profile is unavailable. Choose a valid profile before continuing.";
+      const errorMessage = effectiveAccessProfile.accessLimitUnavailable
+        ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+        : "The selected access profile is unavailable. Choose a valid profile before continuing.";
       this.updateTask(taskId, {
         status: "paused",
         terminalStatus: "needs_user_action",
@@ -17031,7 +17052,9 @@ export class AgentDaemon extends EventEmitter {
     });
     if (effectiveAccessProfile.profileUnavailable) {
       throw new Error(
-        "The selected access profile is unavailable. Choose a valid profile before continuing.",
+        effectiveAccessProfile.accessLimitUnavailable
+          ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+          : "The selected access profile is unavailable. Choose a valid profile before continuing.",
       );
     }
 

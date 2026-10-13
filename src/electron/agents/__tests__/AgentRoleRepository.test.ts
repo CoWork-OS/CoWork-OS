@@ -127,6 +127,26 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
     });
   });
 
+  it("stores and clears an agent's access limit", () => {
+    const created = agentRoleRepo.create({
+      name: "limited-bot",
+      displayName: "Limited bot",
+      capabilities: ["code"],
+    });
+    expect(created.accessProfileId).toBeUndefined();
+    expect(
+      agentRoleRepo.update({ id: created.id, accessProfileId: "ask_for_approval" })
+        ?.accessProfileId,
+    ).toBe("ask_for_approval");
+    // Other updates leave the limit alone; null clears it.
+    expect(agentRoleRepo.update({ id: created.id, displayName: "Renamed" })?.accessProfileId).toBe(
+      "ask_for_approval",
+    );
+    expect(
+      agentRoleRepo.update({ id: created.id, accessProfileId: null })?.accessProfileId,
+    ).toBeUndefined();
+  });
+
   it("deactivates custom roles without breaking historical task references", () => {
     const db = manager.getDatabase();
     const workspaceId = "workspace-for-role-delete";

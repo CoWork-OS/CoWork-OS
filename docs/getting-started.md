@@ -340,6 +340,7 @@ CoWork samples the video into representative still frames for image-capable mode
 
 - **Icon rail**: **Home**, **Inbox**, **Bots** and **Automations**, plus **Library** in the Calm visual style. **More** holds Devices, Mission Control, Add tools and, in Calm, Build; pin any of them to the rail. Use Cmd/Ctrl+number to jump to a rail item, and drag or Alt+Up/Down to reorder. **Settings** is at the bottom of the rail and opens inside the app window.
 - **Session panel**: **New session**, an always-visible search (Cmd/Ctrl+K), **Running** and **Needs you** filters, sessions grouped by day (Today, Yesterday, and so on), and a collapsed **Automated sessions** section for scheduled, hook, API and heartbeat runs.
+  - In the Calm visual style the panel keeps pinned items, your projects and the five most recent other sessions, then **All work** opens Work, which lists every session, automated ones included. Searching or filtering the panel still lists everything.
 - **Notices**: one dismissable notice area above Automated sessions, for tips such as the use-case gallery.
 
 ### Task View (Right)

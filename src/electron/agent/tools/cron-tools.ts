@@ -5,6 +5,7 @@
  */
 
 import { Workspace } from "../../../shared/types";
+import { inheritableAccessCeilings } from "../../../shared/access-profiles";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { getCronService } from "../../cron";
@@ -176,6 +177,23 @@ export class CronTools {
           }
         : undefined;
 
+    // A scheduled run works under every access limit the scheduling session does, and stays
+    // its agent's work, so the agent's current limit applies when it runs as well.
+    const inheritedCeilings = inheritableAccessCeilings(sourceTask?.agentConfig);
+    const sourceRoleId =
+      typeof sourceTask?.assignedAgentRoleId === "string" && sourceTask.assignedAgentRoleId.trim()
+        ? sourceTask.assignedAgentRoleId.trim()
+        : undefined;
+    const taskAgentConfig =
+      inheritedLegacyAgentConfig || inheritedCeilings.length > 0
+        ? {
+            ...(inheritedLegacyAgentConfig ?? {}),
+            ...(inheritedCeilings.length > 0
+              ? { inheritedAccessCeilingProfileIds: inheritedCeilings }
+              : {}),
+          }
+        : undefined;
+
     // Create the job
     const jobCreate: CronJobCreate = {
       name: params.name,
@@ -187,7 +205,8 @@ export class CronTools {
       taskPrompt: params.prompt,
       taskTitle: params.name,
       ...(inheritedAccessProfileId ? { accessProfileId: inheritedAccessProfileId } : {}),
-      ...(inheritedLegacyAgentConfig ? { taskAgentConfig: inheritedLegacyAgentConfig } : {}),
+      ...(taskAgentConfig ? { taskAgentConfig } : {}),
+      ...(sourceRoleId ? { assignedAgentRoleId: sourceRoleId } : {}),
       runMode:
         params.target === "current_thread" || params.target === "task"
           ? "thread_follow_up"

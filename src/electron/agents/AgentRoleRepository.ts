@@ -602,6 +602,10 @@ export class AgentRoleStore {
       fields.push("autonomy_level = ?");
       values.push(request.autonomyLevel);
     }
+    if (request.accessProfileId !== undefined) {
+      fields.push("access_profile_id = ?");
+      values.push(request.accessProfileId || null);
+    }
     if (request.soul !== undefined) {
       fields.push("soul = ?");
       values.push(request.soul);
@@ -941,6 +945,10 @@ export class AgentRoleStore {
       updatedAt: row.updated_at,
       // Automation fields
       autonomyLevel: (row.autonomy_level as AgentAutonomyLevel) || "specialist",
+      accessProfileId:
+        typeof row.access_profile_id === "string" && row.access_profile_id.trim()
+          ? row.access_profile_id.trim()
+          : undefined,
       soul: row.soul || undefined,
       heartbeatEnabled: row.heartbeat_enabled === 1,
       heartbeatIntervalMinutes: row.heartbeat_interval_minutes || 15,

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 import { MCTaskDetail } from "./MCTaskDetail";
-import { MCAgentDetail } from "./MCAgentDetail";
 import { MCIssueDetail } from "./MCIssueDetail";
 import type { MissionControlData } from "./useMissionControlData";
 
@@ -22,8 +21,7 @@ export function MCDetailPanel({ data }: MCDetailPanelProps) {
 
   if (!detailPanel) return null;
 
-  const typeLabel =
-    detailPanel.kind === "task" ? "Task" : detailPanel.kind === "agent" ? "Agent" : "Issue";
+  const typeLabel = detailPanel.kind === "task" ? "Task" : "Issue";
 
   return (
     <aside className="mc-v2-detail-panel">
@@ -41,9 +39,6 @@ export function MCDetailPanel({ data }: MCDetailPanelProps) {
       </div>
       <div className="mc-v2-detail-body">
         {detailPanel.kind === "task" && <MCTaskDetail data={data} taskId={detailPanel.taskId} />}
-        {detailPanel.kind === "agent" && (
-          <MCAgentDetail data={data} agentId={detailPanel.agentId} />
-        )}
         {detailPanel.kind === "issue" && (
           <MCIssueDetail data={data} issueId={detailPanel.issueId} />
         )}

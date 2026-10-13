@@ -8,13 +8,13 @@ Open **Mission Control** from **More** on the left icon rail (in both the standa
 
 Mission Control observes and configures tasks; it is not a second permission
 plane. When creating or editing an agent or automation, review the attached
-[access profile](access-profiles.md) alongside its autonomy, tool, connector,
+[access profile](access-profiles.md) alongside its access limit, tool, connector,
 and workspace settings. Planner, Heartbeat, and dispatch policies can narrow
 or defer work, but they cannot widen the profile or revive an unavailable one.
 
 <p align="center">
   <img src="../resources/branding/images/cowork-os-8.webp" alt="Mission Control board" width="700">
-  <br><em>Mission Control brings global runtime queue state, assigned board work, live feed, and review state into one operations view.</em>
+  <br><em>Mission Control brings global runtime queue state, assigned board work, the evidence feed, and review state into one operations view.</em>
 </p>
 
 Mission Control now sits alongside the other operational entry points:
@@ -26,21 +26,22 @@ Mission Control now sits alongside the other operational entry points:
 
 ## Layout
 
-Mission Control has two main areas:
+Mission Control has a header, a row of tabs and the selected tab's view. Selecting a task or an issue opens its details in a panel on the right; close it with the X or Esc.
 
-| Panel                      | Purpose                                                                                                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Center — Mission Board** | Kanban board with 5 columns for tracked work lifecycle management                                                                          |
-| **Right — Feed & Details** | Live activity feed and selected task details with comments/mentions                                                                        |
+| Tab               | What it shows                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| **Brief**         | The command brief: headline numbers, the global runtime queue, what needs you and what Mission Control flagged |
+| **Work**          | The Mission Board: tracked work in five columns, with filters                                                   |
+| **Intelligence**  | Learnings, awareness and reviews, read-only                                                                     |
+| **Evidence Feed** | Grouped activity with its evidence, filterable by category, status and agent                                    |
+| **Operations**    | Company operations, including the Core Harness and the Strategic Planner; shown only when a company exists     |
 
-The header bar shows workspace selector, current time, and operational counters grouped by source:
+The header has the workspace selector (**All Workspaces** by default), **Refresh**, **Agent teams**, the agents button, a clock, and operational counters grouped by source:
 
 - **Heartbeat agents**: enabled background roles that may be monitoring or idle.
 - **Global runtime queue**: tasks currently running or waiting for an execution slot. This matches the chat/right-panel queue and can include work from another workspace.
 - **Board work**: open work items tracked on the Mission Control board.
 - **Mentions**: pending human or agent mentions.
-
-On **Brief**, **need you** counts the approvals, questions and paused sessions waiting on you in the selected workspace (and agent, when one is selected). The **Needs You** section lists them, and each opens where it is decided. Today, Bots and the bell count the same decisions; Mission Control's own flags are listed under **Flagged**.
 
 The header's **Bots** button opens the Bots page, where agents are created and configured. In the Calm theme it reads **Team** and opens Team, which shows each agent with what it is doing, what it waits on you for and where it runs.
 
@@ -50,39 +51,24 @@ These numbers can differ. For example, two Heartbeat agents can be enabled while
 
 ## Agents
 
-Mission Control doesn't keep its own agent list. Agents are created and configured on the Bots page: the header's **Bots** button, or **Team** in the Calm theme, which also shows what each agent is doing, what it is waiting on you for, its seniority (lead, specialist or intern, which only paces its heartbeat) and **May do alone**, its [access limit](access-profiles.md#agent-access-limits). On the board, **Wake owner** on a card runs the assigned agent's heartbeat review now.
+Mission Control doesn't keep its own agent list. Agents are created on the Bots page and configured there or in Team (the header's **Bots** button, or **Team** in the Calm theme):
+
+- **Team** shows what each agent is doing, what it is waiting on you for, and **May do alone**, its [access limit](access-profiles.md#agent-access-limits). **Edit agent** opens its full settings.
+- On the Bots page, **Edit bot** changes the character, name, purpose and instructions; **More settings** opens the full settings.
+- The full settings cover the display name, description, icon and color, model and personality, capabilities and tool restrictions, and **Seniority** (Intern, Specialist or Lead). Seniority sets how often the agent checks in (every 20 minutes for a lead, 30 otherwise), whether it hands out work by default, and who leads an agent team. It isn't a permission.
+
+On the Work board, the lightning icon on a task card (**Wake owner**) runs the assigned agent's heartbeat review now.
 
 ---
 
-## Mission Board — Kanban Board (Center)
+## Brief
 
-A 5-column Kanban board for managing tracked work. Drag tasks between columns to change their status. This board is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
+The **Brief** tab opens first. Under **Command Brief** (with **Refresh brief** and a link to the Evidence Feed), the metric buttons jump to their section or tab: **global runtime queue**, **need you**, **open board work**, **learnings**, **awareness** and **evidence rows**.
 
-| Column          | Status         | Description                                    |
-| --------------- | -------------- | ---------------------------------------------- |
-| **INBOX**       | Backlog        | Unassigned items waiting for triage            |
-| **ASSIGNED**    | Todo           | Assigned board work ready to start             |
-| **IN PROGRESS** | Active         | Board work currently being executed or planned |
-| **REVIEW**      | Pending review | Awaiting approval or human review              |
-| **DONE**        | Completed      | Finished tasks                                 |
+- **need you** counts the approvals, questions and paused sessions waiting on you in the selected workspace (and agent, when one is selected in the Evidence Feed). The **Needs You** section lists up to six, each opening where it is decided, then **+N more in Today**. Today, Bots and the bell count the same decisions.
+- **Flagged** lists Mission Control's own flags. **Latest Decisions**, **Learnings**, **Awareness**, **Active Work** and **Upcoming Reviews** follow; each item opens its task.
 
-### Task Cards
-
-Each card shows:
-
-- Task title
-- Assigned agent (avatar + name)
-- Status pill with color coding
-- Time since last update (relative: "5m ago", "2h ago")
-
-### Interactions
-
-- **Drag and drop** tasks between columns to change status
-- **Click** a task card to view its details in the right panel
-
----
-
-## Global Runtime Queue
+### Global Runtime Queue
 
 The Brief tab includes a **Global Runtime Queue** card. It is sourced from the same task executor queue used by chat and the right-panel lineup:
 
@@ -90,113 +76,92 @@ The Brief tab includes a **Global Runtime Queue** card. It is sourced from the s
 - **Waiting** tasks are queued for the next available execution slot.
 - **Unavailable** means the queue service could not be read, so Mission Control cannot truthfully claim the queue is empty.
 
-This queue is global to the local CoWork runtime. It can include tasks from workspaces outside the current Mission Control workspace selector. When a queued task belongs outside the visible workspace scope, Mission Control still includes it in the global queue count and marks the row as outside scope instead of hiding the discrepancy.
+This queue is global to the local CoWork runtime. It can include tasks from workspaces outside the current Mission Control workspace selector. When a queued task belongs outside the visible workspace scope, Mission Control still includes it in the global queue count and marks the row as outside scope instead of hiding the discrepancy. Each list shows four rows, then **+N more in chat queue**.
 
 The **Mission Board** remains workspace-scoped tracked work. A workspace can have no open board work while the global runtime queue still has running or waiting tasks.
 
 ---
 
-## Feed & Task Details (Right)
+## Work: the Mission Board
 
-Tabbed panel with three views.
+The **Work** tab is a five-column board for tracked work. It is separate from the live global runtime queue: runtime tasks can be running or waiting even when the board has no open work in the current view.
 
-### Live Feed Tab
+| Column             | Meaning                                    |
+| ------------------ | ------------------------------------------ |
+| **Not started**    | Waiting for triage or an owner             |
+| **Ready to start** | Assigned and ready                         |
+| **Working**        | Being executed or planned                  |
+| **Needs review**   | Awaiting approval or human review          |
+| **Done**           | Finished; shown with **History** or **All tasks** |
 
-Real-time activity stream for the current workspace.
+Column headers show the count (red past the column's work-in-progress limit) and how many cards need attention, are overdue or are stale.
 
-**Filter by event type:**
+- **Presets**: **Active**, **Needs attention**, **All tasks**, plus **History** for finished work.
+- **Search** by title, label, owner or reason; filter by agent, label, priority, status and, under All Workspaces, workspace; sort by urgency, last update, due date or priority. **Show empty** keeps empty columns visible.
+- **Cards** show priority (P0 to P4), labels, title, status, last update, why the card needs attention, the owner, and due date, estimate or a stale marker. The icons on a card open its details, cycle its priority, wake its owner, or move it to the next stage.
+- **Drag** a card to another column to change its stage; click it (or press Enter or Space) to open its details.
 
-- ALL — Everything
-- TASKS — Task creation and status changes
-- COMMENTS — Comments and mentions
-- STATUS — Heartbeat status updates
+### Task details
 
-**Filter by agent:** Click agent chips to show only that agent's activity.
+The detail panel shows the task's status and why it needs attention, with **Wake owner**, **Move to** the next stage and **Due today**. Below:
 
-**Event types shown:**
+- a summary (owner, priority, due date, estimate, health, labels) and controls to change the assignee, stage, priority, estimate, due date and labels;
+- **Brief**: the task's prompt;
+- **What Cowork learned**: memory captured, playbook reinforcement, skill proposal state, evidence links (including Chronicle `screen_context` evidence when used) and the next step when a review is needed;
+- **Search everything**: search tasks, messages, the conversation index, files, workspace notes, memory, screen context and the knowledge graph from one box. Tasks and activity are searched over every row of the workspace and ranked by how many query terms match; the lanes are fused by reciprocal rank. Searching records no memory use and starts no index sync; notes are read through the workspace's access profile. Details: [Memory Engine](memory-engine.md) §4b;
+- **Updates**: the task's activity, with **Post Update**;
+- **Mentions**: mention an agent with `@` and track each mention's status.
 
-- Pulse results (`idle`, `deferred`, `suggestion`, `dispatch_task`, `dispatch_runbook`, `handoff_to_cron`)
-- Dispatch results (`silent`, `suggestion`, `task`, `runbook`, `cron_handoff`)
-- Task comments and mentions
-- Task status changes
-- Agent assignments
+Chronicle shows up in task details as a learning step named **Chronicle screen context used**, as `screen_context` evidence refs when a task promoted recent-screen context, and as search hits for promoted observations.
 
-### Task Details Tab
+---
 
-Click any task card to see its full details:
+## Intelligence
 
-- **Title and status** with color-coded pill
-- **Assignment controls**: Change assignee (agent dropdown) and stage (column dropdown)
-- **Task brief**: Full prompt/description
-- **Updates**: Activity feed for this task with comment box to post updates
-- **Mentions**: Create and manage mentions with status tracking (pending, acknowledged, completed, dismissed)
-- **Completion projection**: task detail completion rows now include semantic batch labels, verifier verdicts, and follow-up trigger text when available
+The **Intelligence** tab lists **Learnings**, **Awareness** and **Reviews** (up to twelve each), each with its severity, time, summary and the decision or next step. It is read-only; **Open Evidence Feed** shows the underlying items.
 
-### Learning, Recall, and Runtime State
+---
 
-Task details now surface the new runtime visibility signals that used to live only in background services:
+## Evidence Feed
 
-- **What Cowork learned**: the completion card shows memory captured, playbook reinforcement, skill proposal state, evidence links, Chronicle-backed `screen_context` evidence when used, and the next action when a human review is needed
-- **Unified recall**: task detail search spans tasks, messages and the conversation index (verbatim user and assistant messages, tool output, summaries), files, workspace notes, memory items and archive memories, Chronicle `screen_context`, knowledge-graph context, from one surface. Tasks and activity are searched over every row of the workspace (not only recent ones) and ranked by how many query terms match; the lanes are fused by reciprocal rank. Searching records no memory use and starts no index sync; notes are read through the workspace's access profile. Details: [Memory Engine](memory-engine.md) §4b
-- **Shell session status**: long-lived shell sessions show when cwd/env/alias state is being retained or reset, so operator workflows are easier to trust
-- **Model routing status**: the active provider/model, route reason, and fallback transitions are visible in the task UI and settings surfaces
+The **Evidence Feed** groups activity into items you can filter:
 
-Chronicle now shows up in three places inside task detail:
+- **Category**: All, Attention, Work, Reviews, Learnings, Awareness, Evidence.
+- **Status**: Any status, Action needed, Monitor only, Successful, Failed.
+- **Agent**: click an agent chip. Selecting an agent also scopes the Brief and its Needs You list to that agent.
 
-- a learning-progress step named **Chronicle screen context used**
-- `screen_context` evidence refs when a task promoted recent-screen context
-- unified recall hits for promoted observations and any linked `screen_context` memory
+Each item shows its severity, category, agent, workspace and time, a summary and the decision or next step, with **Open task** and **Show evidence** for the rows behind it.
 
-These signals are also mirrored into the live feed so Mission Control stays the primary desktop control plane for understanding what the runtime is doing.
+---
 
-### Ops Tab
+## Operations
 
-The `Ops` tab is the company-operations view.
+The **Operations** tab is the company-operations view. It appears when a company exists and has these sub-tabs:
 
-It exposes:
+- **Overview**: active goals and projects, open issues, pending review and valuable outputs.
+- **Core Harness**: the learning loop around always-on automation, with recurring failure clusters, recent failure records, eval and experiment activity, and recent learnings. This is the main monitoring surface for the `trace -> failure mining -> clustering -> eval -> experiment -> learning` loop behind Heartbeat and Workflow Intelligence.
+- **Operators**: each operator's mandate, bottleneck, last useful output, heartbeat and health.
+- **Outputs & Review**: the operations feed and the review queue.
+- **Execution Map**: planner-managed issues.
+- **Planner**: the Strategic Planner (below).
+- **Automation**: recent automation outcomes, each with its task, the next step and **Retry notification**.
 
-- company snapshot
-- goals and projects
-- planner-managed issues
-- planner-cycle issue drill-down
-- issue comments
-- issue execution runs
-- run timeline events
-- linked task navigation
-
-Use its **Planner** sub-tab to watch company-level planning move into executable task work.
+Selecting an issue opens its details: description, **Open linked task**, recent comments, and recent runs with their timeline.
 
 If the work itself is being executed on another machine, pair Mission Control with **More > Devices** (**Team** in the Calm theme): Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
-
-### Core Harness
-
-Mission Control now includes a `Core Harness` view for the learning loop around always-on automation.
-
-It surfaces:
-
-- recurring core failure clusters
-- living eval cases
-- proposed and gated experiments
-- promoted learnings
-
-This is the main monitoring surface for the `trace -> failure mining -> clustering -> eval -> experiment -> learning` loop behind Heartbeat and Workflow Intelligence.
 
 ---
 
 ## Strategic Planner
 
-The strategic planner lives in the **Planner** sub-tab of the `Ops` tab, where you configure and review company-ops planning.
+The strategic planner lives in **Operations > Planner**, where you configure and review company-ops planning:
 
-Available controls:
-
-- scheduled runs on/off
-- auto-dispatch toggle
-- planner interval
-- planning workspace selector
-- planner-agent selector
-- approval preset selector
-- manual `Run Planner`
-- recent planner cycle history
+- **Schedule runs** and **Auto-dispatch**
+- **Interval** (at least 5 minutes)
+- **Workspace** and **Agent** (Auto-pick by default)
+- **Approval**: Manual, Safe autonomy or Founder edge
+- **Run Planner** to run now
+- **Recent Runs**, each showing what it created, updated and dispatched, with the issues it touched
 
 This is the main desktop entry point for company planning loops.
 
@@ -204,7 +169,7 @@ This is the main desktop entry point for company planning loops.
 
 ## Agent Teams
 
-Access from the **Agent teams** button in the header. Full management UI for coordinated multi-agent collaboration.
+Access from the **Agent teams** button in the header, with one workspace selected (the button is unavailable under All Workspaces). It opens the team management UI for coordinated multi-agent collaboration.
 
 - **Create teams**: Name, description, lead agent, max parallel agents, model and personality preferences
 - **Manage members**: Add/remove agents, reorder, provide guidance
@@ -238,12 +203,10 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 
 | Event Stream             | What It Updates                                                                                  |
 | ------------------------ | ------------------------------------------------------------------------------------------------ |
-| **Heartbeat v3 events**  | Agent status dots, pulse/dispatch indicators, deferred state, feed items                         |
-| **Core harness events**  | Failure clusters, eval upkeep, experiment progression, and learning summaries                    |
-| **Activity events**      | Comments, mentions, assignments in the feed                                                      |
-| **Learning events**      | Post-task learning progression, skill promotion states, and evidence-linked completion summaries |
-| **Routing events**       | Provider/model switches, fallback transitions, and route-reason updates                          |
-| **Task events**          | New tasks, status changes on the Kanban board                                                    |
+| **Heartbeat v3 events**  | Heartbeat agent counts, pulse and dispatch state, deferred state, feed items                     |
+| **Activity events**      | Comments, mentions and assignments                                                               |
+| **Learning events**      | Post-task learning progression in the open task's details                                        |
+| **Task events**          | New tasks and status changes on the Work board                                                   |
 | **Task board events**    | Column moves, priority changes, label/date updates                                               |
 | **Runtime queue events** | Global running/waiting counts and queue task summaries in the Brief tab                          |
 | **Team run events**      | Team and member changes, run progress, item status                                               |
@@ -256,13 +219,14 @@ Mission Control subscribes to live event streams — no manual refresh needed:
 | Action                              | How                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------- |
 | Open Mission Control                | More > Mission Control; see the [release surface reference](release-surface-reference.md)                 |
-| Add or edit an agent                | Header > Bots (Team in Calm)                                               |
-| Review core automation learning     | Open the `Core Harness` view                                               |
-| Configure the company planner       | Open the `Ops` tab, then its `Planner` sub-tab                             |
-| Inspect company ops                 | Open the `Ops` tab in the right panel                                      |
-| Trigger immediate heartbeat review  | Click **Wake owner** on the agent's board card                             |
+| Add an agent                        | Header > Bots (Team in Calm)                                               |
+| Change an agent's settings          | Team > **Edit agent**, or Bots > edit > **More settings**                  |
+| Review core automation learning     | Operations > **Core Harness**                                              |
+| Configure the company planner       | Operations > **Planner**                                                   |
+| Inspect company ops                 | Operations > **Overview**                                                  |
+| Trigger immediate heartbeat review  | **Wake owner** (lightning icon) on a Work board card                       |
 | Move a task to a new stage          | Drag the task card to the target column                                    |
 | View task details                   | Click any task card                                                        |
 | Post an update on a task            | Select task, type in the comment box, click "Post Update"                  |
-| Filter feed by agent                | Click an agent chip in the feed panel                                      |
+| Filter feed by agent                | Click an agent chip in the Evidence Feed                                   |
 | Create a team                       | Header > Agent teams > create team                                         |

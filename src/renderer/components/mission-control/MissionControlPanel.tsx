@@ -1,4 +1,5 @@
 import { hasHostMethod } from "../../host/browser-capabilities";
+import type { AttentionItem } from "../../../shared/attention";
 import "./mission-control.css";
 import { useMissionControlData } from "./useMissionControlData";
 import { MCTopBar } from "./MCTopBar";
@@ -18,6 +19,8 @@ interface MissionControlPanelProps {
   initialCompanyId?: string | null;
   /** When opening from Inbox Agent (or elsewhere), focus this issue in Ops. */
   initialIssueId?: string | null;
+  /** Opens where a needs-you queue item is decided. */
+  onOpenAttention?: (item: AttentionItem) => void;
 }
 
 export function MissionControlPanel({
@@ -25,6 +28,7 @@ export function MissionControlPanel({
   onOpenAgents,
   initialCompanyId = null,
   initialIssueId = null,
+  onOpenAttention,
 }: MissionControlPanelProps) {
   const data = useMissionControlData(initialCompanyId, initialIssueId);
 
@@ -85,7 +89,9 @@ export function MissionControlPanel({
 
       <div className="mc-v2-body">
         <div className="mc-v2-tab-content">
-          {activeTab === "overview" && <MCOverviewTab data={data} />}
+          {activeTab === "overview" && (
+            <MCOverviewTab data={data} onOpenAttention={onOpenAttention} />
+          )}
           {activeTab === "agents" && <MCAgentsTab data={data} />}
           {activeTab === "board" && <MCBoardTab data={data} />}
           {activeTab === "intelligence" && <MCIntelligenceTab data={data} />}

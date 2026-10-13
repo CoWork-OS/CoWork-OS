@@ -49,6 +49,10 @@ const LIMITS = {
   suggestions: 20,
   /** Task lookups for approvals and questions whose session is not among the recent ones. */
   taskLookups: 50,
+  /** Parent lookups while finding the agent roles an item's work belongs to. */
+  ownerLookups: 50,
+  /** How far up a chain of delegated sessions to look for owners. */
+  ownerDepth: 8,
   total: 100,
 } as const;
 
@@ -134,11 +138,55 @@ export class AttentionService {
         .slice(0, LIMITS.suggestions),
     ];
 
+    const ranked = rankAttention(items).slice(0, LIMITS.total);
+    const owners = await this.ownersFor(
+      tasks,
+      ranked.flatMap((item) => (item.taskId ? [item.taskId] : [])),
+    );
     return {
       generatedAt: now,
-      items: rankAttention(items).slice(0, LIMITS.total),
+      items: ranked.map((item) => {
+        const ownerAgentRoleIds = item.taskId ? owners.get(item.taskId) : undefined;
+        return ownerAgentRoleIds ? { ...item, ownerAgentRoleIds } : item;
+      }),
       failedSources,
     };
+  }
+
+  /**
+   * The agent roles each session's work belongs to, nearest first: its own assignee, then
+   * those of the sessions above it (sub-agents and orchestrated steps point at the session that
+   * started them). The walk stays in the session's workspace, as the bot work view does.
+   */
+  private async ownersFor(
+    tasks: Map<string, Task>,
+    taskIds: string[],
+  ): Promise<Map<string, string[]>> {
+    let lookups = 0;
+    const load = async (taskId: string) => {
+      const known = tasks.get(taskId);
+      if (known || lookups >= LIMITS.ownerLookups) return known;
+      lookups += 1;
+      const found = await this.sources.findTask(taskId).catch(() => undefined);
+      if (found) tasks.set(found.id, found);
+      return found;
+    };
+    const owners = new Map<string, string[]>();
+    for (const taskId of new Set(taskIds)) {
+      const start = tasks.get(taskId);
+      const roles: string[] = [];
+      const seen = new Set<string>();
+      let task = start;
+      while (task && !seen.has(task.id) && seen.size < LIMITS.ownerDepth) {
+        seen.add(task.id);
+        if (task.workspaceId !== start?.workspaceId) break;
+        const role = task.assignedAgentRoleId;
+        if (role && !roles.includes(role)) roles.push(role);
+        task = task.parentTaskId ? await load(task.parentTaskId) : undefined;
+      }
+      if (roles.length > 0) owners.set(taskId, roles);
+    }
+    return owners;
   }
 
   /** The recent sessions by id, plus any session an approval or question belongs to. */

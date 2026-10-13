@@ -39,6 +39,9 @@ import { getTaskEventStatus } from "../../../shared/task-event-status-map";
 import { useAgentContext } from "../../hooks/useAgentContext";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { createRendererLogger } from "../../utils/logger";
+import { useAttentionSnapshot } from "../../hooks/useAttentionSnapshot";
+import { attentionWaitingByTask } from "../../../shared/attention";
+import { attentionInScope } from "../../utils/attention-scope";
 
 type AgentRole = AgentRoleData;
 type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
@@ -1303,8 +1306,29 @@ export function useMissionControlData(
     return isTaskStaleForUi(task);
   }, []);
 
+  // Decisions waiting on the user come from the shared queue, so Mission Control counts them
+  // as Today, Bots and the bell do. Hosts without the queue keep the brief's own count.
+  const attentionSnapshot = useAttentionSnapshot(true);
+  const needsYouItems = useMemo(
+    () =>
+      attentionSnapshot.fromQueue
+        ? attentionInScope(attentionSnapshot.items, {
+            workspaceId: selectedWorkspaceId === ALL_WORKSPACES_ID ? null : selectedWorkspaceId,
+            agentRoleId: selectedAgent,
+          })
+        : null,
+    [attentionSnapshot, selectedAgent, selectedWorkspaceId],
+  );
+  const attentionWaiting = useMemo(
+    () => (attentionSnapshot.fromQueue ? attentionWaitingByTask(attentionSnapshot.items) : null),
+    [attentionSnapshot],
+  );
+
   const getTaskAttentionReason = useCallback(
     (task: Task) => {
+      // A pending approval or question can wait on a task whose status still says running.
+      const waiting = attentionWaiting?.get(task.id);
+      if (waiting) return waiting;
       if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
       if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
       if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
@@ -1323,7 +1347,7 @@ export function useMissionControlData(
       if (isTaskStale(task)) return "Stale";
       return null;
     },
-    [getMissionColumnForTask, isTaskStale],
+    [attentionWaiting, getMissionColumnForTask, isTaskStale],
   );
 
   const isTaskAttentionRequired = useCallback(
@@ -1658,6 +1682,8 @@ export function useMissionControlData(
   return {
     // Core data
     workspaces,
+    /** Decisions waiting on the user in this scope, from the shared queue; null without it. */
+    needsYouItems,
     selectedWorkspaceId,
     setSelectedWorkspaceId,
     companies,

@@ -78,6 +78,12 @@ export interface AttentionItem {
   place: AttentionPlace;
   workspaceId?: string;
   taskId?: string;
+  /**
+   * Agent roles the work belongs to, nearest first: the session's own assignee, then the
+   * assignees of the sessions that delegated it, within the same workspace. Bots and Team
+   * count an item for every role listed, as the bot work view lists delegated work.
+   */
+  ownerAgentRoleIds?: string[];
   ref: AttentionRef;
 }
 

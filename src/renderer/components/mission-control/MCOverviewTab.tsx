@@ -1,9 +1,15 @@
+import type { AttentionItem } from "../../../shared/attention";
 import type { MissionControlItem } from "../../../shared/types";
 import type { MissionControlData } from "./useMissionControlData";
 
 interface MCOverviewTabProps {
   data: MissionControlData;
+  /** Opens where a queue item is decided: its session, its automation, or Today. */
+  onOpenAttention?: (item: AttentionItem) => void;
 }
+
+/** How many queue items the overview lists before pointing at Today. */
+const NEEDS_YOU_SHOWN = 6;
 
 const CATEGORY_LABELS: Record<string, string> = {
   attention: "Attention",
@@ -91,6 +97,52 @@ function BriefSection({
   );
 }
 
+/** The shared queue's decisions in this scope, each opening where it is decided. */
+function NeedsYouSection({
+  items,
+  formatRelativeTime,
+  onOpen,
+}: {
+  items: AttentionItem[];
+  formatRelativeTime: MissionControlData["formatRelativeTime"];
+  onOpen?: (item: AttentionItem) => void;
+}) {
+  const shown = items.slice(0, NEEDS_YOU_SHOWN);
+  return (
+    <section id="mc-v2-needs-you" className="mc-v2-brief-section">
+      <div className="mc-v2-brief-section-header">
+        <h2>Needs You</h2>
+        <span>{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="mc-v2-empty mc-v2-empty-compact">Nothing needs you right now.</div>
+      ) : (
+        <div className="mc-v2-brief-list">
+          {shown.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="mc-v2-brief-item attention mc-v2-needs-you-item"
+              disabled={!onOpen}
+              onClick={() => onOpen?.(item)}
+            >
+              <div className="mc-v2-brief-item-top">
+                <span className="mc-v2-brief-kicker">{item.state}</span>
+                <span className="mc-v2-feed-time">{formatRelativeTime(item.createdAt)}</span>
+              </div>
+              <h3>{item.title}</h3>
+              <p>{item.detail ?? item.actor.name}</p>
+            </button>
+          ))}
+          {items.length > shown.length && (
+            <p className="mc-v2-runtime-more">+{items.length - shown.length} more in Today</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function formatRuntimeQueueValue(
   state: MissionControlData["queueStatusState"],
   running: number,
@@ -161,8 +213,9 @@ function RuntimeTaskList({
   );
 }
 
-export function MCOverviewTab({ data }: MCOverviewTabProps) {
+export function MCOverviewTab({ data, onOpenAttention }: MCOverviewTabProps) {
   const {
+    needsYouItems,
     missionControlBrief,
     missionControlItems,
     activeAgentsCount,
@@ -202,6 +255,12 @@ export function MCOverviewTab({ data }: MCOverviewTabProps) {
     runtimeQueuedCount,
     runtimeMaxConcurrent,
   );
+  const focusNeedsYou = () => {
+    document.getElementById("mc-v2-needs-you")?.scrollIntoView({
+      block: "start",
+      behavior: "smooth",
+    });
+  };
   const focusRuntimeQueue = () => {
     document.getElementById("mc-v2-runtime-queue-card")?.scrollIntoView({
       block: "start",
@@ -243,10 +302,21 @@ export function MCOverviewTab({ data }: MCOverviewTabProps) {
           <span>global runtime queue</span>
           <small>{runtimeQueueValue}</small>
         </button>
-        <button className="mc-v2-brief-metric attention" onClick={() => setActiveTab("feed")}>
-          <strong>{brief?.attentionCount ?? 0}</strong>
-          <span>need attention</span>
-        </button>
+        {needsYouItems ? (
+          <button
+            className="mc-v2-brief-metric attention"
+            onClick={focusNeedsYou}
+            title="Approvals, questions and paused sessions waiting on you in this scope. Today, Bots and the bell count the same decisions."
+          >
+            <strong>{needsYouItems.length}</strong>
+            <span>need you</span>
+          </button>
+        ) : (
+          <button className="mc-v2-brief-metric attention" onClick={() => setActiveTab("feed")}>
+            <strong>{brief?.attentionCount ?? 0}</strong>
+            <span>need attention</span>
+          </button>
+        )}
         <button
           className="mc-v2-brief-metric"
           onClick={() => setActiveTab("board")}
@@ -336,10 +406,19 @@ export function MCOverviewTab({ data }: MCOverviewTabProps) {
         )}
 
       <div className="mc-v2-brief-grid">
+        {needsYouItems && (
+          <NeedsYouSection
+            items={needsYouItems}
+            formatRelativeTime={formatRelativeTime}
+            onOpen={onOpenAttention}
+          />
+        )}
+        {/* With the queue, decisions live in Needs You; this keeps Mission Control's own flags,
+            such as failed runs and blocked work. */}
         <BriefSection
-          title="Needs Attention"
+          title={needsYouItems ? "Flagged" : "Needs Attention"}
           items={attention}
-          empty="No action-needed items right now."
+          empty={needsYouItems ? "Nothing flagged right now." : "No action-needed items right now."}
           formatRelativeTime={formatRelativeTime}
           onOpenTask={openTask}
         />

@@ -22,6 +22,7 @@ import {
   FolderOpen,
   GitBranch,
   HardDrive,
+  Layers,
   ListTree,
   Pencil,
   Pin,
@@ -79,6 +80,9 @@ const SIDEBAR_WORKSPACE_HEADER_HEIGHT = 32;
 const SIDEBAR_WORKSPACE_SESSION_ACTION_HEIGHT = 28;
 const SIDEBAR_WORKSPACE_SESSION_PREVIEW_COUNT = 6;
 const SIDEBAR_LOAD_MORE_HEIGHT = 32;
+const SIDEBAR_WORK_LINK_HEIGHT = 44;
+/** In Calm, sessions outside a project shown before "All work" hands over to Work. */
+const CALM_RECENT_SESSION_LIMIT = 5;
 const SIDEBAR_VIRTUALIZATION_MIN_ROWS = 30;
 const SIDEBAR_LOAD_MORE_THRESHOLD_PX = 320;
 
@@ -598,6 +602,15 @@ export type SidebarVirtualRow =
       kind: "load-more";
       id: string;
       loading: boolean;
+    }
+  | {
+      /** Calm: opens Work, which lists every session the short Recent list leaves out. */
+      kind: "work-link";
+      id: string;
+      /** Sessions not listed here: older recents and automated sessions. */
+      hidden: number;
+      /** Whether one of those waits on the user. */
+      needsYou: boolean;
     };
 
 function TaskTitleSelect({
@@ -1656,6 +1669,8 @@ function SidebarComponent({
     () => workspaceGroups.groups.filter((group) => !group.pinned),
     [workspaceGroups.groups],
   );
+  const workTakesOverSessions =
+    isCalm && Boolean(onNavigate) && !hasSessionSearch && !hasSessionStateFilter;
   const sidebarVirtualRows = useMemo(() => {
     const rows: SidebarVirtualRow[] = [];
 
@@ -1735,6 +1750,28 @@ function SidebarComponent({
       }
     }
 
+    // In Calm, Work is where every session lives: the sidebar keeps pinned items, projects and
+    // a short Recent list, then hands over to Work. Searching or filtering still lists
+    // everything, so nothing is out of reach.
+    if (workTakesOverSessions) {
+      const recentNodes = workspaceGroups.recentNodes;
+      if (recentNodes.length > 0) {
+        rows.push({ kind: "date-header", id: "recents:Recent", label: "Recent" });
+        appendTaskRows(recentNodes.slice(0, CALM_RECENT_SESSION_LIMIT), "user");
+      }
+      const hiddenNodes = [
+        ...recentNodes.slice(CALM_RECENT_SESSION_LIMIT),
+        ...unpinnedAutomatedTaskTree,
+      ];
+      rows.push({
+        kind: "work-link",
+        id: "work-link",
+        hidden: hiddenNodes.length,
+        needsYou: hiddenNodes.some((node) => activityOf(node.task)?.category === "needs-you"),
+      });
+      return rows;
+    }
+
     const hasRecentContent = workspaceGroups.recentNodes.length > 0;
     if (hasRecentContent) {
       // Recents read as a timeline: one label per day bucket.
@@ -1779,6 +1816,9 @@ function SidebarComponent({
     workspaceSessionListsExpanded,
     workspaceNavSettings.collapsedRecentGroups,
     workspaceGroups.recentNodes,
+    workTakesOverSessions,
+    unpinnedAutomatedTaskTree,
+    activityOf,
   ]);
 
   const useVirtualizedTaskRows = sidebarVirtualRows.length > SIDEBAR_VIRTUALIZATION_MIN_ROWS;
@@ -2888,6 +2928,32 @@ function SidebarComponent({
         </div>
       );
     }
+    if (row.kind === "work-link") {
+      const more = `${row.hidden} more ${row.hidden === 1 ? "session" : "sessions"}`;
+      return (
+        <button
+          type="button"
+          className="sidebar-work-link"
+          onClick={() => onNavigate?.("work")}
+          aria-label={`All work${row.hidden > 0 ? `, ${more}` : ""}${row.needsYou ? ", some need you" : ""}`}
+        >
+          <Layers size={15} aria-hidden="true" />
+          <span className="sidebar-work-link-copy">
+            <span className="sidebar-work-link-label">All work</span>
+            <span className="sidebar-work-link-summary">
+              {row.hidden > 0 ? more : "Every session, by project"}
+            </span>
+          </span>
+          {row.needsYou && (
+            <span
+              className="cli-session-indicator cli-session-indicator-awaiting"
+              aria-hidden="true"
+            />
+          )}
+          <ChevronRight size={13} aria-hidden="true" />
+        </button>
+      );
+    }
     if (row.kind === "load-more") {
       return (
         <button
@@ -3468,7 +3534,9 @@ function SidebarComponent({
                                     : SIDEBAR_DATE_HEADER_HEIGHT
                                   : row.kind === "load-more"
                                     ? SIDEBAR_LOAD_MORE_HEIGHT
-                                    : getSidebarSessionRowHeight(row.row.node.task, activityOf)
+                                    : row.kind === "work-link"
+                                      ? SIDEBAR_WORK_LINK_HEIGHT
+                                      : getSidebarSessionRowHeight(row.row.node.task, activityOf)
                       }
                       renderItem={(row) => renderSidebarVirtualRow(row)}
                       estimatedItemHeight={
@@ -3503,7 +3571,7 @@ function SidebarComponent({
               {/* Sidebar notification area: add new notices in sidebar/SidebarNotices.tsx. */}
               <SidebarNotices />
 
-              {unpinnedAutomatedTaskTree.length > 0 && (
+              {unpinnedAutomatedTaskTree.length > 0 && !workTakesOverSessions && (
                 <section className="sidebar-automated-section" aria-label="Automated sessions">
                   <button
                     type="button"

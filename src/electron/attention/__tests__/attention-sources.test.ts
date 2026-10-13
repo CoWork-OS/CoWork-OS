@@ -94,7 +94,8 @@ describe("listSuggestionsAcross", () => {
       ],
       listActive,
     );
-    expect(listActive).toHaveBeenCalledWith("a", undefined, ["a", "b"]);
+    // A queue read is not a showing: no "surfaced" (and later "ignored") telemetry.
+    expect(listActive).toHaveBeenCalledWith("a", { recordSurface: false }, ["a", "b"]);
     expect(result.map((entry) => [entry.suggestion.id, entry.workspaceId])).toEqual([
       ["s1", "b"],
       ["s2", "a"],

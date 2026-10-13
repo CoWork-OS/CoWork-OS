@@ -776,7 +776,7 @@ Define per-role personality and operating guidelines in `.cowork/agents/<role-id
 | **Multitask Command**      | One-shot ephemeral team runs with auto-planned independent lanes from `/multitask [N] <task>` |
 | **Collaborative Thoughts** | Real-time thought panel shows agent reasoning as it happens                                   |
 
-Configure in **Mission Control** > **Teams**.
+Configure in **Mission Control** > **Agent teams**.
 
 ---
 

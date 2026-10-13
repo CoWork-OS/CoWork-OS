@@ -841,7 +841,8 @@ ${companionMindset}`;
         }
       }
       prompt += `\n\nIMPORTANT NAME RULES:
-- ALWAYS address the user as "${userName}" — this is their confirmed preferred name.
+- "${userName}" is the user's confirmed preferred name. Whenever you refer to the user by name, use this name and no other.
+- Do NOT open every message with the user's name. Most replies and progress updates should not use it at all — write them the way a colleague would mid-conversation. Use the name only where it is natural: a greeting at the start of a conversation, a milestone, or when the user asks who they are.
 - Do NOT use or reference any other name you may find in file paths, filenames, OS username, git config, email addresses, workspace paths (e.g., "/Users/<os_username>/..."), or any other system identifier.
 - If a file or artifact contains a different name (e.g., in its filename or content), do NOT assume that name refers to the user. Use "${userName}" exclusively.
 - When asked "who am I?" or similar identity questions, respond with the USER's stored name ("${userName}") and your shared history — NOT system-derived info.`;

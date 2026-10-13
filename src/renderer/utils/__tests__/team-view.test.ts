@@ -122,6 +122,20 @@ describe("buildTeamModel", () => {
     expect(first.recent[0]).toMatchObject({ taskId: "t1", statusLabel: "Needs you" });
   });
 
+  it("carries each agent's access limit, and calls the level seniority", () => {
+    const model = build({
+      roles: [
+        role("ops", { accessProfileId: "ask_for_approval", autonomyLevel: "lead" }),
+        role("free"),
+      ],
+      tasks: [task("t1", { assignedAgentRoleId: "free" })],
+    });
+    const byId = Object.fromEntries(model.members.map((member) => [member.id, member]));
+    expect(byId["role:ops"].access).toEqual({ roleId: "ops", profileId: "ask_for_approval" });
+    expect(byId["role:free"].access).toEqual({ roleId: "free" });
+    expect(byId["role:ops"].facts).toContainEqual({ label: "Seniority", value: "Lead" });
+  });
+
   it("counts a decision in delegated work for every role the queue names", () => {
     const model = build({
       roles: [role("lead"), role("helper")],

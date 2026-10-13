@@ -136,17 +136,21 @@ describe("ProactiveSuggestionsService", () => {
 
   it("defers low-signal suggestions from interactive surfaces but keeps them for briefings", async () => {
     seedSuggestion("ws-1", "s2", "Review backlog");
+    // The service buckets telemetry by local hour (Date#getHours), so derive the fixture hours
+    // from the pinned clock in the same zone: dismissals now, acts six hours away.
+    const nowHour = new Date().getHours();
+    const actedHour = (nowHour + 18) % 24;
     repoLoad.mockReturnValue({
       dismissed: [],
       actedOn: [],
       surfacedAt: {},
       telemetryEvents: [
-        { workspaceId: "ws-1", suggestionId: "old-1", type: "acted_on", at: 1, hour: 9 },
-        { workspaceId: "ws-1", suggestionId: "old-2", type: "acted_on", at: 2, hour: 9 },
-        { workspaceId: "ws-1", suggestionId: "old-3", type: "acted_on", at: 3, hour: 9 },
-        { workspaceId: "ws-1", suggestionId: "old-4", type: "dismissed", at: 4, hour: 15 },
-        { workspaceId: "ws-1", suggestionId: "old-5", type: "dismissed", at: 5, hour: 15 },
-        { workspaceId: "ws-1", suggestionId: "old-6", type: "dismissed", at: 6, hour: 15 },
+        { workspaceId: "ws-1", suggestionId: "old-1", type: "acted_on", at: 1, hour: actedHour },
+        { workspaceId: "ws-1", suggestionId: "old-2", type: "acted_on", at: 2, hour: actedHour },
+        { workspaceId: "ws-1", suggestionId: "old-3", type: "acted_on", at: 3, hour: actedHour },
+        { workspaceId: "ws-1", suggestionId: "old-4", type: "dismissed", at: 4, hour: nowHour },
+        { workspaceId: "ws-1", suggestionId: "old-5", type: "dismissed", at: 5, hour: nowHour },
+        { workspaceId: "ws-1", suggestionId: "old-6", type: "dismissed", at: 6, hour: nowHour },
       ],
     });
 

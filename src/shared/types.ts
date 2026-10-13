@@ -2350,6 +2350,18 @@ export interface AgentConfig {
   /** Canonical access profile requested for this task. */
   accessProfileId?: AccessProfileId;
   /**
+   * The most access this task may get, from its assigned agent role's "May do alone" limit.
+   * Set only by the daemon from the role (never accepted from the renderer); the resolver
+   * narrows the task's profile to it and never widens anything.
+   */
+  accessCeilingProfileId?: AccessProfileId;
+  /**
+   * Access limits inherited from the sessions that started this one (sub-agents, scheduled
+   * runs an agent created). Set when the task is created and never removed by its own role;
+   * every one of them narrows the task's profile.
+   */
+  inheritedAccessCeilingProfileIds?: AccessProfileId[];
+  /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
    * - 2: draft + refine
@@ -5662,6 +5674,11 @@ export interface AgentRole {
 
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel; // How independently the agent can act
+  /**
+   * "May do alone": the most access any of this agent's work gets (its sessions, scheduled
+   * runs and Heartbeat dispatches). A ceiling only: a task can still be stricter.
+   */
+  accessProfileId?: AccessProfileId;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5753,6 +5770,8 @@ export interface UpdateAgentRoleRequest {
   sortOrder?: number;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** The agent's access limit; null clears it. */
+  accessProfileId?: AccessProfileId | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;

@@ -41,6 +41,8 @@ The header bar shows workspace selector, current time, and operational counters 
 - **Board work**: open work items tracked on the Mission Control board.
 - **Mentions**: pending human or agent mentions.
 
+The header's **Bots** button opens the Bots page, where agents are created and configured. In the Calm theme it reads **Team** and opens Team, which shows each agent with what it is doing, what it waits on you for and where it runs.
+
 These numbers can differ. For example, two Heartbeat agents can be enabled while zero board items are open in the selected workspace and four global runtime tasks are waiting in chat. If the queue service is still loading or unavailable, Mission Control shows that state explicitly instead of reporting `0` or `All clear`.
 
 ---
@@ -235,7 +237,7 @@ This is the main desktop entry point for company planning loops.
 
 ## Agent Teams
 
-Access from the **Teams** button in the header. Full management UI for coordinated multi-agent collaboration.
+Access from the **Agent teams** button in the header. Full management UI for coordinated multi-agent collaboration.
 
 - **Create teams**: Name, description, lead agent, max parallel agents, model and personality preferences
 - **Manage members**: Add/remove agents, reorder, provide guidance

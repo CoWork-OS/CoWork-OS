@@ -52,8 +52,16 @@ export interface AttentionSetupDeps extends AttentionIpcDeps {
   getMainWindow: () => BrowserWindow | null;
 }
 
+let sharedService: Pick<AttentionService, "snapshot"> | null = null;
+
+/** The queue the desktop app serves, so the browser host on the same profile can read it. */
+export function getAttentionService(): Pick<AttentionService, "snapshot"> | null {
+  return sharedService;
+}
+
 /** Registers the handlers and starts signalling changes. Returns the change trigger. */
 export function setupAttentionHandlers(deps: AttentionSetupDeps): { notifyChanged: () => void } {
+  sharedService = deps.service;
   const handlers = createAttentionIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
     ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));

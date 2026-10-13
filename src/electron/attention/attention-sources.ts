@@ -73,19 +73,24 @@ export function suggestionWorkspaces(workspaces: Workspace[]): Workspace[] {
   );
 }
 
-/** Active suggestions across the saved workspaces, each with the workspace it belongs to. */
+/**
+ * Active suggestions across the saved workspaces, each with the workspace it belongs to.
+ * Reading the queue is not showing anyone a suggestion, so it records no "surfaced" event:
+ * otherwise every refresh would count as one, and a day later as "ignored", which lowers the
+ * suggestion's ranking.
+ */
 export async function listSuggestionsAcross(
   workspaces: Workspace[],
   listActive: (
     workspaceId: string,
-    options: undefined,
+    options: { recordSurface: false },
     workspaceIds: string[],
   ) => Promise<ProactiveSuggestion[]>,
 ): Promise<Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>> {
   const saved = suggestionWorkspaces(workspaces);
   if (saved.length === 0) return [];
   const ids = saved.map((workspace) => workspace.id);
-  const suggestions = await listActive(ids[0], undefined, ids);
+  const suggestions = await listActive(ids[0], { recordSurface: false }, ids);
   return suggestions.map((suggestion) => ({
     workspaceId: suggestion.workspaceId || ids[0],
     suggestion,

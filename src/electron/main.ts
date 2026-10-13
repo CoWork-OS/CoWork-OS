@@ -230,6 +230,7 @@ import {
 } from "./control-plane";
 import { createWebHostIdentity } from "../host/web/host-identity";
 import { createBrowserHostApplication } from "../host/services/browser-host-application";
+import { getAttentionService } from "./ipc/attention-handlers";
 import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
 import type { WebApplication } from "../host/web/WebApplication";
 import { sanitizeTaskMessageParams } from "./control-plane/sanitize";
@@ -388,6 +389,7 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         agentDaemon,
         channelGateway,
         notificationService: getNotificationService() ?? undefined,
+        getAttentionService,
         getRoutineService: () => routineService,
         getEventTriggerService: () => eventTriggerService,
         getHeartbeatService: () => heartbeatService,

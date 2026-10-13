@@ -7,7 +7,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderTopBar() {
+function renderTopBar(agentsLabel?: string) {
   const data = {
     workspaces: [{ id: "workspace-one", name: "Workspace one" }],
     selectedWorkspaceId: "workspace-one",
@@ -31,7 +31,7 @@ function renderTopBar() {
     agentContext: { getUiCopy: (key: string) => key },
   } as unknown as MissionControlData;
 
-  return renderToStaticMarkup(<MCTopBar data={data} />);
+  return renderToStaticMarkup(<MCTopBar data={data} agentsLabel={agentsLabel} />);
 }
 
 describe("Mission Control browser-only controls", () => {
@@ -43,7 +43,7 @@ describe("Mission Control browser-only controls", () => {
 
     const markup = renderTopBar();
 
-    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Teams<\/button>/);
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Agent teams<\/button>/);
     expect(markup).toContain(
       'title="Team management is not available in this browser session yet."',
     );
@@ -60,7 +60,15 @@ describe("Mission Control browser-only controls", () => {
 
     const markup = renderTopBar();
 
-    expect(markup).toMatch(/<button[^>]*>Teams<\/button>/);
+    expect(markup).toMatch(/<button[^>]*>Agent teams<\/button>/);
     expect(markup).not.toContain("mc-v2-capability-notice");
+  });
+});
+
+describe("Mission Control agents link", () => {
+  it("opens Bots by default and Team where the host says so", () => {
+    expect(renderTopBar()).toContain(">Bots</button>");
+    expect(renderTopBar("Team")).toContain(">Team</button>");
+    expect(renderTopBar()).not.toContain("Agents Hub");
   });
 });

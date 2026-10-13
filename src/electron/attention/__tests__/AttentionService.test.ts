@@ -254,6 +254,37 @@ describe("AttentionService", () => {
     expect(findTask).not.toHaveBeenCalled();
   });
 
+  it("names the remote device a waiting session runs on, and carries on without names", async () => {
+    const remote = task("t1", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      targetNodeId: "remote-gateway:mini",
+      error: "Approval request timed out",
+    });
+    const named = new AttentionService(
+      sources({
+        listRecentTasks: async () => [remote],
+        listDevices: async () => [{ id: "mini", name: "Mac mini" }],
+      }),
+    );
+    expect((await named.snapshot()).items[0].place).toEqual({
+      kind: "remote",
+      label: "Mac mini",
+      deviceId: "mini",
+    });
+    const unnamed = new AttentionService(
+      sources({
+        listRecentTasks: async () => [remote],
+        listDevices: async () => {
+          throw new Error("no settings");
+        },
+      }),
+    );
+    const snapshot = await unnamed.snapshot();
+    expect(snapshot.failedSources).toEqual([]);
+    expect(snapshot.items[0].place.label).toBe("Another device");
+  });
+
   it("stops at a cycle of parent links", async () => {
     const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
     const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });

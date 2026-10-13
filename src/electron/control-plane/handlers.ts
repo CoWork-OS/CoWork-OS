@@ -393,7 +393,8 @@ function toManagedDeviceFromSaved(settings: ControlPlaneSettingsData, saved: Any
   });
 }
 
-function listStoredManagedDevices(): ManagedDevice[] {
+/** Remote devices saved in the control plane settings, without connecting to any. */
+export function listStoredManagedDevices(): ManagedDevice[] {
   const settings = ControlPlaneSettingsManager.loadSettings() as ControlPlaneSettingsData;
   const byId = new Map<string, ManagedDevice>();
 

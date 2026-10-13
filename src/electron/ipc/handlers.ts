@@ -11200,6 +11200,11 @@ export async function setupIpcHandlers(
         new Map(
           (await agentRoleRepo.findAll()).map((role) => [role.id, role.displayName || role.name]),
         ),
+      // Reads the saved device list only; no device is contacted.
+      listDevices: async () => {
+        const { listStoredManagedDevices } = await import("../control-plane/handlers");
+        return listStoredManagedDevices();
+      },
       listWaitingFlowSteps: () => listWaitingFlowSteps(options?.getRoutineService?.() ?? null),
       listDueCommitments: async () =>
         RelationshipMemoryService.listDueSoonCommitments(24).map(toAttentionCommitment),

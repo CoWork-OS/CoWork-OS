@@ -1,4 +1,9 @@
-import { classifyTaskActivity, type AttentionItem } from "../../shared/attention";
+import {
+  classifyTaskActivity,
+  indexDevicesByNode,
+  isLocalTaskNode,
+  type AttentionItem,
+} from "../../shared/attention";
 import { getAccessProfileLabel } from "../../shared/access-profiles";
 import { deriveCanonicalTaskStatus } from "../../shared/task-status";
 import type { AgentAutonomyLevel, Task } from "../../shared/types";
@@ -80,6 +85,9 @@ export interface TeamDeviceInput {
   name: string;
   role: "local" | "remote";
   status: string;
+  /** The node id tasks routed to the device carry. */
+  taskNodeId?: string | null;
+  clientId?: string;
 }
 
 export type TeamMemberKind = "bot" | "agent" | "schedule" | "automation";
@@ -430,12 +438,18 @@ export function buildTeamModel(input: {
       a.name.localeCompare(b.name),
   );
 
-  // Devices: this machine, then every remote device the app manages.
+  // Devices: this machine, then every remote device the app manages. Tasks name their device
+  // by node id, which differs from the device id.
+  const devicesByNode = indexDevicesByNode(
+    input.devices.filter((device) => device.role === "remote"),
+  );
+  const deviceOf = (task: Task) =>
+    isLocalTaskNode(task.targetNodeId)
+      ? undefined
+      : (devicesByNode.get(task.targetNodeId as string)?.id ?? task.targetNodeId);
   const running = (deviceId?: string) =>
     roots.filter(
-      (task) =>
-        (task.targetNodeId || undefined) === deviceId &&
-        classifyTaskActivity(task)?.category === "running",
+      (task) => deviceOf(task) === deviceId && classifyTaskActivity(task)?.category === "running",
     ).length;
   const waiting = (deviceId?: string) =>
     input.attention.filter((item) =>

@@ -138,6 +138,18 @@ describe("cardForAttention", () => {
     });
   });
 
+  it("says why a session stopped, and never claims a question it doesn't have", () => {
+    const timedOut = cardForAttention(
+      item("t", { detail: "Its approval request timed out, so it stopped before that step." }),
+      NOW,
+    );
+    expect(timedOut?.why).toBe("Its approval request timed out, so it stopped before that step.");
+    expect(timedOut?.primary).toMatchObject({ label: "Reply" });
+    const unknown = cardForAttention(item("u"), NOW);
+    expect(unknown?.why).toBe("It stopped and is waiting for you before it can go on.");
+    expect(unknown?.why).not.toMatch(/question/i);
+  });
+
   it("opens the automation for a waiting flow step", () => {
     const card = cardForAttention(
       item("flow_approval:s1", {

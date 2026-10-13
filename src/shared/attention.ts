@@ -282,15 +282,57 @@ export function attentionFromInputRequest(
   };
 }
 
+/** What each pause reason the executor records asks of the user. */
+const WAIT_REASONS: Record<string, string> = {
+  required_decision: "It needs a decision from you before it can go on.",
+  required_decision_followup: "It needs a decision from you before it can go on.",
+  // The output check holds a reply that asks for a decision, so it reads the same.
+  jev_output_guardrail: "It needs a decision from you before it can go on.",
+  skill_parameters: "It needs a few details from you before it can go on.",
+  missing_required_workspace_artifact: "It can't find a file it needs from you.",
+  verification_failed: "It couldn't verify its work and needs you to check it.",
+  step_stopped_by_user: "You stopped a step, so it's waiting to hear how to go on.",
+  access_profile_unavailable: "Its access profile isn't available, so it can't go on.",
+  queued_attachment_unavailable: "A file you attached is no longer available.",
+};
+
+/**
+ * Why a waiting session stopped, in one sentence, when the task records it: the executor's
+ * pause reason, or a timed-out approval. Without a record there is no reason to give, and
+ * surfaces fall back to their own wording, which must not claim a question.
+ */
+export function sessionWaitReason(task: Task): string | undefined {
+  const code = task.awaitingUserInputReasonCode?.trim();
+  if (code) {
+    if (WAIT_REASONS[code]) return WAIT_REASONS[code];
+    if (code.startsWith("user_action_required")) {
+      return "It needs you to do something before it can go on.";
+    }
+    return "It's waiting for your input before it can go on.";
+  }
+  // The approval itself is closed (denied on timeout), so the session only waits to be told
+  // to go on.
+  if (
+    task.terminalStatus === "needs_user_action" &&
+    /approval request timed out/i.test(task.error ?? "")
+  ) {
+    return "Its approval request timed out, so it stopped before that step.";
+  }
+  return undefined;
+}
+
 /** A task waiting on the user that has no approval or question record of its own. */
 export function attentionFromTask(task: Task, context: AttentionTaskContext): AttentionItem | null {
   const activity = classifyTaskActivity(task);
   if (activity?.category !== "needs-you") return null;
+  // Other states (resuming, blocked, paused) say what they need in their own words.
+  const reason = activity.label === "Response needed" ? sessionWaitReason(task) : undefined;
   return {
     id: `session:${task.id}`,
     kind: "session",
     state: activity.label,
     title: taskName(task),
+    ...(reason ? { detail: reason } : {}),
     createdAt: task.updatedAt || task.createdAt,
     urgent: true,
     ...taskFields(task, task.id, context),

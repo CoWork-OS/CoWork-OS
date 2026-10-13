@@ -56,5 +56,5 @@ export function botAttentionLine(item: AttentionItem): string {
   if (item.kind === "question") {
     return item.state === "Question" ? "Has a question for you" : `Has ${item.state} for you`;
   }
-  return item.state;
+  return item.detail ?? item.state;
 }

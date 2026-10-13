@@ -7,6 +7,7 @@ import {
   attentionFromInputRequest,
   attentionFromSuggestion,
   attentionFromTask,
+  sessionWaitReason,
   attentionOriginForTask,
   attentionPlaceForTask,
   attentionWaitingByTask,
@@ -161,6 +162,43 @@ describe("attention mappers", () => {
       ),
     ).toMatchObject({ id: "session:w", state: "Resume available" });
     expect(attentionFromTask(task("x", { status: "executing" }), context)).toBeNull();
+  });
+
+  it("says why a session stopped for the user, and only when the task records it", () => {
+    const paused = (overrides: Partial<Task>) =>
+      task("p", { status: "paused", terminalStatus: "needs_user_action", ...overrides });
+    expect(sessionWaitReason(paused({ error: "Approval request timed out" }))).toBe(
+      "Its approval request timed out, so it stopped before that step.",
+    );
+    expect(sessionWaitReason(paused({ awaitingUserInputReasonCode: "required_decision" }))).toBe(
+      "It needs a decision from you before it can go on.",
+    );
+    expect(
+      sessionWaitReason(paused({ awaitingUserInputReasonCode: "user_action_required_tool" })),
+    ).toBe("It needs you to do something before it can go on.");
+    expect(sessionWaitReason(paused({ awaitingUserInputReasonCode: "something_new" }))).toBe(
+      "It's waiting for your input before it can go on.",
+    );
+    // No record, no reason: a dismissed question or a declined step leaves none.
+    expect(sessionWaitReason(paused({}))).toBeUndefined();
+    expect(
+      attentionFromTask(paused({ error: "Approval request timed out" }), context),
+    ).toMatchObject({
+      state: "Response needed",
+      detail: "Its approval request timed out, so it stopped before that step.",
+    });
+    expect(attentionFromTask(paused({}), context)?.detail).toBeUndefined();
+    // Other states keep their own wording.
+    expect(
+      attentionFromTask(
+        task("i", {
+          status: "interrupted",
+          terminalStatus: "resume_available",
+          awaitingUserInputReasonCode: "required_decision",
+        }),
+        context,
+      )?.detail,
+    ).toBeUndefined();
   });
 
   it("describes a waiting flow step", () => {

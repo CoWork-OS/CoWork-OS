@@ -8,6 +8,7 @@
  * that owns it (the approval review, the session, the flow run), with its own checks.
  */
 import { deriveCanonicalTaskStatus } from "./task-status";
+import { LOCAL_MANAGED_DEVICE_NODE_ID } from "./types";
 import type {
   ApprovalRequest,
   ApprovalType,
@@ -147,10 +148,56 @@ export function classifyTaskActivity(task: Task): TaskActivity | null {
   return null;
 }
 
+/** A remote device the app manages, as the queue needs it. */
+export interface AttentionDevice {
+  id: string;
+  name: string;
+  /** The node id tasks routed to it carry; "remote-gateway:<id>" when not set. */
+  taskNodeId?: string | null;
+  /** The gateway client id, which older tasks can carry instead. */
+  clientId?: string;
+}
+
+/** A remote device's id and name. */
+export interface AttentionDeviceRef {
+  id: string;
+  name: string;
+}
+
+/** Whether a task's target node is this machine: no node, or the local device's node id. */
+export function isLocalTaskNode(nodeId: string | null | undefined): boolean {
+  return !nodeId || nodeId === LOCAL_MANAGED_DEVICE_NODE_ID;
+}
+
+/**
+ * Remote devices by every node id a task routed to them can carry. Tasks carry the device's
+ * task node id (by default "remote-gateway:<device id>"), not the device id, so a lookup by
+ * device id alone misses them.
+ */
+export function indexDevicesByNode(
+  devices: readonly AttentionDevice[],
+): Map<string, AttentionDeviceRef> {
+  const byNode = new Map<string, AttentionDeviceRef>();
+  for (const device of devices) {
+    if (!device?.id || isLocalTaskNode(device.id)) continue;
+    const ref = { id: device.id, name: device.name || "Another device" };
+    for (const nodeId of [
+      device.taskNodeId,
+      `remote-gateway:${device.id}`,
+      device.id,
+      device.clientId,
+    ]) {
+      if (nodeId && !byNode.has(nodeId)) byNode.set(nodeId, ref);
+    }
+  }
+  return byNode;
+}
+
 /** Names the queue needs to describe a task: agent roles by id and remote devices by node id. */
 export interface AttentionTaskContext {
   agentNames?: ReadonlyMap<string, string>;
-  deviceNames?: ReadonlyMap<string, string>;
+  /** Remote devices by the node ids their tasks carry (see indexDevicesByNode). */
+  devicesByNode?: ReadonlyMap<string, AttentionDeviceRef>;
   /** What this machine is called in the UI, e.g. "This Mac". */
   localLabel: string;
 }
@@ -195,11 +242,14 @@ export function attentionOriginForTask(task: Task): AttentionOrigin {
 }
 
 export function attentionPlaceForTask(task: Task, context: AttentionTaskContext): AttentionPlace {
-  if (!task.targetNodeId) return { kind: "local", label: context.localLabel };
+  const nodeId = task.targetNodeId;
+  if (!nodeId || isLocalTaskNode(nodeId)) return { kind: "local", label: context.localLabel };
+  const device = context.devicesByNode?.get(nodeId);
   return {
     kind: "remote",
-    label: context.deviceNames?.get(task.targetNodeId) || "Another device",
-    deviceId: task.targetNodeId,
+    label: device?.name || "Another device",
+    // The managed device's id, so a surface can match it against the device list.
+    deviceId: device?.id ?? nodeId,
   };
 }
 

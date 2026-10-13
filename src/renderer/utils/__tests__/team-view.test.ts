@@ -181,7 +181,9 @@ describe("buildTeamModel", () => {
       ],
       tasks: [
         task("here", { status: "executing" }),
-        task("there", { status: "executing", targetNodeId: "mini" }),
+        // Tasks carry the device's node id, not its id; this machine's node id is local.
+        task("also-here", { status: "executing", targetNodeId: "local:this-device" }),
+        task("there", { status: "executing", targetNodeId: "remote-gateway:mini" }),
       ],
       attention: [approval("there", "mini")],
     });
@@ -192,7 +194,7 @@ describe("buildTeamModel", () => {
         local: true,
         online: true,
         statusLabel: "This device",
-        running: 1,
+        running: 2,
         waiting: 0,
       },
       {

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, Repeat, Search } from "lucide-react";
-import type { AttentionTaskContext } from "../../../shared/attention";
+import {
+  indexDevicesByNode,
+  type AttentionDeviceRef,
+  type AttentionTaskContext,
+} from "../../../shared/attention";
 import type { Task, Workspace } from "../../../shared/types";
 import { useAttentionSnapshot } from "../../hooks/useAttentionSnapshot";
 import { formatHomeSessionTime } from "../../utils/home-sessions";
@@ -64,7 +68,9 @@ function formatDateTime(timestamp: number): string {
 function useWorkContext(): { context: AttentionTaskContext; workspaces: Workspace[] } {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [agentNames, setAgentNames] = useState<ReadonlyMap<string, string>>(new Map());
-  const [deviceNames, setDeviceNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const [devicesByNode, setDevicesByNode] = useState<ReadonlyMap<string, AttentionDeviceRef>>(
+    new Map(),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -94,8 +100,10 @@ function useWorkContext(): { context: AttentionTaskContext; workspaces: Workspac
         .then(
           (result) =>
             !cancelled &&
-            setDeviceNames(
-              new Map((result?.devices ?? []).map((device) => [device.id, device.name])),
+            setDevicesByNode(
+              indexDevicesByNode(
+                (result?.devices ?? []).filter((device) => device.role === "remote"),
+              ),
             ),
         )
         .catch(() => undefined);
@@ -106,8 +114,8 @@ function useWorkContext(): { context: AttentionTaskContext; workspaces: Workspac
   }, []);
 
   const context = useMemo(
-    () => ({ agentNames, deviceNames, localLabel: LOCAL_LABEL }),
-    [agentNames, deviceNames],
+    () => ({ agentNames, devicesByNode, localLabel: LOCAL_LABEL }),
+    [agentNames, devicesByNode],
   );
   return { context, workspaces };
 }

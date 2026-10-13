@@ -13,7 +13,9 @@ import {
   attentionFromSuggestion,
   attentionFromTask,
   rankAttention,
+  indexDevicesByNode,
   type AttentionCommitment,
+  type AttentionDevice,
   type AttentionFlowStep,
   type AttentionItem,
   type AttentionSnapshot,
@@ -30,6 +32,8 @@ export interface AttentionSources {
   findTask: (taskId: string) => Promise<Task | undefined>;
   /** Agent role display names by id. */
   listAgentNames: () => Promise<ReadonlyMap<string, string>>;
+  /** Remote devices the app manages, so items routed to one name it. */
+  listDevices?: () => Promise<AttentionDevice[]>;
   listWaitingFlowSteps: () => Promise<AttentionFlowStep[]>;
   listDueCommitments: () => Promise<AttentionCommitment[]>;
   listSuggestions: () => Promise<Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>>;
@@ -72,21 +76,31 @@ export class AttentionService {
       }
     };
 
-    const [approvals, questions, recentTasks, agentNames, flowSteps, commitments, suggestions] =
-      await Promise.all([
-        read("approvals", this.sources.listPendingApprovals, [] as ApprovalRequest[]),
-        read("questions", this.sources.listPendingInputRequests, [] as InputRequest[]),
-        read("sessions", this.sources.listRecentTasks, [] as Task[]),
-        // Names only decorate items; without them items still show, so this is not a source.
-        this.sources.listAgentNames().catch(() => new Map<string, string>()),
-        read("flows", this.sources.listWaitingFlowSteps, [] as AttentionFlowStep[]),
-        read("commitments", this.sources.listDueCommitments, [] as AttentionCommitment[]),
-        read(
-          "suggestions",
-          this.sources.listSuggestions,
-          [] as Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>,
-        ),
-      ]);
+    const [
+      approvals,
+      questions,
+      recentTasks,
+      agentNames,
+      devices,
+      flowSteps,
+      commitments,
+      suggestions,
+    ] = await Promise.all([
+      read("approvals", this.sources.listPendingApprovals, [] as ApprovalRequest[]),
+      read("questions", this.sources.listPendingInputRequests, [] as InputRequest[]),
+      read("sessions", this.sources.listRecentTasks, [] as Task[]),
+      // Names only decorate items; without them items still show, so this is not a source.
+      this.sources.listAgentNames().catch(() => new Map<string, string>()),
+      // Device names decorate items the same way.
+      (this.sources.listDevices?.() ?? Promise.resolve([])).catch(() => [] as AttentionDevice[]),
+      read("flows", this.sources.listWaitingFlowSteps, [] as AttentionFlowStep[]),
+      read("commitments", this.sources.listDueCommitments, [] as AttentionCommitment[]),
+      read(
+        "suggestions",
+        this.sources.listSuggestions,
+        [] as Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>,
+      ),
+    ]);
 
     const newestFirst = <T extends { requestedAt: number }>(rows: T[]) =>
       [...rows].sort((a, b) => b.requestedAt - a.requestedAt);
@@ -110,7 +124,11 @@ export class AttentionService {
     };
     const pendingApprovals = openApprovals.filter((approval) => live(approval.taskId));
     const pendingQuestions = openQuestions.filter((request) => live(request.taskId));
-    const context: AttentionTaskContext = { agentNames, localLabel: this.sources.localLabel };
+    const context: AttentionTaskContext = {
+      agentNames,
+      devicesByNode: indexDevicesByNode(devices),
+      localLabel: this.sources.localLabel,
+    };
     const waitingSessions = await this.withWaitDetails(
       recentTasks
         // A waiting sub-agent is represented by its parent session, as in the sidebar.

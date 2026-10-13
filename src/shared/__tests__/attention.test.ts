@@ -7,6 +7,8 @@ import {
   attentionFromInputRequest,
   attentionFromSuggestion,
   attentionFromTask,
+  indexDevicesByNode,
+  isLocalTaskNode,
   sessionWaitReason,
   attentionOriginForTask,
   attentionPlaceForTask,
@@ -89,6 +91,29 @@ describe("classifyTaskActivity", () => {
   });
 });
 
+describe("devices", () => {
+  it("names the device a task is routed to by any node id its tasks carry", () => {
+    const devicesByNode = indexDevicesByNode([
+      { id: "mini", name: "Mac mini" },
+      { id: "studio", name: "Studio", taskNodeId: "node-studio", clientId: "client-7" },
+      { id: "local:this-device", name: "This Mac" },
+    ]);
+    const placed = (targetNodeId: string) =>
+      attentionPlaceForTask(task("r", { targetNodeId }), { ...context, devicesByNode });
+    expect(placed("remote-gateway:mini")).toEqual({
+      kind: "remote",
+      label: "Mac mini",
+      deviceId: "mini",
+    });
+    expect(placed("node-studio")).toMatchObject({ label: "Studio", deviceId: "studio" });
+    expect(placed("client-7")).toMatchObject({ label: "Studio", deviceId: "studio" });
+    expect(placed("mini")).toMatchObject({ label: "Mac mini", deviceId: "mini" });
+    expect(placed("gone")).toEqual({ kind: "remote", label: "Another device", deviceId: "gone" });
+    expect(isLocalTaskNode("local:this-device")).toBe(true);
+    expect(devicesByNode.has("local:this-device")).toBe(false);
+  });
+});
+
 describe("task context", () => {
   it("names the agent, what started the work and where it runs", () => {
     const remote = task("r", {
@@ -109,6 +134,10 @@ describe("task context", () => {
     });
     const mine = task("m");
     expect(attentionActorForTask(mine, context)).toEqual({ kind: "you", name: "You" });
+    // A task routed to this machine's own node id runs here.
+    expect(
+      attentionPlaceForTask(task("l", { targetNodeId: "local:this-device" }), context),
+    ).toEqual({ kind: "local", label: "This Mac" });
     expect(attentionOriginForTask(mine).kind).toBe("you");
     expect(attentionPlaceForTask(mine, context)).toEqual({ kind: "local", label: "This Mac" });
     expect(attentionActorForTask(task("h", { heartbeatRunId: "run" }), context).name).toBe(

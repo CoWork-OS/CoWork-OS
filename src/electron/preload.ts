@@ -5655,6 +5655,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_SNOOZE, workspaceId, suggestionId, snoozedUntil),
   editSuggestion: (workspaceId: string, suggestionId: string, editedPrompt: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_EDIT, workspaceId, suggestionId, editedPrompt),
+  addSuggestionAsCommitment: (workspaceId: string, suggestionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, workspaceId, suggestionId),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
@@ -9649,6 +9651,10 @@ export interface ElectronAPI {
   refreshSuggestions: (workspaceId: string) => Promise<{ success: boolean }>;
   refreshSuggestionsForWorkspaces: (workspaceIds: string[]) => Promise<{ success: boolean }>;
   dismissSuggestion: (workspaceId: string, suggestionId: string) => Promise<{ success: boolean }>;
+  addSuggestionAsCommitment: (
+    workspaceId: string,
+    suggestionId: string,
+  ) => Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_eligible" | "unavailable" }>;
   snoozeSuggestion: (
     workspaceId: string,
     suggestionId: string,

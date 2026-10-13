@@ -11582,6 +11582,17 @@ function MainContentComponent({
                     handleQuickAction(prompt);
                     promptInputRef.current?.focus();
                   }}
+                  onEditSuggestion={(prompt, workspaceId, suggestionId) => {
+                    // Same tracking as a welcome suggestion: sending records it as acted on,
+                    // and as edited when the prompt changed.
+                    handleQuickAction(prompt);
+                    setActiveWelcomeSuggestionDraft({
+                      workspaceId,
+                      suggestionId,
+                      originalPrompt: prompt,
+                    });
+                    promptInputRef.current?.focus();
+                  }}
                 />
               ) : (
                 renderCalmSuggestionChips()

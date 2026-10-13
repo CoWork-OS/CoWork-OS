@@ -8818,6 +8818,8 @@ export const IPC_CHANNELS = {
   SUGGESTIONS_SNOOZE: "suggestions:snooze",
   SUGGESTIONS_EDIT: "suggestions:edit",
   SUGGESTIONS_ACT: "suggestions:act",
+  /** Keep a follow-up suggestion as a commitment. */
+  SUGGESTIONS_ADD_COMMITMENT: "suggestions:addCommitment",
 
   // Shared "needs you" queue (shared/attention.ts): the snapshot, and a signal when it changed
   ATTENTION_LIST: "attention:list",

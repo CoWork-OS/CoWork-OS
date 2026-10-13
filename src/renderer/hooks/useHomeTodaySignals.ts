@@ -17,6 +17,10 @@ export interface HomeTodaySignals {
   /** Records that the user started a suggestion, after its task was created. */
   markSuggestionStarted: (workspaceId: string, suggestionId: string) => Promise<void>;
   snoozeSuggestion: (workspaceId: string, suggestionId: string) => Promise<void>;
+  /** Stops showing a suggestion; ranking learns from it. */
+  dismissSuggestion: (workspaceId: string, suggestionId: string) => Promise<void>;
+  /** Keeps a follow-up suggestion as a commitment; false when it could not be saved. */
+  addSuggestionAsCommitment: (workspaceId: string, suggestionId: string) => Promise<boolean>;
   completeCommitment: (commitmentId: string) => Promise<boolean>;
   /** Reopens a commitment memory closed on its own; the error says why it could not. */
   undoMemoryChange: (
@@ -55,6 +59,20 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     await window.electronAPI.snoozeSuggestion(workspaceId, suggestionId, Date.now() + SNOOZE_MS);
   }, []);
 
+  const dismissSuggestion = useCallback(async (workspaceId: string, suggestionId: string) => {
+    await window.electronAPI.dismissSuggestion(workspaceId, suggestionId);
+  }, []);
+
+  const addSuggestionAsCommitment = useCallback(
+    async (workspaceId: string, suggestionId: string) => {
+      const api = window.electronAPI;
+      if (typeof api.addSuggestionAsCommitment !== "function") return false;
+      const result = await api.addSuggestionAsCommitment(workspaceId, suggestionId);
+      return result?.ok === true;
+    },
+    [],
+  );
+
   const completeCommitment = useCallback(async (commitmentId: string) => {
     const updated = await window.electronAPI.updateRelationshipMemory({
       id: commitmentId,
@@ -89,6 +107,8 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     actedRows,
     markSuggestionStarted,
     snoozeSuggestion,
+    dismissSuggestion,
+    addSuggestionAsCommitment,
     completeCommitment,
     undoMemoryChange,
     answerQuestion,

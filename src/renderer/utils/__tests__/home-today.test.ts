@@ -322,6 +322,26 @@ describe("cardForAttention", () => {
 });
 
 describe("commitmentDueState", () => {
+  it("offers Edit and Dismiss on suggestions, and Add as commitment on follow-ups", () => {
+    const followUp = cardForAttention(suggestion("f1", false), NOW);
+    expect(followUp?.more?.map((button) => button.label)).toEqual([
+      "Edit",
+      "Add as commitment",
+      "Dismiss",
+    ]);
+    expect(followUp?.more?.[0].action).toEqual({
+      type: "edit-suggestion",
+      workspaceId: "ws",
+      suggestionId: "f1",
+      prompt: "Do f1",
+    });
+    const insight = cardForAttention(
+      { ...suggestion("i1", false), suggestionType: "insight" },
+      NOW,
+    );
+    expect(insight?.more?.map((button) => button.label)).toEqual(["Edit", "Dismiss"]);
+  });
+
   it("names the day relative to now", () => {
     expect(commitmentDueState(NOW - HOUR, NOW)).toBe("Overdue");
     expect(commitmentDueState(NOW + 2 * HOUR, NOW)).toBe("Due today");

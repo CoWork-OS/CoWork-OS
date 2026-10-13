@@ -229,6 +229,44 @@ describe("ProactiveSuggestionsService", () => {
     );
   });
 
+  it("keeps a follow-up as a commitment due a day later, and records it as acted on", async () => {
+    seedSuggestion("ws-1", "s4", "Send Dana the Q3 proposal");
+    const remember = vi.fn(async () => true);
+    vi.doMock("../../memory/RelationshipMemoryService", () => ({
+      RelationshipMemoryService: { rememberUserCommitment: remember },
+    }));
+    const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");
+    const now = Date.now();
+
+    expect(await ProactiveSuggestionsService.addAsCommitment("ws-1", "missing", now)).toEqual({
+      ok: false,
+      reason: "not_found",
+    });
+    expect(await ProactiveSuggestionsService.addAsCommitment("ws-1", "s4", now)).toEqual({
+      ok: true,
+    });
+    expect(remember).toHaveBeenCalledWith({
+      text: "Send Dana the Q3 proposal",
+      dueAt: now + 24 * 60 * 60 * 1000,
+      suggestionId: "s4",
+    });
+    expect(profile.db!.prepare("SELECT status FROM suggestions WHERE id = 's4'").get()).toEqual({
+      status: "acted_on",
+    });
+
+    // Not saved: the suggestion stays open.
+    seedSuggestion("ws-1", "s5", "Call the venue");
+    remember.mockResolvedValueOnce(false);
+    expect(await ProactiveSuggestionsService.addAsCommitment("ws-1", "s5", now)).toEqual({
+      ok: false,
+      reason: "unavailable",
+    });
+    expect(profile.db!.prepare("SELECT status FROM suggestions WHERE id = 's5'").get()).toEqual({
+      status: "active",
+    });
+    vi.doUnmock("../../memory/RelationshipMemoryService");
+  });
+
   it("stores nothing when memory settings do not allow it", async () => {
     gate.enabled = false;
     const { ProactiveSuggestionsService } = await import("../ProactiveSuggestionsService");

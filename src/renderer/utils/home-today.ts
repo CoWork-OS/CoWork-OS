@@ -31,6 +31,12 @@ export type HomeTodayAction =
       prompt: string;
     }
   | { type: "snooze-suggestion"; workspaceId: string; suggestionId: string }
+  /** Never show this suggestion again. */
+  | { type: "dismiss-suggestion"; workspaceId: string; suggestionId: string }
+  /** Put the suggestion's prompt in the composer; sending it records whether it was edited. */
+  | { type: "edit-suggestion"; workspaceId: string; suggestionId: string; prompt: string }
+  /** Keep a follow-up suggestion as a commitment. */
+  | { type: "add-commitment"; workspaceId: string; suggestionId: string }
   | { type: "complete-commitment"; commitmentId: string }
   | { type: "draft-prompt"; prompt: string };
 
@@ -76,6 +82,8 @@ export interface HomeTodayCard {
   secondary?: HomeTodayButton;
   /** A question's options, answered right on the card; the actions then only open the session. */
   choices?: HomeTodayButton[];
+  /** Quieter actions after the main two (suggestions: Edit, Add as commitment, Dismiss). */
+  more?: HomeTodayButton[];
 }
 
 export interface HomeTodayHandledRow {
@@ -328,6 +336,25 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
           label: "Not now",
           action: { type: "snooze-suggestion", workspaceId, suggestionId },
         },
+        more: [
+          {
+            label: "Edit",
+            action: { type: "edit-suggestion", workspaceId, suggestionId, prompt: item.prompt },
+          },
+          // A follow-up is something the user means to do: it can be kept as a commitment.
+          ...(type === "follow_up"
+            ? [
+                {
+                  label: "Add as commitment",
+                  action: { type: "add-commitment" as const, workspaceId, suggestionId },
+                },
+              ]
+            : []),
+          {
+            label: "Dismiss",
+            action: { type: "dismiss-suggestion", workspaceId, suggestionId },
+          },
+        ],
       };
     }
     case "memory_change":

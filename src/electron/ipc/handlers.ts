@@ -1151,6 +1151,7 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_DISMISS, RATE_LIMIT_CONFIGS.limit
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_SNOOZE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_EDIT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -10788,6 +10789,21 @@ export async function setupIpcHandlers(
         validatedSuggestionId,
       );
       return { actionPrompt };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT,
+    async (_, workspaceId: string, suggestionId: string) => {
+      checkRateLimit(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT);
+      const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
+      const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      // The text comes from the stored suggestion, never from the renderer.
+      return ProactiveSuggestionsService.addAsCommitment(
+        validatedWorkspaceId,
+        validatedSuggestionId,
+      );
     },
   );
 

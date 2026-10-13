@@ -1775,6 +1775,17 @@ html.visual-calm .calm-today-button:hover:not(:disabled) {
   background: var(--calm-surface-muted);
 }
 
+/* Quieter actions after a card's main two: no outline until hovered. */
+html.visual-calm .calm-today-button.quiet {
+  padding: 0 10px;
+  border-color: transparent;
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-today-button.quiet:hover:not(:disabled) {
+  color: var(--calm-text);
+}
+
 html.visual-calm .calm-today-button.primary {
   border-color: var(--calm-accent);
   background: var(--calm-accent);

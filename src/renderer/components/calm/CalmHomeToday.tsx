@@ -49,6 +49,8 @@ interface CalmHomeTodayProps {
     HomeTodaySignals,
     | "markSuggestionStarted"
     | "snoozeSuggestion"
+    | "dismissSuggestion"
+    | "addSuggestionAsCommitment"
     | "completeCommitment"
     | "undoMemoryChange"
     | "answerQuestion"
@@ -66,6 +68,11 @@ interface CalmHomeTodayProps {
   onStartTask: (title: string, prompt: string) => Promise<boolean>;
   /** Puts a prompt in the composer for the user to edit and send. */
   onDraftPrompt: (prompt: string) => void;
+  /**
+   * Puts a suggestion's prompt in the composer; sending it records the suggestion as acted
+   * on, and as edited when the prompt changed.
+   */
+  onEditSuggestion?: (prompt: string, workspaceId: string, suggestionId: string) => void;
 }
 
 function cardTime(card: HomeTodayCard, now: number): string {
@@ -88,6 +95,7 @@ export function CalmHomeToday({
   onOpenRoutine,
   onStartTask,
   onDraftPrompt,
+  onEditSuggestion,
 }: CalmHomeTodayProps) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -136,6 +144,14 @@ export function CalmHomeToday({
       onDraftPrompt(action.prompt);
       return;
     }
+    if (action.type === "edit-suggestion") {
+      if (onEditSuggestion) {
+        onEditSuggestion(action.prompt, action.workspaceId, action.suggestionId);
+      } else {
+        onDraftPrompt(action.prompt);
+      }
+      return;
+    }
     setBusy(card.id);
     setErrors(({ [card.id]: _cleared, ...rest }) => rest);
     try {
@@ -156,6 +172,19 @@ export function CalmHomeToday({
       } else if (action.type === "snooze-suggestion") {
         await signals.snoozeSuggestion(action.workspaceId, action.suggestionId);
         foldAway(card);
+      } else if (action.type === "dismiss-suggestion") {
+        await signals.dismissSuggestion(action.workspaceId, action.suggestionId);
+        foldAway(card);
+      } else if (action.type === "add-commitment") {
+        if (!(await signals.addSuggestionAsCommitment(action.workspaceId, action.suggestionId))) {
+          throw new Error("not saved");
+        }
+        foldAway(card, {
+          id: `acted:${card.id}`,
+          title: card.title,
+          outcome: "Added as commitment",
+          at: Date.now(),
+        });
       } else if (action.type === "answer-question") {
         const status = await signals.answerQuestion(
           action.requestId,
@@ -310,6 +339,17 @@ export function CalmHomeToday({
               {card.secondary.label}
             </button>
           )}
+          {card.more?.map((button) => (
+            <button
+              key={button.label}
+              type="button"
+              className="calm-today-button quiet"
+              disabled={isBusy}
+              onClick={() => void run(card, button)}
+            >
+              {button.label}
+            </button>
+          ))}
         </div>
       </article>
     );

@@ -54,6 +54,8 @@ export interface RelationshipMemoryItem {
 
 /** Source ref store of mailbox insights (contact-scope, third-party). */
 export const MAILBOX_MEMORY_STORE = "mailbox";
+/** Commitments the user added from a suggestion card. */
+export const SUGGESTION_MEMORY_STORE = "suggestions";
 
 const MAX_TEXT_LENGTH = 220;
 const LIST_LIMIT = 500;
@@ -409,6 +411,43 @@ export class RelationshipMemoryService {
     }
     // Contact facts are not in the snapshot; commitments are (the open / due-soon lists).
     if (commitments.length > 0) await MemoryFactsSnapshot.refresh();
+  }
+
+  /**
+   * A commitment the user chose to keep, from a suggestion: the user's own, so global and
+   * user-stated, with its due date. Re-adding the same suggestion edits the same record.
+   * Returns false when memory is not running or the write was skipped.
+   */
+  static async rememberUserCommitment(params: {
+    text: string;
+    dueAt: number;
+    suggestionId: string;
+  }): Promise<boolean> {
+    const writer = MemoryWriter.get();
+    const text = normalizeText(params.text);
+    if (!writer || !text || !Number.isFinite(params.dueAt)) return false;
+    try {
+      const result = await writer.ingest({
+        content: text,
+        kind: "commitment",
+        scope: "global",
+        workspaceId: null,
+        source: "user_stated",
+        sourceRef: {
+          store: SUGGESTION_MEMORY_STORE,
+          id: params.suggestionId,
+          dueAt: Math.floor(params.dueAt),
+        },
+        confidence: 1,
+        originText: text,
+      });
+      if (result.status === "skipped") return false;
+      await MemoryFactsSnapshot.refresh();
+      return true;
+    } catch (error) {
+      logger.warn("Recording a commitment from a suggestion failed:", error);
+      return false;
+    }
   }
 
   /** True for items whose text came from a third party (e.g. an email sender). */

@@ -9,7 +9,6 @@ import { MCFeedTab } from "./MCFeedTab";
 import { MCIntelligenceTab } from "./MCIntelligenceTab";
 import { MCOpsTab } from "./MCOpsTab";
 import { MCDetailPanel } from "./MCDetailPanel";
-import { AgentRoleEditor } from "../AgentRoleEditor";
 import { AgentTeamsPanel } from "../AgentTeamsPanel";
 
 interface MissionControlPanelProps {
@@ -37,11 +36,6 @@ export function MissionControlPanel({
   const {
     loading,
     activeTab,
-    editingAgent,
-    setEditingAgent,
-    isCreatingAgent,
-    agentError,
-    handleSaveAgent,
     selectedWorkspace,
     teamsOpen,
     setTeamsOpen,
@@ -56,26 +50,6 @@ export function MissionControlPanel({
     return (
       <div className="mc-v2">
         <div className="mc-v2-loading">{agentContext.getUiCopy("mcLoading")}</div>
-      </div>
-    );
-  }
-
-  if (editingAgent) {
-    return (
-      <div className="mc-v2">
-        <div className="mc-v2-editor-overlay">
-          <div className="mc-v2-editor-modal">
-            <AgentRoleEditor
-              role={editingAgent}
-              isCreating={isCreatingAgent}
-              onSave={handleSaveAgent}
-              onCancel={() => {
-                setEditingAgent(null);
-              }}
-              error={agentError}
-            />
-          </div>
-        </div>
       </div>
     );
   }

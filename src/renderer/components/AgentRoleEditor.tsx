@@ -48,14 +48,26 @@ const ALL_CAPABILITIES: {
   { value: "analyze", label: "Analyze", icon: "📊", description: "Analyze data and performance" },
 ];
 
+/**
+ * Seniority paces the agent's background check-ins and decides who leads a team. It is not a
+ * permission: what an agent may do comes from its sessions' access and its access limit.
+ */
 const AUTONOMY_LEVELS = [
-  { value: "intern", label: "Intern", description: "Requires approval for most actions" },
+  {
+    value: "intern",
+    label: "Intern",
+    description: "Checks in every 30 minutes and watches by default",
+  },
   {
     value: "specialist",
     label: "Specialist",
-    description: "Works independently on assigned tasks",
+    description: "Checks in every 30 minutes and watches by default",
   },
-  { value: "lead", label: "Lead", description: "Can delegate tasks to other agents" },
+  {
+    value: "lead",
+    label: "Lead",
+    description: "Checks in every 20 minutes, hands out work by default, and leads agent teams",
+  },
 ] as const;
 
 export function AgentRoleEditor({
@@ -290,7 +302,7 @@ export function AgentRoleEditor({
               </p>
 
               <div className="form-row">
-                <label>Autonomy Level</label>
+                <label>Seniority</label>
                 <div className="autonomy-options">
                   {AUTONOMY_LEVELS.map((level) => (
                     <label
@@ -314,6 +326,10 @@ export function AgentRoleEditor({
                     </label>
                   ))}
                 </div>
+                <p className="section-description">
+                  Seniority isn't a permission. What the agent may do comes from its access, and its
+                  limit is set in Team as May do alone.
+                </p>
               </div>
 
               <div className="form-row">

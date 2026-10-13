@@ -37,6 +37,8 @@ export interface BotFormDialogProps {
   error?: string | null;
   /** Offers Delete bot at the start of the action bar. */
   onDelete?: () => void;
+  /** Offers More settings: the agent's full settings (seniority, capabilities, tools, model). */
+  onMoreSettings?: () => void;
 }
 
 /** The create and edit dialog for a bot: its character, name, purpose and instructions. */
@@ -56,6 +58,7 @@ export function BotFormDialog({
   busy = false,
   error = null,
   onDelete,
+  onMoreSettings,
 }: BotFormDialogProps) {
   const dialogRef = useRef<HTMLFormElement>(null);
   const requestClose = () => {
@@ -220,6 +223,16 @@ export function BotFormDialog({
             <span className="bot-form-footnote">{footnote}</span>
           ) : null}
           <span className="bot-form-actions-end">
+            {onMoreSettings && (
+              <button
+                type="button"
+                className="bot-form-secondary"
+                onClick={onMoreSettings}
+                disabled={loading || busy || unavailable}
+              >
+                More settings
+              </button>
+            )}
             <button
               type="button"
               className="bot-form-secondary"

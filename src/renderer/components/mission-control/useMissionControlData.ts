@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type {
   AgentRoleData,
   HeartbeatStatus,
-  AgentCapability,
   ActivityData,
   MentionData,
   TaskLabelData,
@@ -337,9 +336,6 @@ export function useMissionControlData(
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // ── Agent editor ──
-  const [editingAgent, setEditingAgent] = useState<AgentRole | null>(null);
-  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
-  const [agentError, setAgentError] = useState<string | null>(null);
 
   // ── Comment ──
   const [commentText, setCommentText] = useState("");
@@ -1090,87 +1086,6 @@ export function useMissionControlData(
     };
   }, []);
 
-  // ── Agent actions ──
-  const handleCreateAgent = useCallback(() => {
-    setEditingAgent({
-      id: "",
-      name: "",
-      displayName: "",
-      description: "",
-      icon: "🤖",
-      color: "#6366f1",
-      capabilities: ["code"] as AgentCapability[],
-      isSystem: false,
-      isActive: true,
-      sortOrder: 100,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    setIsCreatingAgent(true);
-  }, []);
-
-  const handleEditAgent = useCallback((agent: AgentRole) => {
-    setEditingAgent({ ...agent });
-    setIsCreatingAgent(false);
-  }, []);
-
-  const handleSaveAgent = useCallback(
-    async (agent: AgentRole) => {
-      try {
-        setAgentError(null);
-        if (isCreatingAgent) {
-          const created = await window.electronAPI.createAgentRole({
-            name: agent.name,
-            displayName: agent.displayName,
-            description: agent.description,
-            icon: agent.icon,
-            color: agent.color,
-            personalityId: agent.personalityId,
-            modelKey: agent.modelKey,
-            providerType: agent.providerType,
-            systemPrompt: agent.systemPrompt,
-            capabilities: agent.capabilities,
-            toolRestrictions: agent.toolRestrictions,
-            autonomyLevel: agent.autonomyLevel,
-            soul: agent.soul,
-          });
-          setAgents((prev) => [...prev, normalizeMissionControlAgent(created)]);
-        } else {
-          const updated = await window.electronAPI.updateAgentRole({
-            id: agent.id,
-            displayName: agent.displayName,
-            description: agent.description,
-            icon: agent.icon,
-            color: agent.color,
-            personalityId: agent.personalityId,
-            modelKey: agent.modelKey,
-            providerType: agent.providerType,
-            systemPrompt: agent.systemPrompt,
-            capabilities: agent.capabilities,
-            toolRestrictions: agent.toolRestrictions,
-            isActive: agent.isActive,
-            sortOrder: agent.sortOrder,
-            autonomyLevel: agent.autonomyLevel,
-            soul: agent.soul,
-          });
-          if (updated) {
-            const normalized = normalizeMissionControlAgent(updated);
-            setAgents((prev) => prev.map((a) => (a.id === normalized.id ? normalized : a)));
-          }
-        }
-        setEditingAgent(null);
-        setIsCreatingAgent(false);
-        const statuses = hasHostMethod("getAllHeartbeatStatus")
-          ? await window.electronAPI.getAllHeartbeatStatus()
-          : [];
-        setHeartbeatStatuses(statuses);
-      } catch (err: Any) {
-        setAgentError(err.message || "Failed to save agent");
-      }
-    },
-    [isCreatingAgent],
-  );
-
   // ── Task actions ──
   const getMissionColumnForTask = useCallback((task: Task) => {
     return resolveMissionColumnForTask(task);
@@ -1750,10 +1665,6 @@ export function useMissionControlData(
     currentTime,
 
     // Agent editor
-    editingAgent,
-    setEditingAgent,
-    isCreatingAgent,
-    agentError,
 
     // Comment
     commentText,
@@ -1824,9 +1735,6 @@ export function useMissionControlData(
     handlePlannerConfigChange,
     handleRunPlanner,
     handlePostComment,
-    handleCreateAgent,
-    handleEditAgent,
-    handleSaveAgent,
     loadMissionControlIntelligence,
     loadMissionControlEvidence,
     toggleMissionControlEvidence,

@@ -252,8 +252,9 @@ The limit only narrows what a session may do; it never grants access.
   session, and the session's audit records the previous and new agent and the
   access-limit change (unchanged, added, lifted or changed).
 
-An agent's seniority (lead, specialist or intern) only paces its heartbeat; it
-is not a permission.
+An agent's seniority (lead, specialist or intern) sets how often it checks in and
+who leads an agent team; it is not a permission. Change it with **Edit agent** in
+Team or **More settings** on the Bots page.
 
 ## Resolution and compatibility
 

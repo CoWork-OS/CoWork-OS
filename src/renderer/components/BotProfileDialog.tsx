@@ -3,6 +3,7 @@ import type { AgentRoleData } from "../../electron/preload";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { botMascotIcon, resolveBotMascot } from "../../shared/bot-mascots";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
+import { AgentRoleEditorDialog } from "./AgentRoleEditorDialog";
 
 export const BOT_PROFILE_UPDATED_EVENT = "cowork:bot-profile-updated";
 export const BOT_PROFILE_DELETED_EVENT = "cowork:bot-profile-deleted";
@@ -26,6 +27,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** The agent's full settings replace this form until they are saved or closed. */
+  const [moreSettings, setMoreSettings] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +120,19 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     }
   };
 
+  if (moreSettings) {
+    return (
+      <AgentRoleEditorDialog
+        roleId={botId}
+        onClose={onClose}
+        onSaved={async (updated) => {
+          await onSaved?.(updated);
+          window.dispatchEvent(new CustomEvent(BOT_PROFILE_UPDATED_EVENT, { detail: updated }));
+        }}
+      />
+    );
+  }
+
   return (
     <BotFormDialog
       title="Edit bot"
@@ -132,6 +148,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       busy={saving}
       error={error}
       onDelete={role && !role.isSystem ? () => void deleteBot() : undefined}
+      onMoreSettings={() => setMoreSettings(true)}
     />
   );
 }

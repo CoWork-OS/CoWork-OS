@@ -111,6 +111,14 @@ export class AttentionService {
     const pendingApprovals = openApprovals.filter((approval) => live(approval.taskId));
     const pendingQuestions = openQuestions.filter((request) => live(request.taskId));
     const context: AttentionTaskContext = { agentNames, localLabel: this.sources.localLabel };
+    const waitingSessions = await this.withWaitDetails(
+      recentTasks
+        // A waiting sub-agent is represented by its parent session, as in the sidebar.
+        .filter(
+          (task) => !task.parentTaskId && classifyTaskActivity(task)?.category === "needs-you",
+        )
+        .slice(0, LIMITS.sessions),
+    );
 
     const items: AttentionItem[] = [
       ...pendingApprovals.map((approval) =>
@@ -119,12 +127,9 @@ export class AttentionService {
       ...pendingQuestions.map((request) =>
         attentionFromInputRequest(request, tasks.get(request.taskId), context),
       ),
-      ...recentTasks
-        // A waiting sub-agent is represented by its parent session, as in the sidebar.
-        .filter((task) => !task.parentTaskId)
+      ...waitingSessions
         .map((task) => attentionFromTask(task, context))
-        .filter((item): item is AttentionItem => item !== null)
-        .slice(0, LIMITS.sessions),
+        .filter((item): item is AttentionItem => item !== null),
       ...flowSteps.slice(0, LIMITS.flows).map((step) => attentionFromFlowStep(step, context)),
       ...commitments
         .map((commitment) => attentionFromCommitment(commitment, now, context))
@@ -187,6 +192,24 @@ export class AttentionService {
       if (roles.length > 0) owners.set(taskId, roles);
     }
     return owners;
+  }
+
+  /**
+   * Recent sessions are summaries without the error text, which is the only record of why a
+   * session stopped when no pause reason was saved (for example a timed-out approval). Those
+   * few are read in full; any that cannot be read keep their summary.
+   */
+  private async withWaitDetails(sessions: Task[]): Promise<Task[]> {
+    return Promise.all(
+      sessions.map(async (task) => {
+        if (task.terminalStatus !== "needs_user_action" || task.awaitingUserInputReasonCode) {
+          return task;
+        }
+        if (task.error) return task;
+        const full = await this.sources.findTask(task.id).catch(() => undefined);
+        return full ?? task;
+      }),
+    );
   }
 
   /** The recent sessions by id, plus any session an approval or question belongs to. */

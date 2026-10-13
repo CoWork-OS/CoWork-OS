@@ -220,6 +220,40 @@ describe("AttentionService", () => {
     });
   });
 
+  it("reads a waiting session in full to say why it stopped", async () => {
+    const summary = task("t1", { status: "paused", terminalStatus: "needs_user_action" });
+    const findTask = vi.fn(async (id: string) =>
+      id === "t1" ? { ...summary, error: "Approval request timed out" } : undefined,
+    );
+    const service = new AttentionService(
+      sources({ listRecentTasks: async () => [summary], findTask }),
+    );
+    const [item] = (await service.snapshot()).items;
+    expect(item).toMatchObject({
+      id: "session:t1",
+      state: "Response needed",
+      detail: "Its approval request timed out, so it stopped before that step.",
+    });
+    // A session with a recorded pause reason needs no extra read.
+    findTask.mockClear();
+    const coded = new AttentionService(
+      sources({
+        listRecentTasks: async () => [
+          task("t2", {
+            status: "paused",
+            terminalStatus: "needs_user_action",
+            awaitingUserInputReasonCode: "skill_parameters",
+          }),
+        ],
+        findTask,
+      }),
+    );
+    expect((await coded.snapshot()).items[0].detail).toBe(
+      "It needs a few details from you before it can go on.",
+    );
+    expect(findTask).not.toHaveBeenCalled();
+  });
+
   it("stops at a cycle of parent links", async () => {
     const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
     const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });

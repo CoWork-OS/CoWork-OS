@@ -110,7 +110,8 @@ const SESSION_COPY: Record<string, { icon: HomeTodayIcon; why: string; primary: 
   },
   "Response needed": {
     icon: "question",
-    why: "It has a question for you before it can go on.",
+    // A question on record has its own card; this one only knows the session stopped for you.
+    why: "It stopped and is waiting for you before it can go on.",
     primary: "Reply",
   },
   "Resume available": {
@@ -229,7 +230,7 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         source: askerName(item),
         state: item.state,
         title: item.title,
-        why: copy.why,
+        why: item.detail || copy.why,
         primary: openSession(item.taskId, copy.primary),
       };
     }

@@ -91,7 +91,13 @@ import {
 import { SessionProgressCard } from "./SessionProgressCard";
 import { SessionDashboardCard } from "./SessionDashboardCard";
 import { SessionMembersCard } from "./SessionMembersCard";
-import { getRecoveredSynthesisTaskIds } from "../../shared/synthesis-agent-detection";
+import {
+  getRecoveredSynthesisTaskIds,
+  isSynthesisChildTask,
+} from "../../shared/synthesis-agent-detection";
+import { AgentGlyph, type AgentGlyphState } from "./AgentGlyph";
+import { assignAgentGlyphs, getAgentGlyphForSeed } from "../utils/agent-glyphs";
+import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
 import "./right-panel.css";
 
 /**
@@ -850,6 +856,8 @@ interface RightPanelProps {
   /** Cumulative usage per child task, independent of the capped childEvents. */
   childUsageByTaskId?: TaskUsageTotalsByTaskId;
   onSelectTask?: (taskId: string) => void;
+  /** Opens a sub agent in the agent sidebar. */
+  onOpenAgent?: (taskId: string) => void;
   onOpenSpreadsheetArtifact?: (path: string) => void;
   onOpenDocumentArtifact?: (path: string) => void;
   onOpenPresentationArtifact?: (path: string) => void;
@@ -859,7 +867,7 @@ interface RightPanelProps {
   costReceiptEnabled?: boolean;
   /** Opt-in Appearance setting; sub-agent runtime/token/cost totals are hidden by default. */
   subAgentStatsEnabled?: boolean;
-  /** Bumped to expand the Sub Agents section and scroll it into view. */
+  /** Bumped to expand the Subagents section, open its list and scroll it into view. */
   subAgentsFocusRequest?: number;
   onSubAgentsFocusConsumed?: () => void;
   highlightOutputPath?: string | null;
@@ -1562,6 +1570,17 @@ const ContextSection = memo(
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
 
+/** The roster line stays one row; the expanded list names every agent. */
+const MAX_ROSTER_GLYPHS = 5;
+
+const AGENT_GLYPH_STATE: Record<CollaborativeAgentStatusKind, AgentGlyphState> = {
+  completed: "done",
+  warning: "done",
+  failed: "failed",
+  running: "working",
+  pending: "idle",
+};
+
 const CollaborativeAgentsSection = memo(
   function CollaborativeAgentsSection({
     visible,
@@ -1569,6 +1588,8 @@ const CollaborativeAgentsSection = memo(
     totals,
     toggleSection,
     onSelectTask,
+    onOpenAgent,
+    revealListRequest = 0,
     statsEnabled = false,
     sectionRef,
     rendererPerfLoggingEnabled,
@@ -1578,6 +1599,10 @@ const CollaborativeAgentsSection = memo(
     totals: CollaborativeAgentTotals | null;
     toggleSection: () => void;
     onSelectTask?: (taskId: string) => void;
+    /** Opens an agent in the agent sidebar; preferred over navigating to it. */
+    onOpenAgent?: (taskId: string) => void;
+    /** Bumped when the user asked to see the sub agents, so the list opens too. */
+    revealListRequest?: number;
     statsEnabled?: boolean;
     sectionRef?: React.Ref<HTMLDivElement>;
     rendererPerfLoggingEnabled?: boolean;
@@ -1587,9 +1612,28 @@ const CollaborativeAgentsSection = memo(
       `visible:${visible}:expanded:${expanded}`,
       rendererPerfLoggingEnabled,
     );
+    const [listOpen, setListOpen] = useState(() => revealListRequest > 0);
+    useEffect(() => {
+      if (revealListRequest) setListOpen(true);
+    }, [revealListRequest]);
+    const glyphs = useMemo(
+      () => assignAgentGlyphs(totals?.rows.map((row) => row.task) ?? []),
+      [totals],
+    );
     if (!visible || !totals) return null;
 
+    const openAgent = onOpenAgent ?? onSelectTask;
     const totalTokens = totals.inputTokens + totals.outputTokens;
+    const rosterSummary =
+      [
+        totals.running > 0 ? `${totals.running} running` : null,
+        totals.pending > 0 ? `${totals.pending} pending` : null,
+        totals.completed > 0 ? `${totals.completed} done` : null,
+        totals.warning > 0 ? `${totals.warning} warning` : null,
+        totals.failed > 0 ? `${totals.failed} failed` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || `${totals.total} agents`;
     const statusSummary = [
       totals.completed > 0 ? `${totals.completed} done` : null,
       totals.warning > 0 ? `${totals.warning} warning` : null,
@@ -1613,10 +1657,9 @@ const CollaborativeAgentsSection = memo(
         >
           <span className="cli-section-prompt">&gt;</span>
           <span className="cli-section-title">
-            <span className="terminal-only">SUB_AGENTS</span>
-            <span className="modern-only">Sub Agents</span>
+            <span className="terminal-only">SUBAGENTS</span>
+            <span className="modern-only">Subagents</span>
           </span>
-          <span className="cli-active-context-badge">{totals.total}</span>
           <span className="cli-section-toggle">
             <span className="terminal-only">{expanded ? "[-]" : "[+]"}</span>
             <span className="modern-only cli-section-chevron">
@@ -1668,40 +1711,78 @@ const CollaborativeAgentsSection = memo(
                 </div>
               </div>
             ) : null}
-            <div className="collab-agents-list">
-              {totals.rows.map((row) => (
-                <div key={row.task.id} className={`collab-agent-summary-row ${row.statusKind}`}>
-                  <div className="collab-agent-summary-main">
-                    <span className="collab-agent-summary-title" title={row.task.title}>
-                      {stripInlineMarkdownFormatting(
-                        row.task.title || row.task.prompt || "Sub agent",
-                      )}
-                    </span>
-                  </div>
-                  {statsEnabled ? (
-                    <div className="collab-agent-summary-meta">
-                      <span>{formatRightPanelDuration(row.durationMs)}</span>
-                      <span>{formatCompactNumber(row.toolCallCount)} tools</span>
-                      <span>
-                        {formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok
+            <button
+              type="button"
+              className="collab-agents-roster"
+              onClick={() => setListOpen((open) => !open)}
+              aria-expanded={listOpen}
+            >
+              <span className="collab-agents-roster-glyphs" aria-hidden="true">
+                {totals.rows.slice(0, MAX_ROSTER_GLYPHS).map((row) => (
+                  <AgentGlyph
+                    key={row.task.id}
+                    glyph={glyphs.get(row.task.id) ?? getAgentGlyphForSeed(row.task.id)}
+                    size={18}
+                    state={AGENT_GLYPH_STATE[row.statusKind]}
+                  />
+                ))}
+              </span>
+              <span className="collab-agents-roster-summary">{rosterSummary}</span>
+              <ChevronDown
+                size={13}
+                strokeWidth={2}
+                className={`collab-agents-roster-chevron${listOpen ? " open" : ""}`}
+                aria-hidden="true"
+              />
+            </button>
+            {listOpen ? (
+              <div className="collab-agents-list">
+                {totals.rows.map((row) => {
+                  const openable = Boolean(openAgent) && !isSynthesisChildTask(row.task);
+                  const content = (
+                    <>
+                      <AgentGlyph
+                        glyph={glyphs.get(row.task.id) ?? getAgentGlyphForSeed(row.task.id)}
+                        size={16}
+                        state={AGENT_GLYPH_STATE[row.statusKind]}
+                      />
+                      <span className="collab-agent-summary-title" title={row.task.title}>
+                        {resolveAgentDisplayName(
+                          stripInlineMarkdownFormatting(
+                            row.task.title || row.task.prompt || "Sub agent",
+                          ),
+                        )}
                       </span>
-                    </div>
-                  ) : null}
-                  <span className={`collab-agent-summary-status ${row.statusKind}`}>
-                    {row.statusLabel}
-                  </span>
-                  {onSelectTask ? (
+                      {statsEnabled ? (
+                        <span className="collab-agent-summary-meta">
+                          {formatRightPanelDuration(row.durationMs)} ·{" "}
+                          {formatCompactNumber(row.toolCallCount)} tools ·{" "}
+                          {formatCompactNumber(row.usage.inputTokens + row.usage.outputTokens)} tok
+                        </span>
+                      ) : null}
+                      <span className={`collab-agent-summary-status ${row.statusKind}`}>
+                        {row.statusLabel}
+                      </span>
+                    </>
+                  );
+                  return openable ? (
                     <button
+                      key={row.task.id}
                       type="button"
-                      className="collab-agent-open-task"
-                      onClick={() => onSelectTask(row.task.id)}
+                      className={`collab-agent-summary-row ${row.statusKind}`}
+                      onClick={() => openAgent?.(row.task.id)}
+                      title="Open this agent"
                     >
-                      Open
+                      {content}
                     </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
+                  ) : (
+                    <div key={row.task.id} className={`collab-agent-summary-row ${row.statusKind}`}>
+                      {content}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -1712,6 +1793,8 @@ const CollaborativeAgentsSection = memo(
     prev.expanded === next.expanded &&
     prev.totals === next.totals &&
     prev.onSelectTask === next.onSelectTask &&
+    prev.onOpenAgent === next.onOpenAgent &&
+    prev.revealListRequest === next.revealListRequest &&
     prev.statsEnabled === next.statsEnabled &&
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled,
 );
@@ -1726,6 +1809,7 @@ function RightPanelComponent({
   childEvents = [],
   childUsageByTaskId = EMPTY_CHILD_USAGE,
   onSelectTask,
+  onOpenAgent,
   onOpenSpreadsheetArtifact,
   onOpenDocumentArtifact,
   onOpenPresentationArtifact,
@@ -2468,6 +2552,8 @@ function RightPanelComponent({
         totals={collaborativeAgentTotals}
         toggleSection={() => toggleSection("collaborativeAgents")}
         onSelectTask={onSelectTask}
+        onOpenAgent={onOpenAgent}
+        revealListRequest={subAgentsFocusRequest}
         statsEnabled={subAgentStatsEnabled}
         sectionRef={collaborativeAgentsSectionRef}
         rendererPerfLoggingEnabled={rendererPerfLoggingEnabled}
@@ -2584,6 +2670,7 @@ function areRightPanelPropsEqual(prev: RightPanelProps, next: RightPanelProps): 
     prev.onSubAgentsFocusConsumed === next.onSubAgentsFocusConsumed &&
     prev.highlightOutputPath === next.highlightOutputPath &&
     prev.onSelectTask === next.onSelectTask &&
+    prev.onOpenAgent === next.onOpenAgent &&
     prev.onHighlightConsumed === next.onHighlightConsumed
   );
 }

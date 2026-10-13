@@ -117,7 +117,6 @@ import {
   detectModeSuggestions,
   type ModeSuggestion,
 } from "../../../shared/mode-suggestion-detection";
-import { CollaborativeAgentLines } from "../CollaborativeAgentLines";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { CollaborativeSummaryPanel } from "../CollaborativeSummaryPanel";
@@ -681,7 +680,7 @@ interface MainContentProps {
   onDismissInputRequest?: (requestId: string) => void;
   onOpenBrowserView?: (url?: string) => void;
   onViewTaskOutputs?: (taskId: string, primaryOutputPath?: string) => void;
-  /** Opens the right panel scrolled to its Sub Agents section. */
+  /** Opens the right panel scrolled to its Subagents section. */
   onViewSubAgents?: () => void;
   onTasksChanged?: () => void | Promise<void>;
   onOpenSpreadsheetArtifact?: (path: string) => void;
@@ -1769,6 +1768,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
   const verboseSteps = props.verboseSteps as boolean;
   const voiceEnabled = props.voiceEnabled as boolean;
   const wrappingUp = props.wrappingUp as boolean;
+  const onWrapUp = props.onWrapUp as (() => void) | undefined;
   const workspace = props.workspace as Workspace | null;
   const returnToDefaultTranscript = props.returnToDefaultTranscript as () => void;
   const openFileInPanel = props.openFileInPanel as (path: string) => void;
@@ -2464,6 +2464,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                       mainTaskCompleted={
                         !!task && ["completed", "failed", "cancelled"].includes(task.status)
                       }
+                      onWrapUp={onWrapUp}
                       isWrappingUp={wrappingUp}
                     />
                   </div>
@@ -3806,6 +3807,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       verboseSteps,
       voiceEnabled,
       wrappingUp,
+      onWrapUp,
       workspace,
       workspace?.path,
     ],
@@ -3867,6 +3869,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.verboseSteps === next.verboseSteps &&
     prev.voiceEnabled === next.voiceEnabled &&
     prev.wrappingUp === next.wrappingUp &&
+    prev.onWrapUp === next.onWrapUp &&
     prev.workspace?.path === next.workspace?.path &&
     prev.toolCallPairing?.completions === next.toolCallPairing?.completions &&
     prev.toolCallPairing?.claimedResultIds === next.toolCallPairing?.claimedResultIds &&
@@ -5650,6 +5653,11 @@ function MainContentComponent({
   useEffect(() => {
     setWrappingUp(false);
   }, [task?.id]);
+  const handleWrapUp = useCallback(() => {
+    if (wrappingUp || !onWrapUpTask) return;
+    setWrappingUp(true);
+    onWrapUpTask();
+  }, [onWrapUpTask, wrappingUp]);
 
   // Derive current in-progress step from events (for step feedback)
   const currentStep = useMemo(() => {
@@ -5753,10 +5761,9 @@ function MainContentComponent({
 
   const isTaskFinished =
     task?.status === "completed" || task?.status === "failed" || task?.status === "cancelled";
-  // The live agent strip above the composer goes away once agents settle, so a
-  // finished run with sub agents gets a jump to the right panel's Sub Agents list.
+  // Sub agents live in the right panel, so offer a jump there while it is closed.
   const showSubAgentsStripButton = Boolean(
-    onViewSubAgents && isTaskFinished && childTasks.length > 0,
+    onViewSubAgents && !rightPanelOpen && childTasks.length > 0,
   );
   const defaultTranscriptMode = getDefaultTranscriptMode({
     isTaskWorking,
@@ -5870,7 +5877,6 @@ function MainContentComponent({
   }, [events, guardrailDefaultMaxAutoContinuations, isTaskWorking, task]);
 
   // One glyph per sub-agent, shared by the composer agent lines and transcript rows.
-  const composerAgentGlyphs = useMemo(() => assignAgentGlyphs(childTasks), [childTasks]);
 
   const latestCanvasSessionId = useMemo(() => {
     if (canvasSessions.length === 0) return null;
@@ -11703,6 +11709,7 @@ function MainContentComponent({
       timelineHistoryError={timelineHistoryError}
       onLoadMoreTimelineHistory={onLoadMoreTimelineHistory}
       wrappingUp={wrappingUp}
+      onWrapUp={collaborativeRun && onWrapUpTask ? handleWrapUp : undefined}
       workspace={workspace}
     />
   );
@@ -12631,48 +12638,12 @@ function MainContentComponent({
           </div>
         )}
         <div
-          className={`input-container ${isDraggingFiles ? "drag-over" : ""} ${(collaborativeRun || childTasks.length > 0) && (onOpenChildAgentSidebar || onSelectChildTask) ? "input-container-with-agents" : ""}`}
+          className={`input-container ${isDraggingFiles ? "drag-over" : ""}`}
           onDragOver={handleDragOver}
           onDragEnter={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* Collaborative agent lines — extension of input box, inside same container */}
-          {!isBotConversation &&
-            (collaborativeRun || childTasks.length > 0) &&
-            (onOpenChildAgentSidebar || onSelectChildTask) && (
-              <CollaborativeAgentLines
-                collaborativeRun={collaborativeRun}
-                childTasks={childTasks}
-                childEvents={childEvents}
-                agentGlyphs={composerAgentGlyphs}
-                onOpenAgent={(taskId) => (onOpenChildAgentSidebar ?? onSelectChildTask)?.(taskId)}
-                onShowAllAgents={
-                  childTasks.length > 0 && (onOpenChildAgentSidebar || onSelectChildTask)
-                    ? () => {
-                        const firstTaskId = childTasks[0]?.id;
-                        if (firstTaskId) {
-                          (onOpenChildAgentSidebar ?? onSelectChildTask)?.(firstTaskId);
-                        }
-                      }
-                    : undefined
-                }
-                mainTaskCompleted={
-                  !!task && ["completed", "failed", "cancelled"].includes(task.status)
-                }
-                onWrapUp={
-                  onWrapUpTask
-                    ? () => {
-                        if (!wrappingUp) {
-                          setWrappingUp(true);
-                          onWrapUpTask();
-                        }
-                      }
-                    : undefined
-                }
-                isWrappingUp={wrappingUp}
-              />
-            )}
           {routineCreationNotice?.taskId === task.id && (
             <div className="task-automation-created-response" role="status">
               <div>

@@ -80,6 +80,9 @@ describe("RightPanel checklist rendering", () => {
     const markup = renderToStaticMarkup(
       React.createElement(RightPanel, {
         subAgentStatsEnabled: true,
+        // A "show sub agents" request opens the agent list under the roster line.
+        subAgentsFocusRequest: 1,
+        onOpenAgent: () => {},
         task: {
           id: "task-1",
           status: "completed",
@@ -143,16 +146,16 @@ describe("RightPanel checklist rendering", () => {
       }),
     );
 
-    expect(markup).toContain("Sub Agents");
+    expect(markup).toContain("Subagents");
     expect(markup).toContain("2 background agents");
-    expect(markup).toContain("1 done");
-    expect(markup).toContain("1 warning");
+    expect(markup).toContain("1 done · 1 warning");
     expect(markup).toContain("Tools");
     expect(markup).toContain("Tokens");
     expect(markup).toContain("1.9K");
     expect(markup).toContain("$0.015");
     expect(markup).toContain("Bug and Regression Risk Review");
     expect(markup).toContain("Needs review");
+    expect(markup).toContain('title="Open this agent"');
   });
 
   it("hides sub-agent stats unless the Appearance setting is on", () => {
@@ -184,8 +187,10 @@ describe("RightPanel checklist rendering", () => {
       }),
     );
 
-    expect(markup).toContain("Sub Agents");
-    expect(markup).toContain("Market research");
+    expect(markup).toContain("Subagents");
+    expect(markup).toContain("1 done");
+    // The agent list stays folded under the roster line until asked for.
+    expect(markup).not.toContain("Market research");
     expect(markup).not.toContain("background agents");
     expect(markup).not.toContain("LLM calls");
     expect(markup).not.toContain(" tok");

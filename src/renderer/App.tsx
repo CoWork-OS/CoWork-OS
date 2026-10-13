@@ -1177,7 +1177,7 @@ const SelectedTaskWorkspaceView = memo(
     const closeSpawnedAgentSidebar = useCallback(() => {
       setSpawnedAgentSidebar(null);
     }, []);
-    // The Sub Agents section lives in the right panel, which only mounts when no other side
+    // The Subagents section lives in the right panel, which only mounts when no other side
     // panel is open. Close those so the request lands now, not when they are closed later.
     const viewSubAgents = useCallback(() => {
       setSpreadsheetArtifact(null);
@@ -2002,6 +2002,7 @@ const SelectedTaskWorkspaceView = memo(
                   childEvents={rightPanelInput.childEvents}
                   childUsageByTaskId={rightPanelInput.childUsageByTaskId}
                   onSelectTask={onSelectTask}
+                  onOpenAgent={openSpawnedAgentSidebar}
                   onOpenSpreadsheetArtifact={openSpreadsheetArtifact}
                   onOpenDocumentArtifact={openDocumentArtifact}
                   onOpenPresentationArtifact={openPresentationArtifact}
@@ -3537,7 +3538,7 @@ export function App() {
   const handleRevealRightSidebar = useCallback(() => {
     setRightSidebarCollapsed(false);
   }, []);
-  // Bumped to make the right panel expand and scroll to its Sub Agents section.
+  // Bumped to make the right panel expand and scroll to its Subagents section.
   const [subAgentsFocusRequest, setSubAgentsFocusRequest] = useState(0);
   const handleViewSubAgents = useCallback(() => {
     setRightSidebarCollapsed(false);

@@ -98,7 +98,7 @@ function shouldAnnounce(model: TaskStatusStripViewModel): boolean {
   );
 }
 
-/** Strip action that jumps to the right panel's Sub Agents section once a run has agents. */
+/** Strip action that jumps to the right panel's Subagents section while that panel is closed. */
 export function SubAgentsStripButton({ count, onOpen }: { count: number; onOpen: () => void }) {
   return (
     <button

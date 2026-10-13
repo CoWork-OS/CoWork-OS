@@ -13,6 +13,23 @@ const CALENDAR_UNAVAILABLE: CalendarCardResult = {
   message: "Calendar actions aren't available here.",
 };
 
+/** What a reply-draft card's action did; `sendAfter` is when a queued reply goes out. */
+export type MailDraftResult = { ok: true; sendAfter?: number } | { ok: false; message: string };
+
+const MAIL_UNAVAILABLE: MailDraftResult = {
+  ok: false,
+  message: "Reply drafts aren't available here.",
+};
+
+function mailResult(
+  outcome: { ok: true; sendAfter?: number } | { ok: false; message: string } | undefined,
+): MailDraftResult {
+  if (!outcome) return MAIL_UNAVAILABLE;
+  return outcome.ok
+    ? { ok: true, ...(outcome.sendAfter ? { sendAfter: outcome.sendAfter } : {}) }
+    : { ok: false, message: outcome.message };
+}
+
 export interface HomeTodaySignals {
   /** The shared queue's items, most pressing first. */
   attention: AttentionItem[];
@@ -55,8 +72,19 @@ export interface HomeTodaySignals {
     start: number;
     end: number;
   }) => Promise<CalendarCardResult>;
+  /** Queues a drafted reply in the outbox; it goes out after the send delay unless undone. */
+  sendMailReplyDraft: (draftId: string) => Promise<MailDraftResult>;
+  /** Takes back a queued reply; the draft can be edited again. */
+  undoMailReplyDraftSend: (draftId: string) => Promise<MailDraftResult>;
+  discardMailReplyDraft: (draftId: string) => Promise<MailDraftResult>;
+  /** Saves an edited reply's text. */
+  saveMailDraftBody: (draftId: string, bodyText: string) => Promise<void>;
+  setMailReplyDraftsEnabled: (enabled: boolean) => Promise<void>;
+  dismissMailReplyDraftsOffer: () => Promise<void>;
   /** Hides a card right away and, when given, records the row it leaves behind. */
   resolve: (cardId: string, row?: HomeTodayHandledRow) => void;
+  /** Brings a card back (after an undo) and drops the row it left. */
+  unresolve: (cardId: string, rowId: string) => void;
 }
 
 /** The shared queue for the Calm home's Today stack, plus the actions its cards take. */
@@ -68,6 +96,15 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
   const resolve = useCallback((cardId: string, row?: HomeTodayHandledRow) => {
     setResolved((current) => new Set(current).add(cardId));
     if (row) setActedRows((current) => [row, ...current.filter((item) => item.id !== row.id)]);
+  }, []);
+
+  const unresolve = useCallback((cardId: string, rowId: string) => {
+    setResolved((current) => {
+      const next = new Set(current);
+      next.delete(cardId);
+      return next;
+    });
+    setActedRows((current) => current.filter((item) => item.id !== rowId));
   }, []);
 
   const markSuggestionStarted = useCallback(async (workspaceId: string, suggestionId: string) => {
@@ -145,6 +182,36 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     [],
   );
 
+  const sendMailReplyDraft = useCallback(async (draftId: string) => {
+    const api = window.electronAPI;
+    if (typeof api.sendMailReplyDraft !== "function") return MAIL_UNAVAILABLE;
+    return mailResult(await api.sendMailReplyDraft(draftId));
+  }, []);
+
+  const undoMailReplyDraftSend = useCallback(async (draftId: string) => {
+    const api = window.electronAPI;
+    if (typeof api.undoMailReplyDraftSend !== "function") return MAIL_UNAVAILABLE;
+    return mailResult(await api.undoMailReplyDraftSend(draftId));
+  }, []);
+
+  const discardMailReplyDraft = useCallback(async (draftId: string) => {
+    const api = window.electronAPI;
+    if (typeof api.discardMailReplyDraft !== "function") return MAIL_UNAVAILABLE;
+    return mailResult(await api.discardMailReplyDraft(draftId));
+  }, []);
+
+  const saveMailDraftBody = useCallback(async (draftId: string, bodyText: string) => {
+    await window.electronAPI.updateMailboxDraft(draftId, { bodyText });
+  }, []);
+
+  const setMailReplyDraftsEnabled = useCallback(async (enabled: boolean) => {
+    await window.electronAPI.setMailReplyDraftsEnabled(enabled);
+  }, []);
+
+  const dismissMailReplyDraftsOffer = useCallback(async () => {
+    await window.electronAPI.dismissMailReplyDraftsOffer();
+  }, []);
+
   return {
     attention: snapshot.items,
     failedSources: snapshot.failedSources,
@@ -160,6 +227,13 @@ export function useHomeTodaySignals(enabled: boolean): HomeTodaySignals {
     acceptCalendarProposal,
     dismissCalendarProposal,
     holdCalendarTimeForSuggestion,
+    sendMailReplyDraft,
+    undoMailReplyDraftSend,
+    discardMailReplyDraft,
+    saveMailDraftBody,
+    setMailReplyDraftsEnabled,
+    dismissMailReplyDraftsOffer,
     resolve,
+    unresolve,
   };
 }

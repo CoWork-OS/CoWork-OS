@@ -12,6 +12,8 @@ import {
   attentionFromInputRequest,
   attentionFromMemoryChange,
   attentionFromCalendarProposal,
+  attentionFromMailReplyDraft,
+  attentionMailReplyOffer,
   suggestsCalendarHold,
   attentionFromSuggestion,
   attentionFromTask,
@@ -26,6 +28,7 @@ import {
   type AttentionTaskContext,
 } from "../../shared/attention";
 import type { CalendarProposal } from "../../shared/calendar-proposals";
+import type { MailReplyDraftCard } from "../../shared/mail-reply-drafts";
 import type { MemoryCurationChange } from "../../shared/memory-review-types";
 import type { ApprovalRequest, InputRequest, ProactiveSuggestion, Task } from "../../shared/types";
 
@@ -48,6 +51,10 @@ export interface AttentionSources {
   listCalendarProposals?: () => Promise<CalendarProposal[]>;
   /** A free stretch to offer as a hold on a suggestion about making time. */
   findCalendarHold?: () => Promise<{ start: number; end: number } | null>;
+  /** Replies drafted for mail that needs one, waiting on Send. */
+  listMailReplyDrafts?: () => Promise<MailReplyDraftCard[]>;
+  /** Whether to offer drafting replies (it's off, and some mail needs a reply). */
+  shouldOfferMailReplyDrafts?: () => Promise<boolean>;
   /** What this machine is called in the UI, e.g. "This Mac". */
   localLabel: string;
   now?: () => number;
@@ -64,6 +71,7 @@ const LIMITS = {
   suggestions: 20,
   memory: 20,
   calendar: 8,
+  mail: 5,
   /** Task lookups for approvals and questions whose session is not among the recent ones. */
   taskLookups: 50,
   /** Parent lookups while finding the agent roles an item's work belongs to. */
@@ -77,7 +85,10 @@ const LIMITS = {
  * Sources read over the network get a time limit, so a slow one never holds up the
  * approvals and questions read from the local database.
  */
-const SOURCE_TIMEOUT_MS: Partial<Record<AttentionSourceName, number>> = { calendar: 5000 };
+const SOURCE_TIMEOUT_MS: Partial<Record<AttentionSourceName, number>> = {
+  calendar: 5000,
+  mail: 5000,
+};
 
 function withTimeout<T>(load: Promise<T>, ms: number | undefined): Promise<T> {
   if (!ms) return load;
@@ -115,6 +126,8 @@ export class AttentionService {
       suggestions,
       memoryChanges,
       calendarProposals,
+      mailDrafts,
+      offerMailDrafts,
     ] = await Promise.all([
       read("approvals", this.sources.listPendingApprovals, [] as ApprovalRequest[]),
       read("questions", this.sources.listPendingInputRequests, [] as InputRequest[]),
@@ -140,6 +153,16 @@ export class AttentionService {
         this.sources.listCalendarProposals ?? (async () => []),
         [] as CalendarProposal[],
       ),
+      read(
+        "mail",
+        this.sources.listMailReplyDrafts ?? (async () => []),
+        [] as MailReplyDraftCard[],
+      ),
+      // Only decides whether an offer shows; not reading it hides nothing that waits.
+      withTimeout(
+        this.sources.shouldOfferMailReplyDrafts?.() ?? Promise.resolve(false),
+        SOURCE_TIMEOUT_MS.mail,
+      ).catch(() => false),
     ]);
 
     const newestFirst = <T extends { requestedAt: number }>(rows: T[]) =>
@@ -206,6 +229,10 @@ export class AttentionService {
       ...calendarProposals
         .slice(0, LIMITS.calendar)
         .map((proposal) => attentionFromCalendarProposal(proposal, context)),
+      ...mailDrafts
+        .slice(0, LIMITS.mail)
+        .map((draft) => attentionFromMailReplyDraft(draft, context)),
+      ...(offerMailDrafts ? [attentionMailReplyOffer(now, context)] : []),
     ];
     await this.offerCalendarHold(items);
 

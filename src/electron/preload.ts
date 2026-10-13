@@ -1634,6 +1634,11 @@ interface AgentToolRestrictions {
   deniedTools?: string[];
 }
 
+/** What a reply-draft card's action did (see MailReplyDraftsService). */
+type MailReplyDraftCardOutcome =
+  | { ok: true; sendAfter?: number }
+  | { ok: false; reason: "not_found" | "gone" | "too_late" | "failed"; message: string };
+
 /** What a calendar card's action did (see CalendarProposalsService). */
 type CalendarCardOutcome =
   | { ok: true; kind: "focus_hold" | "conflict" | "meeting_prep" }
@@ -5678,6 +5683,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     start: number;
     end: number;
   }) => ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_HOLD_FOR_SUGGESTION, data),
+  // Reply drafts on Today
+  sendMailReplyDraft: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFT_SEND, draftId),
+  undoMailReplyDraftSend: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFT_UNDO_SEND, draftId),
+  discardMailReplyDraft: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFT_DISCARD, draftId),
+  setMailReplyDraftsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFTS_SET_ENABLED, enabled),
+  dismissMailReplyDraftsOffer: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFTS_DISMISS_OFFER),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
@@ -9677,6 +9693,11 @@ export interface ElectronAPI {
     suggestionId: string,
   ) => Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_eligible" | "unavailable" }>;
   acceptCalendarProposal: (proposalId: string) => Promise<CalendarCardOutcome>;
+  sendMailReplyDraft: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
+  undoMailReplyDraftSend: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
+  discardMailReplyDraft: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
+  setMailReplyDraftsEnabled: (enabled: boolean) => Promise<{ ok: boolean }>;
+  dismissMailReplyDraftsOffer: () => Promise<{ ok: boolean }>;
   dismissCalendarProposal: (proposalId: string) => Promise<{ ok: boolean }>;
   holdCalendarTimeForSuggestion: (data: {
     workspaceId: string;

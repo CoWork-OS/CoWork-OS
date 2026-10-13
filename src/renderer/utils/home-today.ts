@@ -55,7 +55,17 @@ export type HomeTodayAction =
       start: number;
       end: number;
     }
-  | { type: "open-link"; url: string };
+  | { type: "open-link"; url: string }
+  /** Queue a drafted reply in the outbox; it goes out after the send delay unless undone. */
+  | { type: "send-mail-draft"; draftId: string }
+  /** Edit a drafted reply's text right on the card. */
+  | { type: "edit-mail-draft"; draftId: string }
+  | { type: "discard-mail-draft"; draftId: string }
+  /** Take back a reply waiting in the outbox. */
+  | { type: "undo-mail-send"; draftId: string }
+  /** Turn reply drafts on or off. */
+  | { type: "set-mail-drafts"; enabled: boolean }
+  | { type: "dismiss-mail-offer" };
 
 export interface HomeTodayButton {
   label: string;
@@ -74,6 +84,7 @@ export type HomeTodayIcon =
   | "calendar_hold"
   | "calendar_conflict"
   | "calendar_prep"
+  | "mail_reply"
   | SuggestionType;
 
 /** A short fact under the card's header: what started the work, where it runs, its risk. */
@@ -106,6 +117,8 @@ export interface HomeTodayCard {
   more?: HomeTodayButton[];
   /** An offer, not a request: shown with the cards, but nothing counts it as needing you. */
   offer?: boolean;
+  /** A drafted reply's id and text, which the card can edit. */
+  mailDraft?: { draftId: string; bodyText: string };
 }
 
 export interface HomeTodayHandledRow {
@@ -118,6 +131,8 @@ export interface HomeTodayHandledRow {
   taskId?: string;
   /** A commitment memory closed on its own, which the row can reopen. */
   undo?: { workspaceId: string; changeId: string };
+  /** A reply waiting in the outbox, which the row can take back until it goes out. */
+  undoSend?: { cardId: string; draftId: string; until: number };
   /** Why it was handled, for the row's tooltip. */
   detail?: string;
 }
@@ -519,7 +534,85 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
     case "calendar":
       if (item.ref.type !== "calendar_proposal" || !item.calendar) return null;
       return calendarCard(item, item.calendar, base, now);
+    case "mail_reply":
+      return mailReplyCard(item, base);
   }
+}
+
+function mailReplyCard(
+  item: AttentionItem,
+  base: Pick<HomeTodayCard, "id" | "kind" | "at" | "chips">,
+): HomeTodayCard | null {
+  const common = {
+    ...base,
+    // "From your inbox" would only repeat the source.
+    chips: base.chips.filter((chip) => chip.kind !== "origin"),
+    icon: "mail_reply" as const,
+    source: "Mail",
+    state: item.state,
+    title: item.title,
+    why: item.detail || "",
+  };
+  if (item.ref.type === "mail_offer") {
+    return {
+      ...common,
+      offer: true,
+      primary: { label: "Turn on", action: { type: "set-mail-drafts", enabled: true } },
+      secondary: { label: "Not now", action: { type: "dismiss-mail-offer" } },
+    };
+  }
+  if (item.ref.type !== "mail_draft" || !item.mailDraft) return null;
+  const { draftId, bodyText, to, failed, copies, attachments, sendingUntil } = item.mailDraft;
+  const extras = [
+    copies > 0 ? `${copies} more in copy` : "",
+    attachments > 0 ? (attachments === 1 ? "1 attachment" : `${attachments} attachments`) : "",
+  ].filter(Boolean);
+  // The whole reply and every recipient's address, exactly as it will be sent.
+  const preview = {
+    label: [to.length > 0 ? `To ${namesList(to)}` : "", ...extras].filter(Boolean).join(" · "),
+    text: bodyText,
+  };
+  if (item.mailDraft.retrying) {
+    return {
+      ...common,
+      offer: true,
+      preview,
+      primary: {
+        label: "Cancel send",
+        hint: "Stops the retries. The reply stays as a draft.",
+        action: { type: "undo-mail-send", draftId },
+      },
+    };
+  }
+  if (sendingUntil) {
+    return {
+      ...common,
+      why: `It goes out at ${formatClock(sendingUntil)}.`,
+      // Waiting to go out is not a decision; it only stays undoable until then.
+      offer: true,
+      preview,
+      primary: { label: "Undo send", action: { type: "undo-mail-send", draftId } },
+    };
+  }
+  return {
+    ...common,
+    preview,
+    mailDraft: { draftId, bodyText },
+    primary: {
+      label: failed ? "Send again" : "Send",
+      hint: "Sends after a short delay. You can undo until then.",
+      action: { type: "send-mail-draft", draftId },
+    },
+    secondary: { label: "Edit", action: { type: "edit-mail-draft", draftId } },
+    more: [
+      { label: "Discard draft", action: { type: "discard-mail-draft", draftId } },
+      {
+        label: "Stop drafting replies",
+        hint: "No new drafts. The ones already made stay until you send or discard them.",
+        action: { type: "set-mail-drafts", enabled: false },
+      },
+    ],
+  };
 }
 
 /** A waiting session the renderer knows about, as an attention item. */
@@ -563,11 +656,16 @@ export function buildHomeToday(input: {
       .map(sessionAttention),
   ]);
 
+  // A reply this view just sent already has a row with Undo; no second card for it.
+  const sentHere = new Set(
+    (input.actedRows ?? []).flatMap((row) => (row.undoSend ? [row.undoSend.draftId] : [])),
+  );
   const needsYou: HomeTodayCard[] = [];
   let idea: HomeTodayCard | null = null;
   for (const item of items) {
     const card = cardForAttention(item, now);
     if (!card || resolved.has(card.id)) continue;
+    if (item.mailDraft?.sendingUntil && sentHere.has(item.mailDraft.draftId)) continue;
     if (item.kind === "suggestion" && !item.urgent) {
       idea ??= card;
       continue;
@@ -590,8 +688,14 @@ export function buildHomeToday(input: {
         ]
       : [],
   );
+  // A reply whose send failed is back as a card, so its "Sent" row would contradict it.
+  const failedDrafts = new Set(
+    input.attention.flatMap((item) => (item.mailDraft?.failed ? [item.mailDraft.draftId] : [])),
+  );
   const handled: HomeTodayHandledRow[] = [
-    ...(input.actedRows ?? []),
+    ...(input.actedRows ?? []).filter(
+      (row) => !row.undoSend || !failedDrafts.has(row.undoSend.draftId),
+    ),
     ...[
       ...memoryRows,
       // The queue is the authority on what still waits: a session it lists is never

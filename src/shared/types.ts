@@ -8843,6 +8843,12 @@ export const IPC_CHANNELS = {
   CALENDAR_PROPOSAL_ACCEPT: "calendar:acceptProposal",
   CALENDAR_PROPOSAL_DISMISS: "calendar:dismissProposal",
   CALENDAR_HOLD_FOR_SUGGESTION: "calendar:holdForSuggestion",
+  // Reply drafts on Today
+  MAIL_REPLY_DRAFT_SEND: "mailReplyDrafts:send",
+  MAIL_REPLY_DRAFT_UNDO_SEND: "mailReplyDrafts:undoSend",
+  MAIL_REPLY_DRAFT_DISCARD: "mailReplyDrafts:discard",
+  MAIL_REPLY_DRAFTS_SET_ENABLED: "mailReplyDrafts:setEnabled",
+  MAIL_REPLY_DRAFTS_DISMISS_OFFER: "mailReplyDrafts:dismissOffer",
 
   // Shared "needs you" queue (shared/attention.ts): the snapshot, and a signal when it changed
   ATTENTION_LIST: "attention:list",

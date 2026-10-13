@@ -3,6 +3,8 @@ import {
   attentionActorForTask,
   attentionFromApproval,
   attentionFromCalendarProposal,
+  attentionFromMailReplyDraft,
+  attentionMailReplyOffer,
   attentionFromCommitment,
   attentionFromFlowStep,
   attentionFromInputRequest,
@@ -374,6 +376,45 @@ describe("rankAttention", () => {
       "prep-late",
       "idea",
     ]);
+  });
+});
+
+describe("mail reply items", () => {
+  it("asks to send a drafted reply, and only offers to start drafting", () => {
+    const draft = {
+      draftId: "d1",
+      threadId: "t1",
+      accountId: "gmail:me@example.com",
+      provider: "gmail" as const,
+      subject: "Q3 proposal",
+      to: ["Dana <dana@example.com>", "Lee", "Kim", "Ray"],
+      copies: 2,
+      attachments: 1,
+      sender: "Dana",
+      bodyText: "Thanks Dana, sending it Friday.",
+      createdAt: NOW - 60_000,
+    };
+    expect(attentionFromMailReplyDraft(draft, context)).toMatchObject({
+      id: "mail_reply:d1",
+      kind: "mail_reply",
+      state: "Reply drafted",
+      title: "Q3 proposal",
+      detail: "Dana is waiting on a reply.",
+      urgent: true,
+      actor: { kind: "background", name: "Mail" },
+      ref: { type: "mail_draft", draftId: "d1" },
+      mailDraft: draft,
+    });
+    expect(attentionMailReplyOffer(NOW, context)).toMatchObject({
+      id: "mail_reply:offer",
+      urgent: false,
+      ref: { type: "mail_offer" },
+    });
+    const ranked = rankAttention([
+      attentionMailReplyOffer(NOW, context),
+      attentionFromMailReplyDraft(draft, context),
+    ]);
+    expect(ranked.map((item) => item.id)).toEqual(["mail_reply:d1", "mail_reply:offer"]);
   });
 });
 

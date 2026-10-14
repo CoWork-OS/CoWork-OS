@@ -1081,12 +1081,25 @@ export class DatabaseManager {
         earliest_available_cursor,
         high_water_cursor - ${TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK} + 1
       );
+      -- Driven from the state rows: only tasks that passed the window and still hold rows
+      -- below it are touched. Scanning the whole journal here cost hundreds of ms on every
+      -- start, since the insert trigger above already keeps nearly every task in bounds.
       DELETE FROM task_event_mutation_journal
-      WHERE cursor < (
-        SELECT earliest_available_cursor
-        FROM task_event_mutation_journal_state
-        WHERE task_id = task_event_mutation_journal.task_id
-      );
+      WHERE task_id IN (
+        SELECT s.task_id
+        FROM task_event_mutation_journal_state AS s
+        WHERE s.earliest_available_cursor > 1
+          AND EXISTS (
+            SELECT 1
+            FROM task_event_mutation_journal AS j
+            WHERE j.task_id = s.task_id AND j.cursor < s.earliest_available_cursor
+          )
+      )
+        AND cursor < (
+          SELECT earliest_available_cursor
+          FROM task_event_mutation_journal_state
+          WHERE task_id = task_event_mutation_journal.task_id
+        );
 
       CREATE TABLE IF NOT EXISTS session_progress (
         task_id TEXT PRIMARY KEY,

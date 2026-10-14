@@ -93,6 +93,58 @@ function createDaemonLike() {
   }) as Any;
 }
 
+describe("application operation completion gate", () => {
+  function withApplicationStatus(status: string) {
+    const daemon = createDaemonLike();
+    daemon.updateTask = vi.fn();
+    daemon.workSessionContractService = { beginWait: vi.fn() };
+    daemon.applicationExecutionService = {
+      repository: { list: vi.fn().mockResolvedValue([{ id: "operation" }]) },
+      projection: vi
+        .fn()
+        .mockReturnValue({ operationId: "operation", status, objective: "Requested work" }),
+    };
+    return daemon;
+  }
+  it("keeps a background job pending without labeling it as a required user decision", async () => {
+    const daemon = withApplicationStatus("in_progress");
+    await daemon.completeTask("task-1", "done");
+    expect(daemon.updateTask).toHaveBeenCalledWith("task-1", {
+      status: "paused",
+      terminalStatus: undefined,
+    });
+    expect(daemon.workSessionContractService.beginWait).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ requestId: "application_completion:task-1" }),
+    );
+    expect(daemon.finishQueueSlot).toHaveBeenCalledWith("task-1");
+    expect(daemon.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ status: "completed" }),
+    );
+  });
+  it("requires reconciliation before an unknown effect can be reported as completed", async () => {
+    const daemon = withApplicationStatus("unknown");
+    await daemon.completeTask("task-1", "done");
+    expect(daemon.updateTask).toHaveBeenCalledWith("task-1", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+    });
+    expect(daemon.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ status: "completed" }),
+    );
+  });
+  it("keeps an unverified application result from becoming an OK task outcome", async () => {
+    const daemon = withApplicationStatus("unverified");
+    await daemon.completeTask("task-1", "done");
+    expect(daemon.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ terminalStatus: "partial_success" }),
+    );
+  });
+});
+
 describe("AgentDaemon.completeTask", () => {
   it("fails required verification at the depth limit instead of silently skipping it", async () => {
     const daemonLike = createDaemonLike();

@@ -1078,6 +1078,19 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect((executor as Any).resolveVerificationModeForStep(step)).toBe("artifact_file");
   });
 
+  it("does not require a file when the verify step only forbids file writes", () => {
+    executor = createExecutorWithStubs([], {});
+    const step: Any = {
+      id: "verify-native-no-files",
+      description:
+        "Verify: Confirm from a fresh observation of the same Calculator window that its final display equals 400, and confirm the action record contains only background native_app operations and no file-writing operations.",
+      status: "pending",
+    };
+    expect((executor as Any).resolveVerificationModeForStep(step)).toBe("none");
+    step.description = "Verify: confirm the report file exists and does not contain placeholders.";
+    expect((executor as Any).resolveVerificationModeForStep(step)).toBe("artifact_file");
+  });
+
   it("accepts artifact verification evidence from file inspection tools when step text is generic", async () => {
     executor = createExecutorWithStubs(
       [
@@ -6159,6 +6172,63 @@ relationship_memory:
     expect(verifyContext).toContain("Do not inspect parent directories");
   });
 
+  it("gives the verifier the host-recorded native action ledger", async () => {
+    let verifyContext = "";
+    const executor = createExecutorWithLLMHandler((messages) => {
+      verifyContext = String(messages?.[0]?.content || "");
+      return textResponse("OK");
+    });
+    const preservation = {
+      frontmostUnchanged: true,
+      pointerUnchanged: true,
+      globalInput: false,
+      clipboardUsed: false,
+      before: { frontmostPid: 45899 },
+      after: { frontmostPid: 45899 },
+    };
+    const attempt = (attemptId: string, status: string, extra: Any = {}) => ({
+      id: `${attemptId}-${status}`,
+      taskId: "task-1",
+      timestamp: 1,
+      type: "log",
+      payload: {
+        kind: "native_app_attempt",
+        attemptId,
+        status,
+        action: "press",
+        pid: 6632,
+        windowId: 221212,
+        ...extra,
+      },
+    });
+    (executor as Any).daemon.getTaskEvents = vi
+      .fn()
+      .mockReturnValue([
+        attempt("a1", "dispatching"),
+        attempt("a1", "acknowledged", { preservation }),
+        attempt("a2", "dispatching"),
+        attempt("a2", "acknowledged", { preservation }),
+      ]);
+    const verifyStep: Any = {
+      id: "verify",
+      kind: "verification",
+      description:
+        "Verify the display shows 400 and that the foreground app and pointer were untouched.",
+      status: "pending",
+    };
+    (executor as Any).plan = { description: "Plan", steps: [verifyStep] };
+
+    await (executor as Any).executeStep(verifyStep);
+
+    expect(verifyContext).toContain("NATIVE ACTION LEDGER");
+    expect(verifyContext).toContain(
+      "- press pid=6632 window=221212: acknowledged; frontmost unchanged (pid 45899 -> 45899), pointer unchanged",
+    );
+    expect(verifyContext).toContain(
+      "pointer, keyboard and clipboard untouched: 2; with an exception: 0; unresolved: 0.",
+    );
+  });
+
   it("detects recovery intent from user messaging in simple phrases", () => {
     const executor = createExecutorWithStubs([textResponse("done")], {});
     expect((executor as Any).isRecoveryIntent("I need you to find another way")).toBe(true);
@@ -7205,6 +7275,16 @@ describe("TaskExecutor step loop control", () => {
       executor.task.id,
       expect.objectContaining({ status: "failed", error: "provider exploded" }),
     );
+  });
+
+  it("never scores an explicit FAIL_BLOCKING verdict as a pass", () => {
+    const executor = createExecutorWithStubs([], {}) as Any;
+    expect(
+      executor.isVerificationPassing(
+        "FAIL_BLOCKING — fresh native state from Calculator window 221212 shows 17×, not 400. The chat report accurately reflects that incomplete state, but the required final result is missing.",
+      ),
+    ).toBe(false);
+    expect(executor.isVerificationPassing("OK")).toBe(true);
   });
 
   describe("verification repair pass", () => {

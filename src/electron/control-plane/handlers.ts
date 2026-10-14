@@ -94,6 +94,7 @@ import { registerControlPlaneCoreMethods } from "./registerControlPlaneCoreMetho
 import { registerAgentSecurityMethods } from "./registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "./registerStrategicPlannerMethods";
 import { registerWorkSessionMethods } from "./registerWorkSessionMethods";
+import { registerApplicationExecutionMethods } from "./registerApplicationExecutionMethods";
 import { getStrategicPlannerService } from "./StrategicPlannerService";
 import {
   getFleetConnectionManager,
@@ -2975,6 +2976,7 @@ export function registerTaskAndWorkspaceMethods(
     agentDaemon,
     requireScope,
   });
+  registerApplicationExecutionMethods({ server, agentDaemon, requireScope });
 
   const redactWorkspaceForRead = (workspace: any) => ({
     id: workspace.id,

@@ -41,7 +41,7 @@ interface BuiltinToolsSettingsData {
   codexRuntimeMode: "native" | "acpx";
   computerUseAutomation: {
     browserAutomationMode: "background" | "visible" | "ask";
-    nativeComputerUseMode: "background_first" | "ask_visible" | "visible";
+    nativeComputerUseMode: "background" | "ask_visible" | "visible";
   };
   version: string;
 }
@@ -173,7 +173,9 @@ export function BuiltinToolsSettings() {
           browserAutomationMode:
             loadedSettings.computerUseAutomation?.browserAutomationMode || "background",
           nativeComputerUseMode:
-            loadedSettings.computerUseAutomation?.nativeComputerUseMode || "background_first",
+            loadedSettings.computerUseAutomation?.nativeComputerUseMode === "background_first"
+              ? "background"
+              : loadedSettings.computerUseAutomation?.nativeComputerUseMode || "background",
         },
       });
       setCategories(loadedCategories);
@@ -358,9 +360,7 @@ export function BuiltinToolsSettings() {
     }
   };
 
-  const handleNativeComputerUseMode = async (
-    mode: "background_first" | "ask_visible" | "visible",
-  ) => {
+  const handleNativeComputerUseMode = async (mode: "background" | "ask_visible" | "visible") => {
     if (!settings) return;
 
     const newSettings = {
@@ -442,7 +442,7 @@ export function BuiltinToolsSettings() {
           const browserAutomationMode =
             settings.computerUseAutomation?.browserAutomationMode || "background";
           const nativeComputerUseMode =
-            settings.computerUseAutomation?.nativeComputerUseMode || "background_first";
+            settings.computerUseAutomation?.nativeComputerUseMode || "background";
 
           return (
             <div
@@ -616,7 +616,8 @@ export function BuiltinToolsSettings() {
                     <div className="builtin-tool-advanced-text">
                       <div className="builtin-tool-advanced-label">Native desktop control</div>
                       <div className="builtin-tool-advanced-hint">
-                        Background first tries Accessibility actions before visible Mac control.
+                        Background control preserves your active app and input. Unsupported actions
+                        stop without foreground fallback.
                       </div>
                     </div>
                     <select
@@ -624,12 +625,12 @@ export function BuiltinToolsSettings() {
                       value={nativeComputerUseMode}
                       onChange={(e) =>
                         handleNativeComputerUseMode(
-                          e.target.value as "background_first" | "ask_visible" | "visible",
+                          e.target.value as "background" | "ask_visible" | "visible",
                         )
                       }
                       disabled={!config.enabled}
                     >
-                      <option value="background_first">Background first (Recommended)</option>
+                      <option value="background">Background only (Recommended)</option>
                       <option value="ask_visible">Ask before visible control</option>
                       <option value="visible">Visible control</option>
                     </select>

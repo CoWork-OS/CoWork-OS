@@ -149,16 +149,21 @@ function sessionStatusForTurn(status: WorkSessionTurnStatus): WorkSessionStatus 
  * TaskEvent has its own compatibility sanitizer; this second boundary keeps
  * the canonical protocol safe even when callers append arbitrary legacy data.
  */
-export function redactWorkSessionValue(value: unknown, key = "", depth = 0): unknown {
+export function redactWorkSessionValue(
+  value: unknown,
+  key = "",
+  depth = 0,
+  maxDepth = MAX_PROTOCOL_DEPTH,
+): unknown {
   if (SENSITIVE_KEY.test(key)) return "[redacted]";
   if (typeof value === "string" && SECRET_VALUE.test(value)) return "[redacted]";
-  if (depth >= MAX_PROTOCOL_DEPTH) return "[depth-limited]";
+  if (depth >= maxDepth) return "[depth-limited]";
   if (typeof value === "string") return boundedText(value);
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
   if (Array.isArray(value)) {
     return value
       .slice(0, MAX_PROTOCOL_ARRAY_ITEMS)
-      .map((item) => redactWorkSessionValue(item, key, depth + 1));
+      .map((item) => redactWorkSessionValue(item, key, depth + 1, maxDepth));
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
@@ -167,7 +172,7 @@ export function redactWorkSessionValue(value: unknown, key = "", depth = 0): unk
         .slice(0, MAX_PROTOCOL_ARRAY_ITEMS)
         .map(([entryKey, entryValue]) => [
           entryKey,
-          redactWorkSessionValue(entryValue, entryKey, depth + 1),
+          redactWorkSessionValue(entryValue, entryKey, depth + 1, maxDepth),
         ]),
     );
   }

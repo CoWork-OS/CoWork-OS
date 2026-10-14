@@ -154,7 +154,9 @@ export function buildAssistantApprovalRequest(
         )
       : "";
   const taskConsent =
-    (approvalType === "external_service" || approvalType === "network_access") &&
+    (approvalType === "external_service" ||
+      approvalType === "network_access" ||
+      approvalType === "computer_use") &&
     details &&
     typeof details === "object" &&
     typeof (details as Record<string, unknown>).taskConsentScope === "string"

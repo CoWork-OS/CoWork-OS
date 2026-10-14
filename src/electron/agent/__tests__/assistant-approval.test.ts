@@ -157,6 +157,18 @@ it("makes the duration and app scope explicit while keeping Deny first", () => {
   ).toBe(true);
 });
 
+it("labels native background app permission with the actual task duration", () => {
+  const request = buildAssistantApprovalRequest("computer_use", "Control Calculator", {
+    taskConsentScope: "background observation, clicking and typing in com.apple.calculator",
+  });
+  expect(request.questions[0].question).toContain("com.apple.calculator");
+  expect(request.questions[0].question).toContain("until this task ends");
+  expect(request.questions[0].options.map((option) => option.label)).toEqual([
+    "Deny",
+    "Allow for this task",
+  ]);
+});
+
 it("offers a chat-scoped consent for read-only web access in a bot chat", () => {
   const request = buildAssistantApprovalRequest(
     "network_access",

@@ -235,6 +235,16 @@ export const Events = {
  * Standard method names
  */
 export const Methods = {
+  APPLICATION_CAPABILITIES: "application.capabilities",
+  APPLICATION_OPERATION_CREATE: "application.operation.create",
+  APPLICATION_OPERATION_GET: "application.operation.get",
+  APPLICATION_OPERATION_LIST: "application.operation.list",
+  APPLICATION_OPERATION_PREPARE: "application.operation.prepare",
+  APPLICATION_OPERATION_EXECUTE: "application.operation.execute",
+  APPLICATION_OPERATION_RECONCILE: "application.operation.reconcile",
+  APPLICATION_OPERATION_CANCEL: "application.operation.cancel",
+  APPLICATION_DECISION_RESOLVE: "application.decision.resolve",
+  APPLICATION_OPERATION_RESOLVE_UNKNOWN: "application.operation.resolveUnknown",
   // Connection
   CONNECT: "connect",
   PING: "ping",

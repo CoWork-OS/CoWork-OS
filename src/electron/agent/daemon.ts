@@ -79,6 +79,13 @@ import { SessionProgressService } from "../sessions/SessionProgressService";
 import { WorkSessionProtocolService } from "../sessions/WorkSessionProtocolService";
 import { WorkSessionContractService } from "../sessions/WorkSessionContractService";
 import {
+  createDaemonApplicationExecution,
+  ApplicationTaskToolGateway,
+} from "../applications/daemon-application-execution";
+import type { ApplicationExecutionService } from "../applications/ApplicationExecutionService";
+import type { ApplicationToolGateway } from "../applications/ApplicationAdapterCatalog";
+import { APPLICATION_DECISION_PREFIX, resolveApplicationInput } from "./tools/application-tools";
+import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
 } from "../sessions/session-retention-settings";
@@ -827,6 +834,8 @@ export class AgentDaemon extends EventEmitter {
   private sessionProgressService: SessionProgressService;
   private workSessionProtocolService: WorkSessionProtocolService;
   private workSessionContractService: WorkSessionContractService;
+  private applicationExecutionService?: ApplicationExecutionService;
+  private applicationTaskTools = new ApplicationTaskToolGateway();
   private annotationRepo: AnnotationRepository;
   private activityRepo: ActivityStore;
   private agentRoleRepo: AgentRoleStore;
@@ -1075,6 +1084,57 @@ export class AgentDaemon extends EventEmitter {
   /** Return the durable Phase 4 contracts/evidence/lineage service. */
   getWorkSessionContractService(): WorkSessionContractService {
     return this.workSessionContractService;
+  }
+
+  getApplicationExecutionService(): ApplicationExecutionService {
+    this.applicationExecutionService ??= createDaemonApplicationExecution(
+      this,
+      this.applicationTaskTools,
+    );
+    return this.applicationExecutionService;
+  }
+
+  bindApplicationToolGateway(taskId: string, gateway: ApplicationToolGateway): void {
+    this.applicationTaskTools.bind(taskId, gateway);
+  }
+  getExistingApplicationExecutionService(): ApplicationExecutionService | undefined {
+    return this.applicationExecutionService;
+  }
+
+  async resumeAfterApplicationOperations(taskId: string): Promise<void> {
+    const task = this.getTask(taskId);
+    if (
+      !task ||
+      task.status !== "paused" ||
+      !this.applicationExecutionService ||
+      this.applicationExecutionService.isTaskCancellationRequested(taskId)
+    )
+      return;
+    const session = this.workSessionContractService.getForTask(taskId)?.session;
+    if (!session) return;
+    const requestId = `application_completion:${taskId}`;
+    const wait = this.workSessionContractService
+      .getRepository()
+      .findWaitStateByRequest(session.id, "external", requestId);
+    if (wait?.status !== "pending") return;
+    const operations = await this.applicationExecutionService.repository.list(taskId, 500);
+    const projections = operations.map((operation) =>
+      this.applicationExecutionService!.projection(operation),
+    );
+    if (
+      projections.some((projection) =>
+        ["in_progress", "needs_decision", "unknown"].includes(projection.status),
+      )
+    )
+      return;
+    if ((await this.getPendingInputRequests(taskId)).length > 0) return;
+    this.workSessionContractService.resolveWait(taskId, "external", requestId, "resolved", {
+      operations: projections,
+    });
+    await this.resumeTaskAfterDurableWait(
+      taskId,
+      `Application operations settled:\n${JSON.stringify(projections)}`,
+    );
   }
 
   /** Return Phase 5 projection, lease, metrics, replay, and rollout services. */
@@ -2266,6 +2326,8 @@ export class AgentDaemon extends EventEmitter {
   }
 
   async initialize(): Promise<void> {
+    // Recover journalled operations even when no model executor is currently running.
+    this.getApplicationExecutionService();
     // Before recovery logs any event: the projection backend is fixed for the run.
     await this.configureTimelineProjection();
     this.orchestrationGraphEngine.start();
@@ -6388,6 +6450,7 @@ export class AgentDaemon extends EventEmitter {
     }
     if (options.scopeWorkspaceId && existing.workspaceId !== options.scopeWorkspaceId)
       throw new Error("Task control workspace changed");
+    await this.applicationExecutionService?.cancelForTask(taskId);
     // Background processes (run_command background: true) outlive a finished
     // turn so follow-ups can use them; cancelling or deleting the task, even a
     // completed one whose executor is gone, stops them.
@@ -7712,7 +7775,7 @@ export class AgentDaemon extends EventEmitter {
   async getTaskConsentAuthority(
     taskId: string,
     details: Any,
-    approvalType: "external_service" | "network_access" = "external_service",
+    approvalType: "external_service" | "network_access" | "computer_use" = "external_service",
   ): Promise<string | null> {
     const task = this.taskRepo.findById(taskId);
     if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return null;
@@ -10030,6 +10093,11 @@ export class AgentDaemon extends EventEmitter {
         });
         inputRequestIdempotency.complete(idempotencyKey, { status: "handled" });
         return { status: "handled", requestId: response.requestId };
+      }
+      if (
+        request.questions.some((question) => question.id.startsWith(APPLICATION_DECISION_PREFIX))
+      ) {
+        await resolveApplicationInput(this.getApplicationExecutionService(), request, response);
       }
       if (
         !(await this.inputRequestRepo.resolve(
@@ -12457,6 +12525,12 @@ export class AgentDaemon extends EventEmitter {
       const fileBuffer = fs.readFileSync(filePath);
       const sha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
+      if (
+        (await this.artifactRepo.findByTaskId(taskId)).some(
+          (a) => a.path === filePath && a.sha256 === sha256,
+        )
+      )
+        return;
       const artifact = await this.artifactRepo.create({
         taskId,
         path: filePath,
@@ -12619,6 +12693,7 @@ export class AgentDaemon extends EventEmitter {
   beginFollowUpRun(taskId: string): Task | undefined {
     const existing = this.taskRepo.findById(taskId);
     if (!existing) return undefined;
+    this.applicationExecutionService?.resetTaskCancellation(taskId);
 
     const currentStatus = deriveCanonicalTaskStatus(existing);
     if (!isTerminalTaskStatus(currentStatus)) {
@@ -15019,6 +15094,53 @@ export class AgentDaemon extends EventEmitter {
     }
     if (this.reconcilePendingUserUpdateBeforeCompletion(taskId).deferred) return;
 
+    let hasApplicationOperations = false;
+    if (this.applicationExecutionService) {
+      const operations = await this.applicationExecutionService.repository.list(taskId, 500);
+      hasApplicationOperations = operations.length > 0;
+      const projections = operations.map((operation) =>
+        this.applicationExecutionService!.projection(operation),
+      );
+      if (
+        projections.some((projection) =>
+          ["in_progress", "needs_decision", "unknown"].includes(projection.status),
+        )
+      ) {
+        const needsUser = projections.some((projection) =>
+          ["needs_decision", "unknown"].includes(projection.status),
+        );
+        this.updateTask(taskId, {
+          status: "paused",
+          terminalStatus: needsUser ? "needs_user_action" : undefined,
+        });
+        this.workSessionContractService.beginWait(taskId, {
+          kind: "external",
+          requestId: `application_completion:${taskId}`,
+          reason: "application_operations",
+          payload: { operations: projections },
+        });
+        this.logEvent(taskId, "application_operation_wait", {
+          reason: "application_operations",
+          message:
+            "Application work is still running, awaiting a decision, or requires reconciliation.",
+          operations: projections,
+        });
+        this.finishQueueSlot(taskId);
+        return;
+      }
+      if (
+        projections.some(
+          (projection) => projection.status !== "complete" && projection.status !== "superseded",
+        )
+      ) {
+        metadata = {
+          ...metadata,
+          terminalStatus: "partial_success",
+          failureClass: "contract_error",
+        };
+      }
+    }
+
     this.cleanupPendingApprovalsForTask(
       taskId,
       "Task ended before the approval request was resolved.",
@@ -15027,7 +15149,7 @@ export class AgentDaemon extends EventEmitter {
     const isChatSession =
       existingTask.agentConfig?.executionMode === "chat" &&
       existingTask.agentConfig?.executionModeSource === "user";
-    if (isChatSession) {
+    if (isChatSession && !hasApplicationOperations) {
       // A child chat task (team synthesis) hands its answer to the parent through
       // resultSummary; an interactive chat turn has no summary to keep.
       const handoffSummary =
@@ -19129,6 +19251,11 @@ export class AgentDaemon extends EventEmitter {
   private async shutdownInternal(): Promise<void> {
     log.info("Shutting down agent daemon...");
     const shutdownErrors: unknown[] = [];
+    try {
+      await this.applicationExecutionService?.stop();
+    } catch (error) {
+      shutdownErrors.push(error);
+    }
     try {
       this.orchestrationGraphEngine.stop();
     } catch (error) {

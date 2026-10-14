@@ -2,6 +2,7 @@ import type { ToolPolicyTrace } from "../../../shared/types";
 import type { ToolRegistry } from "../tools/registry";
 import type { ToolInvocationContext } from "./ToolInvocationContext";
 import { buildToolResultEnvelope } from "./tool-result-envelope";
+import { ApplicationNotDispatchedError } from "../../applications/ApplicationAdapterCatalog";
 
 export interface CoordinatedToolExecutionResult {
   result?: Any;
@@ -40,6 +41,7 @@ export class ToolExecutionCoordinator {
         targetPaths: context.targetPaths,
         followUp: context.followUp,
         stepId: context.stepId,
+        applicationAttempt: context.applicationAttempt,
       });
       const result = executionWithRuntime?.result;
       const policyTrace = executionWithRuntime?.policyTrace;
@@ -69,15 +71,18 @@ export class ToolExecutionCoordinator {
         envelope,
       };
     } catch (error) {
-      const recovery = await context.workspaceRecovery?.({
-        toolName,
-        input,
-        errorMessage: String((error as { message?: string })?.message || error || ""),
-        toolTimeoutMs,
-        stepId: context.stepId,
-        targetPaths: context.targetPaths,
-        followUp: context.followUp,
-      });
+      const recovery =
+        error instanceof ApplicationNotDispatchedError
+          ? undefined
+          : await context.workspaceRecovery?.({
+              toolName,
+              input,
+              errorMessage: String((error as { message?: string })?.message || error || ""),
+              toolTimeoutMs,
+              stepId: context.stepId,
+              targetPaths: context.targetPaths,
+              followUp: context.followUp,
+            });
       if (recovery?.recovered) {
         const recoveredResult = recovery.result;
         const recoveredReminder = this.getModelReminder(recoveredResult);

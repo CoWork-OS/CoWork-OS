@@ -219,7 +219,12 @@ export interface SessionRuntimeSnapshotV2 {
     }>;
   };
   tooling: {
-    toolResultMemory: Array<{ tool: string; summary: string; timestamp: number }>;
+    toolResultMemory: Array<{
+      tool: string;
+      summary: string;
+      timestamp: number;
+      nativeObservation?: { pid: number; windowId: number };
+    }>;
     webEvidenceMemory: WebEvidenceEntry[];
     toolUsageCounts: Array<[string, number]>;
     successfulToolUsageCounts: Array<[string, number]>;
@@ -341,7 +346,12 @@ export interface SessionRuntimeState {
   };
   tooling: {
     toolFailureTracker: ToolFailureTracker;
-    toolResultMemory: Array<{ tool: string; summary: string; timestamp: number }>;
+    toolResultMemory: Array<{
+      tool: string;
+      summary: string;
+      timestamp: number;
+      nativeObservation?: { pid: number; windowId: number };
+    }>;
     webEvidenceMemory: WebEvidenceEntry[];
     toolUsageCounts: Map<string, number>;
     successfulToolUsageCounts: Map<string, number>;

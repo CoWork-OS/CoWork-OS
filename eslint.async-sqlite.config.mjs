@@ -6,6 +6,14 @@ import tseslint from "@typescript-eslint/eslint-plugin";
 import parser from "@typescript-eslint/parser";
 
 export const ASYNC_SQLITE_LINT_FILES = [
+  "src/electron/applications/ApplicationExecutionService.ts",
+  "src/electron/applications/ApplicationOperationRepository.ts",
+  "src/electron/applications/daemon-application-execution.ts",
+  "src/electron/applications/native-application-pilots.ts",
+  "src/electron/applications/native-desktop-session.ts",
+  "src/electron/agent/tools/native-application-tools.ts",
+  "src/electron/agent/tools/application-tools.ts",
+  "src/electron/control-plane/registerApplicationExecutionMethods.ts",
   "src/electron/gateway/ChannelDecisionRepository.ts",
   "src/electron/gateway/TeamsConversationReferenceRepository.ts",
   "src/electron/gateway/TeamsConversationReferenceStore.ts",

@@ -309,6 +309,25 @@ async function assertResearcherDispatchBoundary(task: Any): Promise<void> {
 }
 
 describe("ToolRegistry tool catalog versioning", () => {
+  it("offers local Photoshop without shell/network authority and never VM tools", () => {
+    const workspace = createWorkspace();
+    workspace.permissions.shell = false;
+    workspace.permissions.network = false;
+    const registry = new ToolRegistry(workspace as never, createDaemon(), "task");
+    const names = registry.getTools().map((tool) => tool.name);
+    expect(names).toContain("local_photoshop_create");
+    expect(names).toContain("local_photoshop_read");
+    expect(registry.getRuntimeMetadata("local_photoshop_read")).toMatchObject({
+      alwaysExpose: true,
+      deferLoad: false,
+      readOnly: true,
+      concurrencyClass: "exclusive",
+    });
+    expect(names).toContain("local_photoshop_edit");
+    expect(names).toContain("application_operation");
+    expect(names).not.toContain("native_application_create");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -1400,6 +1419,69 @@ it.each(["ask_for_approval", "full_access"])(
 );
 
 describe("immutable tool operation dispatch", () => {
+  it("classifies HTTP mutations from the sealed arguments instead of static read metadata", async () => {
+    const assertToolDispatch = vi.fn().mockResolvedValue(undefined);
+    const registry = {
+      taskId: "task-1",
+      daemon: { getExistingApplicationExecutionService: () => ({ assertToolDispatch }) },
+      getRuntimeMetadata: () => ({ readOnly: true }),
+      handlerRegistry: { has: () => true },
+      executeWithRegisteredHandler: vi.fn().mockResolvedValue({ result: { ok: true } }),
+    } as Any;
+    await ToolRegistry.prototype.executeToolWithRuntime.call(registry, "http_request", {
+      method: "POST",
+      url: "https://example.invalid/record",
+    });
+    expect(assertToolDispatch).toHaveBeenLastCalledWith("task-1", false, undefined);
+    await ToolRegistry.prototype.executeToolWithRuntime.call(registry, "http_request", {
+      method: "GET",
+      url: "https://example.invalid/record",
+    });
+    expect(assertToolDispatch).toHaveBeenLastCalledWith("task-1", true, undefined);
+  });
+  it("blocks direct mutations while a durable application effect needs reconciliation", async () => {
+    const assertToolDispatch = vi.fn().mockRejectedValue(new Error("Reconcile pending effects"));
+    const dispatch = vi.fn();
+    const registry = {
+      taskId: "task-1",
+      daemon: { getExistingApplicationExecutionService: () => ({ assertToolDispatch }) },
+      getRuntimeMetadata: () => ({ readOnly: false }),
+      handlerRegistry: { has: () => true },
+      executeWithRegisteredHandler: dispatch,
+    } as Any;
+    await expect(
+      ToolRegistry.prototype.executeToolWithRuntime.call(registry, "write_file", {
+        path: "record",
+      }),
+    ).rejects.toThrow("Reconcile pending effects");
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(assertToolDispatch).toHaveBeenCalledWith("task-1", false, undefined);
+  });
+  it("forwards host attempt provenance without letting tool arguments supply it", async () => {
+    const assertToolDispatch = vi.fn().mockResolvedValue(undefined);
+    const dispatch = vi.fn().mockResolvedValue({ result: { ok: true } });
+    const reference = {
+      operationId: "operation",
+      attemptId: "attempt",
+      generation: 1,
+      phase: "execute",
+    };
+    const registry = {
+      taskId: "task-1",
+      daemon: { getExistingApplicationExecutionService: () => ({ assertToolDispatch }) },
+      getRuntimeMetadata: () => ({ readOnly: false }),
+      handlerRegistry: { has: () => true },
+      executeWithRegisteredHandler: dispatch,
+    } as Any;
+    await ToolRegistry.prototype.executeToolWithRuntime.call(
+      registry,
+      "write_file",
+      { applicationAttempt: { ...reference, generation: 99 } },
+      { applicationAttempt: reference },
+    );
+    expect(assertToolDispatch).toHaveBeenCalledWith("task-1", false, reference);
+    expect(dispatch).toHaveBeenCalledOnce();
+  });
   it("keeps the admitted operation when caller input changes during a policy wait", async () => {
     const input = { destination: "reviewed", params: { body: "approved bytes" } };
     const execute = vi.fn(async (_name, admitted) => ({ result: admitted }));

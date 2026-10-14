@@ -13,6 +13,16 @@ const CANONICAL_ARTIFACT_EXTENSION_LIST = [
   "jsonl",
   "txt",
   "pptx",
+  "psd",
+  "psb",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
   "mp4",
   "mov",
   "webm",
@@ -141,6 +151,8 @@ export function extractArtifactExtensionsFromText(text: string): string[] {
   if (/\bxlsx\b|\bexcel\b|\bspreadsheet\b/.test(normalized)) extensions.add(".xlsx");
   if (/\bpptx\b|\bslides?\b|\bpowerpoint\b/.test(normalized)) extensions.add(".pptx");
   if (/\bpdf\b/.test(normalized)) extensions.add(".pdf");
+  if (/\bpsd\b/.test(normalized)) extensions.add(".psd");
+  if (/\bpng\b/.test(normalized)) extensions.add(".png");
   if (/\btxt\b|\btext file\b|\bplain text\b/.test(normalized)) extensions.add(".txt");
   return Array.from(extensions.values());
 }

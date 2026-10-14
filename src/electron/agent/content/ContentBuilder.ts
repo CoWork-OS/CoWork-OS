@@ -28,6 +28,7 @@ export interface BuildExecutionPromptParams {
   identityPrompt?: string;
   safetyCorePrompt?: string;
   baseInstructionPrompt?: string;
+  applicationWorkerPrompt?: string;
   /** Inline-surface guidance and the cowork-ui component reference (answer-style tasks). */
   answerSurfacePrompt?: string;
   inputPolicyPrompt?: string;
@@ -99,6 +100,7 @@ function makeSection(
     stableInputHash?: string;
     truncation?: PromptSection["truncation"];
     minTokens?: number;
+    preserveWhole?: boolean;
   },
 ): PromptSection {
   const normalized = String(text || "").trim();
@@ -106,6 +108,7 @@ function makeSection(
     key,
     text: normalized,
     maxTokens,
+    preserveWhole: options?.preserveWhole,
     required: options?.required,
     dropPriority: options?.dropPriority,
     layerKind: options?.layerKind,
@@ -230,6 +233,12 @@ export class ContentBuilder {
             layerKind: "always",
             cacheScope: "session",
           }),
+          makeSection("application_workers", params.applicationWorkerPrompt, 800, {
+            required: true,
+            preserveWhole: true,
+            layerKind: "always",
+            cacheScope: "session",
+          }),
         ]
       : [
           makeSection("identity", params.identityPrompt, undefined, {
@@ -239,6 +248,12 @@ export class ContentBuilder {
           }),
           makeSection("safety_core", params.safetyCorePrompt || SHARED_PROMPT_POLICY_CORE, 920, {
             required: true,
+            layerKind: "always",
+            cacheScope: "session",
+          }),
+          makeSection("application_workers", params.applicationWorkerPrompt, 800, {
+            required: true,
+            preserveWhole: true,
             layerKind: "always",
             cacheScope: "session",
           }),

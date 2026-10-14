@@ -143,7 +143,7 @@ const DEFAULT_SETTINGS: BuiltinToolsSettings = {
   codexRuntimeMode: "native",
   computerUseAutomation: {
     browserAutomationMode: "background",
-    nativeComputerUseMode: "background_first",
+    nativeComputerUseMode: "background",
   },
   version: "1.0.0",
 };
@@ -244,6 +244,7 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings["categories"]> 
   run_applescript: "system",
   // Computer use tools
   screen_context_resolve: "chronicle",
+  native_app: "computer_use",
   screenshot: "computer_use",
   click: "computer_use",
   double_click: "computer_use",

@@ -170,6 +170,7 @@ import { KnowledgeGraphTools } from "./knowledge-graph-tools";
 import { ScrapingTools } from "./scraping-tools";
 import { DocumentTools } from "./document-tools";
 import { ComputerUseTools } from "./computer-use-tools";
+import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { QATools } from "./qa-tools";
@@ -202,6 +203,15 @@ import {
   getDefaultRuntimeToolMetadata,
 } from "./runtime-tool-definition";
 import { ToolHandlerRegistry } from "../runtime/tool-handler-registry";
+import { ToolExecutionCoordinator } from "../runtime/ToolExecutionCoordinator";
+import type { ToolInvocationContext } from "../runtime/ToolInvocationContext";
+import { APPLICATION_OPERATION_TOOL, runApplicationTool } from "./application-tools";
+import {
+  LOCAL_PHOTOSHOP_TOOLS,
+  NATIVE_APPLICATION_TOOLS,
+  NativeApplicationTools,
+} from "./native-application-tools";
+import { ApplicationNotDispatchedError } from "../../applications/ApplicationAdapterCatalog";
 import {
   createStaticRuntimeToolSchedulerSpecResolver,
   resolveRuntimeToolSchedulerSpec,
@@ -615,6 +625,7 @@ export class ToolRegistry {
   private visionTools: VisionTools;
   private systemTools: SystemTools;
   private computerUseTools: ComputerUseTools;
+  private nativeAppTools: NativeAppTools;
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private canvasTools: CanvasTools;
@@ -703,6 +714,7 @@ export class ToolRegistry {
     this.visionTools = new VisionTools(workspace, daemon, taskId);
     this.systemTools = new SystemTools(workspace, daemon, taskId);
     this.computerUseTools = new ComputerUseTools(workspace, daemon, taskId);
+    this.nativeAppTools = new NativeAppTools(this.fileTools, daemon, taskId);
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
@@ -1354,6 +1366,21 @@ export class ToolRegistry {
       ...TextTools.getToolDefinitions(),
       ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
+      process.platform === "darwin"
+        ? {
+            ...APPLICATION_OPERATION_TOOL,
+            runtime: {
+              ...APPLICATION_OPERATION_TOOL.runtime!,
+              alwaysExpose: true,
+            },
+          }
+        : APPLICATION_OPERATION_TOOL,
+      ...(process.platform === "darwin" ? LOCAL_PHOTOSHOP_TOOLS : []),
+      ...(process.platform === "darwin"
+        ? NATIVE_APPLICATION_TOOLS.filter(
+            (tool) => tool.name !== "native_application_create" || this.workspace.permissions.shell,
+          )
+        : []),
     ];
     if (this.protectedCredentialService) {
       allTools.push(this.getProtectedCredentialToolDefinition());
@@ -1486,6 +1513,7 @@ export class ToolRegistry {
 
     // Computer use tools (native mouse/keyboard/screenshot — desktop platforms only, not headless)
     allTools.push(...ComputerUseTools.getToolDefinitions({ headless }));
+    if (!headless && process.platform === "darwin") allTools.push(NATIVE_APP_TOOL);
 
     // Batch image processing tools — only when image generation is available
     if (ImageTools.isAvailable()) {
@@ -1738,6 +1766,23 @@ export class ToolRegistry {
       this.getTools().find((tool) => tool.name === toolName)?.runtime ||
       getDefaultRuntimeToolMetadata(toolName)
     );
+  }
+
+  private async assertApplicationRecoveryBoundary(
+    name: string,
+    input: unknown,
+    runtime?: Record<string, unknown>,
+  ): Promise<void> {
+    if (name === "application_operation" || name === "request_user_input") return;
+    const service = this.daemon?.getExistingApplicationExecutionService?.();
+    if (service)
+      await service.assertToolDispatch(
+        this.taskId,
+        name === "http_request"
+          ? isReadOnlyHttpRequestInput(input)
+          : this.getRuntimeMetadata(name).readOnly,
+        runtime?.applicationAttempt,
+      );
   }
 
   getApprovalType(toolName: string, input?: Any): ApprovalType | null {
@@ -2167,6 +2212,9 @@ export class ToolRegistry {
       toolName === "run_command" ||
       toolName === "delete_file" ||
       toolName === "run_applescript" ||
+      toolName === "local_photoshop_create" ||
+      toolName === "local_photoshop_edit" ||
+      toolName === "native_application_create" ||
       toolName === "take_screenshot" ||
       toolName === "open_path" ||
       toolName === "show_in_folder" ||
@@ -3197,6 +3245,45 @@ export class ToolRegistry {
       async ({ request }) => this.systemTools.runAppleScript(request.input.script),
       exclusiveSchedulerSpec,
     );
+    register(
+      "native_application_create",
+      async ({ request }) => {
+        if (!this.workspace.permissions.shell)
+          throw new ApplicationNotDispatchedError(
+            "Native application commands require task shell authority",
+          );
+        return new NativeApplicationTools(this.fileTools, this.daemon, this.taskId).create(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        );
+      },
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "native_application_inspect",
+      async ({ request }) =>
+        new NativeApplicationTools(this.fileTools, this.daemon, this.taskId).inspect(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      readParallelSchedulerSpec,
+    );
+    for (const action of ["create", "inspect", "read", "edit"] as const) {
+      register(
+        `local_photoshop_${action}`,
+        async ({ request }) => {
+          if (request.input.app !== "photoshop")
+            throw new ApplicationNotDispatchedError(
+              "Local background route supports Photoshop only",
+            );
+          return new NativeApplicationTools(this.fileTools, this.daemon, this.taskId, true)[action](
+            request.input,
+            request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+          );
+        },
+        action === "inspect" ? readParallelSchedulerSpec : exclusiveSchedulerSpec,
+      );
+    }
     register("generate_image", async ({ request }) =>
       this.imageTools.generateImage(request.input, {
         signal: request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
@@ -3212,6 +3299,11 @@ export class ToolRegistry {
     register("analyze_image", async ({ request }) => this.visionTools.analyzeImage(request.input));
     register("read_pdf_visual", async ({ request }) =>
       this.visionTools.readPdfVisual(request.input),
+    );
+    register(
+      "native_app",
+      async ({ request }) => this.nativeAppTools.run(request.input),
+      serialSchedulerSpec,
     );
     register(
       "screenshot",
@@ -3470,6 +3562,60 @@ export class ToolRegistry {
     register("task_history", async ({ request }) => this.taskHistory(request.input));
     register("task_events", async ({ request }) => this.taskEvents(request.input));
     register("request_user_input", async ({ request }) => this.requestUserInput(request.input));
+    register(
+      "application_operation",
+      async ({ request }) => {
+        this.daemon.bindApplicationToolGateway(this.taskId, {
+          call: async (name, input, context) => {
+            const currentTask = this.daemon.getTask(this.taskId);
+            if (
+              (!currentTask ||
+                ["completed", "failed", "cancelled"].includes(currentTask.status) ||
+                this.daemon
+                  .getApplicationExecutionService()
+                  .isTaskCancellationRequested(this.taskId)) &&
+              ["prepare", "execute"].includes(context.phase)
+            )
+              throw new ApplicationNotDispatchedError(
+                "The original application task is terminal or stopping",
+              );
+            if (
+              context.operation.request.taskId !== this.taskId ||
+              context.operation.request.workspaceId !== this.workspace.id ||
+              name.startsWith("application_") ||
+              !this.getTools().some((tool) => tool.name === name)
+            )
+              throw new ApplicationNotDispatchedError(
+                "Application tool is unavailable in the original task context",
+              );
+            const execution = await new ToolExecutionCoordinator(this).executeTool(
+              name,
+              input,
+              {
+                taskId: this.taskId,
+                phase: "step",
+                signal: context.signal,
+                toolPolicyContext: request.runtime
+                  ?.toolPolicyContext as ToolInvocationContext["toolPolicyContext"],
+                applicationAttempt: {
+                  operationId: context.operation.id,
+                  attemptId: context.attemptId,
+                  generation: context.generation,
+                  phase: context.phase,
+                },
+              },
+              `${context.attemptId}:${name}`,
+            );
+            if (execution.error) throw execution.error;
+            if (execution.envelope.status === "error")
+              throw new Error(`${name} did not return a successful application result`);
+            return execution.result;
+          },
+        });
+        return runApplicationTool(this.daemon, this.taskId, request.input);
+      },
+      serialSchedulerSpec,
+    );
     register(
       "task_list_create",
       async ({ request }) => this.taskListCreate(request.input),
@@ -4603,6 +4749,7 @@ ${skillDescriptions}`;
     runtime?: Record<string, unknown>,
   ): Promise<{ result: Any; policyTrace?: Any }> {
     input = snapshotToolInput(input);
+    await ToolRegistry.prototype.assertApplicationRecoveryBoundary.call(this, name, input, runtime);
     if (this.handlerRegistry.has(name)) {
       return await this.executeWithRegisteredHandler(name, input, runtime);
     }
@@ -4639,6 +4786,12 @@ ${skillDescriptions}`;
 
   async executeTool(name: string, input: Any, _runtime?: Record<string, unknown>): Promise<Any> {
     input = snapshotToolInput(input);
+    await ToolRegistry.prototype.assertApplicationRecoveryBoundary.call(
+      this,
+      name,
+      input,
+      _runtime,
+    );
     await this.assertResponsibilityPolicy(name, input);
     if (this.handlerRegistry.has(name)) {
       const execution = await this.executeWithRegisteredHandler(name, input, _runtime);
@@ -5034,6 +5187,7 @@ ${skillDescriptions}`;
     if (name === "run_applescript") return await this.systemTools.runAppleScript(input.script);
 
     // Computer use tools (CUA)
+    if (name === "native_app") return await this.nativeAppTools.run(input);
     if (name === "screenshot")
       return await this.computerUseTools.screenshot({
         app: input.app,

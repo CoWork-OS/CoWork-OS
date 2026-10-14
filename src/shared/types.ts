@@ -1491,6 +1491,7 @@ export type ToolType =
   | "preview_web_page"
   // Computer use tools (CUA)
   | "screen_context_resolve"
+  | "native_app"
   | "screenshot"
   | "click"
   | "double_click"
@@ -1539,6 +1540,9 @@ export type ToolRiskLevel = "read" | "write" | "destructive" | "system" | "netwo
 export const TOOL_GROUPS = {
   // Read-only operations - lowest risk
   "group:read": [
+    "local_photoshop_inspect",
+    "local_photoshop_read",
+    "native_application_inspect",
     "read_file",
     "read_files",
     "parse_document",
@@ -1569,6 +1573,9 @@ export const TOOL_GROUPS = {
   ],
   // Write operations - medium risk
   "group:write": [
+    "local_photoshop_create",
+    "local_photoshop_edit",
+    "native_application_create",
     "manage_connector_events",
     "write_file",
     "edit_file",
@@ -1607,6 +1614,7 @@ export const TOOL_GROUPS = {
     "open_path",
     "show_in_folder",
     "screen_context_resolve",
+    "native_app",
     "screenshot",
     "click",
     "double_click",
@@ -1839,6 +1847,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   show_in_folder: "system",
   screen_context_resolve: "system",
   // Computer use operations (CUA)
+  native_app: "system",
   screenshot: "system",
   click: "system",
   double_click: "system",

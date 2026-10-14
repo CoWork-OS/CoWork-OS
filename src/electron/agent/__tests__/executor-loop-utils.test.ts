@@ -612,6 +612,15 @@ describe("progress-aware tool-use streak", () => {
 });
 
 describe("ToolLoopProgressTracker", () => {
+  it("counts each dispatched native_app action as progress, but not observation", () => {
+    const tracker = new ToolLoopProgressTracker();
+    tracker.recordOutcome("native_app", { action: "observe", pid: 1, windowId: 2 }, true);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+    tracker.recordOutcome("native_app", { action: "press", pid: 1, windowId: 2 }, false);
+    expect(tracker.consumeTurnProgress()).toBe(false);
+    tracker.recordOutcome("native_app", { action: "press", pid: 1, windowId: 2 }, true);
+    expect(tracker.consumeTurnProgress()).toBe(true);
+  });
   it("treats edits, a failing command that now passes and first reads of a file as progress", () => {
     const tracker = new ToolLoopProgressTracker();
     tracker.recordOutcome(

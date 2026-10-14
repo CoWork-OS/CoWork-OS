@@ -1,4 +1,5 @@
 export const COMPUTER_USE_TOOL_NAMES = [
+  "native_app",
   "screenshot",
   "click",
   "double_click",
@@ -19,7 +20,7 @@ export function isComputerUseToolName(toolName: string): toolName is ComputerUse
 }
 
 export type BrowserAutomationMode = "background" | "visible" | "ask";
-export type NativeComputerUseMode = "background_first" | "ask_visible" | "visible";
+export type NativeComputerUseMode = "background" | "background_first" | "ask_visible" | "visible";
 
 export interface ComputerUseAutomationSettings {
   browserAutomationMode: BrowserAutomationMode;
@@ -31,5 +32,5 @@ export function normalizeBrowserAutomationMode(value: unknown): BrowserAutomatio
 }
 
 export function normalizeNativeComputerUseMode(value: unknown): NativeComputerUseMode {
-  return value === "visible" || value === "ask_visible" ? value : "background_first";
+  return value === "visible" || value === "ask_visible" ? value : "background";
 }

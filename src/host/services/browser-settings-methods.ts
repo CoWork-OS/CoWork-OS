@@ -111,7 +111,7 @@ const BuiltinToolsSchema = z
     computerUseAutomation: z
       .object({
         browserAutomationMode: z.enum(["background", "visible", "ask"]),
-        nativeComputerUseMode: z.enum(["background_first", "ask_visible", "visible"]),
+        nativeComputerUseMode: z.enum(["background", "background_first", "ask_visible", "visible"]),
       })
       .strict(),
   })

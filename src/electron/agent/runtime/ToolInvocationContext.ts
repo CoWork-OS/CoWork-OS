@@ -8,6 +8,13 @@ export interface ToolBatchCorrelationMetaLite {
 }
 
 export interface ToolInvocationContext {
+  /** Added only by the host's application gateway, never by model tool arguments. */
+  applicationAttempt?: {
+    operationId: string;
+    attemptId: string;
+    generation: number;
+    phase: "prepare" | "execute" | "observe" | "verify" | "cancel";
+  };
   taskId: string;
   stepId?: string;
   phase: "step" | "follow_up";

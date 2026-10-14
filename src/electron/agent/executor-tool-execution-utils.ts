@@ -778,6 +778,20 @@ function buildComputerUseCompanionContent(
       windowId: Number.isFinite(result?.target?.windowId) ? result.target.windowId : undefined,
     },
     imageAttached: true,
+    ...(toolName === "native_app"
+      ? {
+          snapshotId: result.snapshotId,
+          pid: result.pid,
+          windowId: result.windowId,
+          elements: result.elements,
+          expiresInMs: result.expiresInMs,
+          truncated: result.truncated,
+          dispatch: result.dispatch,
+          effect: result.effect,
+          preservation: result.preservation,
+          background: true,
+        }
+      : {}),
     ...(note ? { note } : {}),
   });
 

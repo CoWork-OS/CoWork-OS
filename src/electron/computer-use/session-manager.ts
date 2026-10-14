@@ -73,7 +73,11 @@ export class ComputerUseSessionManager {
     return this.aborted;
   }
 
-  acquire(taskId: string, daemon: ComputerUseDaemonLike): void {
+  acquire(
+    taskId: string,
+    daemon: ComputerUseDaemonLike,
+    options: { background?: boolean } = {},
+  ): void {
     if (this.activeTaskId && this.activeTaskId !== taskId) {
       throw new Error(
         "Computer use is already active for another task. Finish or cancel that task first.",
@@ -89,9 +93,10 @@ export class ComputerUseSessionManager {
     this.aborted = false;
     void (this.mainWindowGetter?.() ?? null);
 
-    this.shortcutGuard.enable(() => {
-      void this.abortSession(taskId);
-    });
+    if (!options.background)
+      this.shortcutGuard.enable(() => {
+        void this.abortSession(taskId);
+      });
 
     daemon.logEvent(taskId, "computer_use_session_started", { mode: "helper_runtime" });
     this.emitNotify({ type: "session_started", taskId });

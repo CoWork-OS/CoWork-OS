@@ -735,10 +735,40 @@ export async function listAgentDefinitions(
   };
 }
 
-async function searchCatalog(ctx: AdminContext, query: string): Promise<WorkdayAgentResource[]> {
+async function searchCatalogOnce(
+  ctx: AdminContext,
+  query: string,
+): Promise<WorkdayAgentResource[]> {
   const params = new URLSearchParams({ searchString: query, limit: String(SEARCH_LIMIT) });
   const { data } = await callAsor(ctx, "GET", `agentResourceSearch?${params.toString()}`);
   return parseAgentResources(data);
+}
+
+/**
+ * Fallback queries for a snake_case tool name. Workday's catalog search does
+ * not always match a full snake_case name (find_absence_balances matches,
+ * find_service_dates_for_worker does not), but it matches its words.
+ */
+export function catalogQueryFallbacks(query: string): string[] {
+  if (!isMcpToolName(query)) return [];
+  const words = query.split("_");
+  const longest = [...words].sort((a, b) => b.length - a.length)[0];
+  return [...new Set([words.join(" "), longest])].filter((q) => q && q !== query);
+}
+
+/** Searches the catalog, retrying a snake_case name by its words when it finds nothing. */
+async function searchCatalog(ctx: AdminContext, query: string): Promise<WorkdayAgentResource[]> {
+  const rows = await searchCatalogOnce(ctx, query);
+  if (rows.length > 0) return rows;
+  let nearby: WorkdayAgentResource[] = [];
+  for (const fallback of catalogQueryFallbacks(query)) {
+    const found = await searchCatalogOnce(ctx, fallback);
+    const exact = found.filter((row) => row.toolName === query);
+    // The named tool first; the rest of the word search stays as nearby results.
+    if (exact.length > 0) return [...exact, ...found.filter((row) => row.toolName !== query)];
+    if (nearby.length === 0) nearby = found;
+  }
+  return nearby;
 }
 
 const SearchQuerySchema = z.string().trim().min(1).max(200);

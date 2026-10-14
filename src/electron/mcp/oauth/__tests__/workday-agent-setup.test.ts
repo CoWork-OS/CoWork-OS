@@ -78,6 +78,7 @@ const TENANT = "cdjqxhyhvf_extdev";
 const ABSENCE_WID = "3cf962648a6a10001482cdbe30920000";
 const PAY_WID = "aaaabbbbccccddddeeeeffff00001111";
 const OPERATION_WID = "0123456789abcdef0123456789abcdef";
+const SERVICE_DATES_WID = "c545581f797e100013a3ae9e78560000";
 
 /** The definition body verified live against a Workday Developer tenant. */
 const LIVE_BODY = {
@@ -163,6 +164,8 @@ const catalog = [
   { id: ABSENCE_WID, descriptor: "find_absence_balances" },
   { id: PAY_WID, descriptor: "get_pay_slips" },
   { id: OPERATION_WID, descriptor: "Get Workers" },
+  // Like the live catalog: found by its words, never by its full snake_case name.
+  { id: SERVICE_DATES_WID, descriptor: "find_service_dates_for_worker", wordsOnly: true },
 ];
 
 async function startFakeWorkday(): Promise<FakeWorkday> {
@@ -205,10 +208,15 @@ async function startFakeWorkday(): Promise<FakeWorkday> {
       const route = url.pathname.slice(asor.length);
       if (route === "agentResourceSearch" && req.method === "GET") {
         const q = (url.searchParams.get("searchString") || "").toLowerCase();
-        return json(200, {
-          total: 3,
-          data: catalog.filter((row) => row.descriptor.toLowerCase().includes(q)),
-        });
+        const words = q.split(/\s+/).filter(Boolean);
+        const data = catalog
+          .filter((row) =>
+            row.wordsOnly
+              ? !q.includes("_") && words.every((word) => row.descriptor.includes(word))
+              : row.descriptor.toLowerCase().includes(q),
+          )
+          .map(({ id, descriptor }) => ({ id, descriptor }));
+        return json(200, { total: data.length, data });
       }
       if (route === "agentDefinition" && req.method === "GET")
         return json(200, { total: fake.definitions.length, data: fake.definitions });
@@ -516,8 +524,9 @@ describe("Workday agent definitions", () => {
     expect(mcpOnly.resources.map((row) => row.toolName)).toEqual([
       "find_absence_balances",
       "get_pay_slips",
+      "find_service_dates_for_worker",
     ]);
-    expect(mcpOnly.matched).toBe(3);
+    expect(mcpOnly.matched).toBe(4);
     const all = await searchAgentResources(serverId, "e", { ...transport, mcpOnly: false });
     expect(all.resources).toContainEqual({
       wid: OPERATION_WID,
@@ -526,6 +535,27 @@ describe("Workday agent definitions", () => {
     });
     const search = fake.requests.find((request) => request.path.endsWith("agentResourceSearch"));
     expect(search?.headers.authorization).toBe("Bearer admin-token");
+  });
+
+  it("finds a tool that the catalog only matches by its words", async () => {
+    const fake = await startFakeWorkday();
+    const transport = await transportFor(fake);
+    const serverId = await signedIn(fake, transport);
+    const found = await searchAgentResources(serverId, "find_service_dates_for_worker", transport);
+    expect(found.resources[0]).toEqual({
+      wid: SERVICE_DATES_WID,
+      toolName: "find_service_dates_for_worker",
+      kind: "mcp",
+    });
+    const model = structuredClone(MODEL);
+    model.skills[0]!.tools.push({
+      toolName: "find_service_dates_for_worker",
+      wid: SERVICE_DATES_WID,
+      description: "",
+    });
+    const saved = await saveAgentDefinition(serverId, model, transport);
+    expect(saved.status).toBe("saved");
+    expect(fake.posted).toHaveLength(1);
   });
 
   it("refuses to post while a tool WID is missing from the catalog", async () => {
@@ -708,8 +738,8 @@ describe("Workday agent definitions", () => {
 
   it("parses catalog rows from any collection key and skips malformed rows", () => {
     for (const key of ["data", "results", "items"])
-      expect(parseAgentResources({ [key]: catalog })).toHaveLength(3);
-    expect(parseAgentResources(catalog)).toHaveLength(3);
+      expect(parseAgentResources({ [key]: catalog })).toHaveLength(catalog.length);
+    expect(parseAgentResources(catalog)).toHaveLength(catalog.length);
     expect(
       parseAgentResources([
         { id: "not-a-wid", descriptor: "x_y" },

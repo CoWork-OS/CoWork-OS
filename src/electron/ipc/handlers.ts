@@ -57,6 +57,11 @@ import {
 } from "../database/repository-facades";
 import { estimateTaskCost } from "../agent/llm/usage-telemetry";
 import {
+  addRemoteOAuthServer,
+  authorizeMcpServer,
+  discoverRemoteOAuth,
+} from "../mcp/oauth/mcp-server-authorization";
+import {
   ipcMain,
   shell,
   BrowserWindow,
@@ -11644,6 +11649,8 @@ function setupMCPHandlers(): void {
   rateLimiter.configure(IPC_CHANNELS.MCP_TEST_SERVER, RATE_LIMIT_CONFIGS.expensive);
   rateLimiter.configure(IPC_CHANNELS.MCP_REGISTRY_INSTALL, RATE_LIMIT_CONFIGS.expensive);
   rateLimiter.configure(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, RATE_LIMIT_CONFIGS.expensive);
+  rateLimiter.configure(IPC_CHANNELS.MCP_OAUTH_AUTHORIZE, RATE_LIMIT_CONFIGS.expensive);
+  rateLimiter.configure(IPC_CHANNELS.MCP_OAUTH_DISCOVER, RATE_LIMIT_CONFIGS.expensive);
 
   // Initialize MCP settings manager
   MCPSettingsManager.initialize();
@@ -11824,6 +11831,31 @@ function setupMCPHandlers(): void {
     // Admin policy connectors.blocked: do not collect tokens for a blocked provider.
     assertMcpServerNotBlocked({ id: "", name: validated.provider, registryId: validated.provider });
     return startConnectorOAuth(validated);
+  });
+
+  // Remote MCP servers that sign in with OAuth 2.1 (e.g. Workday Agent-Ready Tools)
+  ipcMain.handle(IPC_CHANNELS.MCP_ADD_REMOTE_OAUTH_SERVER, async (_, payload) => {
+    checkRateLimit(IPC_CHANNELS.MCP_ADD_SERVER);
+    return addRemoteOAuthServer(payload);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_OAUTH_DISCOVER, async (_, url: unknown) => {
+    checkRateLimit(IPC_CHANNELS.MCP_OAUTH_DISCOVER);
+    return discoverRemoteOAuth(url);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MCP_OAUTH_AUTHORIZE, async (_, serverId: string) => {
+    checkRateLimit(IPC_CHANNELS.MCP_OAUTH_AUTHORIZE);
+    const validatedId = validateInput(UUIDSchema, serverId, "server ID");
+    return authorizeMcpServer(validatedId, {
+      openUrl: async (url) => {
+        const page = new URL(url);
+        const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(page.hostname);
+        if (page.protocol !== "https:" && !(page.protocol === "http:" && loopback))
+          throw new Error("Sign-in page must use https");
+        await shell.openExternal(url);
+      },
+    });
   });
 
   // MCP Host handlers

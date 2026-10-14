@@ -16,6 +16,14 @@ import { createLogger } from "../utils/logger";
 
 const LEGACY_SETTINGS_FILE = "mcp-settings.json";
 const MASKED_VALUE = "***configured***";
+const SECRET_AUTH_KEYS = [
+  "token",
+  "apiKey",
+  "password",
+  "refreshToken",
+  "clientSecret",
+  "privateKey",
+] as const;
 const ENCRYPTED_PREFIX = "encrypted:";
 const CONNECTOR_SCRIPT_PATH_REGEX = /(?:^|[\\/])connectors[\\/]([^\\/]+)[\\/]dist[\\/]index\.js$/;
 const logger = createLogger("MCP Settings");
@@ -162,6 +170,7 @@ function encryptServerAuth(auth?: MCPAuthConfig): MCPAuthConfig | undefined {
     password: encryptSecret(auth.password),
     refreshToken: encryptSecret(auth.refreshToken),
     clientSecret: encryptSecret(auth.clientSecret),
+    privateKey: encryptSecret(auth.privateKey),
   };
 }
 
@@ -178,6 +187,7 @@ function decryptServerAuth(auth?: MCPAuthConfig): MCPAuthConfig | undefined {
     password: decryptSecret(auth.password),
     refreshToken: decryptSecret(auth.refreshToken),
     clientSecret: decryptSecret(auth.clientSecret),
+    privateKey: decryptSecret(auth.privateKey),
   };
 }
 
@@ -453,6 +463,19 @@ export class MCPSettingsManager {
 
     // Don't allow changing the ID
     const { id: _ignoredId, ...validUpdates } = updates;
+    // The UI only ever sees masked secrets. A masked placeholder sent back
+    // means "unchanged", never a new secret value.
+    if (validUpdates.auth) {
+      const existing = settings.servers[index].auth;
+      const auth: MCPAuthConfig = { ...validUpdates.auth };
+      for (const key of SECRET_AUTH_KEYS) {
+        if (auth[key] === MASKED_VALUE) {
+          if (existing?.[key] !== undefined) auth[key] = existing[key];
+          else delete auth[key];
+        }
+      }
+      validUpdates.auth = auth;
+    }
 
     settings.servers[index] = {
       ...settings.servers[index],
@@ -561,6 +584,7 @@ export class MCPSettingsManager {
               password: server.auth.password ? MASKED_VALUE : undefined,
               refreshToken: server.auth.refreshToken ? MASKED_VALUE : undefined,
               clientSecret: server.auth.clientSecret ? MASKED_VALUE : undefined,
+              privateKey: server.auth.privateKey ? MASKED_VALUE : undefined,
             }
           : undefined,
       })),

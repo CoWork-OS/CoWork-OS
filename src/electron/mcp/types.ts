@@ -34,6 +34,29 @@ export interface MCPAuthConfig {
   clientSecret?: string; // Encrypted when stored
   tokenUrl?: string;
   expiresAt?: number;
+  /** When the refresh token stops working, if the provider says. */
+  refreshExpiresAt?: number;
+  /** PEM private key for JWT bearer (ambient) identities. Encrypted when stored. */
+  privateKey?: string;
+  /** OAuth 2.1 settings for remote servers that sign in (see mcp/oauth/mcp-oauth.ts). */
+  oauth?: MCPOAuthSettings;
+}
+
+export interface MCPOAuthSettings {
+  /**
+   * authorization_code: a person signs in once (PKCE); refresh tokens renew it.
+   * jwt_bearer: the agent signs a JWT with its own key (RFC 7523); no person needed.
+   */
+  grant: "authorization_code" | "jwt_bearer";
+  authorizationUrl?: string;
+  /** Registered loopback redirect, e.g. http://127.0.0.1:18768/oauth/callback. */
+  redirectUri?: string;
+  scopes?: string[];
+  /** RFC 8707 resource indicator. */
+  resource?: string;
+  tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+  jwt?: { subject: string; audience?: string; keyId?: string; algorithm?: "RS256" | "ES256" };
+  preset?: { kind: "workday"; region: string; tenant: string };
 }
 
 // MCP Server Configuration

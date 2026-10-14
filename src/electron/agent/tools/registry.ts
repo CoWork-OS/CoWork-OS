@@ -604,6 +604,9 @@ export function getMcpPaymentLimitError(input: unknown, toolSchema?: MCPTool): s
  */
 const registryLogger = createLogger("ToolRegistry");
 
+/** Servers exposing more tools than this load them through tool_search instead of every request. */
+export const MCP_DEFERRED_SERVER_TOOL_THRESHOLD = 25;
+
 export class ToolRegistry {
   private static mermaidValidationInitialized = false;
   private fileTools: FileTools;
@@ -663,6 +666,8 @@ export class ToolRegistry {
   private _deepWorkMode = false;
   private _codeExecTools?: CodeExecTools;
   private deniedTools: Set<string> = new Set();
+  /** MCP servers whose tools are deferred to tool_search (see getMCPToolDefinitions). */
+  private deferredMcpServers: Array<{ name: string; toolCount: number }> = [];
   private deniedGroups: Set<ToolGroupName> = new Set();
   private denyAllTools = false;
   private shadowedToolsLogged = false;
@@ -1636,6 +1641,9 @@ export class ToolRegistry {
       allTools.push(...EmailImapTools.getToolDefinitions());
     }
 
+    // MCP definitions first: they decide which servers tool_search announces.
+    const mcpTools = this.getMCPToolDefinitions();
+
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
 
@@ -1645,7 +1653,6 @@ export class ToolRegistry {
     // Add MCP tools from connected servers, filtering out those that shadow built-in tools
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
-    const mcpTools = this.getMCPToolDefinitions();
     const shadowedTools: string[] = [];
 
     for (const mcpTool of mcpTools) {
@@ -2248,6 +2255,12 @@ export class ToolRegistry {
       },
       override,
     );
+  }
+
+  /** Connected MCP servers whose tools load through tool_search (refreshed by getTools). */
+  getDeferredMcpServers(): Array<{ name: string; toolCount: number }> {
+    this.getTools();
+    return this.deferredMcpServers.slice();
   }
 
   getDeferredTools(): LLMTool[] {
@@ -3850,11 +3863,26 @@ export class ToolRegistry {
       const serversById = new Map((settings.servers || []).map((server) => [server.id, server]));
       const policies = loadPolicies();
 
+      const serverIdFor = (tool: MCPTool): string | null =>
+        typeof (mcpManager as Any).getServerIdForTool === "function"
+          ? (mcpManager as Any).getServerIdForTool(tool.name)
+          : null;
+      // A server with hundreds of tools (Workday exposes 400+) would flood every
+      // request with schemas. Its tools load on demand through tool_search.
+      const toolCountByServer = new Map<string, number>();
+      for (const tool of mcpTools) {
+        const id = serverIdFor(tool);
+        if (id) toolCountByServer.set(id, (toolCountByServer.get(id) ?? 0) + 1);
+      }
+      this.deferredMcpServers = [];
+      for (const [id, count] of toolCountByServer) {
+        const server = serversById.get(id);
+        if (count > MCP_DEFERRED_SERVER_TOOL_THRESHOLD && server?.enabled !== false)
+          this.deferredMcpServers.push({ name: server?.name || id, toolCount: count });
+      }
+
       const definitions = mcpTools.flatMap((tool: MCPTool) => {
-        const serverId =
-          typeof (mcpManager as Any).getServerIdForTool === "function"
-            ? (mcpManager as Any).getServerIdForTool(tool.name)
-            : null;
+        const serverId = serverIdFor(tool);
         const server = serverId ? serversById.get(serverId) : undefined;
         if (server?.enabled === false) return [];
         // Admin-blocked connectors are not offered to the model; dispatch refuses them too.
@@ -3884,11 +3912,12 @@ export class ToolRegistry {
             interruptBehavior: readOnly ? ("cancel" as const) : ("block" as const),
             approvalKind: "external_service" as const,
             sideEffectLevel: readOnly ? ("none" as const) : ("medium" as const),
-            deferLoad: false,
-            alwaysExpose: true,
+            ...((serverId ? (toolCountByServer.get(serverId) ?? 0) : 0) >
+            MCP_DEFERRED_SERVER_TOOL_THRESHOLD
+              ? { deferLoad: true, alwaysExpose: false, exposure: "conditional" as const }
+              : { deferLoad: false, alwaysExpose: true, exposure: "always" as const }),
             supportsContextMutation: !readOnly,
             capabilityTags: ["mcp" as const, "integration" as const],
-            exposure: "always" as const,
             resultKind: "integration" as const,
             ...(codexComputerUse
               ? {
@@ -13449,7 +13478,14 @@ ${skillDescriptions}`;
         name: "tool_search",
         description:
           "Search deferred or specialized tools by intent. Use this when the exact tool name is unknown, " +
-          "when a needed capability is not currently exposed, or when you suspect a long-tail integration/tool exists.",
+          "when a needed capability is not currently exposed, or when you suspect a long-tail integration/tool exists." +
+          (this.deferredMcpServers.length
+            ? ` Connected MCP servers whose tools load only through this search: ${this.deferredMcpServers
+                .map((server) => `${server.name} (${server.toolCount} tools)`)
+                .join(
+                  ", ",
+                )}. Search by the business task (for example "supplier invoices" or "time off balance").`
+            : ""),
         input_schema: {
           type: "object",
           properties: {

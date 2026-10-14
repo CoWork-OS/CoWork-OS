@@ -25,8 +25,11 @@ function prune() {
 }
 /** Only successful trusted OAuth refresh adapters call this. No token/secret text is retained. */
 export function recordOAuthRefresh(before: MCPAuthConfig, after: MCPAuthConfig): void {
+  // A JWT bearer identity renews by signing a new assertion, so it has no refresh token.
+  const jwtBearer = (auth: MCPAuthConfig) =>
+    auth.oauth?.grant === "jwt_bearer" && typeof auth.privateKey === "string";
   const required = (auth: MCPAuthConfig) =>
-    [auth.refreshToken, auth.clientId, auth.tokenUrl].every(
+    [jwtBearer(auth) ? "jwt" : auth.refreshToken, auth.clientId, auth.tokenUrl].every(
       (value) => typeof value === "string" && Boolean(value.trim()),
     );
   if (!required(before) || !required(after)) return;
@@ -36,8 +39,7 @@ export function recordOAuthRefresh(before: MCPAuthConfig, after: MCPAuthConfig):
     (before.token !== undefined && (typeof before.token !== "string" || !before.token.trim())) ||
     typeof after.token !== "string" ||
     !after.token.trim() ||
-    !before.refreshToken ||
-    !after.refreshToken ||
+    (!jwtBearer(before) && (!before.refreshToken || !after.refreshToken)) ||
     !before.clientId ||
     !before.tokenUrl ||
     before.clientId !== after.clientId ||
@@ -45,7 +47,7 @@ export function recordOAuthRefresh(before: MCPAuthConfig, after: MCPAuthConfig):
     before.tokenUrl !== after.tokenUrl
   )
     return;
-  const rotating = new Set(["token", "refreshToken", "expiresAt"]);
+  const rotating = new Set(["token", "refreshToken", "expiresAt", "refreshExpiresAt"]);
   const fixed = (auth: MCPAuthConfig) =>
     Object.fromEntries(Object.entries(auth).filter(([key]) => !rotating.has(key)));
   if (JSON.stringify(canonical(fixed(before))) !== JSON.stringify(canonical(fixed(after)))) return;

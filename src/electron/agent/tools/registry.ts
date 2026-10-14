@@ -1328,6 +1328,16 @@ export class ToolRegistry {
   /**
    * Check if a tool is allowed based on security policy
    */
+  /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
+  private isDeniedByTaskRestrictions(toolName: string): boolean {
+    if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
+    for (const groupName of this.deniedGroups) {
+      const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
+      if (tools && tools.includes(toolName)) return true;
+    }
+    return false;
+  }
+
   isToolAllowed(toolName: string): boolean {
     if (this.denyAllTools) {
       return false;
@@ -2491,6 +2501,11 @@ export class ToolRegistry {
         workspace: this.workspace,
         toolName: context.request.name,
         toolInput: context.request.input,
+        // Hiding a restricted tool from the catalog is not enough: a call that
+        // names it anyway (or arrives through application_operation) is denied.
+        deniedTools: this.isDeniedByTaskRestrictions(context.request.name)
+          ? new Set([context.request.name])
+          : undefined,
         gatewayContext: this.gatewayContext,
         policyContext: context.request.runtime?.toolPolicyContext as Any,
         approvalRequired: runtimeApprovalRequired && !codexFullAccess,

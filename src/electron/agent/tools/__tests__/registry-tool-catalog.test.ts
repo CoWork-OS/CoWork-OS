@@ -309,6 +309,31 @@ async function assertResearcherDispatchBoundary(task: Any): Promise<void> {
 }
 
 describe("ToolRegistry tool catalog versioning", () => {
+  it("hides and refuses task-restricted scripting tools at execution", async () => {
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
+    try {
+      const registry = new ToolRegistry(
+        createWorkspace() as never,
+        createDaemon(),
+        "task",
+        undefined,
+        ["run_applescript", "local_photoshop_edit"],
+      );
+      const names = registry.getTools().map((tool) => tool.name);
+      expect(names).not.toContain("run_applescript");
+      expect(names).not.toContain("local_photoshop_edit");
+      expect(names).toContain("local_photoshop_read");
+      const runAppleScript = vi.spyOn((registry as Any).systemTools, "runAppleScript");
+      await expect(
+        registry.executeToolWithRuntime("run_applescript", { script: 'return "x"' }),
+      ).rejects.toThrow(/task restrictions/);
+      expect(runAppleScript).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { configurable: true, value: platform });
+    }
+  });
+
   it("offers local Photoshop without shell/network authority and never VM tools", () => {
     const workspace = createWorkspace();
     workspace.permissions.shell = false;

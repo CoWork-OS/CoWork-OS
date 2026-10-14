@@ -39,6 +39,10 @@ Qualification is per app and per control. The route reports these behaviors hone
 
 **Photoshop** is not qualified for generic background UI editing. Opening a document through a nonactivating launch makes Photoshop activate itself, which the helper reports as `outcome_unknown`. On an already-open document, setting the Character panel's font-size field and confirming it (`AXConfirm` or Return) echoes the new value but does not apply it, and Cmd+S then saves nothing. Use the local Photoshop document route ([local Photoshop editing](photoshop-local-editing.md)) for these edits; saved-file readback is the proof.
 
+## Task-stated restrictions
+
+When a task says not to use scripting (for example "do not use scripting to make the edit"), the scripting-based mutation tools (`application_operation`, `local_photoshop_create`, `local_photoshop_edit`, `native_application_create` and `run_applescript`) become task tool restrictions. They are hidden from the catalog and tool search, and any call that names one is denied by the policy pipeline's `task_restrictions` stage. Read-only readbacks such as `local_photoshop_read` stay available for verification.
+
 ## Verification evidence
 
 Verification and summary steps receive a native action ledger built from the task's durable attempt journal, not from model text. For each attempt it lists the action, target, final status, and the helper's foreground, pointer, keyboard and clipboard evidence. A foreground change to another app, or pointer movement accompanied by physical mouse events, is attributed to the user; the helper already treats target self-activation and pointer movement without physical events as `outcome_unknown`. The ledger proves dispatch and preservation, never the app outcome.

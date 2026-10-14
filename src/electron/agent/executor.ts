@@ -6,6 +6,7 @@ import {
   type NativeObservation,
 } from "./native-app-observation";
 import { applicationReadbackPath, summarizeApplicationReadback } from "./application-readback";
+import { promptDerivedToolRestrictions, taskForbidsScripting } from "./task-tool-restrictions";
 import {
   hasNativeApplicationOutputIntent,
   isNativeApplicationPreparationStep,
@@ -7118,6 +7119,10 @@ ${transcript}
     const isReadOnlyReview = descriptionHasReadOnlyIntent(desc) && !descriptionHasWriteIntent(desc);
     const toolRestrictions = [
       ...(this.task.agentConfig?.toolRestrictions || []),
+      // "Do not use scripting to make the edit" is enforced, not left to the model.
+      ...promptDerivedToolRestrictions(
+        `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+      ),
       ...(this.task.agentConfig?.chronicleMode === "disabled" ? ["screen_context_resolve"] : []),
       ...(isReadOnlyReview
         ? [
@@ -19844,7 +19849,13 @@ ${transcript}
       identityPrompt: params.identityPrompt,
       safetyCorePrompt: SHARED_PROMPT_POLICY_CORE,
       baseInstructionPrompt: this.buildExecutionBaseInstructionPrompt(),
-      applicationWorkerPrompt: applicationWorkerPrompt(),
+      applicationWorkerPrompt:
+        applicationWorkerPrompt() +
+        (taskForbidsScripting(
+          `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+        )
+          ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
+          : ""),
       answerSurfacePrompt: richSurfacesPrompt,
       inputPolicyPrompt: this.buildExecutionInputPolicyPrompt(),
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),

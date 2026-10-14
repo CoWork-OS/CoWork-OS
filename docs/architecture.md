@@ -253,6 +253,7 @@ Application work runs locally; there is no VM, SSH or remote worker route.
   - Mutations are journaled before dispatch and never replayed. Target self-activation, unexplained pointer movement or a lost reply yields `outcome_unknown`, which blocks further mutations in the task.
   - Requires an unlocked Mac, enforced by a native session probe.
 - **Harness evidence:** the latest native observation per window and the latest saved-file readback per path stay in later steps' context. Verification and summary steps also receive a native action ledger, built from the durable attempt journal, with per-action foreground/pointer/keyboard/clipboard evidence. Steps performed through native UI require `native_app` rather than a file or scripting writer, and a dispatch acknowledgement is never treated as proof of the app outcome.
+- **Task-stated restrictions:** a task that forbids scripting turns the scripting-based mutation tools into task tool restrictions. They are hidden from the catalog, and the policy pipeline denies them at execution. Task tool restrictions in general are now enforced at execution, not only by hiding the tool.
 - **Default:** native computer use is **Background only**. Legacy `background_first` settings migrate to it, and foreground modes are explicit opt-ins.
 
 ## Terminal Tabs

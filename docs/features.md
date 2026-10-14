@@ -169,6 +169,7 @@ Desktop automation for **native apps** on macOS and Windows when MCP, browser au
 - **Built-in tools category**: Enable/disable and priority for the `computer_use` tool family alongside other built-in categories.
 - **Policy & planning**: Tool availability defers the computer-use lane unless the task signals native/desktop GUI intent; executor guidance treats computer use as last resort after integrations, `browser_*`, and shell. For native GUI tasks, routing prefers **`screenshot`**, **`click`**, **`type_text`**, **`keypress`**, and related tools (plus **`open_application`** when launching the app) over **`run_applescript`** / fragile shell GUI hacks.
 - **Tools**: `screenshot`, `click`, `double_click`, `move_mouse`, `drag`, `scroll`, `type_text`, `keypress`, `wait` (with blocklisted dangerous key chords).
+- **Background app control (macOS)**: `native_app` operates one exact window of an installed app without activating it, moving the pointer or using the clipboard, and pauses while you use that app. Mutations are journaled and never resent; success is judged from a fresh observation. See [Background App Control](local-background-app-control.md).
 
 ### Chronicle (Desktop Research Preview)
 
@@ -1356,6 +1357,7 @@ See [Remote Access](remote-access.md) for details.
 - **MCP Client**: Connect to external MCP servers
 - **MCP Host**: Expose CoWork's tools as an MCP server
 - **MCP Registry**: Browse and install servers from a catalog
+- **Remote MCP OAuth**: Connect remote servers that require OAuth 2.1 sign-in, such as Workday Agent-Ready Tools, as a person (PKCE) or with an agent key (JWT bearer) for headless runs. Tokens renew automatically, large catalogs load on demand through `tool_search`, tool names shared by several servers are namespaced, and write tools ask first. See [Remote MCP OAuth](remote-mcp-oauth.md).
 - **Secure MCP Tunnels**: Expose selected local/private MCP tools through an outbound-only CoWork relay you operate, with separate client/caller tokens, tool allowlists, read-only mode, and local audit logs. See [Secure MCP Tunnels](secure-mcp-tunnels.md).
 - **Versioned tool snapshots**: Tool discovery tracks a stable catalog hash across native tools and MCP state so status/tool changes invalidate caches immediately
 

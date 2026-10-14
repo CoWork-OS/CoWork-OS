@@ -16,6 +16,43 @@ import {
   JSONRPCNotification,
 } from "../../types";
 
+const MAX_REDIRECTS = 5;
+
+/**
+ * fetch for MCP SSE: credentials travel as headers, and a redirect is followed only
+ * within the configured origin so they never reach another host.
+ */
+async function fetchWithinOrigin(
+  input: string | URL,
+  init: RequestInit,
+  credentialHeaders: Record<string, string>,
+): Promise<Response> {
+  const origin = new URL(String(input)).origin;
+  let url = new URL(String(input));
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const headers = new Headers(init.headers);
+    for (const [name, value] of Object.entries(credentialHeaders)) headers.set(name, value);
+    const response = await fetch(url, { ...init, headers, redirect: "manual" });
+    const location =
+      response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+    if (!location) return response;
+    const next = new URL(location, url);
+    await response.body?.cancel().catch(() => undefined);
+    if (next.origin !== origin)
+      throw new Error(
+        `MCP SSE server redirected to another origin (${next.origin}); refusing to send credentials`,
+      );
+    url = next;
+  }
+  throw new Error("MCP SSE server redirected too many times");
+}
+
+/** The URL without its query string, for logs. */
+function redactUrl(url: string): string {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname}${parsed.search ? "?[redacted]" : ""}`;
+}
+
 interface PendingRequest {
   resolve: (result: Any) => void;
   reject: (error: Error) => void;
@@ -63,13 +100,16 @@ export class SSETransport extends EventEmitter implements MCPTransport {
       }, this.config.connectionTimeout || 30000);
 
       try {
-        // Build SSE URL with auth headers if needed
-        const sseUrl = this.buildUrl(url, "/sse");
-        console.log(`[MCP SSETransport] Connecting to: ${sseUrl}`);
+        const sseUrl = this.buildUrl(url, "/sse", { streamRequest: true });
+        console.log(`[MCP SSETransport] Connecting to: ${redactUrl(sseUrl)}`);
 
-        // Create EventSource for server-to-client messages
-        // Note: EventSource doesn't support custom headers, so we use URL params for auth
-        this.eventSource = new EventSource(sseUrl);
+        // Credentials go in headers through a custom fetch, never in the URL, where
+        // proxies and server access logs would record them.
+        const credentialHeaders: Record<string, string> = { ...this.config.headers };
+        this.addAuthHeaders(credentialHeaders);
+        this.eventSource = new EventSource(sseUrl, {
+          fetch: (input, init) => fetchWithinOrigin(input, init as RequestInit, credentialHeaders),
+        });
 
         this.eventSource.onopen = () => {
           clearTimeout(timeout);
@@ -197,12 +237,15 @@ export class SSETransport extends EventEmitter implements MCPTransport {
       // Add auth headers
       this.addAuthHeaders(headers);
 
-      const response = await fetch(postUrl, {
-        method: "POST",
+      const response = await fetchWithinOrigin(
+        postUrl,
+        {
+          method: "POST",
+          body: JSON.stringify(message),
+          signal: this.abortController.signal,
+        },
         headers,
-        body: JSON.stringify(message),
-        signal: this.abortController.signal,
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -292,7 +335,11 @@ export class SSETransport extends EventEmitter implements MCPTransport {
   /**
    * Build URL with optional path
    */
-  private buildUrl(baseUrl: string, path: string): string {
+  private buildUrl(
+    baseUrl: string,
+    path: string,
+    options: { streamRequest?: boolean } = {},
+  ): string {
     const url = new URL(baseUrl);
 
     // Append path if base URL doesn't already have it
@@ -300,13 +347,12 @@ export class SSETransport extends EventEmitter implements MCPTransport {
       url.pathname = url.pathname.replace(/\/$/, "") + path;
     }
 
-    // Add auth params for SSE (since EventSource doesn't support headers)
-    if (this.config.auth) {
-      if (this.config.auth.type === "bearer" && this.config.auth.token) {
-        url.searchParams.set("token", this.config.auth.token);
-      } else if (this.config.auth.type === "api-key" && this.config.auth.apiKey) {
-        url.searchParams.set("api_key", this.config.auth.apiKey);
-      }
+    // Legacy servers that can only read a query token opt in explicitly; it applies to
+    // the stream request alone, and the header is still sent.
+    const auth = this.config.auth;
+    if (options.streamRequest && auth?.sendTokenInQuery) {
+      if (auth.type === "bearer" && auth.token) url.searchParams.set("token", auth.token);
+      else if (auth.type === "api-key" && auth.apiKey) url.searchParams.set("api_key", auth.apiKey);
     }
 
     return url.toString();

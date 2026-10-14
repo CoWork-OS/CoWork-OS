@@ -115,6 +115,22 @@ describe("listMemoryChangesAcross", () => {
   const change = (id: string, appliedAt: number) => ({ id, appliedAt }) as MemoryCurationChange;
   const NOW = 10 * MEMORY_CHANGE_WINDOW_MS;
 
+  it("reads hundreds of workspaces without a burst past the database queue", async () => {
+    let active = 0;
+    let peak = 0;
+    const recentSince = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return [];
+    });
+    const workspaces = Array.from({ length: 300 }, (_, i) => ({ id: `w${i}` }) as Workspace);
+    await listMemoryChangesAcross(workspaces, recentSince, NOW);
+    expect(recentSince).toHaveBeenCalledTimes(300);
+    expect(peak).toBeLessThanOrEqual(8);
+  });
+
   it("reads recent expiries in each saved workspace, newest first", async () => {
     const recentSince = vi.fn(async (workspaceId: string) =>
       workspaceId === "a" ? [change("c1", NOW - 10)] : [change("c2", NOW - 5)],

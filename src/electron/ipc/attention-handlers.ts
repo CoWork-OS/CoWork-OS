@@ -32,12 +32,18 @@ type Handler = (raw: unknown) => Promise<unknown>;
 
 /** The handlers by channel, independent of Electron (tests call them directly). */
 export function createAttentionIpcHandlers(deps: AttentionIpcDeps): Record<string, Handler> {
+  // Mount, window focus and change events can ask at the same moment; they share
+  // one snapshot instead of each fanning out across every workspace.
+  let inFlight: ReturnType<AttentionIpcDeps["service"]["snapshot"]> | null = null;
   return {
     [IPC_CHANNELS.ATTENTION_LIST]: async (raw) => {
       if (raw !== undefined && raw !== null) {
         throw new Error("attention:list takes no arguments");
       }
-      return deps.service.snapshot();
+      inFlight ??= deps.service.snapshot().finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 }

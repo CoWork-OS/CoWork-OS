@@ -188,7 +188,7 @@ SQL runs off the host event loop by default: in a write worker, a reporting read
 - **Foreign lock:** a 2 s write lock held by another process stalls the host for at most 41 ms, down from 2.2 s.
 - **Throughput:** does not regress.
 
-Under saturation the worker queue rejects requests with `overloaded` instead of growing without bound; callers on timers must catch that rejection. To rule the workers out while diagnosing, restart with `COWORK_DB_WORKER=0` (the host backend) and compare. See [Architecture: Database Ownership](architecture.md#database-ownership).
+Each database client sends at most 256 requests to its worker at a time. A burst beyond that waits on the host, in submission order, up to 4,096 requests and 32 MiB. Waiting counts toward the request's deadline, and a waiting request is never sent twice: it fails as `not_committed` if its deadline passes, it is cancelled, or the client closes or its worker exits. Past both bounds the client rejects with `overloaded` instead of growing without bound; callers on timers must catch that rejection. To rule the workers out while diagnosing, restart with `COWORK_DB_WORKER=0` (the host backend) and compare. See [Architecture: Database Ownership](architecture.md#database-ownership).
 
 **Files:** `src/electron/database/async/runtime.ts`, `src/electron/database/async/DatabaseClient.ts`
 

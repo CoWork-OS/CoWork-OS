@@ -28,9 +28,14 @@ import {
   ApprovalRepository,
   ArtifactRepository,
   InputRequestRepository,
+  storageStatements,
   TaskSessionMetadataRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
+import {
+  FOLLOW_UP_RECOVERY_TASK_STATUSES,
+  hasUnstartedFollowUpReceipt,
+} from "../database/follow-up-recovery-sql";
 import { EventEmitter } from "events";
 import {
   authorizationFingerprint,
@@ -43,7 +48,11 @@ import * as path from "path";
 import { createLogger } from "../utils/logger";
 import { DatabaseManager } from "../database/schema";
 import { recordHostOperation } from "../database/sqlite-instrumentation";
-import { getDatabaseClient, isTimelineProjectionWorkerEnabled } from "../database/async/runtime";
+import {
+  getDatabaseClient,
+  getReportingReader,
+  isTimelineProjectionWorkerEnabled,
+} from "../database/async/runtime";
 import { TimelineProjectionQueue } from "../database/async/TimelineProjectionQueue";
 import { TimelineWriter } from "../database/async/TimelineWriter";
 import { pendingTimelineWritesCommitted } from "../database/timeline-write-registry";
@@ -2403,8 +2412,9 @@ export class AgentDaemon extends EventEmitter {
     // A follow-up can be journaled before an idle executor changes a terminal
     // task back to executing. If the host exits in that short admission window,
     // recover the durable queued/started receipt instead of leaving it attached
-    // to a task that startup would otherwise treat as finished.
-    this.recoverUnstartedUserFollowUpsOnStartup();
+    // to a task that startup would otherwise treat as finished. The receipt scan
+    // runs off the host thread; its tasks are recovered with the delayed resume.
+    const followUpRecoveryCandidates = this.scanUnstartedUserFollowUps();
 
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
@@ -2532,12 +2542,12 @@ export class AgentDaemon extends EventEmitter {
     // (IPC handlers, tray, cron, UI) finish initializing first.
     if (tasksToResume.length > 0) {
       console.log(`[AgentDaemon] ${tasksToResume.length} task(s) scheduled for resume`);
-      setTimeout(() => {
-        this.resumeInterruptedTasks(tasksToResume).catch((error) => {
-          log.error("Failed to resume interrupted tasks:", error);
-        });
-      }, 2000);
     }
+    setTimeout(() => {
+      this.resumeTasksAfterStartup(tasksToResume, followUpRecoveryCandidates).catch((error) => {
+        log.error("Failed to resume interrupted tasks:", error);
+      });
+    }, 2000);
 
     await this.orchestrationGraphEngine.resumeRunningRuns();
   }
@@ -3370,31 +3380,60 @@ export class AgentDaemon extends EventEmitter {
     return true;
   }
 
-  private recoverUnstartedUserFollowUpsOnStartup(): void {
-    const candidates = this.taskRepo.findByStatus([
-      "paused",
-      "blocked",
-      "completed",
-      "failed",
-      "cancelled",
-    ]);
-    let recoveredCount = 0;
+  /**
+   * Start the startup scan for follow-up receipts a crash left queued or started. On the
+   * worker backend it runs in the reporting reader (a report unit), so the host thread and
+   * the first window never wait for it; on the host backend it runs when the delayed resume
+   * consumes it. Resolves to candidate task ids, or null when the scan failed.
+   */
+  private scanUnstartedUserFollowUps(): () => Promise<string[] | null> {
+    const port = storageStatements(this.getDatabase());
+    const scan = () =>
+      port.unit("taskEvent_findUnstartedFollowUpTaskIds", []).catch((error: unknown) => {
+        log.warn("Follow-up recovery scan failed; checking every finished task instead:", error);
+        return null;
+      });
+    if (!port.usesWorker()) return scan;
+    // Report units use the reader once it is up instead of queueing on the write worker.
+    const pending = getReportingReader()
+      .catch(() => null)
+      .then(scan);
+    return () => pending;
+  }
+
+  /** The delayed startup resume: interrupted tasks plus tasks with a recovered follow-up. */
+  private async resumeTasksAfterStartup(
+    tasksToResume: Task[],
+    followUpRecoveryCandidates: () => Promise<string[] | null>,
+  ): Promise<void> {
+    if (this.shutdownRequested) return;
+    const candidateTaskIds = await followUpRecoveryCandidates();
+    if (this.shutdownRequested) return;
+    const recovered = this.recoverUnstartedUserFollowUpsOnStartup(candidateTaskIds ?? undefined);
+    if (recovered.length > 0) {
+      console.log(`[AgentDaemon] ${recovered.length} follow-up task(s) scheduled for resume`);
+    }
+    const tasks = [...tasksToResume, ...recovered];
+    if (tasks.length > 0) await this.resumeInterruptedTasks(tasks);
+  }
+
+  /**
+   * Interrupt finished tasks whose latest follow-up receipt is still queued or started, so
+   * the startup resume redispatches it. With the worker scan's candidate ids only those
+   * tasks are re-read and re-checked; without them every task in a recovery status is.
+   */
+  private recoverUnstartedUserFollowUpsOnStartup(candidateTaskIds?: readonly string[]): Task[] {
+    const statuses: readonly TaskStatus[] = FOLLOW_UP_RECOVERY_TASK_STATUSES;
+    const candidates = candidateTaskIds
+      ? candidateTaskIds
+          .map((taskId) => this.taskRepo.findById(taskId))
+          .filter((task): task is Task => Boolean(task && statuses.includes(task.status)))
+      : this.taskRepo.findByStatus([...statuses]);
+    const recovered: Task[] = [];
     for (const task of candidates) {
       if (!this.shouldResumeTaskOnStartup(task)) continue;
-
-      const latestReceipts = new Map<string, Record<string, unknown>>();
-      for (const event of readDurableTaskEvents(this, task.id, "user_message")) {
-        const payload = event.payload as Record<string, unknown> | undefined;
-        const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
-        if (messageId && payload?.deliveryMode === "follow_up") {
-          latestReceipts.set(messageId, payload);
-        }
-      }
-      const hasUnstartedFollowUp = Array.from(latestReceipts.values()).some((payload) => {
-        const status = payload.deliveryStatus ?? payload.status;
-        return status === "queued" || status === "started";
-      });
-      if (!hasUnstartedFollowUp) continue;
+      const receipts = readDurableTaskEvents(this, task.id, "user_message");
+      if (!hasUnstartedFollowUpReceipt(receipts.map((event) => event.payload))) continue;
 
       this.taskRepo.update(task.id, {
         status: "interrupted",
@@ -3404,11 +3443,12 @@ export class AgentDaemon extends EventEmitter {
         message: "A queued follow-up was interrupted by application restart. The task will resume.",
         reason: "user_follow_up_recovered_after_restart",
       });
-      recoveredCount += 1;
+      recovered.push({ ...task, status: "interrupted" });
     }
-    if (recoveredCount > 0) {
-      log.info(`[AgentDaemon] Recovering ${recoveredCount} task(s) with queued follow-ups`);
+    if (recovered.length > 0) {
+      log.info(`[AgentDaemon] Recovering ${recovered.length} task(s) with queued follow-ups`);
     }
+    return recovered;
   }
 
   private skipStartupResume(task: Task): void {

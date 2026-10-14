@@ -14,7 +14,9 @@ export interface MCPToolPolicy {
 }
 
 export function resolveMcpToolPolicy(tool: MCPTool, server: MCPServerConfig): MCPToolPolicy {
-  const mode = server.toolApprovals?.[tool.name] ?? server.defaultToolsApprovalMode;
+  // Approvals are saved per server under the server's own tool name.
+  const mode =
+    server.toolApprovals?.[tool.serverToolName ?? tool.name] ?? server.defaultToolsApprovalMode;
   return {
     serverName: server.name,
     approvalMode: mode === "prompt" || mode === "writes" || mode === "approve" ? mode : "auto",

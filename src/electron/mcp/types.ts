@@ -110,6 +110,8 @@ export interface MCPServerConfig {
 // MCP Tool Definition (follows MCP spec)
 export interface MCPTool {
   name: string;
+  /** The server's own name for the tool, when the catalog namespaced a colliding name. */
+  serverToolName?: string;
   description?: string;
   annotations?: {
     title?: string;

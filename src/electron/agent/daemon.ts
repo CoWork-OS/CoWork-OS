@@ -7381,9 +7381,11 @@ export class AgentDaemon extends EventEmitter {
       try {
         const prefix = MCPSettingsManager.loadSettings().toolNamePrefix || "mcp_";
         const rawName = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : "";
+        const manager = MCPClientManager.getInstance();
+        const serverToolName = manager.getServerToolName(rawName) ?? rawName;
         trustedLocalComputerUse =
-          (rawName === "js" || rawName === "js_reset") &&
-          isCodexComputerUseServer(MCPClientManager.getInstance().getServerConfigForTool(rawName));
+          (serverToolName === "js" || serverToolName === "js_reset") &&
+          isCodexComputerUseServer(manager.getServerConfigForTool(rawName));
       } catch {
         // Unavailable or unknown drivers retain ordinary MCP policy.
       }

@@ -3891,10 +3891,12 @@ export class ToolRegistry {
         const policy = server ? resolveMcpToolPolicy(tool, server) : undefined;
         const readOnly = policy?.readOnly === true;
         // Identify the installed driver from local configuration, not untrusted tool prose.
+        const serverToolName = tool.serverToolName ?? tool.name;
         const codexComputerUse =
-          isCodexComputerUseServer(server) && (tool.name === "js" || tool.name === "js_reset");
+          isCodexComputerUseServer(server) &&
+          (serverToolName === "js" || serverToolName === "js_reset");
         const desktopGuide =
-          codexComputerUse && tool.name === "js"
+          codexComputerUse && serverToolName === "js"
             ? 'Codex desktop computer use: at the start of each new task call await cua.rewriteDocumentation() alone and read its output. Bind a native app with let app = await cua.getApp("App name"). Use app.click(index), app.typeText(text), app.pressKey(key), app.getAXState(), and app.getScreenshot() as documented. Read fresh UI state after actions before choosing further indices. '
             : "";
         const baseDescription = desktopGuide + (tool.description || `MCP tool: ${tool.name}`);

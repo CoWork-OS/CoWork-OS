@@ -313,19 +313,34 @@ describe("ToolRegistry tool catalog versioning", () => {
     const workspace = createWorkspace();
     workspace.permissions.shell = false;
     workspace.permissions.network = false;
-    const registry = new ToolRegistry(workspace as never, createDaemon(), "task");
-    const names = registry.getTools().map((tool) => tool.name);
-    expect(names).toContain("local_photoshop_create");
-    expect(names).toContain("local_photoshop_read");
-    expect(registry.getRuntimeMetadata("local_photoshop_read")).toMatchObject({
-      alwaysExpose: true,
-      deferLoad: false,
-      readOnly: true,
-      concurrencyClass: "exclusive",
-    });
-    expect(names).toContain("local_photoshop_edit");
-    expect(names).toContain("application_operation");
-    expect(names).not.toContain("native_application_create");
+    const platform = process.platform;
+    const registryOn = (value: NodeJS.Platform) => {
+      Object.defineProperty(process, "platform", { configurable: true, value });
+      return new ToolRegistry(workspace as never, createDaemon(), "task");
+    };
+    try {
+      // The local Photoshop route drives installed macOS Photoshop; other hosts never see it.
+      expect(
+        registryOn("linux")
+          .getTools()
+          .map((tool) => tool.name),
+      ).not.toContain("local_photoshop_create");
+      const registry = registryOn("darwin");
+      const names = registry.getTools().map((tool) => tool.name);
+      expect(names).toContain("local_photoshop_create");
+      expect(names).toContain("local_photoshop_read");
+      expect(registry.getRuntimeMetadata("local_photoshop_read")).toMatchObject({
+        alwaysExpose: true,
+        deferLoad: false,
+        readOnly: true,
+        concurrencyClass: "exclusive",
+      });
+      expect(names).toContain("local_photoshop_edit");
+      expect(names).toContain("application_operation");
+      expect(names).not.toContain("native_application_create");
+    } finally {
+      Object.defineProperty(process, "platform", { configurable: true, value: platform });
+    }
   });
 
   beforeEach(() => {

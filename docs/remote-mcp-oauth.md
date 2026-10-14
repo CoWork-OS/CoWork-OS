@@ -6,7 +6,7 @@ CoWork can connect to remote MCP servers that require an OAuth 2.1 sign-in, such
 
 **Settings > MCP Servers > + Add Server > Remote (OAuth)**
 
-- **Workday Agent-Ready Tools:** enter the agent gateway region (for example `us` for `us.agent.workday.com`) and your tenant name. CoWork derives:
+- **Workday Agent-Ready Tools:** enter the agent gateway region (for example `us` for `us.agent.workday.com`; Workday Developer Program tenants use `odp`) and your tenant name. CoWork derives:
   - MCP endpoint: `https://{region}.agent.workday.com/{tenant}/mcp`
   - Authorize endpoint: `/auth/authorize/{tenant}`
   - Token endpoint: `/auth/oauth2/{tenant}/token`
@@ -46,9 +46,11 @@ Token renewal is plain Node and needs neither Electron nor a browser, so it runs
 ## Workday setup checklist
 
 1. Join the Workday Developer Program and submit **Request Tenant Access** for a personal development tenant. Workday reviews the request and emails the tenant's sign-in details when it is ready; change the temporary password promptly (Workday asks for it within 72 hours).
-2. Set up Agent System of Record (ASOR) in the tenant, register an external agent through the ASOR API, and configure its skills and tool security. Workday documents these steps under **Agents > External Agents**. The ASOR registration call goes to the tenant's services host, `https://<tenant>-services1.<dc>.myworkday.com/ccx/api/asor/v1/<tenant>/agentDefinition`, with a token from a **Register API Client** client that has the Agent System of Record scope, signed in through the tenant's own `/authorize` and `/ccx/oauth2/<tenant>/token` endpoints. The `us.agent.workday.com` gateway rejects tenant-issued tokens, so don't send this call there.
+2. Set up Agent System of Record (ASOR) in the tenant, register an external agent through the ASOR API, and configure its skills and tool security. Workday documents these steps under **Agents > External Agents**. The ASOR registration call goes to the tenant's services host, `https://<tenant>-services1.<dc>.myworkday.com/ccx/api/asor/v1/<tenant>/agentDefinition`, with a token from a **Register API Client** client that has the Agent System of Record scope, signed in through the tenant's own `/authorize` and `/ccx/oauth2/<tenant>/token` endpoints. The agent gateway rejects tenant-issued tokens, so don't send this call there.
+   - If the agent's skills need a worker ID, register a tool that resolves the signed-in worker too (for example, `create_worker_preferred_name_change` requires `workersId`).
 3. Copy the agent's client ID and secret from **View External Agent Credentials**. For a delegate identity, register `https://127.0.0.1:18768/oauth/callback`. Workday rejects `http://` redirect URIs for authorization-code clients.
 4. In CoWork, add a **Remote (OAuth)** server with the Workday preset and sign in. Expect a certificate warning for 127.0.0.1 in the browser on each sign-in; accept it to finish.
+   - Developer Program tenants are served by `odp.agent.workday.com` (region `odp`), even when the agent's Credentials tab lists `us.agent.workday.com`. The wrong region answers every request for the tenant with `{"error":"Invalid request"}`; a quick check is `https://<region>.agent.workday.com/.well-known/oauth-authorization-server/<tenant>`, which returns metadata only on the right region.
 5. Ask CoWork for something that needs Workday data, for example "What is my time off balance?". The agent finds the right Workday tool through `tool_search`.
 
 Implementation: `src/electron/mcp/oauth/mcp-oauth.ts` (flows, loopback listener, renewal, discovery), `src/electron/mcp/oauth/mcp-server-authorization.ts` (server setup, edit, sign-in and cancel), `src/electron/ipc/mcp-oauth-handlers.ts` (IPC), and `src/electron/mcp/client/transports/StreamableHttpTransport.ts` (renewal, 401 and rate-limit handling).

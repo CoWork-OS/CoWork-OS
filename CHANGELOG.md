@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **"Database worker queue is full" at startup**: the attention snapshot no longer sends one database read per saved workspace at once (at most 8 run at a time, and overlapping snapshots share one), and requests past the worker's in-flight limit now wait in order instead of failing. Profiles with many workspaces no longer fail unrelated startup requests such as the temp workspace.
+- **Startup no longer waits on the follow-up recovery scan**: finding follow-ups a crash left queued used to read every finished task's messages before the first window. The scan now runs in the database worker's reporting reader while the app starts, and the tasks it finds resume with the other interrupted tasks; on a 1,700-task profile agent startup drops from about 250 ms to 50 ms.
 
 ### Security
 

@@ -1,5 +1,4 @@
 import { TeamsConversationReferenceRepository } from "./TeamsConversationReferenceRepository";
-import { createTeamsAdapter } from "./channels/teams";
 import { authorizationFingerprint } from "../security/authorization-identity";
 /**
  * Channel Gateway
@@ -44,10 +43,16 @@ import {
   EmailConfig as _EmailConfig,
   GatewayEventHandler,
 } from "./channels/types";
-import { TelegramAdapter, createTelegramAdapter } from "./channels/telegram";
-import { DiscordAdapter, createDiscordAdapter } from "./channels/discord";
-import { SlackAdapter, createSlackAdapter } from "./channels/slack";
-import { WhatsAppAdapter, createWhatsAppAdapter } from "./channels/whatsapp";
+import type { DiscordAdapter } from "./channels/discord";
+import type { WhatsAppAdapter } from "./channels/whatsapp";
+import {
+  createDiscordAdapter,
+  createSlackAdapter,
+  createTeamsAdapter,
+  createTelegramAdapter,
+  createWhatsAppAdapter,
+  loadChannelAdapterModule,
+} from "./channels/lazy-adapters";
 import { ImessageAdapter, createImessageAdapter } from "./channels/imessage";
 import { SignalAdapter, createSignalAdapter } from "./channels/signal";
 import { createFeishuAdapter } from "./channels/feishu";
@@ -1626,6 +1631,7 @@ export class ChannelGateway {
         ? this.router.getAdapter(channel.type as ChannelType)
         : undefined);
     if (channel.type === "teams") {
+      await loadChannelAdapterModule(channel.type);
       const reconnect = channel.enabled && adapter?.status === "connected";
       await adapter?.disconnect();
       this.router.unregisterAdapter(channelId);
@@ -1662,6 +1668,7 @@ export class ChannelGateway {
     }
 
     // Create and register adapter if not already done
+    await loadChannelAdapterModule(channel.type);
     let adapter =
       this.router.getAdapterByChannelId(channelId) ||
       ((await this.channelRepo.findAllByType(channel.type)).length === 1
@@ -1711,6 +1718,7 @@ export class ChannelGateway {
     }
 
     // Create and register adapter if not already done
+    await loadChannelAdapterModule(channel.type);
     let adapter = this.router.getAdapter("whatsapp") as WhatsAppAdapter | undefined;
     if (!adapter) {
       adapter = this.createAdapterForChannel(channel) as WhatsAppAdapter;
@@ -1813,6 +1821,7 @@ export class ChannelGateway {
     if (!channel) return;
 
     if (channel.type === "whatsapp") {
+      await loadChannelAdapterModule(channel.type);
       const adapter = this.router.getAdapter("whatsapp") as WhatsAppAdapter | undefined;
       if (adapter) {
         await adapter.logout();
@@ -1857,6 +1866,7 @@ export class ChannelGateway {
         };
       }
 
+      await loadChannelAdapterModule(channel.type);
       const adapter = this.createAdapterForChannel(channel);
       let info: Awaited<ReturnType<ChannelAdapter["getInfo"]>>;
       if (adapter.probe) {
@@ -2133,6 +2143,7 @@ export class ChannelGateway {
         if (this.isMicrosoftEmailOAuthChannel(channel)) {
           continue;
         }
+        await loadChannelAdapterModule(channel.type);
         const adapter = this.createAdapterForChannel(channel);
         this.router.registerAdapter(adapter, channel.id);
       } catch (error) {
@@ -2696,10 +2707,11 @@ export * from "./router";
 export * from "./session";
 export * from "./security";
 export * from "./channel-registry";
-export { TelegramAdapter, createTelegramAdapter } from "./channels/telegram";
-export { DiscordAdapter, createDiscordAdapter } from "./channels/discord";
-export { SlackAdapter, createSlackAdapter } from "./channels/slack";
-export { WhatsAppAdapter, createWhatsAppAdapter } from "./channels/whatsapp";
+// Types only: the SDK-backed adapters load lazily (see channels/lazy-adapters).
+export type { TelegramAdapter } from "./channels/telegram";
+export type { DiscordAdapter } from "./channels/discord";
+export type { SlackAdapter } from "./channels/slack";
+export type { WhatsAppAdapter } from "./channels/whatsapp";
 export { ImessageAdapter, createImessageAdapter } from "./channels/imessage";
 export { SignalAdapter, createSignalAdapter } from "./channels/signal";
 export { SignalClient } from "./channels/signal-client";

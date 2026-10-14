@@ -330,7 +330,7 @@ describe("PDF page budget", () => {
     async (name) => {
       const { builder, dir } = makeBuilder();
       const content = briefs[name];
-      expect(builder.measurePdfLayouts(content, { pageNumbers: true })[0]).toBe(3);
+      expect((await builder.measurePdfLayouts(content, { pageNumbers: true }))[0]).toBe(3);
       vi.restoreAllMocks();
       instrumentPdfDrawing();
 

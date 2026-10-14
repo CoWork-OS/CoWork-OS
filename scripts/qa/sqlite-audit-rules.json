@@ -285,6 +285,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/automation/responsibility-schema\\.ts$",
+      "domain": "shared SQL",
+      "access": "Bot responsibility table SQL and its one-time constraint upgrade, split from responsibility-store so schema initialization loads neither zod nor the store. Runs only inside schema initialization: in the bootstrap worker in the runtimes, in-thread for tests and the bootstrap fallback.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/database/schema\\.ts$",
       "domain": "lifecycle",
       "access": "Schema initialization (in the bootstrap worker in the runtimes; in-thread for tests and the fallback) and post-startup maintenance fallback.",

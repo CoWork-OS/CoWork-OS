@@ -53,6 +53,7 @@ final class Box<T> {
 final class Bridge {
 	private let refStore = AXRefStore()
 	private var stdinBuffer = Data()
+	private lazy var background = BackgroundController(capture: { [unowned self] id in try self.captureWindow(windowId: id) })
 
 	func run() {
 		while true {
@@ -157,6 +158,8 @@ final class Bridge {
 		let cmd = try stringArg(request, "cmd")
 
 		switch cmd {
+		case "background":
+			return try background.handle(request)
 		case "checkPermissions":
 			return checkPermissions()
 		case "openPermissionPane":
@@ -300,7 +303,7 @@ final class Bridge {
 	}
 
 	private func listApps() -> [[String: Any]] {
-		let frontmostPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+		let frontmostPid = liveFrontmostApplication()?.processIdentifier
 		let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
 		return apps.map { app in
 			var data: [String: Any] = [
@@ -316,7 +319,7 @@ final class Bridge {
 	}
 
 	private func getFrontmost() throws -> [String: Any] {
-		guard let app = NSWorkspace.shared.frontmostApplication else {
+		guard let app = liveFrontmostApplication() else {
 			throw BridgeFailure(message: "No frontmost app available", code: "frontmost_unavailable")
 		}
 		let pid = app.processIdentifier
@@ -351,8 +354,14 @@ final class Bridge {
 
 	private func listWindows(pid: Int32) throws -> [[String: Any]] {
 		let appElement = AXUIElementCreateApplication(pid)
-		let windows = axElementArray(appElement, attribute: kAXWindowsAttribute as CFString)
+		let (inventoryStatus, windows) = axWindowInventory(appElement)
+		guard inventoryStatus == .success else {
+			throw BridgeFailure(message: "Accessibility window inventory failed (AX error \(inventoryStatus.rawValue)); no window state was changed", code: "ax_inventory_failed")
+		}
 		let candidates = cgWindowCandidates(pid: pid)
+		if windows.isEmpty && !candidates.isEmpty {
+			throw BridgeFailure(message: "WindowServer reports app windows but Accessibility has not supplied their identities", code: "ax_inventory_unavailable")
+		}
 		var usedIds = Set<UInt32>()
 
 		var output: [[String: Any]] = []
@@ -867,7 +876,7 @@ final class Bridge {
 
 	private func windowElement(pid: Int32, windowId: UInt32?) -> AXUIElement? {
 		let appElement = AXUIElementCreateApplication(pid)
-		let windows = axElementArray(appElement, attribute: kAXWindowsAttribute as CFString)
+		let windows = axWindowInventory(appElement).1
 		guard !windows.isEmpty else { return nil }
 		guard let windowId else {
 			return windows.first
@@ -1210,7 +1219,12 @@ final class Bridge {
 			let dy = abs(candidate.bounds.origin.y - frame.origin.y)
 			let dw = abs(candidate.bounds.size.width - frame.size.width)
 			let dh = abs(candidate.bounds.size.height - frame.size.height)
-			score -= Double(dx + dy + dw + dh) / 20.0
+			let distance = Double(dx + dy + dw + dh)
+			// An exact window id must identify this window, not merely the least-bad
+			// one: a floating panel must never inherit a document window's id.
+			let sameTitle = !normalizedTitle.isEmpty && candidateTitle == normalizedTitle
+			if distance > 8 && !(sameTitle && distance <= 64) { continue }
+			score -= distance / 20.0
 
 			if let currentBest = best {
 				if score > currentBest.score {
@@ -1565,5 +1579,329 @@ final class Bridge {
 	}
 }
 
+// Strict local background control. This controller never activates, raises,
+// focuses, warps the physical pointer, changes the pasteboard, or posts to HID.
+final class BackgroundController {
+    struct Snapshot {
+        let session: String
+        let pid: pid_t
+        let processStart: Date?
+        let windowId: UInt32
+        let window: AXUIElement
+        let frame: CGRect
+        let created: Date
+        let elements: [String: AXUIElement]
+        let fingerprints: [String: String]
+    }
+    private var snapshots: [String: Snapshot] = [:]
+    private let capture: (UInt32) throws -> [String: Any]
+    init(capture: @escaping (UInt32) throws -> [String: Any]) { self.capture = capture }
+
+    private func fail(_ message: String, _ code: String = "background_unavailable") -> BridgeFailure {
+        BridgeFailure(message: message, code: code)
+    }
+    private func attr(_ e: AXUIElement, _ name: String) -> AnyObject? {
+        var v: AnyObject?
+        return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
+    }
+    private func text(_ e: AXUIElement, _ name: String) -> String { (attr(e, name) as? String) ?? "" }
+    private func children(_ e: AXUIElement, _ name: String = "AXChildren") -> [AXUIElement] {
+        (attr(e, name) as? [AXUIElement]) ?? []
+    }
+    private func frame(_ e: AXUIElement) -> CGRect? {
+        guard let p = attr(e, "AXPosition"), let s = attr(e, "AXSize"),
+              CFGetTypeID(p) == AXValueGetTypeID(), CFGetTypeID(s) == AXValueGetTypeID() else { return nil }
+        var pt = CGPoint.zero, size = CGSize.zero
+        guard AXValueGetValue(unsafeBitCast(p, to: AXValue.self), .cgPoint, &pt),
+              AXValueGetValue(unsafeBitCast(s, to: AXValue.self), .cgSize, &size) else { return nil }
+        return CGRect(origin: pt, size: size)
+    }
+    private func sameFrame(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX-b.minX)<1 && abs(a.minY-b.minY)<1 && abs(a.width-b.width)<1 && abs(a.height-b.height)<1
+    }
+    private func actions(_ e: AXUIElement) -> [String] {
+        var names: CFArray?
+        guard AXUIElementCopyActionNames(e, &names) == .success else { return [] }
+        return (names as? [String]) ?? []
+    }
+    private func secure(_ e: AXUIElement) -> Bool {
+        text(e,"AXRole") == "AXSecureTextField" || text(e,"AXSubrole") == "AXSecureTextField"
+    }
+    private func value(_ e: AXUIElement) -> String? {
+        guard !secure(e), let v=attr(e,"AXValue") else { return nil }
+        if let s=v as? String { return String(s.prefix(10000)) }
+        if let n=v as? NSNumber { return n.stringValue }
+        return nil
+    }
+    private func fingerprint(_ e: AXUIElement) -> String {
+        [text(e,"AXRole"),text(e,"AXSubrole"),text(e,"AXTitle"),text(e,"AXDescription"),text(e,"AXIdentifier"),value(e) ?? ""].joined(separator:"\u{1f}")
+    }
+    private func requireSession() throws {
+        guard AXIsProcessTrusted() else { throw fail("Accessibility permission is required", "permission_required") }
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+              (session[kCGSessionOnConsoleKey as String] as? Bool) == true,
+              (session["CGSSessionScreenIsLocked"] as? Bool) != true else {
+            throw fail("Unlock the local Mac before background app control", "session_unavailable")
+        }
+    }
+    private func target(_ pid: pid_t, _ windowId: UInt32) throws -> (AXUIElement, CGRect) {
+        guard let rows=CGWindowListCopyWindowInfo(.optionIncludingWindow, windowId) as? [[String:Any]],
+              let row=rows.first(where:{($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowId}),
+              (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+              let raw=row[kCGWindowBounds as String] as? [String:Any],
+              let bounds=CGRect(dictionaryRepresentation:raw as CFDictionary) else {
+            throw fail("The exact window is no longer owned by the selected app", "stale_target")
+        }
+        let appElement=AXUIElementCreateApplication(pid)
+        let (status,windows)=axWindowInventory(appElement)
+        guard status == .success,!windows.isEmpty else {
+            throw fail("Accessibility has not supplied the existing window's identity (AX error \(status.rawValue))", "ax_inventory_unavailable")
+        }
+        let matches=windows.filter { w in
+            if let n=attr(w,"AXWindowNumber") as? NSNumber { return n.uint32Value == windowId }
+            guard let f=frame(w), sameFrame(f,bounds) else { return false }
+            let title=(row[kCGWindowName as String] as? String) ?? ""
+            return title.isEmpty || text(w,"AXTitle") == title
+        }
+        guard matches.count == 1 else { throw fail("Window identity is ambiguous or unavailable", "stale_target") }
+        guard (attr(matches[0],"AXMinimized") as? Bool) != true else {
+            throw fail("Minimized windows are not qualified for background control; no unminimize fallback")
+        }
+        return (matches[0],bounds)
+    }
+    private func context() -> [String:Any] {
+        let p=CGEvent(source:nil)?.location ?? .zero
+        return ["frontmostPid":Int(liveFrontmostApplication()?.processIdentifier ?? 0),
+                "pointer":["x":p.x,"y":p.y],
+                "physicalMouseEvents":Int(CGEventSource.counterForEventType(.hidSystemState,eventType:.mouseMoved))]
+    }
+    private func finish(_ before: [String:Any], _ pid: pid_t, _ dispatched: Bool) throws -> [String:Any] {
+        let after=context()
+        if (after["frontmostPid"] as? Int) == Int(pid), (before["frontmostPid"] as? Int) != Int(pid) {
+            throw fail("Target became foreground. Outcome unknown; stop and inspect, never replay or restore user focus", "outcome_unknown")
+        }
+        // A physical user movement is allowed. Never restore an old pointer position.
+        if NSDictionary(dictionary:before["pointer"] as? [String:Any] ?? [:]) != NSDictionary(dictionary:after["pointer"] as? [String:Any] ?? [:]),
+           (before["physicalMouseEvents"] as? Int) == (after["physicalMouseEvents"] as? Int) {
+            throw fail("Pointer changed without a physical movement. Outcome unknown; stop and inspect", dispatched ? "outcome_unknown" : "background_interference")
+        }
+        return ["before":before,"after":after,"globalInput":false,"clipboardUsed":false,
+                "frontmostUnchanged":(before["frontmostPid"] as? Int)==(after["frontmostPid"] as? Int),
+                "pointerUnchanged":NSDictionary(dictionary:before["pointer"] as? [String:Any] ?? [:]) == NSDictionary(dictionary:after["pointer"] as? [String:Any] ?? [:])]
+    }
+    func handle(_ r: [String:Any]) throws -> [String:Any] {
+        let action=r["action"] as? String ?? ""
+        let session=r["session"] as? String ?? ""
+        guard !session.isEmpty else { throw fail("Host-owned session is required", "invalid_args") }
+        try requireSession()
+        if action == "launch" { return try launch(r) }
+        guard let pid=(r["pid"] as? NSNumber)?.int32Value, pid>0,
+              let wid=(r["windowId"] as? NSNumber)?.uint32Value, wid>0 else { throw fail("Exact pid and windowId required", "invalid_args") }
+        if action == "observe" { return try observe(session,pid,wid,r["screenshot"] as? Bool ?? true) }
+        return try act(r,session,pid,wid)
+    }
+    private func launch(_ r:[String:Any]) throws -> [String:Any] {
+        guard let bundle=r["bundleId"] as? String,
+              let url=NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else { throw fail("Installed app bundle not found", "app_not_found") }
+        let before=context()
+        let config=NSWorkspace.OpenConfiguration();config.activates=false;config.addsToRecentItems=false
+        config.createsNewApplicationInstance=false;config.hidesOthers=false
+        var app:NSRunningApplication?, error:Error?, done=false
+        let callback:(NSRunningApplication?,Error?)->Void = { a,e in app=a;error=e;done=true }
+        if let document=r["documentPath"] as? String {
+            NSWorkspace.shared.open([URL(fileURLWithPath:document)],withApplicationAt:url,configuration:config,completionHandler:callback)
+        } else { NSWorkspace.shared.openApplication(at:url,configuration:config,completionHandler:callback) }
+        let deadline=Date().addingTimeInterval(15)
+        while !done && Date()<deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.02)) }
+        guard done, let launched=app else { throw fail(error?.localizedDescription ?? "Launch reply unavailable; observe the app before retrying", "outcome_unknown") }
+        let guardResult=try finish(before,launched.processIdentifier,true)
+        return ["pid":Int(launched.processIdentifier),"bundleId":bundle,"background":true,"preservation":guardResult]
+    }
+    private func observe(_ session:String,_ pid:pid_t,_ wid:UInt32,_ screenshot:Bool) throws -> [String:Any] {
+        let (window,bounds)=try target(pid,wid)
+        guard let app=NSRunningApplication(processIdentifier:pid) else { throw fail("App exited", "stale_target") }
+        let snapshotId=UUID().uuidString
+        var refs:[String:AXUIElement]=[:], fingerprints:[String:String]=[:], rows:[[String:Any]]=[], bytes=0, truncated=false
+        func walk(_ e:AXUIElement,_ parent:String?,_ depth:Int) {
+            guard depth<=14, rows.count<250 else { truncated=true;return }
+            let token=UUID().uuidString
+            let isSecure=secure(e)
+            var row:[String:Any] = ["token":token,"role":text(e,"AXRole"),"title":String(text(e,"AXTitle").prefix(512)),"description":String(text(e,"AXDescription").prefix(512)),"identifier":String(text(e,"AXIdentifier").prefix(512)),"enabled":(attr(e,"AXEnabled") as? Bool) ?? true,"secure":isSecure]
+            if let parent { row["parent"]=parent }
+            if let f=frame(e) { row["frame"]=["x":f.minX,"y":f.minY,"w":f.width,"h":f.height] }
+            var settable=DarwinBoolean(false)
+            row["canSetValue"] = !isSecure && AXUIElementIsAttributeSettable(e,"AXValue" as CFString,&settable) == .success && settable.boolValue
+            if !isSecure {
+                row["actions"]=actions(e)
+                if let v=value(e) { row["value"]=v }
+            }
+            let cost=(try? JSONSerialization.data(withJSONObject:row).count) ?? 50000
+            guard bytes+cost<=50000 else { truncated=true;return }
+            bytes+=cost
+            if !isSecure { refs[token]=e;fingerprints[token]=fingerprint(e) }
+            rows.append(row)
+            if !isSecure { for child in children(e) { walk(child,token,depth+1) } }
+        }
+        walk(window,nil,0)
+        snapshots=snapshots.filter { Date().timeIntervalSince($0.value.created)<60 && !($0.value.session==session && $0.value.pid==pid && $0.value.windowId==wid) }
+        if snapshots.count>=32 { snapshots.removeAll() }
+        snapshots[snapshotId]=Snapshot(session:session,pid:pid,processStart:app.launchDate,windowId:wid,window:window,frame:bounds,created:Date(),elements:refs,fingerprints:fingerprints)
+        var result:[String:Any] = ["snapshotId":snapshotId,"expiresInMs":60000,"pid":Int(pid),"bundleId":app.bundleIdentifier ?? "","windowId":Int(wid),"windowTitle":text(window,"AXTitle"),"elements":rows,"truncated":truncated,"background":true]
+        if screenshot { result["capture"]=try capture(wid) }
+        return result
+    }
+    private func act(_ r:[String:Any],_ session:String,_ pid:pid_t,_ wid:UInt32) throws -> [String:Any] {
+        guard let id=r["snapshotId"] as? String,let s=snapshots[id],s.session==session,s.pid==pid,s.windowId==wid,
+              Date().timeIntervalSince(s.created)<60,NSRunningApplication(processIdentifier:pid)?.launchDate==s.processStart else {
+            throw fail("Snapshot expired, consumed, replaced, or belongs to a different target/session", "stale_snapshot")
+        }
+        let (window,bounds)=try target(pid,wid)
+        guard CFEqual(window,s.window),sameFrame(bounds,s.frame) else { throw fail("Window changed since observation", "stale_snapshot") }
+        guard liveFrontmostApplication()?.processIdentifier != pid else {
+            throw fail("You are using the target app. Background control pauses instead of sharing your typing", "user_conflict")
+        }
+        let before=context(),action=r["action"] as? String ?? ""
+        let semantic:[String:String] = ["press":"AXPress","increment":"AXIncrement","decrement":"AXDecrement","confirm":"AXConfirm"]
+        if action == "set_value" || semantic[action] != nil {
+            guard let token=r["token"] as? String,let e=s.elements[token],fingerprint(e)==s.fingerprints[token],!secure(e) else { throw fail("Element changed or is secure", "stale_element") }
+            var owner:pid_t=0;AXUIElementGetPid(e,&owner)
+            guard owner==pid,(attr(e,"AXEnabled") as? Bool) != false else { throw fail("Element disabled or belongs to another process", "stale_element") }
+            // Reject detached elements and controls moved to a different sheet/window.
+            var ancestor:AXUIElement?=e,belongs=false
+            for _ in 0..<32 {
+                guard let current=ancestor else { break }
+                if CFEqual(current,window) { belongs=true;break }
+                if let p=attr(current,"AXParent"),CFGetTypeID(p)==AXUIElementGetTypeID() { ancestor=unsafeBitCast(p,to:AXUIElement.self) } else { ancestor=nil }
+            }
+            guard belongs else { throw fail("Element is no longer in the observed window", "stale_element") }
+            if action == "set_value" {
+                guard let expected=r["expectedValue"] as? String,let replacement=r["value"] as? String,replacement.utf16.count<=10000,value(e)==expected else { throw fail("Value changed since inspection or replacement invalid", "value_conflict") }
+                var settable=DarwinBoolean(false)
+                guard AXUIElementIsAttributeSettable(e,"AXValue" as CFString,&settable) == .success,settable.boolValue else { throw fail("AX value is not writable") }
+                snapshots.removeValue(forKey:id)
+                guard AXUIElementSetAttributeValue(e,"AXValue" as CFString,replacement as CFTypeRef) == .success else { throw fail("Set value was dispatched but not acknowledged; inspect before any further action", "outcome_unknown") }
+                let guardResult=try finish(before,pid,true)
+                return ["action":action,"dispatch":"acknowledged","effect":"unverified","valueReadbackMatches":value(e)==replacement,"preservation":guardResult,"note":"AX echo is not domain proof; inspect the fresh screenshot and application outcome."]
+            }
+            let name=semantic[action]!
+            guard actions(e).contains(name),!text(e,"AXRole").contains("Menu") else { throw fail("This control has no qualified background semantic action") }
+            snapshots.removeValue(forKey:id)
+            guard AXUIElementPerformAction(e,name as CFString) == .success else { throw fail("Action dispatched without confirmation; inspect, do not replay", "outcome_unknown") }
+        } else if action == "keypress" || action == "type_text" {
+            let app=AXUIElementCreateApplication(pid)
+            guard let f=attr(app,"AXFocusedWindow"),CFEqual(f,window) else { throw fail("Keyboard target is not the app's existing focused window; no focus fallback") }
+            if let focused=attr(app,"AXFocusedUIElement"),CFGetTypeID(focused)==AXUIElementGetTypeID(),secure(unsafeBitCast(focused,to:AXUIElement.self)) {
+                throw fail("Secure text entry is not available to background automation", "secure_input")
+            }
+            guard let source=CGEventSource(stateID:.privateState) else { throw fail("Private input source unavailable") }
+            var flags:CGEventFlags=[]
+            for mod in r["modifiers"] as? [String] ?? [] {
+                switch mod { case "command":flags.insert(.maskCommand);case "shift":flags.insert(.maskShift);case "control":flags.insert(.maskControl);case "option":flags.insert(.maskAlternate);default:throw fail("Unknown modifier", "invalid_args") }
+            }
+            let code=(r["keyCode"] as? NSNumber)?.uint16Value ?? 0
+            let input=r["text"] as? String ?? ""
+            guard input.utf16.count<=2000,action != "type_text" || !input.isEmpty else { throw fail("Invalid text", "invalid_args") }
+            // Global shortcuts are forbidden even though delivery is process-local.
+            if flags.contains(.maskCommand) && [7,8,9,12,48,49].contains(Int(code)) { throw fail("Clipboard/global/quit shortcut is blocked; use direct text input", "unsupported_shortcut") }
+            snapshots.removeValue(forKey:id)
+            let chunks=action == "type_text" ? input.unicodeScalars.map{String($0)} : [input]
+            for chunk in chunks {
+                guard liveFrontmostApplication()?.processIdentifier != pid else { throw fail("Target became active mid-action", "outcome_unknown") }
+                guard let down=CGEvent(keyboardEventSource:source,virtualKey:code,keyDown:true),let up=CGEvent(keyboardEventSource:source,virtualKey:code,keyDown:false) else { throw fail("Input creation failed after dispatch began", "outcome_unknown") }
+                down.flags=flags;up.flags=flags
+                if !chunk.isEmpty { let units=Array(chunk.utf16);units.withUnsafeBufferPointer { buf in if let base=buf.baseAddress { down.keyboardSetUnicodeString(stringLength:buf.count,unicodeString:base);up.keyboardSetUnicodeString(stringLength:buf.count,unicodeString:base) } } }
+                down.setIntegerValueField(.eventTargetUnixProcessID,value:Int64(pid));up.setIntegerValueField(.eventTargetUnixProcessID,value:Int64(pid))
+                down.postToPid(pid);up.postToPid(pid)
+            }
+        } else if ["click","double_click","scroll","drag"].contains(action) {
+            func point(_ obj:[String:Any]) throws -> CGPoint {
+                guard let x=obj["x"] as? Double,let y=obj["y"] as? Double,x.isFinite,y.isFinite,x>=0,y>=0,x<bounds.width,y<bounds.height else { throw fail("Coordinates must be inside the observed window in points", "invalid_args") }
+                return CGPoint(x:bounds.minX+x,y:bounds.minY+y)
+            }
+            guard let source=CGEventSource(stateID:.privateState) else { throw fail("Private input source unavailable") }
+            func stamp(_ e:CGEvent) {
+                e.flags=[]
+                e.setIntegerValueField(.eventTargetUnixProcessID,value:Int64(pid))
+                e.setIntegerValueField(.mouseEventWindowUnderMousePointer,value:Int64(wid))
+                e.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent,value:Int64(wid))
+            }
+            func post(_ e:CGEvent) throws {
+                guard liveFrontmostApplication()?.processIdentifier != pid else { throw fail("User entered the target app during input", "outcome_unknown") }
+                stamp(e)
+                e.postToPid(pid)
+            }
+            if action == "scroll" {
+                let p=try point(r)
+                guard let dx=r["scrollX"] as? Int,let dy=r["scrollY"] as? Int,abs(dx)<=1000,abs(dy)<=1000,
+                      let event=CGEvent(scrollWheelEvent2Source:source,units:.line,wheelCount:2,wheel1:Int32(dy),wheel2:Int32(dx),wheel3:0) else { throw fail("Invalid scroll", "invalid_args") }
+                event.location=p;snapshots.removeValue(forKey:id);try post(event)
+            } else {
+                let points: [CGPoint]
+                if action == "drag" {
+                    guard let path=r["path"] as? [[String:Any]],path.count>=2,path.count<=100 else { throw fail("Invalid drag path", "invalid_args") }
+                    points=try path.map{try point($0)}
+                } else { points=[try point(r)] }
+                let right=r["button"] as? String == "right"
+                let button:CGMouseButton=right ? .right : .left
+                let down:CGEventType=right ? .rightMouseDown : .leftMouseDown
+                let up:CGEventType=right ? .rightMouseUp : .leftMouseUp
+                let clicks=action == "double_click" ? 2 : 1
+                snapshots.removeValue(forKey:id)
+                for click in 1...clicks {
+                    guard let start=CGEvent(mouseEventSource:source,mouseType:down,mouseCursorPosition:points[0],mouseButton:button),
+                          let end=CGEvent(mouseEventSource:source,mouseType:up,mouseCursorPosition:points.last!,mouseButton:button) else { throw fail("Mouse creation failed", "outcome_unknown") }
+                    start.setIntegerValueField(.mouseEventClickState,value:Int64(click));end.setIntegerValueField(.mouseEventClickState,value:Int64(click))
+                    try post(start)
+                    do {
+                        if action == "drag" { for p in points.dropFirst() {
+                            guard let drag=CGEvent(mouseEventSource:source,mouseType:.leftMouseDragged,mouseCursorPosition:p,mouseButton:.left) else { throw fail("Drag creation failed", "outcome_unknown") }
+                            try post(drag);usleep(8000)
+                        } }
+                        try post(end)
+                    } catch { stamp(end);end.postToPid(pid);throw error }
+                }
+            }
+        } else { throw fail("Unsupported background action; use semantic controls or another qualified route", "background_unavailable") }
+        return ["action":action,"dispatch":"acknowledged","effect":"unverified","preservation":try finish(before,pid,true),"note":"Take a fresh observation and verify the requested application outcome. Never infer success from dispatch alone."]
+    }
+}
+
 let bridge = Bridge()
 bridge.run()
+
+/// AXWindows omits windows outside the current Space, while the app still
+/// reports them through AXMainWindow/AXFocusedWindow/AXChildren. Read-only; the
+/// caller still matches each element to an exact WindowServer window.
+func axWindowInventory(_ app: AXUIElement) -> (AXError, [AXUIElement]) {
+	var raw: CFTypeRef?
+	let status = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &raw)
+	var windows = status == .success ? ((raw as? [AXUIElement]) ?? []) : []
+	if status != .success || !windows.isEmpty { return (status, windows) }
+	var extra: [AXUIElement] = []
+	for name in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+		var value: CFTypeRef?
+		if AXUIElementCopyAttributeValue(app, name as CFString, &value) == .success, let value,
+		   CFGetTypeID(value) == AXUIElementGetTypeID() {
+			extra.append(value as! AXUIElement)
+		}
+	}
+	var children: CFTypeRef?
+	if AXUIElementCopyAttributeValue(app, kAXChildrenAttribute as CFString, &children) == .success {
+		for child in (children as? [AXUIElement]) ?? [] {
+			var role: CFTypeRef?
+			if AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &role) == .success,
+			   (role as? String) == (kAXWindowRole as String) { extra.append(child) }
+		}
+	}
+	for element in extra where !windows.contains(where: { CFEqual($0, element) }) { windows.append(element) }
+	return (status, windows)
+}
+
+/// NSWorkspace updates frontmostApplication only when this process's run loop
+/// handles activation notifications. The helper blocks on stdin between
+/// commands, so drain pending notifications first; otherwise the value stays at
+/// whatever was frontmost the last time the run loop spun (e.g. during launch).
+func liveFrontmostApplication() -> NSRunningApplication? {
+	for _ in 0..<3 { RunLoop.current.run(mode: .default, before: Date()) }
+	return NSWorkspace.shared.frontmostApplication
+}

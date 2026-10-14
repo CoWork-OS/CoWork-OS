@@ -438,6 +438,29 @@
       "backstop": true
     },
     {
+      "pattern": "^src/electron/applications/application-operation-store\\.ts$",
+      "domain": "shared SQL",
+      "access": "Application operation store (operations, attempts, events, leases): synchronous SQL run as services-domain units registered in application-operation-units.ts behind the async ApplicationOperationRepository facade; nothing calls the store on the host outside a unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/applications/daemon-application-execution\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Daemon application execution wiring passes the database handle only to the ApplicationOperationRepository facade.",
+      "plan": "stays: handles only; SQL runs through the worker-backed facade",
+      "owner": "agent runtime",
+      "ratchetExemptKeys": ["getDatabase"]
+    },
+    {
+      "pattern": "^src/electron/(applications/ApplicationExecutionService|agent/tools/application-tools)\\.ts$",
+      "domain": "runtime wiring",
+      "access": "No SQLite access: the inventory counts calls to the application operation lifecycle method prepare() (ApplicationExecutionService.prepare and adapter.prepare), not Database.prepare. Persistence goes through the async ApplicationOperationRepository facade.",
+      "plan": "stays: no database access",
+      "owner": "agent runtime",
+      "ratchetExemptKeys": ["prepare"]
+    },
+    {
       "pattern": "^src/electron/agent/",
       "domain": "agent runtime",
       "access": "Daemon and tool setup reads, orchestration stores, usage telemetry fallback; per-event timeline writes go through the worker writer when enabled.",

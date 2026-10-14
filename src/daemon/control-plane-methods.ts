@@ -52,6 +52,7 @@ import { registerControlPlaneCoreMethods } from "../electron/control-plane/regis
 import { registerAgentSecurityMethods } from "../electron/control-plane/registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "../electron/control-plane/registerStrategicPlannerMethods";
 import { registerWorkSessionMethods } from "../electron/control-plane/registerWorkSessionMethods";
+import { registerApplicationExecutionMethods } from "../electron/control-plane/registerApplicationExecutionMethods";
 import { getStrategicPlannerService } from "../electron/control-plane/StrategicPlannerService";
 import { resolvePathWithinRoot } from "../electron/control-plane/path-containment";
 import { evaluateControlPlaneDeploymentPosture } from "../electron/control-plane/deployment-posture";
@@ -868,6 +869,7 @@ export function registerControlPlaneMethods(
     agentDaemon,
     requireScope,
   });
+  registerApplicationExecutionMethods({ server, agentDaemon, requireScope });
 
   // Managed Accounts (API-first signup/account lifecycle)
   server.registerMethod(Methods.ACCOUNT_LIST, async (client, params) => {

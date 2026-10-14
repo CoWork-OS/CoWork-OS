@@ -25,6 +25,7 @@ import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
 import { ensurePactSchema } from "../pact/schema";
+import { APPLICATION_EXECUTION_SCHEMA } from "../applications/application-operation-store";
 import { runSchemaBootstrap } from "./schema-bootstrap";
 import {
   acquireMigrationLock,
@@ -4323,6 +4324,7 @@ export class DatabaseManager {
     // PACT business-agent state (descriptors, grants, turns, receipts); secrets stay in
     // secure settings. Units may run in the worker, so the tables exist before any unit.
     ensurePactSchema(this.db);
+    this.db.exec(APPLICATION_EXECUTION_SCHEMA);
 
     // ============ Mission Control Migrations ============
 

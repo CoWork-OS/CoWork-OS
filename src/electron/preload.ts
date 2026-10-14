@@ -875,7 +875,7 @@ interface BuiltinToolsSettings {
   codexRuntimeMode: "native" | "acpx";
   computerUseAutomation: {
     browserAutomationMode: "background" | "visible" | "ask";
-    nativeComputerUseMode: "background_first" | "ask_visible" | "visible";
+    nativeComputerUseMode: "background" | "background_first" | "ask_visible" | "visible";
   };
   version: string;
 }

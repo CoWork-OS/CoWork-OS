@@ -11,6 +11,14 @@ import {
   isFileMutationToolName,
 } from "./tool-semantics";
 import { getDefaultRuntimeToolMetadata } from "./tools/runtime-tool-definition";
+import type { NativeObservation } from "./native-app-observation";
+
+const hasNativeObservation = (entry: { tool: string; nativeObservation?: NativeObservation }) =>
+  entry.tool === "native_app" &&
+  Number.isInteger(entry.nativeObservation?.pid) &&
+  Number.isInteger(entry.nativeObservation?.windowId) &&
+  entry.nativeObservation!.pid > 0 &&
+  entry.nativeObservation!.windowId > 0;
 
 const ARTIFACT_CREATION_VERBS = String.raw`(?:create|build|write|generate|produce|draft|prepare|save|export|compile|synthesize|combine|merge|join|stitch|concatenate|concat|transcode|remux)`;
 const ARTIFACT_CREATION_VERB_REGEX = new RegExp(String.raw`\b${ARTIFACT_CREATION_VERBS}\b`);
@@ -919,10 +927,12 @@ export function isVerificationEvidenceTool(toolName: string): boolean {
 }
 
 export function hasVerificationToolEvidence(
-  toolResultMemory: Array<{ tool: string }> | undefined,
+  toolResultMemory: Array<{ tool: string; nativeObservation?: NativeObservation }> | undefined,
 ): boolean {
   if (!Array.isArray(toolResultMemory) || toolResultMemory.length === 0) return false;
-  return toolResultMemory.some((entry) => isVerificationEvidenceTool(entry.tool));
+  return toolResultMemory.some(
+    (entry) => isVerificationEvidenceTool(entry.tool) || hasNativeObservation(entry),
+  );
 }
 
 export function responseLooksOperationalOnly(text: string): boolean {
@@ -1181,7 +1191,7 @@ function responseStatesConclusion(text: string): boolean {
 export function hasVerificationEvidence(opts: {
   bestCandidate: string;
   planSteps?: Array<{ status?: string; description?: string }>;
-  toolResultMemory?: Array<{ tool: string }>;
+  toolResultMemory?: Array<{ tool: string; nativeObservation?: NativeObservation }>;
   successfulTools?: string[];
 }): boolean {
   const toolNames = [
@@ -1196,7 +1206,11 @@ export function hasVerificationEvidence(opts: {
   );
   // Verification needs something the run actually observed. Wording alone
   // (including a well-formed command report) is easy to produce without work.
-  if (!toolNames.some((tool) => isVerificationEvidenceTool(tool))) return false;
+  if (
+    !toolNames.some((tool) => isVerificationEvidenceTool(tool)) &&
+    !opts.toolResultMemory?.some(hasNativeObservation)
+  )
+    return false;
 
   // Reported command results or API responses count only when a tool that can
   // produce them ran; reading package.json does not show that `npm test` passed.

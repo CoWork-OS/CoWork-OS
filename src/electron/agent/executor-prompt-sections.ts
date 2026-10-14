@@ -9,6 +9,8 @@ export interface PromptSection {
   text?: string;
   resolve?: () => string | Promise<string>;
   maxTokens?: number;
+  /** Persistent instructions must reach the model intact or fail at context admission. */
+  preserveWhole?: boolean;
   required?: boolean;
   layerKind?: "always" | "optional" | "on_demand";
   cacheScope?: "session" | "turn";
@@ -146,7 +148,7 @@ export function buildModeDomainContract(
 function budgetSection(section: PromptSection, truncatedSections: string[]): string {
   const raw = String(section.text || "").trim();
   if (!raw) return "";
-  if (!section.maxTokens || section.maxTokens <= 0) {
+  if (section.preserveWhole || !section.maxTokens || section.maxTokens <= 0) {
     return raw;
   }
   if (section.truncation === "fragment") {
@@ -207,7 +209,9 @@ export function composePromptSections(
 
   if (totalTokens > totalBudgetTokens) {
     const removable = working
-      .filter((section) => !section.required && section.layerKind !== "always")
+      .filter(
+        (section) => !section.preserveWhole && !section.required && section.layerKind !== "always",
+      )
       .sort((a, b) => {
         if (a.dropPriority !== b.dropPriority) return b.dropPriority - a.dropPriority;
         return b.index - a.index;
@@ -246,13 +250,26 @@ export function composePromptSections(
   }
 
   if (totalTokens > totalBudgetTokens && working.length > 0) {
-    const lastSection = working[working.length - 1];
+    const lastSection = working.findLast((section) => !section.preserveWhole);
+    if (!lastSection) {
+      const prompt = working
+        .map((section) => section.text)
+        .join("\n\n")
+        .trim();
+      return {
+        prompt,
+        totalTokens: estimateTokens(prompt),
+        droppedSections,
+        truncatedSections,
+        sections: working.map(({ index: _index, tokens: _tokens, ...section }) => section),
+      };
+    }
     const tokensWithoutLast = totalTokens - lastSection.tokens;
     const remainingBudget = Math.max(64, totalBudgetTokens - tokensWithoutLast);
     const truncated = truncateToTokens(lastSection.text, remainingBudget).trim();
     if (truncated !== lastSection.text) {
       truncatedSections.push(lastSection.key);
-      working[working.length - 1] = {
+      working[working.indexOf(lastSection)] = {
         ...lastSection,
         text: `${truncated}\n[Prompt section '${lastSection.key}' truncated for total budget.]`,
         tokens: estimateTokens(truncated),

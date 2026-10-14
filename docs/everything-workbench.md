@@ -78,6 +78,7 @@ The product promise is "one app for the everyday work most people currently spli
 
 ## Related Docs
 
+- [Application Execution Backend](application-execution-backend.md) — implemented shared operation lifecycle, feedback, recovery, and verification baseline for application pilots.
 - [Features](features.md)
 - [Getting Started](getting-started.md)
 - [Document Artifacts](document-artifacts.md)

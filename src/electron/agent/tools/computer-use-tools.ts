@@ -433,7 +433,9 @@ export class ComputerUseTools {
     if (process.platform !== "darwin" && process.platform !== "win32") {
       throw new Error("Computer use is only supported on macOS and Windows desktop builds.");
     }
-    this.session().acquire(this.taskId, this.daemon);
+    this.session().acquire(this.taskId, this.daemon, {
+      background: this.resolveNativeControlMode() === "background",
+    });
     this.session().checkNotAborted();
     await this.helper().ensureReadyWithInteractivePermissions();
   }
@@ -473,7 +475,10 @@ export class ComputerUseTools {
   }
 
   private isVisibleControlAllowed(target: ComputerUseTargetState): boolean {
-    return this.resolveNativeControlMode() === "visible" || this.hasVisibleControlGrant(target);
+    return (
+      this.resolveNativeControlMode() !== "background" &&
+      (this.resolveNativeControlMode() === "visible" || this.hasVisibleControlGrant(target))
+    );
   }
 
   private async requestVisibleControlApproval(
@@ -506,6 +511,10 @@ export class ComputerUseTools {
     target: ComputerUseTargetState,
     reason: string,
   ): Promise<void> {
+    if (this.resolveNativeControlMode() === "background")
+      throw new Error(
+        `${toolName}: background_unavailable. Use native_app with an exact window/element; foreground fallback is disabled.`,
+      );
     if (this.isVisibleControlAllowed(target)) return;
     const approved = await this.requestVisibleControlApproval(toolName, target, reason);
     if (!approved) {
@@ -903,6 +912,10 @@ export class ComputerUseTools {
     toolName: string,
     captureId?: string,
   ): Promise<ActionPreparationResult> {
+    if (this.resolveNativeControlMode() === "background")
+      throw new Error(
+        "background_unavailable: use native_app exact-window control; foreground fallback is disabled.",
+      );
     await this.ensureReady();
     const target = await this.refreshCurrentTarget();
     const capture = this.requireCurrentCapture(captureId);
@@ -1144,6 +1157,10 @@ export class ComputerUseTools {
   }
 
   async typeText(text: string): Promise<ComputerUseToolResult> {
+    if (this.resolveNativeControlMode() === "background")
+      throw new Error(
+        "Use native_app with an exact window and element for background text; no focus fallback.",
+      );
     if (typeof text !== "string" || text.length === 0) {
       throw new Error("type_text requires a non-empty text string.");
     }
@@ -1205,6 +1222,8 @@ export class ComputerUseTools {
   }
 
   async pressKeys(keys: string[]): Promise<ComputerUseToolResult> {
+    if (this.resolveNativeControlMode() === "background")
+      throw new Error("Use native_app exact-window background keypress; no foreground fallback.");
     if (!Array.isArray(keys) || keys.length === 0) {
       throw new Error("keypress requires a non-empty keys array.");
     }

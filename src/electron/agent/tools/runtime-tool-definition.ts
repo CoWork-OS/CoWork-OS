@@ -17,6 +17,8 @@ import {
 } from "../tool-semantics";
 
 const READ_PARALLEL_TOOLS = new Set([
+  "local_photoshop_inspect",
+  "native_application_inspect",
   "pact_discover",
   "pact_get_conversation",
   "read_file",
@@ -61,6 +63,10 @@ const READ_PARALLEL_TOOLS = new Set([
 ]);
 
 const EXCLUSIVE_TOOLS = new Set([
+  "local_photoshop_read",
+  "local_photoshop_edit",
+  "local_photoshop_create",
+  "native_application_create",
   // Appends to the swarm folder and commits: one at a time.
   "swarm_note",
   "write_file",
@@ -257,6 +263,7 @@ function inferConcurrencyClass(toolName: string): RuntimeToolConcurrencyClass {
 }
 
 function inferReadOnly(toolName: string, concurrencyClass: RuntimeToolConcurrencyClass): boolean {
+  if (toolName === "local_photoshop_read") return true;
   if (toolName === "run_command") return false;
   if (toolName === "analyze_image" || toolName === "read_pdf_visual") return false;
   if (toolName.endsWith("_action")) return false;

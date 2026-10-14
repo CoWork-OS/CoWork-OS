@@ -1,3 +1,19 @@
+import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
+import {
+  buildNativeActionLedger,
+  nativeObservationTarget,
+  summarizeNativeObservation,
+  type NativeObservation,
+} from "./native-app-observation";
+import { applicationReadbackPath, summarizeApplicationReadback } from "./application-readback";
+import { promptDerivedToolRestrictions, taskForbidsScripting } from "./task-tool-restrictions";
+import {
+  hasNativeApplicationOutputIntent,
+  isNativeApplicationPreparationStep,
+  isNativeApplicationReadbackStep,
+  isNativeApplicationPresentationStep,
+  isNativeUiOperationStep,
+} from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
@@ -1206,7 +1222,13 @@ export class TaskExecutor {
   private redirectRequested: boolean = false;
   /** An explicit pivot away from the earlier work; only this replaces the history. */
   private redirectResetsHistory: boolean = false;
-  private toolResultMemory: Array<{ tool: string; summary: string; timestamp: number }> = [];
+  private toolResultMemory: Array<{
+    tool: string;
+    summary: string;
+    timestamp: number;
+    nativeObservation?: NativeObservation;
+    readbackPath?: string;
+  }> = [];
   private webEvidenceMemory: WebEvidenceEntry[] = [];
   private toolUsageCounts: Map<string, number> = new Map();
   private successfulToolUsageCounts: Map<string, number> = new Map();
@@ -7097,6 +7119,10 @@ ${transcript}
     const isReadOnlyReview = descriptionHasReadOnlyIntent(desc) && !descriptionHasWriteIntent(desc);
     const toolRestrictions = [
       ...(this.task.agentConfig?.toolRestrictions || []),
+      // "Do not use scripting to make the edit" is enforced, not left to the model.
+      ...promptDerivedToolRestrictions(
+        `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+      ),
       ...(this.task.agentConfig?.chronicleMode === "disabled" ? ["screen_context_resolve"] : []),
       ...(isReadOnlyReview
         ? [
@@ -12100,6 +12126,28 @@ ${transcript}
     }
 
     // Record file creations
+    if (
+      toolName === "application_operation" &&
+      ["execute", "reconcile"].includes(input?.action) &&
+      result?.status === "complete" &&
+      result?.operation?.request?.taskId === this.task?.id &&
+      result?.operation?.verification === "verified"
+    ) {
+      for (const resource of result?.result?.resources || []) {
+        if (resource?.kind !== "file" || resource?.system !== "local") continue;
+        const filename = resource.locator;
+        if (typeof filename !== "string" || !this.canReadWorkspacePath(filename)) continue;
+        const evidence = this.hasArtifactVerificationToolEvidence(
+          toolName,
+          input,
+          result,
+          [path.extname(filename).toLowerCase()],
+          this.buildArtifactPathTokens(filename),
+          new Set(),
+        );
+        if (evidence.matched) this.fileOperationTracker.recordFileCreation(filename);
+      }
+    }
     // Note: get_video_generation_job is a polling tool — only record a creation when
     // generate_video completes and the result includes an output path.
     const fileCreationTools = new Set(["write_file", "copy_file", "generate_video"]);
@@ -13852,9 +13900,14 @@ ${transcript}
       return "none";
     }
 
+    // "...and no file-writing operations" forbids a file; it does not ask to verify one.
+    const positiveDescription = description.replace(
+      /\b(?:no|without|never|do\s+not|don't|must\s+not|should\s+not)\b(?:[^,.;!?\n]|\.(?=[a-z0-9_/-]))*/g,
+      " ",
+    );
     const explicitArtifactNounCue =
-      hasArtifactExtensionMention(description) ||
-      /\b(file|document|artifact|path|directory|folder)\b/.test(description);
+      hasArtifactExtensionMention(positiveDescription) ||
+      /\b(file|document|artifact|path|directory|folder)\b/.test(positiveDescription);
     const explicitArtifactStateCue =
       /\b(exists?|present|readable|written|created|saved|produced|generated|exported)\b/.test(
         description,
@@ -14161,24 +14214,49 @@ ${transcript}
       }
     }
     const mutationToolsRestricted = this.areWorkspaceMutationToolsRestricted();
+    const nativePreparation = isNativeApplicationPreparationStep(
+      this.getContractPrompt(),
+      descriptionRaw,
+    );
+    const nativePresentation = isNativeApplicationPresentationStep(
+      this.getContractPrompt(),
+      descriptionRaw,
+    );
+    if (nativePresentation) {
+      for (const name of ["write_file", "edit_file"])
+        if (!new RegExp(`\\b${name}\\b`).test(description)) requiredTools.delete(name);
+    }
+    if (nativePreparation) {
+      requiredTools.delete("write_file");
+      requiredTools.delete("edit_file");
+      if (
+        /\bsource\.psd\b|\binspect\b.*\.psd\b/i.test(descriptionRaw) &&
+        this.isRegistryToolAvailable("local_photoshop_read")
+      ) {
+        requiredTools.add("local_photoshop_read");
+        for (const toolName of ["read_file", "parse_document", "get_file_info"])
+          if (!new RegExp(`\\b${toolName}\\b`).test(description)) requiredTools.delete(toolName);
+      }
+    }
+    // Generic background UI work: the app is the writer, so infer neither a
+    // file write nor the app-specific scripting operation for this step.
+    const nativeUiOperation =
+      !nativePreparation &&
+      !verificationStep &&
+      isNativeUiOperationStep(descriptionRaw) &&
+      this.isRegistryToolAvailable("native_app");
+    if (nativeUiOperation) {
+      for (const name of ["write_file", "edit_file", "application_operation"])
+        if (!new RegExp(`\\b${name}\\b`).test(description)) requiredTools.delete(name);
+      requiredTools.add("native_app");
+    }
     const hasReadOnlyConstraint =
+      nativePreparation ||
       buildHealthReadOnlyStep ||
       mutationToolsRestricted ||
       isReadOnlyConstraintOnlyStep(descriptionRaw) ||
       this.promptHasReadOnlyConstraint(`${this.task?.title || ""}\n${this.getContractPrompt()}`);
     const artifactPreparationDeferred = this.isArtifactPreparationDeferredToLaterWrite(step);
-    const requiresArtifactEvidence = hasReadOnlyConstraint
-      ? false
-      : artifactPreparationDeferred
-        ? false
-        : this.stepRequiresArtifactEvidence(step);
-    const artifactContractMode = requiresArtifactEvidence
-      ? this.resolveStepArtifactContractMode(step)
-      : null;
-    const artifactWriteRequired = artifactContractMode === "artifact_write_required";
-    const softwareArtifactExtensionMentioned = hasArtifactExtensionMention(description);
-    const scaffoldIntent = descriptionHasScaffoldIntent(description);
-    const hasWriteIntent = descriptionHasWriteIntent(description);
     // Mutation constraints such as "Do not create or modify the target before
     // the wait" describe when a write must happen, not a separate edit action.
     // Keep those negated clauses out of the direct-edit tool inference so a
@@ -14189,7 +14267,43 @@ ${transcript}
       /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b(?:[^,.;!?\n]|\.(?=[A-Za-z0-9_/-]))*/gi,
       " ",
     );
+    const applicationWriteIntent =
+      !nativePresentation &&
+      !nativeUiOperation &&
+      hasNativeApplicationOutputIntent(this.getContractPrompt()) &&
+      this.isRegistryToolAvailable("application_operation") &&
+      !hasReadOnlyConstraint &&
+      !verificationStep &&
+      !artifactPreparationDeferred &&
+      (!descriptionHasSummaryCue(description) || this.extractStepPathCandidates(step).length > 0) &&
+      descriptionHasStrongWriteIntent(positiveMutationDescription) &&
+      !isReadOnlyConstraintOnlyStep(descriptionRaw);
+    if (applicationWriteIntent) {
+      requiredTools.add("application_operation");
+      // Native creation/save is the artifact writer. Keep explicit tool requests,
+      // but do not infer a second binary-file write from filenames in the plan.
+      for (const toolName of ["write_file", "edit_file"]) {
+        if (!new RegExp(`\\b${toolName}\\b`).test(description)) requiredTools.delete(toolName);
+      }
+    }
+    const requiresArtifactEvidence =
+      hasReadOnlyConstraint || nativeUiOperation
+        ? false
+        : artifactPreparationDeferred
+          ? false
+          : applicationWriteIntent || this.stepRequiresArtifactEvidence(step);
+    const artifactContractMode = requiresArtifactEvidence
+      ? this.resolveStepArtifactContractMode(step)
+      : null;
+    const artifactWriteRequired = artifactContractMode === "artifact_write_required";
+    const softwareArtifactExtensionMentioned = hasArtifactExtensionMention(description);
+    const scaffoldIntent = descriptionHasScaffoldIntent(description);
+    const hasWriteIntent = descriptionHasWriteIntent(description);
     const directFileMutationIntent =
+      !nativePresentation &&
+      !nativeUiOperation &&
+      !applicationWriteIntent &&
+      !nativePreparation &&
       !isReadOnlyConstraintOnlyStep(descriptionRaw) &&
       descriptionHasWriteIntent(positiveMutationDescription) &&
       (/\b(?:file|files|document|documents|workspace|folder|directory)\b/.test(
@@ -14235,27 +14349,30 @@ ${transcript}
       /\b(?:csv|tsv|xlsx|spreadsheet|workbook)\b/i.test(this.getContractPrompt());
     const summaryCue = descriptionHasSummaryCue(description);
     const inlineDiagramIntent = this.stepIndicatesInlineDiagramIntent(description);
+    // A native UI step's file effect comes from the app; its readback proves it.
     const inferredMutation =
-      artifactWriteRequired ||
-      directFileMutationIntent ||
-      tabularFileMutationIntent ||
-      (!verificationStep && inlineDiagramIntent && hasWriteIntent) ||
-      (!verificationStep &&
-        (softwareArtifactExtensionMentioned || scaffoldIntent) &&
-        hasWriteIntent &&
-        !summaryCue) ||
-      hasExistingOnlyWriteVerificationTarget ||
-      requiredTools.has("create_document") ||
-      requiredTools.has("compile_latex") ||
-      requiredTools.has("create_spreadsheet") ||
-      requiredTools.has("create_presentation") ||
-      requiredTools.has("get_video_generation_job") ||
-      requiredTools.has("create_diagram") ||
-      requiredTools.has("canvas_push") ||
-      requiredTools.has("create_directory") ||
-      requiredTools.has("write_file") ||
-      requiredTools.has("edit_file") ||
-      requiredTools.has("edit_document");
+      !nativeUiOperation &&
+      (applicationWriteIntent ||
+        artifactWriteRequired ||
+        directFileMutationIntent ||
+        tabularFileMutationIntent ||
+        (!verificationStep && inlineDiagramIntent && hasWriteIntent) ||
+        (!verificationStep &&
+          (softwareArtifactExtensionMentioned || scaffoldIntent) &&
+          hasWriteIntent &&
+          !summaryCue) ||
+        hasExistingOnlyWriteVerificationTarget ||
+        requiredTools.has("create_document") ||
+        requiredTools.has("compile_latex") ||
+        requiredTools.has("create_spreadsheet") ||
+        requiredTools.has("create_presentation") ||
+        requiredTools.has("get_video_generation_job") ||
+        requiredTools.has("create_diagram") ||
+        requiredTools.has("canvas_push") ||
+        requiredTools.has("create_directory") ||
+        requiredTools.has("write_file") ||
+        requiredTools.has("edit_file") ||
+        requiredTools.has("edit_document"));
     const modeDetails = deriveStepContractMode({
       description: descriptionRaw,
       requiresMutation: inferredMutation,
@@ -14263,6 +14380,11 @@ ${transcript}
       requiresWriteByArtifactMode: artifactWriteRequired,
       hasReadOnlyConstraint,
     });
+    if (nativeUiOperation && modeDetails.mode === "analysis_only") {
+      // Not a read-only step: its action is native UI input whose effect a later
+      // readback proves. "analysis_or_readonly_step" made the model refuse to act.
+      modeDetails.contractReason = "native_ui_action_required";
+    }
     if (
       mutationToolsRestricted &&
       modeDetails.mode === "analysis_only" &&
@@ -14339,6 +14461,7 @@ ${transcript}
     if (artifactWriteRequired && artifactKind === "file") {
       const hasFileMutationTool = requiredTools.has("write_file") || requiredTools.has("edit_file");
       const hasSpecializedArtifactTool =
+        requiredTools.has("application_operation") ||
         requiredTools.has("create_document") ||
         requiredTools.has("generate_document") ||
         requiredTools.has("compile_latex") ||
@@ -15080,8 +15203,11 @@ ${transcript}
   }
 
   private hasNonImageGenerationWorkIntent(taskText: string): boolean {
-    return /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
-      taskText,
+    return (
+      hasNativeApplicationOutputIntent(taskText) ||
+      /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
+        taskText,
+      )
     );
   }
 
@@ -19723,6 +19849,13 @@ ${transcript}
       identityPrompt: params.identityPrompt,
       safetyCorePrompt: SHARED_PROMPT_POLICY_CORE,
       baseInstructionPrompt: this.buildExecutionBaseInstructionPrompt(),
+      applicationWorkerPrompt:
+        applicationWorkerPrompt() +
+        (taskForbidsScripting(
+          `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+        )
+          ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
+          : ""),
       answerSurfacePrompt: richSurfacesPrompt,
       inputPolicyPrompt: this.buildExecutionInputPolicyPrompt(),
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),
@@ -20053,6 +20186,11 @@ ${transcript}
       "grep",
       "read_file",
       "search_files",
+      // This gateway also discovers capabilities and reads original verification.
+      // Its effectful actions retain the service and task permission checks.
+      "application_operation",
+      "local_photoshop_read",
+      "native_app",
       // Any step may need prior decisions or context (RECALL-1), or learn something a
       // later task needs. memory_forget stays step-scoped.
       ...MEMORY_STEP_TOOLS,
@@ -20202,6 +20340,7 @@ ${transcript}
       }
     }
     if (hasNativeDesktopGuiIntent(String(nativeGuiText || "").toLowerCase())) {
+      base.add("native_app");
       base.add("open_application");
       base.add("screenshot");
       base.add("click");
@@ -24048,6 +24187,9 @@ You are continuing a previous conversation. The context from the previous conver
 
   private summarizeToolResult(toolName: string, result: Any, input?: Any): string | null {
     if (!result) return null;
+    if (toolName === "native_app") return summarizeNativeObservation(toolName, result);
+    const readback = summarizeApplicationReadback(toolName, result, input);
+    if (readback) return readback;
 
     // Desktop MCP observations must survive a fresh verification-step context.
     // Keep source text as evidence, not instructions or an assistant's claimed result.
@@ -24471,7 +24613,31 @@ You are continuing a previous conversation. The context from the previous conver
     if (!Array.isArray(this.toolResultMemory)) {
       this.toolResultMemory = [];
     }
-    this.toolResultMemory.push({ tool: toolName, summary, timestamp: Date.now() });
+    const nativeObservation = nativeObservationTarget(toolName, result);
+    if (nativeObservation) {
+      // Supersede old UI state for this exact window. Later verification must
+      // see the final display rather than an earlier intermediate value.
+      this.toolResultMemory = this.toolResultMemory.filter(
+        (entry) =>
+          entry.nativeObservation?.pid !== nativeObservation.pid ||
+          entry.nativeObservation?.windowId !== nativeObservation.windowId,
+      );
+    }
+    const readbackPath = applicationReadbackPath(toolName, result, input);
+    if (readbackPath) {
+      // The newest readback of a saved file supersedes older ones, so the final
+      // summary reports what is on disk now rather than a pre-edit baseline.
+      this.toolResultMemory = this.toolResultMemory.filter(
+        (entry) => entry.readbackPath !== readbackPath,
+      );
+    }
+    this.toolResultMemory.push({
+      tool: toolName,
+      summary,
+      timestamp: Date.now(),
+      ...(nativeObservation ? { nativeObservation } : {}),
+      ...(readbackPath ? { readbackPath } : {}),
+    });
     if (this.toolResultMemory.length > this.toolResultMemoryLimit) {
       this.toolResultMemory.splice(0, this.toolResultMemory.length - this.toolResultMemoryLimit);
     }
@@ -24772,6 +24938,17 @@ You are continuing a previous conversation. The context from the previous conver
     return entries.map((entry) => `- ${entry.tool}: ${entry.summary}`).join("\n");
   }
 
+  private getNativeActionLedgerSummary(): string {
+    const getTaskEvents = (this.daemon as Any)?.getTaskEvents;
+    if (typeof getTaskEvents !== "function") return "";
+    try {
+      const events = getTaskEvents.call(this.daemon, this.task.id, { types: ["log"] });
+      return Array.isArray(events) ? buildNativeActionLedger(events) : "";
+    } catch {
+      return "";
+    }
+  }
+
   private getTaskMutationAuditSummary(maxEntries = 30): string {
     const getTaskEvents = (this.daemon as Any)?.getTaskEvents;
     if (typeof getTaskEvents !== "function") return "";
@@ -24908,7 +25085,10 @@ You are continuing a previous conversation. The context from the previous conver
       );
     const explicitProtocolOutcome =
       /^(?:fail_blocking|pending_user_action|warn_non_blocking)\b/.test(lower);
-    if (!zeroTestsRan && !explicitProtocolOutcome) {
+    // An explicit non-OK verdict decides. The keyword score below must not turn
+    // "FAIL_BLOCKING — ... accurately reflects that incomplete state" into a pass.
+    if (explicitProtocolOutcome) return false;
+    if (!zeroTestsRan) {
       const outcomeClauses = lower.split(/[.;:!?\n]+|,\s*(?:but|however)\b/);
       for (let index = outcomeClauses.length - 1; index >= 0; index -= 1) {
         const clause = outcomeClauses[index]
@@ -25960,6 +26140,11 @@ You are continuing a previous conversation. The context from the previous conver
   private resolveStepArtifactContractMode(
     step: PlanStep,
   ): "artifact_write_required" | "artifact_presence_required" {
+    if (
+      isNativeApplicationPresentationStep(this.getContractPrompt(), String(step.description || ""))
+    ) {
+      return "artifact_presence_required";
+    }
     if (this.isSinglePlanStepForTaskArtifactOutput(step)) {
       return "artifact_write_required";
     }
@@ -26395,9 +26580,14 @@ You are continuing a previous conversation. The context from the previous conver
       );
     }
     if (
-      !["read_file", "get_file_info", "read_files", "parse_document", "glob"].includes(
-        canonicalToolName,
-      )
+      ![
+        "read_file",
+        "get_file_info",
+        "read_files",
+        "parse_document",
+        "glob",
+        "application_operation",
+      ].includes(canonicalToolName)
     ) {
       return noEvidence;
     }
@@ -26409,6 +26599,64 @@ You are continuing a previous conversation. The context from the previous conver
       if (!trimmed) return;
       candidates.add(trimmed);
     };
+
+    if (canonicalToolName === "application_operation") {
+      const operation = result?.operation;
+      const native = result?.result?.data;
+      if (
+        !["get", "execute", "reconcile"].includes(input?.action) ||
+        result?.status !== "complete" ||
+        operation?.id !== input?.operationId ||
+        operation?.request?.taskId !== this.task?.id ||
+        operation?.verification !== "verified" ||
+        operation?.verificationResult?.status !== "verified" ||
+        ![
+          "photoshop.banner.create",
+          "photoshop.document.edit",
+          "excel.operating-plan.create",
+        ].includes(operation?.request?.capability) ||
+        (operation?.route?.environment?.kind === "isolated_worker" && native?.delivered !== true)
+      )
+        return noEvidence;
+      const expectedFiles = [
+        { path: native?.path, sha256: native?.persisted?.sha256, size: native?.persisted?.size },
+        {
+          path: native?.persisted?.export?.path,
+          sha256: native?.persisted?.export?.sha256,
+          size: native?.persisted?.export?.size,
+        },
+      ];
+      for (const resource of result?.result?.resources || []) {
+        if (resource?.kind !== "file" || resource?.system !== "local") continue;
+        const candidate = resource.locator;
+        const expected = expectedFiles.find((file) => file.path === candidate);
+        if (
+          typeof candidate !== "string" ||
+          !expected ||
+          !/^[a-f0-9]{64}$/i.test(expected.sha256 || "") ||
+          !this.canReadWorkspacePath(candidate)
+        )
+          continue;
+        let fd: number | undefined;
+        try {
+          fd = fs.openSync(candidate, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+          const stat = fs.fstatSync(fd);
+          if (
+            !stat.isFile() ||
+            stat.size <= 0 ||
+            stat.size > 32 * 1024 * 1024 ||
+            stat.size !== expected.size
+          )
+            continue;
+          const hash = createHash("sha256").update(fs.readFileSync(fd)).digest("hex");
+          if (hash === expected.sha256) addCandidate(candidate);
+        } catch {
+          // Missing or changed local bytes cannot satisfy native verification.
+        } finally {
+          if (fd !== undefined) fs.closeSync(fd);
+        }
+      }
+    }
 
     // Format-checked parser evidence: parse_document reports errors in the
     // result body rather than with success=false, and its detected type is
@@ -26432,7 +26680,7 @@ You are continuing a previous conversation. The context from the previous conver
           addCandidate(typeof match === "string" ? match : match?.path);
         }
       }
-    } else {
+    } else if (canonicalToolName !== "application_operation") {
       addCandidate(input?.path);
       addCandidate(input?.filename);
       addCandidate(result?.path);
@@ -26838,7 +27086,9 @@ You are continuing a previous conversation. The context from the previous conver
     const hasChecklistCue = descriptionHasChecklistReportCue(desc);
     const hasChecklistActionCue =
       /\b(run|final|editorial|qa|audit|quality|check|verify|validate|confirm)\b/.test(desc);
-    const hasExplicitWriteCue = /\b(write|create|save|append|update|edit)\b/.test(desc);
+    const hasExplicitWriteCue =
+      /\b(write|create|save|append|update|edit)\b/.test(desc) &&
+      !isNativeApplicationReadbackStep(this.getContractPrompt(), desc);
     const checklistStylePath = hasChecklistCue && hasChecklistActionCue;
     const policy = this.getEffectiveVerificationArtifactPathPolicy();
 
@@ -27060,7 +27310,11 @@ You are continuing a previous conversation. The context from the previous conver
 
   private shouldCollectMutationEvidence(toolName: string): boolean {
     const canonicalToolName = canonicalizeToolNameUtil(toolName);
-    return this.isFileMutationTool(canonicalToolName) || canonicalToolName === "run_command";
+    return (
+      this.isFileMutationTool(canonicalToolName) ||
+      canonicalToolName === "run_command" ||
+      canonicalToolName === "application_operation"
+    );
   }
 
   private isAnalysisScratchMutation(
@@ -27354,6 +27608,82 @@ You are continuing a previous conversation. The context from the previous conver
     stepContract?: StepExecutionContract;
   }): MutationEvidence | null {
     const canonicalToolName = canonicalizeToolNameUtil(opts.toolName);
+    if (canonicalToolName === "application_operation") {
+      // Discovery/admission is not a write. Only a verified original operation
+      // with a fresh task artifact event and actual local bytes can satisfy it.
+      const projection = opts.result?.projection || opts.result;
+      if (
+        !["execute", "reconcile"].includes(opts.input?.action) ||
+        projection?.status !== "complete"
+      )
+        return null;
+      const resources = projection.result?.resources;
+      if (!Array.isArray(resources)) return null;
+      const paths = new Set(
+        resources
+          .filter(
+            (r: Any) => r?.kind === "file" && r.system === "local" && typeof r.locator === "string",
+          )
+          .map((r: Any) => path.resolve(r.locator)),
+      );
+      for (const event of this.getWorkspaceMutationEventsSince(opts.stepStartedAt)) {
+        const observed = this.getWorkspaceMutationEventPath(event);
+        if (!observed.reportedPath || !paths.has(path.resolve(observed.reportedPath))) continue;
+        const verified = this.hasArtifactVerificationToolEvidence(
+          canonicalToolName,
+          opts.input,
+          opts.result,
+          [path.extname(observed.reportedPath).toLowerCase()],
+          this.buildArtifactPathTokens(observed.reportedPath),
+          new Set(),
+        );
+        if (!verified.matched) continue;
+        const evidence = this.buildObservedMutationEvidence({
+          canonicalToolName,
+          reportedPath: observed.reportedPath,
+          thresholdMs: Math.max(0, opts.stepStartedAt - 1000),
+          observedEventType: observed.eventType,
+          observedEventTimestamp: observed.eventTimestamp,
+        });
+        if (evidence?.artifact_registered) return evidence;
+      }
+      // A canonical event projection can lag the durable native save. A new
+      // original operation admitted during this step can also prove delivery,
+      // but only with tracked artifacts and current bytes matching native SHA.
+      const operation = opts.result?.operation;
+      const threshold = Math.max(0, opts.stepStartedAt - 1000);
+      const checkedAt = operation?.verificationResult?.checkedAt;
+      if (
+        typeof operation?.createdAt !== "number" ||
+        !Number.isFinite(operation.createdAt) ||
+        operation.createdAt < threshold ||
+        typeof checkedAt !== "number" ||
+        !Number.isFinite(checkedAt) ||
+        checkedAt < threshold
+      )
+        return null;
+      for (const filename of this.fileOperationTracker?.getCreatedFiles?.() || []) {
+        if (!paths.has(path.resolve(filename))) continue;
+        const verified = this.hasArtifactVerificationToolEvidence(
+          canonicalToolName,
+          opts.input,
+          opts.result,
+          [path.extname(filename).toLowerCase()],
+          this.buildArtifactPathTokens(filename),
+          new Set(),
+        );
+        if (!verified.matched) continue;
+        const evidence = this.buildObservedMutationEvidence({
+          canonicalToolName,
+          reportedPath: filename,
+          thresholdMs: threshold,
+          observedEventType: "native_verified_delivery",
+          observedEventTimestamp: checkedAt,
+        });
+        if (evidence?.artifact_registered) return evidence;
+      }
+      return null;
+    }
     if (canonicalToolName === "run_command") {
       return this.collectRunCommandMutationEvidence(opts);
     }
@@ -33980,6 +34310,12 @@ Return ONLY a JSON object:
           stepContext += `\n\n${mutationAuditSummary}`;
         }
       }
+      if (isVerifyStep || isSummaryStep) {
+        // Earlier steps' tool results are compacted away; without the journal a
+        // verifier cannot certify which native actions ran or what they preserved.
+        const nativeActionLedger = this.getNativeActionLedgerSummary();
+        if (nativeActionLedger) stepContext += `\n\n${nativeActionLedger}`;
+      }
 
       // Inject scratchpad notes so the agent sees prior step findings without calling scratchpad_read
       if (completedSteps.length > 0) {
@@ -34128,7 +34464,11 @@ Return ONLY a JSON object:
               ? stepContract.requiredExtensions.join(", ")
               : "(none)"
           }\n` +
-          `- Verification mode: ${stepContract.verificationMode}`;
+          `- Verification mode: ${stepContract.verificationMode}` +
+          (stepContract.contractReason === "native_ui_action_required"
+            ? `\n- This step performs its requested native_app actions (set_value, press, keypress, ...). ` +
+              `No file write is expected here; the app saves, and a later readback proves the saved result.`
+            : "");
       }
 
       const workspaceAliasHints = this.getStepAliasPathHints(step.id);

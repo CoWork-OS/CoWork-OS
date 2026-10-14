@@ -1,18 +1,26 @@
-import { createHash, generateKeyPairSync, verify } from "node:crypto";
+import { createHash, generateKeyPairSync, verify, X509Certificate } from "node:crypto";
 import * as http from "node:http";
+import * as https from "node:https";
 import type { AddressInfo } from "node:net";
+import * as net from "node:net";
+import type { TLSSocket } from "node:tls";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MCPAuthConfig } from "../../types";
 import {
+  activeLoopbackPorts,
   authorizeWithPkce,
   buildJwtAssertion,
   canRenewWithoutUser,
   discoverOAuthMetadata,
+  isMcpSignInCancelled,
   McpAuthorizationRequiredError,
+  McpSignInCancelledError,
   parseExpiresIn,
+  parseLoopbackRedirect,
   renewOAuthToken,
   workdayEndpoints,
 } from "../mcp-oauth";
+import { createLoopbackTlsCredentials } from "../loopback-tls";
 
 const nativeFetch = globalThis.fetch;
 const servers: http.Server[] = [];
@@ -23,6 +31,24 @@ afterEach(async () => {
       .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
   );
 });
+
+/** What a client sees when it dials the port: "connected" or the socket error code. */
+function probePort(port: number): Promise<string> {
+  return new Promise<string>((resolve) => {
+    const socket = net.connect(port, "127.0.0.1");
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve("connected");
+    });
+    socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code || "error"));
+  });
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => (resolve = done));
+  return { promise, resolve };
+}
 
 async function freePort(): Promise<number> {
   const probe = http.createServer();
@@ -178,6 +204,258 @@ describe("MCP OAuth", () => {
     expect(next).toMatchObject({ token: "access-1", refreshToken: "refresh-1" });
     expect(next.expiresAt! - Date.now()).toBeGreaterThan(14_000 * 1000);
     expect(canRenewWithoutUser(next)).toBe(true);
+  });
+
+  it("accepts http and https loopback redirects with an explicit port only", () => {
+    expect(parseLoopbackRedirect("http://127.0.0.1:18768/oauth/callback").port).toBe("18768");
+    expect(parseLoopbackRedirect("https://127.0.0.1:18768/oauth/callback").protocol).toBe("https:");
+    expect(parseLoopbackRedirect("https://localhost:9000/cb").hostname).toBe("localhost");
+    expect(parseLoopbackRedirect("https://[::1]:9000/cb").hostname).toBe("[::1]");
+    for (const rejected of [
+      "https://example.com:18768/oauth/callback",
+      "https://10.0.0.5:18768/oauth/callback",
+      "http://127.0.0.1/oauth/callback",
+      "https://127.0.0.1/oauth/callback",
+      "ftp://127.0.0.1:21/cb",
+    ])
+      expect(() => parseLoopbackRedirect(rejected)).toThrow(/http or https loopback/);
+  });
+
+  it("issues a fresh one-day self-signed loopback certificate per sign-in", () => {
+    const now = Date.now();
+    const first = createLoopbackTlsCredentials(now);
+    const second = createLoopbackTlsCredentials(now);
+    const cert = new X509Certificate(first.cert);
+    expect(cert.subject).toBe("CN=127.0.0.1");
+    expect(cert.checkIP("127.0.0.1")).toBe("127.0.0.1");
+    expect(cert.checkIP("::1")).toBe("::1");
+    expect(cert.checkHost("localhost")).toBe("localhost");
+    expect(cert.ca).toBe(false);
+    expect(cert.verify(cert.publicKey)).toBe(true);
+    expect(Date.parse(cert.validTo) - now).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+    expect(Date.parse(cert.validFrom)).toBeLessThan(now);
+    expect(first.cert).not.toContain("PRIVATE KEY");
+    expect(second.key).not.toBe(first.key);
+    expect(new X509Certificate(second.cert).serialNumber).not.toBe(cert.serialNumber);
+  });
+
+  it("completes authorization code + PKCE through an https loopback redirect", async () => {
+    const { base } = await startAuthServer(() => ({
+      body: { access_token: "access-tls", refresh_token: "refresh-tls", expires_in: 3600 },
+    }));
+    const port = await freePort();
+    const redirectUri = `https://127.0.0.1:${port}/oauth/callback`;
+    const auth: MCPAuthConfig = {
+      type: "bearer",
+      clientId: "client-1",
+      tokenUrl: `${base}/token`,
+      oauth: { grant: "authorization_code", authorizationUrl: `${base}/authorize`, redirectUri },
+    };
+    // Stand in for a browser whose person accepted the certificate warning.
+    const visit = (target: string) =>
+      new Promise<{ status: number; body: string; cert: X509Certificate | undefined }>(
+        (resolve, reject) => {
+          https
+            .get(target, { rejectUnauthorized: false, agent: false }, (res) => {
+              const raw = (res.socket as TLSSocket).getPeerX509Certificate?.();
+              let body = "";
+              res.on("data", (chunk) => (body += chunk));
+              res.on("end", () => resolve({ status: res.statusCode ?? 0, body, cert: raw }));
+            })
+            .on("error", reject);
+        },
+      );
+    let stray: Awaited<ReturnType<typeof visit>> | undefined;
+    let callback: Awaited<ReturnType<typeof visit>> | undefined;
+    const next = await authorizeWithPkce(auth, {
+      fetchImpl: nativeFetch,
+      openUrl: async (url) => {
+        const response = await nativeFetch(url, { redirect: "manual" });
+        const location = new URL(response.headers.get("location")!);
+        expect(location.protocol).toBe("https:");
+        // A callback with the wrong state is refused and does not end the flow.
+        const wrong = new URL(location);
+        wrong.searchParams.set("state", "not-the-state");
+        wrong.searchParams.set("code", "stolen");
+        stray = await visit(wrong.toString());
+        callback = await visit(location.toString());
+      },
+    });
+    expect(stray?.status).toBe(400);
+    expect(stray?.body).toContain("does not match");
+    expect(callback?.status).toBe(200);
+    expect(callback?.body).toContain("Authorization complete");
+    expect(callback?.cert?.checkIP("127.0.0.1")).toBe("127.0.0.1");
+    expect(next).toMatchObject({ token: "access-tls", refreshToken: "refresh-tls" });
+    // The listener is gone once sign-in finishes.
+    const refused = await new Promise<string>((resolve) => {
+      const socket = net.connect(port, "127.0.0.1");
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve("connected");
+      });
+      socket.once("error", (error: NodeJS.ErrnoException) => resolve(error.code || "error"));
+    });
+    expect(refused).toBe("ECONNREFUSED");
+  });
+
+  it("cancels a pending http or https sign-in: the port is released and no token is requested", async () => {
+    for (const scheme of ["http", "https"]) {
+      const port = await freePort();
+      const tokenRequests: string[] = [];
+      const opened = deferred();
+      const controller = new AbortController();
+      const pending = authorizeWithPkce(
+        {
+          type: "bearer",
+          clientId: "client-1",
+          tokenUrl: "https://idp.invalid/token",
+          oauth: {
+            grant: "authorization_code",
+            authorizationUrl: "https://idp.invalid/authorize",
+            redirectUri: `${scheme}://127.0.0.1:${port}/oauth/callback`,
+          },
+        },
+        {
+          signal: controller.signal,
+          openUrl: () => opened.resolve(),
+          fetchImpl: async (url) => {
+            tokenRequests.push(url);
+            throw new Error("no token request expected");
+          },
+        },
+      );
+      const outcome = pending.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await opened.promise;
+      expect(await probePort(port)).toBe("connected");
+      expect(activeLoopbackPorts()).toContain(port);
+      controller.abort();
+      const error = await outcome;
+      expect(isMcpSignInCancelled(error)).toBe(true);
+      expect((error as McpSignInCancelledError).reason).toBe("cancelled");
+      expect(await probePort(port)).toBe("ECONNREFUSED");
+      expect(activeLoopbackPorts()).not.toContain(port);
+      expect(tokenRequests).toEqual([]);
+    }
+  });
+
+  it("still cancels when opening the browser never settles", async () => {
+    const port = await freePort();
+    const controller = new AbortController();
+    const pending = authorizeWithPkce(
+      {
+        type: "bearer",
+        clientId: "client-1",
+        tokenUrl: "https://idp.invalid/token",
+        oauth: {
+          grant: "authorization_code",
+          authorizationUrl: "https://idp.invalid/authorize",
+          redirectUri: `http://127.0.0.1:${port}/oauth/callback`,
+        },
+      },
+      { signal: controller.signal, openUrl: () => new Promise<void>(() => {}) },
+    );
+    const outcome = pending.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(await probePort(port)).toBe("connected");
+    controller.abort();
+    expect(isMcpSignInCancelled(await outcome)).toBe(true);
+    expect(await probePort(port)).toBe("ECONNREFUSED");
+  });
+
+  it("refuses to start a sign-in whose signal is already aborted", async () => {
+    const port = await freePort();
+    const controller = new AbortController();
+    controller.abort();
+    let opened = false;
+    const error = await authorizeWithPkce(
+      {
+        type: "bearer",
+        clientId: "c",
+        tokenUrl: "https://idp.invalid/token",
+        oauth: {
+          grant: "authorization_code",
+          authorizationUrl: "https://idp.invalid/authorize",
+          redirectUri: `http://127.0.0.1:${port}/oauth/callback`,
+        },
+      },
+      { signal: controller.signal, openUrl: () => void (opened = true) },
+    ).catch((caught: unknown) => caught);
+    expect(isMcpSignInCancelled(error)).toBe(true);
+    expect(opened).toBe(false);
+    expect(await probePort(port)).toBe("ECONNREFUSED");
+  });
+
+  it("lets a newer sign-in take over the port from CoWork's own pending sign-in", async () => {
+    const { base } = await startAuthServer((form) => ({
+      body: { access_token: `token-for-${form.get("client_id")}`, expires_in: 3600 },
+    }));
+    const port = await freePort();
+    const auth = (clientId: string): MCPAuthConfig => ({
+      type: "bearer",
+      clientId,
+      tokenUrl: `${base}/token`,
+      oauth: {
+        grant: "authorization_code",
+        authorizationUrl: `${base}/authorize`,
+        redirectUri: `http://127.0.0.1:${port}/oauth/callback`,
+      },
+    });
+    const firstOpened = deferred();
+    const first = authorizeWithPkce(auth("first"), {
+      fetchImpl: nativeFetch,
+      // The person never finishes this sign-in.
+      openUrl: () => firstOpened.resolve(),
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await firstOpened.promise;
+    const second = await authorizeWithPkce(auth("second"), {
+      fetchImpl: nativeFetch,
+      openUrl: async (url) => {
+        const response = await nativeFetch(url, { redirect: "manual" });
+        await nativeFetch(response.headers.get("location")!);
+      },
+    });
+    const superseded = await first;
+    expect(isMcpSignInCancelled(superseded)).toBe(true);
+    expect((superseded as McpSignInCancelledError).reason).toBe("superseded");
+    expect(second.token).toBe("token-for-second");
+    expect(await probePort(port)).toBe("ECONNREFUSED");
+  });
+
+  it("still reports the port in use when another process holds it", async () => {
+    const port = await freePort();
+    const foreign = net.createServer();
+    await new Promise<void>((resolve) => foreign.listen(port, "127.0.0.1", resolve));
+    try {
+      let opened = false;
+      await expect(
+        authorizeWithPkce(
+          {
+            type: "bearer",
+            clientId: "c",
+            tokenUrl: "https://idp.invalid/token",
+            oauth: {
+              grant: "authorization_code",
+              authorizationUrl: "https://idp.invalid/authorize",
+              redirectUri: `https://127.0.0.1:${port}/oauth/callback`,
+            },
+          },
+          { openUrl: () => void (opened = true) },
+        ),
+      ).rejects.toThrow(`OAuth redirect port ${port} is in use`);
+      expect(opened).toBe(false);
+      expect(activeLoopbackPorts()).not.toContain(port);
+    } finally {
+      await new Promise<void>((resolve) => foreign.close(() => resolve()));
+    }
   });
 
   it("refreshes a public client without a secret and keeps a refresh token the server did not rotate", async () => {

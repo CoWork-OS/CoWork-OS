@@ -7666,6 +7666,20 @@ export interface RemoteOAuthServerRequest {
   privateKey?: string;
 }
 
+/**
+ * Edits a Remote (OAuth) server. A blank clientSecret or privateKey keeps the stored
+ * value; changing the identity, endpoints or client signs the server out.
+ */
+export interface RemoteOAuthServerUpdateRequest {
+  serverId: string;
+  server: RemoteOAuthServerRequest;
+}
+
+/** A cancelled or replaced sign-in resolves with status "cancelled"; it is not an error. */
+export type RemoteOAuthAuthorizeResult =
+  | { status: "signed_in"; expiresAt?: number; grant: "authorization_code" | "jwt_bearer" }
+  | { status: "cancelled"; reason: "cancelled" | "superseded" };
+
 export const IPC_CHANNELS = {
   // Task operations
   TASK_CREATE: "task:create",
@@ -8439,7 +8453,9 @@ export const IPC_CHANNELS = {
   // MCP Connector OAuth
   MCP_CONNECTOR_OAUTH_START: "mcp:connectorOAuthStart",
   MCP_ADD_REMOTE_OAUTH_SERVER: "mcp:addRemoteOAuthServer",
+  MCP_UPDATE_REMOTE_OAUTH_SERVER: "mcp:updateRemoteOAuthServer",
   MCP_OAUTH_AUTHORIZE: "mcp:oauthAuthorize",
+  MCP_OAUTH_CANCEL: "mcp:oauthCancel",
   MCP_OAUTH_DISCOVER: "mcp:oauthDiscover",
 
   // MCP Host

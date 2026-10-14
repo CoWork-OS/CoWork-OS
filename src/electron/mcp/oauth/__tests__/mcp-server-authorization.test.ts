@@ -3,6 +3,7 @@ import {
   buildRemoteOAuthServer,
   DEFAULT_OAUTH_REDIRECT_URI,
   RemoteOAuthServerSchema,
+  WORKDAY_OAUTH_REDIRECT_URI,
 } from "../mcp-server-authorization";
 
 describe("remote OAuth MCP server setup", () => {
@@ -30,12 +31,41 @@ describe("remote OAuth MCP server setup", () => {
         oauth: {
           grant: "authorization_code",
           authorizationUrl: "https://us.agent.workday.com/auth/authorize/acme_dev1",
-          redirectUri: DEFAULT_OAUTH_REDIRECT_URI,
+          redirectUri: WORKDAY_OAUTH_REDIRECT_URI,
           preset: { kind: "workday", region: "us", tenant: "acme_dev1" },
         },
       },
     });
     expect(config.auth?.token).toBeUndefined();
+  });
+
+  it("defaults Workday to an https loopback redirect and custom servers to http", () => {
+    expect(WORKDAY_OAUTH_REDIRECT_URI).toBe("https://127.0.0.1:18768/oauth/callback");
+    const custom = buildRemoteOAuthServer(
+      RemoteOAuthServerSchema.parse({
+        name: "Custom",
+        kind: "custom",
+        grant: "authorization_code",
+        clientId: "c",
+        url: "https://a.example/mcp",
+        tokenUrl: "https://a.example/token",
+        authorizationUrl: "https://a.example/authorize",
+      }),
+    );
+    expect(custom.auth?.oauth?.redirectUri).toBe(DEFAULT_OAUTH_REDIRECT_URI);
+    const typed = RemoteOAuthServerSchema.parse({
+      name: "Custom",
+      kind: "custom",
+      grant: "authorization_code",
+      clientId: "c",
+      url: "https://a.example/mcp",
+      tokenUrl: "https://a.example/token",
+      authorizationUrl: "https://a.example/authorize",
+      redirectUri: "https://127.0.0.1:9443/cb",
+    });
+    expect(buildRemoteOAuthServer(typed).auth?.oauth?.redirectUri).toBe(
+      "https://127.0.0.1:9443/cb",
+    );
   });
 
   it("allows plain http only for a loopback development server", () => {

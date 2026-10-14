@@ -7,17 +7,24 @@ import { z } from "zod";
 import { credentialFingerprint } from "../../security/oauth-refresh-proof";
 import { MCPClientManager } from "../client/MCPClientManager";
 import { assertMcpServerNotBlocked } from "../connector-policy";
-import { MCPSettingsManager } from "../settings";
+import { MASKED_VALUE, MCPSettingsManager } from "../settings";
 import type { MCPAuthConfig, MCPServerConfig } from "../types";
 import {
   authorizeWithoutUser,
   authorizeWithPkce,
   discoverOAuthMetadata,
+  McpSignInCancelledError,
+  parseLoopbackRedirect,
   workdayEndpoints,
 } from "./mcp-oauth";
 
-/** Workday registers the redirect exactly; a fixed loopback port keeps it stable. */
+/** Providers register the redirect exactly; a fixed loopback port keeps it stable. */
 export const DEFAULT_OAUTH_REDIRECT_URI = "http://127.0.0.1:18768/oauth/callback";
+/**
+ * Workday rejects http redirect URIs for authorization-code clients, so its
+ * preset uses an https loopback served with an ephemeral self-signed certificate.
+ */
+export const WORKDAY_OAUTH_REDIRECT_URI = "https://127.0.0.1:18768/oauth/callback";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 /** https, or http only on this machine's loopback (local development servers). */
@@ -32,7 +39,8 @@ const httpsUrl = z
     );
   }, "Must be an https URL (http is allowed only on localhost)");
 
-export const RemoteOAuthServerSchema = z
+/** The add form's fields. Secrets may be blank on an edit (keep the stored value). */
+const RemoteOAuthServerFields = z
   .object({
     name: z.string().trim().min(1).max(200),
     kind: z.enum(["workday", "custom"]),
@@ -44,15 +52,32 @@ export const RemoteOAuthServerSchema = z
     grant: z.enum(["authorization_code", "jwt_bearer"]),
     clientId: z.string().trim().min(1).max(500),
     clientSecret: z.string().max(2000).optional(),
-    redirectUri: z.string().url().max(500).optional(),
+    // Only a loopback listener on this machine can receive the code.
+    redirectUri: z
+      .string()
+      .url()
+      .max(500)
+      .refine((value) => {
+        try {
+          parseLoopbackRedirect(value);
+          return true;
+        } catch {
+          return false;
+        }
+      }, "Redirect URI must be an http or https loopback address with an explicit port")
+      .optional(),
     scopes: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
     resource: z.string().url().max(1000).optional(),
     jwtSubject: z.string().trim().max(500).optional(),
     jwtKeyId: z.string().trim().max(200).optional(),
     privateKey: z.string().max(10000).optional(),
   })
-  .strict()
-  .superRefine((value, ctx) => {
+  .strict();
+
+type RemoteOAuthServerFieldsInput = z.infer<typeof RemoteOAuthServerFields>;
+
+export const RemoteOAuthServerSchema = RemoteOAuthServerFields.superRefine(
+  (value: RemoteOAuthServerFieldsInput, ctx) => {
     if (value.kind === "workday" && (!value.region || !value.tenant))
       ctx.addIssue({ code: "custom", message: "Workday needs a gateway region and tenant" });
     if (value.kind === "custom" && (!value.url || !value.tokenUrl))
@@ -64,7 +89,8 @@ export const RemoteOAuthServerSchema = z
       });
     if (value.grant === "jwt_bearer" && (!value.privateKey || !value.jwtSubject))
       ctx.addIssue({ code: "custom", message: "JWT bearer needs a private key and subject" });
-  });
+  },
+);
 
 export type RemoteOAuthServerInput = z.infer<typeof RemoteOAuthServerSchema>;
 
@@ -89,7 +115,9 @@ export function buildRemoteOAuthServer(input: RemoteOAuthServerInput): Omit<MCPS
       ...(input.grant === "authorization_code"
         ? {
             authorizationUrl: endpoints.authorizationUrl,
-            redirectUri: input.redirectUri || DEFAULT_OAUTH_REDIRECT_URI,
+            redirectUri:
+              input.redirectUri ||
+              (input.kind === "workday" ? WORKDAY_OAUTH_REDIRECT_URI : DEFAULT_OAUTH_REDIRECT_URI),
           }
         : {
             jwt: {
@@ -122,6 +150,106 @@ export function addRemoteOAuthServer(input: unknown): MCPServerConfig {
   return MCPSettingsManager.addServer(config);
 }
 
+/** An edit of a Remote (OAuth) server: the add form's fields plus the server ID. */
+export const RemoteOAuthServerUpdateSchema = z
+  .object({ serverId: z.string().uuid(), server: RemoteOAuthServerFields })
+  .strict();
+
+const TOKEN_KEYS = ["token", "refreshToken", "expiresAt", "refreshExpiresAt"] as const;
+
+function withoutTokens(auth: MCPAuthConfig | undefined): MCPAuthConfig | undefined {
+  if (!auth) return undefined;
+  const rest: MCPAuthConfig = { ...auth };
+  for (const key of TOKEN_KEYS) delete rest[key];
+  return rest;
+}
+
+/** A secret field left blank, or sent back as the display mask, keeps the stored value. */
+function keepsStoredSecret(value: string | undefined): boolean {
+  return !value?.trim() || value.trim() === MASKED_VALUE;
+}
+
+/**
+ * Edits a Remote (OAuth) server in place with the same validation and builder
+ * as add. Stored secrets the UI never saw are kept when left blank. Any change
+ * to the identity, endpoints or client sign the server out: tokens are cleared,
+ * a pending sign-in is cancelled and the connection is closed, so the next
+ * sign-in uses the new settings. Approvals granted earlier no longer match the
+ * stored configuration (see configuration-authority.ts) and are asked again.
+ */
+export async function updateRemoteOAuthServer(
+  input: unknown,
+): Promise<{ server: MCPServerConfig; signedOut: boolean }> {
+  const { serverId, server: fields } = RemoteOAuthServerUpdateSchema.parse(input);
+  const current = MCPSettingsManager.getServer(serverId);
+  if (!current) throw new Error("MCP server not found");
+  const auth = current.auth;
+  if (current.transport !== "streamable-http" || auth?.type !== "bearer" || !auth.oauth)
+    throw new Error("Only a Remote (OAuth) server can be edited here");
+  const merged = RemoteOAuthServerSchema.parse({
+    ...fields,
+    clientSecret: keepsStoredSecret(fields.clientSecret) ? auth.clientSecret : fields.clientSecret,
+    privateKey: keepsStoredSecret(fields.privateKey) ? auth.privateKey : fields.privateKey,
+    // The settings form does not show these; leaving them out keeps the stored value.
+    resource: fields.resource ?? auth.oauth.resource,
+    jwtKeyId: fields.jwtKeyId ?? auth.oauth.jwt?.keyId,
+  });
+  const built = buildRemoteOAuthServer(merged);
+  assertMcpServerNotBlocked({ id: serverId, name: built.name, registryId: current.registryId });
+  const nextOAuth = { ...built.auth!.oauth! };
+  // Settings with no form field survive an edit.
+  if (auth.oauth.tokenAuthMethod) nextOAuth.tokenAuthMethod = auth.oauth.tokenAuthMethod;
+  if (nextOAuth.jwt && auth.oauth.jwt) {
+    const { audience, algorithm } = auth.oauth.jwt;
+    nextOAuth.jwt = {
+      ...nextOAuth.jwt,
+      ...(audience ? { audience } : {}),
+      ...(algorithm ? { algorithm } : {}),
+    };
+  }
+  const nextAuth: MCPAuthConfig = { ...built.auth!, oauth: nextOAuth };
+  const signedOut =
+    built.url !== current.url ||
+    credentialFingerprint(withoutTokens(auth)) !== credentialFingerprint(nextAuth);
+  if (!signedOut && built.name === current.name) return { server: current, signedOut: false };
+
+  let updated: MCPServerConfig | null;
+  if (signedOut) {
+    cancelMcpServerSignIn(serverId);
+    updated = MCPSettingsManager.updateServer(serverId, {
+      name: built.name,
+      url: built.url,
+      auth: nextAuth,
+      lastError: undefined,
+    });
+    const manager = MCPClientManager.getInstance();
+    if (manager.getServerStatus(serverId)) await manager.disconnectServer(serverId);
+  } else {
+    // A rename keeps the sign-in.
+    updated = MCPSettingsManager.updateServer(serverId, { name: built.name });
+  }
+  if (!updated) throw new Error("MCP server not found");
+  return { server: updated, signedOut };
+}
+
+/** Pending interactive sign-ins by server ID, so the person can cancel one. */
+const pendingSignIns = new Map<string, AbortController>();
+
+/**
+ * Cancels a server's pending sign-in: its loopback listener closes and the
+ * sign-in rejects with McpSignInCancelledError. False when none is pending.
+ */
+export function cancelMcpServerSignIn(
+  serverId: string,
+  reason: "cancelled" | "superseded" = "cancelled",
+): boolean {
+  const controller = pendingSignIns.get(serverId);
+  if (!controller) return false;
+  pendingSignIns.delete(serverId);
+  controller.abort(new McpSignInCancelledError(reason));
+  return true;
+}
+
 export async function discoverRemoteOAuth(url: unknown) {
   return discoverOAuthMetadata(httpsUrl.parse(url));
 }
@@ -150,10 +278,19 @@ export async function authorizeMcpServer(
       throw new Error(
         "Signing in this server needs a browser; use the desktop app, or configure a JWT bearer identity for headless use",
       );
-    next = await authorizeWithPkce(before, {
-      openUrl: options.openUrl,
-      timeoutMs: options.timeoutMs,
-    });
+    // A second sign-in of the same server replaces the first.
+    cancelMcpServerSignIn(serverId, "superseded");
+    const controller = new AbortController();
+    pendingSignIns.set(serverId, controller);
+    try {
+      next = await authorizeWithPkce(before, {
+        openUrl: options.openUrl,
+        timeoutMs: options.timeoutMs,
+        signal: controller.signal,
+      });
+    } finally {
+      if (pendingSignIns.get(serverId) === controller) pendingSignIns.delete(serverId);
+    }
   }
   // Settings edited while the person was signing in win; the new token is discarded.
   const current = MCPSettingsManager.getServer(serverId)?.auth;

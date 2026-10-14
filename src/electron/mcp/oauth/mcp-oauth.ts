@@ -13,7 +13,9 @@
  */
 import { createHash, createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
 import * as http from "node:http";
+import * as https from "node:https";
 import type { MCPAuthConfig, MCPOAuthSettings } from "../types";
+import { createLoopbackTlsCredentials } from "./loopback-tls";
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -26,6 +28,38 @@ export class McpAuthorizationRequiredError extends Error {
     super(message);
     this.name = "McpAuthorizationRequiredError";
   }
+}
+
+export const MCP_SIGN_IN_CANCELLED = "MCP_SIGN_IN_CANCELLED";
+
+/**
+ * A pending interactive sign-in ended without an answer from the provider:
+ * the person cancelled it, or a newer sign-in on the same redirect port took
+ * over. Neither is a failure to report.
+ */
+export class McpSignInCancelledError extends Error {
+  readonly code = MCP_SIGN_IN_CANCELLED;
+  constructor(readonly reason: "cancelled" | "superseded") {
+    super(
+      reason === "superseded" ? "Sign-in was replaced by a newer sign-in" : "Sign-in cancelled",
+    );
+    this.name = "McpSignInCancelledError";
+  }
+}
+
+export function isMcpSignInCancelled(error: unknown): error is McpSignInCancelledError {
+  return (
+    error instanceof McpSignInCancelledError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === MCP_SIGN_IN_CANCELLED)
+  );
+}
+
+function cancelledBy(signal: AbortSignal): McpSignInCancelledError {
+  return isMcpSignInCancelled(signal.reason)
+    ? signal.reason
+    : new McpSignInCancelledError("cancelled");
 }
 
 const JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -83,6 +117,7 @@ async function tokenRequest(
   auth: MCPAuthConfig,
   params: Record<string, string>,
   fetchImpl: FetchLike,
+  signal?: AbortSignal,
 ): Promise<MCPAuthConfig> {
   if (!auth.tokenUrl || !auth.clientId) throw new Error("OAuth token endpoint is not configured");
   const body = new URLSearchParams(params);
@@ -97,6 +132,9 @@ async function tokenRequest(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
+  // A cancelled sign-in also abandons a token exchange already in flight.
+  const onCancel = () => controller.abort();
+  signal?.addEventListener("abort", onCancel, { once: true });
   let response: Response;
   try {
     response = await fetchImpl(auth.tokenUrl, {
@@ -106,8 +144,12 @@ async function tokenRequest(
       redirect: "manual",
       signal: controller.signal,
     });
+  } catch (error) {
+    if (signal?.aborted) throw cancelledBy(signal);
+    throw error;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", onCancel);
   }
   const text = await response.text();
   if (!response.ok) {
@@ -212,7 +254,10 @@ export function createPkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge: base64Url(createHash("sha256").update(verifier).digest()) };
 }
 
-/** Only an http loopback redirect can be received locally. */
+/**
+ * Only a loopback redirect can be received locally. https is served with an
+ * ephemeral self-signed certificate, for providers that reject http redirects.
+ */
 export function parseLoopbackRedirect(redirectUri: string): URL {
   let url: URL;
   try {
@@ -221,12 +266,12 @@ export function parseLoopbackRedirect(redirectUri: string): URL {
     throw new Error("OAuth redirect URI is invalid");
   }
   if (
-    url.protocol !== "http:" ||
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
     !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
     !url.port
   )
     throw new Error(
-      "OAuth redirect URI must be an http loopback address with an explicit port, e.g. http://127.0.0.1:18768/oauth/callback",
+      "OAuth redirect URI must be an http or https loopback address with an explicit port, e.g. http://127.0.0.1:18768/oauth/callback or https://127.0.0.1:18768/oauth/callback",
     );
   return url;
 }
@@ -250,27 +295,73 @@ export function buildAuthorizeUrl(
   return url.toString();
 }
 
-function waitForCallback(
+/**
+ * This process's open loopback callback listeners, by port. localhost can
+ * resolve to either loopback family, so one port carries at most one pending
+ * sign-in: a newer sign-in supersedes the older one instead of failing with
+ * "port in use" against CoWork's own listener.
+ */
+const loopbackListeners = new Map<number, { supersede: () => void; closed: Promise<void> }>();
+
+/** Ports with a pending sign-in in this process (for diagnostics and tests). */
+export function activeLoopbackPorts(): number[] {
+  return [...loopbackListeners.keys()];
+}
+
+interface LoopbackCallback {
+  /** Settles with the authorization code, or rejects (timeout, cancel, takeover, provider error). */
+  code: Promise<string>;
+  close: () => void;
+}
+
+/**
+ * Listens on the registered loopback redirect for the provider's callback.
+ * Resolves once listening; rejects with McpSignInCancelledError when the
+ * signal aborts or a newer sign-in takes the port first.
+ */
+async function listenForCallback(
   redirect: URL,
   state: string,
   timeoutMs: number,
-): { ready: Promise<void>; code: Promise<string>; close: () => void } {
+  signal?: AbortSignal,
+): Promise<LoopbackCallback> {
+  const port = Number(redirect.port);
+  // Take the port over from CoWork's own earlier sign-in, if any. Re-check after
+  // each wait: a sign-in started meanwhile may have registered in between.
+  for (
+    let previous = loopbackListeners.get(port);
+    previous;
+    previous = loopbackListeners.get(port)
+  ) {
+    previous.supersede();
+    await previous.closed;
+  }
+  if (signal?.aborted) throw cancelledBy(signal);
+
   let resolveCode!: (code: string) => void;
   let rejectCode!: (error: Error) => void;
   const code = new Promise<string>((resolve, reject) => {
     resolveCode = resolve;
     rejectCode = reject;
   });
+  let failure: Error | undefined;
+  let settled = false;
+  const fail = (error: Error) => {
+    if (settled) return;
+    settled = true;
+    failure = error;
+    rejectCode(error);
+  };
   const page = (text: string) =>
     `<!doctype html><meta charset="utf-8"><title>CoWork OS</title><p style="font:16px system-ui;margin:40px">${text}</p>`;
-  const server = http.createServer((req, res) => {
+  const handler: http.RequestListener = (req, res) => {
     const url = new URL(req.url || "/", `http://${req.headers.host || redirect.host}`);
     if (url.pathname !== redirect.pathname) {
       res.writeHead(404).end();
       return;
     }
     // A request with the wrong state is ignored, so a stray page cannot end the flow.
-    if (url.searchParams.get("state") !== state) {
+    if (url.searchParams.get("state") !== state || settled) {
       res.writeHead(400, { "Content-Type": "text/html", "Cache-Control": "no-store" });
       res.end(page("This sign-in link does not match the current request."));
       return;
@@ -289,16 +380,27 @@ function waitForCallback(
       ),
     );
     if (error || !received)
-      rejectCode(new Error(`Authorization failed: ${sanitize(error || "no code returned")}`));
-    else resolveCode(received);
-  });
-  const timer = setTimeout(() => rejectCode(new Error("Authorization timed out")), timeoutMs);
-  const close = () => {
-    clearTimeout(timer);
-    server.closeAllConnections?.();
-    server.close();
+      fail(new Error(`Authorization failed: ${sanitize(error || "no code returned")}`));
+    else {
+      settled = true;
+      resolveCode(received);
+    }
   };
-  const ready = new Promise<void>((resolve, reject) => {
+  // An https redirect gets a fresh self-signed certificate per sign-in; the key
+  // stays in memory with this listener and is never persisted or logged.
+  const server: http.Server | https.Server =
+    redirect.protocol === "https:"
+      ? https.createServer(createLoopbackTlsCredentials(), handler)
+      : http.createServer(handler);
+  let markClosed!: () => void;
+  const closed = new Promise<void>((resolve) => (markClosed = resolve));
+  const entry = { supersede: () => fail(new McpSignInCancelledError("superseded")), closed };
+  // Registered before listening, so a sign-in started while this one binds supersedes it.
+  loopbackListeners.set(port, entry);
+  const onAbort = () => fail(cancelledBy(signal!));
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const timer = setTimeout(() => fail(new Error("Authorization timed out")), timeoutMs);
+  const listening = new Promise<void>((resolve, reject) => {
     server.once("error", (error: NodeJS.ErrnoException) =>
       reject(
         error.code === "EADDRINUSE"
@@ -309,17 +411,50 @@ function waitForCallback(
       ),
     );
     // The redirect is registered with the provider, so it must be exactly this host and port.
-    server.listen(Number(redirect.port), redirect.hostname.replace(/^\[|\]$/g, ""), () =>
-      resolve(),
-    );
+    server.listen(port, redirect.hostname.replace(/^\[|\]$/g, ""), () => resolve());
   });
-  code.catch(() => undefined).finally(close);
-  return { ready, code, close };
+  let closing = false;
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+    // Wait for the bind to settle, so a listener still binding cannot outlive the flow.
+    const finish = () => {
+      server.closeAllConnections?.();
+      // The callback runs whether or not the server is listening.
+      server.close(() => {
+        if (loopbackListeners.get(port) === entry) loopbackListeners.delete(port);
+        markClosed();
+      });
+    };
+    listening.then(finish, finish);
+  };
+  // The listener closes as soon as the flow settles, so a takeover never waits
+  // on the token exchange that follows.
+  code.then(close, close);
+
+  try {
+    await Promise.race([listening, code.then(() => undefined)]);
+  } catch (error) {
+    // Bind failed (a foreign process holds the port) or the flow ended while binding.
+    fail(error as Error);
+    close();
+    await closed;
+    throw failure ?? error;
+  }
+  if (failure) {
+    await closed;
+    throw failure;
+  }
+  return { code, close };
 }
 
 /**
  * Interactive authorization code + PKCE. The person signs in at the provider in
- * their browser; the code returns to the registered loopback redirect.
+ * their browser; the code returns to the registered loopback redirect. Aborting
+ * the signal (or a newer sign-in on the same port) closes the listener and
+ * rejects with McpSignInCancelledError before any token request.
  */
 export async function authorizeWithPkce(
   auth: MCPAuthConfig,
@@ -327,6 +462,7 @@ export async function authorizeWithPkce(
     openUrl: (url: string) => Promise<void> | void;
     timeoutMs?: number;
     fetchImpl?: FetchLike;
+    signal?: AbortSignal;
   },
 ): Promise<MCPAuthConfig> {
   if (auth.type !== "bearer" || auth.oauth?.grant === "jwt_bearer")
@@ -335,11 +471,19 @@ export async function authorizeWithPkce(
   const state = base64Url(randomBytes(24));
   const { verifier, challenge } = createPkcePair();
   const authorizeUrl = buildAuthorizeUrl(auth, { state, challenge });
-  const callback = waitForCallback(redirect, state, options.timeoutMs ?? 5 * 60_000);
+  const callback = await listenForCallback(
+    redirect,
+    state,
+    options.timeoutMs ?? 5 * 60_000,
+    options.signal,
+  );
   try {
-    await callback.ready;
-    await options.openUrl(authorizeUrl);
-    const code = await callback.code;
+    // Opening the browser can hang (shell.openExternal may never settle), so the
+    // flow ends on the callback, a cancel or the timeout regardless; a failure to
+    // open still ends it.
+    const opened = Promise.resolve().then(() => options.openUrl(authorizeUrl));
+    const code = await Promise.race([callback.code, opened.then(() => callback.code)]);
+    if (options.signal?.aborted) throw cancelledBy(options.signal);
     return await tokenRequest(
       auth,
       {
@@ -349,6 +493,7 @@ export async function authorizeWithPkce(
         code_verifier: verifier,
       },
       options.fetchImpl ?? fetch,
+      options.signal,
     );
   } finally {
     callback.close();

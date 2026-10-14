@@ -15,7 +15,8 @@ import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
 
 const LEGACY_SETTINGS_FILE = "mcp-settings.json";
-const MASKED_VALUE = "***configured***";
+/** Stands in for a stored secret in anything the renderer sees. */
+export const MASKED_VALUE = "***configured***";
 const SECRET_AUTH_KEYS = [
   "token",
   "apiKey",

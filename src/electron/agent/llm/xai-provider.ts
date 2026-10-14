@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -14,6 +14,7 @@ import {
 import { OpenAICompatibleProvider } from "./openai-compatible-provider";
 import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
 import { XAIOAuth, XAIOAuthTokens, isXAIAccessTokenExpiring } from "./xai-oauth";
+import { lazyClient, loadOpenAISdk } from "./sdk-loaders";
 
 const XAI_BASE_URL = "https://api.x.ai/v1";
 const DEFAULT_XAI_MODEL = "grok-4.3";
@@ -30,7 +31,8 @@ const isImageContent = (item: LLMContent | LLMToolResult): item is LLMImageConte
 export class XAIProvider implements LLMProvider {
   readonly type: "xai" | "xai-oauth";
   private client?: OpenAICompatibleProvider;
-  private responsesClient?: OpenAI;
+  /** Created on its first request (see sdk-loaders); replaced when the OAuth token refreshes. */
+  private responsesClient?: () => Promise<OpenAI>;
   private oauthTokens?: XAIOAuthTokens;
   private oauthTokenUpdater?: LLMProviderConfig["xaiOAuthTokenUpdater"];
   private model: string;
@@ -52,10 +54,7 @@ export class XAIProvider implements LLMProvider {
         expires_at: config.xaiTokenExpiresAt,
         token_endpoint: config.xaiTokenEndpoint,
       };
-      this.responsesClient = new OpenAI({
-        apiKey: config.xaiAccessToken,
-        baseURL: this.baseUrl,
-      });
+      this.responsesClient = this.createResponsesClient(config.xaiAccessToken);
       return;
     }
 
@@ -109,11 +108,13 @@ export class XAIProvider implements LLMProvider {
     }
     const refreshed = await XAIOAuth.refreshTokens(this.oauthTokens);
     this.oauthTokens = refreshed;
-    this.responsesClient = new OpenAI({
-      apiKey: refreshed.access_token,
-      baseURL: this.baseUrl,
-    });
+    this.responsesClient = this.createResponsesClient(refreshed.access_token);
     await this.oauthTokenUpdater?.(refreshed);
+  }
+
+  private createResponsesClient(apiKey: string): () => Promise<OpenAI> {
+    const baseURL = this.baseUrl;
+    return lazyClient(async () => new (await loadOpenAISdk())({ apiKey, baseURL }));
   }
 
   private buildResponsesInput(request: LLMRequest): Any[] {
@@ -233,7 +234,8 @@ export class XAIProvider implements LLMProvider {
   private async createResponsesMessage(request: LLMRequest): Promise<LLMResponse> {
     await this.refreshOAuthIfNeeded();
     const tools = request.tools ? this.toResponsesTools(request.tools) : undefined;
-    const response = await (this.responsesClient as Any).responses.create(
+    const responsesClient = (await this.responsesClient?.()) as Any;
+    const response = await responsesClient.responses.create(
       {
         model: request.model || this.model,
         input: this.buildResponsesInput(request),

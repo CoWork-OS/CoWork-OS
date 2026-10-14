@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
+import { LazyMarkdownRenderer } from "./lazy-renderers";
 import { InlineHtmlPreview, InlineHtmlSourcePreview } from "./InlineHtmlPreview";
 // Shared with the plain-text fallback, so both agree on what counts as a rendered page.
 import { getRenderableHtmlTitle, looksLikeRenderableHtml } from "../../shared/rich-embeds";
@@ -58,10 +59,6 @@ type MessageSegment =
   | { type: "frame_source"; html: string; directive: FrameDirective; raw: string }
   | { type: "html_error"; raw: string; error: string }
   | { type: "answer_surface"; source: string; closed: boolean; key: string; raw: string };
-
-const LazyMarkdownRenderer = lazy(() =>
-  import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer })),
-);
 
 function DeferredMarkdown({ children, components }: { children: string; components?: unknown }) {
   return (

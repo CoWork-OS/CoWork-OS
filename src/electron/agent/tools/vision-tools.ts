@@ -4,17 +4,17 @@ import * as os from "os";
 import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import Anthropic from "@anthropic-ai/sdk";
-import {
-  BedrockRuntimeClient,
-  BedrockRuntimeClientConfig,
-  ConverseCommand,
-} from "@aws-sdk/client-bedrock-runtime";
-import { fromIni } from "@aws-sdk/credential-provider-ini";
+import type Anthropic from "@anthropic-ai/sdk";
+import type { BedrockRuntimeClientConfig } from "@aws-sdk/client-bedrock-runtime";
 import { SensitiveSourceRef, Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool, MODELS } from "../llm/types";
 import { LLMProviderFactory, type LLMSettings } from "../llm/provider-factory";
+import {
+  loadAnthropicSdk,
+  loadAwsIniCredentialProvider,
+  loadBedrockRuntimeSdk,
+} from "../llm/sdk-loaders";
 import { OpenAIProvider } from "../llm/openai-provider";
 import type { OpenAIOAuthTokens } from "../llm/openai-oauth";
 import { getOpenAISiwcClientId } from "../llm/openai-siwc-oauth";
@@ -1240,6 +1240,7 @@ export class VisionTools {
     mimeType: string;
     maxTokens: number;
   }): Promise<string> {
+    const Anthropic = await loadAnthropicSdk();
     const client = isAnthropicSubscriptionToken(args.apiKey)
       ? new Anthropic({
           apiKey: null,
@@ -1291,6 +1292,7 @@ export class VisionTools {
     mimeType: string;
     maxTokens: number;
   }): Promise<string> {
+    const { BedrockRuntimeClient, ConverseCommand } = await loadBedrockRuntimeSdk();
     const bedrock = args.settings.bedrock;
     const clientConfig: BedrockRuntimeClientConfig = {
       region: bedrock?.region || "us-east-1",
@@ -1303,6 +1305,7 @@ export class VisionTools {
         ...(bedrock.sessionToken && { sessionToken: bedrock.sessionToken }),
       };
     } else if (bedrock?.profile) {
+      const { fromIni } = await loadAwsIniCredentialProvider();
       clientConfig.credentials = fromIni({ profile: bedrock.profile });
     }
 

@@ -387,7 +387,8 @@ describe("BedrockProvider", () => {
           outputTokens: 20,
         },
       });
-    provider.client.send = send;
+    // The runtime client is created on first use.
+    (await provider.getRuntime()).client.send = send;
 
     await provider.createMessage({
       model: "anthropic.claude-haiku-4-5-20250514",

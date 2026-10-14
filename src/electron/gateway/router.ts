@@ -41,7 +41,7 @@ import {
   ChannelConfig,
   CHANNEL_TYPES,
 } from "./channels/types";
-import { TelegramAdapter } from "./channels/telegram";
+import { isTelegramAdapter } from "./channels/lazy-adapters";
 import { SecurityManager } from "./security";
 import { SessionManager } from "./session";
 import { Channel } from "../database/repositories";
@@ -1339,7 +1339,7 @@ export class MessageRouter {
       });
 
       // Ensure draft-streaming state is available even after restarts.
-      if (adapter instanceof TelegramAdapter) {
+      if (isTelegramAdapter(adapter)) {
         await adapter.startDraftStream(session.chatId);
       }
     }
@@ -4635,7 +4635,7 @@ export class MessageRouter {
     });
 
     // Start draft streaming for real-time response preview (Telegram).
-    if (adapter instanceof TelegramAdapter) {
+    if (isTelegramAdapter(adapter)) {
       await adapter.startDraftStream(message.chatId);
     }
 
@@ -7038,7 +7038,7 @@ export class MessageRouter {
     }
 
     // Start draft streaming for real-time response preview (Telegram)
-    if (adapter instanceof TelegramAdapter) {
+    if (isTelegramAdapter(adapter)) {
       await adapter.startDraftStream(message.chatId);
     }
 
@@ -7139,7 +7139,7 @@ export class MessageRouter {
       }
 
       // Use draft streaming for Telegram when streaming content.
-      if (isStreaming && pending.adapter instanceof TelegramAdapter) {
+      if (isStreaming && isTelegramAdapter(pending.adapter)) {
         this.telegramDraftStreamTouchedTasks.add(taskId);
         await pending.adapter.updateDraftStream(pending.chatId, preparedText);
         return;
@@ -7361,7 +7361,7 @@ export class MessageRouter {
       this.detachedTaskResponseIds.delete(taskId);
       return;
     }
-    if (!(pending.adapter instanceof TelegramAdapter)) return;
+    if (!isTelegramAdapter(pending.adapter)) return;
     if (!this.telegramDraftStreamTouchedTasks.has(taskId)) return;
 
     const trimmed = (finalText || "").trim();
@@ -7398,7 +7398,7 @@ export class MessageRouter {
   async cancelDraftStreamForTask(taskId: string): Promise<void> {
     const pending = this.pendingTaskResponses.get(taskId);
     if (!pending) return;
-    if (!(pending.adapter instanceof TelegramAdapter)) return;
+    if (!isTelegramAdapter(pending.adapter)) return;
     if (!this.telegramDraftStreamTouchedTasks.has(taskId)) return;
 
     try {
@@ -7486,7 +7486,7 @@ export class MessageRouter {
           : message;
 
       // Finalize draft stream if using Telegram
-      if (pending.adapter instanceof TelegramAdapter) {
+      if (isTelegramAdapter(pending.adapter)) {
         // Finalize the streaming draft with final message
         const finalizedMessageId = await pending.adapter.finalizeDraftStream(
           pending.chatId,
@@ -7728,7 +7728,7 @@ export class MessageRouter {
 
     try {
       // Cancel any draft stream
-      if (pending.adapter instanceof TelegramAdapter) {
+      if (isTelegramAdapter(pending.adapter)) {
         await pending.adapter.cancelDraftStream(pending.chatId);
         this.telegramDraftStreamTouchedTasks.delete(taskId);
 
@@ -7787,7 +7787,7 @@ export class MessageRouter {
 
     try {
       // Cancel any draft stream
-      if (pending.adapter instanceof TelegramAdapter) {
+      if (isTelegramAdapter(pending.adapter)) {
         await pending.adapter.cancelDraftStream(pending.chatId);
         this.telegramDraftStreamTouchedTasks.delete(taskId);
 
@@ -8072,7 +8072,7 @@ export class MessageRouter {
     });
 
     // Enable Telegram draft streaming for the follow-up thread.
-    if (opts.adapter instanceof TelegramAdapter) {
+    if (isTelegramAdapter(opts.adapter)) {
       try {
         await opts.adapter.startDraftStream(opts.chatId);
       } catch {

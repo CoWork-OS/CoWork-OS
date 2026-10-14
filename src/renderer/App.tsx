@@ -249,18 +249,25 @@ import {
 } from "./utils/selected-task-restoration";
 import { resolveComposerDraftOwnerContext } from "./utils/composer-draft-owner";
 import { taskSurfaceStore } from "./state/task-surface-store";
+import { prefetchWhenIdle } from "./utils/idle-prefetch";
+import { preloadableLazy } from "./utils/preloadable-lazy";
+import {
+  LazyHighlightedCodeBlock,
+  LazyHighlightedCodePreview,
+  LazyMarkdownRenderer,
+} from "./components/lazy-renderers";
 import { serializeTaskSurfaceKey, type TaskSurfaceKey } from "./state/task-view-cache";
 
-const Settings = lazy(() =>
-  import("./components/Settings").then((module) => ({ default: module.Settings })),
+const Settings = preloadableLazy(() =>
+  import("./components/Settings").then((module) => module.Settings),
 );
 const mainContentModulePromise = import("./components/MainContent");
 void mainContentModulePromise.catch(() => {});
 const MainContent = lazy(() =>
   mainContentModulePromise.then((module) => ({ default: module.MainContent })),
 );
-const RightPanel = lazy(() =>
-  import("./components/RightPanel").then((module) => ({ default: module.RightPanel })),
+const RightPanel = preloadableLazy(() =>
+  import("./components/RightPanel").then((module) => module.RightPanel),
 );
 const SideChatPanel = lazy(() =>
   import("./components/SideChatPanel").then((module) => ({ default: module.SideChatPanel })),
@@ -306,22 +313,38 @@ const BrowserView = lazy(() =>
 const HomeDashboard = lazy(() =>
   import("./components/HomeDashboard").then((module) => ({ default: module.HomeDashboard })),
 );
-const WorkView = lazy(() =>
-  import("./components/work/WorkView").then((module) => ({ default: module.WorkView })),
+const WorkView = preloadableLazy(() =>
+  import("./components/work/WorkView").then((module) => module.WorkView),
 );
-const TeamView = lazy(() =>
-  import("./components/team/TeamView").then((module) => ({ default: module.TeamView })),
+const TeamView = preloadableLazy(() =>
+  import("./components/team/TeamView").then((module) => module.TeamView),
 );
-const AutomationStudioPanel = lazy(() => import("./components/AutomationStudioPanel"));
+const AutomationStudioPanel = preloadableLazy(() =>
+  import("./components/AutomationStudioPanel").then((module) => module.default),
+);
 const DevicesPanel = lazy(() =>
   import("./components/DevicesPanel").then((module) => ({ default: module.DevicesPanel })),
 );
-const InboxAgentPanel = lazy(() =>
-  import("./components/InboxAgentPanel").then((module) => ({ default: module.InboxAgentPanel })),
+const InboxAgentPanel = preloadableLazy(() =>
+  import("./components/InboxAgentPanel").then((module) => module.InboxAgentPanel),
 );
-const AgentsHubPanel = lazy(() =>
-  import("./components/AgentsHubPanel").then((module) => ({ default: module.AgentsHubPanel })),
+const AgentsHubPanel = preloadableLazy(() =>
+  import("./components/AgentsHubPanel").then((module) => module.AgentsHubPanel),
 );
+// Loaded while idle after startup, so a first open renders at once instead of suspending.
+const IDLE_PREFETCHED_SCREENS = [
+  LazyMarkdownRenderer.preload,
+  LazyHighlightedCodeBlock.preload,
+  RightPanel.preload,
+  Settings.preload,
+  InboxAgentPanel.preload,
+  AgentsHubPanel.preload,
+  AutomationStudioPanel.preload,
+  WorkView.preload,
+  TeamView.preload,
+  LazyHighlightedCodePreview.preload,
+];
+const IDLE_PREFETCH_DELAY_MS = 2_000;
 const MissionControlPanel = lazy(() =>
   import("./components/mission-control").then((module) => ({
     default: module.MissionControlPanel,
@@ -3296,6 +3319,12 @@ export function App() {
     }
   }, [isInitialTaskListLoading, leftSidebarCollapsed, markStartupOnce, tasks.length]);
 
+  const startupTaskListLoaded = !isInitialTaskListLoading;
+  useEffect(() => {
+    if (!startupTaskListLoaded) return;
+    return prefetchWhenIdle(IDLE_PREFETCHED_SCREENS, { delayMs: IDLE_PREFETCH_DELAY_MS });
+  }, [startupTaskListLoaded]);
+
   useEffect(() => {
     if (
       sidebarFirstPaintMarkedRef.current ||
@@ -5305,9 +5334,10 @@ export function App() {
           switchId: taskSwitchIdByTaskIdRef.current.get(requestedTaskId),
           eventCount: historicalEvents.length,
           payloadBytes: timelinePage?.summary.payloadBytes,
-          serializedPayloadBytes: timelinePage
-            ? undefined
-            : new Blob([JSON.stringify(historicalEvents)]).size,
+          serializedPayloadBytes:
+            timelinePage || !rendererPerfLoggingEnabled
+              ? undefined
+              : new Blob([JSON.stringify(historicalEvents)]).size,
           truncatedEventCount: timelinePage?.summary.truncatedEventCount,
           hasMoreHistory: timelinePage?.hasMoreHistory,
           receiveMs: Number(receiveMs.toFixed(1)),

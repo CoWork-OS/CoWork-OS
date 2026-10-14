@@ -7,7 +7,8 @@
  * Every parser stops keeping rows at the limit before building anything large: a hostile
  * file in the workspace must not be able to exhaust the main process.
  */
-import ExcelJS from "exceljs";
+import type ExcelJS from "exceljs";
+import { loadExcelJS } from "../utils/exceljs-loader";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { Readable } from "stream";
@@ -155,7 +156,7 @@ async function tableFromWorkbook(
   file: string,
   rowLimit: number,
 ): Promise<AnswerDataTable> {
-  const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from(buffer), {
+  const reader = new (await loadExcelJS()).stream.xlsx.WorkbookReader(Readable.from(buffer), {
     sharedStrings: "cache",
     hyperlinks: "ignore",
     styles: "ignore",

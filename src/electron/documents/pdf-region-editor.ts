@@ -1,6 +1,5 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { PDFDocument, rgb } from "pdf-lib";
 import { LOCAL_PDF_PARSE_LIMITS, extractPdfPageTextBounded } from "../utils/bounded-pdf-parser";
 
 import { selectPdfEditFont } from "./pdf-edit-font";
@@ -205,6 +204,8 @@ async function extractSelectionText(
 }
 
 export async function editPdfRegion(input: PdfRegionEditInput): Promise<void> {
+  // pdf-lib loads on first use rather than at app start.
+  const { PDFDocument, rgb } = await import("pdf-lib");
   await fs.mkdir(path.dirname(input.destPath), { recursive: true });
   const sourceBytes = await fs.readFile(input.sourcePath);
   const pdfBytes = await PDFDocument.load(sourceBytes);

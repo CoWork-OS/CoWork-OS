@@ -3,7 +3,6 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { promisify } from "util";
-import mammoth from "mammoth";
 import { canEditDocumentInApp, getDocumentFormatLabel } from "../../shared/document-formats";
 import type { DocumentPreview } from "../../shared/document-preview";
 import { parseDocxBlocksFromBuffer } from "../documents/docx-blocks";
@@ -69,6 +68,8 @@ function extractOdtTextFromXml(xml: string): string {
 
 async function buildDocxLikePreview(filePath: string, format: string): Promise<DocumentPreview> {
   const buffer = await readDocumentArchiveBuffer(filePath);
+  // mammoth loads on first preview rather than at app start.
+  const mammoth = (await import("mammoth")).default;
   const htmlResult = await mammoth.convertToHtml({ buffer });
   const textResult = await mammoth.extractRawText({ buffer });
   let blocks: DocumentPreview["blocks"];

@@ -34,13 +34,16 @@ import {
   WhatsAppCloudConfig,
   TwilioSmsConfig,
 } from "./channels/types";
-import { createTelegramAdapter } from "./channels/telegram";
-import { createDiscordAdapter } from "./channels/discord";
-import { createSlackAdapter } from "./channels/slack";
-import { createWhatsAppAdapter } from "./channels/whatsapp";
+import {
+  createDiscordAdapter,
+  createSlackAdapter,
+  createTeamsAdapter,
+  createTelegramAdapter,
+  createWhatsAppAdapter,
+  loadChannelAdapterModule,
+} from "./channels/lazy-adapters";
 import { createImessageAdapter } from "./channels/imessage";
 import { createSignalAdapter } from "./channels/signal";
-import { createTeamsAdapter } from "./channels/teams";
 import { createGoogleChatAdapter } from "./channels/google-chat";
 import { createFeishuAdapter } from "./channels/feishu";
 import { createWeComAdapter } from "./channels/wecom";
@@ -1537,12 +1540,13 @@ export class ChannelRegistry extends EventEmitter {
   /**
    * Create a channel adapter instance
    */
-  createAdapter(type: string, config: ChannelConfig): ChannelAdapter {
+  async createAdapter(type: string, config: ChannelConfig): Promise<ChannelAdapter> {
     const entry = this.channels.get(type);
     if (!entry) {
       throw new Error(`Unknown channel type: ${type}`);
     }
 
+    await loadChannelAdapterModule(type);
     return entry.factory(config);
   }
 

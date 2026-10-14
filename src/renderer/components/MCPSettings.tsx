@@ -1429,11 +1429,24 @@ export function MCPSettings({
 
                         {config?.auth?.oauth && !isBrowserHost && (
                           <button
-                            className="button-small button-primary"
+                            className={`button-small ${
+                              serverStatus.status === "connected"
+                                ? "button-secondary"
+                                : "button-primary"
+                            }`}
                             onClick={() => handleAuthorizeServer(serverStatus.id)}
                             disabled={authorizingServers.has(serverStatus.id) || !config?.enabled}
+                            title={
+                              serverStatus.status === "connected"
+                                ? "Sign in again, for example after the server's tools change"
+                                : undefined
+                            }
                           >
-                            {authorizingServers.has(serverStatus.id) ? "Signing in..." : "Sign in"}
+                            {authorizingServers.has(serverStatus.id)
+                              ? "Signing in..."
+                              : serverStatus.status === "connected"
+                                ? "Sign in again"
+                                : "Sign in"}
                           </button>
                         )}
 

@@ -405,10 +405,10 @@ export function WorkdayAgentSetupModal({
                 </div>
                 <div className="settings-field">
                   <label htmlFor="workday-agent-description">Description</label>
-                  <input
+                  <textarea
                     id="workday-agent-description"
-                    type="text"
-                    className="settings-input"
+                    className="settings-input workday-agent-textarea"
+                    rows={2}
                     value={draft.description}
                     onChange={(e) => updateDraft({ ...draft, description: e.target.value })}
                   />
@@ -431,7 +431,7 @@ export function WorkdayAgentSetupModal({
                     <div key={skill.id} className="mcp-tool-item">
                       <div className="workday-agent-row">
                         <div>
-                          <div className="mcp-tool-name">{skill.name}</div>
+                          <div className="workday-agent-skill-name">{skill.name}</div>
                           <div className="workday-agent-wid">{skill.id}</div>
                         </div>
                         <div className="workday-agent-row-actions">
@@ -469,7 +469,7 @@ export function WorkdayAgentSetupModal({
                         <ul className="workday-agent-tools">
                           {skill.tools.map((tool) => (
                             <li key={tool.wid} className="workday-agent-row">
-                              <div>
+                              <div className="workday-agent-tool">
                                 <span className="workday-agent-tool-name">{tool.toolName}</span>
                                 <span className="workday-agent-wid">{tool.wid}</span>
                               </div>
@@ -619,7 +619,7 @@ export function WorkdayAgentSetupModal({
                         ?.tools.some((tool) => tool.wid === resource.wid);
                       return (
                         <li key={resource.wid} className="workday-agent-row">
-                          <div>
+                          <div className="workday-agent-tool">
                             <span className="workday-agent-tool-name">{resource.toolName}</span>
                             <span className="workday-agent-wid">{resource.wid}</span>
                           </div>

@@ -10624,6 +10624,52 @@ a,
   max-width: 720px;
 }
 
+/* Fields fill the modal; the per-skill mode select stays compact. */
+.workday-agent-modal .settings-input,
+.workday-agent-modal .settings-select {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.workday-agent-modal .workday-agent-row-actions .settings-select {
+  width: auto;
+  min-width: 120px;
+}
+
+.workday-agent-modal .settings-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.workday-agent-textarea {
+  resize: vertical;
+  min-height: 56px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.workday-agent-skill-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.workday-agent-tool {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.workday-agent-row .button-small {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .workday-agent-section {
   padding: 16px 0;
   border-top: 1px solid var(--color-border);
@@ -10681,7 +10727,6 @@ a,
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--color-text);
-  margin-right: 8px;
 }
 
 .workday-agent-wid {

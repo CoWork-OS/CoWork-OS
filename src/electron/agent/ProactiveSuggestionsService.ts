@@ -1,3 +1,4 @@
+import { mapBounded, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import { v4 as uuidv4 } from "uuid";
 import { MemoryService } from "../memory/MemoryService";
 import { PlaybookService } from "../memory/PlaybookService";
@@ -303,7 +304,9 @@ export class ProactiveSuggestionsService {
       const searchWorkspaceIds =
         Array.isArray(workspaceIds) && workspaceIds.length > 0 ? workspaceIds : [workspaceId];
       const results = (
-        await Promise.all(searchWorkspaceIds.map((id) => this.readStoredSuggestions(id)))
+        await mapBounded(searchWorkspaceIds, WORKSPACE_READ_CONCURRENCY, (id) =>
+          this.readStoredSuggestions(id),
+        )
       ).flat();
       const now = Date.now();
       const suggestions: ProactiveSuggestion[] = [];
@@ -914,7 +917,9 @@ export class ProactiveSuggestionsService {
     try {
       const store = await getProactiveSuggestionStore();
       return store ? await action(store) : null;
-    } catch {
+    } catch (error) {
+      // Still a no-op for callers, but an overloaded or failing store must be visible.
+      console.warn("[ProactiveSuggestions] Suggestion store request failed:", error);
       return null;
     }
   }

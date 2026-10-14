@@ -2,6 +2,7 @@
  * Adapters from the app's stores to the attention queue's sources. Kept apart from the IPC
  * wiring so each one can be tested with a plain fake.
  */
+import { mapBoundedSettled, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import type { AttentionCommitment, AttentionFlowStep } from "../../shared/attention";
 import type {
   RoutineWorkflowRunRecord,
@@ -114,13 +115,11 @@ export async function listMemoryChangesAcross(
 ): Promise<MemoryChangeEntry[]> {
   const saved = suggestionWorkspaces(workspaces);
   const since = now - MEMORY_CHANGE_WINDOW_MS;
-  const results = await Promise.allSettled(
-    saved.map(async (workspace) =>
-      (await recentSince(workspace.id, since)).map((change) => ({
-        workspaceId: workspace.id,
-        change,
-      })),
-    ),
+  const results = await mapBoundedSettled(saved, WORKSPACE_READ_CONCURRENCY, async (workspace) =>
+    (await recentSince(workspace.id, since)).map((change) => ({
+      workspaceId: workspace.id,
+      change,
+    })),
   );
   const read = results.filter(
     (result): result is PromiseFulfilledResult<MemoryChangeEntry[]> =>

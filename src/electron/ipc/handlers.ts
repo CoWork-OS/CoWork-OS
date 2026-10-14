@@ -1,3 +1,4 @@
+import { mapBounded, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
@@ -10527,8 +10528,10 @@ export async function setupIpcHandlers(
     return service.generateBriefing(normalizedWorkspaceId, undefined, {
       deps: {
         getRecentTasks: async (_workspaceId, sinceMs) => {
-          const perWorkspace = await Promise.all(
-            briefingWorkspaceIds.map(async (id) =>
+          const perWorkspace = await mapBounded(
+            briefingWorkspaceIds,
+            WORKSPACE_READ_CONCURRENCY,
+            async (id) =>
               (
                 (await taskRepo.findByCreatedAtRange({
                   startMs: sinceMs,
@@ -10540,7 +10543,6 @@ export async function setupIpcHandlers(
                 ...task,
                 workspaceName: labelForWorkspace(id),
               })),
-            ),
           );
           const tasks = perWorkspace.flat();
           return tasks.sort((a: Any, b: Any) => (b.createdAt || 0) - (a.createdAt || 0));

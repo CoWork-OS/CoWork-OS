@@ -26,6 +26,12 @@ export interface MCPAuthConfig {
   username?: string;
   password?: string; // Encrypted when stored
   headerName?: string; // Custom header name for API key auth
+  /**
+   * SSE only, for legacy servers that cannot read headers: also send the token as a
+   * `token`/`api_key` query parameter on the stream request. Off by default because
+   * URLs are recorded by proxies and server logs.
+   */
+  sendTokenInQuery?: boolean;
 
   // Optional OAuth refresh metadata. The access token still travels as a
   // bearer token; these fields let HTTP transports renew it when needed.

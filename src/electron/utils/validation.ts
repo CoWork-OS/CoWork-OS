@@ -2606,6 +2606,7 @@ export const MCPAuthConfigSchema = z
     username: z.string().max(500).optional(),
     password: z.string().max(500).optional(),
     headerName: z.string().max(100).optional(),
+    sendTokenInQuery: z.boolean().optional(),
     refreshToken: z.string().max(MAX_OAUTH_TOKEN_LENGTH).optional(),
     clientId: z.string().max(500).optional(),
     clientSecret: z.string().max(2000).optional(),

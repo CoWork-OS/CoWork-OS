@@ -32,6 +32,7 @@ For delegate sign-in, register this redirect URI with the provider exactly as sh
 - **Rate limits:** a 429 response is retried after `Retry-After` (at most 30 s, at most two retries). A 503 is retried for discovery and listing, but a tool call is never resent after a 503, because the server may already have acted.
 - **Large catalogs:** a server with more than 25 tools (Workday has 400+) doesn't add every schema to every request. Its tools load on demand through `tool_search`, and `tool_search` lists such servers so the agent knows to search by business task.
 - **Tool names across servers:** a tool name offered by one server keeps its plain name (`mcp_<tool>`). A name that several connected servers offer is namespaced on every one of them (`mcp_<server>__<tool>`), so calls never depend on which server connected first, and calling the bare name returns the namespaced options. Per-tool approval settings stay keyed by the server's own tool name.
+- **Legacy SSE servers:** credentials are sent as `Authorization` or API-key headers on the event stream and on every message, never in the URL. A redirect is followed only within the configured origin. A server that can only read a query token can opt in with `auth.sendTokenInQuery`; this applies to the stream request only and is off by default, because proxies and server logs record URLs.
 - **Write approvals:** new remote OAuth servers default to running read-only tools without prompts and asking before any tool that can change data.
 
 ## Headless use

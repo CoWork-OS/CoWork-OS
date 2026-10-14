@@ -22,7 +22,7 @@ import type {
   BotResponsibilitySave,
   BotResponsibilityRevise,
 } from "../shared/bot-responsibility";
-import type { BotWorkQuery, BotWorkPage } from "../shared/types";
+import type { BotWorkQuery, BotWorkPage, RemoteOAuthServerRequest } from "../shared/types";
 import * as path from "path";
 import { contextBridge, ipcRenderer } from "electron";
 import * as fs from "fs";
@@ -4271,6 +4271,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     loginHint?: string;
     prompt?: "select_account" | "consent";
   }) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, payload),
+  addRemoteOAuthMCPServer: (payload: RemoteOAuthServerRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_ADD_REMOTE_OAUTH_SERVER, payload),
+  discoverMCPOAuth: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_DISCOVER, url),
+  authorizeMCPServer: (serverId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_AUTHORIZE, serverId) as Promise<{
+      expiresAt?: number;
+      grant: "authorization_code" | "jwt_bearer";
+    }>,
 
   // MCP Status change event listener
   onMCPStatusChange: (callback: (status: Any[]) => void) => {
@@ -8284,6 +8292,19 @@ export interface ElectronAPI {
     workspaces?: Array<{ id: string; name: string }>;
     error?: string;
   }>;
+  addRemoteOAuthMCPServer: (
+    payload: RemoteOAuthServerRequest,
+  ) => Promise<{ id: string; name: string }>;
+  discoverMCPOAuth: (url: string) => Promise<{
+    authorizationUrl?: string;
+    tokenUrl?: string;
+    scopes?: string[];
+    resource?: string;
+    issuer?: string;
+  }>;
+  authorizeMCPServer: (
+    serverId: string,
+  ) => Promise<{ expiresAt?: number; grant: "authorization_code" | "jwt_bearer" }>;
   startConnectorOAuth: (payload: {
     provider:
       | "box"

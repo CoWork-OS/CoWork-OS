@@ -309,6 +309,56 @@ async function assertResearcherDispatchBoundary(task: Any): Promise<void> {
 }
 
 describe("ToolRegistry tool catalog versioning", () => {
+  it("loads a large MCP server's tools through tool_search instead of every request", () => {
+    const previous = {
+      tools: mockMcpState.tools,
+      servers: mockMcpSettings.servers,
+      version: mockMcpState.version,
+    };
+    mockMcpState.version = 77;
+    mockMcpSettings.servers = [
+      { id: "workday", name: "Workday", enabled: true },
+      { id: "small", name: "Notes", enabled: true },
+    ];
+    mockMcpState.tools = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        name: `wd_tool_${i}`,
+        description: i === 7 ? "Returns supplier invoices awaiting approval" : `Workday tool ${i}`,
+        inputSchema: { type: "object", properties: {} },
+        serverId: "workday",
+      })),
+      {
+        name: "notes_list",
+        description: "List notes",
+        inputSchema: { type: "object" },
+        serverId: "small",
+      },
+    ];
+    try {
+      const registry = new ToolRegistry(createWorkspace() as never, createDaemon(), "task");
+      const tools = registry.getTools();
+      const workday = tools.find((tool) => tool.name === "mcp_wd_tool_7");
+      expect(workday?.runtime).toMatchObject({ deferLoad: true, alwaysExpose: false });
+      expect(tools.find((tool) => tool.name === "mcp_notes_list")?.runtime).toMatchObject({
+        deferLoad: false,
+        alwaysExpose: true,
+      });
+      expect(tools.find((tool) => tool.name === "tool_search")?.description).toContain(
+        "Workday (40 tools)",
+      );
+      expect(
+        registry.getDeferredTools().filter((tool) => tool.name.startsWith("mcp_wd_")),
+      ).toHaveLength(40);
+      expect(registry.searchDeferredTools("supplier invoices").matches[0]?.name).toBe(
+        "mcp_wd_tool_7",
+      );
+    } finally {
+      mockMcpState.tools = previous.tools;
+      mockMcpSettings.servers = previous.servers;
+      mockMcpState.version = previous.version;
+    }
+  });
+
   it("hides and refuses task-restricted scripting tools at execution", async () => {
     const platform = process.platform;
     Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });

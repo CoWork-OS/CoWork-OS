@@ -7646,6 +7646,26 @@ export interface ProactiveSuggestion {
 }
 
 // IPC Channel names
+/** Adds a remote MCP server that signs in with OAuth 2.1 (Workday preset or custom). */
+export interface RemoteOAuthServerRequest {
+  name: string;
+  kind: "workday" | "custom";
+  region?: string;
+  tenant?: string;
+  url?: string;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  grant: "authorization_code" | "jwt_bearer";
+  clientId: string;
+  clientSecret?: string;
+  redirectUri?: string;
+  scopes?: string[];
+  resource?: string;
+  jwtSubject?: string;
+  jwtKeyId?: string;
+  privateKey?: string;
+}
+
 export const IPC_CHANNELS = {
   // Task operations
   TASK_CREATE: "task:create",
@@ -8418,6 +8438,9 @@ export const IPC_CHANNELS = {
 
   // MCP Connector OAuth
   MCP_CONNECTOR_OAUTH_START: "mcp:connectorOAuthStart",
+  MCP_ADD_REMOTE_OAUTH_SERVER: "mcp:addRemoteOAuthServer",
+  MCP_OAUTH_AUTHORIZE: "mcp:oauthAuthorize",
+  MCP_OAUTH_DISCOVER: "mcp:oauthDiscover",
 
   // MCP Host
   MCP_HOST_START: "mcp:hostStart",

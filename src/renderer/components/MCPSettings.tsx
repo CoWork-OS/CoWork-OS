@@ -39,6 +39,7 @@ interface MCPServerConfig {
     clientSecret?: string;
     tokenUrl?: string;
     expiresAt?: number;
+    oauth?: { grant: "authorization_code" | "jwt_bearer"; preset?: { kind: "workday" } };
   };
   connectionTimeout?: number;
   requestTimeout?: number;
@@ -166,6 +167,27 @@ export function MCPSettings({
   const [newServerCommand, setNewServerCommand] = useState("");
   const [newServerArgs, setNewServerArgs] = useState("");
   const [newServerEnv, setNewServerEnv] = useState("");
+  // Remote servers that sign in with OAuth 2.1 (Workday Agent-Ready Tools or any compliant server)
+  const [addMode, setAddMode] = useState<"local" | "remote">("local");
+  const [remote, setRemote] = useState({
+    kind: "workday" as "workday" | "custom",
+    name: "Workday",
+    region: "us",
+    tenant: "",
+    url: "",
+    authorizationUrl: "",
+    tokenUrl: "",
+    grant: "authorization_code" as "authorization_code" | "jwt_bearer",
+    clientId: "",
+    clientSecret: "",
+    redirectUri: "",
+    scopes: "",
+    jwtSubject: "",
+    privateKey: "",
+  });
+  const [authorizingServer, setAuthorizingServer] = useState<string | null>(null);
+  const updateRemote = (patch: Partial<typeof remote>) =>
+    setRemote((prev) => ({ ...prev, ...patch }));
   const [showAddTunnelForm, setShowAddTunnelForm] = useState(false);
   const [newTunnelName, setNewTunnelName] = useState("CoWork tools");
   const [newTunnelRelayUrl, setNewTunnelRelayUrl] = useState("http://127.0.0.1:8787");
@@ -409,6 +431,66 @@ export function MCPSettings({
     } catch (error: Any) {
       console.error("Failed to remove server:", error);
       alert(`Failed to remove server: ${error.message}`);
+    }
+  };
+
+  const handleAuthorizeServer = async (serverId: string) => {
+    try {
+      setAuthorizingServer(serverId);
+      setConnectionErrors((prev) => {
+        const { [serverId]: _, ...rest } = prev;
+        return rest;
+      });
+      await invokeMcpApi("authorizeMCPServer", serverId);
+      await loadData();
+    } catch (error: Any) {
+      setConnectionErrors((prev) => ({ ...prev, [serverId]: error.message || "Sign-in failed" }));
+    } finally {
+      setAuthorizingServer(null);
+    }
+  };
+
+  const remoteFormReady =
+    Boolean(remote.name.trim() && remote.clientId.trim()) &&
+    (remote.kind === "workday"
+      ? Boolean(remote.region.trim() && remote.tenant.trim())
+      : Boolean(remote.url.trim() && remote.tokenUrl.trim()) &&
+        (remote.grant === "jwt_bearer" || Boolean(remote.authorizationUrl.trim()))) &&
+    (remote.grant === "authorization_code" ||
+      Boolean(remote.jwtSubject.trim() && remote.privateKey.trim()));
+
+  const handleAddRemoteServer = async () => {
+    if (!remoteFormReady) return;
+    const optional = (value: string) => (value.trim() ? value.trim() : undefined);
+    try {
+      setSaving(true);
+      const server = await invokeMcpApi<{ id: string }>("addRemoteOAuthMCPServer", {
+        name: remote.name.trim(),
+        kind: remote.kind,
+        ...(remote.kind === "workday"
+          ? { region: remote.region.trim(), tenant: remote.tenant.trim() }
+          : {
+              url: remote.url.trim(),
+              tokenUrl: remote.tokenUrl.trim(),
+              authorizationUrl: optional(remote.authorizationUrl),
+            }),
+        grant: remote.grant,
+        clientId: remote.clientId.trim(),
+        clientSecret: optional(remote.clientSecret),
+        redirectUri: optional(remote.redirectUri),
+        scopes: remote.scopes.trim() ? remote.scopes.trim().split(/\s+/) : undefined,
+        ...(remote.grant === "jwt_bearer"
+          ? { jwtSubject: remote.jwtSubject.trim(), privateKey: remote.privateKey }
+          : {}),
+      });
+      setRemote((prev) => ({ ...prev, clientSecret: "", privateKey: "" }));
+      setShowAddForm(false);
+      await loadData();
+      await handleAuthorizeServer(server.id);
+    } catch (error: Any) {
+      alert(`Failed to add server: ${error.message}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -832,58 +914,283 @@ export function MCPSettings({
             {!isBrowserHost && showAddForm && (
               <div className="mcp-add-form">
                 <h4>Add New MCP Server</h4>
-                <div className="settings-field">
-                  <label>Server Name</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    placeholder="e.g., Filesystem Server"
-                    value={newServerName}
-                    onChange={(e) => setNewServerName(e.target.value)}
-                  />
+                <div className="mcp-add-mode" role="radiogroup" aria-label="Server type">
+                  {(["local", "remote"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={addMode === mode}
+                      className={`button-small ${addMode === mode ? "button-primary" : "button-secondary"}`}
+                      onClick={() => setAddMode(mode)}
+                    >
+                      {mode === "local" ? "Local command" : "Remote (OAuth)"}
+                    </button>
+                  ))}
                 </div>
-                <div className="settings-field">
-                  <label>Command</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    placeholder="e.g., npx -y @modelcontextprotocol/server-filesystem"
-                    value={newServerCommand}
-                    onChange={(e) => setNewServerCommand(e.target.value)}
-                  />
-                  <p className="settings-hint">The command to start the MCP server</p>
-                </div>
-                <div className="settings-field">
-                  <label>Arguments (space-separated)</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    placeholder="e.g., /Users/me/Documents"
-                    value={newServerArgs}
-                    onChange={(e) => setNewServerArgs(e.target.value)}
-                  />
-                </div>
-                <div className="settings-field">
-                  <label>Environment Variables (KEY=value, one per line)</label>
-                  <textarea
-                    className="settings-textarea"
-                    placeholder="API_KEY=xxx&#10;DEBUG=true"
-                    value={newServerEnv}
-                    onChange={(e) => setNewServerEnv(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-                <div className="mcp-form-actions">
-                  <button
-                    className="button-primary"
-                    onClick={handleAddServer}
-                    disabled={
-                      !newServerName || !newServerCommand || saving || mcpSettingsUnreadable
-                    }
-                  >
-                    {saving ? "Adding..." : "Add Server"}
-                  </button>
-                </div>
+                {addMode === "remote" ? (
+                  <>
+                    <div className="settings-field">
+                      <label>Provider</label>
+                      <select
+                        className="settings-select"
+                        value={remote.kind}
+                        onChange={(e) =>
+                          updateRemote({
+                            kind: e.target.value as "workday" | "custom",
+                            name: e.target.value === "workday" ? "Workday" : remote.name,
+                          })
+                        }
+                      >
+                        <option value="workday">Workday Agent-Ready Tools</option>
+                        <option value="custom">Other OAuth 2.1 MCP server</option>
+                      </select>
+                    </div>
+                    <div className="settings-field">
+                      <label>Server Name</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        value={remote.name}
+                        onChange={(e) => updateRemote({ name: e.target.value })}
+                      />
+                    </div>
+                    {remote.kind === "workday" ? (
+                      <>
+                        <div className="settings-field">
+                          <label>Agent gateway region</label>
+                          <input
+                            type="text"
+                            className="settings-input"
+                            placeholder="us"
+                            value={remote.region}
+                            onChange={(e) => updateRemote({ region: e.target.value })}
+                          />
+                          <p className="settings-hint">
+                            The subdomain of your agent gateway, e.g. us for us.agent.workday.com.
+                          </p>
+                        </div>
+                        <div className="settings-field">
+                          <label>Tenant name</label>
+                          <input
+                            type="text"
+                            className="settings-input"
+                            placeholder="e.g. acme_dev1"
+                            value={remote.tenant}
+                            onChange={(e) => updateRemote({ tenant: e.target.value })}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="settings-field">
+                          <label>MCP URL</label>
+                          <input
+                            type="url"
+                            className="settings-input"
+                            placeholder="https://example.com/mcp"
+                            value={remote.url}
+                            onChange={(e) => updateRemote({ url: e.target.value })}
+                          />
+                        </div>
+                        <div className="settings-field">
+                          <label>Authorization URL</label>
+                          <input
+                            type="url"
+                            className="settings-input"
+                            value={remote.authorizationUrl}
+                            onChange={(e) => updateRemote({ authorizationUrl: e.target.value })}
+                          />
+                        </div>
+                        <div className="settings-field">
+                          <label>Token URL</label>
+                          <input
+                            type="url"
+                            className="settings-input"
+                            value={remote.tokenUrl}
+                            onChange={(e) => updateRemote({ tokenUrl: e.target.value })}
+                          />
+                          <button
+                            type="button"
+                            className="button-small button-secondary"
+                            disabled={!remote.url.trim()}
+                            onClick={async () => {
+                              try {
+                                const found = await invokeMcpApi<{
+                                  authorizationUrl?: string;
+                                  tokenUrl?: string;
+                                  scopes?: string[];
+                                }>("discoverMCPOAuth", remote.url.trim());
+                                if (!found.tokenUrl)
+                                  alert("The server publishes no OAuth metadata.");
+                                updateRemote({
+                                  authorizationUrl:
+                                    found.authorizationUrl || remote.authorizationUrl,
+                                  tokenUrl: found.tokenUrl || remote.tokenUrl,
+                                  scopes: found.scopes?.join(" ") || remote.scopes,
+                                });
+                              } catch (error: Any) {
+                                alert(`Discovery failed: ${error.message}`);
+                              }
+                            }}
+                          >
+                            Discover from server
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    <div className="settings-field">
+                      <label>Identity</label>
+                      <select
+                        className="settings-select"
+                        value={remote.grant}
+                        onChange={(e) =>
+                          updateRemote({
+                            grant: e.target.value as "authorization_code" | "jwt_bearer",
+                          })
+                        }
+                      >
+                        <option value="authorization_code">
+                          Sign in as a person (delegate; acts with that user's permissions)
+                        </option>
+                        <option value="jwt_bearer">
+                          Agent key (ambient; JWT bearer, runs fully headless)
+                        </option>
+                      </select>
+                    </div>
+                    <div className="settings-field">
+                      <label>Client ID</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        value={remote.clientId}
+                        onChange={(e) => updateRemote({ clientId: e.target.value })}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label>Client secret (optional for public clients)</label>
+                      <input
+                        type="password"
+                        className="settings-input"
+                        autoComplete="off"
+                        value={remote.clientSecret}
+                        onChange={(e) => updateRemote({ clientSecret: e.target.value })}
+                      />
+                    </div>
+                    {remote.grant === "authorization_code" ? (
+                      <div className="settings-field">
+                        <label>Redirect URI</label>
+                        <input
+                          type="url"
+                          className="settings-input"
+                          placeholder="http://127.0.0.1:18768/oauth/callback"
+                          value={remote.redirectUri}
+                          onChange={(e) => updateRemote({ redirectUri: e.target.value })}
+                        />
+                        <p className="settings-hint">
+                          Register exactly this address with the provider. Leave empty for
+                          http://127.0.0.1:18768/oauth/callback.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="settings-field">
+                          <label>Agent user (JWT subject)</label>
+                          <input
+                            type="text"
+                            className="settings-input"
+                            value={remote.jwtSubject}
+                            onChange={(e) => updateRemote({ jwtSubject: e.target.value })}
+                          />
+                        </div>
+                        <div className="settings-field">
+                          <label>Private key (PEM)</label>
+                          <textarea
+                            className="settings-textarea"
+                            rows={4}
+                            spellCheck={false}
+                            value={remote.privateKey}
+                            onChange={(e) => updateRemote({ privateKey: e.target.value })}
+                          />
+                          <p className="settings-hint">Stored encrypted on this device.</p>
+                        </div>
+                      </>
+                    )}
+                    <div className="settings-field">
+                      <label>Scopes (space-separated, optional)</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        value={remote.scopes}
+                        onChange={(e) => updateRemote({ scopes: e.target.value })}
+                      />
+                    </div>
+                    <div className="mcp-form-actions">
+                      <button
+                        className="button-primary"
+                        onClick={handleAddRemoteServer}
+                        disabled={!remoteFormReady || saving || mcpSettingsUnreadable}
+                      >
+                        {saving ? "Adding..." : "Add and sign in"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="settings-field">
+                      <label>Server Name</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="e.g., Filesystem Server"
+                        value={newServerName}
+                        onChange={(e) => setNewServerName(e.target.value)}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label>Command</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="e.g., npx -y @modelcontextprotocol/server-filesystem"
+                        value={newServerCommand}
+                        onChange={(e) => setNewServerCommand(e.target.value)}
+                      />
+                      <p className="settings-hint">The command to start the MCP server</p>
+                    </div>
+                    <div className="settings-field">
+                      <label>Arguments (space-separated)</label>
+                      <input
+                        type="text"
+                        className="settings-input"
+                        placeholder="e.g., /Users/me/Documents"
+                        value={newServerArgs}
+                        onChange={(e) => setNewServerArgs(e.target.value)}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label>Environment Variables (KEY=value, one per line)</label>
+                      <textarea
+                        className="settings-textarea"
+                        placeholder="API_KEY=xxx&#10;DEBUG=true"
+                        value={newServerEnv}
+                        onChange={(e) => setNewServerEnv(e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="mcp-form-actions">
+                      <button
+                        className="button-primary"
+                        onClick={handleAddServer}
+                        disabled={
+                          !newServerName || !newServerCommand || saving || mcpSettingsUnreadable
+                        }
+                      >
+                        {saving ? "Adding..." : "Add Server"}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -1023,6 +1330,16 @@ export function MCPSettings({
                             }
                           >
                             {isConnecting ? "Connecting..." : "Connect"}
+                          </button>
+                        )}
+
+                        {config?.auth?.oauth && !isBrowserHost && (
+                          <button
+                            className="button-small button-primary"
+                            onClick={() => handleAuthorizeServer(serverStatus.id)}
+                            disabled={authorizingServer === serverStatus.id || !config?.enabled}
+                          >
+                            {authorizingServer === serverStatus.id ? "Signing in..." : "Sign in"}
                           </button>
                         )}
 

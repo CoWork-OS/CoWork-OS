@@ -6,6 +6,7 @@ import { MCPSettingsManager } from "../../../settings";
 import { BoxSettingsManager } from "../../../../settings/box-manager";
 
 const nativeFetch = globalThis.fetch;
+type Any = any; // oxlint-disable-line typescript-eslint/no-explicit-any
 
 describe("StreamableHttpTransport", () => {
   const fetchMock = vi.fn();
@@ -596,6 +597,100 @@ describe("StreamableHttpTransport", () => {
         params: { progress: 50 },
       },
     ]);
+  });
+
+  const jsonRpc = (result: unknown, init: ResponseInit = {}) =>
+    new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers || {}) },
+    });
+  const oauthServer = (auth: Record<string, unknown>) =>
+    new StreamableHttpTransport({
+      id: "workday",
+      name: "Workday",
+      enabled: true,
+      transport: "streamable-http",
+      url: "https://us.agent.workday.com/acme/mcp",
+      auth: {
+        type: "bearer",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        tokenUrl: "https://us.agent.workday.com/auth/oauth2/acme/token",
+        oauth: { grant: "authorization_code" },
+        ...auth,
+      } as never,
+    });
+
+  it("renews once after a 401 and resends the rejected tool call with a proven credential", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response("expired", { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ access_token: "fresh", refresh_token: "r2", expires_in: "14400" }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(jsonRpc({ content: [{ type: "text", text: "ok" }] }));
+    const transport = oauthServer({
+      token: "stale",
+      refreshToken: "r1",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const approved = structuredClone((transport as Any).config);
+    vi.spyOn(MCPSettingsManager, "getServer").mockImplementation(() => (transport as Any).config);
+    await transport.connect();
+    await expect(
+      transport.sendRequest(
+        "tools/call",
+        { name: "Get_Workers", arguments: {} },
+        { beforeSend: () => mcpConfigurationCurrent(approved, (transport as Any).config) },
+      ),
+    ).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(new Headers(fetchMock.mock.calls[2][1].headers).get("Authorization")).toBe(
+      "Bearer fresh",
+    );
+    expect((transport as Any).config.auth.expiresAt - Date.now()).toBeGreaterThan(14_000_000);
+  });
+
+  it("reports that sign-in is needed instead of calling a server without a token", async () => {
+    const transport = oauthServer({});
+    await transport.connect();
+    await expect(transport.sendRequest("tools/list")).rejects.toMatchObject({
+      code: "MCP_AUTH_REQUIRED",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const signedIn = oauthServer({ token: "t", expiresAt: Date.now() + 3_600_000 });
+    fetchMock.mockResolvedValueOnce(
+      new Response("", {
+        status: 401,
+        headers: { "WWW-Authenticate": 'Bearer error="invalid_token"' },
+      }),
+    );
+    await signedIn.connect();
+    await expect(signedIn.sendRequest("tools/list")).rejects.toMatchObject({
+      code: "MCP_AUTH_REQUIRED",
+      status: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("backs off on 429 Retry-After but never resends a tool call after a 503", async () => {
+    const transport = oauthServer({ token: "t", expiresAt: Date.now() + 3_600_000 });
+    await transport.connect();
+    fetchMock
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "Retry-After": "0" } }))
+      .mockResolvedValueOnce(jsonRpc({ tools: [] }));
+    await expect(transport.sendRequest("tools/list")).resolves.toEqual({ tools: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(new Response("busy", { status: 503 }));
+    await expect(
+      transport.sendRequest("tools/call", { name: "Submit_Time_Off", arguments: {} }),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes an expired OAuth token before a request", async () => {

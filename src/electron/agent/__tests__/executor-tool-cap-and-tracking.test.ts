@@ -54,6 +54,17 @@ describe("TaskExecutor adaptive tool cap + file tracking", () => {
     const capped = executor.capToolCount([...buildTools(150, 0), ...mcp]);
     for (const tool of mcp) expect(capped).toContain(tool);
   });
+  it("keeps deferred MCP tools that tool search surfaced for this task", () => {
+    const executor = createExecutor("execution");
+    executor.task.prompt = "What is my current time off balance?";
+    const surfaced = {
+      name: "mcp_Get_Time_Off_Balance",
+      description: "Returns the worker's time off balances.",
+      runtime: { deferLoad: true, alwaysExpose: false, capabilityTags: ["mcp"] },
+    };
+    const capped = executor.capToolCount([...buildTools(150, 0), surfaced], 40, 40);
+    expect(capped).toContain(surfaced);
+  });
   it("does not enforce a strict 80-tool cap for execution intent", () => {
     const executor = createExecutor("execution");
     const tools = buildTools(10, 160);

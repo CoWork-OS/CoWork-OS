@@ -65,6 +65,23 @@ export interface MCPOAuthSettings {
   preset?: { kind: "workday"; region: string; tenant: string };
 }
 
+/**
+ * The Workday admin API client ("Register API Client") a Workday preset server
+ * uses for in-app agent setup through the Agent System of Record API. Separate
+ * from auth: it never signs the MCP server in, and editing it does not sign the
+ * server out. See mcp/oauth/workday-agent-setup.ts.
+ */
+export interface WorkdayAdminConnection {
+  /** Tenant UI host, e.g. impl.wd5.myworkday.com. */
+  tenantHost: string;
+  /** Tenant services host; derived from tenantHost when absent. */
+  servicesHost?: string;
+  clientId: string;
+  clientSecret?: string; // Encrypted when stored
+  /** Send a PKCE challenge, for admin clients registered with PKCE. */
+  usePkce?: boolean;
+}
+
 // MCP Server Configuration
 export interface MCPServerConfig {
   id: string;
@@ -88,6 +105,9 @@ export interface MCPServerConfig {
 
   // Authentication
   auth?: MCPAuthConfig;
+
+  /** Workday preset servers only: admin client for in-app agent setup. */
+  workdayAdmin?: WorkdayAdminConnection;
 
   // Timeouts (in ms)
   connectionTimeout?: number; // Default: 30000

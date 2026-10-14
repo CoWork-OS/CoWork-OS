@@ -17,6 +17,8 @@ import {
   type RemoteOAuthForm,
   type StoredRemoteSecrets,
 } from "./mcp-remote-oauth-form";
+import { WorkdayAgentSetupModal } from "./WorkdayAgentSetupModal";
+import type { WorkdayAdminDisplay } from "./workday-agent-setup-model";
 
 // Types (matching preload types)
 type MCPTransportType = "stdio" | "sse" | "websocket" | "streamable-http";
@@ -58,6 +60,8 @@ interface MCPServerConfig {
       preset?: { kind: "workday"; region?: string; tenant?: string };
     };
   };
+  /** Workday preset servers: the admin client for agent setup (secret masked). */
+  workdayAdmin?: WorkdayAdminDisplay;
   connectionTimeout?: number;
   requestTimeout?: number;
   defaultToolsApprovalMode?: MCPToolApprovalMode;
@@ -195,6 +199,8 @@ export function MCPSettings({
     privateKey: false,
   });
   const [authorizingServers, setAuthorizingServers] = useState<ReadonlySet<string>>(new Set());
+  // Workday preset server whose agent setup panel is open.
+  const [agentSetupFor, setAgentSetupFor] = useState<string | null>(null);
   const updateRemote = (patch: Partial<RemoteOAuthForm>) =>
     setRemote((prev) => ({ ...prev, ...patch }));
   const [showAddTunnelForm, setShowAddTunnelForm] = useState(false);
@@ -1452,6 +1458,16 @@ export function MCPSettings({
                           </button>
                         )}
 
+                        {config?.auth?.oauth?.preset?.kind === "workday" && !isBrowserHost && (
+                          <button
+                            className="button-small button-secondary"
+                            onClick={() => setAgentSetupFor(serverStatus.id)}
+                            title="Manage the Workday agent's skills and tools"
+                          >
+                            Agent setup
+                          </button>
+                        )}
+
                         {connectorProvider && !isBrowserHost && (
                           <button
                             className="button-small button-primary"
@@ -2063,6 +2079,32 @@ export function MCPSettings({
           </ModalDialog>
         </div>
       )}
+
+      {agentSetupFor &&
+        (() => {
+          const config = settings?.servers.find((server) => server.id === agentSetupFor);
+          if (!config) return null;
+          return (
+            <WorkdayAgentSetupModal
+              serverId={agentSetupFor}
+              serverName={config.name}
+              tenant={config.auth?.oauth?.preset?.tenant}
+              admin={config.workdayAdmin}
+              onClose={() => setAgentSetupFor(null)}
+              // Refreshes settings without the loading screen, which would close the panel.
+              onConnectionSaved={() =>
+                void invokeMcpApi<MCPSettingsData>("getMCPSettings")
+                  .then(setSettings)
+                  .catch(() => undefined)
+              }
+              onSignInServer={() => {
+                const serverId = agentSetupFor;
+                setAgentSetupFor(null);
+                void handleAuthorizeServer(serverId);
+              }}
+            />
+          );
+        })()}
 
       {connectorSetup && (
         <ConnectorSetupModal

@@ -10619,6 +10619,99 @@ a,
   max-width: 500px;
 }
 
+/* Workday agent setup (MCP settings) */
+.workday-agent-modal {
+  max-width: 720px;
+}
+
+.workday-agent-section {
+  padding: 16px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.workday-agent-section h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.workday-agent-subsection {
+  margin-top: 16px;
+}
+
+.workday-agent-error {
+  margin-bottom: 12px;
+}
+
+.workday-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workday-agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workday-agent-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workday-agent-tools {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workday-agent-results {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.workday-agent-tool-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text);
+  margin-right: 8px;
+}
+
+.workday-agent-wid {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.workday-agent-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.workday-agent-missing {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.workday-agent-saved {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.workday-agent-saved p {
+  margin: 0 0 8px;
+}
+
 .mcp-modal-content .settings-field {
   margin-bottom: 16px;
 }

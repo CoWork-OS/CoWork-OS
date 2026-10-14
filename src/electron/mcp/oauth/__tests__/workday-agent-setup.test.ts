@@ -138,6 +138,7 @@ const MODEL: WorkdayAgentModel = {
 interface FakeRequest {
   method: string;
   path: string;
+  search: string;
   headers: http.IncomingHttpHeaders;
   body: string;
 }
@@ -186,6 +187,7 @@ async function startFakeWorkday(): Promise<FakeWorkday> {
       fake.requests.push({
         method: req.method || "",
         path: url.pathname,
+        search: url.searchParams.get("searchString") ?? "",
         headers: req.headers,
         body: raw.toString(),
       });
@@ -556,6 +558,27 @@ describe("Workday agent definitions", () => {
     const saved = await saveAgentDefinition(serverId, model, transport);
     expect(saved.status).toBe("saved");
     expect(fake.posted).toHaveLength(1);
+  });
+
+  it("does not search again for tools this session already saw Workday return", async () => {
+    const fake = await startFakeWorkday();
+    const transport = await transportFor(fake);
+    const serverId = await signedIn(fake, transport);
+    await searchAgentResources(serverId, "get_pay_slips", transport);
+    const searchesBefore = fake.requests.filter((r) =>
+      r.path.endsWith("agentResourceSearch"),
+    ).length;
+    const model = structuredClone(MODEL);
+    model.skills[0]!.tools.push({ toolName: "get_pay_slips", wid: PAY_WID, description: "" });
+    const saved = await saveAgentDefinition(serverId, model, transport);
+    expect(saved.status).toBe("saved");
+    const searched = fake.requests
+      .filter((r) => r.path.endsWith("agentResourceSearch"))
+      .slice(searchesBefore)
+      .map((r) => r.search);
+    // Only the tool this session had not seen yet is checked.
+    expect(searched).not.toContain("get_pay_slips");
+    expect(searched).toContain("find_absence_balances");
   });
 
   it("refuses to post while a tool WID is missing from the catalog", async () => {

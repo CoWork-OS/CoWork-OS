@@ -43,6 +43,8 @@ import { WORKDAY_OAUTH_REDIRECT_URI } from "./mcp-server-authorization";
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 const ASOR_TIMEOUT_MS = 30_000;
+/** Saving a definition makes Workday validate every tool; give it longer. */
+const ASOR_SAVE_TIMEOUT_MS = 90_000;
 /** Renew a little before Workday's stated expiry rather than fail mid-save. */
 const TOKEN_EXPIRY_MARGIN_MS = 30_000;
 const SEARCH_LIMIT = 100;
@@ -245,7 +247,7 @@ export function saveWorkdayAdminConnection(input: unknown): WorkdayAdminConnecti
   const previous = server.workdayAdmin;
   if (!previous || connectionKey(previous, tenant) !== connectionKey(next, tenant)) {
     cancelWorkdayAdminSignIn(fields.serverId);
-    adminSessions.delete(fields.serverId);
+    forgetAdminSession(fields.serverId);
   }
   if (!MCPSettingsManager.updateServer(fields.serverId, { workdayAdmin: next }))
     throw new Error("MCP server not found");
@@ -269,6 +271,25 @@ interface AdminSession {
 
 /** Admin access tokens by server ID. Memory only; never persisted or returned. */
 const adminSessions = new Map<string, AdminSession>();
+/**
+ * Tool WIDs this admin session has seen Workday return (from catalog searches
+ * and the agent definitions it listed), by server ID: WID -> tool name. A save
+ * re-checks only tools outside this set, since Workday's search is slow.
+ * Cleared whenever the session ends.
+ */
+const verifiedTools = new Map<string, Map<string, string>>();
+
+function forgetAdminSession(serverId: string): void {
+  adminSessions.delete(serverId);
+  verifiedTools.delete(serverId);
+}
+
+function rememberVerified(serverId: string, tools: Array<{ wid: string; toolName: string }>): void {
+  if (!adminSessions.has(serverId)) return;
+  const known = verifiedTools.get(serverId) ?? new Map<string, string>();
+  for (const tool of tools) known.set(tool.wid, tool.toolName);
+  verifiedTools.set(serverId, known);
+}
 /** Pending admin sign-ins by server ID, so the person can cancel one. */
 const pendingAdminSignIns = new Map<string, AbortController>();
 
@@ -283,7 +304,7 @@ function activeSession(
     session.connectionKey !== connectionKey(connection, tenant) ||
     (session.expiresAt !== undefined && session.expiresAt - TOKEN_EXPIRY_MARGIN_MS <= Date.now())
   ) {
-    adminSessions.delete(serverId);
+    forgetAdminSession(serverId);
     return undefined;
   }
   return session;
@@ -291,7 +312,7 @@ function activeSession(
 
 /** Forgets a server's admin token (for example when the server is removed). */
 export function signOutWorkdayAdmin(serverId: string): void {
-  adminSessions.delete(serverId);
+  forgetAdminSession(serverId);
   cancelWorkdayAdminSignIn(serverId);
 }
 
@@ -381,6 +402,7 @@ export async function signInWorkdayAdmin(
   if (!current || connectionKey(current, tenant) !== key)
     throw new Error("Workday admin connection changed during sign-in; sign in again");
   const expiresAt = token.expiresIn ? Date.now() + token.expiresIn * 1000 : undefined;
+  forgetAdminSession(serverId);
   adminSessions.set(serverId, { accessToken: token.accessToken, expiresAt, connectionKey: key });
   return { expiresAt };
 }
@@ -429,6 +451,7 @@ async function callAsor(
   path: string,
   body?: { json: unknown } | { form: FormData },
   passStatuses: number[] = [],
+  step = method === "POST" ? "saving the agent" : "reading the catalog",
 ): Promise<AsorResponse> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${ctx.accessToken}`,
@@ -443,7 +466,10 @@ async function callAsor(
     payload = body.form;
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ASOR_TIMEOUT_MS);
+  const timer = setTimeout(
+    () => controller.abort(),
+    method === "POST" ? ASOR_SAVE_TIMEOUT_MS : ASOR_TIMEOUT_MS,
+  );
   let response: Response;
   try {
     response = await ctx.fetchImpl(`${ctx.endpoints.asorBaseUrl}/${path}`, {
@@ -454,7 +480,7 @@ async function callAsor(
       signal: controller.signal,
     });
   } catch (error) {
-    if (controller.signal.aborted) throw new Error("Workday did not answer in time");
+    if (controller.signal.aborted) throw new Error(`Workday did not answer in time (${step})`);
     throw new Error(
       `Could not reach Workday: ${redactOAuthText(error instanceof Error ? error.message : String(error))}`,
     );
@@ -463,7 +489,7 @@ async function callAsor(
   }
   const text = await response.text();
   if (response.status === 401) {
-    adminSessions.delete(ctx.serverId);
+    forgetAdminSession(ctx.serverId);
     throw new Error("Workday admin sign-in expired or was rejected; sign in again");
   }
   if (response.status >= 300 && response.status < 400)
@@ -748,10 +774,16 @@ export async function listAgentDefinitions(
   const { data } = await callAsor(ctx, "GET", `agentDefinition?limit=${LIST_LIMIT}`);
   const rows = collectionRows(data);
   const total = Number(record(data).total);
+  const agents = rows.map(agentModelFromDefinition);
+  // Tools already on a registered definition were accepted by Workday.
+  rememberVerified(
+    serverId,
+    agents.flatMap((agent) => agent.skills.flatMap((skill) => skill.tools)),
+  );
   return {
     status: "ok",
     total: Number.isFinite(total) && total >= 0 ? total : rows.length,
-    agents: rows.map(agentModelFromDefinition),
+    agents,
   };
 }
 
@@ -760,8 +792,17 @@ async function searchCatalogOnce(
   query: string,
 ): Promise<WorkdayAgentResource[]> {
   const params = new URLSearchParams({ searchString: query, limit: String(SEARCH_LIMIT) });
-  const { data } = await callAsor(ctx, "GET", `agentResourceSearch?${params.toString()}`);
-  return parseAgentResources(data);
+  const { data } = await callAsor(
+    ctx,
+    "GET",
+    `agentResourceSearch?${params.toString()}`,
+    undefined,
+    [],
+    `searching the catalog for "${query}"`,
+  );
+  const resources = parseAgentResources(data);
+  rememberVerified(ctx.serverId, resources);
+  return resources;
 }
 
 /**
@@ -812,8 +853,10 @@ export async function searchAgentResources(
 
 async function findMissingTools(ctx: AdminContext, model: WorkdayAgentModel) {
   const wanted = new Map<string, Set<string>>();
+  const known = verifiedTools.get(ctx.serverId);
   for (const skill of model.skills)
     for (const tool of skill.tools) {
+      if (known?.get(tool.wid) === tool.toolName) continue;
       const wids = wanted.get(tool.toolName) ?? new Set<string>();
       wids.add(tool.wid);
       wanted.set(tool.toolName, wids);

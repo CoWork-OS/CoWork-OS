@@ -332,6 +332,7 @@ SQLite is owned by worker threads by default in the desktop app, the daemon and 
 - **Write worker:**
   - One per runtime (`src/electron/database/async/`). It runs every mutation for the timeline, reports, settings, storage, services, memory, mailbox and control-plane domains.
   - A write is a catalogued unit: one IMMEDIATE transaction, so a read-then-write is never interleaved with another writer.
+  - At most 256 requests are in flight per client. A burst beyond that waits on the host in submission order (bounded at 4,096 requests and 32 MiB). It is delayed, never resent, so writes are neither duplicated nor reordered.
   - A reply means the write committed. If the worker exits before replying, the outcome is reported as `unknown`, and the caller reconciles against durable state instead of replaying the write.
 - **Read workers:**
   - The reporting reader runs heavy reports and the mailbox reads.

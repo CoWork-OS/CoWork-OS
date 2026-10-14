@@ -37,7 +37,7 @@ While a sign-in waits for the browser, **Cancel** next to **Signing in...** stop
 - **Large catalogs:** a server with more than 25 tools (Workday has 400+) doesn't add every schema to every request. Its tools load on demand through `tool_search`, and `tool_search` lists such servers so the agent knows to search by business task.
 - **Tool names across servers:** a tool name offered by one server keeps its plain name (`mcp_<tool>`). A name that several connected servers offer is namespaced on every one of them (`mcp_<server>__<tool>`), so calls never depend on which server connected first, and calling the bare name returns the namespaced options. Per-tool approval settings stay keyed by the server's own tool name.
 - **Legacy SSE servers:** credentials are sent as `Authorization` or API-key headers on the event stream and on every message, never in the URL. A redirect is followed only within the configured origin. A server that can only read a query token can opt in with `auth.sendTokenInQuery`; this applies to the stream request only and is off by default, because proxies and server logs record URLs.
-- **Write approvals:** new remote OAuth servers default to running read-only tools without prompts and asking before any tool that can change data.
+- **Write approvals:** new remote OAuth servers default to running read-only tools without prompts and asking before any tool that can change data. The approval card names the server and shows the call's arguments exactly as they will be sent, so you decide on the actual change. Approval needs an access profile that asks (**Ask for approval** or **Approve for me**): under **Full access**, which never asks, a tool that requires consent is blocked instead of prompted.
 
 ## Headless use
 
@@ -75,5 +75,19 @@ Tools whose names start with `create_`, `update_`, `delete_`, `submit_` or `requ
 4. Open **Agent setup** on the server row, sign in with an admin API client, and give the agent its skills and tools (see [In-app Workday agent setup](#in-app-workday-agent-setup)). If a skill needs a worker ID, add a tool that resolves the signed-in worker too (for example, `create_worker_preferred_name_change` requires `workersId`).
 5. **Sign in** on the server row. Expect a certificate warning for 127.0.0.1 in the browser on each sign-in; accept it to finish.
 6. Ask CoWork for something that needs Workday data, for example "What is my time off balance?". The agent finds the right Workday tool through `tool_search`.
+7. To try a write, set the task's Access to **Ask for approval** and ask for a change, for example a preferred-name change. Workday validates the whole proposed name, not only the field you change: `create_worker_preferred_name_change` needs `proposedName.firstName`, `proposedName.lastName` and `proposedName.country` as a reference with an `id` (the country's WID; an ISO code alone is rejected with `S25`, and a missing field with `A6`). A request that worked on a Developer tenant:
+
+   ```json
+   {
+     "workersId": "<worker WID from find_staffing_workers>",
+     "proposedName": {
+       "firstName": "Logan Test",
+       "lastName": "McNeil",
+       "country": { "id": "bc33aa3152ec42d4995f4791a106ed09" }
+     }
+   }
+   ```
+
+   `bc33aa3152ec42d4995f4791a106ed09` is the United States in Workday's demo data; check the country WID in your own tenant. Workday answers with the business process and its status (`Successfully Completed`).
 
 Implementation: `src/electron/mcp/oauth/mcp-oauth.ts` (flows, loopback listener, renewal, discovery), `src/electron/mcp/oauth/mcp-server-authorization.ts` (server setup, edit, sign-in and cancel), `src/electron/mcp/oauth/workday-agent-setup.ts` (admin sign-in and ASOR agent setup), `src/electron/ipc/mcp-oauth-handlers.ts` and `src/electron/ipc/workday-agent-handlers.ts` (IPC), and `src/electron/mcp/client/transports/StreamableHttpTransport.ts` (renewal, 401 and rate-limit handling).

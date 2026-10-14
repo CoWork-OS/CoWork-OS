@@ -42,3 +42,5 @@ Qualification is per app and per control. The route reports these behaviors hone
 ## Verification evidence
 
 Verification and summary steps receive a native action ledger built from the task's durable attempt journal, not from model text. For each attempt it lists the action, target, final status, and the helper's foreground, pointer, keyboard and clipboard evidence. A foreground change to another app, or pointer movement accompanied by physical mouse events, is attributed to the user; the helper already treats target self-activation and pointer movement without physical events as `outcome_unknown`. The ledger proves dispatch and preservation, never the app outcome.
+
+Saved-file readbacks (`local_photoshop_read`, `local_photoshop_inspect`, `native_application_inspect`) also stay in later steps' context. Each lists the path, SHA-256, size, dimensions and layer text, font and size, and the newest readback of a path replaces older ones, so the final answer reports what is on disk after the attempted change.

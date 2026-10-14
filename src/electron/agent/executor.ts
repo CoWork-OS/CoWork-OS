@@ -5,6 +5,7 @@ import {
   summarizeNativeObservation,
   type NativeObservation,
 } from "./native-app-observation";
+import { applicationReadbackPath, summarizeApplicationReadback } from "./application-readback";
 import {
   hasNativeApplicationOutputIntent,
   isNativeApplicationPreparationStep,
@@ -1225,6 +1226,7 @@ export class TaskExecutor {
     summary: string;
     timestamp: number;
     nativeObservation?: NativeObservation;
+    readbackPath?: string;
   }> = [];
   private webEvidenceMemory: WebEvidenceEntry[] = [];
   private toolUsageCounts: Map<string, number> = new Map();
@@ -24175,6 +24177,8 @@ You are continuing a previous conversation. The context from the previous conver
   private summarizeToolResult(toolName: string, result: Any, input?: Any): string | null {
     if (!result) return null;
     if (toolName === "native_app") return summarizeNativeObservation(toolName, result);
+    const readback = summarizeApplicationReadback(toolName, result, input);
+    if (readback) return readback;
 
     // Desktop MCP observations must survive a fresh verification-step context.
     // Keep source text as evidence, not instructions or an assistant's claimed result.
@@ -24608,11 +24612,20 @@ You are continuing a previous conversation. The context from the previous conver
           entry.nativeObservation?.windowId !== nativeObservation.windowId,
       );
     }
+    const readbackPath = applicationReadbackPath(toolName, result, input);
+    if (readbackPath) {
+      // The newest readback of a saved file supersedes older ones, so the final
+      // summary reports what is on disk now rather than a pre-edit baseline.
+      this.toolResultMemory = this.toolResultMemory.filter(
+        (entry) => entry.readbackPath !== readbackPath,
+      );
+    }
     this.toolResultMemory.push({
       tool: toolName,
       summary,
       timestamp: Date.now(),
       ...(nativeObservation ? { nativeObservation } : {}),
+      ...(readbackPath ? { readbackPath } : {}),
     });
     if (this.toolResultMemory.length > this.toolResultMemoryLimit) {
       this.toolResultMemory.splice(0, this.toolResultMemory.length - this.toolResultMemoryLimit);

@@ -384,6 +384,39 @@ describe("TaskExecutor completion contract integration", () => {
     expect(executor.summarizeToolResult("native_app", { dispatch: "acknowledged" })).toBeNull();
   });
 
+  it("keeps the latest saved-file readback for later steps, superseding the baseline", () => {
+    const executor = createExecuteHarness({ prompt: "Edit and verify the PSD", lastOutput: "" });
+    executor.recordWebEvidence = vi.fn();
+    executor.toolResultMemory = [];
+    const readback = (size: number, sha256: string) => ({
+      path: "/tmp/ws/background-edit.psd",
+      saved: true,
+      model: {
+        width: 1200,
+        height: 630,
+        layers: [
+          {
+            path: ["Brand"],
+            kind: "text",
+            visible: true,
+            opacity: 100,
+            text: { contents: "COWORK OS", font: "ArialMT", size },
+          },
+          { path: ["Background"], kind: "raster", visible: true, opacity: 100 },
+        ],
+      },
+      persisted: { sha256, size: 246308 },
+    });
+    executor.recordToolResult("local_photoshop_read", readback(18, "a708"));
+    executor.recordToolResult("local_photoshop_read", readback(22, "b912"));
+    expect(executor.toolResultMemory).toHaveLength(1);
+    const summary = executor.getRecentToolResultSummary();
+    expect(summary).toContain("Saved-file readback by local_photoshop_read");
+    expect(summary).toContain("sha256=b912");
+    expect(summary).toContain('- Brand: text, text="COWORK OS", font=ArialMT, size=22pt');
+    expect(summary).not.toContain("size=18pt");
+  });
+
   it("infers only the requested output extension when the prompt also names a source file", () => {
     expect(
       extractExplicitOutputExtensions(

@@ -1011,7 +1011,8 @@ export function MCPSettings({
                             onChange={(e) => updateRemote({ region: e.target.value })}
                           />
                           <p className="settings-hint">
-                            The subdomain of your agent gateway, e.g. us for us.agent.workday.com. Workday Developer tenants use odp.
+                            The subdomain of your agent gateway, e.g. us for us.agent.workday.com.
+                            Workday Developer tenants use odp.
                           </p>
                         </div>
                         <div className="settings-field">

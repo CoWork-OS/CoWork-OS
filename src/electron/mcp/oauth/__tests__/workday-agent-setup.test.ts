@@ -736,6 +736,33 @@ describe("Workday agent definitions", () => {
     });
   });
 
+  it("reads Workday's live search row shape (wid, name, type, mcpEnabled, description)", () => {
+    expect(
+      parseAgentResources({
+        total: 2,
+        data: [
+          {
+            description: "Returns the worker's service dates. Read-only.",
+            type: "AGENT_READY",
+            mcpEnabled: true,
+            httpEnabled: false,
+            name: "find_service_dates_for_worker",
+            wid: SERVICE_DATES_WID,
+          },
+          { type: "SOAP", mcpEnabled: false, name: "Get Workers", wid: OPERATION_WID },
+        ],
+      }),
+    ).toEqual([
+      {
+        wid: SERVICE_DATES_WID,
+        toolName: "find_service_dates_for_worker",
+        kind: "mcp",
+        description: "Returns the worker's service dates. Read-only.",
+      },
+      { wid: OPERATION_WID, toolName: "Get Workers", kind: "operation" },
+    ]);
+  });
+
   it("parses catalog rows from any collection key and skips malformed rows", () => {
     for (const key of ["data", "results", "items"])
       expect(parseAgentResources({ [key]: catalog })).toHaveLength(catalog.length);

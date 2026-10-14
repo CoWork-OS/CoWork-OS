@@ -10665,6 +10665,25 @@ a,
   min-width: 0;
 }
 
+.workday-agent-result {
+  min-width: 0;
+}
+
+.workday-agent-tool-description {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.workday-agent-results .workday-agent-row {
+  align-items: flex-start;
+}
+
 .workday-agent-row .button-small {
   flex-shrink: 0;
   white-space: nowrap;

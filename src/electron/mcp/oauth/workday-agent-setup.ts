@@ -509,17 +509,37 @@ export function isMcpToolName(name: string): boolean {
 
 const WID = /^[0-9a-f]{32}$/;
 
-/** Catalog rows as resources: a 32-hex WID and a name, deduplicated by WID. */
+const RESOURCE_DESCRIPTION_LIMIT = 400;
+
+/**
+ * Catalog rows as resources: a 32-hex WID and a name, deduplicated by WID.
+ * Workday's agentResourceSearch returns `wid`, `name`, `description`,
+ * `type` ("AGENT_READY" for MCP tools) and `mcpEnabled`; other collections
+ * use `id` and `descriptor`. Both shapes are read.
+ */
 export function parseAgentResources(data: unknown): WorkdayAgentResource[] {
   const seen = new Set<string>();
   const resources: WorkdayAgentResource[] = [];
   for (const raw of collectionRows(data)) {
     const row = record(raw);
-    const wid = str(row.id).trim().toLowerCase();
-    const toolName = (str(row.descriptor) || str(row.name)).trim();
+    const wid = (str(row.wid) || str(row.id)).trim().toLowerCase();
+    const toolName = (str(row.name) || str(row.descriptor) || str(row.tool_name)).trim();
     if (!WID.test(wid) || !toolName || seen.has(wid)) continue;
     seen.add(wid);
-    resources.push({ wid, toolName, kind: isMcpToolName(toolName) ? "mcp" : "operation" });
+    // Workday's own flags win; the snake_case name is the fallback signal.
+    const mcp =
+      typeof row.mcpEnabled === "boolean"
+        ? row.mcpEnabled
+        : str(row.type)
+          ? str(row.type) === "AGENT_READY"
+          : isMcpToolName(toolName);
+    const description = str(row.description).trim().slice(0, RESOURCE_DESCRIPTION_LIMIT);
+    resources.push({
+      wid,
+      toolName,
+      kind: mcp ? "mcp" : "operation",
+      ...(description ? { description } : {}),
+    });
   }
   return resources;
 }

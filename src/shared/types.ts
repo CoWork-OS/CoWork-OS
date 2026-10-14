@@ -7748,6 +7748,8 @@ export interface WorkdayAgentResource {
   wid: string;
   toolName: string;
   kind: "mcp" | "operation";
+  /** Workday's description of the tool, when the catalog returns one. */
+  description?: string;
 }
 
 export interface WorkdayAgentSearchRequest {

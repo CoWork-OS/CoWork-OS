@@ -619,9 +619,16 @@ export function WorkdayAgentSetupModal({
                         ?.tools.some((tool) => tool.wid === resource.wid);
                       return (
                         <li key={resource.wid} className="workday-agent-row">
-                          <div className="workday-agent-tool">
-                            <span className="workday-agent-tool-name">{resource.toolName}</span>
-                            <span className="workday-agent-wid">{resource.wid}</span>
+                          <div className="workday-agent-result">
+                            <div className="workday-agent-tool">
+                              <span className="workday-agent-tool-name">{resource.toolName}</span>
+                              <span className="workday-agent-wid">{resource.wid}</span>
+                            </div>
+                            {resource.description && (
+                              <div className="workday-agent-tool-description">
+                                {resource.description}
+                              </div>
+                            )}
                           </div>
                           <button
                             className="button-small button-secondary"

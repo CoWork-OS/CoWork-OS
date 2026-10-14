@@ -41,7 +41,7 @@ Token renewal is plain Node and needs neither Electron nor a browser, so it runs
 
 ## Workday setup checklist
 
-1. Join the Workday Developer Program and request a personal development tenant (Console > Tenants). Workday emails the tenant's sign-in details when it is ready.
+1. Join the Workday Developer Program and submit **Request Tenant Access** for a personal development tenant. Workday reviews the request and emails the tenant's sign-in details when it is ready; change the temporary password promptly (Workday asks for it within 72 hours).
 2. Set up Agent System of Record (ASOR) in the tenant, register an external agent through the ASOR API, and configure its skills and tool security. Workday documents these steps under **Agents > External Agents**.
 3. Copy the agent's client ID and secret from **View External Agent Credentials**. For a delegate identity, register the redirect URI above.
 4. In CoWork, add a **Remote (OAuth)** server with the Workday preset and sign in.

@@ -13,6 +13,13 @@ CoWork's `native_app` tool controls an installed macOS app through its own nativ
 
 The helper records before/after frontmost-app and pointer evidence. Target self-activation or unexplained pointer movement produces `outcome_unknown`; it never restores a stale user focus or pointer position. If the user is using the target app, mutations pause. Background sessions do not register a global Escape handler; Stop in CoWork cancels the task. Cancellation is not undo.
 
+Private Browser Workbench input also blocks `native_app`, including observations. A privacy
+generation check discards results that overlap a private flow, even if the dialog closes before
+the native action returns. If a mutation may already have been dispatched, its journal remains
+`outcome_unknown`; do not replay it or switch tools to retry. Wait until private capture protection
+ends, then inspect and reconcile the application state. Filled browser documents stay protected
+until full navigation or tab destruction. See [private browser safeguards](security-guide.md#private-browser-credentials-and-checkout).
+
 ## Availability and limits
 
 Native computer use defaults to **Background only**. Legacy `background_first` settings migrate to this strict mode. Existing foreground/ask-visible modes remain explicit choices; they do not change `native_app` into a foreground tool. Legacy mutation tools refuse in strict mode and direct the agent to the exact-window route.

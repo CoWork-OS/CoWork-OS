@@ -50,7 +50,7 @@ the granted boundary is ordinary execution: reads, writes, edits, artifact creat
 local commands do not create an approval request. A profile with `approval: "never"` denies a
 missing boundary instead of waiting for a prompt.
 
-The local runtime keeps popup approvals disabled by default. An `allow` decision runs silently;
+The local runtime keeps the legacy tool-approval popup queue disabled by default. An `allow` decision runs silently;
 an unresolved `ask` becomes an assistant message plus a durable inline **Deny** / **Allow once**
 input card. This includes network/on-request access, credential use, data export, MCP and other
 external side effects, eligible outside-workspace paths, and explicit opt-outs from automatic
@@ -62,7 +62,8 @@ fail-closed. Pending approval rows and assistant cards fail closed on restart.
 
 When the legacy queue is enabled, you can approve or deny each request individually and persist
 some approvals as session, workspace, or profile rules. In the normal runtime, respond to the
-inline assistant card; it is the only interactive approval surface and grants **Allow once**.
+inline assistant card for tool-policy decisions; it grants **Allow once**. Private browser input
+and native credential confirmations use the separate surfaces described below.
 
 For the full evaluation order, rule precedence, and persistence model, see
 [Permission System](permission-system.md).
@@ -72,6 +73,39 @@ The composer access selector uses the same task-level profile model as the permi
 combines sandbox, approval, reviewer, command-tool, filesystem, and network boundaries. There is no
 separate shell enable/disable switch. Approval is not a substitute for sandboxing, and a custom
 profile cannot widen the restrictions inherited from its parent.
+
+### Private Browser Credentials And Checkout
+
+The local Browser Workbench's **Passwords & autofill** menu and `browser_vault` share a main-process
+credential service. Enter passwords, authenticator setup keys, verification codes, addresses,
+cards, and manager unlock passwords only in its private dialog. Answers use owner-only IPC and
+stay out of chat, tool arguments, task events, and memory. Saved usernames and item metadata remain
+visible to the agent. Approved autofill supplies the private values to the destination page, which
+can read its own fields.
+
+Saved login and saved-code access requires Touch ID where available or native confirmation.
+Address/card fills require native confirmation. Agent card fills also require fresh tool approval
+with automatic approval and standing grants disabled; this never authorizes placing an order.
+Navigation, cancellation, takeover, and changed task authority invalidate pending work.
+
+Local saved items use OS-backed encryption. If it is unavailable, private input offers one-use
+entry with saving disabled. CVCs and entered verification codes are never saved. 1Password and
+Bitwarden require an installed, signed-in CLI; unlock sessions stay in memory, scoped to the
+workspace, and expire after 30 minutes idle. Their adapters supply logins and OTPs; checkout items
+come from the local vault.
+
+Agent screenshots, page scripts, storage reads, and native computer control are blocked during
+private input and while a filled document remains active. Captures that overlap a private flow are
+discarded. Prompt protection lasts through the cleared UI's paint acknowledgement; document
+protection ends on full navigation or tab destruction. Text snapshots retain refs and mask filled
+values, including split verification codes and commonly formatted card numbers. This is a guard
+on CoWork's tool paths, not a system-wide screen-capture restriction.
+
+The flow requires the local desktop Workbench and an available human-input channel. Headless,
+external, and cloud browser routes cannot substitute ordinary typing or shell commands for it.
+Passkeys, security keys, device approvals, and framed fields require a manual handoff. Inspect the
+page after `fill_outcome_unknown` before retrying; successful filling alone does not prove login.
+See [setup, supported fields, and fixture-validation limits](browser-workbench.md#private-login-password-managers-2fa-and-checkout).
 
 ### Agent Security with Numbat
 

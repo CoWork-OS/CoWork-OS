@@ -78,7 +78,7 @@ Please include as much of the following information as possible:
 ### Local Data Storage
 
 - SQLite database is stored in user's Application Support folder
-- No sensitive data is transmitted to external services (except configured LLM providers)
+- Cloud models and configured integrations receive data needed for authorized tasks. Approved browser autofill supplies private values to the exact destination site; passwords, authenticator keys, verification codes, and payment details entered through the private flow stay out of model context. See [private browser credentials](docs/security-guide.md#private-browser-credentials-and-checkout).
 - Users control their own API keys
 
 ## Security Best Practices for Users

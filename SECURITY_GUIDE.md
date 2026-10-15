@@ -31,7 +31,7 @@ The selected profile is the task-level authority. Workspace booleans and legacy 
 
 ### Approval System
 
-The default local runtime does not open popup approval dialogs. Allowed operations run silently.
+The default local runtime keeps the legacy tool-approval popup queue disabled. Allowed operations run silently.
 When policy still returns `ask`, CoWork posts an assistant message and a durable inline **Deny** /
 **Allow once** input card for interactive tasks. This includes command and file boundary
 exceptions, credentials, external writes and data export, MCP/connector side effects, and eligible
@@ -39,6 +39,12 @@ outside-workspace paths. Automated tasks without a human-input channel fail clos
 approval cannot widen a finite profile scope or repair an unavailable profile. Location access may
 still show the operating system's native one-time consent flow; that is separate from CoWork's
 approval surface.
+
+Private Browser Workbench input uses a separate owner-only dialog. Saved login/code use requires
+Touch ID or native confirmation; address/card fills require native confirmation, and agent card
+fills additionally require fresh approval. These checks remain in effect when automatic review
+is enabled. Filling a card does not authorize an order. See
+[Private browser credentials and checkout](docs/security-guide.md#private-browser-credentials-and-checkout).
 
 ### Configurable Guardrails
 

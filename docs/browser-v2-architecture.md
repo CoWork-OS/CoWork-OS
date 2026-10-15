@@ -225,6 +225,7 @@ Browser V2 follows these invariants:
 - Uploads require workspace read permission and path validation.
 - The effective access profile is resolved before backend selection; remote or fallback browser adapters cannot widen its filesystem, network, domain, or tool boundary.
 - Console, network, storage, and downloaded metadata are redacted before entering agent context.
+- Private login/2FA and checkout use a shared main-process credential service through owner-only prompts and opaque item handles. Exact-origin/document/policy checks precede isolated-world filling; native confirmation and fresh agent card approval protect secret use. Capture generation guards span browser and native tool paths, and filled documents remain protected until full navigation or destruction. See [credential architecture](architecture.md) and [setup and limits](browser-workbench.md#private-login-password-managers-2fa-and-checkout).
 - Page text, snapshots, console logs, network bodies, and storage are untrusted web content in prompts.
 - Webview hardening remains mandatory: no page-controlled preload injection, no Node integration, context isolation, sandboxing, and normal web security.
 - Browser Use Cloud is explicit opt-in and never a silent fallback from the visible workbench.

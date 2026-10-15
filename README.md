@@ -138,7 +138,9 @@ Each step is shown with screenshots in [macOS Installation](docs/macos-installat
 
 > **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
 
-> First launch asks how you want to power AI: sign in with an existing ChatGPT subscription, use a local Ollama model, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. After onboarding, Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. After at least two model routes work, you can create a Mixture of Agents preset that combines them. You can explore the app without AI, but tasks require one working model route.
+> First launch starts with an editable task and suggestions. Choose **Start task** to use an existing model configuration or open AI setup when needed. **Personalize first** opens guided setup; **Explore CoWork** enters the app without starting work. When a request names a supported app that needs connecting, CoWork opens the existing connector controls and keeps your request ready to continue. See [First-result onboarding and contextual connections](docs/first-result-onboarding.md).
+>
+> Tasks require one working model route: sign in with an existing ChatGPT subscription, use a local Ollama model, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. After onboarding, Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. After at least two model routes work, you can create a Mixture of Agents preset that combines them.
 
 ### Or Install via npm
 
@@ -574,6 +576,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
 | [Multitask Command](docs/multitask.md)                                   | `/multitask [N] <task>` lane fan-out through collaborative team runs                                                                               |
 | [Use Case Showcase](docs/showcase.md)                                    | Comprehensive guide to what you can build and automate                                                                                             |
 | [Features](docs/features.md)                                             | Complete feature reference                                                                                                                         |
+| [First-result Onboarding](docs/first-result-onboarding.md)               | Start with a task, reuse model access, and connect supported apps while preserving the request                                                       |
 | [Add Tools Discovery](docs/add-tools-discovery.md)                        | Browse capability catalogs and inspect available setup/readiness evidence in one place                                                            |
 | [Desktop Location & Maps](docs/features.md#desktop-location)             | Explicitly approved desktop location, geocoding, routes, and nearby-place workflows                                                                |
 | [Everything Workbench](docs/everything-workbench.md)                     | Unified in-app artifact model for docs, sheets, decks, web pages, PDFs, and live browser sessions                                                  |

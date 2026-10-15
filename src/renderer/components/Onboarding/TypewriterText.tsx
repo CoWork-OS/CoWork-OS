@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface TypewriterTextProps {
   text: string;
@@ -17,6 +17,8 @@ export function TypewriterText({
 }: TypewriterTextProps) {
   const [displayedText, setDisplayedText] = useState("");
   const [isComplete, setIsComplete] = useState(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     // Reset when text changes
@@ -25,7 +27,7 @@ export function TypewriterText({
 
     if (!text) {
       setIsComplete(true);
-      onComplete?.();
+      onCompleteRef.current?.();
       return;
     }
 
@@ -37,12 +39,12 @@ export function TypewriterText({
       } else {
         clearInterval(intervalId);
         setIsComplete(true);
-        onComplete?.();
+        onCompleteRef.current?.();
       }
     }, speed);
 
     return () => clearInterval(intervalId);
-  }, [text, speed, onComplete]);
+  }, [text, speed]);
 
   return (
     <div className={`onboarding-typewriter ${className}`}>

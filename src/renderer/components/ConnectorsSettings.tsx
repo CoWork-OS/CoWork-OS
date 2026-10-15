@@ -69,6 +69,7 @@ interface ConnectorDefinition {
 
 interface ConnectorsSettingsProps {
   initialSelection?: AddToolsSelection;
+  onSetupClosed?: () => void;
 }
 
 const SHIPPED_CONNECTOR_IDS = new Set([
@@ -919,7 +920,10 @@ function normalizeConnectorSearch(value: string): string {
   return value.trim().toLowerCase();
 }
 
-export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps = {}) {
+export function ConnectorsSettings({
+  initialSelection,
+  onSetupClosed,
+}: ConnectorsSettingsProps = {}) {
   const [settings, setSettings] = useState<MCPSettingsData | null>(null);
   const [serverStatuses, setServerStatuses] = useState<MCPServerStatus[]>([]);
   const [registryConnectorIds, setRegistryConnectorIds] = useState<Set<string> | null>(null);
@@ -1347,9 +1351,18 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
       )}
 
       {integrationModal && (
-        <div className="mcp-modal-overlay" onClick={() => setIntegrationModal(null)}>
+        <div
+          className="mcp-modal-overlay"
+          onClick={() => {
+            setIntegrationModal(null);
+            onSetupClosed?.();
+          }}
+        >
           <ModalDialog
-            onClose={() => setIntegrationModal(null)}
+            onClose={() => {
+              setIntegrationModal(null);
+              onSetupClosed?.();
+            }}
             aria-label="Connector details"
             className="cm-integration-modal"
             onClick={(e) => e.stopPropagation()}
@@ -1364,7 +1377,13 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
                 <h2>{integrationModal.name}</h2>
                 <p className="cm-detail-subtitle">{integrationModal.description}</p>
               </div>
-              <button className="mcp-modal-close" onClick={() => setIntegrationModal(null)}>
+              <button
+                className="mcp-modal-close"
+                onClick={() => {
+                  setIntegrationModal(null);
+                  onSetupClosed?.();
+                }}
+              >
                 ×
               </button>
             </div>
@@ -1381,7 +1400,10 @@ export function ConnectorsSettings({ initialSelection }: ConnectorsSettingsProps
           installingId={installingId}
           connectingServer={connectingServer}
           connectionErrors={connectionErrors}
-          onClose={() => setDetailConnector(null)}
+          onClose={() => {
+            setDetailConnector(null);
+            onSetupClosed?.();
+          }}
           onInstall={handleInstall}
           onConnect={handleConnectServer}
           onDisconnect={handleDisconnectServer}

@@ -14,6 +14,7 @@ import {
 
 // Onboarding conversation states
 export type OnboardingState =
+  | "first_result"
   | "dormant"
   | "awakening"
   | "greeting"
@@ -403,7 +404,11 @@ const clearResumeSnapshot = (): void => {
 };
 
 export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOptions) {
-  const [state, setState] = useState<OnboardingState>("dormant");
+  const [state, setState] = useState<OnboardingState>("first_result");
+  const [firstResultMode, setFirstResultMode] = useState(true);
+  const [preparingFirstResult, setPreparingFirstResult] = useState(false);
+  const preparingFirstResultRef = useRef(false);
+  const firstResultModeRef = useRef(true);
   const [currentText, setCurrentText] = useState("");
   const [greetingIndex, setGreetingIndex] = useState(0);
   const [showInput, setShowInput] = useState(false);
@@ -438,6 +443,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   // Clear timeout on unmount
   useEffect(() => {
     return () => {
+      asyncMutationTokenRef.current += 1;
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -493,13 +499,6 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     pendingLlmSettingsRef.current = settings;
   }, []);
 
-  // Helper to delay state transitions
-  const delayedTransition = useCallback((nextState: OnboardingState, delay: number) => {
-    timeoutRef.current = setTimeout(() => {
-      setState(nextState);
-    }, delay);
-  }, []);
-
   // Start the onboarding
   const start = useCallback(() => {
     if (startedRef.current) return;
@@ -514,12 +513,10 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setData(INITIAL_ONBOARDING_DATA);
     setCurrentText("");
     setGreetingIndex(0);
-    setState("dormant");
+    setState("first_result");
 
     canPersistRef.current = true;
-    // Small delay before awakening
-    delayedTransition("awakening", 500);
-  }, [clearPendingTransition, delayedTransition, resetViewState]);
+  }, [clearPendingTransition, resetViewState]);
 
   // Failsafe: never remain in dormant after onboarding has started.
   useEffect(() => {
@@ -683,8 +680,12 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
 
       case "llm_confirmed":
         timeoutRef.current = setTimeout(() => {
-          setState("recap");
-          setCurrentText(SCRIPT.recap_intro(data.assistantName));
+          setState(firstResultModeRef.current ? "completion" : "recap");
+          setCurrentText(
+            firstResultModeRef.current
+              ? "Starting your task…"
+              : SCRIPT.recap_intro(data.assistantName),
+          );
         }, 1000);
         break;
 
@@ -702,7 +703,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
               }
               if (!result.success) {
                 resetViewState();
-                setState("recap");
+                setState(firstResultModeRef.current ? "first_result" : "recap");
                 setCurrentText(result.error || SCRIPT.save_error);
                 return;
               }
@@ -715,7 +716,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
                 }
                 void Promise.resolve(onComplete(true)).catch((error) => {
                   resetViewState();
-                  setState("recap");
+                  setState(firstResultModeRef.current ? "first_result" : "recap");
                   setCurrentText(error instanceof Error ? error.message : SCRIPT.save_error);
                 });
               }, 800);
@@ -891,6 +892,47 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setCurrentText(SCRIPT.completion(data.assistantName));
   }, [data.assistantName]);
 
+  const startFirstResult = useCallback(async () => {
+    if (preparingFirstResultRef.current) return;
+    preparingFirstResultRef.current = true;
+    setPreparingFirstResult(true);
+    clearPendingTransition();
+    const token = beginAsyncMutation();
+    try {
+      const config = await window.electronAPI.getLLMConfigStatus();
+      if (!isActiveAsyncMutation(token)) return;
+      if (
+        config.providers.some(
+          (provider) => provider.type === config.currentProvider && provider.configured,
+        )
+      ) {
+        setState("completion");
+        setCurrentText("Starting your task…");
+      } else {
+        setState("transition_setup");
+        setCurrentText("Connect AI access to run your task. Your request is ready to continue.");
+      }
+    } catch {
+      if (!isActiveAsyncMutation(token)) return;
+      setState("transition_setup");
+      setCurrentText("Choose AI access for your first task. Your request is ready to continue.");
+    } finally {
+      preparingFirstResultRef.current = false;
+      setPreparingFirstResult(false);
+    }
+  }, [preparingFirstResult, clearPendingTransition, beginAsyncMutation, isActiveAsyncMutation]);
+
+  const personalizeFirst = useCallback(() => {
+    firstResultModeRef.current = false;
+    setFirstResultMode(false);
+    clearPendingTransition();
+    invalidateAsyncMutations();
+    resetViewState();
+    setState("ask_name");
+    setCurrentText(SCRIPT.ask_name);
+    setShowInput(true);
+  }, [clearPendingTransition, invalidateAsyncMutations, resetViewState]);
+
   const exitOnboarding = useCallback(() => {
     clearPendingTransition();
     invalidateAsyncMutations();
@@ -1012,6 +1054,13 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     clearPendingTransition();
     invalidateAsyncMutations();
     clearStyleCountdownInterval();
+
+    if (firstResultModeRef.current) {
+      resetViewState();
+      setState("first_result");
+      setCurrentText("");
+      return;
+    }
 
     switch (state) {
       case "ask_name":
@@ -1658,8 +1707,12 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
       selectedProvider: fallbackProvider,
     }));
 
-    setState("recap");
-    setCurrentText(SCRIPT.recap_intro(data.assistantName));
+    setState(firstResultModeRef.current ? "first_result" : "recap");
+    setCurrentText(
+      firstResultModeRef.current
+        ? "Connect AI access before running a task, or explore CoWork for now."
+        : SCRIPT.recap_intro(data.assistantName),
+    );
   }, [
     beginAsyncMutation,
     clearPendingTransition,
@@ -1676,6 +1729,14 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     const activePersona = deriveOnboardingPersona(data);
     const activePersonality = deriveOnboardingPersonalityPreset(data);
     try {
+      // Task-first setup must not reset existing identity, memory, or workspace preferences.
+      if (firstResultModeRef.current) {
+        if (pendingLlmSettingsRef.current) {
+          await window.electronAPI.saveLLMSettings(pendingLlmSettingsRef.current);
+          pendingLlmSettingsRef.current = null;
+        }
+        return { success: true };
+      }
       // Save to AppearanceSettings (for backward compatibility)
       const currentAppearance = await window.electronAPI.getAppearanceSettings();
       await window.electronAPI.saveAppearanceSettings({
@@ -1871,6 +1932,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     }
   }, [
     state,
+    firstResultMode,
     data,
     greetingIndex,
     currentText,
@@ -1885,6 +1947,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   return {
     // State
     state,
+    firstResultMode,
+    preparingFirstResult,
     currentText,
     showInput,
     showProviders,
@@ -1902,6 +1966,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
 
     // Actions
     start,
+    startFirstResult,
+    personalizeFirst,
     onAwakeningComplete,
     onTextComplete,
     continueFromIntro,

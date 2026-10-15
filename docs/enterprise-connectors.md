@@ -53,6 +53,25 @@ command boundary.
 
 See [Composer Mentions](composer-mentions.md) for the full resolver and runtime contract.
 
+## Connect Apps While Starting a Task
+
+New tasks, including the first onboarding task, and local task follow-ups can
+open contextual connection setup when the request explicitly names a supported
+app that is not ready. For example, “Create a project update from my Linear
+issues” can open Linear setup before the task starts.
+
+**Set up** reuses the existing connector details and sign-in controls. Closing
+those details checks readiness again; **Continue task** submits the preserved
+request, workspace, and attachments. **Back to request** restores the editable
+request without submitting it. **Continue without connecting** submits it with
+the current access. Connecting an app does not grant additional task permissions
+or bypass approvals.
+
+This preflight covers explicitly named supported apps; it does not discover every
+possible dependency or intercept remote-task follow-ups. See
+[First-result onboarding and contextual connections](first-result-onboarding.md)
+for supported apps, readiness checks, and acceptance instructions.
+
 ## Connector Events and Content Triggers
 
 CoWork can now treat MCP connector notifications as automation inputs, not just tool catalogs.

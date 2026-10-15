@@ -6590,6 +6590,24 @@ relationship_memory:
     expect(contractMode).toBe("artifact_presence_required");
   });
 
+  it("does not require the final report during an intermediate issue-scope discovery step", () => {
+    executor = createExecutorWithStubs([textResponse("Retrieved issue scope established.")], {});
+    const scope: Any = {
+      id: "scope",
+      status: "pending",
+      description:
+        "Establish the report scope from the retrieved issues, grouping by project where project fields are available. Retrieve remaining pages where supported, and identify missing fields or inaccessible records that limit the update.",
+    };
+    const write: Any = {
+      id: "write",
+      status: "pending",
+      description: "Write the project update to project-update.md.",
+    };
+    (executor as Any).plan = { description: "Project update", steps: [scope, write] };
+    expect((executor as Any).stepRequiresArtifactEvidence(scope)).toBe(false);
+    expect((executor as Any).stepRequiresArtifactEvidence(write)).toBe(true);
+  });
+
   it("does not classify write-to-file report steps as summary steps", () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
 

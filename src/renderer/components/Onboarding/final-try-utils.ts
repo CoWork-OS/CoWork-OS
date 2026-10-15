@@ -1,6 +1,6 @@
 export const FINAL_TRY_HEADLINE = "Choose a prompt or write your own.";
 export const FINAL_TRY_NEXT_STEP =
-  "Suggestions fill the prompt. Run in workspace saves your setup, then starts a normal task to follow and review.";
+  "Start task saves your setup, connects any apps you need, then starts a normal task to follow and review. You can personalize CoWork later.";
 
 export function selectFinalTrySuggestion(
   prompt: string,

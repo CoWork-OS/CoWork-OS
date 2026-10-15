@@ -42667,12 +42667,16 @@ Return ONLY a JSON object:
       const previousRoute = { providerType: this.provider.type, modelId: this.modelId };
       try {
         this.applyResolvedProviderSelection(newSelection);
-        if (previousRoute.providerType !== newSelection.providerType) {
-          this.pendingModelHandoff = {
-            from: previousRoute,
-            to: { providerType: newSelection.providerType, modelId: newSelection.modelId },
-          };
-        }
+        // Only a pinned model (the thread's own pick, or its bot's model) gets a handoff
+        // note; a global provider switch (or a later switch back) clears any pending note.
+        this.pendingModelHandoff =
+          modelConfig?.modelPinned === true &&
+          previousRoute.providerType !== newSelection.providerType
+            ? {
+                from: previousRoute,
+                to: { providerType: newSelection.providerType, modelId: newSelection.modelId },
+              }
+            : null;
         this.rebuildProviderFailoverSelections(newSelection, desiredProfile);
         this.emitEvent("log", {
           message:

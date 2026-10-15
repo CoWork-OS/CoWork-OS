@@ -2807,6 +2807,7 @@ export class LLMProviderFactory {
       type: LLMProviderType;
       name: string;
       configured: boolean;
+      reasoningEffort?: LLMReasoningEffort;
     }>;
     models: Array<{
       key: string;
@@ -2851,7 +2852,11 @@ export class LLMProviderFactory {
       currentProvider: settings.providerType,
       currentModel,
       currentReasoningEffort: routingSettings.reasoningEffort,
-      providers: this.getAvailableProviders(),
+      // Each provider's saved effort, so a conversation pinned to another provider shows it.
+      providers: this.getAvailableProviders().map((provider) => {
+        const effort = this.getProviderRoutingSettings(settings, provider.type).reasoningEffort;
+        return effort ? { ...provider, reasoningEffort: effort } : provider;
+      }),
       models: modelStatus.models,
       routing: {
         currentProvider: settings.providerType,

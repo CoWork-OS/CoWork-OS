@@ -766,6 +766,51 @@ describe("TaskExecutor provider refresh", () => {
     expect(executor.takeModelHandoffNote()).toBeNull();
   });
 
+  it("does not note a handoff for a global provider switch on an unpinned task", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "anthropic",
+      anthropic: { apiKey: "anthropic-key" },
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "resolveTaskModelSelection").mockReturnValue({
+      providerType: "anthropic",
+      modelId: "claude-opus-4-5",
+      modelKey: "opus-4-5",
+      llmProfileUsed: "cheap",
+      resolvedModelKey: "opus-4-5",
+      modelSource: "provider_default",
+      warnings: [],
+    } as Any);
+
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-global-switch", title: "Task", agentConfig: {} };
+    executor.provider = { type: "openai", createMessage: vi.fn() };
+    executor.modelId = "gpt-4o";
+    executor.llmProfileUsed = "cheap";
+    executor.providerFailoverIndex = 0;
+    executor.logTag = "[Executor:test]";
+    executor.emitEvent = vi.fn();
+    executor.emitRoutingState = vi.fn();
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+    });
+    executor.rebuildProviderFailoverSelections = vi.fn();
+    executor.isVerificationTaskRoute = vi.fn(() => false);
+    executor.hasExplicitTaskRouteOverride = vi.fn(() => false);
+    executor.conversationHistory = [];
+    // A note left over from an earlier switch is dropped by the next route change.
+    executor.pendingModelHandoff = {
+      from: { providerType: "gemini", modelId: "g" },
+      to: { providerType: "openai", modelId: "gpt-4o" },
+    };
+
+    executor.refreshProviderIfSettingsChanged();
+
+    expect(executor.provider.type).toBe("anthropic");
+    expect(executor.takeModelHandoffNote()).toBeNull();
+  });
+
   it("runs a bot's conversation on the bot's model, below the conversation's own pick", () => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
       providerType: "openai",
@@ -836,5 +881,57 @@ describe("TaskExecutor provider refresh", () => {
       expect.not.objectContaining({ modelPinned: true }),
       expect.any(Object),
     );
+  });
+
+  it("notes a handoff when a bot's own model moves its conversation to another provider", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "openai",
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+      anthropic: { apiKey: "anthropic-key" },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "resolveTaskModelSelection").mockReturnValue({
+      providerType: "anthropic",
+      modelId: "claude-opus-4-5",
+      modelKey: "opus-4-5",
+      llmProfileUsed: "cheap",
+      resolvedModelKey: "opus-4-5",
+      modelSource: "explicit_override",
+      warnings: [],
+    } as Any);
+
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-bot-handoff",
+      title: "Bot conversation",
+      assignedAgentRoleId: "role-1",
+      agentConfig: { botConversation: true },
+    };
+    executor.daemon = {
+      getAgentRoleById: vi.fn(() => ({
+        id: "role-1",
+        modelKey: "opus-4-5",
+        providerType: "anthropic",
+      })),
+    };
+    executor.provider = { type: "openai", createMessage: vi.fn() };
+    executor.modelId = "gpt-4o";
+    executor.llmProfileUsed = "cheap";
+    executor.modelKey = "gpt-4o";
+    executor.logTag = "[Executor:test]";
+    executor.emitEvent = vi.fn();
+    executor.emitRoutingState = vi.fn();
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+    });
+    executor.rebuildProviderFailoverSelections = vi.fn();
+    executor.isVerificationTaskRoute = vi.fn(() => false);
+    executor.hasExplicitTaskRouteOverride = vi.fn(() => false);
+    executor.conversationHistory = [];
+
+    executor.refreshProviderIfSettingsChanged();
+
+    expect(executor.provider.type).toBe("anthropic");
+    expect(executor.takeModelHandoffNote()).not.toBeNull();
   });
 });

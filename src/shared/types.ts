@@ -9598,6 +9598,8 @@ export interface LLMProviderInfo {
   type: LLMProviderType;
   name: string;
   configured: boolean;
+  /** The provider's saved reasoning effort (shown when a conversation is pinned to it). */
+  reasoningEffort?: LLMReasoningEffort;
 }
 
 export interface LLMModelInfo {

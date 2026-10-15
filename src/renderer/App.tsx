@@ -1640,6 +1640,7 @@ const SelectedTaskWorkspaceView = memo(
               initialUrl={visibleBrowserWorkbench.url}
               openRequestId={visibleBrowserWorkbench.requestId}
               workspaceId={workspace?.id}
+              botId={task.assignedAgentRoleId || undefined}
               workspacePath={workspace?.path}
               mode={visibleBrowserWorkbench.mode}
               onClose={closeBrowserWorkbench}

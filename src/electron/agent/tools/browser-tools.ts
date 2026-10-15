@@ -1004,15 +1004,31 @@ export class BrowserTools {
     if (trimmed === "chrome-relay") {
       return path.join(this.workspace.path, ".cowork", "browser-profiles", "chrome-relay");
     }
+    // A bot keeps its own saved profiles, so it never signs in as you or as another bot.
+    const botPrefix = this.getBotProfilePrefix();
     if (trimmed === "workspace") {
-      return path.join(this.workspace.path, ".cowork", "browser-profiles", "default");
+      return path.join(this.workspace.path, ".cowork", "browser-profiles", `${botPrefix}default`);
     }
     const safe =
       path
         .basename(profile.trim())
         .replace(/[^a-zA-Z0-9._-]+/g, "_")
         .slice(0, 64) || "default";
-    return path.join(this.workspace.path, ".cowork", "browser-profiles", safe);
+    return path.join(this.workspace.path, ".cowork", "browser-profiles", `${botPrefix}${safe}`);
+  }
+
+  /** `bot-<id>-` when a bot does this task, else empty. */
+  private getBotProfilePrefix(): string {
+    let botId: string | undefined;
+    try {
+      botId = this.daemon.getTask?.(this.taskId)?.assignedAgentRoleId;
+    } catch {
+      botId = undefined;
+    }
+    const safe = String(botId || "")
+      .replace(/[^a-zA-Z0-9-]+/g, "")
+      .slice(0, 40);
+    return safe ? `bot-${safe}-` : "";
   }
 
   private getSystemChromeUserDataDir(): string {

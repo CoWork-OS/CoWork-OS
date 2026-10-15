@@ -1672,3 +1672,47 @@ describe("BrowserTools current effect authority", () => {
     }
   });
 });
+
+describe("BrowserTools saved profiles", () => {
+  const workspace = {
+    id: "workspace-1",
+    path: "/tmp/ws",
+    permissions: { read: true, write: true, delete: true, network: true, shell: true },
+  } as Any;
+  const toolsFor = (assignedAgentRoleId?: string) =>
+    new BrowserTools(
+      workspace,
+      {
+        logEvent: vi.fn(),
+        registerArtifact: vi.fn(),
+        getTask: vi.fn(() => ({ id: "task-1", assignedAgentRoleId })),
+      } as Any,
+      "task-1",
+    ) as Any;
+
+  it("keeps a bot's saved profiles apart from the workspace's", () => {
+    const bot = toolsFor("7d2c1e9a-3b4f-4c5d-8e6f-7a8b9c0d1e2f");
+    expect(bot.getPersistentUserDataDir("workspace")).toBe(
+      path.join(
+        "/tmp/ws",
+        ".cowork",
+        "browser-profiles",
+        "bot-7d2c1e9a-3b4f-4c5d-8e6f-7a8b9c0d1e2f-default",
+      ),
+    );
+    expect(bot.getPersistentUserDataDir("shopping")).toBe(
+      path.join(
+        "/tmp/ws",
+        ".cowork",
+        "browser-profiles",
+        "bot-7d2c1e9a-3b4f-4c5d-8e6f-7a8b9c0d1e2f-shopping",
+      ),
+    );
+  });
+
+  it("keeps ordinary tasks on the workspace profile", () => {
+    expect(toolsFor().getPersistentUserDataDir("workspace")).toBe(
+      path.join("/tmp/ws", ".cowork", "browser-profiles", "default"),
+    );
+  });
+});

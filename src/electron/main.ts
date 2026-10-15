@@ -278,7 +278,10 @@ import { defaultExternalBrowserDeps } from "./browser/credentials/external-brows
 import { ImportSessions } from "./browser/credentials/import-session";
 import { getBrowserVault } from "./browser/credentials/vault";
 import { BrowserSettingsManager } from "./settings/browser-settings-manager";
-import { browserProfileKeyFromPartition } from "../shared/browser-profile";
+import {
+  browserProfileKeyFromPartition,
+  isBrowserPartitionAllowedForTask,
+} from "../shared/browser-profile";
 import { matchBrowserShortcut } from "../shared/browser-shortcuts";
 import { isAllowedWebviewUrl } from "./browser/webview-url-policy";
 import { pruneTempWorkspaces } from "./utils/temp-workspace";
@@ -5063,6 +5066,20 @@ if (isMacSafeStorageMigrationWorker) {
     });
 
     /** Set a workbench session's access policy from its task's effective access profile. */
+    /**
+     * A bot's task shows pages only on that bot's own browser profile, and any other task only
+     * on a workspace profile, so bots never share sign-ins with each other or with you.
+     */
+    const isBrowserPartitionAllowedForTaskId = async (
+      taskId: string,
+      partition: string | undefined,
+    ): Promise<boolean> => {
+      if (!agentDaemon || !partition) return false;
+      const task = await agentDaemon.getTaskById(taskId);
+      return (
+        Boolean(task) && isBrowserPartitionAllowedForTask(partition, task?.assignedAgentRoleId)
+      );
+    };
     const applyBrowserWorkbenchAccessPolicy = async (
       taskId: string,
       sessionId: string,
@@ -5114,6 +5131,14 @@ if (isMacSafeStorageMigrationWorker) {
         ))
       ) {
         throw new Error("Browser task workspace not found");
+      }
+      if (
+        !(await isBrowserPartitionAllowedForTaskId(
+          data.taskId,
+          browserWorkbenchSessions.get(guest.session as object),
+        ))
+      ) {
+        throw new Error("This page is not on the task's browser profile");
       }
       await getBrowserWorkbenchService().registerSession({
         taskId: data.taskId,
@@ -5232,6 +5257,9 @@ if (isMacSafeStorageMigrationWorker) {
       }
       if (!(await applyBrowserWorkbenchAccessPolicy(key.taskId, key.sessionId))) {
         throw new Error("Browser task workspace not found");
+      }
+      if (!(await isBrowserPartitionAllowedForTaskId(key.taskId, partition))) {
+        throw new Error("This page is not on the task's browser profile");
       }
       return getBrowserTabViewHost().open({ ...key, partition, activate: data.activate === true });
     });

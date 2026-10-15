@@ -343,6 +343,7 @@ import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { generateAndApplyTaskTitle } from "../agent/task-title-generator";
+import { effectiveTaskModelConfigFor } from "../agent/task-model-config";
 import { RuntimeVisibilityService } from "../agent/RuntimeVisibilityService";
 import {
   LLMProviderFactory,
@@ -1665,7 +1666,12 @@ export async function setupIpcHandlers(
       )
         return null;
       const { resolveComposerPredictionModel } = await import("../agent/composer-prediction-model");
-      const selection = resolveComposerPredictionModel(task);
+      // A bot's conversation predicts with the bot's own model, like its turns.
+      const selection = resolveComposerPredictionModel({
+        agentConfig: await effectiveTaskModelConfigFor(task, (roleId) =>
+          agentRoleRepo.findById(roleId),
+        ),
+      });
       const key = `${taskId}:${request.revision}:${selection.providerType}:${selection.modelId}`;
       const prediction = await composerPredictions.request(
         event.sender.id,
@@ -1826,12 +1832,21 @@ export async function setupIpcHandlers(
     prompt: string,
     agentConfig?: AgentConfig,
   ): void => {
-    void generateAndApplyTaskTitle(
-      task,
-      prompt,
-      taskRepo,
-      (taskId, title) => agentDaemon.emitTaskTitleUpdated(taskId, title),
-      agentConfig,
+    // A bot's task titles with the bot's own model, like its turns.
+    void effectiveTaskModelConfigFor(
+      {
+        agentConfig: agentConfig ?? task.agentConfig,
+        assignedAgentRoleId: task.assignedAgentRoleId,
+      },
+      (roleId) => agentRoleRepo.findById(roleId),
+    ).then((modelConfig) =>
+      generateAndApplyTaskTitle(
+        task,
+        prompt,
+        taskRepo,
+        (taskId, title) => agentDaemon.emitTaskTitleUpdated(taskId, title),
+        modelConfig,
+      ),
     );
   };
 

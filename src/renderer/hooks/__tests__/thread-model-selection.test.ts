@@ -40,9 +40,10 @@ describe("resolveThreadModelSelection", () => {
         providerType: "anthropic",
       }),
     ).toEqual({ modelKey: "opus-4-5", providerType: "anthropic", pinned: false, source: "bot" });
+    // A bot model without a provider is ignored, as the executor ignores it.
     expect(
       resolveThreadModelSelection(undefined, "gpt-4o", "openai", { modelKey: "gpt-4o-mini" }),
-    ).toMatchObject({ modelKey: "gpt-4o-mini", providerType: "openai", source: "bot" });
+    ).toMatchObject({ modelKey: "gpt-4o", providerType: "openai", source: "global" });
     expect(
       resolveThreadModelSelection(
         { agentConfig: { providerType: "openai", modelKey: "gpt-4o-mini", modelPinned: true } },

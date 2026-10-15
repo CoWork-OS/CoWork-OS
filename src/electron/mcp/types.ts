@@ -58,6 +58,11 @@ export interface MCPOAuthSettings {
   /** Registered loopback redirect, e.g. http://127.0.0.1:18768/oauth/callback. */
   redirectUri?: string;
   scopes?: string[];
+  /**
+   * `scopes` came from the server (its challenge or resource metadata), not from the
+   * person: the next sign-in asks the server again, so a changed challenge is honored.
+   */
+  scopesDiscovered?: boolean;
   /** RFC 8707 resource indicator. */
   resource?: string;
   tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";

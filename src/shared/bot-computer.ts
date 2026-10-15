@@ -4,10 +4,17 @@ import { COMPUTER_USE_TOOL_NAMES } from "./computer-use-contract";
  * Where a bot works: which computer its tasks may drive.
  * - auto: decided per task (today: this computer or the in-app browser)
  * - this_computer: this Mac's apps and screen, plus the in-app browser
+ * - own_desktop: a separate desktop on this computer that only this bot uses (a container)
  * - browser: only the in-app browser
  * - off: no computer at all (files, commands and connectors still work)
  */
-export const BOT_WORKS_ON_VALUES = ["auto", "this_computer", "browser", "off"] as const;
+export const BOT_WORKS_ON_VALUES = [
+  "auto",
+  "this_computer",
+  "own_desktop",
+  "browser",
+  "off",
+] as const;
 export type BotWorksOn = (typeof BOT_WORKS_ON_VALUES)[number];
 
 export const BOT_WORKS_ON_OPTIONS: ReadonlyArray<{
@@ -24,6 +31,12 @@ export const BOT_WORKS_ON_OPTIONS: ReadonlyArray<{
     value: "this_computer",
     label: "This computer",
     description: "Can use apps on this Mac and the browser. Actions still ask for approval.",
+  },
+  {
+    value: "own_desktop",
+    label: "Its own desktop",
+    description:
+      "A separate desktop that only this bot uses, with its own browser and files. Needs Docker Desktop or Podman.",
   },
   { value: "browser", label: "Browser", description: "Only the in-app browser." },
   { value: "off", label: "Off", description: "No computer or browser." },
@@ -44,6 +57,7 @@ export function normalizeBotWorksOn(value: unknown): BotWorksOn {
 const WORKS_ON_RANK: Record<BotWorksOn, number> = {
   off: 0,
   browser: 1,
+  own_desktop: 1,
   this_computer: 2,
   auto: 2,
 };
@@ -85,8 +99,11 @@ export const HOST_COMPUTER_TOOL_NAMES: readonly string[] = [
 
 const HOST_COMPUTER_TOOL_SET = new Set(HOST_COMPUTER_TOOL_NAMES);
 
-/** host: this computer; browser: the in-app browser; handoff: asking the person to take over. */
-export type ComputerToolKind = "host" | "browser" | "handoff";
+/**
+ * host: this computer; browser: the in-app browser; desktop: the bot's own desktop;
+ * handoff: asking the person to take over.
+ */
+export type ComputerToolKind = "host" | "browser" | "desktop" | "handoff";
 
 /** Which computer a tool acts on, or null when it acts on neither. */
 export function computerToolKind(
@@ -96,6 +113,7 @@ export function computerToolKind(
   const name = String(toolName || "").trim();
   if (options.hostDesktopMcp || HOST_COMPUTER_TOOL_SET.has(name)) return "host";
   if (name.startsWith("browser_")) return "browser";
+  if (name.startsWith("desktop_")) return "desktop";
   if (name === "request_takeover") return "handoff";
   return null;
 }
@@ -105,9 +123,14 @@ export function isComputerToolBlocked(
   worksOn: BotWorksOn | undefined,
   kind: ComputerToolKind | null,
 ): boolean {
-  if (!kind || !worksOn) return false;
+  if (!kind) return false;
+  // The bot's own desktop exists only for a bot set to work there.
+  if (kind === "desktop") return worksOn !== "own_desktop";
+  if (!worksOn) return false;
   if (worksOn === "off") return true;
   if (worksOn === "browser") return kind === "host";
+  // On its own desktop a bot leaves this computer and the in-app browser alone.
+  if (worksOn === "own_desktop") return kind === "host" || kind === "browser";
   return false;
 }
 

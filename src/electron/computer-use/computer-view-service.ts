@@ -30,6 +30,8 @@ export interface ComputerViewDeps {
   encodeFrame: (png: Buffer, maxWidth: number) => EncodedFrame | null;
   /** Captures the task's in-app browser tab, if it has one. */
   captureBrowser?: (taskId: string) => Promise<{ png: Buffer; label?: string } | null>;
+  /** Captures the bot's own desktop, if it is running. */
+  captureDesktop?: (taskId: string) => Promise<{ png: Buffer; label?: string } | null>;
   /** Pauses or resumes the bot's driving of the task's in-app browser tabs. */
   setBrowserPaused?: (taskId: string, paused: boolean) => void;
   logEvent?: (taskId: string, type: string, payload: Record<string, unknown>) => void;
@@ -232,20 +234,22 @@ export class ComputerViewService {
     return next;
   }
 
-  /** Captures the browser every few seconds while someone watches a task working in it. */
+  /**
+   * Captures the browser or the bot's own desktop every few seconds while someone watches a
+   * task working there. This computer is captured only by its own actions.
+   */
   private syncPoller(taskId: string): void {
     const state = this.states.get(taskId);
     const shouldPoll =
-      Boolean(this.deps.captureBrowser) &&
+      Boolean(this.capturerFor(state?.surface)) &&
       this.isWatched(taskId) &&
-      state?.status === "working" &&
-      state.surface === "browser";
+      state?.status === "working";
     if (!shouldPoll) {
       this.stopPoller(taskId);
       return;
     }
     if (this.pollers.has(taskId)) return;
-    const timer = setInterval(() => void this.captureBrowserFrame(taskId), COMPUTER_VIEW_POLL_MS);
+    const timer = setInterval(() => void this.captureNow(taskId), COMPUTER_VIEW_POLL_MS);
     (timer as { unref?: () => void }).unref?.();
     this.pollers.set(taskId, timer);
   }
@@ -256,15 +260,29 @@ export class ComputerViewService {
     this.pollers.delete(taskId);
   }
 
-  /** Captures the task's browser now (after a browser action, or on the poll). */
+  private capturerFor(surface: ComputerViewSurface | undefined) {
+    if (surface === "browser") return this.deps.captureBrowser;
+    if (surface === "own_desktop") return this.deps.captureDesktop;
+    return undefined;
+  }
+
+  /** Captures the task's browser now (after a browser action). */
   async captureBrowserFrame(taskId: string): Promise<void> {
-    if (!this.deps.captureBrowser || this.capturing.has(taskId) || this.isHeldByPerson(taskId)) {
+    if (this.getState(taskId).surface !== "browser") this.noteWorking(taskId, "browser");
+    await this.captureNow(taskId);
+  }
+
+  /** Captures what the task works on now, if it can be captured without its tools. */
+  async captureNow(taskId: string): Promise<void> {
+    const surface = this.states.get(taskId)?.surface;
+    const capture = this.capturerFor(surface);
+    if (!surface || !capture || this.capturing.has(taskId) || this.isHeldByPerson(taskId)) {
       return;
     }
     this.capturing.add(taskId);
     try {
-      const captured = await this.deps.captureBrowser(taskId);
-      if (captured) this.publishFrame(taskId, "browser", captured.png, captured.label);
+      const captured = await capture(taskId);
+      if (captured) this.publishFrame(taskId, surface, captured.png, captured.label);
     } catch {
       // A tab that closed or navigated away just skips this frame.
     } finally {

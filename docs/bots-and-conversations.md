@@ -464,6 +464,7 @@ Each bot has a **Works on** setting, chosen in its create and edit dialogs:
 | --- | --- |
 | **Auto** (default) | This computer or the in-app browser, whichever the task needs |
 | **This computer** | Apps on the computer running CoWork OS, and the in-app browser |
+| **Its own desktop** | A separate desktop only this bot uses, with its own browser and files (needs Docker Desktop or Podman) |
 | **Browser** | Only the in-app browser |
 | **Off** | No computer or browser; files, commands and connectors still work |
 
@@ -478,6 +479,20 @@ own in each workspace, so bots don't share cookies, sign-ins or history with
 each other or with you. Cookies you import go to the workspace profile, so a
 bot starts signed out. The agent's saved background profiles are per bot too
 (`.cowork/browser-profiles/bot-<id>-…`).
+
+**Its own desktop.** A bot set to work on its own desktop gets a Linux desktop
+in a container on this computer, built from `resources/bot-desktop` on first
+use (a few minutes, once). It never touches your apps, screen or in-app
+browser; its `desktop_*` tools take screenshots, click, type, press keys,
+scroll, drag, open pages in its own browser, and run commands inside the
+desktop. The container runs as an unprivileged user with no capabilities,
+memory, CPU and process limits, and only its viewer published on `127.0.0.1`.
+The only folder of yours it sees is the bot's own home folder in CoWork's app
+data, so its files and browser sign-ins are kept between conversations and
+after **Stop desktop**. A desktop stops after an hour without use and when
+CoWork quits. Tasks of the same bot take turns on it. **Open desktop** shows
+it in a window: read-only while the bot works, and yours to use after **Take
+over**.
 
 **One task at a time on this computer.** This computer has one cursor and one
 focus, so one task drives it at a time. Another task waits its turn, first come
@@ -657,7 +672,12 @@ The bot implementation is intentionally split by responsibility:
   notifications, history and link copying; `BotComputerSection.tsx` (with
   `useComputerView`) shows where the bot works, the live view and take-over.
 - `src/shared/bot-computer.ts` defines the **Works on** values and which tools
-  act on this computer or the browser; the tool registry enforces it.
+  act on this computer, the browser or the bot's own desktop; the tool registry
+  enforces it.
+- `src/electron/computer-use/bot-desktop-manager.ts` runs each bot's own desktop
+  (image build, locked-down container, turns, idle stop, viewer address);
+  `agent/tools/bot-desktop-tools.ts` defines the `desktop_*` tools;
+  `resources/bot-desktop/` holds the desktop's Dockerfile and start script.
 - `src/electron/computer-use/computer-view-service.ts` keeps each task's latest
   still and take-over state; `session-manager.ts` queues tasks waiting for this
   computer; `agent/tools/computer-handoff-tools.ts` defines `request_takeover`.

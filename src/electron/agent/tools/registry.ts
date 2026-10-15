@@ -180,6 +180,7 @@ import { AndroidPhoneTools, ANDROID_PHONE_TOOLS } from "./android-phone-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { ComputerHandoffTools } from "./computer-handoff-tools";
+import { BotDesktopTools } from "./bot-desktop-tools";
 import { QATools } from "./qa-tools";
 import { WebPreviewTools } from "./web-preview-tools";
 import {
@@ -668,6 +669,7 @@ export class ToolRegistry {
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
   private computerHandoffTools: ComputerHandoffTools;
+  private botDesktopTools: BotDesktopTools;
   private qaTools: QATools;
   private webPreviewTools: WebPreviewTools;
   private citationTracker?: CitationTracker;
@@ -762,6 +764,7 @@ export class ToolRegistry {
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
     this.computerHandoffTools = new ComputerHandoffTools(taskId);
+    this.botDesktopTools = new BotDesktopTools(daemon as Any, taskId);
     this.qaTools = new QATools(workspace, daemon, taskId);
     this.webPreviewTools = new WebPreviewTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
@@ -1368,9 +1371,10 @@ export class ToolRegistry {
   /** Whether the bot's "Works on" setting takes this tool away. */
   private isBlockedByBotWorksOn(toolName: string): boolean {
     const worksOn = this.currentBotWorksOn();
-    if (!worksOn || worksOn === "auto" || worksOn === "this_computer") return false;
+    const restricted = worksOn === "browser" || worksOn === "off" || worksOn === "own_desktop";
     const kind = computerToolKind(toolName, {
-      hostDesktopMcp: this.getCodexConsentServer(toolName) !== null,
+      // Only a restricted setting needs to know whether an MCP tool drives this computer.
+      hostDesktopMcp: restricted && this.getCodexConsentServer(toolName) !== null,
     });
     return isComputerToolBlocked(worksOn, kind);
   }
@@ -1674,6 +1678,9 @@ export class ToolRegistry {
 
     // Hand a step to the person (passwords, codes, payments) instead of doing it
     allTools.push(...ComputerHandoffTools.getToolDefinitions());
+
+    // The bot's own desktop (offered only to a bot set to work there; see isBlockedByBotWorksOn)
+    allTools.push(...BotDesktopTools.getToolDefinitions());
 
     // Playwright QA tools (automated visual testing for web apps)
     allTools.push(...QATools.getToolDefinitions());
@@ -3202,6 +3209,30 @@ export class ToolRegistry {
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
     register("request_takeover", async ({ request }) =>
       this.computerHandoffTools.requestTakeover(request.input),
+    );
+    register("desktop_screenshot", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_screenshot", request.input),
+    );
+    register("desktop_open_url", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_open_url", request.input),
+    );
+    register("desktop_click", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_click", request.input),
+    );
+    register("desktop_type", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_type", request.input),
+    );
+    register("desktop_key", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_key", request.input),
+    );
+    register("desktop_scroll", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_scroll", request.input),
+    );
+    register("desktop_drag", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_drag", request.input),
+    );
+    register("desktop_run", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_run", request.input),
     );
     register("read_clipboard", async () => this.systemTools.readClipboard());
     register("write_clipboard", async ({ request }) =>
@@ -5294,6 +5325,7 @@ ${skillDescriptions}`;
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
     if (name === "request_takeover") return this.computerHandoffTools.requestTakeover(input);
+    if (name.startsWith("desktop_")) return this.botDesktopTools.execute(name, input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
     if (name === "write_clipboard") return await this.systemTools.writeClipboard(input.text);
     if (name === "take_screenshot") return await this.systemTools.takeScreenshot(input);

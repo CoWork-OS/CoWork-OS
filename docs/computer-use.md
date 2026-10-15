@@ -3,8 +3,9 @@
 Computer use lets the agent drive **native desktop applications** on macOS and Windows through real mouse, keyboard, and screen capture—when integrations, browser automation, and shell are not the right tool for the job.
 
 Actions run on the computer where CoWork OS is running, using that computer's
-local permissions. Computer use does not provision a separate hosted computer
-or virtual machine; cloud sandbox tools are a separate execution surface.
+local permissions. A bot can instead work on **its own desktop**, a separate
+Linux desktop in a container that only that bot uses; see
+[Bots and conversations → Where a bot works](bots-and-conversations.md#where-a-bot-works).
 
 This page is the **authoritative product guide** for the feature. For a short summary, see [Features → Computer use](features.md#computer-use).
 

@@ -386,6 +386,10 @@
         "to": "computer-use"
       },
       {
+        "from": "resources/bot-desktop",
+        "to": "bot-desktop"
+      },
+      {
         "from": "build/numbat",
         "to": "numbat",
         "filter": [

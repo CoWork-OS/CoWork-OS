@@ -380,6 +380,11 @@ function inferToolExposureMetadata(
   ) {
     return { lane: "integration", exposure: "conditional", overlapGroup: "integration" };
   }
+  // The bot's own desktop: the registry offers these only to a bot set to work there, and
+  // for that bot they are its main tools.
+  if (toolName.startsWith("desktop_")) {
+    return { lane: "core", exposure: "always", overlapGroup: "bot_desktop" };
+  }
   if (toolName.startsWith("browser_") || toolName.startsWith("canvas_")) {
     return {
       lane: toolName.startsWith("canvas_") ? "artifact" : "browser",

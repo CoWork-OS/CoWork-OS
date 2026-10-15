@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
 
 describe("TaskExecutor tool allow-list semantics", () => {
+  it("keeps phone tools and the durable gateway together for Android steps", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: {} };
+    executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("execute");
+    const allowed = executor.buildStepToolAllowlist(
+      { requiredTools: new Set() },
+      "mutation_required",
+      "general",
+      "Open Settings",
+      "Open Settings on my Android phone",
+    );
+    for (const name of [
+      "application_operation",
+      "android_phone_devices",
+      "android_phone_observe",
+      "android_phone_authorize",
+      "android_phone_dispatch",
+      "android_phone_readback",
+    ])
+      expect(allowed.has(name), name).toBe(true);
+  });
   function createExecutor(allowedTools?: string[]) {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { allowedTools } };

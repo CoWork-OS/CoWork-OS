@@ -165,6 +165,14 @@ jobs:
           npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
           npm run numbat:build
 
+      - name: Setup Python for Android worker guard tests
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Android worker test image dependency
+        run: python -m pip install pillow==12.3.0
+
       - name: Run tests
         run: npm test
 
@@ -199,6 +207,14 @@ jobs:
         run: |
           npm rebuild node-pty --ignore-scripts=false --no-audit --no-fund
           npm run numbat:build
+
+      - name: Setup Python for Android worker guard tests
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Android worker test image dependency
+        run: python -m pip install pillow==12.3.0
 
       - name: Run tests
         run: npm test

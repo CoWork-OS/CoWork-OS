@@ -5,6 +5,9 @@ import { NativeCreateSchema } from "../../applications/native-application-script
 import { nativePilotResources } from "../../applications/native-application-pilots";
 import { PhotoshopEditSchema } from "../../applications/photoshop-document-edit";
 import { photoshopEditResources } from "../../applications/photoshop-edit-adapter";
+import { androidPhoneResources } from "../../applications/android-phone-adapter";
+import { AndroidPhoneInputSchema } from "../../../shared/android-phone";
+import { AndroidPhoneService } from "../../phone/AndroidPhoneService";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 import type { InputRequest, InputRequestResponse } from "../../../shared/types";
@@ -121,13 +124,15 @@ export async function runApplicationTool(
       throw new Error("Application request is required");
     const bounded = request as Record<string, unknown>;
     const inferredResources =
-      bounded.capability === "photoshop.document.edit" && bounded.resources === undefined
-        ? photoshopEditResources(PhotoshopEditSchema.parse(bounded.input))
-        : ["photoshop.banner.create", "excel.operating-plan.create"].includes(
-              String(bounded.capability),
-            ) && bounded.resources === undefined
-          ? nativePilotResources(NativeCreateSchema.parse(bounded.input))
-          : bounded.resources;
+      bounded.capability === "phone.android.action" && bounded.resources === undefined
+        ? androidPhoneResources(AndroidPhoneInputSchema.parse(bounded.input))
+        : bounded.capability === "photoshop.document.edit" && bounded.resources === undefined
+          ? photoshopEditResources(PhotoshopEditSchema.parse(bounded.input))
+          : ["photoshop.banner.create", "excel.operating-plan.create"].includes(
+                String(bounded.capability),
+              ) && bounded.resources === undefined
+            ? nativePilotResources(NativeCreateSchema.parse(bounded.input))
+            : bounded.resources;
     const parsed = ApplicationOperationRequestSchema.parse({
       ...request,
       resources: inferredResources,
@@ -200,6 +205,32 @@ export async function runApplicationTool(
             source: "local-photoshop",
             operationId: finished.id,
           });
+        }
+      }
+      if (finished.route.id === "phone.android.v1") {
+        const observation = finished.result?.data?.observation as
+          | { captureId?: string }
+          | undefined;
+        if (observation?.captureId) {
+          const screen = await AndroidPhoneService.getInstance().savedObservation(
+            taskId,
+            observation.captureId,
+          );
+          await daemon.registerArtifact(
+            taskId,
+            AndroidPhoneService.getInstance().capturePath(screen.captureId),
+            "image/png",
+          );
+          return {
+            ...present(finished),
+            ...screen,
+            phoneOperation: {
+              operationId: finished.id,
+              execution: finished.execution,
+              verification: finished.verification,
+              unmetCriteria: finished.result?.unmetCriteria,
+            },
+          };
         }
       }
       return present(finished);

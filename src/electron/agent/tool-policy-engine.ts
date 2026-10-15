@@ -471,6 +471,12 @@ export function evaluateToolAvailability(
   }
 
   const taskText = normalizeTaskText(ctx.taskText);
+  if (
+    normalizedToolName === "application_operation" &&
+    /\bandroid\b|phone-harness|phone\.android\.|android_phone_/.test(taskText)
+  ) {
+    return { decision: "allow", metadata };
+  }
   if (!taskText) {
     return { decision: "defer", reason: `hidden_without_task_signal:${metadata.lane}`, metadata };
   }
@@ -595,6 +601,8 @@ const READONLY_GIT_TOOLS = new Set([
 ]);
 
 const ALWAYS_MUTATING = new Set([
+  "android_phone_authorize",
+  "android_phone_dispatch",
   // Writes a note to the memory folder; plan mode allows it only for swarm members.
   "swarm_note",
   "run_command",

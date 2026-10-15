@@ -23,6 +23,12 @@ curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/in
 
 No Git checkout, compiler, or Node.js installation is needed for the desktop installer. For macOS first-launch security prompts and the DMG's **Open Anyway** steps, see [macOS Installation](macos-installation.md). If you want the terminal interface, use the [released CLI guide](cli.md). To clone, build, or contribute, use the [development guide](development.md).
 
+First launch opens **What would you like to get done?** Choose a suggestion or
+write your own request, then choose **Start task**. CoWork reuses configured model
+access or opens model setup when needed. **Personalize first** opens optional
+guided setup; **Explore CoWork** opens the app so you can follow the manual steps
+below. See [First-result onboarding](first-result-onboarding.md).
+
 ### Step 2: Connect and test one model
 
 Open **Settings > AI & Models > Model Access**, choose an account, API key, or local model route, then select a model and run **Test Connection**. Use the private starter workspace for this first task; you do not need to choose a project folder. See [Model Providers](providers.md) if you need help choosing a route.
@@ -50,7 +56,13 @@ If you need to configure a route manually, choose the path that fits your setup:
 3. **Use an API key** for Claude, OpenAI API, Gemini, OpenRouter, Groq, xAI, DeepSeek, Kimi, NanoGPT, Bedrock, or another supported or compatible route. Provider pricing and free allowances can change, so confirm current terms with the provider.
 4. **Explore without AI** if you only want to look around. AI tasks stay gated until one route is connected and tested.
 
-The onboarding flow keeps your answers in the renderer while you are moving through setup. CoWork writes the profile, provider choice, memory preference, and related settings only when you confirm the final recap. The recap is a fixed review frame with a scrollable body, so long work-context notes do not push the final action off screen.
+The optional **Personalize first** flow keeps your answers in the renderer while you are moving through guided setup. CoWork writes the profile, provider choice, memory preference, and related settings when you confirm the final recap. The recap is a fixed review frame with a scrollable body, so long work-context notes do not push the final action off screen. Starting directly with a task preserves existing identity, voice, memory, and workspace preferences.
+
+If your task explicitly names a supported app that needs connecting, contextual
+setup opens before submission. Use **Set up** to connect through the existing
+controls, then **Continue task** to submit the original request. **Back to
+request** restores your editable request; **Continue without connecting** submits
+with the current access. The same setup applies to local task follow-ups.
 
 If you use the API-key path, open **Settings > AI & Models > Model Access** and choose a provider:
 

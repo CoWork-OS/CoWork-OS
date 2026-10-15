@@ -1,0 +1,86 @@
+{
+  "id": "android-phone-control-2026-10-15",
+  "title": "Selected Android device, approval cancellation and uncertain input recovery",
+  "source": {
+    "review": "initial Android integration edge-case review",
+    "pullRequest": 552
+  },
+  "categories": [
+    {
+      "id": "stop-fences-pending-work",
+      "prompt": "Stop phone activity while discovery, settings writes or approval are pending, then enable control again.",
+      "assertions": {
+        "oldInputDispatched": false,
+        "earlierEnableOvertakesStop": false,
+        "originalReceiptReadbackPreserved": true,
+        "executableTest": "src/electron/phone/__tests__/AndroidPhoneService.test.ts",
+        "executableTestNames": [
+          "keeps Stop last when it overlaps an earlier settings write",
+          "does not dispatch if Stop is pressed during device discovery",
+          "invalidates approved input across Stop and re-enable, while preserving receipt readback",
+          "cancels an open approval immediately when phone activity is stopped",
+          "does not take an approved screenshot after Stop and re-enable during review"
+        ]
+      }
+    },
+    {
+      "id": "approval-is-not-an-input-timeout",
+      "prompt": "Hold input approval beyond the adapter deadline, then cancel before authorizing input.",
+      "assertions": {
+        "deadlineSpentDuringApproval": false,
+        "inputDispatched": false,
+        "deviceLockReleased": true,
+        "executableTest": "src/electron/applications/__tests__/ApplicationExecutionService.test.ts",
+        "executableTestNames": [
+          "does not spend the adapter deadline while waiting for approval",
+          "releases the device resource when canceled before approval, without dispatch"
+        ]
+      }
+    },
+    {
+      "id": "unknown-security-remains-observation-only",
+      "prompt": "Observe a screen with busy accessibility data or missing, malformed or unreadable security XML, then request input.",
+      "assertions": {
+        "unknownSecurityAllowsInput": false,
+        "busyTreeAllowsApprovedScreenshot": true,
+        "executableCoverage": [
+          "src/electron/phone/__tests__/android-bridge.test.ts",
+          "src/electron/phone/__tests__/AndroidPhoneService.test.ts"
+        ],
+        "executableTestNames": [
+          "returns an approved screenshot when the accessibility tree is busy, without enabling input",
+          "keeps screenshot-only observations read-only when security or accessibility is unknown"
+        ]
+      }
+    },
+    {
+      "id": "fresh-visual-target-and-typing-focus",
+      "prompt": "Change the screen pixels without changing the accessibility tree. For typing, change focus, text, target or surrounding pixels; separately allow caret paint inside the same focused native field.",
+      "assertions": {
+        "staleInputDispatched": false,
+        "sameFieldCaretPaintAllowed": true,
+        "executableTest": "src/electron/phone/__tests__/android-bridge.test.ts",
+        "executableTestNames": [
+          "refuses changed pixels even when the opaque accessibility tree is unchanged",
+          "allows caret paint changes only for typing into the same focused native text field"
+        ]
+      }
+    },
+    {
+      "id": "unknown-input-is-not-replayed",
+      "prompt": "Restart after uncertain Android input, then attempt another operation on the same device and reconcile the original receipt.",
+      "assertions": {
+        "originalInputReplayed": false,
+        "unknownOutcomeRetainsDeviceLock": true,
+        "dispatchAcknowledgementCountsAsVerification": false,
+        "executableTest": "src/electron/applications/__tests__/android-phone-adapter.test.ts",
+        "executableTestNames": [
+          "preserves unknown input and blocks a second task on the same device across service restart",
+          "verifies fresh domain criteria, keeps screenshots out of SQLite and never executes twice",
+          "does not claim verification from dispatch, wrong text or a missing receipt"
+        ]
+      }
+    }
+  ],
+  "notes": "Scenario specification linked to executable Vitest regressions. This JSON is not loaded or graded by run_eval_suite.cjs and is not independent live capability evidence. The optional emulator scenario and separate Electron approval acceptance are documented in docs/android-phone-validation.md. No provider credentials or production profile data are required by the automated tests."
+}

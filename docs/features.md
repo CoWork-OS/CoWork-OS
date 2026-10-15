@@ -1,5 +1,16 @@
 # Features
 
+## First-result Onboarding and Contextual Connections
+
+First launch opens an editable task with starter suggestions. **Start task**
+reuses configured model access or opens the existing model setup; **Personalize
+first** keeps guided setup optional, and **Explore CoWork** enters without
+starting work. Explicit references to supported apps can open connection setup
+before a new task or local follow-up is submitted. Existing connector controls
+handle sign-in, cancellation restores the request, and continuation preserves the
+workspace and attachments. Connections retain normal task permissions and
+approvals. See [First-result onboarding and contextual connections](first-result-onboarding.md).
+
 ## Multi-Channel AI Gateway
 
 Messaging channels share unified operations, plus per-channel, per-chat, and per-topic specialization for workspace, agent role, guidance, tool policy, and shared-memory opt-in. See [Channel Integrations](channels.md) for the current supported list and setup details, [Channel User Guides](channel-user-guides.md) for per-channel features and best practices, [Dedicated Channel Guides](channel-guides/) for separate channel pages, [Using CoWork from WhatsApp and Other Channels](gateway-user-guide.md) for end-user workflows, and [Gateway Message Lifecycle](gateway-message-lifecycle.md) for remote command routing, active-task behavior, delivery, and scheduled outputs.
@@ -159,6 +170,10 @@ Cross-platform location access for nearby-place, walking-distance, and local-err
 - **Accuracy modes**: `precise` (GPS/Wi-Fi best) or `coarse` (city-level)
 - **Timeout**: Configurable 1–60 seconds (default 15s). Failed requests are cached for 2 minutes to prevent retry storms.
 - **Maps integration**: Coordinates feed into `maps.search_places`, `maps.rank_nearby_options`, and `maps.route` from the bundled Maps MCP connector.
+
+### Android phone control
+
+Opt-in control of a selected Android phone or emulator through ADB and phone-harness. Settings provides runtime installation/repair, exact device selection, enable and Stop controls. Screen access and every input require explicit owner approval. Screenshots, fresh task-owned captures, durable action receipts and package/text readback support inspected execution and recovery without replaying uncertain input. Opening apps, taps, swipes, ASCII typing, Home, Back and Recents are supported; authentication and locked screens require the user. See [Android phone control](android-phone-control.md) for setup and verification limits.
 
 ### Computer use
 

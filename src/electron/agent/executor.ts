@@ -1,5 +1,6 @@
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
+import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
@@ -11429,6 +11430,12 @@ ${transcript}
   }
 
   private getToolTimeoutMs(toolName: string, input: unknown): number {
+    const timeoutMs = this.getToolTimeoutMsBeforeComputerWait(toolName, input);
+    // A computer-use call may first wait its turn while another task has the computer.
+    return isComputerUseToolName(toolName) ? timeoutMs + COMPUTER_USE_WAIT_MS : timeoutMs;
+  }
+
+  private getToolTimeoutMsBeforeComputerWait(toolName: string, input: unknown): number {
     const settingsTimeout = BuiltinToolsSettingsManager.getToolTimeoutMs(toolName);
     const normalizedSettingsTimeout =
       settingsTimeout && settingsTimeout > 0 ? settingsTimeout : null;

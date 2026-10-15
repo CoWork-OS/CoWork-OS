@@ -209,7 +209,9 @@ export class NativeAppTools {
       throw new Error(
         "outcome_unknown: a previous native action is unresolved. Read-only observation remains available; no mutation or replay is allowed.",
       );
-    ComputerUseSessionManager.getInstance().acquire(this.taskId, this.daemon, { background: true });
+    await ComputerUseSessionManager.getInstance().acquireOrWait(this.taskId, this.daemon, {
+      background: true,
+    });
     ComputerUseSessionManager.getInstance().checkNotAborted();
     await this.runtime.ensureReadyWithInteractivePermissions();
     assertPrivateCaptureAllowed();

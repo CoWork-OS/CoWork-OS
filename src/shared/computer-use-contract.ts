@@ -11,6 +11,9 @@ export const COMPUTER_USE_TOOL_NAMES = [
   "wait",
 ] as const;
 
+/** How long a task waits for another task to finish with this computer. */
+export const COMPUTER_USE_WAIT_MS = 2 * 60 * 1000;
+
 export type ComputerUseToolName = (typeof COMPUTER_USE_TOOL_NAMES)[number];
 
 const COMPUTER_USE_TOOL_NAME_SET = new Set<string>(COMPUTER_USE_TOOL_NAMES);

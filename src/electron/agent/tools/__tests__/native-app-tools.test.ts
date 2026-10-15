@@ -12,7 +12,11 @@ vi.mock("../../../applications/native-desktop-session", () => ({
 }));
 vi.mock("../../../computer-use/session-manager", () => ({
   ComputerUseSessionManager: {
-    getInstance: () => ({ acquire: vi.fn(), checkNotAborted: vi.fn() }),
+    getInstance: () => ({
+      acquire: vi.fn(),
+      acquireOrWait: vi.fn(async () => undefined),
+      checkNotAborted: vi.fn(),
+    }),
   },
 }));
 const platform = process.platform;

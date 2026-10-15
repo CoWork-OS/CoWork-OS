@@ -7076,7 +7076,9 @@ export class AgentDaemon extends EventEmitter {
    * Tear down an active computer-use session when a task leaves the queue slot.
    */
   private releaseComputerUseSession(taskId: string): void {
-    ComputerUseSessionManager.getInstance().endSessionIfOwner(taskId);
+    const sessions = ComputerUseSessionManager.getInstance();
+    sessions.cancelWaiting(taskId);
+    sessions.endSessionIfOwner(taskId);
   }
 
   private finishQueueSlot(taskId: string): void {

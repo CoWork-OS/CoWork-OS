@@ -436,7 +436,7 @@ export class ComputerUseTools {
     if (process.platform !== "darwin" && process.platform !== "win32") {
       throw new Error("Computer use is only supported on macOS and Windows desktop builds.");
     }
-    this.session().acquire(this.taskId, this.daemon, {
+    await this.session().acquireOrWait(this.taskId, this.daemon, {
       background: this.resolveNativeControlMode() === "background",
     });
     this.session().checkNotAborted();

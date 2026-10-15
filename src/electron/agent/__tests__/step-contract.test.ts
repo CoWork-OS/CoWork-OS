@@ -179,6 +179,20 @@ describe("step-contract write intent", () => {
 });
 
 describe("step-contract read-only intent", () => {
+  it("keeps report scope discovery read-only when update is a noun", () => {
+    const description =
+      "Establish the report scope from the retrieved issues, grouping by project where project fields are available. Retrieve remaining pages where supported, and identify missing fields or inaccessible records that limit the update.";
+    expect(descriptionHasWriteIntent(description)).toBe(false);
+    expect(descriptionHasReadOnlyIntent(description)).toBe(true);
+  });
+  it.each([
+    "Establish the report scope and write project-update.md",
+    "Define the project scope in scope.md",
+    "Update the report with the latest issues",
+    "Write the update to project-update.md",
+  ])("retains write requirements for %s", (description) => {
+    expect(descriptionHasWriteIntent(description)).toBe(true);
+  });
   it("treats remote source fetch steps that mention README.md as read-only discovery", () => {
     const description =
       'Search for "Hermes Agent" and "OpenClaw" to pin down the exact GitHub repositories. Fetch their `README.md` and stats pages.';

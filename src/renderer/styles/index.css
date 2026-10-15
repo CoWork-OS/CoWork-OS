@@ -16434,12 +16434,14 @@ a,
   max-width: 880px;
 }
 
-.cinematic-onboarding.onboarding-state-final_try .onboarding-orb-container {
+.cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+  .onboarding-orb-container {
   width: 96px;
   height: 96px;
 }
 
-.cinematic-onboarding.onboarding-state-final_try .onboarding-orb {
+.cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+  .onboarding-orb {
   width: 72px;
   height: 72px;
 }
@@ -16458,7 +16460,8 @@ a,
 }
 
 .cinematic-onboarding.onboarding-state-recap .onboarding-typewriter,
-.cinematic-onboarding.onboarding-state-final_try .onboarding-typewriter {
+.cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+  .onboarding-typewriter {
   font-size: 1.2rem;
   min-height: 0;
 }
@@ -18221,7 +18224,8 @@ a,
     min-height: 118px;
   }
 
-  .cinematic-onboarding.onboarding-state-final_try .onboarding-content {
+  .cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+    .onboarding-content {
     gap: 14px;
     padding-top: calc(env(safe-area-inset-top, 0px) + 24px);
   }
@@ -18232,18 +18236,21 @@ a,
     padding-bottom: 28px;
   }
 
-  .cinematic-onboarding.onboarding-state-final_try .onboarding-orb-container {
+  .cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+    .onboarding-orb-container {
     width: 76px;
     height: 76px;
   }
 
-  .cinematic-onboarding.onboarding-state-final_try .onboarding-orb {
+  .cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+    .onboarding-orb {
     width: 58px;
     height: 58px;
   }
 
   .cinematic-onboarding.onboarding-state-recap .onboarding-typewriter,
-  .cinematic-onboarding.onboarding-state-final_try .onboarding-typewriter {
+  .cinematic-onboarding:is(.onboarding-state-final_try, .onboarding-state-first_result)
+    .onboarding-typewriter {
     font-size: 1.05rem;
     line-height: 1.35;
   }

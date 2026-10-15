@@ -61,6 +61,8 @@ import type { AutomationOwner } from "./components/automation-library";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
+import { ContextualConnectorSetup } from "./components/ContextualConnectorSetup";
+import { useContextualConnectorSetup } from "./hooks/useContextualConnectorSetup";
 import { ToastContainer } from "./components/Toast";
 import {
   ComputerUseApprovalDialog,
@@ -3179,6 +3181,7 @@ export function App() {
   // Onboarding state (null = loading)
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
   const [pendingOnboardingPrompt, setPendingOnboardingPrompt] = useState<string | null>(null);
+  const contextualConnectorSetup = useContextualConnectorSetup();
   const firstOnboardingPromptStartedRef = useRef(false);
   // Timestamp of when onboarding was completed
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<string | undefined>(undefined);
@@ -3580,6 +3583,8 @@ export function App() {
   const handleSubAgentsFocusConsumed = useCallback(() => setSubAgentsFocusRequest(0), []);
 
   const handleShowOnboarding = () => {
+    firstOnboardingPromptStartedRef.current = false;
+    setPendingOnboardingPrompt(null);
     // Reset onboarding state to show the wizard again
     setOnboardingCompleted(false);
     // Close settings view if open
@@ -6319,6 +6324,7 @@ export function App() {
   ): Promise<boolean> => {
     const effectiveWorkspace = workspaceOverride ?? currentWorkspace;
     if (!effectiveWorkspace) return false;
+    if (!(await contextualConnectorSetup.prepare(prompt))) return false;
 
     const multitaskCommand = findMultitaskCommand(prompt, title);
     if (multitaskCommand?.isMultitask && !multitaskCommand.valid) {
@@ -6549,21 +6555,25 @@ export function App() {
       return;
     firstOnboardingPromptStartedRef.current = true;
     const prompt = pendingOnboardingPrompt;
-    setPendingOnboardingPrompt(null);
     void (async () => {
       try {
         const workspace =
           currentWorkspace ?? (await window.electronAPI.getTempWorkspace({ createNew: true }));
         if (!workspace) throw new Error("Could not create a workspace for the first task.");
         if (!currentWorkspace) setCurrentWorkspace(workspace);
-        await handleCreateTask(
+        const started = await handleCreateTask(
           prompt.slice(0, 80),
           prompt,
           { generateTitle: true },
           undefined,
           workspace,
         );
+        if (!started)
+          throw new Error("Your task has not started. Your request is ready to edit or try again.");
+        setPendingOnboardingPrompt(null);
       } catch (error) {
+        firstOnboardingPromptStartedRef.current = false;
+        setOnboardingCompleted(false);
         addToast({
           type: "error",
           title: "First task could not start",
@@ -6998,6 +7008,13 @@ export function App() {
     },
   ) => {
     if (!selectedTaskId) return;
+    if (
+      !remoteTaskView &&
+      !options?.verbatim &&
+      !(await contextualConnectorSetup.prepare(message))
+    ) {
+      throw new Error("Message not sent. Your request is ready to edit or try again.");
+    }
     const { verbatim = false, ...sendOptions } = options ?? {};
 
     try {
@@ -8315,6 +8332,7 @@ export function App() {
       <div className="app">
         <Onboarding
           onComplete={handleOnboardingComplete}
+          initialPrompt={pendingOnboardingPrompt ?? undefined}
           workspaceId={currentWorkspace?.id ?? null}
         />
       </div>
@@ -8333,6 +8351,12 @@ export function App() {
 
   return (
     <div className={`app${RAIL_VIEWS.has(currentView) ? " app-shell" : ""}`}>
+      {contextualConnectorSetup.request && (
+        <ContextualConnectorSetup
+          request={contextualConnectorSetup.request}
+          onResolve={contextualConnectorSetup.resolve}
+        />
+      )}
       <div
         className={`title-bar${RAIL_VIEWS.has(currentView) ? " title-bar-shell" : ""}`}
         style={

@@ -257,7 +257,15 @@ export function extractArtifactPathAlternativeGroups(text: string): string[][] {
 }
 
 export function descriptionHasWriteIntent(text: string): boolean {
-  const desc = String(text || "").toLowerCase();
+  let desc = String(text || "").toLowerCase();
+  // Establishing what a report covers is planning. An explicit output path or
+  // a separate write verb still makes the step an artifact-producing operation.
+  if (extractArtifactPathCandidates(desc).length === 0) {
+    desc = desc.replace(
+      /\b(?:define|establish|specify|lock|set)\s+(?:the\s+)?(?:(?:report|project|task)\s+)?scope\b/g,
+      " ",
+    );
+  }
   if (descriptionHasStrongWriteIntent(desc)) return true;
 
   const structuredWriteVerb = /\b(lock|define|specify|establish|set)\b/.test(desc);
@@ -288,7 +296,10 @@ export function descriptionHasStrongWriteIntent(text: string): boolean {
     .toLowerCase()
     // In inspection steps, "the build scripts" and "or build scripts" name
     // existing files; "build" is not an instruction to produce anything.
-    .replace(/\b(?:the|existing|current|and|or)\s+build\s+scripts?\b/g, " ");
+    .replace(/\b(?:the|existing|current|and|or)\s+build\s+scripts?\b/g, " ")
+    // "Review the update" names an input; "update the report" is a mutation.
+    // Other real write verbs ("write the update") remain in the sentence.
+    .replace(/\b(?:the|an?|this|that|project|status|weekly|daily)\s+update\b/g, " ");
   return STRONG_WRITE_VERB_REGEX.test(desc) || PASSIVE_ARTIFACT_WRITE_CUE_REGEX.test(desc);
 }
 

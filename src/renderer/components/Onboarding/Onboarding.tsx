@@ -30,6 +30,7 @@ import {
 interface OnboardingProps {
   onComplete: (dontShowAgain: boolean, firstPrompt?: string) => void | Promise<void>;
   workspaceId?: string | null;
+  initialPrompt?: string;
 }
 
 interface OnboardingAmbientAudio {
@@ -178,19 +179,35 @@ const clearOnboardingUiDraft = (): void => {
 };
 
 // Use shared starter missions — pick a subset for the onboarding final step
-const FINAL_TRY_SUGGESTIONS = STARTER_MISSIONS.filter((mission) => mission.kind === "prompt").slice(
-  0,
-  8,
-);
+const FINAL_TRY_SUGGESTIONS = [
+  {
+    title: "Create a project update",
+    prompt:
+      "Create a project update from my Linear issues. Summarize progress, blockers, and next steps, and save the update as project-update.md in this workspace. Do not change any issues.",
+  },
+  {
+    title: "Triage my inbox",
+    prompt:
+      "Triage my Gmail inbox. Summarize messages needing a reply, decisions, and follow-ups. Save the summary as inbox-summary.md in this workspace. Do not send, archive, or change any messages.",
+  },
+  {
+    title: "Make a useful first file",
+    prompt:
+      "Create a practical meeting preparation checklist with sections for objectives, source material, questions, and follow-ups. Save it as meeting-checklist.md in this workspace, then read the saved file to check it.",
+  },
+  ...STARTER_MISSIONS.filter((mission) => mission.id === "decision-memo"),
+];
 
-export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
+export function Onboarding({ onComplete, workspaceId, initialPrompt }: OnboardingProps) {
   const firstPromptRef = useRef("");
   const handleFlowComplete = useCallback(
     (done: boolean) => onComplete(done, firstPromptRef.current || undefined),
     [onComplete],
   );
   const uiDraftRef = useRef<OnboardingUiDraft | null>(null);
-  const [inputValue, setInputValue] = useState(uiDraftRef.current?.inputValue ?? "");
+  const [inputValue, setInputValue] = useState(
+    initialPrompt ?? uiDraftRef.current?.inputValue ?? "",
+  );
   const [inputMode, setInputMode] = useState<"voice" | "keyboard">(
     uiDraftRef.current?.inputMode ?? "keyboard",
   );
@@ -214,7 +231,10 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
   const onboarding = useOnboardingFlow({ onComplete: handleFlowComplete, workspaceId });
   const isSensitiveInputState =
     onboarding.state === "llm_api_key" || onboarding.state === "llm_testing";
-  const isCompactRecapStep = onboarding.state === "recap" || onboarding.state === "final_try";
+  const isCompactRecapStep =
+    onboarding.state === "recap" ||
+    onboarding.state === "final_try" ||
+    onboarding.state === "first_result";
 
   // Voice input integration
   const voiceInput = useVoiceInput({
@@ -703,11 +723,13 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
       (prompt) => {
         firstPromptRef.current = prompt;
       },
-      () => onboarding.completeOnboarding(),
+      () =>
+        onboarding.state === "first_result"
+          ? void onboarding.startFirstResult()
+          : onboarding.completeOnboarding(),
     );
     if (!submitted) return;
     setVoiceError(null);
-    setInputValue("");
   }, [inputValue, onboarding]);
 
   // Handle input submission
@@ -725,7 +747,7 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
     } else if (onboarding.state === "llm_api_key") {
       onboarding.submitApiKey(inputValue);
       setInputValue("");
-    } else if (onboarding.state === "final_try") {
+    } else if (onboarding.state === "final_try" || onboarding.state === "first_result") {
       handleConfidencePromptSubmit();
     }
   }, [inputValue, onboarding, handleConfidencePromptSubmit]);
@@ -1482,7 +1504,13 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
 
   const renderFinalTryPrompt = () => (
     <div className="onboarding-final-try">
+      {onboarding.state === "first_result" && (
+        <h1 className="onboarding-first-result-title">What would you like to get done?</h1>
+      )}
       <p className="onboarding-final-try-copy">{FINAL_TRY_HEADLINE}</p>
+      {onboarding.state === "first_result" && onboarding.currentText && (
+        <p role="status">{onboarding.currentText}</p>
+      )}
 
       <div className="onboarding-final-try-suggestions">
         {FINAL_TRY_SUGGESTIONS.map((mission) => (
@@ -1499,7 +1527,9 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
       </div>
 
       <div className="onboarding-final-try-input-row">
-        <input
+        <textarea
+          aria-label="Your first task"
+          rows={3}
           className="onboarding-input onboarding-final-try-input"
           placeholder="Describe a task for your workspace…"
           value={inputValue}
@@ -1558,16 +1588,29 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         <button
           className="onboarding-btn onboarding-btn-primary"
           onClick={handleConfidencePromptSubmit}
-          disabled={!inputValue.trim()}
+          disabled={!inputValue.trim() || onboarding.preparingFirstResult}
         >
-          Run in workspace
+          {onboarding.preparingFirstResult ? "Checking AI access…" : "Start task"}
         </button>
         <button
           className="onboarding-btn onboarding-btn-secondary"
-          onClick={onboarding.completeOnboarding}
+          onClick={() => {
+            firstPromptRef.current = "";
+            if (onboarding.firstResultMode) onboarding.exitOnboarding();
+            else onboarding.completeOnboarding();
+          }}
         >
-          Enter CoWork
+          Explore CoWork
         </button>
+        {onboarding.firstResultMode && (
+          <button
+            className="onboarding-btn onboarding-btn-secondary"
+            onClick={onboarding.personalizeFirst}
+            disabled={onboarding.preparingFirstResult}
+          >
+            Personalize first
+          </button>
+        )}
       </div>
 
       <p className="onboarding-final-try-prompt">{FINAL_TRY_NEXT_STEP}</p>
@@ -1910,7 +1953,10 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
       <div className="onboarding-top-right-controls">
         <button
           className="onboarding-skip-btn"
-          onClick={onboarding.exitOnboarding}
+          onClick={() => {
+            firstPromptRef.current = "";
+            onboarding.exitOnboarding();
+          }}
           aria-label="Skip onboarding"
           title="Skip onboarding"
           type="button"
@@ -2016,10 +2062,11 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         {/* Text */}
         {onboarding.currentText &&
           onboarding.state !== "dormant" &&
-          onboarding.state !== "recap" && (
+          onboarding.state !== "recap" &&
+          onboarding.state !== "first_result" && (
             <TypewriterText
               text={onboarding.currentText}
-              speed={40}
+              speed={onboarding.firstResultMode ? 8 : 40}
               onComplete={onboarding.onTextComplete}
               showCursor={
                 onboarding.state !== "ask_name" &&
@@ -2086,7 +2133,8 @@ export function Onboarding({ onComplete, workspaceId }: OnboardingProps) {
         {onboarding.state === "recap" && renderPersonalizedRecap()}
 
         {/* Final confidence moment */}
-        {onboarding.state === "final_try" && renderFinalTryPrompt()}
+        {(onboarding.state === "final_try" || onboarding.state === "first_result") &&
+          renderFinalTryPrompt()}
 
         {/* Testing indicator */}
         {onboarding.state === "llm_testing" && (

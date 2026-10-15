@@ -92,6 +92,7 @@ import type { AnswerImageRequest, AnswerImageResult } from "../shared/answer-sur
 import type {
   MemoryRepoCompactResult,
   MemoryRepoSyncNowResult,
+  MemoryRepoBotMemoryReport,
   MemoryRepoDreamActionResult,
   MemoryRepoDreamNowResult,
   MemoryRepoDreamPart,
@@ -4833,6 +4834,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
   compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
   syncMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW),
+  getBotMemory: (data: { botId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_MEMORY, data),
+  forgetBotMemoryEntry: (data: { botId: string; ref: string; hash: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_FORGET, data),
+  undoBotMemoryChange: (data: { botId: string; commit: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_UNDO, data),
 
   // PACT business agents (docs/pact.md)
   getPactStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_STATUS),
@@ -8977,6 +8984,16 @@ export interface ElectronAPI {
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
   syncMemoryRepoNow: () => Promise<MemoryRepoSyncNowResult>;
+  getBotMemory: (data: { botId: string }) => Promise<MemoryRepoBotMemoryReport>;
+  forgetBotMemoryEntry: (data: {
+    botId: string;
+    ref: string;
+    hash: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  undoBotMemoryChange: (data: {
+    botId: string;
+    commit: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
 
   // PACT business agents. Sign-in links never reach the desktop renderer; openPactSignIn
   // opens the business's own login in the system browser from main.

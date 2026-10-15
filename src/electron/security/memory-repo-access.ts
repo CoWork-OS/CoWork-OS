@@ -28,6 +28,10 @@ export interface MemoryRepoAccessScope {
    * (docs/memory-repo-phase5-design.md §2).
    */
   swarmPrefix?: string | null;
+  /**
+   * The task's bot's own file (`bots/<slug>.md`): recall searches it and no other bot's file.
+   */
+  botFile?: string | null;
 }
 
 let memoryRepoRoot: string | null = null;
@@ -65,7 +69,17 @@ export function runWithMemoryRepoAccess<T>(scope: MemoryRepoAccessScope, fn: () 
     typeof scope.swarmPrefix === "string" && SWARM_PREFIX.test(scope.swarmPrefix)
       ? scope.swarmPrefix
       : null;
-  return accessScope.run({ readAllowed: scope.readAllowed === true, swarmPrefix }, fn);
+  const botFile =
+    typeof scope.botFile === "string" && BOT_FILE.test(scope.botFile) ? scope.botFile : null;
+  return accessScope.run({ readAllowed: scope.readAllowed === true, swarmPrefix, botFile }, fn);
+}
+
+/** `bots/<name>.md`: one segment, no hidden or dot segments. */
+const BOT_FILE = /^bots\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.md$/;
+
+/** The bot file the current tool call's recall may search (`bots/<name>.md`), or null. */
+export function getMemoryRepoBotFile(): string | null {
+  return accessScope.getStore()?.botFile ?? null;
 }
 
 /** `swarms/<slug>`: a lower-case slug, no dots, no further segments. */

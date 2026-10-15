@@ -4,6 +4,7 @@ import * as nodePath from "node:path";
 import type { AccessFilesystemRule } from "../../shared/access-profiles";
 import type { Workspace } from "../../shared/types";
 import {
+  getMemoryRepoBotFile,
   getMemoryRepoRoot,
   getMemoryRepoSwarmReadPrefix,
   getTeamMemoryRepoRoots,
@@ -545,6 +546,34 @@ function isWithinReadableSwarmFolder(lexicalPath: string, canonicalPath: string)
   return inside(nodePath.resolve(lexicalPath)) && inside(canonicalPath);
 }
 
+/**
+ * Whether a path is a file in the memory folder's `bots/` (a bot's own memory) other than the
+ * current tool call's own bot file. The folder itself stays listable so search tools can
+ * walk into it; every other bot's file is refused.
+ */
+function isOtherBotMemoryPath(lexicalPath: string, canonicalPath: string): boolean {
+  const root = getMemoryRepoRoot();
+  if (!root) return false;
+  const bases = new Set<string>([nodePath.resolve(root)]);
+  try {
+    bases.add(canonicalizeAccessPath(root));
+  } catch {
+    // The root may be missing; the lexical root still applies.
+  }
+  const own = getMemoryRepoBotFile();
+  for (const base of bases) {
+    for (const target of [nodePath.resolve(lexicalPath), canonicalPath]) {
+      const relative = nodePath.relative(base, target);
+      if (!relative || relative.startsWith("..") || nodePath.isAbsolute(relative)) continue;
+      const normalized = relative.split(nodePath.sep).join("/");
+      const segments = normalized.split("/");
+      if (segments[0]?.toLowerCase() !== "bots" || segments.length === 1) continue;
+      if (normalized !== own) return true;
+    }
+  }
+  return false;
+}
+
 function resolveWorkspacePolicyPath(workspacePath: string, value: string): string {
   value = expandHomeShortcutPath(value);
   return canonicalizeAccessPath(
@@ -649,6 +678,10 @@ export function evaluateWorkspaceFilesystemAccess(
     }
     if (ruleDecision === "deny") {
       return { decision: "deny", path: operationPath, reason: "profile_filesystem_denied" };
+    }
+    // A bot's own memory (`bots/<name>.md`) is read by that bot's tasks only.
+    if (isOtherBotMemoryPath(requestedPath, resolvedPath)) {
+      return { decision: "deny", path: operationPath, reason: "memory_repo_unavailable" };
     }
     // A swarm member without the memoryRepo layer reads its own swarm folder only.
     return isMemoryRepoReadAllowed() || isWithinReadableSwarmFolder(requestedPath, resolvedPath)

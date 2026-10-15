@@ -37,6 +37,7 @@ import {
   MEMORY_REPO_LESSONS_FILE,
   MEMORY_REPO_LIMITS,
   MEMORY_REPO_ME_FILE,
+  MEMORY_REPO_BOTS_DIR,
   MEMORY_REPO_SWARMS_DIR,
   MEMORY_REPO_WORKSPACES_DIR,
   ensureIndexLink,
@@ -44,6 +45,8 @@ import {
   initialTopicFile,
   insertEntryLine,
   isSafeRepoPath,
+  isBotRepoPath,
+  isMemoryRepoMarker,
   isSwarmRepoPath,
   isoDay,
   memoryRepoRef,
@@ -152,15 +155,23 @@ const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set([
   "kind",
   "subject",
   "workspace",
+  "bot",
+  "until",
   "added",
 ]);
 
 export interface MemoryRepoRememberInput {
   text: string;
   kind: MemoryItemKind;
-  scope: "global" | "workspace";
+  /** `bot`: the bot's own file (`bots/<slug>.md`), loaded only into that bot's tasks. */
+  scope: "global" | "workspace" | "bot";
   workspaceId?: string | null;
   workspaceName?: string | null;
+  /** The bot (`AgentRole` id) for `scope: "bot"`. */
+  botId?: string | null;
+  botName?: string | null;
+  /** `YYYY-MM-DD`: the fact stops applying after this day (it leaves the prompt then). */
+  until?: string | null;
   by: MemoryRepoAuthor;
   /** Keep it in every prompt: honoured only for the user's own statements. */
   pinned?: boolean;
@@ -234,6 +245,19 @@ export interface MemoryRepoChange {
   version: string;
 }
 
+/** One commit that changed a file (`fileHistory`). */
+export interface MemoryRepoFileChange {
+  commit: string;
+  at: number;
+  /** The commit subject (`Remember preference: …`, `Forget: …`, `Hand edits`). */
+  message: string;
+  origin: string | null;
+  taskId: string | null;
+  /** Memory lines the commit added and removed (entry text, metadata left out). */
+  added: string[];
+  removed: string[];
+}
+
 export interface MemoryRepoServiceDeps {
   root: string;
   runtime: "desktop" | "node" | "cli";
@@ -305,6 +329,7 @@ export class MemoryRepoService {
   private chain: Promise<unknown> = Promise.resolve();
   private stopped = false;
   private workspaceFiles: Map<string, string> | null = null;
+  private botFiles: Map<string, string> | null = null;
   /** Private-remote sync (Phase 4); null when off. */
   private syncUrl: string | null = null;
   private syncState: MemoryRepoSyncState = emptySyncState();
@@ -502,6 +527,32 @@ export class MemoryRepoService {
     return map.get(workspaceId) ?? null;
   }
 
+  /** The bot's file (`bots/<slug>.md`), if one names this bot id. */
+  async botFile(botId: string): Promise<string | null> {
+    if (!botId) return null;
+    const map = await this.botFileMap();
+    return map.get(botId) ?? null;
+  }
+
+  private async botFileMap(): Promise<Map<string, string>> {
+    if (this.botFiles) return this.botFiles;
+    const map = new Map<string, string>();
+    for (const file of await this.listFiles()) {
+      if (!isBotRepoPath(file)) continue;
+      for (const entry of await this.entries(file)) {
+        const id = entry.metadata.bot;
+        if (id && !map.has(id)) map.set(id, file);
+      }
+    }
+    this.botFiles = map;
+    return map;
+  }
+
+  private invalidateFileMaps(): void {
+    this.workspaceFiles = null;
+    this.botFiles = null;
+  }
+
   private async workspaceFileMap(): Promise<Map<string, string>> {
     if (this.workspaceFiles) return this.workspaceFiles;
     const map = new Map<string, string>();
@@ -549,6 +600,9 @@ export class MemoryRepoService {
         detail: "workspace scope needs a workspace",
       };
     }
+    if (input.scope === "bot" && !input.botId) {
+      return { status: "skipped", reason: "unavailable", detail: "bot scope needs a bot" };
+    }
     return this.serialized(() => this.writeEntry(input, screened.content, screened.redactions));
   }
 
@@ -574,6 +628,10 @@ export class MemoryRepoService {
           if (text === null) return { removed: null, error: "No such memory file." };
           const entry = parseMemoryRepoLine(splitLines(text)[line - 1] ?? "", line);
           if (!entry) return { removed: null, error: "That line is not a saved memory." };
+          // The line that maps a workspace or bot file keeps it mapped.
+          if (isMemoryRepoMarker(entry)) {
+            return { removed: null, error: "That line names the file's owner; it stays." };
+          }
           if (options.expectHash && entry.hash !== options.expectHash) {
             return { removed: null, error: "The memory file changed; recall the memory again." };
           }
@@ -588,6 +646,131 @@ export class MemoryRepoService {
     } catch (error) {
       return { removed: null, error: this.describeError(error) };
     }
+  }
+
+  /**
+   * The latest commits that changed one file, newest first, with the memory lines each one
+   * added and removed (markers and non-entry lines left out). Empty without git.
+   */
+  async fileHistory(relPath: string, limit = 20): Promise<MemoryRepoFileChange[]> {
+    if (!this.isReady() || !this.hasGit || !isSafeRepoPath(relPath)) return [];
+    const count = Math.min(Math.max(Math.floor(limit) || 20, 1), 50);
+    try {
+      const log = await this.runGit([
+        "log",
+        `-n${count}`,
+        "--format=%x1e%H%x1f%ct%x1f%B",
+        "--",
+        relPath,
+      ]);
+      const changes: MemoryRepoFileChange[] = [];
+      for (const record of log.split("\x1e")) {
+        const [commit, seconds, body = ""] = record.split("\x1f");
+        if (!commit || !/^[0-9a-f]{7,64}$/.test(commit.trim())) continue;
+        const lines = await this.commitEntryLines(commit.trim(), relPath);
+        changes.push({
+          commit: commit.trim(),
+          at: Number(seconds) * 1000,
+          message: body.split("\n")[0]?.trim().slice(0, 200) ?? "",
+          origin: /^Origin:\s*(\S+)/m.exec(body)?.[1] ?? null,
+          taskId: /^Task:\s*(\S+)/m.exec(body)?.[1] ?? null,
+          added: lines.added.map((line) => line.text),
+          removed: lines.removed.map((line) => line.text),
+        });
+      }
+      return changes;
+    } catch (error) {
+      logger.warn("Memory repo history failed:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Undo one commit's change to one file: remove the memory lines it added (when they are
+   * still there) and put back the lines it removed (when they are gone), in a new commit.
+   * Other files and later changes are left as they are.
+   */
+  async undoFileChange(
+    relPath: string,
+    commit: string,
+    options: { origin?: MemoryRepoOrigin } = {},
+  ): Promise<{ undone: boolean; error?: string }> {
+    if (!this.isWritable()) return { undone: false, error: "The memory repo is not available." };
+    if (!this.hasGit) return { undone: false, error: "The memory folder has no history." };
+    if (!isSafeRepoPath(relPath) || !/^[0-9a-f]{7,64}$/.test(commit)) {
+      return { undone: false, error: "Unknown change." };
+    }
+    try {
+      return await this.serialized(() =>
+        this.locked(async () => {
+          await this.commitHandEdits();
+          const touched = await this.runGit(["log", "--format=%H", "--", relPath]);
+          const full = touched.split("\n").find((sha) => sha.trim().startsWith(commit));
+          if (!full) return { undone: false, error: "That change is not in this file's history." };
+          const { added, removed } = await this.commitEntryLines(full.trim(), relPath);
+          let text = (await this.readFile(relPath)) ?? "";
+          let rows = splitLines(text);
+          let changed = false;
+          for (const line of added) {
+            const index = rows.findIndex((row) => row === line.raw);
+            if (index < 0) continue;
+            rows = [...rows.slice(0, index), ...rows.slice(index + 1)];
+            changed = true;
+          }
+          text = rows.join("\n");
+          for (const line of removed) {
+            if (splitLines(text).includes(line.raw)) continue;
+            text = insertEntryLine(text, line.raw, relPath === MEMORY_REPO_ENTRY_FILE);
+            changed = true;
+          }
+          if (!changed) {
+            return { undone: false, error: "Nothing to undo: the file changed since then." };
+          }
+          const subject = (await this.runGit(["log", "-1", "--format=%s", full.trim()])).trim();
+          await this.writeFileAtomic(relPath, text);
+          this.invalidateFileMaps();
+          await this.commitPaths([relPath], `Undo: ${preview(subject)}`, {
+            origin: options.origin ?? "memory_hub",
+          });
+          return { undone: true };
+        }),
+      );
+    } catch (error) {
+      if (error instanceof SkipWrite) return { undone: false, error: error.detail ?? error.reason };
+      return { undone: false, error: this.describeError(error) };
+    }
+  }
+
+  /** Memory lines one commit added to and removed from a file (no markers, no headings). */
+  private async commitEntryLines(
+    commit: string,
+    relPath: string,
+  ): Promise<{
+    added: Array<{ raw: string; text: string }>;
+    removed: Array<{ raw: string; text: string }>;
+  }> {
+    const diff = await this.runGit([
+      "show",
+      "--format=",
+      "--unified=0",
+      "--no-color",
+      "--no-ext-diff",
+      commit,
+      "--",
+      relPath,
+    ]);
+    const added: Array<{ raw: string; text: string }> = [];
+    const removed: Array<{ raw: string; text: string }> = [];
+    for (const row of splitLines(diff)) {
+      if (row.startsWith("+++") || row.startsWith("---")) continue;
+      const sign = row[0];
+      if (sign !== "+" && sign !== "-") continue;
+      const raw = row.slice(1);
+      const entry = parseMemoryRepoLine(raw, 1);
+      if (!entry || isMemoryRepoMarker(entry)) continue;
+      (sign === "+" ? added : removed).push({ raw, text: entry.text });
+    }
+    return { added, removed };
   }
 
   /** The entry at a line, for approval prompts and attribution. */
@@ -802,7 +985,7 @@ export class MemoryRepoService {
               changed.push(MEMORY_REPO_ENTRY_FILE);
             }
           }
-          if (file.path.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) this.workspaceFiles = null;
+          this.invalidateFileMaps();
           await this.commitPaths(changed, `Keep: ${preview(entry.text)}`, { origin: "memory_hub" });
           return { moved: { path: file.path, line: targetLine } };
         }),
@@ -859,7 +1042,9 @@ export class MemoryRepoService {
         this.locked(async () => {
           await this.commitHandEdits();
           const known = new Set<string>();
-          for (const file of (await this.listFiles()).filter((name) => !isSwarmRepoPath(name))) {
+          for (const file of (await this.listFiles()).filter(
+            (name) => !isSwarmRepoPath(name) && !isBotRepoPath(name),
+          )) {
             for (const entry of parseMemoryRepoEntries((await this.readFile(file)) ?? "")) {
               known.add(entry.hash);
             }
@@ -1137,7 +1322,7 @@ export class MemoryRepoService {
           );
           changed.push(MEMORY_REPO_ENTRY_FILE);
         }
-        this.workspaceFiles = null;
+        this.invalidateFileMaps();
         await this.commitPaths(changed, "Clear workspace memory", { origin: "memory_hub" });
       }),
     );
@@ -1281,7 +1466,7 @@ export class MemoryRepoService {
           if (pulled.changed) {
             this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
             this.writeCount += 1;
-            this.workspaceFiles = null;
+            this.invalidateFileMaps();
             this.silentNotify = true;
             try {
               this.notify([]);
@@ -1384,7 +1569,7 @@ export class MemoryRepoService {
         let autoCommit: string | null = null;
         if (auto.files.size > 0) {
           for (const [file, text] of auto.files) await this.writeFileAtomic(file, text);
-          this.workspaceFiles = null;
+          this.invalidateFileMaps();
           this.writeCount += 1;
           await this.runGit(["add", "-A", "--", ...auto.files.keys()]);
           await this.commit(
@@ -1572,7 +1757,7 @@ export class MemoryRepoService {
           this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
           await this.runGit(["branch", "-D", branch]).catch(() => undefined);
           this.writeCount += 1;
-          this.workspaceFiles = null;
+          this.invalidateFileMaps();
           await this.writeDreamRecord({
             ...record,
             reviewStatus: "accepted",
@@ -1629,7 +1814,7 @@ export class MemoryRepoService {
           }
           this.head = (await this.runGit(["rev-parse", "HEAD"])).trim() || null;
           this.writeCount += 1;
-          this.workspaceFiles = null;
+          this.invalidateFileMaps();
           await this.writeDreamRecord({ ...record, undoneAt: this.now() });
           this.notify([]);
           return { undone: true };
@@ -1749,6 +1934,7 @@ export class MemoryRepoService {
           ...(input.subject ? { subject: input.subject } : {}),
           ...(input.taskId ? { source: taskSourceLink(input.taskId) } : {}),
           added: isoDay(input.addedAt ?? this.now()),
+          ...(input.until && /^\d{4}-\d{2}-\d{2}$/.test(input.until) ? { until: input.until } : {}),
         };
         const line = renderMemoryRepoEntry(content, metadata);
         const holder = input.subject
@@ -1780,10 +1966,12 @@ export class MemoryRepoService {
         const changed = [target.path];
         await this.writeFileAtomic(target.path, text);
         // The inbox is unreviewed: never linked, so following the index never reaches it.
+        // A bot's file is its own memory, loaded into its tasks only: not linked either.
         if (
           created &&
           target.path !== MEMORY_REPO_ENTRY_FILE &&
-          target.path !== MEMORY_REPO_INBOX_FILE
+          target.path !== MEMORY_REPO_INBOX_FILE &&
+          !isBotRepoPath(target.path)
         ) {
           const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? initialEntryFile();
           const linked = ensureIndexLink(entryFile, target.path);
@@ -1792,7 +1980,7 @@ export class MemoryRepoService {
             changed.push(MEMORY_REPO_ENTRY_FILE);
           }
         }
-        if (target.path.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) this.workspaceFiles = null;
+        this.invalidateFileMaps();
         await this.commitPaths(
           changed,
           `${action === "replaced" ? "Update" : "Remember"} ${input.kind}: ${preview(content)}`,
@@ -1829,6 +2017,7 @@ export class MemoryRepoService {
     if (input.by === "agent" && input.tainted) {
       return { path: MEMORY_REPO_INBOX_FILE, initial: initialTopicFile(MEMORY_REPO_INBOX_TITLE) };
     }
+    if (input.scope === "bot") return this.chooseBotFile(String(input.botId), input.botName);
     if (input.by === "user" && input.pinned) {
       const entryFile = (await this.readFile(MEMORY_REPO_ENTRY_FILE)) ?? "";
       if (
@@ -1876,6 +2065,32 @@ export class MemoryRepoService {
     return { path: candidate, initial: header };
   }
 
+  private async chooseBotFile(
+    botId: string,
+    botName: string | null | undefined,
+  ): Promise<{ path: string; initial: string }> {
+    // One line: a name with line breaks must not add lines (or a marker) to the header.
+    const name =
+      String(botName ?? "")
+        .replace(/[\u0000-\u001f\u007f\u2028\u2029\[\]]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120) || "Bot";
+    const header = `${initialTopicFile(name)}${renderMemoryRepoEntry("CoWork bot", {
+      by: "user",
+      bot: botId,
+    })}\n`;
+    const existing = await this.botFile(botId);
+    if (existing) return { path: existing, initial: header };
+    const taken = new Set(await this.listFiles());
+    const slug = workspaceSlug(name);
+    let candidate = `${MEMORY_REPO_BOTS_DIR}/${slug}.md`;
+    for (let n = 2; taken.has(candidate); n += 1) {
+      candidate = `${MEMORY_REPO_BOTS_DIR}/${slug}-${n}.md`;
+    }
+    return { path: candidate, initial: header };
+  }
+
   /** Remove every entry `match` accepts in `files` (default: all files), in one commit. */
   private async removeMatching(
     match: (entry: MemoryRepoEntry, file: string) => boolean,
@@ -1894,8 +2109,8 @@ export class MemoryRepoService {
           const lines = splitLines(text);
           const keep = lines.filter((row, index) => {
             const entry = parseMemoryRepoLine(row, index + 1);
-            // The workspace marker line keeps the file mapped.
-            if (!entry || entry.metadata.workspace) return true;
+            // The workspace or bot marker line keeps the file mapped.
+            if (!entry || isMemoryRepoMarker(entry)) return true;
             if (!match(entry, file)) return true;
             removed += 1;
             return false;
@@ -1959,7 +2174,7 @@ export class MemoryRepoService {
     }
     await this.runGit(["add", "-A", "--", ...changes.map((change) => change.path)]);
     await this.commit("Hand edits", { origin: "hand_edit" });
-    this.workspaceFiles = null;
+    this.invalidateFileMaps();
   }
 
   private async commitPaths(
@@ -2141,6 +2356,7 @@ function editableEntryProblem(entry: MemoryRepoEntry | null, expectHash?: string
   }
   // The `[workspace: <id>]` marker line maps the file to its workspace.
   if (entry.metadata.workspace) return "That line names the workspace; it cannot be changed here.";
+  if (entry.metadata.bot) return "That line names the bot; it cannot be changed here.";
   return null;
 }
 

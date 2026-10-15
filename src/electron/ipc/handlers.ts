@@ -11475,6 +11475,9 @@ export async function setupIpcHandlers(
     // Memory Hub "What CoWork knows" over the folder: entries, edit, delete, pin, open file.
     getHubService: () => MemoryRepoService.get(),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+    // A bot's own memory file, shown in the bot's details panel.
+    getBotService: () => MemoryRepoService.get(),
+    botExists: async (botId) => Boolean(await agentRoleRepo.findById(botId)),
     workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
     // "Import notes from a folder": the folder is chosen here, never sent by the renderer.
     pickFolder: async () => {

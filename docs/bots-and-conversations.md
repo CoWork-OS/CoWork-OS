@@ -404,6 +404,38 @@ remain queue-oriented and are addressed by task ID; bot-team conversations are
 persistent named peers. See [Agent messaging](agent-messaging.md) for delivery
 receipts, retry identity, and worker-task semantics.
 
+## A bot's own memory
+
+Each bot keeps its own memory as a file in the memory folder: `bots/<name>.md`, mapped to the
+bot by a first line `- CoWork bot [bot: <role id>; by: user]` (like workspace files). It uses
+the same format, writer, screening and git history as the rest of the folder
+([memory-engine.md](memory-engine.md), [memory-repo-phase1-design.md](memory-repo-phase1-design.md)).
+
+- **Writing.** In a bot's tasks, `memory_remember` saves to the bot's file by default (scope
+  `bot`): its job, what the user wants from it, decisions made together. Facts about the user
+  (identity, preferences, corrections) stay global unless the bot passes `scope: "bot"`, and
+  `scope: "workspace"` still writes the workspace file. An optional `until` day
+  (`YYYY-MM-DD`) marks a fact that stops applying; after that day it leaves the prompt but
+  stays in the file. A task that read untrusted content still writes to `inbox.md`.
+- **Reading.** The bot's file joins the `<cowork_memory_repo>` block (300 tokens) in every
+  task assigned to that bot, in any conversation and in any workspace (the file belongs to the
+  bot, not to a workspace; workspace memory settings apply when a fact is written). Other bots'
+  tasks and ordinary tasks never load it: `memory_recall` searches only the task's own bot
+  file, file tools (`read_file`, `grep`, `glob`) refuse every other bot's file, and
+  `memory_forget` refuses another bot's entries. The line that names the bot cannot be
+  removed. Bot files are not linked from `MEMORY.md`, not shown in the Memory Hub folder view,
+  and not read by dreams.
+- **Earlier conversations.** `memory_recall` with `scopes: ["bot"]` searches the bot's other
+  conversations in the workspace (up to its 25 most recent), or with `since` (`"24h"`, `"3d"`,
+  `"2w"`, `YYYY-MM-DD`) and no query lists their latest messages. It follows the conversation
+  recall setting in Memory settings.
+- **Reviewing.** The bot's details panel has a **Memory** section: the saved entries with
+  **Forget**, and **Recent changes** (the file's last 20 commits) with **Undo**, which removes
+  what a change added and restores what it removed in a new commit.
+
+CoWork does not log every turn into the bot's file (each line would be a commit); the
+conversation index already holds that history and `memory_recall` scope `bot` reads it.
+
 ## Conversation lifecycle
 
 The normal flow is:

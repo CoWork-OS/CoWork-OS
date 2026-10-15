@@ -686,6 +686,9 @@ const DEFAULT_PROMPT_SECTION_BUDGETS = {
 // (was capped at 1,200), and design-system context, project guidance and the
 // external profile have their own sections instead of sharing that cap.
 // Overflow still drops/shrinks optional sections by drop priority.
+/** A bot's own memory (memory folder `bots/<slug>.md`) and its earlier conversations. */
+const BOT_MEMORY_GUIDANCE =
+  'You have your own memory as this bot: what you save with memory_remember scope bot (your job, what the user wants from you, decisions you made together) is shown to you in every conversation you have with the user. Before asking the user to repeat something or redoing earlier work, search your earlier conversations with memory_recall scopes ["bot"] (add since, e.g. "3d", for recent ones).';
 const EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET = 7600;
 type BasePromptRoutingBlock = "cloud_storage" | "messaging" | "maps" | "pdf" | "rich_surfaces";
 // Same provider list the IntentRouter uses for its cloud-storage signals.
@@ -8885,6 +8888,12 @@ ${transcript}
         if (rolePersona) {
           lines.push(rolePersona);
         }
+        if (
+          this.task.agentConfig?.botConversation === true &&
+          MemoryRepoService.get()?.isWritable()
+        ) {
+          lines.push(BOT_MEMORY_GUIDANCE);
+        }
       }
     }
 
@@ -9077,7 +9086,10 @@ ${transcript}
   ): Promise<MemoryRepoContextBlock | null> {
     if (!decision.layers.memoryRepo) return null;
     try {
-      return await getMemoryRepoContext().build({ workspaceId: this.workspace?.id ?? null });
+      return await getMemoryRepoContext().build({
+        workspaceId: this.workspace?.id ?? null,
+        botId: this.task.assignedAgentRoleId ?? null,
+      });
     } catch (error) {
       logger.warn("[Executor] Memory repo block build failed:", (error as Error)?.message ?? error);
       return null;
@@ -11728,10 +11740,17 @@ ${transcript}
             swarm ? swarmFolderPath(swarm.slug) : null,
           )
         : null;
+    // A bot's task recalls from its own bot file and no other bot's.
+    const botFile =
+      memoryRepoReadAllowed && this.task.assignedAgentRoleId
+        ? await MemoryRepoService.get()
+            ?.botFile(this.task.assignedAgentRoleId)
+            .catch(() => null)
+        : null;
 
     try {
       const coordinated = await withTimeout(
-        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix }, () =>
+        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
           this.toolExecutionCoordinator.executeTool(
             toolName,
             input as Any,

@@ -8894,6 +8894,10 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_KEEP_ENTRY: "memoryRepo:keepEntry",
   // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
   MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
+  // A bot's own memory (bots/<slug>.md): list with history, forget an entry, undo a change
+  MEMORY_REPO_BOT_MEMORY: "memoryRepo:botMemory",
+  MEMORY_REPO_BOT_FORGET: "memoryRepo:botForget",
+  MEMORY_REPO_BOT_UNDO: "memoryRepo:botUndo",
   // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
   // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
   PACT_STATUS: "pact:status",

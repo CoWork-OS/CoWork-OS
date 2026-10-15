@@ -7,12 +7,14 @@
 //
 // Env: BENCH_SCENARIOS=startup,screens,tasks,scroll  BENCH_PROBE=1 (main-process phases)
 //      BENCH_IDLE_MS (wait before interactions)  BENCH_RENDER_PROF=<file> (scroll CPU profile)
+//      BENCH_KEYCHAIN=mock|off (see keychain-env.mjs; warm the template in the same mode)
 // Results land in ./results/<label>.json; compare.cjs and startup-ab.cjs summarize A/B sets.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { applyKeychainEnv } from "./keychain-env.mjs";
 
 const [root, template, label = "run", runsArg = "5"] = process.argv.slice(2);
 const RUNS = Number(runsArg);
@@ -42,13 +44,13 @@ async function launch(profile) {
     ...process.env,
     NODE_ENV: "production",
     COWORK_USER_DATA_DIR: profile,
-    COWORK_DISABLE_OS_KEYCHAIN: "1",
     COWORK_IMPORT_ENV_SETTINGS: "0",
     COWORK_DEV_LOG_CAPTURE: "1",
     COWORK_DISABLE_UPDATE_CHECK: "1",
     COWORK_DEV_BRAND_APP: "0",
   };
   delete env.ELECTRON_RUN_AS_NODE;
+  applyKeychainEnv(env);
   if (process.env.BENCH_PROBE === "1")
     env.NODE_OPTIONS = `--require=${path.join(path.dirname(new URL(import.meta.url).pathname), "probe.cjs")}`;
   const logs = [];
@@ -493,6 +495,7 @@ for (let run = 0; run < RUNS; run++) {
     try {
       r.probe = fs.readFileSync(path.join(profile, "probe.log"), "utf8").trim().split("\n");
     } catch {}
+    fs.rmSync(profile, { recursive: true, force: true });
   }
   results.runs.push(r);
   console.log(JSON.stringify({ run, startup: r.startup, error: r.error }));

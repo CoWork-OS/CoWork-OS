@@ -147,6 +147,125 @@ describe("AgentDaemon follow-up startup recovery", () => {
     );
   });
 
+  it("re-checks only the worker scan's candidates before interrupting them", () => {
+    const startedReceipt = (taskId: string, deliveryStatus: string) => [
+      {
+        id: `${taskId}-receipt`,
+        taskId,
+        timestamp: 1,
+        type: "user_message",
+        payload: { messageId: `${taskId}-follow-up`, deliveryMode: "follow_up", deliveryStatus },
+      },
+    ];
+    const tasks = new Map<string, Any>([
+      ["still-stranded", { id: "still-stranded", status: "completed", source: "manual" }],
+      // Restarted by a new message after the scan's snapshot.
+      ["restarted", { id: "restarted", status: "executing", source: "manual" }],
+      // Its receipt was accepted after the scan's snapshot.
+      ["since-accepted", { id: "since-accepted", status: "failed", source: "manual" }],
+      ["hook-task", { id: "hook-task", status: "completed", source: "hook" }],
+    ]);
+    const eventsByTask = new Map([
+      ["still-stranded", startedReceipt("still-stranded", "started")],
+      ["restarted", startedReceipt("restarted", "started")],
+      ["since-accepted", startedReceipt("since-accepted", "accepted")],
+      ["hook-task", startedReceipt("hook-task", "queued")],
+    ]);
+    const update = vi.fn();
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: vi.fn((taskId: string) => tasks.get(taskId)),
+        findByStatus: vi.fn(),
+        update,
+      },
+      eventRepo: {
+        findByTaskIdAndTypes: vi.fn((taskId: string) => eventsByTask.get(taskId) ?? []),
+      },
+      logEvent: vi.fn(),
+    }) as Any;
+
+    const recovered = AgentDaemon.prototype["recoverUnstartedUserFollowUpsOnStartup"].call(
+      daemonLike,
+      ["still-stranded", "restarted", "since-accepted", "hook-task", "deleted-task"],
+    );
+
+    expect(daemonLike.taskRepo.findByStatus).not.toHaveBeenCalled();
+    expect(daemonLike.eventRepo.findByTaskIdAndTypes).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(
+      "still-stranded",
+      expect.objectContaining({ status: "interrupted" }),
+    );
+    expect(recovered).toEqual([
+      expect.objectContaining({ id: "still-stranded", status: "interrupted" }),
+    ]);
+  });
+
+  it.each([
+    ["the worker scan's candidates", ["stranded"], 0],
+    ["a full host check when the scan failed", null, 1],
+  ])(
+    "resumes interrupted tasks together with follow-ups recovered from %s",
+    async (_label, candidates, fullChecks) => {
+      const interrupted = { id: "interrupted", status: "interrupted", source: "manual" };
+      const stranded = { id: "stranded", status: "completed", source: "manual" };
+      const receipt = {
+        id: "receipt",
+        taskId: "stranded",
+        timestamp: 1,
+        type: "user_message",
+        payload: { messageId: "follow-up", deliveryMode: "follow_up", deliveryStatus: "queued" },
+      };
+      const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+        shutdownRequested: false,
+        taskRepo: {
+          findById: vi.fn((taskId: string) => (taskId === "stranded" ? stranded : undefined)),
+          findByStatus: vi.fn().mockReturnValue([stranded]),
+          update: vi.fn(),
+        },
+        eventRepo: {
+          findByTaskIdAndTypes: vi.fn((taskId: string) => (taskId === "stranded" ? [receipt] : [])),
+        },
+        logEvent: vi.fn(),
+        resumeInterruptedTasks: vi.fn().mockResolvedValue(undefined),
+      }) as Any;
+
+      await AgentDaemon.prototype["resumeTasksAfterStartup"].call(
+        daemonLike,
+        [interrupted],
+        async () => candidates,
+      );
+
+      expect(daemonLike.taskRepo.findByStatus).toHaveBeenCalledTimes(fullChecks);
+      expect(daemonLike.resumeInterruptedTasks).toHaveBeenCalledWith([
+        interrupted,
+        expect.objectContaining({ id: "stranded", status: "interrupted" }),
+      ]);
+    },
+  );
+
+  it("leaves stranded follow-ups for the next launch when shutdown starts during the scan", async () => {
+    let finishScan: (ids: string[]) => void = () => undefined;
+    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+      shutdownRequested: false,
+      taskRepo: { findById: vi.fn(), findByStatus: vi.fn(), update: vi.fn() },
+      resumeInterruptedTasks: vi.fn(),
+    }) as Any;
+
+    const resume = AgentDaemon.prototype["resumeTasksAfterStartup"].call(
+      daemonLike,
+      [{ id: "interrupted", status: "interrupted" }],
+      () => new Promise<string[]>((resolve) => (finishScan = resolve)),
+    );
+    daemonLike.shutdownRequested = true;
+    finishScan(["stranded"]);
+    await resume;
+
+    expect(daemonLike.taskRepo.findById).not.toHaveBeenCalled();
+    expect(daemonLike.taskRepo.update).not.toHaveBeenCalled();
+    expect(daemonLike.resumeInterruptedTasks).not.toHaveBeenCalled();
+  });
+
   it("promotes a transcript-consumed started receipt before redispatching after a crash", async () => {
     const event = {
       id: "follow-up-receipt",

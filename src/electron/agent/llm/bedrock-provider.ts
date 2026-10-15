@@ -1,7 +1,5 @@
-import {
+import type {
   BedrockRuntimeClient,
-  BedrockRuntimeClientConfig,
-  ConverseCommand,
   ContentBlock,
   Message,
   SystemContentBlock,
@@ -9,7 +7,6 @@ import {
   ToolInputSchema,
   StopReason,
 } from "@aws-sdk/client-bedrock-runtime";
-import { fromIni } from "@aws-sdk/credential-provider-ini";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -25,6 +22,9 @@ import {
   isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
 } from "./prompt-cache";
+import { lazyClient, loadAwsIniCredentialProvider, loadBedrockRuntimeSdk } from "./sdk-loaders";
+
+type BedrockRuntimeSdk = Awaited<ReturnType<typeof loadBedrockRuntimeSdk>>;
 
 /**
  * AWS Bedrock provider implementation
@@ -32,10 +32,14 @@ import {
  */
 export class BedrockProvider implements LLMProvider {
   readonly type = "bedrock" as const;
-  private client: BedrockRuntimeClient;
+  /** The SDK and client, loaded on the first request (see sdk-loaders). */
+  private readonly getRuntime: () => Promise<{
+    sdk: BedrockRuntimeSdk;
+    client: BedrockRuntimeClient;
+  }>;
+  private readonly getCredentials: () => Promise<Any>;
   private model: string;
   private region: string;
-  private credentials?: Any;
   private resolvedModelCache = new Map<string, string>();
   private inferenceProfileCache?: { fetchedAt: number; profiles: InferenceProfileCandidate[] };
   private static readonly CONTINUE_PLACEHOLDER_TEXT = "I understand. Let me continue.";
@@ -43,32 +47,37 @@ export class BedrockProvider implements LLMProvider {
   private static readonly toolNameRegex = /^[a-zA-Z0-9_-]+$/;
 
   constructor(config: LLMProviderConfig) {
-    const clientConfig: BedrockRuntimeClientConfig = {
-      region: config.awsRegion || "us-east-1",
-    };
-    this.region = config.awsRegion || "us-east-1";
+    const region = config.awsRegion || "us-east-1";
+    this.region = region;
 
     // Store the model for use in testConnection
     this.model = config.model || "anthropic.claude-sonnet-4-6";
 
     // Use explicit credentials if provided
-    if (config.awsAccessKeyId && config.awsSecretAccessKey) {
-      this.credentials = {
-        accessKeyId: config.awsAccessKeyId,
-        secretAccessKey: config.awsSecretAccessKey,
-        ...(config.awsSessionToken && { sessionToken: config.awsSessionToken }),
-      };
-      clientConfig.credentials = this.credentials;
-    } else if (config.awsProfile) {
+    const explicitCredentials =
+      config.awsAccessKeyId && config.awsSecretAccessKey
+        ? {
+            accessKeyId: config.awsAccessKeyId,
+            secretAccessKey: config.awsSecretAccessKey,
+            ...(config.awsSessionToken && { sessionToken: config.awsSessionToken }),
+          }
+        : undefined;
+    const profile = config.awsProfile;
+    this.getCredentials = lazyClient(async () => {
+      if (explicitCredentials) return explicitCredentials;
       // Use fromIni to load credentials from a specific profile
       // This avoids mutating process.env which could affect other code
-      this.credentials = fromIni({ profile: config.awsProfile });
-      clientConfig.credentials = this.credentials;
-    }
-    // Otherwise, let the SDK use default credential chain
-    // (environment variables, IAM role, etc.)
-
-    this.client = new BedrockRuntimeClient(clientConfig);
+      if (profile) return (await loadAwsIniCredentialProvider()).fromIni({ profile });
+      // Otherwise, let the SDK use default credential chain
+      // (environment variables, IAM role, etc.)
+      return undefined;
+    });
+    this.getRuntime = lazyClient(async () => {
+      const sdk = await loadBedrockRuntimeSdk();
+      const credentials = await this.getCredentials();
+      const client = new sdk.BedrockRuntimeClient({ region, ...(credentials && { credentials }) });
+      return { sdk, client };
+    });
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
@@ -83,7 +92,8 @@ export class BedrockProvider implements LLMProvider {
 
     const resolvedModelId = await this.resolveModelId(request.model);
     const clampedMaxTokens = this.clampToKnownOutputLimit(resolvedModelId, request.maxTokens);
-    const command = new ConverseCommand({
+    const { sdk, client } = await this.getRuntime();
+    const command = new sdk.ConverseCommand({
       modelId: resolvedModelId,
       messages,
       system,
@@ -100,7 +110,7 @@ export class BedrockProvider implements LLMProvider {
         console.log(`${logTag} Resolved model: ${request.model} -> ${resolvedModelId}`);
       }
       console.log(`${logTag} Calling API with model: ${resolvedModelId}`);
-      const response = await this.client.send(
+      const response = await client.send(
         command,
         // Pass abort signal to allow cancellation
         request.signal ? { abortSignal: request.signal } : undefined,
@@ -123,8 +133,8 @@ export class BedrockProvider implements LLMProvider {
         if (fallback && fallback !== resolvedModelId) {
           console.log(`${logTag} Retrying with inference profile: ${fallback}`);
           const retryMaxTokens = this.clampToKnownOutputLimit(fallback, request.maxTokens);
-          const retryResponse = await this.client.send(
-            new ConverseCommand({
+          const retryResponse = await client.send(
+            new sdk.ConverseCommand({
               modelId: fallback,
               messages,
               system,
@@ -166,7 +176,8 @@ export class BedrockProvider implements LLMProvider {
     try {
       // Send a minimal request to test the connection using the configured model
       console.log(`[Bedrock] Testing connection with model: ${this.model}`);
-      const command = new ConverseCommand({
+      const { sdk, client } = await this.getRuntime();
+      const command = new sdk.ConverseCommand({
         modelId: await this.resolveModelId(this.model),
         messages: [
           {
@@ -179,7 +190,7 @@ export class BedrockProvider implements LLMProvider {
         },
       });
 
-      await this.client.send(command);
+      await client.send(command);
       return { success: true };
     } catch (error: Any) {
       // Provide helpful error message for common issues
@@ -193,8 +204,9 @@ export class BedrockProvider implements LLMProvider {
         const fallback = await this.resolveInferenceProfileFallback(this.model);
         if (fallback) {
           try {
-            await this.client.send(
-              new ConverseCommand({
+            const { sdk, client } = await this.getRuntime();
+            await client.send(
+              new sdk.ConverseCommand({
                 modelId: fallback,
                 messages: [
                   {
@@ -320,9 +332,10 @@ export class BedrockProvider implements LLMProvider {
     try {
       const { BedrockClient, ListInferenceProfilesCommand } =
         await import("@aws-sdk/client-bedrock");
+      const credentials = await this.getCredentials();
       const client = new BedrockClient({
         region: this.region,
-        ...(this.credentials && { credentials: this.credentials }),
+        ...(credentials && { credentials }),
       } as Any);
 
       const results: InferenceProfileCandidate[] = [];

@@ -2,12 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import * as mimetypes from "mime-types";
 import { createHash, randomUUID } from "crypto";
-import OpenAI from "openai";
 import { Workspace } from "../../../shared/types";
 import { getOpenRouterAttributionHeaders } from "../llm/openrouter-attribution";
 import { OpenAIOAuth, OpenAIOAuthTokens } from "../llm/openai-oauth";
 import { getOpenAISiwcClientId } from "../llm/openai-siwc-oauth";
 import { loadPiAiModule } from "../llm/pi-ai-loader";
+import { loadOpenAISdk } from "../llm/sdk-loaders";
 import { LLMProviderFactory } from "../llm/provider-factory";
 import {
   assertWorkspaceReadableFileAccessWithApproval,
@@ -1937,7 +1937,7 @@ export class ImageGenerator {
 
       const accountId = extractChatGPTAccountId(args.accessToken);
       const hostModel = await resolveOpenAICodexHostModel();
-      const client = new OpenAI({
+      const client = new (await loadOpenAISdk())({
         apiKey: args.apiKey,
         baseURL: OPENAI_CODEX_BASE_URL,
         defaultHeaders: {

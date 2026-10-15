@@ -224,6 +224,55 @@ describeWithSqlite("TaskEventRepository committed mutation journal", () => {
     });
   });
 
+  it("prunes rows left below the window when the database is opened again", () => {
+    const otherTaskId = new TaskStore(db).create({
+      title: "Other journal",
+      prompt: "Stays within the window",
+      status: "executing",
+      workspaceId,
+    }).id;
+    // Rows written without the prune trigger, as by a build that predates it.
+    db.exec("DROP TRIGGER task_event_mutation_journal_prune");
+    const mutationCount = TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK + 25;
+    const insert = db.prepare(
+      `INSERT INTO task_events (id, task_id, timestamp, type, payload)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    db.transaction(() => {
+      for (let index = 0; index < mutationCount; index += 1) {
+        insert.run(`stale-event-${index}`, taskId, 2_000 + index, "assistant_message", "{}");
+      }
+      for (let index = 0; index < 5; index += 1) {
+        insert.run(`other-event-${index}`, otherTaskId, 2_000 + index, "assistant_message", "{}");
+      }
+    })();
+    const countRows = (id: string) =>
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM task_event_mutation_journal WHERE task_id = ?")
+          .get(id) as { count: number }
+      ).count;
+    expect(countRows(taskId)).toBe(mutationCount);
+
+    manager.close();
+    manager = new DatabaseManager();
+    db = manager.getDatabase();
+
+    expect(countRows(taskId)).toBe(TASK_EVENT_MUTATION_JOURNAL_MAX_ROWS_PER_TASK);
+    expect(countRows(otherTaskId)).toBe(5);
+    const oldest = db
+      .prepare("SELECT MIN(cursor) AS cursor FROM task_event_mutation_journal WHERE task_id = ?")
+      .get(taskId) as { cursor: number };
+    expect(oldest.cursor).toBe(26);
+    expect(
+      db
+        .prepare(
+          "SELECT earliest_available_cursor FROM task_event_mutation_journal_state WHERE task_id = ?",
+        )
+        .get(taskId),
+    ).toEqual({ earliest_available_cursor: 26 });
+  });
+
   it("removes retained journal metadata when a task is deleted", () => {
     createEvent("event-to-delete");
     expect(repo.getCommittedMutationCursor(taskId)).toEqual({ taskId, position: 1 });

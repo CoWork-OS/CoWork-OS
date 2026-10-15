@@ -1,7 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, PDFFont, StandardFonts, degrees } from "pdf-lib";
+// pdf-lib and fontkit load on first use rather than at app start.
+import type { PDFDocument, PDFFont } from "pdf-lib";
 
 type FontStyle = "regular" | "italic" | "bold" | "bold-italic";
 
@@ -25,6 +25,7 @@ async function readBundledFont(fileName: string): Promise<Buffer> {
 }
 
 export async function selectPdfEditFont(pdf: PDFDocument, text: string, style: FontStyle) {
+  const { StandardFonts, degrees } = await import("pdf-lib");
   const glyphText = text.replace(/[\r\n\t]/g, "");
   const standard = {
     regular: StandardFonts.Helvetica,
@@ -40,7 +41,7 @@ export async function selectPdfEditFont(pdf: PDFDocument, text: string, style: F
     // WinAnsi cannot represent Turkish, Cyrillic, or CJK. Embed an offline
     // Unicode subset instead of losing/replacing characters in the selection.
   }
-  pdf.registerFontkit(fontkit);
+  pdf.registerFontkit((await import("@pdf-lib/fontkit")).default);
   const suffix = {
     regular: "Regular",
     italic: "Italic",

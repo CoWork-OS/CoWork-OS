@@ -5,7 +5,7 @@ import {
   reasoningFromResponsesOutput,
   responsesReplayItems,
 } from "./reasoning-replay";
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import type {
   Model,
   Message as PiAiMessage,
@@ -55,6 +55,7 @@ import {
   splitSystemBlocksForOpenAIPrefix,
 } from "./prompt-cache";
 import { createLogger } from "../../utils/logger";
+import { lazyClient, loadOpenAISdk } from "./sdk-loaders";
 
 // Default model for openai-codex (ChatGPT backend)
 const DEFAULT_CODEX_MODEL = "gpt-6-astra";
@@ -181,7 +182,8 @@ class OpenAIProviderError extends Error {
  */
 export class OpenAIProvider implements LLMProvider {
   readonly type = "openai" as const;
-  private client: OpenAI | null = null;
+  /** The API-key SDK client, created on its first request (see sdk-loaders); null under OAuth. */
+  private getApiKeyClient: (() => Promise<OpenAI>) | null = null;
   private authMethod: "api_key" | "oauth";
   private oauthTokens?: OpenAIOAuthTokens;
   private model: string;
@@ -233,15 +235,20 @@ export class OpenAIProvider implements LLMProvider {
       );
     } else if (apiKey) {
       // Use API key - standard OpenAI SDK
-      this.client = new OpenAI({
-        apiKey,
-        ...(this.openaiBaseUrl ? { baseURL: this.openaiBaseUrl } : {}),
-      });
+      const baseURL = this.openaiBaseUrl;
+      this.getApiKeyClient = lazyClient(
+        async () => new (await loadOpenAISdk())({ apiKey, ...(baseURL ? { baseURL } : {}) }),
+      );
       this.authMethod = "api_key";
       logger.debug("Using API key authentication");
     } else {
       throw new Error("OpenAI authentication required. Use API key or sign in with ChatGPT.");
     }
+  }
+
+  private async apiKeyClient(): Promise<OpenAI> {
+    if (!this.getApiKeyClient) throw new Error("OpenAI client not initialized");
+    return this.getApiKeyClient();
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
@@ -332,7 +339,7 @@ export class OpenAIProvider implements LLMProvider {
     request: LLMRequest,
     cacheTier: OpenAIPromptCacheTier = resolvePromptCacheTier("chat", request.model),
   ): Promise<LLMResponse> {
-    if (!this.client) {
+    if (!this.getApiKeyClient) {
       throw new Error("OpenAI client not initialized");
     }
 
@@ -366,7 +373,8 @@ export class OpenAIProvider implements LLMProvider {
         ...buildOpenAIPromptCacheFields(request.promptCache, model, cacheTier),
       };
       sentCacheFields = pickOpenAIPromptCacheFields(body);
-      const response = await this.client.chat.completions.create(
+      const client = await this.apiKeyClient();
+      const response = await client.chat.completions.create(
         body,
         request.signal ? { signal: request.signal } : undefined,
       );
@@ -653,7 +661,7 @@ export class OpenAIProvider implements LLMProvider {
       logger.debug(`Calling Responses API with model: ${request.model}`);
       const body = this.buildResponsesBody(request, cacheTier);
       sentCacheFields = pickOpenAIPromptCacheFields(body);
-      const response = await (this.client as Any).responses.create(
+      const response = await ((await this.apiKeyClient()) as Any).responses.create(
         body,
         request.signal ? { signal: request.signal } : undefined,
       );
@@ -864,7 +872,11 @@ export class OpenAIProvider implements LLMProvider {
     try {
       const accessToken = await this.getSiwcAccessToken();
       // Retries are owned by the executor so usage-limit errors are not replayed.
-      const client = new OpenAI({ apiKey: accessToken, baseURL: SIWC_RESOURCE, maxRetries: 0 });
+      const client = new (await loadOpenAISdk())({
+        apiKey: accessToken,
+        baseURL: SIWC_RESOURCE,
+        maxRetries: 0,
+      });
       logger.debug(`Calling Responses API via Sign in with ChatGPT with model: ${body.model}`);
       const stream = await (client as Any).responses.create(
         body,
@@ -1190,13 +1202,14 @@ export class OpenAIProvider implements LLMProvider {
         return { success: true };
       } else {
         // For API key, use standard OpenAI SDK
-        if (!this.client) {
+        if (!this.getApiKeyClient) {
           return { success: false, error: "OpenAI client not initialized" };
         }
+        const client = await this.apiKeyClient();
 
         const model = this.normalizeCodexModelId(this.model || DEFAULT_CODEX_MODEL);
         if (this.forceResponsesApi || this.shouldUseResponsesApi(this.model)) {
-          await (this.client as Any).responses.create({
+          await (client as Any).responses.create({
             model,
             input: [{ role: "user", content: [{ type: "input_text", text: "Hi" }] }],
             max_output_tokens: 10,
@@ -1204,7 +1217,7 @@ export class OpenAIProvider implements LLMProvider {
           return { success: true };
         }
 
-        await this.client.chat.completions.create({
+        await client.chat.completions.create({
           model,
           max_tokens: 10,
           messages: [{ role: "user", content: "Hi" }],
@@ -1298,9 +1311,9 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     // For API key authentication, use the standard models list API
-    if (this.client) {
+    if (this.getApiKeyClient) {
       try {
-        const response = await this.client.models.list();
+        const response = await (await this.apiKeyClient()).models.list();
         const models = response.data
           .filter((m) => m.id.startsWith("gpt-") || m.id.startsWith("o1") || m.id.startsWith("o3"))
           .map((m) => ({

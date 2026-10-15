@@ -2,6 +2,7 @@ import type { Task, TaskEvent, TaskTimelinePageCursor } from "../../shared/types
 import type { ComposerDraft } from "../../shared/composer-drafts";
 import type { SharedTaskEventUiState } from "../utils/task-event-derived";
 import type { DisclosureIntentState } from "../utils/disclosure-state";
+import { estimateJsonBytes } from "../utils/json-size";
 
 export interface TaskSurfaceKey {
   scope: "local" | "remote";
@@ -149,18 +150,21 @@ export class TaskViewCache {
   }
 }
 
+/**
+ * Serialized size of a snapshot. Runs on every surface update (each live event, page and
+ * projection), so it reuses the memoized sizes of the events and payloads it shares with
+ * the previous snapshot instead of stringifying the whole timeline and projection again.
+ */
 export function estimateTaskViewSnapshotBytes(snapshot: TaskViewSnapshot): number {
   try {
-    return new TextEncoder().encode(
-      JSON.stringify({
-        task: snapshot.task,
-        timeline: snapshot.timeline,
-        projection: snapshot.projection,
-        composerDraft: snapshot.composerDraft,
-        disclosureState: snapshot.disclosureState,
-        scrollAnchor: snapshot.scrollAnchor,
-      }),
-    ).byteLength;
+    return estimateJsonBytes({
+      task: snapshot.task,
+      timeline: snapshot.timeline,
+      projection: snapshot.projection,
+      composerDraft: snapshot.composerDraft,
+      disclosureState: snapshot.disclosureState,
+      scrollAnchor: snapshot.scrollAnchor,
+    });
   } catch {
     return Number.POSITIVE_INFINITY;
   }

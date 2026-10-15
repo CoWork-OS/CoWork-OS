@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import { normalizeResponseToolMetadata } from "./response-tool-metadata";
-import Anthropic from "@anthropic-ai/sdk";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -24,6 +23,7 @@ import {
   isRetiredAnthropicModelReference,
 } from "./types";
 import { AnthropicProvider } from "./anthropic-provider";
+import { loadAnthropicSdk } from "./sdk-loaders";
 import { BedrockProvider } from "./bedrock-provider";
 import { OllamaProvider } from "./ollama-provider";
 import { GeminiProvider } from "./gemini-provider";
@@ -4026,6 +4026,7 @@ export class LLMProviderFactory {
 
     try {
       const isSubscriptionToken = credential.includes("sk-ant-oat");
+      const Anthropic = await loadAnthropicSdk();
       const client = isSubscriptionToken
         ? new Anthropic({
             apiKey: null,

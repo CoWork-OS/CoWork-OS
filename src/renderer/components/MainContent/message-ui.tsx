@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback, lazy, Suspense, useLayoutEffect } from "react";
+import { memo, useState, useRef, useCallback, Suspense, useLayoutEffect } from "react";
 import { GitFork } from "lucide-react";
 import type {
   IntegrationMentionSelection,
@@ -22,13 +22,7 @@ import {
   IntegrationMentionText,
   hasRenderableIntegrationMentions,
 } from "../IntegrationMentionText";
-
-const LazyMarkdownRenderer = lazy(() =>
-  import("../MarkdownRenderer").then((module) => ({ default: module.MarkdownRenderer })),
-);
-const LazyHighlightedCodePreview = lazy(() =>
-  import("../HighlightedCode").then((module) => ({ default: module.HighlightedCodePreview })),
-);
+import { LazyHighlightedCodePreview, LazyMarkdownRenderer } from "../lazy-renderers";
 
 export const UserMessageImageGallery = memo(function UserMessageImageGallery({
   attachments,

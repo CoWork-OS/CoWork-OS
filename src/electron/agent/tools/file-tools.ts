@@ -27,7 +27,6 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
-import mammoth from "mammoth";
 import { extractPptxContentFromFile } from "../../utils/pptx-extractor";
 import { extractPdfText } from "../../utils/pdf-text";
 import { detectWorkspacePathAlias, shouldRewriteWorkspaceAliasPath } from "../path-alias";
@@ -1747,6 +1746,8 @@ export class FileTools {
     window: ReadWindow;
   }> {
     try {
+      // mammoth loads on first DOCX read rather than at app start.
+      const mammoth = (await import("mammoth")).default;
       const result = await mammoth.extractRawText({
         buffer: await readDocumentArchiveBuffer(fullPath),
       });

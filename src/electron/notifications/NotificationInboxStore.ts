@@ -3,11 +3,9 @@ import type Database from "better-sqlite3";
 import type { AppNotification } from "../../shared/types";
 import { BotNotificationStore } from "./BotNotificationStore";
 import type { SchedulerFence } from "../automation/scheduler-lease-store";
-export const NOTIFICATION_INBOX_SCHEMA = `
- CREATE TABLE IF NOT EXISTS notification_inbox_items(id TEXT PRIMARY KEY,payload_json TEXT,dedupe_key TEXT UNIQUE,created_at INTEGER NOT NULL,scope_key TEXT NOT NULL,retired_at INTEGER);
- CREATE INDEX IF NOT EXISTS idx_notification_inbox_current ON notification_inbox_items(retired_at,created_at DESC);
- CREATE TABLE IF NOT EXISTS notification_inbox_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-`;
+
+export { NOTIFICATION_INBOX_SCHEMA } from "./notification-inbox-schema";
+
 export interface BotInboxAuthority {
   ids: string[];
   fence: SchedulerFence;

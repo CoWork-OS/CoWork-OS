@@ -2,24 +2,9 @@ import { loadDocumentArchive, readDocumentArchiveBuffer } from "../../security/d
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  HeadingLevel,
-  AlignmentType,
-  Table,
-  TableRow,
-  TableCell,
-  WidthType,
-  BorderStyle,
-  Footer,
-  PageBreak,
-  PageNumber,
-} from "docx";
-import PDFDocument from "pdfkit";
-import * as mammoth from "mammoth";
+// docx, pdfkit and mammoth are large module trees; each loads on first use, not at app start.
+import type { HeadingLevel, Paragraph, Table } from "docx";
+import type PDFDocument from "pdfkit";
 import { Workspace } from "../../../shared/types";
 import { parseMarkdownTable } from "../../utils/document-generators/markdown-tables";
 import { needsUnicodeFont, resolvePdfFonts } from "../../utils/pdf-unicode-fonts";
@@ -895,6 +880,22 @@ export class DocumentBuilder {
     content: RenderBlock[],
     options: DocumentOptions,
   ): Promise<void> {
+    const {
+      Document,
+      Packer,
+      Paragraph,
+      TextRun,
+      HeadingLevel,
+      AlignmentType,
+      Table,
+      TableRow,
+      TableCell,
+      WidthType,
+      BorderStyle,
+      Footer,
+      PageBreak,
+      PageNumber,
+    } = await import("docx");
     const children: Array<Paragraph | Table> = [];
     const textSize = (options.fontSize || 12) * 2;
     // A page break starts the next paragraph on a new page, so the new page
@@ -915,7 +916,7 @@ export class DocumentBuilder {
 
         case "heading": {
           const level = Math.min(Math.max(block.level || 1, 1), 6);
-          const headingLevel = this.getHeadingLevel(level);
+          const headingLevel = this.getHeadingLevel(HeadingLevel, level);
           children.push(
             new Paragraph({
               children: [
@@ -1093,14 +1094,15 @@ export class DocumentBuilder {
    * Page count of `content` as a PDF at each layout in PDF_FIT_LADDER, in
    * ladder order. Nothing is written.
    */
-  measurePdfLayouts(
+  async measurePdfLayouts(
     content: ContentBlockInput[] | ContentBlockInput | string | undefined,
     options: DocumentOptions = {},
-  ): number[] {
+  ): Promise<number[]> {
     const { blocks } = this.normalizeContent(content);
     const fontChoice = resolvePdfFonts(pdfText(blocks));
+    const pdfKit = (await import("pdfkit")).default;
     return PDF_FIT_LADDER.map(
-      (profile) => this.layoutPdf(blocks, options, fontChoice, profile).pageCount,
+      (profile) => this.layoutPdf(pdfKit, blocks, options, fontChoice, profile).pageCount,
     );
   }
 
@@ -1110,12 +1112,13 @@ export class DocumentBuilder {
    * when chosen, saved.
    */
   private layoutPdf(
+    pdfKit: typeof PDFDocument,
     content: RenderBlock[],
     options: DocumentOptions,
     fontChoice: ReturnType<typeof resolvePdfFonts>,
     profile: PdfLayoutProfile,
   ): { doc: PdfDocument; renderer: PdfBlockRenderer; warnings: string[]; pageCount: number } {
-    const doc = new PDFDocument({
+    const doc = new pdfKit({
       size: "LETTER",
       margins: {
         top: pdfMargin(options.margins?.top, profile.marginScale),
@@ -1173,11 +1176,12 @@ export class DocumentBuilder {
     // The built-in PDF fonts only encode Latin-1; text beyond that needs an
     // embedded Unicode font or it is written as the wrong glyphs.
     const fontChoice = resolvePdfFonts(pdfText(content));
+    const pdfKit = (await import("pdfkit")).default;
     const layouts = new Map<number, ReturnType<DocumentBuilder["layoutPdf"]>>();
     const layoutAt = (level: number): ReturnType<DocumentBuilder["layoutPdf"]> => {
       let layout = layouts.get(level);
       if (!layout) {
-        layout = this.layoutPdf(content, options, fontChoice, PDF_FIT_LADDER[level]);
+        layout = this.layoutPdf(pdfKit, content, options, fontChoice, PDF_FIT_LADDER[level]);
         layouts.set(level, layout);
       }
       return layout;
@@ -1253,22 +1257,25 @@ export class DocumentBuilder {
     await fsPromises.writeFile(outputPath, markdown, "utf-8");
   }
 
-  private getHeadingLevel(level: number): (typeof HeadingLevel)[keyof typeof HeadingLevel] {
+  private getHeadingLevel(
+    headingLevels: typeof HeadingLevel,
+    level: number,
+  ): (typeof HeadingLevel)[keyof typeof HeadingLevel] {
     switch (level) {
       case 1:
-        return HeadingLevel.HEADING_1;
+        return headingLevels.HEADING_1;
       case 2:
-        return HeadingLevel.HEADING_2;
+        return headingLevels.HEADING_2;
       case 3:
-        return HeadingLevel.HEADING_3;
+        return headingLevels.HEADING_3;
       case 4:
-        return HeadingLevel.HEADING_4;
+        return headingLevels.HEADING_4;
       case 5:
-        return HeadingLevel.HEADING_5;
+        return headingLevels.HEADING_5;
       case 6:
-        return HeadingLevel.HEADING_6;
+        return headingLevels.HEADING_6;
       default:
-        return HeadingLevel.HEADING_1;
+        return headingLevels.HEADING_1;
     }
   }
 
@@ -1279,6 +1286,7 @@ export class DocumentBuilder {
     inputPath: string,
   ): Promise<{ html: string; text: string; messages: string[] }> {
     const buffer = await readDocumentArchiveBuffer(inputPath);
+    const mammoth = await import("mammoth");
     const result = await mammoth.convertToHtml({ buffer });
     const textResult = await mammoth.extractRawText({ buffer });
 

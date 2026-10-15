@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import ExcelJS from "exceljs";
+import { loadExcelJS } from "../../utils/exceljs-loader";
 import { loadDocumentArchive } from "../../security/document-archive";
 import type { AgentDaemon } from "../daemon";
 import type { FileTools } from "./file-tools";
@@ -450,7 +450,7 @@ export class NativeApplicationTools {
       const archive = await loadDocumentArchive(bytes);
       const xml = await archive.file("xl/worksheets/sheet1.xml")?.async("string");
       const caches = readSavedNumericFormulaCaches(xml || "");
-      const wb = new ExcelJS.Workbook();
+      const wb = new (await loadExcelJS()).Workbook();
       await wb.xlsx.load(bytes as never);
       const ws = wb.getWorksheet("Operating plan");
       if (!ws) throw new Error("Saved operating-plan sheet is missing");

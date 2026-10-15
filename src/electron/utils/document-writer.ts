@@ -1,17 +1,6 @@
 import { loadDocumentArchive, readDocumentArchiveBuffer } from "../security/document-archive";
 import * as fs from "fs/promises";
-import {
-  AlignmentType,
-  Document,
-  HeadingLevel,
-  LevelFormat,
-  Packer,
-  Paragraph,
-  Table,
-  TableCell,
-  TableRow,
-  TextRun,
-} from "docx";
+import type { Paragraph, Table, TextRun } from "docx";
 import type { EditableDocumentBlock, EditableDocumentRun } from "../../shared/document-preview";
 import { parseDocxBlocksFromXml } from "../documents/docx-blocks";
 
@@ -40,7 +29,14 @@ function blockPlainText(block: EditableDocumentBlock): string {
   return textFromRuns(block.runs, block.text || "");
 }
 
-function buildTextRuns(runs: EditableDocumentRun[] | undefined, fallback = ""): TextRun[] {
+// docx is a large module; it loads when a document is written, not at app start.
+type Docx = typeof import("docx");
+
+function buildTextRuns(
+  { TextRun }: Docx,
+  runs: EditableDocumentRun[] | undefined,
+  fallback = "",
+): TextRun[] {
   const source = runs && runs.length > 0 ? runs : [{ text: fallback }];
   const textRuns = source
     .filter((run) => run.text.length > 0)
@@ -56,7 +52,10 @@ function buildTextRuns(runs: EditableDocumentRun[] | undefined, fallback = ""): 
   return textRuns.length > 0 ? textRuns : [new TextRun("")];
 }
 
-function headingLevel(level: number | undefined): (typeof HeadingLevel)[keyof typeof HeadingLevel] {
+function headingLevel(
+  { HeadingLevel }: Docx,
+  level: number | undefined,
+): (typeof HeadingLevel)[keyof typeof HeadingLevel] {
   if (level === 1) return HeadingLevel.HEADING_1;
   if (level === 2) return HeadingLevel.HEADING_2;
   if (level === 3) return HeadingLevel.HEADING_3;
@@ -65,7 +64,8 @@ function headingLevel(level: number | undefined): (typeof HeadingLevel)[keyof ty
   return HeadingLevel.HEADING_6;
 }
 
-function blockToParagraphs(block: EditableDocumentBlock): Array<Paragraph | Table> {
+function blockToParagraphs(docx: Docx, block: EditableDocumentBlock): Array<Paragraph | Table> {
+  const { AlignmentType, Paragraph, Table, TableCell, TableRow } = docx;
   if (block.type === "table") {
     const rows = block.rows || [];
     if (rows.length === 0) return [];
@@ -86,11 +86,11 @@ function blockToParagraphs(block: EditableDocumentBlock): Array<Paragraph | Tabl
     ];
   }
 
-  const children = buildTextRuns(block.runs, block.text);
+  const children = buildTextRuns(docx, block.runs, block.text);
   if (block.type === "heading") {
     return [
       new Paragraph({
-        heading: headingLevel(block.level),
+        heading: headingLevel(docx, block.level),
         children,
       }),
     ];
@@ -275,7 +275,9 @@ export async function writeEditableDocumentBlocksToDocxFile(
     return;
   }
 
-  const children = blocks.flatMap(blockToParagraphs);
+  const docx = await import("docx");
+  const { AlignmentType, Document, LevelFormat, Packer, Paragraph } = docx;
+  const children = blocks.flatMap((block) => blockToParagraphs(docx, block));
   const document = new Document({
     numbering: {
       config: [

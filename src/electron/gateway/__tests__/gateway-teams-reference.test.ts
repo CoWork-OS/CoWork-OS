@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("electron", () => ({
   app: { getPath: () => "/tmp/cowork-teams-reference-fixture" },
   BrowserWindow: { getAllWindows: () => [] },
 }));
 import { ChannelGateway } from "../index";
 import { TeamsAdapter } from "../channels/teams";
+import { loadChannelAdapterModule } from "../channels/lazy-adapters";
 const reference = {
   channelId: "msteams" as const,
   serviceUrl: "https://smba.trafficmanager.net/amer/",
@@ -41,6 +42,8 @@ function fixture(changed = false) {
   return { adapter, repo: teamsReferenceRepo };
 }
 describe("gateway Teams recovery wiring", () => {
+  // Gateway callers load an SDK-backed adapter module before creating the adapter.
+  beforeAll(() => loadChannelAdapterModule("teams"));
   it("creates the actual Teams adapter with exact channel/app/tenant persistence", async () => {
     const f = fixture();
     expect(f.adapter).toBeInstanceOf(TeamsAdapter);

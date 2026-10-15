@@ -49,7 +49,12 @@ same permission engine; only real exceptions reach `requestApproval`.
 
 `approval: "never"` never creates a harness approval request. An explicit ask rule,
 missing consent, or additional scope instead produces a denial unless authority
-is already validly granted. Mandatory OS permission dialogs are separate.
+is already validly granted. Mandatory OS permission dialogs, private Browser Workbench input,
+and native credential confirmations are separate. Private browser card fills initiated by the
+agent additionally require fresh tool approval with `allowAutoApprove: false` and
+`noStandingApproval: true`; an approved fill never authorizes an order. See
+[Private browser credentials and checkout](security-guide.md#private-browser-credentials-and-checkout).
+
 Pending approvals are revalidated against their operation and current policy;
 argument changes or revoked authority cannot reuse the old grant.
 

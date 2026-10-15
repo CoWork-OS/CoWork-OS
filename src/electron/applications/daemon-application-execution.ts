@@ -8,6 +8,7 @@ import { ApplicationExecutionService } from "./ApplicationExecutionService";
 import { ApplicationOperationRepository } from "./ApplicationOperationRepository";
 import { redactWorkSessionValue } from "../database/WorkSessionProtocolRepository";
 import { registerNativeApplicationPilots } from "./native-application-pilots";
+import { createAndroidPhoneAdapter } from "./android-phone-adapter";
 
 /** Live task registries retain their original tool restrictions, policy context, and gateway identity. */
 export class ApplicationTaskToolGateway implements ApplicationToolGateway {
@@ -176,6 +177,7 @@ export function createDaemonApplicationExecution(
     },
   });
   registerNativeApplicationPilots(service.catalog);
+  service.catalog.register(createAndroidPhoneAdapter());
   service.start();
   return service;
 }

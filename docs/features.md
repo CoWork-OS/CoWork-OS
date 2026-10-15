@@ -171,6 +171,10 @@ Cross-platform location access for nearby-place, walking-distance, and local-err
 - **Timeout**: Configurable 1–60 seconds (default 15s). Failed requests are cached for 2 minutes to prevent retry storms.
 - **Maps integration**: Coordinates feed into `maps.search_places`, `maps.rank_nearby_options`, and `maps.route` from the bundled Maps MCP connector.
 
+### Android phone control
+
+Opt-in control of a selected Android phone or emulator through ADB and phone-harness. Settings provides runtime installation/repair, exact device selection, enable and Stop controls. Screen access and every input require explicit owner approval. Screenshots, fresh task-owned captures, durable action receipts and package/text readback support inspected execution and recovery without replaying uncertain input. Opening apps, taps, swipes, ASCII typing, Home, Back and Recents are supported; authentication and locked screens require the user. See [Android phone control](android-phone-control.md) for setup and verification limits.
+
 ### Computer use
 
 Desktop automation for **native apps** on macOS and Windows when MCP, browser automation, and shell are not enough. **Full guide:** [Computer use](computer-use.md).

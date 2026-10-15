@@ -10,6 +10,7 @@ import {
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
 import type { ApprovalRequest } from "../shared/types";
+import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   ApprovalDraftPreview,
   InlineApprovalDraftReview,
@@ -4426,6 +4427,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, input),
 
   getComputerUseStatus: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_STATUS),
+  getAndroidPhoneStatus: () => ipcRenderer.invoke("androidPhone:status"),
+  saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) =>
+    ipcRenderer.invoke("androidPhone:settings", settings),
+  installAndroidPhoneRuntime: () => ipcRenderer.invoke("androidPhone:install"),
+  stopAndroidPhone: () => ipcRenderer.invoke("androidPhone:stop"),
   endComputerUseSession: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_END_SESSION),
   openComputerUseAccessibilitySettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_OPEN_ACCESSIBILITY),
@@ -8546,6 +8552,10 @@ export interface ElectronAPI {
     screenCaptureStatus: string;
     error: string | null;
   }>;
+  getAndroidPhoneStatus: () => Promise<AndroidPhoneStatus>;
+  saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) => Promise<AndroidPhoneSettings>;
+  installAndroidPhoneRuntime: () => Promise<void>;
+  stopAndroidPhone: () => Promise<void>;
   endComputerUseSession: () => Promise<{ success: boolean }>;
   openComputerUseAccessibilitySettings: () => Promise<{ success: boolean }>;
   openComputerUseScreenRecordingSettings: () => Promise<{ success: boolean }>;

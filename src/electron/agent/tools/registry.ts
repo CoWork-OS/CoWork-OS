@@ -171,6 +171,7 @@ import { ScrapingTools } from "./scraping-tools";
 import { DocumentTools } from "./document-tools";
 import { ComputerUseTools } from "./computer-use-tools";
 import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
+import { AndroidPhoneTools, ANDROID_PHONE_TOOLS } from "./android-phone-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { QATools } from "./qa-tools";
@@ -1345,6 +1346,11 @@ export class ToolRegistry {
   }
 
   isToolAllowed(toolName: string): boolean {
+    if (
+      toolName.startsWith("android_phone_") &&
+      isThirdPartyGatewayTask(this.daemon.getTask?.(this.taskId))
+    )
+      return false;
     if (this.denyAllTools) {
       return false;
     }
@@ -1373,6 +1379,7 @@ export class ToolRegistry {
 
     const headless = isHeadlessMode();
     const allTools: LLMTool[] = [
+      ...ANDROID_PHONE_TOOLS,
       ...this.getFileToolDefinitions(),
       ...this.getSkillToolDefinitions(),
       ...GlobTools.getToolDefinitions(),
@@ -2122,7 +2129,11 @@ export class ToolRegistry {
     // PACT conversation is local.
     if (canonicalToolName === "pact_send_message") return "external_service";
     if (canonicalToolName === "pact_get_conversation") return null;
-    if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
+    if (
+      canonicalToolName.startsWith("android_phone_") ||
+      canonicalToolName === "open_application" ||
+      isComputerUseToolName(canonicalToolName)
+    ) {
       return "computer_use";
     }
     if (NETWORK_TOOL_NAMES.has(canonicalToolName)) return "network_access";
@@ -2233,6 +2244,7 @@ export class ToolRegistry {
       toolName === "local_photoshop_create" ||
       toolName === "local_photoshop_edit" ||
       toolName === "native_application_create" ||
+      toolName.startsWith("android_phone_") ||
       toolName === "take_screenshot" ||
       toolName === "open_path" ||
       toolName === "show_in_folder" ||
@@ -3341,6 +3353,18 @@ export class ToolRegistry {
       async ({ request }) => this.nativeAppTools.run(request.input),
       serialSchedulerSpec,
     );
+    for (const tool of ANDROID_PHONE_TOOLS) {
+      register(
+        tool.name,
+        async ({ request }) =>
+          new AndroidPhoneTools(this.daemon, this.taskId).run(
+            tool.name,
+            request.input,
+            request.runtime,
+          ),
+        serialSchedulerSpec,
+      );
+    }
     register(
       "screenshot",
       async ({ request }) =>
@@ -5242,6 +5266,8 @@ ${skillDescriptions}`;
 
     // Computer use tools (CUA)
     if (name === "native_app") return await this.nativeAppTools.run(input);
+    if (ANDROID_PHONE_TOOLS.some((tool) => tool.name === name))
+      return new AndroidPhoneTools(this.daemon, this.taskId).run(name, input);
     if (name === "screenshot")
       return await this.computerUseTools.screenshot({
         app: input.app,

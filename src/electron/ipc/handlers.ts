@@ -518,6 +518,7 @@ import {
   ChronicleSettingsManager,
 } from "../chronicle";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
+import { ComputerViewService } from "../computer-use/computer-view-service";
 import { registerAndroidPhoneHandlers } from "./android-phone-handlers";
 import { ComputerUseHelperRuntime } from "../computer-use/helper-runtime";
 import {
@@ -1585,11 +1586,65 @@ export async function setupIpcHandlers(
     options?.getMainWindow?.() ?? getMainWindow();
   ComputerUseSessionManager.getInstance().setMainWindowGetter(computerUseMainWindow);
   registerAndroidPhoneHandlers(computerUseMainWindow);
+  const computerView = ComputerViewService.getInstance();
+  computerView.configure({
+    notify: (state) => {
+      const win = computerUseMainWindow();
+      if (win && !win.isDestroyed()) win.webContents.send(IPC_CHANNELS.COMPUTER_VIEW_EVENT, state);
+    },
+    logEvent: (taskId, type, payload) => agentDaemon.logEvent(taskId, type as Any, payload),
+    captureBrowser: (taskId) => getBrowserWorkbenchService().capturePreview(taskId),
+    setBrowserPaused: (taskId, paused) =>
+      getBrowserWorkbenchService().setPausedByUserForTask(taskId, paused),
+  });
   ComputerUseSessionManager.getInstance().setNotifyHandler((event) => {
+    if (event.type === "session_waiting") computerView.noteWaiting(event.taskId);
+    else if (event.type === "session_started")
+      computerView.noteWorking(event.taskId, "this_computer");
+    else if (event.type === "session_ended")
+      computerView.noteReleased(event.taskId, "this_computer");
     const win = computerUseMainWindow();
     if (win && !win.isDestroyed()) {
       win.webContents.send(IPC_CHANNELS.COMPUTER_USE_EVENT, event);
     }
+  });
+  // Which tasks each app window watches, so a closed or reloaded window stops its captures.
+  const computerViewWatches = new Map<number, Set<string>>();
+  const readComputerViewTaskId = (value: unknown): string =>
+    validateInput(StringIdSchema, value, "task ID");
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_WATCH, (event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_WATCH);
+    const id = readComputerViewTaskId(taskId);
+    const senderId = event.sender.id;
+    let watched = computerViewWatches.get(senderId);
+    if (!watched) {
+      watched = new Set();
+      computerViewWatches.set(senderId, watched);
+      event.sender.once("destroyed", () => {
+        for (const watchedTaskId of computerViewWatches.get(senderId) ?? []) {
+          computerView.unwatch(watchedTaskId);
+        }
+        computerViewWatches.delete(senderId);
+      });
+    }
+    if (watched.has(id)) return computerView.getState(id);
+    watched.add(id);
+    return computerView.watch(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, (event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH);
+    const id = readComputerViewTaskId(taskId);
+    if (computerViewWatches.get(event.sender.id)?.delete(id)) computerView.unwatch(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, async (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER);
+    const id = readComputerViewTaskId(taskId);
+    if (!(await agentDaemon.getTaskById(id))) throw new Error("Task not found");
+    return computerView.takeOver(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK);
+    return computerView.handBack(readComputerViewTaskId(taskId));
   });
 
   const db = dbManager.getDatabase();

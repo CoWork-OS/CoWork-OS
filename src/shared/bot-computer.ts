@@ -85,7 +85,8 @@ export const HOST_COMPUTER_TOOL_NAMES: readonly string[] = [
 
 const HOST_COMPUTER_TOOL_SET = new Set(HOST_COMPUTER_TOOL_NAMES);
 
-export type ComputerToolKind = "host" | "browser";
+/** host: this computer; browser: the in-app browser; handoff: asking the person to take over. */
+export type ComputerToolKind = "host" | "browser" | "handoff";
 
 /** Which computer a tool acts on, or null when it acts on neither. */
 export function computerToolKind(
@@ -95,6 +96,7 @@ export function computerToolKind(
   const name = String(toolName || "").trim();
   if (options.hostDesktopMcp || HOST_COMPUTER_TOOL_SET.has(name)) return "host";
   if (name.startsWith("browser_")) return "browser";
+  if (name === "request_takeover") return "handoff";
   return null;
 }
 
@@ -107,4 +109,9 @@ export function isComputerToolBlocked(
   if (worksOn === "off") return true;
   if (worksOn === "browser") return kind === "host";
   return false;
+}
+
+/** Whether a tool drives a computer (this one or the browser) or hands it to the person. */
+export function isComputerTool(toolName: string): boolean {
+  return computerToolKind(toolName) !== null;
 }

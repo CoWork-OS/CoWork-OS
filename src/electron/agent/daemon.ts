@@ -237,6 +237,7 @@ import type { TerminalKind } from "./runtime/TerminalState";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { loadPolicies } from "../admin/policies";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
+import { ComputerViewService } from "../computer-use/computer-view-service";
 import { getNumbatService } from "../security/numbat";
 import {
   decideTaskOutcome,
@@ -7079,6 +7080,7 @@ export class AgentDaemon extends EventEmitter {
     const sessions = ComputerUseSessionManager.getInstance();
     sessions.cancelWaiting(taskId);
     sessions.endSessionIfOwner(taskId);
+    ComputerViewService.getInstance().noteTaskEnded(taskId);
   }
 
   private finishQueueSlot(taskId: string): void {

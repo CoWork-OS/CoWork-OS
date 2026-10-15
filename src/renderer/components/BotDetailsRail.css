@@ -400,3 +400,101 @@
   color: var(--color-text-muted);
   font-size: 12px;
 }
+
+/* ---- Computer ---- */
+
+.bot-computer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.bot-computer-request {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bot-computer-request strong {
+  font-weight: 650;
+}
+
+.bot-computer-note,
+.bot-computer-error {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.bot-computer-error {
+  color: var(--color-error);
+}
+
+.bot-computer-frame {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+}
+
+.bot-computer-frame img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-hover);
+}
+
+.bot-computer-frame figcaption {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-computer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bot-computer-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bot-computer-button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.bot-computer-button.primary {
+  border-color: transparent;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+}
+
+.bot-computer-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

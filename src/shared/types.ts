@@ -1479,6 +1479,8 @@ export type ToolType =
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
+  // Hand a computer step to the person (passwords, codes, payments)
+  | "request_takeover"
   // Orchestration tools
   | "orchestrate_agents"
   // QA tools (Playwright visual QA)
@@ -1966,6 +1968,8 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
+  // Only asks the person to take over; it changes nothing itself.
+  request_takeover: "read",
   // Orchestration
   orchestrate_agents: "write",
   // Meta
@@ -8638,6 +8642,12 @@ export const IPC_CHANNELS = {
   COMPUTER_USE_OPEN_ACCESSIBILITY: "computerUse:openAccessibility",
   COMPUTER_USE_OPEN_SCREEN_RECORDING: "computerUse:openScreenRecording",
   COMPUTER_USE_EVENT: "computerUse:event",
+  // Live view of a task's computer in the bot's panel, and take-over by the person
+  COMPUTER_VIEW_WATCH: "computerView:watch",
+  COMPUTER_VIEW_UNWATCH: "computerView:unwatch",
+  COMPUTER_VIEW_TAKE_OVER: "computerView:takeOver",
+  COMPUTER_VIEW_HAND_BACK: "computerView:handBack",
+  COMPUTER_VIEW_EVENT: "computerView:event",
 
   // Tray (Menu Bar)
   TRAY_GET_SETTINGS: "tray:getSettings",

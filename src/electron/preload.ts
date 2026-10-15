@@ -1,3 +1,4 @@
+import type { ComputerViewState } from "../shared/computer-view";
 import {
   BROWSER_VAULT_IPC,
   type BrowserVaultItem,
@@ -4447,6 +4448,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+  watchComputerView: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_WATCH, taskId),
+  unwatchComputerView: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, taskId),
+  takeOverComputer: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, taskId),
+  handBackComputer: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, taskId),
+  onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
+    const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
+    const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
 
   // Tray (Menu Bar) APIs
   getTraySettings: () => ipcRenderer.invoke(IPC_CHANNELS.TRAY_GET_SETTINGS),
@@ -8564,6 +8579,13 @@ export interface ElectronAPI {
   openComputerUseAccessibilitySettings: () => Promise<{ success: boolean }>;
   openComputerUseScreenRecordingSettings: () => Promise<{ success: boolean }>;
   onComputerUseEvent: (callback: (event: Any) => void) => () => void;
+  /** Starts showing a task's computer in the bot's panel; returns its current state. */
+  watchComputerView: (taskId: string) => Promise<ComputerViewState>;
+  unwatchComputerView: (taskId: string) => Promise<void>;
+  /** The person takes over: the bot's computer and browser actions are refused until hand-back. */
+  takeOverComputer: (taskId: string) => Promise<ComputerViewState>;
+  handBackComputer: (taskId: string) => Promise<ComputerViewState>;
+  onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;
   saveTraySettings: (

@@ -179,6 +179,7 @@ import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
 import { AndroidPhoneTools, ANDROID_PHONE_TOOLS } from "./android-phone-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
+import { ComputerHandoffTools } from "./computer-handoff-tools";
 import { QATools } from "./qa-tools";
 import { WebPreviewTools } from "./web-preview-tools";
 import {
@@ -666,6 +667,7 @@ export class ToolRegistry {
   private swarmToolsAvailable = false;
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
+  private computerHandoffTools: ComputerHandoffTools;
   private qaTools: QATools;
   private webPreviewTools: WebPreviewTools;
   private citationTracker?: CitationTracker;
@@ -759,6 +761,7 @@ export class ToolRegistry {
       (tid, filePath, operation) => daemon.consumeExternalFileApproval(tid, filePath, operation),
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
+    this.computerHandoffTools = new ComputerHandoffTools(taskId);
     this.qaTools = new QATools(workspace, daemon, taskId);
     this.webPreviewTools = new WebPreviewTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
@@ -1668,6 +1671,9 @@ export class ToolRegistry {
 
     // Session scratchpad tools (agent self-notes during long runs)
     allTools.push(...ScratchpadTools.getToolDefinitions());
+
+    // Hand a step to the person (passwords, codes, payments) instead of doing it
+    allTools.push(...ComputerHandoffTools.getToolDefinitions());
 
     // Playwright QA tools (automated visual testing for web apps)
     allTools.push(...QATools.getToolDefinitions());
@@ -3194,6 +3200,9 @@ export class ToolRegistry {
     );
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
+    register("request_takeover", async ({ request }) =>
+      this.computerHandoffTools.requestTakeover(request.input),
+    );
     register("read_clipboard", async () => this.systemTools.readClipboard());
     register("write_clipboard", async ({ request }) =>
       this.systemTools.writeClipboard(request.input.text),
@@ -5284,6 +5293,7 @@ ${skillDescriptions}`;
     if (name === "swarm_note") return await this.swarmTools.note(input);
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
+    if (name === "request_takeover") return this.computerHandoffTools.requestTakeover(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
     if (name === "write_clipboard") return await this.systemTools.writeClipboard(input.text);
     if (name === "take_screenshot") return await this.systemTools.takeScreenshot(input);

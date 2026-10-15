@@ -10,6 +10,7 @@ import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import { BrowserUseCloudClient } from "../../browser/browser-use-cloud-client";
 import { BrowserSettingsManager } from "../../../settings/browser-settings-manager";
 import { DEFAULT_BROWSER_SETTINGS } from "../../../../shared/browser-settings";
+import { ComputerViewService } from "../../../computer-use/computer-view-service";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1714,5 +1715,26 @@ describe("BrowserTools saved profiles", () => {
     expect(toolsFor().getPersistentUserDataDir("workspace")).toBe(
       path.join("/tmp/ws", ".cowork", "browser-profiles", "default"),
     );
+  });
+});
+
+describe("BrowserTools while the person has taken over", () => {
+  afterEach(() => {
+    ComputerViewService.resetForTesting();
+  });
+
+  it("refuses browser actions until the person hands back", async () => {
+    const view = ComputerViewService.resetForTesting({
+      encodeFrame: vi.fn(() => null),
+      logEvent: vi.fn(),
+    });
+    view.takeOver("task-1");
+    const tools = new BrowserTools(
+      { id: "workspace-1", path: "/tmp", permissions: { read: true, network: true } } as Any,
+      { logEvent: vi.fn(), registerArtifact: vi.fn() } as Any,
+      "task-1",
+    );
+    const result = await tools.executeTool("browser_navigate", { url: "https://example.com" });
+    expect(result).toMatchObject({ success: false, error: "paused_by_user" });
   });
 });

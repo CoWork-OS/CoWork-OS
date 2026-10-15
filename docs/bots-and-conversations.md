@@ -197,7 +197,7 @@ APIs instead.
 | Profile | Assigned role, when present | Edit the persistent bot from its identity or sidebar control |
 | Lifecycle | Pin, rename, archive, and fork the task | New conversation, pin, rename, archive, branch, and side chat while the bot identity remains stable |
 | Routine | Creates repeatable work | Creates repeatable work assigned to the bot's role |
-| Desktop access | Uses the task's normal permission policy | Uses the computer running CoWork OS and its local computer-use permissions |
+| Desktop access | Uses the task's normal permission policy | Follows the bot's **Works on** setting (this computer, browser only, or off), with its own browser profile |
 
 The composer, model selection, tool execution, approvals, attachments, browser,
 output viewers, and task persistence remain shared where they are useful.
@@ -299,9 +299,9 @@ destructive and commit actions reachable even when the instructions are long.
 
 The Bot details rail also shows the bot's work counts (**Needs you**, **Working**,
 **Scheduled**; each opens that view) with a link to **Responsibilities and setup**,
-the current conversation status, history, the same "tell me when it needs a
-decision / finishes" toggles as Setup, and the host computer status used by
-computer-use tools. **Copy bot link** copies a
+a **Computer** section (where the bot works, a live view of what it is doing,
+and **Take over**), the current conversation status, history, and the same
+"tell me when it needs a decision / finishes" toggles as Setup. **Copy bot link** copies a
 `cowork://bots/<role-id>` link for the bot roster surface.
 
 ### 7. Delete a bot safely
@@ -456,14 +456,44 @@ rules, filesystem boundaries, or tool hard guardrails. A lead role can have
 delegation guidance, but it still cannot message a bot outside its verified
 team.
 
-### Host computer and computer use
+### Where a bot works
 
-Bots do not receive a separate hosted computer. When computer-use tools
-are selected, they operate on the computer running CoWork OS. The Bot details
-rail reports whether the local helper is installed, Accessibility is trusted,
-Screen Recording is granted, and the computer is already in use by another
-task. The one-active-computer-use-session rule applies across bot and normal
-tasks.
+Each bot has a **Works on** setting, chosen in its create and edit dialogs:
+
+| Works on | The bot's tasks can use |
+| --- | --- |
+| **Auto** (default) | This computer or the in-app browser, whichever the task needs |
+| **This computer** | Apps on the computer running CoWork OS, and the in-app browser |
+| **Browser** | Only the in-app browser |
+| **Off** | No computer or browser; files, commands and connectors still work |
+
+The setting only takes tools away. Approvals, access profiles and the "May do
+alone" limit apply as before. The executor reads the setting from the bot on
+every tool check, so an edit applies on the bot's next tool call, and no task
+or follow-up configuration can widen it. A task a bot delegates inherits the
+narrowest setting of the bots above it.
+
+**Separate browser profiles.** A bot's tasks use a browser profile of their
+own in each workspace, so bots don't share cookies, sign-ins or history with
+each other or with you. Cookies you import go to the workspace profile, so a
+bot starts signed out. The agent's saved background profiles are per bot too
+(`.cowork/browser-profiles/bot-<id>-…`).
+
+**One task at a time on this computer.** This computer has one cursor and one
+focus, so one task drives it at a time. Another task waits its turn, first come
+first served, for up to two minutes, and then gets a "this computer is busy"
+error. Waiting shows in the Bot details rail.
+
+**Live view and take-over.** The Bot details rail's **Computer** section shows
+where the bot works, what it is doing (using this computer, using the browser,
+waiting), and a recent still: the screenshot each computer-use action takes, or
+the in-app browser captured every few seconds while you watch. Stills are
+downscaled, kept in memory only, and never captured while a password or
+one-time code is on screen. **Take over** stops the bot's computer and browser
+actions (they are refused, not queued) until you press **Hand back**. A bot
+asks you to take over with the `request_takeover` tool when a step needs you:
+passwords, passkeys, one-time codes, CAPTCHAs, payments or identity checks. The
+request shows in the rail.
 
 ### Markdown and message rendering
 
@@ -597,9 +627,11 @@ pass.
 
 ### Computer-use actions are unavailable
 
-Open the Bot details rail's computer section and complete the local helper,
-Accessibility, and Screen Recording setup. Another active computer-use task
-can also hold the single-session lock.
+Check the bot's **Works on** setting (Browser and Off take computer-use tools
+away) and whether you have taken over in the Bot details rail. Complete the
+local helper, Accessibility, and Screen Recording setup in Settings → Computer
+use. If another task is using this computer, the bot waits up to two minutes
+for it.
 
 ### Deleting a bot reports a foreign-key error
 
@@ -622,7 +654,13 @@ The bot implementation is intentionally split by responsibility:
 - `src/renderer/components/BotConversationHistory.tsx` renders current and
   archived conversations for one bot.
 - `src/renderer/components/BotDetailsRail.tsx` renders identity, status,
-  notifications, history, link copying, and host-computer state.
+  notifications, history and link copying; `BotComputerSection.tsx` (with
+  `useComputerView`) shows where the bot works, the live view and take-over.
+- `src/shared/bot-computer.ts` defines the **Works on** values and which tools
+  act on this computer or the browser; the tool registry enforces it.
+- `src/electron/computer-use/computer-view-service.ts` keeps each task's latest
+  still and take-over state; `session-manager.ts` queues tasks waiting for this
+  computer; `agent/tools/computer-handoff-tools.ts` defines `request_takeover`.
 - `src/renderer/utils/bot-conversations.ts` defines classification, resume
   selection, and task-creation defaults; `task-working-state.ts` prevents stale
   bot-turn spinners.

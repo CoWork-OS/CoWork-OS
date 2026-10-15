@@ -1983,6 +1983,17 @@ export class BrowserService {
   }
 
   /**
+   * A still of the open page for the bot's panel, captured in memory. Null when no page is
+   * open; it never opens one.
+   */
+  async capturePreview(): Promise<{ png: Buffer; label?: string } | null> {
+    if (!this.page || this.page.isClosed()) return null;
+    const png = await this.page.screenshot({ type: "png", timeout: 3000 });
+    const title = await this.page.title().catch(() => "");
+    return { png, label: title || this.page.url() };
+  }
+
+  /**
    * Get the current page URL
    */
   async getCurrentUrl(): Promise<string> {

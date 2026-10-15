@@ -7,6 +7,7 @@ import {
   type RuntimeToolMetadata,
 } from "../../shared/types";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
+import { isComputerTool } from "../../shared/bot-computer";
 import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
@@ -479,6 +480,18 @@ export function evaluateToolAvailability(
   }
   if (!taskText) {
     return { decision: "defer", reason: `hidden_without_task_signal:${metadata.lane}`, metadata };
+  }
+
+  // Asking the person to take over belongs wherever the agent drives a browser or this computer.
+  if (normalizedToolName === "request_takeover") {
+    const usedComputer = Array.from(ctx.recentlyUsedTools ?? []).some(
+      (name) => name !== "request_takeover" && isComputerTool(name),
+    );
+    return usedComputer ||
+      BROWSER_INTENT_PATTERN.test(taskText) ||
+      hasNativeDesktopGuiIntent(taskText)
+      ? { decision: "allow", metadata }
+      : { decision: "defer", reason: "computer_intent_missing", metadata };
   }
 
   if (normalizedToolName === "read_pdf_visual") {

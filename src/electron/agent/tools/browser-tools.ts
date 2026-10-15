@@ -1,6 +1,7 @@
 import { getBrowserCredentialService } from "../../browser/credentials/browser-credential-service";
 import type { BrowserVaultCommand } from "../../../shared/browser-vault";
 import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
+import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { maskFilledPasswords, passwordRecentlyFilled } from "../../browser/credentials/autofill";
 import * as os from "os";
@@ -983,6 +984,32 @@ export class BrowserTools {
         "The tab you were acting on closed (e.g. a finished sign-in popup); actions now target " +
         "the tab that opened it. Take a new browser_snapshot.";
     }
+  }
+
+  /**
+   * Shows the browser in the bot's panel after a browser action: the visible tab is captured by
+   * the view service; the agent's own background browser is captured here. Nothing is captured
+   * while a private input (password, one-time code) is on screen or was just filled.
+   */
+  private updateComputerView(drives: boolean, sessionId: string | undefined): void {
+    const view = ComputerViewService.getInstance();
+    view.noteWorking(this.taskId, "browser");
+    if (!view.isWatched(this.taskId)) return;
+    if (drives || this.browserWorkbenchService.getSession(this.taskId, sessionId)) {
+      void view.captureBrowserFrame(this.taskId);
+      return;
+    }
+    if (passwordRecentlyFilled(this.taskId, sessionId || "default")) return;
+    void (async () => {
+      try {
+        const assertCaptureAllowed = privateCaptureGuard();
+        const captured = await this.browserService.capturePreview();
+        assertCaptureAllowed();
+        if (captured) view.publishFrame(this.taskId, "browser", captured.png, captured.label);
+      } catch {
+        // A private input or a closed page skips this frame.
+      }
+    })();
   }
 
   private drivesVisibleWorkbench(toolName: string, input: unknown): boolean {
@@ -2066,6 +2093,19 @@ export class BrowserTools {
           "Continue with other tools, or wait.",
       };
     }
+    // The person took over this task's computer from the bot's panel: no browser actions either.
+    if (
+      toolName.startsWith("browser_") &&
+      ComputerViewService.getInstance().isHeldByPerson(this.taskId)
+    ) {
+      return {
+        success: false,
+        error: "paused_by_user",
+        message:
+          "The person has taken over. Do not use browser tools until they hand control back " +
+          "(they will tell you in the conversation).",
+      };
+    }
     if (drives && this.browserWorkbenchService.isPausedByUser?.(this.taskId, sessionId)) {
       return {
         success: false,
@@ -2092,6 +2132,7 @@ export class BrowserTools {
     } finally {
       if (drives) this.browserWorkbenchService.endDriving?.(this.taskId, sessionId);
     }
+    if (toolName.startsWith("browser_")) this.updateComputerView(drives, sessionId);
     // A password the user filled from their saved logins never reaches the model.
     result = maskFilledPasswords(this.taskId, sessionId || "default", result);
     if (BROWSER_PAGE_READ_TOOLS.has(toolName) && result && result.success !== false) {

@@ -189,6 +189,7 @@ export class MCPServerConnection extends EventEmitter {
     } catch (error: Any) {
       logger.error(`Failed to connect to ${this.config.name}:`, error);
       this.setStatus("error", error.message);
+      await this.transport?.disconnect().catch(() => {});
       await this.cleanup();
       throw error;
     }
@@ -422,7 +423,7 @@ export class MCPServerConnection extends EventEmitter {
       this.transport.setProtocolVersion?.(MODERN_PROTOCOL_VERSION);
       try {
         const discovered = await this.transport.sendRequest("server/discover", undefined, {
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(this.config.connectionTimeout || 30_000),
         });
         if (
           Array.isArray(discovered?.supportedVersions) &&

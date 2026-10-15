@@ -7645,6 +7645,7 @@ ${transcript}
           self.discoveredDeferredToolNames instanceof Set
             ? self.discoveredDeferredToolNames
             : new Set<string>(),
+        exposedToolNames: new Set<string>(),
         availableToolsCacheKey:
           typeof self.availableToolsCacheKey === "string" ? self.availableToolsCacheKey : null,
         availableToolsCache: Array.isArray(self.availableToolsCache)
@@ -11389,6 +11390,10 @@ ${transcript}
           cachedTokens: safeCached,
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
           ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
+          // Why this request could not reuse the previous prompt cache, if known.
+          ...(this.promptCacheInvalidationReason
+            ? { cacheInvalidation: this.promptCacheInvalidationReason }
+            : {}),
           totalTokens: safeInput + safeOutput,
           cost: deltaCost,
           costKnown,

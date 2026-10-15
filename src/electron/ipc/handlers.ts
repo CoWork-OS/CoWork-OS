@@ -517,6 +517,7 @@ import {
   ChronicleSettingsManager,
 } from "../chronicle";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
+import { registerAndroidPhoneHandlers } from "./android-phone-handlers";
 import { ComputerUseHelperRuntime } from "../computer-use/helper-runtime";
 import {
   MCPServerConfigSchema,
@@ -1582,6 +1583,7 @@ export async function setupIpcHandlers(
   const computerUseMainWindow = (): BrowserWindow | null =>
     options?.getMainWindow?.() ?? getMainWindow();
   ComputerUseSessionManager.getInstance().setMainWindowGetter(computerUseMainWindow);
+  registerAndroidPhoneHandlers(computerUseMainWindow);
   ComputerUseSessionManager.getInstance().setNotifyHandler((event) => {
     const win = computerUseMainWindow();
     if (win && !win.isDestroyed()) {

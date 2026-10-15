@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MousePointer2, RefreshCw } from "lucide-react";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { DesktopOnlyCard } from "./DesktopOnlyCard";
+import { AndroidPhoneSettings } from "./AndroidPhoneSettings";
 
 type ScreenStatus = "granted" | "denied" | "not-determined" | "unknown";
 
@@ -128,6 +129,7 @@ function ComputerUseSettingsPanel() {
 
   return (
     <div className="computer-use-settings">
+      <AndroidPhoneSettings />
       <div className="settings-section computer-use-settings-heading">
         <h3>
           <span className="computer-use-settings-heading-icon" aria-hidden="true">

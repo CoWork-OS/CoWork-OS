@@ -672,6 +672,17 @@ describe("listModelInvocableSkills", () => {
     expect(invocableSkills[0].id).toBe("safe-skill");
   });
 
+  it("describes required tools as prerequisites rather than an allowlist", () => {
+    const descriptor = loader.getRuntimeSkillDescriptor(
+      createTestSkill({
+        requires: { tools: ["run_command"] },
+      }),
+    );
+
+    expect(descriptor).toHaveProperty("requiredTools", ["run_command"]);
+    expect(descriptor).not.toHaveProperty("allowedTools");
+  });
+
   it("should filter out binary-dependent skills when run_command is unavailable", async () => {
     const binarySkill = createTestSkill({
       id: "binary-skill",

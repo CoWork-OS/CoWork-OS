@@ -80,12 +80,14 @@ each requested operation and use the existing approval controls as appropriate;
 do not disable them to make acceptance pass. A timeout or paused task is not a
 completed acceptance result, even when a report exists on disk.
 
-A merged-source rerun also reproduced an existing limitation: applying the
-built-in Summarize skill can leave file-writing tools unavailable for a later
-report-writing step, which pauses with `mutation_tools_restricted_by_role`.
-Successful shell writes alone do not clear that contract. Record this outcome
-separately from a completed journey; connector readiness does not override skill
-or worker restrictions.
+To reproduce the Summarize regression journey, add
+`COWORK_QA_REQUIRE_SUMMARIZE=1` to the smoke command. This edits the starter request
+to require the built-in Summarize skill, followed by `write_file` and `read_file`.
+The script checks that the skill was actually applied and that no later step
+acquired `mutation_tools_restricted_by_role` from its prerequisites. Previously,
+Summarize's `requires.tools: ["run_command"]` became a task-wide allowlist and
+blocked report creation. Prerequisites now remain eligibility checks; caller and
+worker restrictions still apply. See [Skill runtime model](skills-runtime-model.md).
 
 Focused regressions cover named-source matching, negation, local exports, existing
 connections, expired credentials, missing Google scopes, status timeouts, and

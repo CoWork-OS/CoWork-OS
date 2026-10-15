@@ -51,7 +51,7 @@ function toRuntimeDescriptor(skill: CustomSkill) {
     name: skill.id,
     description: skill.description,
     whenToUse: skill.metadata?.routing?.useWhen || skill.description,
-    allowedTools: Array.isArray((skill.requires as Any)?.tools)
+    requiredTools: Array.isArray((skill.requires as Any)?.tools)
       ? ((skill.requires as Any).tools as string[])
       : undefined,
     disableModelInvocation: skill.invocation?.disableModelInvocation === true,
@@ -329,6 +329,7 @@ vi.mock("../mention-tools", () => {
 
 // Import after mocking
 import { ToolRegistry } from "../registry";
+import { TaskExecutor } from "../../executor";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import type { Workspace } from "../../../../shared/types";
 
@@ -724,6 +725,45 @@ describe("Skill tool", () => {
       expect(result.error).toContain("not currently executable");
       expect(result.reason).toContain("run_command");
       expect(result.missing_tools).toContain("run_command");
+    });
+
+    it("does not turn Summarize tool prerequisites into a task-wide allowlist", async () => {
+      mockWorkspace.permissions.shell = true;
+      mockSkills.set(
+        "summarize",
+        createTestSkill({
+          id: "summarize",
+          name: "Summarize",
+          prompt: "Summarize the retrieved content, preserving source references.",
+          parameters: [],
+          requires: { tools: ["run_command"] },
+        }),
+      );
+
+      const result = await registry.executeTool("Skill", { skill: "summarize" });
+      const application = takeResolvedSkill(result);
+
+      expect(result.success).toBe(true);
+      expect(application?.contextDirectives).not.toHaveProperty("allowedTools");
+      expect(application?.contextDirectives?.metadata?.requiredTools).toEqual(["run_command"]);
+
+      // Apply the actual registry result to the executor, including caller and
+      // worker boundaries that must survive skill application unchanged.
+      for (const [agentConfig, canWrite] of [
+        [{}, true],
+        [{ allowedTools: ["run_command", "read_file"] }, false],
+        [{ allowedTools: [] }, false],
+        [{ toolRestrictions: ["group:write"] }, false],
+        [{ readOnlyExecution: true }, false],
+      ] as const) {
+        const executor = Object.create(TaskExecutor.prototype) as Any;
+        executor.task = { agentConfig: structuredClone(agentConfig) };
+        executor.emitEvent = vi.fn();
+
+        expect(executor.applySkillApplication(application)).toBe(true);
+        expect(executor.task.agentConfig).toEqual(agentConfig);
+        expect(executor.areWorkspaceMutationToolsRestricted()).toBe(!canWrite);
+      }
     });
 
     it("should reject codex-cli unless the task explicitly invokes the skill", async () => {

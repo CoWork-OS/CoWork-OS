@@ -171,6 +171,10 @@ Cross-platform location access for nearby-place, walking-distance, and local-err
 - **Timeout**: Configurable 1–60 seconds (default 15s). Failed requests are cached for 2 minutes to prevent retry storms.
 - **Maps integration**: Coordinates feed into `maps.search_places`, `maps.rank_nearby_options`, and `maps.route` from the bundled Maps MCP connector.
 
+### Android phone control
+
+Opt-in control of a selected Android phone or emulator through ADB and phone-harness. Settings provides runtime installation/repair, exact device selection, enable and Stop controls. Screen access and every input require explicit owner approval. Screenshots, fresh task-owned captures, durable action receipts and package/text readback support inspected execution and recovery without replaying uncertain input. Opening apps, taps, swipes, ASCII typing, Home, Back and Recents are supported; authentication and locked screens require the user. See [Android phone control](android-phone-control.md) for setup and verification limits.
+
 ### Computer use
 
 Desktop automation for **native apps** on macOS and Windows when MCP, browser automation, and shell are not enough. **Full guide:** [Computer use](computer-use.md).
@@ -1200,7 +1204,7 @@ Browser tools first target the active visible browser workbench for the selected
 | `browser_click`         | Click by Browser V2 ref or legacy selector                                                                                                                         |
 | `browser_hover`         | Move pointer over an element by ref or selector                                                                                                                    |
 | `browser_drag`          | Drag from one snapshot ref to another                                                                                                                              |
-| `browser_vault` | Private, approved login/2FA and checkout autofill using local saved items or unlocked 1Password/Bitwarden login sources |
+| `browser_vault` | Private, approved login/2FA and checkout autofill using local saved items or unlocked 1Password/Bitwarden login sources; see [setup and safeguards](browser-workbench.md#private-login-password-managers-2fa-and-checkout) |
 | `browser_fill`          | Fill form fields by ref or selector                                                                                                                                |
 | `browser_type`          | Type text character-by-character by ref or selector                                                                                                                |
 | `browser_press`         | Press keyboard keys (Enter, Tab, Escape, shortcuts)                                                                                                                |

@@ -11,7 +11,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | Native app integrations | 14 |
 | Gateway channels | 17 |
 | MCP connectors (Settings > Connectors) | 110 |
-| Bundled skills | 152 |
+| Bundled skills | 153 |
 
 Requirement keys: `macos-only`, `local-service` (a local app or server must be running), `public-webhook` (a reachable HTTPS URL is needed in production), `oauth-consent`, `api-key`, `cli-binary`, `personal-account-session`.
 
@@ -196,6 +196,7 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `calendly` | Calendly | Tools |  |
 | `usecase-chief-of-staff-briefing` | Chief of Staff Briefing | Use Cases |  |
 | `clean-imports` | Clean Imports | Utilities |  |
+| `cli-anything` | CLI-Anything | Tools |  |
 | `cloud-migration` | Cloud Migration | DevOps |  |
 | `code-review` | Code Review | Development |  |
 | `code-reviewer` | code-reviewer | Development |  |

@@ -7,6 +7,25 @@ import {
   hasNativeDesktopGuiIntent,
 } from "../tool-policy-engine";
 
+describe("Android phone tool exposure", () => {
+  it("blocks phone input in plan/analyze modes while retaining approved observation", () => {
+    for (const executionMode of ["plan", "analyze"] as const) {
+      expect(evaluateToolPolicy("android_phone_dispatch", { executionMode }).decision).toBe("deny");
+      expect(evaluateToolPolicy("android_phone_authorize", { executionMode }).decision).toBe(
+        "deny",
+      );
+      expect(evaluateToolPolicy("android_phone_observe", { executionMode }).decision).toBe("allow");
+    }
+  });
+  it("keeps the durable application gateway reachable for phone tasks", () => {
+    expect(
+      evaluateToolAvailability("application_operation", {
+        taskText: "Open Settings on my Android phone",
+      }).decision,
+    ).toBe("allow");
+  });
+});
+
 describe("tool-policy-engine background process tools", () => {
   it("lets plan mode read background output but not stop processes", () => {
     const plan = { executionMode: "plan" as const, taskDomain: "code" as const };

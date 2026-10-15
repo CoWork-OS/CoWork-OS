@@ -173,6 +173,49 @@ describe("Application execution conformance", () => {
     });
   }
 
+  it("does not spend the adapter deadline while waiting for approval", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const authorize = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const a = adapter({ authorize });
+    const s = service(a);
+    const operation = await s.create(request());
+    const pending = s.execute(operation.id);
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect((await s.get(operation.id)).execution).toBe("submitting");
+    expect(a.execute).not.toHaveBeenCalled();
+    release();
+    expect((await pending).verification).toBe("verified");
+  });
+
+  it("releases the device resource when canceled before approval, without dispatch", async () => {
+    const authorize = vi.fn(
+      (context: Parameters<NonNullable<ApplicationAdapter["authorize"]>>[0]) =>
+        new Promise<void>((_resolve, reject) => {
+          context.signal.addEventListener(
+            "abort",
+            () => reject(new Error("Approval review canceled")),
+            { once: true },
+          );
+        }),
+    );
+    const a = adapter({ authorize });
+    const s = service(a);
+    const operation = await s.create(request());
+    const pending = s.execute(operation.id);
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    await s.cancelForTask("task");
+    expect((await pending).execution).toBe("failed");
+    expect(a.execute).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT count(*) n FROM application_resource_locks").get()).toEqual({ n: 0 });
+  });
+
   it("completes clear authorized work without a decision and preserves ordered attempts/events", async () => {
     const a = adapter();
     const s = service(a);

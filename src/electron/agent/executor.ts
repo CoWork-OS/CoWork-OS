@@ -13,6 +13,7 @@ import {
   isNativeApplicationReadbackStep,
   isNativeApplicationPresentationStep,
   isNativeUiOperationStep,
+  requestsCliAnythingApp,
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
@@ -11431,6 +11432,18 @@ ${transcript}
       return Math.min(Math.round(ms), maxMs);
     };
 
+    if (
+      toolName === "application_operation" &&
+      ["execute", "reconcile"].includes(toolInput.action)
+    ) {
+      // A durable call can prepare, ask for input approval, dispatch, then verify.
+      // Its individual adapter phases retain their own deadlines and cancellation.
+      return (
+        normalizedSettingsTimeout ??
+        clampToStepTimeout(TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS + 3 * 120_000)
+      );
+    }
+
     if (toolName === "run_command") {
       const inputTimeoutRaw =
         typeof (input as { timeout?: unknown })?.timeout === "number"
@@ -15214,6 +15227,7 @@ ${transcript}
   private hasNonImageGenerationWorkIntent(taskText: string): boolean {
     return (
       hasNativeApplicationOutputIntent(taskText) ||
+      requestsCliAnythingApp(taskText) ||
       /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
         taskText,
       )
@@ -18981,6 +18995,18 @@ ${transcript}
     ].join("\n");
   }
 
+  private buildExecutionApplicationWorkerPrompt(): string {
+    const forbidsScripting = taskForbidsScripting(
+      `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+    );
+    return (
+      applicationWorkerPrompt({ forbidsScripting }) +
+      (forbidsScripting
+        ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused, and CLI-Anything harnesses must not be used. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
+        : "")
+    );
+  }
+
   private buildExecutionBaseInstructionPrompt(): string {
     const novelistConstraintPrompt = this.buildNovelistConstraintPrompt();
     const routing = this.getActiveBasePromptRoutingBlocks();
@@ -19858,13 +19884,7 @@ ${transcript}
       identityPrompt: params.identityPrompt,
       safetyCorePrompt: SHARED_PROMPT_POLICY_CORE,
       baseInstructionPrompt: this.buildExecutionBaseInstructionPrompt(),
-      applicationWorkerPrompt:
-        applicationWorkerPrompt() +
-        (taskForbidsScripting(
-          `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
-        )
-          ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
-          : ""),
+      applicationWorkerPrompt: this.buildExecutionApplicationWorkerPrompt(),
       answerSurfacePrompt: richSurfacesPrompt,
       inputPolicyPrompt: this.buildExecutionInputPolicyPrompt(),
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),
@@ -20206,6 +20226,16 @@ ${transcript}
     ]);
 
     const isBotConversation = this.task.agentConfig?.botConversation === true;
+    if (/\bandroid\b|phone-harness|phone\.android\.|android_phone_/i.test(nativeGuiText || "")) {
+      for (const name of [
+        "android_phone_devices",
+        "android_phone_observe",
+        "android_phone_authorize",
+        "android_phone_dispatch",
+        "android_phone_readback",
+      ])
+        always.add(name);
+    }
     const botTeamDelegationRequested = this.hasExplicitBotTeamDelegationRequest(stepText);
 
     if (this.swarmForTools) {

@@ -64,8 +64,10 @@ CoWork passes your memory, skills, tools and approval rules to whichever model y
 conversation on a different provider gets all of them. See [Models & Access](providers.md) for the
 supported providers, including local models.
 
-Today, picking a different model while a conversation is open changes your default model and
-closes that conversation view. The conversation itself stays in your history.
+Picking a different model while a conversation is open changes that conversation only: it stays
+open with its history, and the next message goes to the new model. The global default and other
+conversations are unchanged. See [Bots and conversations](bots-and-conversations.md) for the
+handoff note a provider change adds and for a bot's own model.
 
 The optional `local-balanced-v1` profile for local models works with a lighter budget: at most 10
 tools and 768 tokens of memory. See [Local-model execution](local-model-execution.md).

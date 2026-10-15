@@ -3304,6 +3304,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.TASK_RENAME, { id, title }),
   updateTaskWorkspace: (taskId: string, workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, { taskId, workspaceId }),
+  setTaskModel: (selection: {
+    taskId: string;
+    providerType: LLMProviderType;
+    modelKey: string;
+    reasoningEffort?: LLMReasoningEffort;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_MODEL, selection),
   archiveTask: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE, id),
   archiveWorkspaceSessions: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_ARCHIVE_WORKSPACE_SESSIONS, workspaceId),
@@ -7086,6 +7092,12 @@ export interface ElectronAPI {
   killCommand: (taskId: string, force?: boolean) => Promise<boolean>;
   renameTask: (id: string, title: string) => Promise<void>;
   updateTaskWorkspace: (taskId: string, workspaceId: string) => Promise<Any>;
+  setTaskModel: (selection: {
+    taskId: string;
+    providerType: LLMProviderType;
+    modelKey: string;
+    reasoningEffort?: LLMReasoningEffort;
+  }) => Promise<Task>;
   archiveTask: (id: string) => Promise<Any>;
   archiveWorkspaceSessions?: (workspaceId: string) => Promise<{ sessionCount: number }>;
   deleteTask: (id: string) => Promise<void>;

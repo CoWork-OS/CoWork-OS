@@ -260,6 +260,17 @@ The effective provider, model, access profile, approvals, network policy,
 filesystem policy, and tool restrictions still come from CoWork's normal task
 runtime.
 
+To change the model for one conversation, pick it in the composer's model
+picker while the conversation is open. The conversation stays open and keeps
+its history: the next message goes to the new model with the full transcript.
+When the provider changes (for example from Anthropic to Ollama), that message
+starts with a short handoff note naming the previous model and the tools used
+in earlier turns. The choice applies to that conversation only; the global
+default model and the bot's other conversations are unchanged. If the chosen
+provider is later disconnected, the conversation falls back to the global
+model. An effort level picked there is saved as that provider's effort setting.
+With no conversation open, the picker still changes the global default.
+
 ### 5. Start a separate conversation
 
 Open the bot's header menu and select **New conversation**, or choose **New**

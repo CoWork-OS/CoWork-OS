@@ -20,6 +20,7 @@ import {
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
+import { buildModelHandoffNote, type ModelHandoff } from "./model-handoff-note";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { resolveInteractionMode } from "./strategy/interaction-mode";
@@ -7074,6 +7075,8 @@ ${transcript}
   > = [];
   private providerFailoverIndex = 0;
   private providerFailoverPreserveUntil = 0;
+  /** Set when a thread moves to another provider; noted once on the next user message. */
+  private pendingModelHandoff: ModelHandoff | null = null;
   private providerFailoverRequiresImageInput = false;
   private toolBatchExecutor?: ToolBatchExecutor;
 
@@ -42373,6 +42376,13 @@ Return ONLY a JSON object:
     );
   }
 
+  private takeModelHandoffNote(): string | null {
+    const handoff = this.pendingModelHandoff;
+    if (!handoff) return null;
+    this.pendingModelHandoff = null;
+    return buildModelHandoffNote(handoff, this.conversationHistory);
+  }
+
   private hasExplicitTaskRouteOverride(): boolean {
     return Boolean(this.task.agentConfig?.providerType || this.task.agentConfig?.modelKey);
   }
@@ -42637,7 +42647,9 @@ Return ONLY a JSON object:
     this.cachedLlmSettings = currentSettings;
     const currentSettingsProvider = String(currentSettings.providerType || "").trim();
     const providerChangedInSettings =
-      currentSettingsProvider.length > 0 && currentSettingsProvider !== this.provider.type;
+      this.task.agentConfig?.modelPinned !== true &&
+      currentSettingsProvider.length > 0 &&
+      currentSettingsProvider !== this.provider.type;
 
     const selectionConfig = providerChangedInSettings
       ? {
@@ -42664,8 +42676,19 @@ Return ONLY a JSON object:
       logger.info(
         `${this.logTag} Provider/model changed mid-session: ${this.provider.type}/${this.modelId} → ${newSelection.providerType}/${newSelection.modelId}`,
       );
+      const previousRoute = { providerType: this.provider.type, modelId: this.modelId };
       try {
         this.applyResolvedProviderSelection(newSelection);
+        // Only a model the person pinned to this thread gets a handoff note; a global
+        // provider switch (or a later switch back) clears any note still pending.
+        this.pendingModelHandoff =
+          this.task.agentConfig?.modelPinned === true &&
+          previousRoute.providerType !== newSelection.providerType
+            ? {
+                from: previousRoute,
+                to: { providerType: newSelection.providerType, modelId: newSelection.modelId },
+              }
+            : null;
         this.rebuildProviderFailoverSelections(newSelection, desiredProfile);
         this.emitEvent("log", {
           message:
@@ -43110,9 +43133,14 @@ Return ONLY a JSON object:
     }
     // Both the chat path and the task path below add this to the message the model sees.
     const answerSurfaceNote = await this.takeAnswerSurfaceChanges();
+    const modelHandoffNote =
+      recoveredFromTurnLimit || opts?.transcriptAlreadyContainsMessage
+        ? null
+        : this.takeModelHandoffNote();
     const withAnswerState = (text: string) => {
       const noted = withSurfaceOriginNote(text, opts?.messageContext?.surfaceOrigin);
-      return answerSurfaceNote ? `${noted}\n\n${answerSurfaceNote}` : noted;
+      const withHandoff = modelHandoffNote ? `${modelHandoffNote}\n\n${noted}` : noted;
+      return answerSurfaceNote ? `${withHandoff}\n\n${answerSurfaceNote}` : withHandoff;
     };
     const followUpConversationMessage = this.buildQuotedAssistantContextMessage(
       withAnswerState(executionMessage),

@@ -54,6 +54,10 @@ uv tool install --python 3.11 \
 | Kdenlive / Shotcut | `kdenlive` / `shotcut` | `cli-anything-kdenlive` / `cli-anything-shotcut` | melt |
 | Krita, FreeCAD, MuseScore, OBS Studio, Zotero, Calibre | same name (`obs-studio`) | `cli-anything-<dir>` | the app |
 
+Keep uv's default bin directory (`~/.local/bin`). CoWork's sandboxed shell only puts
+standard locations on PATH (`~/.local/bin`, Homebrew, `bin` directories in your home folder).
+A harness installed anywhere else gives "command not found" in run_command.
+
 On macOS, install a missing app with Homebrew only after the user agrees, for example
 `brew install --cask libreoffice`. Remove a harness with `uv tool uninstall <package>`.
 

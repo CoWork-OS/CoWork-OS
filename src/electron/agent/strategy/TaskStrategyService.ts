@@ -5,6 +5,7 @@ import {
   LlmProfile,
   TaskDomain,
 } from "../../../shared/types";
+import { requestsCliAnythingApp } from "../../applications/application-task-intent";
 import { IntentRoute } from "./IntentRouter";
 import type {
   DirectResponseMode,
@@ -84,6 +85,7 @@ export class TaskStrategyService {
       .toLowerCase();
     if (!lower.trim()) return false;
     if (!this.hasTextToImageGenerationIntent(lower)) return false;
+    if (requestsCliAnythingApp(lower)) return false;
     return !/\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
       lower,
     );
@@ -103,6 +105,7 @@ export class TaskStrategyService {
       );
     const hasAppWorkIntent = /\b(?:app|application)\b/.test(lower) && !hasAppAssetIntent;
     const hasNonImageWorkIntent =
+      requestsCliAnythingApp(lower) ||
       /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
         lower,
       );

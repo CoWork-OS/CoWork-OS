@@ -13,6 +13,7 @@ import {
   isNativeApplicationReadbackStep,
   isNativeApplicationPresentationStep,
   isNativeUiOperationStep,
+  requestsCliAnythingApp,
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
@@ -15214,6 +15215,7 @@ ${transcript}
   private hasNonImageGenerationWorkIntent(taskText: string): boolean {
     return (
       hasNativeApplicationOutputIntent(taskText) ||
+      requestsCliAnythingApp(taskText) ||
       /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
         taskText,
       )

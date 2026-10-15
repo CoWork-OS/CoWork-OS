@@ -158,6 +158,8 @@ scripts/release/*
 !scripts/release/smoke-bundle.mjs
 !scripts/release/smoke-input.test.mjs
 !scripts/release/install-macos.test.mjs
+!scripts/release/fetch-with-retry.mjs
+!scripts/release/fetch-with-retry.test.mjs
 
 # Signing keys and certificates — never commit
 *.p12

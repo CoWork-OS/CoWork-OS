@@ -1756,6 +1756,12 @@ if (isMacSafeStorageMigrationWorker) {
       app.quit();
     }
   } else {
+    // Opening the profile database (schema initialization in its bootstrap worker, DB6)
+    // needs neither Electron readiness nor the keychain, so it starts now and overlaps
+    // app readiness and the keychain prime. Startup awaits it where it needs the database
+    // and handles its failures there.
+    const databaseOpening = DatabaseManager.open();
+    databaseOpening.catch(() => undefined);
     const startupActionGate = new StartupActionGate();
 
     function ensureMainWindowVisible(): void {
@@ -2157,8 +2163,8 @@ if (isMacSafeStorageMigrationWorker) {
       // Initialize database first - required for SecureSettingsRepository
       const coreInitStartedAt = Date.now();
       try {
-        // Schema initialization runs in a bootstrap worker (DB6).
-        dbManager = await DatabaseManager.open();
+        // Started once this process held the single-instance lock (see databaseOpening).
+        dbManager = await databaseOpening;
         setBackgroundDispatchBudget(
           new PersistentDispatchBudget(dbManager.getDatabase(), {
             getSchedulerFence: () => automationRuntime.captureFence(),

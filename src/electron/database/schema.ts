@@ -1,12 +1,12 @@
 import { TEAMS_CONVERSATION_REFERENCE_SCHEMA } from "../gateway/TeamsConversationReferenceStore";
-import { CHANNEL_DECISION_SCHEMA } from "../gateway/ChannelDecisionStore";
+import { CHANNEL_DECISION_SCHEMA } from "../gateway/channel-decision-schema";
 import { BROWSER_HISTORY_SCHEMA_SQL } from "./BrowserHistoryRepository";
-import { NOTIFICATION_INBOX_SCHEMA } from "../notifications/NotificationInboxStore";
-import { BOT_NOTIFICATION_SCHEMA } from "../notifications/BotNotificationStore";
+import { NOTIFICATION_INBOX_SCHEMA } from "../notifications/notification-inbox-schema";
+import { BOT_NOTIFICATION_SCHEMA } from "../notifications/bot-notification-schema";
 import {
   BOT_RESPONSIBILITY_SCHEMA,
   upgradeResponsibilityStateSchema,
-} from "../automation/responsibility-store";
+} from "../automation/responsibility-schema";
 import { SCHEDULER_LEASE_SCHEMA } from "../automation/scheduler-lease-store";
 import { ANSWER_SURFACE_STATE_SCHEMA } from "../answer-surfaces/answer-surface-state-sql";
 import { ANSWER_TOOL_DATA_SCHEMA } from "../answer-surfaces/tool-data-sql";
@@ -25,7 +25,7 @@ import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
 import { ensurePulseSchema } from "../telemetry/pulse-store-sql";
 import { ensurePactSchema } from "../pact/schema";
-import { APPLICATION_EXECUTION_SCHEMA } from "../applications/application-operation-store";
+import { APPLICATION_EXECUTION_SCHEMA } from "../applications/application-execution-schema";
 import { runSchemaBootstrap } from "./schema-bootstrap";
 import {
   acquireMigrationLock,

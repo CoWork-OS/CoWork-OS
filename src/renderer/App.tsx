@@ -25,6 +25,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useReplayMode, type ReplayControls } from "./hooks/useReplayMode";
 import { useTaskDuration } from "./hooks/useTaskDuration";
 import { useComposerDraft } from "./hooks/useComposerDraft";
+import { useThreadModelSelection } from "./hooks/useThreadModelSelection";
 import { useAttentionSnapshot } from "./hooks/useAttentionSnapshot";
 import { attentionWaitingByTask, type AttentionItem } from "../shared/attention";
 import { ArrowLeft, ArrowRight, Globe, Moon, PanelTop, SquareTerminal, Sun } from "lucide-react";
@@ -2502,6 +2503,14 @@ export function App() {
   >(undefined);
   const [sessionModelOverride, setSessionModelOverride] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
+  // The open conversation's own model (when pinned) drives the picker inside that conversation.
+  const threadModel = useThreadModelSelection({
+    task: remoteTaskView ? undefined : selectedTask,
+    globalModel: selectedModel,
+    globalProvider: selectedProvider,
+    globalModels: availableModels,
+    globalReasoningEffort: selectedReasoningEffort,
+  });
   const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
 
   // Update notification state
@@ -7269,6 +7278,36 @@ export function App() {
   }) => {
     const modelKey = selection.modelKey.trim();
     if (!modelKey) return;
+    // In an open conversation the choice belongs to that conversation: it keeps its history
+    // and the global default stays as it is.
+    const conversationTask = remoteTaskView ? undefined : selectedTask;
+    if (conversationTask && window.electronAPI?.setTaskModel) {
+      const providerType = selection.providerType || threadModel.providerType;
+      try {
+        const updated = await window.electronAPI.setTaskModel({
+          taskId: conversationTask.id,
+          providerType,
+          modelKey,
+          ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}),
+        });
+        if (updated) {
+          setTasks((prev) => upsertTaskPreservingIdentity(prev, updated));
+          setBotConversationTasks((prev) => upsertTaskPreservingIdentity(prev, updated));
+        }
+        if (selection.reasoningEffort && providerType === selectedProvider) {
+          setSelectedReasoningEffort(selection.reasoningEffort);
+        }
+      } catch (error) {
+        console.error("Failed to set the conversation model:", error);
+        addToast({
+          type: "error",
+          title: "Model not changed",
+          message:
+            error instanceof Error ? error.message : "Could not change this conversation's model.",
+        });
+      }
+      return;
+    }
     const providerType = selection.providerType || selectedProvider;
     setSelectedModel(modelKey);
     setSelectedProvider(providerType);
@@ -8943,10 +8982,10 @@ export function App() {
                   childEvents={childEvents}
                   activeInputRequest={activeInputRequest}
                   pendingInputRequests={pendingInputRequests}
-                  selectedModel={selectedModel}
-                  selectedProvider={selectedProvider}
-                  selectedReasoningEffort={selectedReasoningEffort}
-                  availableModels={availableModels}
+                  selectedModel={threadModel.modelKey}
+                  selectedProvider={threadModel.providerType}
+                  selectedReasoningEffort={threadModel.reasoningEffort}
+                  availableModels={threadModel.models}
                   availableProviders={availableProviders}
                   uiDensity={uiDensity}
                   homeResearchVaultEnabled={homeResearchVaultEnabled}

@@ -397,6 +397,7 @@ import {
   TaskCreateSchema,
   TaskRenameSchema,
   TaskWorkspaceUpdateSchema,
+  TaskModelSelectionSchema,
   TaskMessageSchema,
   FileImportSchema,
   FileImportDataSchema,
@@ -1156,6 +1157,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_FORK_SESSION, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST_FOR_WORKSPACES, RATE_LIMIT_CONFIGS.frequent);
@@ -5806,6 +5808,28 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TASK_UPDATE_WORKSPACE);
     const validated = validateInput(TaskWorkspaceUpdateSchema, data, "task workspace update");
     return agentDaemon.updateTaskWorkspace(validated.taskId, validated.workspaceId);
+  });
+
+  // Model picked in an open conversation: pinned to that task only. The global default
+  // model is unchanged; an effort choice updates that provider's saved effort.
+  ipcMain.handle(IPC_CHANNELS.TASK_SET_MODEL, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SET_MODEL);
+    const validated = validateInput(TaskModelSelectionSchema, data, "task model selection");
+    await authorizeTaskForEvent(event, validated.taskId, "manage");
+    const task = agentDaemon.setTaskModelSelection(validated.taskId, {
+      providerType: validated.providerType,
+      modelKey: validated.modelKey,
+    });
+    if (validated.reasoningEffort) {
+      LLMProviderFactory.saveSettings(
+        LLMProviderFactory.applyReasoningEffortSelection(
+          LLMProviderFactory.loadSettings(),
+          validated.providerType,
+          validated.reasoningEffort as LLMReasoningEffort,
+        ),
+      );
+    }
+    return task;
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_PIN, async (_, id: string) => {

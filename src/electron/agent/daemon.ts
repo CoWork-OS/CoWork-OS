@@ -189,6 +189,7 @@ import {
   OrchestrationNodeNotification,
   WorkerRoleKind,
   VerificationVerdict,
+  LLMProviderType,
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
@@ -13687,6 +13688,41 @@ export class AgentDaemon extends EventEmitter {
       workspacePath: workspace.path,
     });
 
+    return updatedTask;
+  }
+
+  /**
+   * Pins the model the person picked for one conversation. The next turn switches to it and
+   * keeps the conversation; the global default and the bot's own model stay unchanged.
+   */
+  setTaskModelSelection(
+    taskId: string,
+    selection: { providerType: LLMProviderType; modelKey: string },
+  ): Task {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+    const { llmProfileForced: _forced, ...agentConfig } = task.agentConfig || {};
+    this.taskRepo.update(taskId, {
+      agentConfig: {
+        ...agentConfig,
+        providerType: selection.providerType,
+        modelKey: selection.modelKey,
+        modelPinned: true,
+      },
+    });
+    const updatedTask = this.taskRepo.findById(taskId);
+    if (!updatedTask) {
+      throw new Error(`Task ${taskId} not found after model update`);
+    }
+    const cached = this.activeTasks.get(taskId);
+    if (cached) cached.lastAccessed = Date.now();
+    this.logEvent(taskId, "log", {
+      message: `Model for this conversation set to ${selection.providerType}/${selection.modelKey}.`,
+      providerType: selection.providerType,
+      modelKey: selection.modelKey,
+    });
     return updatedTask;
   }
 

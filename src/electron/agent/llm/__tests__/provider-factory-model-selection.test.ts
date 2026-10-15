@@ -1092,3 +1092,53 @@ describe("OpenAI model access metadata", () => {
     },
   );
 });
+
+describe("LLMProviderFactory thread model pin", () => {
+  const settings = {
+    providerType: "openai",
+    modelKey: "gpt-4o",
+    anthropic: { apiKey: "anthropic-key" },
+    openai: { apiKey: "openai-key", model: "gpt-4o" },
+  } as LLMSettings;
+
+  it("uses a pinned thread model on another configured provider", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "anthropic",
+      modelKey: "opus-4-5",
+      modelPinned: true,
+    });
+
+    expect(resolved.providerType).toBe("anthropic");
+    expect(resolved.modelKey).toBe("opus-4-5");
+    expect(resolved.modelSource).toBe("explicit_override");
+    expect(resolved.warnings).toEqual([]);
+  });
+
+  it("keeps ignoring an unpinned task model", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "anthropic",
+      modelKey: "opus-4-5",
+    });
+
+    expect(resolved.providerType).toBe("openai");
+    expect(resolved.modelSource).toBe("provider_default");
+  });
+
+  it("falls back to the global model when the pinned provider is not configured", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      providerType: "gemini",
+      modelKey: "gemini-2.5-pro",
+      modelPinned: true,
+    });
+
+    expect(resolved.providerType).toBe("openai");
+    expect(resolved.modelSource).toBe("provider_default");
+    expect(resolved.warnings.join("\n")).toContain("gemini/gemini-2.5-pro is not available");
+  });
+});

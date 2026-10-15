@@ -2198,6 +2198,11 @@ export interface AgentConfig {
   /** Override the model key (e.g., 'opus-4-5', 'sonnet-4-5', 'haiku-4-5') */
   modelKey?: string;
   /**
+   * Set when the person picked this task's model in the thread model picker. Only then are
+   * providerType/modelKey authoritative; otherwise tasks follow the global model.
+   */
+  modelPinned?: boolean;
+  /**
    * Optional LLM profile override:
    * - strong: high-capability planning/critical profile
    * - cheap: lower-cost execution profile
@@ -8250,6 +8255,7 @@ export const IPC_CHANNELS = {
   TASK_SEND_STDIN: "task:sendStdin", // Send stdin input to running command
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
   TASK_UPDATE_WORKSPACE: "task:updateWorkspace",
+  TASK_SET_MODEL: "task:setModel",
   SHELL_SESSION_EVENT: "shell:sessionEvent",
   SHELL_SESSION_GET: "shell:sessionGet",
   SHELL_SESSION_LIST: "shell:sessionList",

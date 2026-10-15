@@ -947,14 +947,13 @@ export async function prepareDynamicClient(
     signal: options.signal,
     wwwAuthenticate: challenge,
   });
-  // MCP scope selection: the scopes the server's challenge asks for, else
-  // everything its resource metadata lists, else none (the server's default).
+  // MCP scope selection: scopes the person typed, else the scopes the server's
+  // challenge asks for, else everything its resource metadata lists, else none (the
+  // server's default). Scopes a previous sign-in discovered are asked for again, so a
+  // server that now names different scopes gets them.
   const challengeScopes = parseChallengeScopes(challenge);
-  const scopes = oauth.scopes?.length
-    ? oauth.scopes
-    : challengeScopes.length
-      ? challengeScopes
-      : discovered.scopes;
+  const userScopes = oauth.scopes?.length && !oauth.scopesDiscovered ? oauth.scopes : undefined;
+  const scopes = userScopes ?? (challengeScopes.length ? challengeScopes : discovered.scopes);
   const local = isLoopbackUrl(new URL(mcpUrl));
   const authorizationUrl = requireSecureEndpoint(
     discovered.authorizationUrl,
@@ -985,7 +984,7 @@ export async function prepareDynamicClient(
       authorizationUrl,
       tokenAuthMethod: client.tokenAuthMethod,
       ...(discovered.resource ? { resource: discovered.resource } : {}),
-      ...(scopes?.length ? { scopes } : {}),
+      ...(scopes?.length ? { scopes, scopesDiscovered: !userScopes } : {}),
     },
   };
 }

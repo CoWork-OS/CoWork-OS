@@ -155,6 +155,7 @@ describe("MCP OAuth dynamic client registration", () => {
         tokenAuthMethod: "none",
         resource: `${base}/mcp`,
         scopes: ["read", "write"],
+        scopesDiscovered: true,
         dynamicClientRegistration: true,
       },
     });
@@ -231,6 +232,30 @@ describe("MCP OAuth dynamic client registration", () => {
       { fetchImpl: nativeFetch },
     );
     expect(prepared.oauth?.scopes).toEqual(["read"]);
+  });
+
+  it("asks a changed challenge's scopes again, unless the person typed the scopes", async () => {
+    const { base } = await startProvider({
+      challenge: (b) =>
+        `Bearer resource_metadata="${b}/.well-known/oauth-protected-resource/mcp", scope="read write"`,
+    });
+    const auth = registryAuth("http://127.0.0.1:18768/oauth/callback");
+    // Scopes a previous sign-in discovered: the server is asked again.
+    const rediscovered = await prepareDynamicClient(
+      { ...auth, oauth: { ...auth.oauth!, scopes: ["read"], scopesDiscovered: true } },
+      `${base}/mcp`,
+      { fetchImpl: nativeFetch },
+    );
+    expect(rediscovered.oauth?.scopes).toEqual(["read", "write"]);
+    expect(rediscovered.oauth?.scopesDiscovered).toBe(true);
+    // Scopes the person typed stay as typed.
+    const typed = await prepareDynamicClient(
+      { ...auth, oauth: { ...auth.oauth!, scopes: ["admin"] } },
+      `${base}/mcp`,
+      { fetchImpl: nativeFetch },
+    );
+    expect(typed.oauth?.scopes).toEqual(["admin"]);
+    expect(typed.oauth?.scopesDiscovered).toBe(false);
   });
 
   it("falls back to the metadata's scopes when the challenge names none", async () => {

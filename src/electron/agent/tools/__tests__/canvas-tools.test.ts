@@ -112,3 +112,96 @@ describe("CanvasTools.pushContent", () => {
     expect(pushedHtml).toContain("https://cdn.example.com/app.css");
   });
 });
+
+describe("CanvasTools asset and export boundaries", () => {
+  const daemon = { logEvent: vi.fn() };
+  let root: string;
+  let workspace: Workspace;
+  let manager: {
+    getSession: ReturnType<typeof vi.fn>;
+    addAsset: ReturnType<typeof vi.fn>;
+    exportToFolder: ReturnType<typeof vi.fn>;
+  };
+  let tools: CanvasTools;
+
+  beforeEach(async () => {
+    const fsSync = await vi.importActual<typeof import("fs")>("fs");
+    const os = await import("os");
+    root = fsSync.realpathSync(fsSync.mkdtempSync(path.join(os.tmpdir(), "canvas-tools-")));
+    fsSync.mkdirSync(path.join(root, "ws"));
+    fsSync.writeFileSync(path.join(root, "ws", "scene.png"), "png");
+    fsSync.writeFileSync(path.join(root, "outside.png"), "png");
+    workspace = {
+      id: "workspace-1",
+      name: "Workspace",
+      path: path.join(root, "ws"),
+      createdAt: Date.now(),
+      permissions: { read: true, write: true, delete: true, network: true, shell: false },
+    };
+    manager = {
+      getSession: vi.fn(() => ({
+        id: "session-1",
+        taskId: "task-1",
+        workspaceId: workspace.id,
+        sessionDir: path.join(root, "canvas"),
+        status: "active",
+        title: "Evolution of Primates",
+        createdAt: Date.now(),
+      })),
+      addAsset: vi.fn(async () => ({
+        relativePath: "assets/scene.png",
+        bytes: 3,
+        mimeType: "image/png",
+      })),
+      exportToFolder: vi.fn(async (_id: string, target: string) => ({
+        files: ["index.html"],
+        targetDir: target,
+      })),
+    };
+    tools = new CanvasTools(workspace, daemon as Any, "task-1");
+    (tools as Any).manager = manager;
+  });
+
+  afterEach(async () => {
+    const fsSync = await vi.importActual<typeof import("fs")>("fs");
+    fsSync.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("copies a workspace file through the manager", async () => {
+    const result = await tools.addAsset("session-1", "scene.png");
+    expect(result.url).toBe("assets/scene.png");
+    expect(manager.addAsset).toHaveBeenCalledWith(
+      "session-1",
+      path.join(root, "ws", "scene.png"),
+      undefined,
+    );
+  });
+
+  it("refuses files outside the workspace without an approval", async () => {
+    await expect(tools.addAsset("session-1", path.join(root, "outside.png"))).rejects.toThrow(
+      /Access denied/,
+    );
+    expect(manager.addAsset).not.toHaveBeenCalled();
+  });
+
+  it("refuses another task's canvas", async () => {
+    manager.getSession.mockReturnValue({ ...manager.getSession(), taskId: "other-task" });
+    await expect(tools.addAsset("session-1", "scene.png")).rejects.toThrow("another task");
+    await expect(tools.exportCanvas("session-1")).rejects.toThrow("another task");
+  });
+
+  it("exports to a workspace folder named after the canvas", async () => {
+    const result = await tools.exportCanvas("session-1");
+    expect(result.targetDir).toBe(path.join(root, "ws", "evolution-of-primates"));
+    expect(result.entry).toBe(path.join(root, "ws", "evolution-of-primates", "index.html"));
+  });
+
+  it("refuses export outside the workspace or without write permission", async () => {
+    await expect(tools.exportCanvas("session-1", path.join(root, "elsewhere"))).rejects.toThrow(
+      /Access denied/,
+    );
+    workspace.permissions.write = false;
+    await expect(tools.exportCanvas("session-1")).rejects.toThrow(/Write permission/);
+    expect(manager.exportToFolder).not.toHaveBeenCalled();
+  });
+});

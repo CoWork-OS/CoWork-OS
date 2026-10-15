@@ -4651,7 +4651,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_SNAPSHOT, sessionId),
   canvasExportHTML: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EXPORT_HTML, sessionId),
-  canvasExportToFolder: (data: { sessionId: string; targetDir: string }) =>
+  canvasExportToFolder: (data: { sessionId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EXPORT_TO_FOLDER, data),
   canvasOpenInBrowser: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_OPEN_IN_BROWSER, sessionId),
@@ -8782,8 +8782,7 @@ export interface ElectronAPI {
   canvasExportHTML: (sessionId: string) => Promise<{ content: string; filename: string }>;
   canvasExportToFolder: (data: {
     sessionId: string;
-    targetDir: string;
-  }) => Promise<{ files: string[]; targetDir: string }>;
+  }) => Promise<{ files: string[]; targetDir: string } | null>;
   canvasOpenInBrowser: (sessionId: string) => Promise<{ success: boolean; path: string }>;
   canvasOpenUrl: (data: {
     sessionId: string;

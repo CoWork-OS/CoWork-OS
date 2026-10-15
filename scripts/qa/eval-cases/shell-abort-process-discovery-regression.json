@@ -1,0 +1,28 @@
+{
+  "id": "shell-abort-process-discovery-2026-10-15",
+  "title": "One-shot cancellation settles even when descendant discovery fails",
+  "source": {
+    "incident": "main-macos-shell-cancellation-timeout",
+    "ciRun": 38754563035,
+    "relatedPullRequest": 554
+  },
+  "categories": [
+    {
+      "id": "aborted-command-kills-output-holding-child",
+      "prompt": "Start a one-shot shell command with a background child holding stdout open, then abort it. Descendant discovery is unavailable. Cancellation must terminate the owned command group and return a timeout result without executing the later shell command.",
+      "assertions": {
+        "childExits": true,
+        "commandSettles": true,
+        "laterShellCommandRuns": false,
+        "testTimeoutIncreased": false,
+        "executableTest": "src/electron/agent/tools/__tests__/shell-tools-execution.test.ts",
+        "executableTestNames": [
+          "stops the one-shot process tree when the tool call is aborted and process discovery fails",
+          "stops the one-shot process tree when the user stops it and process discovery fails",
+          "signals a shell before its children so it cannot go on to the next command"
+        ]
+      }
+    }
+  ],
+  "notes": "The main macOS log shows an aborted-command timeout but does not log the underlying process lookup. Failed discovery is a deterministic reproduction of that failure mode. Real-shell regressions retain the original 8-second bound and clean up their own fixture processes even if an assertion fails."
+}

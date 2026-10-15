@@ -1204,7 +1204,7 @@ Browser tools first target the active visible browser workbench for the selected
 | `browser_click`         | Click by Browser V2 ref or legacy selector                                                                                                                         |
 | `browser_hover`         | Move pointer over an element by ref or selector                                                                                                                    |
 | `browser_drag`          | Drag from one snapshot ref to another                                                                                                                              |
-| `browser_vault` | Private, approved login/2FA and checkout autofill using local saved items or unlocked 1Password/Bitwarden login sources |
+| `browser_vault` | Private, approved login/2FA and checkout autofill using local saved items or unlocked 1Password/Bitwarden login sources; see [setup and safeguards](browser-workbench.md#private-login-password-managers-2fa-and-checkout) |
 | `browser_fill`          | Fill form fields by ref or selector                                                                                                                                |
 | `browser_type`          | Type text character-by-character by ref or selector                                                                                                                |
 | `browser_press`         | Press keyboard keys (Enter, Tab, Escape, shortcuts)                                                                                                                |

@@ -336,6 +336,12 @@ Interactive browser tasks use the visible Browser Workbench by default. For form
 
 Browser Use Cloud stealth browsers are available only as an explicit opt-in backend. Configure `BROWSER_USE_API_KEY`, then request `browser_provider: "browser-use-cloud"` for a public HTTP(S) site. Cloud mode is blocked for localhost, private networks, `file:` URLs, generated local HTML artifacts, and intranet-style hostnames; use the default visible Browser Workbench for those targets. Browser Use Cloud sessions are stopped by `browser_close`, and retryable pending-stop results include the Browser Use session id if the stop API fails.
 
+For sign-in, use **Passwords & autofill** (the key button) in the local Browser Workbench or ask
+CoWork to sign in and answer its private dialog. It supports one-use or saved logins,
+1Password/Bitwarden CLI access, and verification codes. Addresses and local cards use approved
+autofill; a card fill never authorizes an order. Keep secrets out of chat. See
+[setup and approval rules](browser-workbench.md#private-login-password-managers-2fa-and-checkout).
+
 ### 7. Inspect An Uploaded Video
 
 Attach an `.mp4`, `.mov`, or `.webm` file and ask:

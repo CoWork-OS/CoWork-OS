@@ -9,6 +9,7 @@ const { chromium } = require('playwright');
 async function main() {
   assert.equal(process.env.COWORK_FIRST_RESULT_QA, '1', 'Use an isolated QA profile; this resets its onboarding and registers a local fixture.');
   assert.ok(process.env.COWORK_QA_CDP_URL, 'Set the isolated dev app CDP URL explicitly.');
+  const requireSummarize = process.env.COWORK_QA_REQUIRE_SUMMARIZE === '1';
   const browser = await chromium.connectOverCDP(process.env.COWORK_QA_CDP_URL);
   try {
     const page = browser.contexts()[0].pages().find((candidate) => /^http:\/\/127\.0\.0\.1:/.test(candidate.url()));
@@ -33,6 +34,10 @@ async function main() {
     await page.getByRole('heading', { name: 'What would you like to get done?', exact: true }).waitFor();
     await page.screenshot({ animations: 'disabled', path: path.join(output, '01-first-task.png') });
     await page.getByRole('button', { name: 'Create a project update', exact: true }).click();
+    if (requireSummarize) {
+      const request = page.getByRole('textbox', { name: 'Your first task', exact: true });
+      await request.fill(`${await request.inputValue()}\nApply the Summarize skill to the retrieved issue content. After applying the skill, use write_file to save the report and read_file to verify its contents.`);
+    }
     const prompt = await page.getByRole('textbox', { name: 'Your first task', exact: true }).inputValue();
     await page.getByRole('button', { name: 'Start task', exact: true }).dblclick();
     const dialog = page.getByRole('dialog', { name: 'Connect apps for your task', exact: true });
@@ -81,13 +86,22 @@ async function main() {
     assert.match(text, /blocker/i);
     assert.match(text, /next steps/i);
     const events = await page.evaluate((id) => window.electronAPI.getTaskEvents(id), task.id);
+    if (requireSummarize) {
+      const appliedIndex = events.findIndex((event) => (event.type === 'skill_applied' || event.payload?.legacyType === 'skill_applied') && event.payload?.skillId === 'summarize');
+      assert.ok(appliedIndex >= 0, 'The regression journey must actually apply the Summarize skill.');
+      const reportResult = (event, tool) => event.payload?.legacyType === 'tool_result' && event.payload.tool === tool && event.payload.envelope?.status === 'success' && typeof event.payload.result?.path === 'string' && path.resolve(workspace.path, event.payload.result.path) === artifact;
+      const reportWriteIndex = events.findIndex((event, index) => index > appliedIndex && reportResult(event, 'write_file'));
+      assert.ok(reportWriteIndex > appliedIndex, 'The report itself must be saved successfully after Summarize is applied.');
+      assert.ok(events.some((event, index) => index > reportWriteIndex && reportResult(event, 'read_file')), 'The saved report must be read back after its write, not a stale file or another artifact.');
+      assert.ok(!events.some((event) => event.payload?.contractReason === 'mutation_tools_restricted_by_role'), 'Skill prerequisites must not restrict later report-writing steps.');
+    }
     const successfulTools = new Set(events.filter((event) => event.payload?.legacyType === 'tool_result' && event.payload.envelope?.status === 'success').map((event) => event.payload.tool));
     assert.ok(successfulTools.has('mcp_linear_list_issues'), 'The model must read the real local MCP fixture.');
     assert.ok(successfulTools.has('read_file') && successfulTools.has('write_file'), 'The journey must save and read back the result.');
     assert.ok(!events.some((event) => event.type === 'timeline_step_finished' && event.payload?.status === 'failed'), 'Every execution step must complete cleanly.');
     assert.equal(await page.evaluate(async () => (await window.electronAPI.listTasks()).length), baseline.count + 1);
     await page.screenshot({ animations: 'disabled', path: path.join(output, '07-verified-result.png') });
-    fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify({ provider: 'ChatGPT subscription OAuth', connector: 'Real local read-only MCP transport with synthetic issues', taskId: task.id, status: state.status, artifact, fixtureId: baseline.fixtureId, screenshot: '07-verified-result.png' }, null, 2));
+    fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify({ provider: 'ChatGPT subscription OAuth', connector: 'Real local read-only MCP transport with synthetic issues', requiredSkill: requireSummarize ? 'summarize' : undefined, taskId: task.id, status: state.status, artifact, fixtureId: baseline.fixtureId, screenshot: '07-verified-result.png' }, null, 2));
     console.log('PASS: completed model-backed task, inspected saved artifact:', artifact);
   } finally { await browser.close(); }
 }

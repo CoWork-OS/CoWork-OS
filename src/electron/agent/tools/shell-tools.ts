@@ -539,14 +539,10 @@ function describeLoopbackViolation(violation: LoopbackListenerViolation): string
 }
 
 /**
- * Signal a background command's whole tree: its descendants and, when it leads
+ * Signal a command's whole tree: its descendants and, when it leads
  * its own process group, every remaining member of that group.
  */
-function signalBackgroundTree(
-  pid: number | undefined,
-  signal: NodeJS.Signals,
-  group: boolean,
-): void {
+function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals, group: boolean): void {
   if (!isValidPid(pid)) return;
   killProcessTree(pid, signal);
   if (!group || process.platform === "win32") return;
@@ -769,6 +765,8 @@ export class ShellTools {
   private bundleApproval: { approvedAt: number; count: number } | null = null;
   // Track the currently running child process for stdin support
   private activeProcess: ChildProcess | null = null;
+  // Set only for a direct child launched as leader of its own POSIX group.
+  private activeProcessGroupPid: number | null = null;
   // Track escalation timeouts so we can cancel them when process exits
   private escalationTimeouts: ReturnType<typeof setTimeout>[] = [];
   // Prevent multiple concurrent kill attempts
@@ -1097,6 +1095,7 @@ export class ShellTools {
         allowLoopbackListen: guardLoopback,
         onProcess: (process) => {
           this.activeProcess = process;
+          this.activeProcessGroupPid = null;
           if (guardLoopback && isValidPid(process.pid)) {
             loopbackGuard.unwatch = getLoopbackListenerGuard().watch(process.pid, (violation) => {
               loopbackGuard.violation = violation;
@@ -1199,6 +1198,7 @@ export class ShellTools {
       };
     } finally {
       this.activeProcess = null;
+      this.activeProcessGroupPid = null;
       this.clearEscalationTimeouts();
       this.userKillRequested = false;
       sandbox.cleanup();
@@ -1261,6 +1261,7 @@ export class ShellTools {
       log.error(`Invalid PID for kill: ${pid}`);
       return false;
     }
+    const ownsProcessGroup = this.activeProcessGroupPid === pid;
 
     // Prevent multiple concurrent kill chains (security: avoid race conditions)
     if (this.killInProgress && !force) {
@@ -1281,7 +1282,7 @@ export class ShellTools {
       this.clearEscalationTimeouts();
 
       try {
-        killProcessTree(pid, "SIGKILL");
+        signalProcessTree(pid, "SIGKILL", ownsProcessGroup);
         if (byUser) {
           this.daemon.logEvent(this.taskId, "command_output", {
             type: "error",
@@ -1346,12 +1347,14 @@ export class ShellTools {
         }
         if (childProcess && !childProcess.killed && childProcess.pid === pid) {
           // Additional safety: verify we own this process before killing
-          if (!isProcessOwnedByCurrentUser(pid)) {
+          // The group remains ours if the shell exited but children still hold
+          // its pipes open. Session identity above prevents a stale escalation.
+          if (!ownsProcessGroup && !isProcessOwnedByCurrentUser(pid)) {
             log.warn(`Process ${pid} no longer owned by current user, skipping SIGKILL`);
             return;
           }
           try {
-            killProcessTree(pid, "SIGKILL");
+            signalProcessTree(pid, "SIGKILL", ownsProcessGroup);
             this.daemon.logEvent(this.taskId, "command_output", {
               type: "error",
               output: "[Escalating to SIGKILL for process tree...]\n",
@@ -1375,7 +1378,7 @@ export class ShellTools {
       } catch {
         // Last resort: SIGKILL
         try {
-          killProcessTree(pid, "SIGKILL");
+          signalProcessTree(pid, "SIGKILL", ownsProcessGroup);
           return true;
         } catch {
           return false;
@@ -1578,7 +1581,7 @@ export class ShellTools {
       reachableFromHost: !docker,
       notes,
       signalTree: (signal) => {
-        signalBackgroundTree(child.pid, signal, !docker);
+        signalProcessTree(child.pid, signal, !docker);
         // Killing the docker client does not stop its container.
         if (docker) spawned.cleanup();
       },
@@ -1609,7 +1612,7 @@ export class ShellTools {
       child,
       sandboxType: "none",
       reachableFromHost: true,
-      signalTree: (signal) => signalBackgroundTree(child.pid, signal, group),
+      signalTree: (signal) => signalProcessTree(child.pid, signal, group),
     };
   }
 
@@ -2241,14 +2244,19 @@ export class ShellTools {
       this.clearEscalationTimeouts();
 
       // Use a shell to handle complex commands with pipes, redirects, etc.
+      // Own the POSIX group so cancellation still reaches children when pgrep
+      // times out or a shell exits before its output-holding descendants.
+      const ownsProcessGroup = process.platform !== "win32";
       const child = spawn(resolvedShell, getShellArgs(resolvedShell, effectiveCommand), {
         cwd,
         env: safeEnv,
+        detached: ownsProcessGroup,
         stdio: ["pipe", "pipe", "pipe"], // Enable stdin for interactive commands
       });
 
       // Store reference to active process for stdin support
       this.activeProcess = child;
+      this.activeProcessGroupPid = ownsProcessGroup ? (child.pid ?? null) : null;
 
       // Set timeout. Kill the whole process tree at once: signalling only the shell
       // leaves its children running and holding the output pipes (and this call)
@@ -2312,6 +2320,7 @@ export class ShellTools {
         clearTimeout(timeoutId);
         options?.signal?.removeEventListener("abort", onAbort);
         this.activeProcess = null; // Clear active process reference
+        this.activeProcessGroupPid = null;
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
 
@@ -2372,6 +2381,7 @@ export class ShellTools {
         clearTimeout(timeoutId);
         options?.signal?.removeEventListener("abort", onAbort);
         this.activeProcess = null; // Clear active process reference
+        this.activeProcessGroupPid = null;
         // Clear any pending escalation timeouts to prevent killing reused PIDs
         this.clearEscalationTimeouts();
         // Reset user kill flag

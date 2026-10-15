@@ -269,6 +269,7 @@ export function inferMcpRequirements(entry: MCPRegistryEntry): IntegrationRequir
   if (tags.includes("macos") || /macos only|on macos/.test(text)) requirements.add("macos-only");
   if (
     envValues.some((value) => LOCAL_URL.test(value)) ||
+    LOCAL_URL.test(entry.defaultUrl || "") ||
     tags.includes("local") ||
     /local (bridge|server|instance|api)/.test(text)
   ) {

@@ -248,6 +248,18 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/usecase-chief-of-staff-briefing.json"
     },
     {
+      "id": "cli-anything",
+      "name": "CLI-Anything",
+      "description": "Drive LibreOffice, GIMP, Blender, Inkscape, Audacity, Draw.io and other desktop apps headless through CLI-Anything harnesses with JSON output, instead of native_app UI control.",
+      "version": "1.0.0",
+      "author": "HKUDS",
+      "tags": ["cli", "libreoffice", "gimp", "blender", "inkscape", "office", "images", "desktop-apps"],
+      "icon": "🧰",
+      "category": "Tools",
+      "updatedAt": "2026-10-15",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/cli-anything.json"
+    },
+    {
       "id": "clean-imports",
       "name": "Clean Imports",
       "description": "Remove unused imports from files",

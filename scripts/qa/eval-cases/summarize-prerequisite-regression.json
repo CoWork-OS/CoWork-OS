@@ -1,0 +1,37 @@
+{
+  "id": "summarize-prerequisites-2026-10-15",
+  "title": "Summarize prerequisites preserve later report writing and caller restrictions",
+  "source": {
+    "incident": "local-first-result-summarize-acceptance",
+    "relatedPullRequest": 551
+  },
+  "categories": [
+    {
+      "id": "prerequisites-do-not-become-an-allowlist",
+      "prompt": "Read Linear issues, apply Summarize, then save project-update.md and read it back. Summarize requires run_command; that prerequisite must not hide later file tools.",
+      "assertions": {
+        "skillRequirementsBecomeTaskAllowlist": false,
+        "callerAllowlistPreserved": true,
+        "denyAllPreserved": true,
+        "workerReadOnlyPreserved": true,
+        "executableTest": "src/electron/agent/tools/__tests__/use-skill.test.ts",
+        "executableTestNames": [
+          "does not turn Summarize tool prerequisites into a task-wide allowlist",
+          "should reject skill when required tool is unavailable"
+        ]
+      }
+    },
+    {
+      "id": "routing-prerequisites-retain-their-meaning",
+      "prompt": "List or invoke a skill only when its required runtime tools are available, describing those requirements as prerequisites rather than permissions.",
+      "assertions": {
+        "executableTest": "src/electron/agent/__tests__/custom-skill-loader.test.ts",
+        "executableTestNames": [
+          "describes required tools as prerequisites rather than an allowlist",
+          "should filter out skills requiring unavailable tools"
+        ]
+      }
+    }
+  ],
+  "notes": "Scenario specifications link to executable regressions. Running-app evidence comes separately from first-result-onboarding-smoke.cjs with COWORK_QA_REQUIRE_SUMMARIZE=1, which requires actual skill application followed by successful file save/readback, real model execution, one task admission, and independent artifact inspection."
+}

@@ -16,6 +16,7 @@ import {
   isNativeApplicationReadbackStep,
   isNativeApplicationPresentationStep,
   isNativeUiOperationStep,
+  requestsCliAnythingApp,
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
@@ -7647,6 +7648,7 @@ ${transcript}
           self.discoveredDeferredToolNames instanceof Set
             ? self.discoveredDeferredToolNames
             : new Set<string>(),
+        exposedToolNames: new Set<string>(),
         availableToolsCacheKey:
           typeof self.availableToolsCacheKey === "string" ? self.availableToolsCacheKey : null,
         availableToolsCache: Array.isArray(self.availableToolsCache)
@@ -11391,6 +11393,10 @@ ${transcript}
           cachedTokens: safeCached,
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
           ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
+          // Why this request could not reuse the previous prompt cache, if known.
+          ...(this.promptCacheInvalidationReason
+            ? { cacheInvalidation: this.promptCacheInvalidationReason }
+            : {}),
           totalTokens: safeInput + safeOutput,
           cost: deltaCost,
           costKnown,
@@ -15242,6 +15248,7 @@ ${transcript}
   private hasNonImageGenerationWorkIntent(taskText: string): boolean {
     return (
       hasNativeApplicationOutputIntent(taskText) ||
+      requestsCliAnythingApp(taskText) ||
       /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
         taskText,
       )
@@ -19009,6 +19016,18 @@ ${transcript}
     ].join("\n");
   }
 
+  private buildExecutionApplicationWorkerPrompt(): string {
+    const forbidsScripting = taskForbidsScripting(
+      `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+    );
+    return (
+      applicationWorkerPrompt({ forbidsScripting }) +
+      (forbidsScripting
+        ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused, and CLI-Anything harnesses must not be used. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
+        : "")
+    );
+  }
+
   private buildExecutionBaseInstructionPrompt(): string {
     const novelistConstraintPrompt = this.buildNovelistConstraintPrompt();
     const routing = this.getActiveBasePromptRoutingBlocks();
@@ -19886,13 +19905,7 @@ ${transcript}
       identityPrompt: params.identityPrompt,
       safetyCorePrompt: SHARED_PROMPT_POLICY_CORE,
       baseInstructionPrompt: this.buildExecutionBaseInstructionPrompt(),
-      applicationWorkerPrompt:
-        applicationWorkerPrompt() +
-        (taskForbidsScripting(
-          `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
-        )
-          ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
-          : ""),
+      applicationWorkerPrompt: this.buildExecutionApplicationWorkerPrompt(),
       answerSurfacePrompt: richSurfacesPrompt,
       inputPolicyPrompt: this.buildExecutionInputPolicyPrompt(),
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),

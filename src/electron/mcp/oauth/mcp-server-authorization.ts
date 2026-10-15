@@ -15,6 +15,7 @@ import {
   discoverOAuthMetadata,
   McpSignInCancelledError,
   parseLoopbackRedirect,
+  prepareDynamicClient,
   workdayEndpoints,
 } from "./mcp-oauth";
 
@@ -269,7 +270,7 @@ export async function authorizeMcpServer(
   const auth = server.auth;
   if (auth?.type !== "bearer" || !auth.oauth)
     throw new Error("This MCP server is not configured for OAuth sign-in");
-  const before = structuredClone(auth);
+  let before = structuredClone(auth);
   let next: MCPAuthConfig;
   if (auth.oauth.grant === "jwt_bearer") {
     next = await authorizeWithoutUser(before);
@@ -283,6 +284,21 @@ export async function authorizeMcpServer(
     const controller = new AbortController();
     pendingSignIns.set(serverId, controller);
     try {
+      // Servers installed for dynamic client registration register a client on first sign-in.
+      if (auth.oauth.dynamicClientRegistration && !server.url)
+        throw new Error("This MCP server has no URL to sign in to");
+      const signInAuth = await prepareDynamicClient(before, server.url || "", {
+        signal: controller.signal,
+      });
+      if (signInAuth !== before) {
+        // Keep the registered client even if this sign-in is cancelled, so a
+        // retry reuses it instead of registering another.
+        const latest = MCPSettingsManager.getServer(serverId)?.auth;
+        if (credentialFingerprint(latest) !== credentialFingerprint(before))
+          throw new Error("MCP server settings changed during sign-in; sign in again");
+        MCPSettingsManager.updateServer(serverId, { auth: signInAuth });
+        before = MCPSettingsManager.getServer(serverId)?.auth ?? signInAuth;
+      }
       next = await authorizeWithPkce(before, {
         openUrl: options.openUrl,
         timeoutMs: options.timeoutMs,

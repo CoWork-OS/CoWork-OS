@@ -82,6 +82,14 @@ Skills can attach scoped runtime directives, but only additive ones:
 
 These directives can narrow or guide execution. They cannot redefine the task. There is no runtime field for "replace the task prompt" semantics.
 
+`requires.tools` declares prerequisites, not an exhaustive tool allowlist. The
+loader and invocation checks require those capabilities to be available; skill
+application records them as `metadata.requiredTools` without changing the task's
+`allowedTools`. For example, Summarize requires `run_command`, but applying it
+does not hide `write_file` or `read_file` needed to save and verify a report.
+This distinction does not grant unavailable tools or widen a caller's allowlist,
+worker restrictions, access profile, or approval policy.
+
 Example:
 
 - `manim-video` can add artifact expectations and project-scaffolding context for a local Manim workspace, but it still does not replace the user's original animation request.

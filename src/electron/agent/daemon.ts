@@ -12771,6 +12771,18 @@ export class AgentDaemon extends EventEmitter {
     return this.agentRoleRepo.findById(agentRoleId);
   }
 
+  /** A bot's conversations in a workspace (most recently active first): ids and titles. */
+  listBotConversationRefs(
+    workspaceId: string,
+    agentRoleId: string,
+    limit = 25,
+  ): Array<{ id: string; title: string }> {
+    if (!workspaceId || !agentRoleId) return [];
+    return this.taskRepo
+      .findBotConversations(workspaceId, { agentRoleId, limit })
+      .map((task) => ({ id: task.id, title: task.title }));
+  }
+
   getActiveAgentRoles(): AgentRole[] {
     return this.agentRoleRepo.findActive();
   }

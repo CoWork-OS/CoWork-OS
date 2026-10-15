@@ -23,7 +23,13 @@ describe("bot usage line", () => {
     const summary = summarizeBotUsage(
       metrics({ taskCalls: 18, taskInputTokens: 1000, taskCachedTokens: 720, taskCost: 0.4249 }),
     );
-    expect(summary).toEqual({ days: 7, calls: 18, cost: 0.4249, cacheReuse: 0.72 });
+    expect(summary).toEqual({
+      days: 7,
+      calls: 18,
+      tokens: 1000,
+      cost: 0.4249,
+      cacheReuse: 0.72,
+    });
     expect(formatBotUsage(summary)).toBe("$0.42 · 18 calls · 72% from cache");
   });
 
@@ -36,6 +42,14 @@ describe("bot usage line", () => {
     expect(formatBotUsage(summarizeBotUsage(metrics({ taskCalls: 3 })))).toBe(
       "No billed cost · 3 calls",
     );
+    // Tokens with no cost: a subscription or an unpriced model, not a free model.
+    expect(
+      formatBotUsage(
+        summarizeBotUsage(
+          metrics({ taskCalls: 4, taskInputTokens: 12_000, taskOutputTokens: 300 }),
+        ),
+      ),
+    ).toBe("12.3k tokens, no cost recorded · 4 calls · 0% from cache");
     expect(formatBotUsage(summarizeBotUsage(metrics({})))).toBeNull();
   });
 });

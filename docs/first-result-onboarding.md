@@ -74,6 +74,19 @@ synthetic and labelled as such; it does not prove third-party OAuth or live Line
 tenant access. Screenshots and an acceptance record go to
 `output/playwright/first-result/`.
 
+The script waits up to five minutes for completion and does not automatically
+answer runtime approval requests. If the model chooses shell operations, inspect
+each requested operation and use the existing approval controls as appropriate;
+do not disable them to make acceptance pass. A timeout or paused task is not a
+completed acceptance result, even when a report exists on disk.
+
+A merged-source rerun also reproduced an existing limitation: applying the
+built-in Summarize skill can leave file-writing tools unavailable for a later
+report-writing step, which pauses with `mutation_tools_restricted_by_role`.
+Successful shell writes alone do not clear that contract. Record this outcome
+separately from a completed journey; connector readiness does not override skill
+or worker restrictions.
+
 Focused regressions cover named-source matching, negation, local exports, existing
 connections, expired credentials, missing Google scopes, status timeouts, and
 preservation of the final artifact requirement during read-only scope discovery.

@@ -11425,6 +11425,18 @@ ${transcript}
       return Math.min(Math.round(ms), maxMs);
     };
 
+    if (
+      toolName === "application_operation" &&
+      ["execute", "reconcile"].includes(toolInput.action)
+    ) {
+      // A durable call can prepare, ask for input approval, dispatch, then verify.
+      // Its individual adapter phases retain their own deadlines and cancellation.
+      return (
+        normalizedSettingsTimeout ??
+        clampToStepTimeout(TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS + 3 * 120_000)
+      );
+    }
+
     if (toolName === "run_command") {
       const inputTimeoutRaw =
         typeof (input as { timeout?: unknown })?.timeout === "number"
@@ -20197,6 +20209,16 @@ ${transcript}
     ]);
 
     const isBotConversation = this.task.agentConfig?.botConversation === true;
+    if (/\bandroid\b|phone-harness|phone\.android\.|android_phone_/i.test(nativeGuiText || "")) {
+      for (const name of [
+        "android_phone_devices",
+        "android_phone_observe",
+        "android_phone_authorize",
+        "android_phone_dispatch",
+        "android_phone_readback",
+      ])
+        always.add(name);
+    }
     const botTeamDelegationRequested = this.hasExplicitBotTeamDelegationRequest(stepText);
 
     if (this.swarmForTools) {

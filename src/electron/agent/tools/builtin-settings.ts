@@ -245,6 +245,11 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings["categories"]> 
   // Computer use tools
   screen_context_resolve: "chronicle",
   native_app: "computer_use",
+  android_phone_devices: "computer_use",
+  android_phone_observe: "computer_use",
+  android_phone_authorize: "computer_use",
+  android_phone_dispatch: "computer_use",
+  android_phone_readback: "computer_use",
   screenshot: "computer_use",
   click: "computer_use",
   double_click: "computer_use",

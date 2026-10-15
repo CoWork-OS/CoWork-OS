@@ -743,6 +743,8 @@ function buildComputerUseCompanionContent(
     return null;
   }
 
+  if (toolName.startsWith("android_phone_") && result.observation) result = result.observation;
+
   const imageBase64 = typeof result.imageBase64 === "string" ? result.imageBase64.trim() : "";
   const captureId = typeof result.captureId === "string" ? result.captureId.trim() : "";
   const mediaType = normalizeImageMimeType(result.mediaType);
@@ -778,6 +780,23 @@ function buildComputerUseCompanionContent(
       windowId: Number.isFinite(result?.target?.windowId) ? result.target.windowId : undefined,
     },
     imageAttached: true,
+    ...(result.deviceId && result.stateDigest
+      ? {
+          deviceId: result.deviceId,
+          package: result.package,
+          texts: result.texts,
+          elements: result.elements,
+          secure: result.secure,
+          treeAvailable: result.treeAvailable,
+          securityKnown: result.securityKnown,
+          observationWarning: result.observationWarning,
+          createdAt: result.createdAt,
+          stateDigest: result.stateDigest,
+          note: "Phone screenshot. Use captureId as snapshotId for a durable phone.android.action. Verify the actual outcome after input.",
+        }
+      : {}),
+    ...(result.phoneOperation ? { phoneOperation: result.phoneOperation } : {}),
+
     ...(toolName === "native_app"
       ? {
           snapshotId: result.snapshotId,

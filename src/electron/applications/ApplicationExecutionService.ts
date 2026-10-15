@@ -439,14 +439,19 @@ export class ApplicationExecutionService {
       1_000,
       Math.min(120_000, this.options.timeoutMs ?? operation.route.callTimeoutMs ?? 30_000),
     );
-    const timeout = setTimeout(
-      () =>
-        controller.abort(
-          new Error("Application adapter deadline exceeded; reconcile before retrying"),
-        ),
-      timeoutMs,
-    );
-    timeout.unref?.();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let effectPhaseStarted = phase !== "execute" || !adapter.authorize;
+    const startDeadline = () => {
+      timeout = setTimeout(
+        () =>
+          controller.abort(
+            new Error("Application adapter deadline exceeded; reconcile before retrying"),
+          ),
+        timeoutMs,
+      );
+      timeout.unref?.();
+    };
+    if (effectPhaseStarted) startDeadline();
     let renewing = false;
     const heartbeat = setInterval(
       () => {
@@ -479,6 +484,12 @@ export class ApplicationExecutionService {
             readiness.reason || "Application adapter is not ready",
           );
         controller.signal.throwIfAborted();
+        if (phase === "execute" && adapter.authorize) {
+          await adapter.authorize(context);
+          controller.signal.throwIfAborted();
+          effectPhaseStarted = true;
+          startDeadline();
+        }
         return callback(context);
       };
       const update = await Promise.race([action(), aborted]);
@@ -486,7 +497,7 @@ export class ApplicationExecutionService {
       return this.notify(next ?? (await this.get(operation.id)));
     } catch (error) {
       const summary = error instanceof Error ? error.message : String(error);
-      const safeFailure = error instanceof ApplicationNotDispatchedError;
+      const safeFailure = error instanceof ApplicationNotDispatchedError || !effectPhaseStarted;
       const current = await this.get(operation.id);
       const update: ApplicationOperationUpdate =
         phase === "verify"

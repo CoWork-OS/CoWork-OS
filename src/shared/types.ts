@@ -1540,6 +1540,9 @@ export type ToolRiskLevel = "read" | "write" | "destructive" | "system" | "netwo
 export const TOOL_GROUPS = {
   // Read-only operations - lowest risk
   "group:read": [
+    "android_phone_devices",
+    "android_phone_observe",
+    "android_phone_readback",
     "local_photoshop_inspect",
     "local_photoshop_read",
     "native_application_inspect",
@@ -1605,6 +1608,11 @@ export const TOOL_GROUPS = {
   "group:destructive": ["delete_file", "run_command"],
   // System operations - requires explicit permission
   "group:system": [
+    "android_phone_devices",
+    "android_phone_observe",
+    "android_phone_authorize",
+    "android_phone_dispatch",
+    "android_phone_readback",
     "get_current_location",
     "read_clipboard",
     "write_clipboard",

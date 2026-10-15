@@ -27,6 +27,32 @@ vi.mock("../../memory/MemoryService", () => ({
 }));
 
 describe("TaskExecutor getToolTimeoutMs", () => {
+  it("lets durable execution cover inner approvals and bounded adapter phases", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+    const timeoutSpy = vi
+      .spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs")
+      .mockReturnValue(null);
+    try {
+      for (const action of ["execute", "reconcile"]) {
+        expect(executor.getToolTimeoutMs("application_operation", { action })).toBe(
+          APPROVAL_GATED_TOOL_TIMEOUT_MS + 360_000,
+        );
+      }
+      expect(executor.getToolTimeoutMs("application_operation", { action: "get" })).toBe(30_000);
+      Object.defineProperty(executor, "effectiveStepTimeoutMs", { value: 600_000 });
+      expect(executor.getToolTimeoutMs("application_operation", { action: "execute" })).toBe(
+        595_000,
+      );
+      timeoutSpy.mockReturnValue(45_000);
+      expect(executor.getToolTimeoutMs("application_operation", { action: "execute" })).toBe(
+        45_000,
+      );
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it("gives orchestrate_agents enough time to wait for child agents", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };

@@ -400,3 +400,10 @@
   color: var(--color-text-muted);
   font-size: 12px;
 }
+
+.bot-details-usage {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}

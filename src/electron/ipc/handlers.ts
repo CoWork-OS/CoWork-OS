@@ -15,6 +15,7 @@ import {
 } from "./approval-draft-preview";
 import { BotNotificationService } from "../notifications/BotNotificationService";
 import { BotWorkResultService } from "../agents/BotWorkResultService";
+import { BotOutcomeMetricsService } from "../agents/BotOutcomeMetricsService";
 import { getAutomationRuntime } from "../automation/AutomationRuntime";
 import { BotWorkControlService } from "../automation/BotWorkControlService";
 import { BotResponsibilityService } from "../automation/BotResponsibilityService";
@@ -1157,6 +1158,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_FORK_SESSION, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST_FOR_WORKSPACES, RATE_LIMIT_CONFIGS.frequent);
@@ -5504,6 +5506,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.BOT_WORK_LIST, async (_, query: unknown) =>
     botWorkQueryService.list(query),
   );
+  // A bot's recent outcomes and model usage (cost, tokens, cache reads) for its details panel.
+  // The request is validated by the service's zod schema.
+  const botOutcomeMetricsService = new BotOutcomeMetricsService(db);
+  ipcMain.handle(IPC_CHANNELS.BOT_METRICS_SUMMARY, async (_, request: unknown) => {
+    checkRateLimit(IPC_CHANNELS.BOT_METRICS_SUMMARY);
+    return botOutcomeMetricsService.summary(request);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.BOT_CONVERSATIONS_LIST,

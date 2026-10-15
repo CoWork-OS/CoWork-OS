@@ -34,6 +34,12 @@ export interface BotOutcomeMetrics {
   modelUsage: {
     taskCalls: number;
     taskTokens: number;
+    /** Input tokens, cache reads included (`taskCachedTokens` of them were read from cache). */
+    taskInputTokens: number;
+    taskOutputTokens: number;
+    taskCachedTokens: number;
+    /** Estimated cost in USD (0 for calls a subscription covers or with no price). */
+    taskCost: number;
     unattachedCalls: number;
     unattachedTokens: number;
   };

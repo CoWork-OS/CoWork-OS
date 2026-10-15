@@ -339,4 +339,14 @@ function start(): void {
   }
 }
 
-start();
+if (data.awaitOpen) {
+  // The modules above have loaded; the host may still be preparing the schema (DB6).
+  const waitForOpen = (message: HostToWorkerMessage): void => {
+    if (message.type !== "open") return;
+    port.off("message", waitForOpen);
+    start();
+  };
+  port.on("message", waitForOpen);
+} else {
+  start();
+}

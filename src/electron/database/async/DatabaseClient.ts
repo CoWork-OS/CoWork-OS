@@ -158,11 +158,19 @@ export class DatabaseClient {
     };
   }
 
-  /** Spawn the worker and wait for its ready handshake. */
-  static async start(options: DatabaseClientOptions): Promise<DatabaseClient> {
+  /**
+   * Spawn the worker and wait for its ready handshake. With `openAfter`, the worker
+   * spawns and loads its modules at once but opens the database only after the promise
+   * resolves (the host's schema setup, DB6); a rejection stops the worker and fails the
+   * start with that error. Restarts never wait: the database is ready by then.
+   */
+  static async start(
+    options: DatabaseClientOptions,
+    startOptions: { openAfter?: Promise<unknown> } = {},
+  ): Promise<DatabaseClient> {
     const client = new DatabaseClient(options);
     try {
-      await client.spawn();
+      await client.spawn(startOptions.openAfter);
     } catch (error) {
       client.state = "failed";
       throw error;
@@ -475,7 +483,7 @@ export class DatabaseClient {
     return { drained };
   }
 
-  private spawn(): Promise<void> {
+  private spawn(openAfter?: Promise<unknown>): Promise<void> {
     this.generation += 1;
     const generation = this.generation;
     const workerData: DatabaseWorkerData = {
@@ -491,21 +499,43 @@ export class DatabaseClient {
       ...(this.options.testCommandsModule
         ? { testCommandsModule: this.options.testCommandsModule }
         : {}),
+      ...(openAfter ? { awaitOpen: true } : {}),
     };
     const worker = new Worker(this.options.workerPath, { workerData });
 
     return new Promise<void>((resolve, reject) => {
       let started = false;
-      const startupTimer = setTimeout(() => {
-        if (started) return;
-        started = true;
-        void worker.terminate();
-        reject(
-          new Error(
-            `Database worker did not become ready within ${this.options.startupTimeoutMs} ms`,
-          ),
+      let startupTimer: ReturnType<typeof setTimeout> | undefined;
+      // The ready deadline covers the worker's own startup, not the wait for `openAfter`.
+      const armStartupTimer = (): void => {
+        startupTimer = setTimeout(() => {
+          if (started) return;
+          started = true;
+          void worker.terminate();
+          reject(
+            new Error(
+              `Database worker did not become ready within ${this.options.startupTimeoutMs} ms`,
+            ),
+          );
+        }, this.options.startupTimeoutMs);
+      };
+      if (openAfter) {
+        openAfter.then(
+          () => {
+            if (started) return;
+            armStartupTimer();
+            worker.postMessage({ type: "open" } satisfies HostToWorkerMessage);
+          },
+          (error: unknown) => {
+            if (started) return;
+            started = true;
+            void worker.terminate();
+            reject(error);
+          },
         );
-      }, this.options.startupTimeoutMs);
+      } else {
+        armStartupTimer();
+      }
 
       worker.on("message", (message: WorkerToHostMessage) => {
         if (message.generation !== generation) return;

@@ -245,6 +245,7 @@ import {
   shouldTrustControlPlaneProxyFromEnv,
 } from "./utils/runtime-mode";
 import { getActiveProfileId, getUserDataDir, hasNonDefaultProfile } from "./utils/user-data-dir";
+import { resolveDatabasePath } from "./database/connection";
 import type { AccessProfileId } from "../shared/access-profiles";
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./canvas";
@@ -1762,6 +1763,22 @@ if (isMacSafeStorageMigrationWorker) {
     // and handles its failures there.
     const databaseOpening = DatabaseManager.open();
     databaseOpening.catch(() => undefined);
+    // The database worker's thread and modules need no database, so it spawns now and
+    // loads them while the schema is prepared; it opens the file only once the open above
+    // has finished (DB6). Startup awaits the same worker before routing work to it.
+    const databasePath = resolveDatabasePath(getUserDataDir());
+    void startDatabaseWorker({
+      dbPath: databasePath,
+      runtime: "desktop",
+      openAfter: databaseOpening.then((manager) => {
+        if (manager.getDatabasePath() !== databasePath) {
+          logger.error(
+            `Profile database opened at ${manager.getDatabasePath()}, not ${databasePath}; the database worker stays off for this run.`,
+          );
+          throw new Error("Profile database path changed during startup");
+        }
+      }),
+    });
     const startupActionGate = new StartupActionGate();
 
     function ensureMainWindowVisible(): void {
@@ -2128,7 +2145,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (hasNonDefaultProfile()) {
         logger.info(`Active profile: ${activeProfileId}`);
       }
-      installDevelopmentBranding();
+      // Decoding the full-size icon takes tens of milliseconds, and the Dock already shows
+      // the bundle's icon (or Electron's in development) until then.
+      deferStartupTask("dock-icon", async () => installDevelopmentBranding());
       installNativeApplicationMenu();
 
       // Set up Content Security Policy for production builds
@@ -2187,9 +2206,10 @@ if (isMacSafeStorageMigrationWorker) {
       }
       dbManager.beginRun("desktop");
       logStartupLane("blocking_startup", { event: "database_manager_ready" });
-      // Database worker (async SQLite plan, DB2); starts after schema setup. Awaited so
-      // each domain's backend is chosen once for the run (DB7): a worker that fails to
-      // start leaves the whole run on the host backend.
+      // Database worker (async SQLite plan, DB2); spawned with the profile open and opened
+      // once the schema was set up (see databaseOpening), so it is usually ready by now.
+      // Awaited so each domain's backend is chosen once for the run (DB7): a worker that
+      // fails to start leaves the whole run on the host backend.
       logStartupLane("blocking_startup", { event: "database_worker_start" });
       await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "desktop" });
       logStartupLane("blocking_startup", { event: "database_worker_ready" });
@@ -2253,7 +2273,9 @@ if (isMacSafeStorageMigrationWorker) {
           logger.warn("Failed to prune temp sandbox profiles:", error);
         }
       };
-      runTempSandboxProfilePrune();
+      // The prune lists the whole temp directory synchronously, which can hold tens of
+      // thousands of entries, so its first run waits until the window is up.
+      deferStartupTask("temp-sandbox-profile-prune", async () => runTempSandboxProfilePrune());
       tempSandboxProfilePruneTimer = setInterval(
         runTempSandboxProfilePrune,
         TEMP_SANDBOX_PROFILE_PRUNE_INTERVAL_MS,

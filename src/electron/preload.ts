@@ -1697,6 +1697,7 @@ interface AgentRoleData {
   accessProfileId?: string;
   /** Where this bot works; unset means Auto. */
   worksOn?: import("../shared/bot-computer").BotWorksOn;
+  desktopHost?: string;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1739,6 +1740,7 @@ interface CreateAgentRoleRequest {
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
   worksOn?: import("../shared/bot-computer").BotWorksOn;
+  desktopHost?: string;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1772,6 +1774,7 @@ interface UpdateAgentRoleRequest {
   /** The agent's access limit; null clears it. */
   accessProfileId?: string | null;
   worksOn?: import("../shared/bot-computer").BotWorksOn | null;
+  desktopHost?: string | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];

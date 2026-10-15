@@ -3,6 +3,7 @@ import type { AgentRoleData } from "../../electron/preload";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { botMascotIcon, resolveBotMascot } from "../../shared/bot-mascots";
 import { normalizeBotWorksOn } from "../../shared/bot-computer";
+import { describeDesktopHostError } from "./BotFormDialog";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 import { AgentRoleEditorDialog } from "./AgentRoleEditorDialog";
 
@@ -24,6 +25,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     systemPrompt: "",
     icon: "",
     worksOn: "auto",
+    desktopHost: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,6 +49,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           // Edit the character the bot is drawn as, so saving keeps what it shows.
           icon: botMascotIcon(resolveBotMascot(loaded.icon)),
           worksOn: normalizeBotWorksOn(loaded.worksOn),
+          desktopHost: loaded.desktopHost || "",
         });
       } catch (cause) {
         if (!cancelled) {
@@ -73,6 +76,11 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       setError("Bot editing is unavailable in this session.");
       return;
     }
+    const desktopHostError = describeDesktopHostError(values);
+    if (desktopHostError) {
+      setError(desktopHostError);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -83,6 +91,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         systemPrompt: normalizeBotProfileText(values.systemPrompt),
         icon: values.icon,
         worksOn: values.worksOn,
+        desktopHost: values.worksOn === "own_desktop" ? values.desktopHost.trim() || null : null,
       });
       if (!updated) throw new Error("Could not save this bot.");
       await onSaved?.(updated);

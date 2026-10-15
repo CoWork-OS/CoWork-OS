@@ -433,6 +433,7 @@ import {
   StringIdSchema,
   AgentRoleAccessProfileIdSchema,
   AgentRoleWorksOnSchema,
+  AgentRoleDesktopHostSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -1591,6 +1592,7 @@ export async function setupIpcHandlers(
   const botDesktops = BotDesktopManager.configure({
     dataDir: () => _app.getPath("userData"),
     resourcesDir: findBotDesktopResources,
+    desktopHostFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopHost,
   });
   void botDesktops.stopLeftovers();
   _app.on("will-quit", () => botDesktops.stopAllOnQuit());
@@ -9787,6 +9789,11 @@ export async function setupIpcHandlers(
       request.worksOn =
         validateInput(AgentRoleWorksOnSchema, request.worksOn, "works on") ?? undefined;
     }
+    if (request.desktopHost !== undefined) {
+      request.desktopHost =
+        validateInput(AgentRoleDesktopHostSchema, request.desktopHost, "desktop server") ??
+        undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -9826,6 +9833,13 @@ export async function setupIpcHandlers(
         AgentRoleWorksOnSchema,
         normalizedRequest.worksOn,
         "works on",
+      );
+    }
+    if (normalizedRequest.desktopHost !== undefined) {
+      normalizedRequest.desktopHost = validateInput(
+        AgentRoleDesktopHostSchema,
+        normalizedRequest.desktopHost,
+        "desktop server",
       );
     }
     const result = await agentRoleRepo.update(normalizedRequest);

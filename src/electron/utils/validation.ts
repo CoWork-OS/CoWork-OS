@@ -4,7 +4,7 @@
  */
 
 import * as path from "path";
-import { BOT_WORKS_ON_VALUES } from "../../shared/bot-computer";
+import { BOT_WORKS_ON_VALUES, DESKTOP_HOST_PATTERN } from "../../shared/bot-computer";
 import { z } from "zod";
 import {
   EXTERNAL_RUNTIME_AGENTS,
@@ -90,6 +90,16 @@ const AccessProfileIdSchema = z.string().trim().min(1).max(120);
 export const AgentRoleAccessProfileIdSchema = AccessProfileIdSchema;
 /** A bot's "Works on" setting; null resets it to Auto. */
 export const AgentRoleWorksOnSchema = z.enum(BOT_WORKS_ON_VALUES).nullable();
+/** The SSH host a bot's own desktop runs on; null or empty means this computer. */
+export const AgentRoleDesktopHostSchema = z
+  .string()
+  .trim()
+  .max(100)
+  .refine((value) => value === "" || DESKTOP_HOST_PATTERN.test(value), {
+    message: "Use an SSH host from your SSH config, like my-server or me@example.com",
+  })
+  .transform((value) => value || null)
+  .nullable();
 const AccessFilesystemRuleSchema = z
   .object({
     path: z.string().trim().min(1).max(MAX_PATH_LENGTH),

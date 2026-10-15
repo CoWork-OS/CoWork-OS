@@ -7,10 +7,17 @@ export interface BotComputerSectionProps {
   taskId: string;
   botName: string;
   worksOn: BotWorksOn;
+  /** The SSH host its own desktop runs on, if not this computer. */
+  desktopHost?: string;
 }
 
 /** Where the bot works, a live view of what it is doing there, and take-over. */
-export function BotComputerSection({ taskId, botName, worksOn }: BotComputerSectionProps) {
+export function BotComputerSection({
+  taskId,
+  botName,
+  worksOn,
+  desktopHost,
+}: BotComputerSectionProps) {
   const off = worksOn === "off";
   const ownDesktop = worksOn === "own_desktop";
   const { state, busy, error, takeOver, handBack, openDesktop, stopDesktop } = useComputerView(
@@ -42,7 +49,10 @@ export function BotComputerSection({ taskId, botName, worksOn }: BotComputerSect
         <span>Computer</span>
       </h3>
       <div className="bot-computer-summary">
-        <span>Works on {worksOnLabel ?? "Auto"}</span>
+        <span>
+          Works on {worksOnLabel ?? "Auto"}
+          {worksOn === "own_desktop" && desktopHost ? ` on ${desktopHost}` : ""}
+        </span>
         {!off ? (
           <span className={`bot-details-status${held || request ? " busy" : ""}`}>
             {describeComputerViewStatus(state)}

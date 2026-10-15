@@ -783,16 +783,20 @@ function buildComputerUseCompanionContent(
     ...(result.deviceId && result.stateDigest
       ? {
           deviceId: result.deviceId,
+          path: result.path,
+          screenshot: result.screenshot,
+          artifactWarning: result.artifactWarning,
           package: result.package,
           texts: result.texts,
           elements: result.elements,
+          focusedEditor: result.focusedEditor,
           secure: result.secure,
           treeAvailable: result.treeAvailable,
           securityKnown: result.securityKnown,
           observationWarning: result.observationWarning,
           createdAt: result.createdAt,
           stateDigest: result.stateDigest,
-          note: "Phone screenshot. Use captureId as snapshotId for a durable phone.android.action. Verify the actual outcome after input.",
+          note: "Phone screenshot. Use captureId as snapshotId for a durable phone.android.action. If focusedEditor is the intended input field, use type_text directly instead of tapping it again; taps require unchanged pixels and a blinking caret can invalidate them. Verify the actual outcome after input.",
         }
       : {}),
     ...(result.phoneOperation ? { phoneOperation: result.phoneOperation } : {}),

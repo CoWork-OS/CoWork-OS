@@ -72,6 +72,7 @@ export type ApplicationOperationUpdate = Pick<ApplicationOperation, "execution">
       | "error"
       | "nextPollAt"
       | "pendingAction"
+      | "notDispatched"
     >
   >;
 
@@ -219,19 +220,39 @@ export class ApplicationOperationStore {
     };
     if (request.supersedes) {
       const previous = this.get(request.supersedes);
+      const unsubmitted =
+        previous &&
+        previous.attemptCount === 0 &&
+        ["planned", "prepared", "cancelled"].includes(previous.execution) &&
+        (!previous.route.supports.prepare || previous.route.preparationEffect === "read");
+      const stalePhoneReplacement =
+        previous &&
+        previous.execution === "failed" &&
+        previous.notDispatched === true &&
+        previous.error?.startsWith("stale_snapshot:") &&
+        previous.route.id === "phone.android.v1" &&
+        route.id === "phone.android.v1" &&
+        previous.request.capability === "phone.android.action" &&
+        request.capability === "phone.android.action" &&
+        !previous.externalId &&
+        !previous.result &&
+        request.input.deviceId === previous.request.input.deviceId &&
+        request.input.snapshotId !== previous.request.input.snapshotId &&
+        applicationDigest(request.input.action) ===
+          applicationDigest(previous.request.input.action) &&
+        applicationDigest(request.input.expected ?? null) ===
+          applicationDigest(previous.request.input.expected ?? null);
       if (
         !previous ||
         previous.request.taskId !== request.taskId ||
         previous.request.sessionId !== request.sessionId ||
         previous.supersededBy ||
-        previous.attemptCount !== 0 ||
-        !["planned", "prepared", "cancelled"].includes(previous.execution) ||
-        (previous.route.supports.prepare && previous.route.preparationEffect !== "read") ||
+        !(unsubmitted || stalePhoneReplacement) ||
         request.planRevision <= previous.request.planRevision ||
         request.dependsOn.includes(previous.id)
       )
         throw new Error(
-          "Only an unsubmitted proposal without preparation effects can be superseded by a later plan revision",
+          "Only an unsubmitted proposal without preparation effects, or a proven stale no-dispatch phone input with the same action and criteria, can be superseded by a later plan revision",
         );
       this.save(
         {

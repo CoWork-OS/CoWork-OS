@@ -662,7 +662,9 @@ export function maybeInjectStopReasonNudge(opts: {
           text: (() => {
             const message =
               "You have been in repeated tool-use turns. Stop calling tools unless absolutely required for correctness. " +
-              "Produce a concise, direct answer from gathered evidence, and list unresolved gaps explicitly.";
+              "A required application operation that is merely planned or prepared is not executed work: continue its necessary governed execution and verification before wrapping up. " +
+              "Never repeat an unknown effect; reconcile it through the original operation. " +
+              "When the requested outcome is satisfied or genuinely blocked, produce a concise, direct answer from gathered evidence and list unresolved gaps explicitly.";
             return opts.sanitizeMessageText ? opts.sanitizeMessageText(message) : message;
           })(),
         },

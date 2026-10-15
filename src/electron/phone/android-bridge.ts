@@ -82,6 +82,7 @@ def main():
             image_digest = hashlib.sha256(raw).hexdigest()
             digest = hashlib.sha256(json.dumps([package, bounds, safe, focused_editors, image_digest, tree_available, security_known], sort_keys=True).encode()).hexdigest()
             typing_digest = None
+            focused_editor = None
             if security_known and tree_available and not secure and len(focused_editors) == 1:
                 # Native editable fields expose text/focus/identity/bounds in XML.
                 # Ignore only their paint (e.g. blinking caret) for typing, while
@@ -97,11 +98,12 @@ def main():
                         ImageDraw.Draw(pixels).rectangle((x1, y1, x2-1, y2-1), fill=(0, 0, 0))
                         masked_hash = hashlib.sha256(pixels.tobytes()).hexdigest()
                         typing_digest = hashlib.sha256(json.dumps([package, bounds, safe, focused_editors, masked_hash], sort_keys=True).encode()).hexdigest()
+                        focused_editor = dict(id=field.get('resource-id', '')[:256], text=field.get('text', '')[:512], x=x1, y=y1, w=x2-x1, h=y2-y1)
 
             return dict(deviceId=serial, createdAt=int(time.time()*1000), width=width, height=height,
                         package=package, stateDigest=digest, typingDigest=typing_digest, texts=[] if secure or not security_known else [str(n.get('text') or n.get('desc'))[:512] for n in safe if n.get('text') or n.get('desc')][:40],
                         elements=[] if secure or not security_known else [dict(text=str(n.get('text') or n.get('desc') or '')[:160], id=str(n.get('id') or '')[:256], x=n['x'], y=n['y'], w=n['w'], h=n['h'], clickable=bool(n.get('clickable'))) for n in safe][:60],
-                        secure=secure, treeAvailable=tree_available, securityKnown=security_known, observationWarning='; '.join(warnings) or None, imageBase64=base64.b64encode(raw).decode())
+                        focusedEditor=focused_editor, secure=secure, treeAvailable=tree_available, securityKnown=security_known, observationWarning='; '.join(warnings) or None, imageBase64=base64.b64encode(raw).decode())
         finally:
             os.unlink(shot)
 

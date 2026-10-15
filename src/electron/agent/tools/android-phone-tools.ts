@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { publishPhoneScreenshot } from "../../phone/phone-screenshot-artifact";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 import { AndroidDeviceIdSchema, AndroidPhoneInputSchema } from "../../../shared/android-phone";
@@ -17,7 +18,7 @@ const definitions: LLMTool[] = [
   {
     name: "android_phone_observe",
     description:
-      "Read the explicitly selected Android phone's screenshot, package and visible text, after screen-access approval. Returns captureId for a short-lived task-owned snapshot. For input use application_operation capability phone.android.action with input {deviceId,snapshotId: captureId,action:{kind,...},expected:{package?,text?}}; omit resources to derive the device lock. Every action requires approval. Never enter passwords, PINs or 2FA; never recreate an unknown action. Observe again when stale. Phone screenshots are sent to the task's model.",
+      "Read the explicitly selected Android phone's screenshot, package and visible text, after screen-access approval. Returns captureId for a short-lived task-owned snapshot and path for the saved PNG artifact. Link path directly in the final answer; do not search private profile directories. For input use application_operation capability phone.android.action with input {deviceId,snapshotId: captureId,action:{kind,...},expected:{package?,text?}}; omit resources to derive the device lock. If focusedEditor identifies the intended field, type_text directly without a redundant tap; caret blinking can invalidate coordinate taps. Every action requires approval. Never enter passwords, PINs or 2FA; never recreate an unknown action. Observe again when stale. Phone screenshots are sent to the task's model.",
     input_schema: {
       type: "object",
       properties: { deviceId: { type: "string" } },
@@ -57,12 +58,20 @@ export class AndroidPhoneTools {
     private service = AndroidPhoneService.getInstance(),
   ) {}
   private async approve(deviceId: string, action?: unknown, signal?: AbortSignal): Promise<void> {
+    const task = this.daemon.getTask(this.taskId);
+    const workspace = task?.workspaceId
+      ? this.daemon.getWorkspaceById?.(task.workspaceId)
+      : undefined;
+    const artifactDirectory = workspace?.permissions.write ? workspace.path : undefined;
     const approved = await this.daemon.requestApproval(
       this.taskId,
       "computer_use",
-      action
+      (action
         ? `Apply this action on Android ${deviceId}: ${JSON.stringify(action)}`
-        : `Read Android ${deviceId}: its screen and text will be shared with this task's model`,
+        : `Read Android ${deviceId}: its screen and text will be shared with this task's model`) +
+        (artifactDirectory
+          ? ". Approved screenshots will also be saved as PNG artifacts in this task's workspace."
+          : ""),
       {
         tool: action ? "android_phone_dispatch" : "android_phone_observe",
         deviceId,
@@ -73,6 +82,7 @@ export class AndroidPhoneTools {
           text: JSON.stringify(
             {
               deviceId,
+              ...(artifactDirectory ? { screenshotArtifactDirectory: artifactDirectory } : {}),
               ...(action ? { action, readback: true } : { shareScreenWithTaskModel: true }),
             },
             null,
@@ -130,7 +140,7 @@ export class AndroidPhoneTools {
             "image/png",
           );
         }
-        return observation;
+        return publishPhoneScreenshot(this.daemon, this.taskId, this.service, observation);
       } finally {
         scope.dispose();
       }

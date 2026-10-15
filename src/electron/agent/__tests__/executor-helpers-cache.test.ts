@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
@@ -624,6 +625,36 @@ describe("TaskExecutor read cache invalidation", () => {
     recordFileOperation(executor, "read_file", { path: filePath }, readResult);
     recordFileOperation(executor, "read_file", { path: filePath }, readResult);
   }
+
+  it("tracks a verified phone PNG as deliverable evidence without claiming a business outcome", () => {
+    const executor = createFileOpExecutor();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "phone-evidence-"));
+    try {
+      const captureId = randomUUID();
+      const filename = path.join(root, `android-screen-${captureId}.png`);
+      const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+      fs.writeFileSync(filename, bytes);
+      executor.workspace.path = root;
+      executor.task = { id: "task" };
+      executor.canReadWorkspacePath = () => true;
+      const result = {
+        captureId,
+        path: filename,
+        screenshot: {
+          taskId: "task",
+          path: filename,
+          size: bytes.length,
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        },
+      };
+      recordFileOperation(executor, "android_phone_observe", {}, result);
+      expect(executor.fileOperationTracker.getCreatedFiles()).toEqual([filename]);
+      recordFileOperation(executor, "application_operation", { action: "execute" }, result);
+      expect(executor.fileOperationTracker.getCreatedFiles()).toEqual([filename]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it("labels a cached read_file result explicitly and keeps it valid JSON", () => {
     const executor = createFileOpExecutor();

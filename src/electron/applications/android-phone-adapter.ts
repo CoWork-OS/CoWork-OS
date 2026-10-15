@@ -162,7 +162,8 @@ export function createAndroidPhoneAdapter(): ApplicationAdapter {
           ? unmet.join("; ")
           : "Fresh selected-device readback matches the requested visible outcome",
         checkedAt: Date.now(),
-        expiresAt: Date.now() + 60_000,
+        // This certifies the visible result at checkedAt, not a standing assertion
+        // about the current screen. Later actions must not invalidate earlier steps.
         evidence: [
           {
             source: `android:${input(context).deviceId}:${state.observation.captureId}`,

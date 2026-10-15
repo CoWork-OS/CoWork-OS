@@ -19,6 +19,32 @@ The live device scenario observed the selected emulator, opened Settings, exerci
 
 Electron acceptance exercised runtime install/repair, device selection, enable, selection reset and Stop. An input approval was held for **125 seconds**: the operation remained `submitting` past the old 120-second adapter deadline, with no input receipt. Clicking Stop settled it as `failed`, left zero device locks and produced no input receipt. A new approved operation then acquired the same device and completed with verified foreground package `com.android.settings`. Read-only inspection of the operation journal and worker receipt confirmed these results.
 
+## Real ChatGPT subscription validation
+
+The follow-up source validation uses the primary profile's configured ChatGPT OAuth subscription with `gpt-6.1-sol` (Medium), copied into the isolated QA profile. The primary profile database was opened read-only. The local deterministic fixture was stopped; neither API-key authentication nor provider failover was used for this run.
+
+The running Electron app (`npm run dev`) drove `Pixel_3a_API_34`, serial `emulator-5554`, through the actual ADB/phone-harness runtime. Playwright operated the isolated app's visible approval cards and screenshot viewer. The LLM opened Settings, tapped search, typed exactly `cowork real llm qa`, and verified it in `com.google.android.settings.intelligence`. Settings itself opens in `com.android.settings`; its delegated search package is explicitly included in the acceptance contract.
+
+The real-provider runs exposed and repaired these issues:
+
+- Approved screenshots were attached to the model but lacked a usable deliverable path and file evidence. Captures now publish authorized workspace PNGs, retain path/hash/ownership metadata through normalization, and participate in file verification.
+- A planned operation could disappear between steps near the repeated-tool-use threshold. Bounded volatile context now carries operation IDs/state, and the wrap-up guidance distinguishes planned work from executed work.
+- Observations did not identify the safe focused editor. They now expose it so the model can avoid redundant coordinate taps; pixel, secure-field, approval and no-replay guards remain enforced.
+- Settings search was classified as web research, causing unrelated network evidence requests. Local Android UI search is excluded while explicit web research remains covered.
+- Definitively stale no-dispatch attempts could not be superseded, leaving successful recovery marked partial. Explicit later revisions now preserve the failed record and require the same action/criteria, a fresh snapshot, and fresh approval. Unknown/dispatched effects remain ineligible.
+- Restored tasks with a generated title containing “Search” lost their phone tools to a read-only review heuristic. The heuristic now retains explicitly requested Android workflows while preserving host-desktop and explicit tool restrictions.
+- Earlier Android readbacks expired after 60 seconds while later steps ran. Completed receipt-backed readbacks now retain historical verification at `checkedAt`; the requested final screen still needs fresh evidence. Other routes retain their expiry checks.
+
+The expanded focused suite passes **321 tests**, with one separate opt-in live scenario skipped. Regression coverage includes no-dispatch supersession, rejection of unknown/completed/mismatched/legacy inputs, historical phone verification, screenshot authorization and integrity, focused-editor output, context continuity, and local versus web search classification.
+
+Before opening the follow-up PR, the branch merged `main` at `e0529cb1f` without conflicts. The same suite plus task-strategy, application-intent and CLI-Anything routing regressions passed **407 tests**, with the same one opt-in live scenario skipped, across 15 files. The real-provider acceptance below predates this merge; it was not repeated for the merge-only integration.
+
+The emulator needed host GPU rendering, four virtual cores and 3 GiB RAM after a System UI ANR in an early attempt. Test setup restarted only this emulator and dismissed its ANR; the model did not alter settings or enter credentials. Repeated stale screens caused a pause and one bounded continuation instruction in the final recovery run. Three stale typing attempts produced no input receipts; revision 4 completed with one typing receipt. Screen and input approvals remained per-call. A separately approved local command checked only screenshot existence/readability/byte count; phone input used `application_operation`, not shell commands.
+
+After the final fixes and app restart, the same task completed its post-restart check: a fresh approved observation confirmed the exact query, and its new PNG opened in the in-app viewer at **1920 × 1080, 91,062 bytes**, with no renderer page errors. The original three completed receipts matched the persisted journal, all three stale attempts remained superseded without receipts, and zero device locks remained. This check dispatched no new phone input. The task finished as Completed without a partial-success marker.
+
+The final run used `<no-memory />`; read-only inspection found zero memory rows for its task. Earlier attempts are isolated QA history, not primary-profile work. Local reports and screenshots are retained under ignored `output/playwright/android-real-*` paths.
+
 ## Regression cases
 
 - Stop during asynchronous discovery or pending approval prevents later dispatch; concurrent settings writes cannot re-enable control after Stop.
@@ -42,6 +68,24 @@ npx vitest run \
   src/electron/agent/tools/__tests__/native-app-tools.test.ts
 ```
 
+To reproduce the follow-up PR's 407-test integration check:
+
+```sh
+npx vitest run \
+  src/electron/phone/__tests__ \
+  src/electron/agent/__tests__/cross-step-evidence.test.ts \
+  src/electron/agent/__tests__/executor-loop-utils.test.ts \
+  src/electron/agent/__tests__/executor-helpers-cache.test.ts \
+  src/electron/agent/__tests__/task-web-evidence-policy.test.ts \
+  src/electron/agent/__tests__/executor-tool-allowlist.test.ts \
+  src/electron/agent/__tests__/tool-policy-engine.test.ts \
+  src/electron/applications/__tests__/android-phone-adapter.test.ts \
+  src/electron/applications/__tests__/ApplicationExecutionService.test.ts \
+  src/electron/agent/strategy/__tests__/TaskStrategyService.test.ts \
+  src/electron/applications/__tests__/application-task-intent.test.ts \
+  src/electron/applications/__tests__/cli-anything-harnesses.test.ts
+```
+
 With a disposable, unlocked emulator connected:
 
 ```sh
@@ -62,6 +106,6 @@ Follow the setup guide, verify both visible approval cards, hold an action appro
 
 ## Validation boundaries
 
-This is source/development acceptance on macOS with an emulator and a deterministic local model fixture. It does not establish physical-phone compatibility, real-provider model behavior, packaged-release acceptance, Linux/Windows host acceptance, or remote CI success. CI and release test jobs now provision Python/Pillow, but their results must be checked on the PR. The adapter remains unqualified: visible package/text evidence cannot certify a remote purchase, message delivery or other business transaction.
+This is source/development acceptance on macOS with an emulator, including both the original deterministic fixture and the subsequent real ChatGPT subscription run described above. It does not establish physical-phone compatibility, packaged-release acceptance, Linux/Windows host acceptance, or remote CI success. CI and release test jobs now provision Python/Pillow, but their results must be checked on the PR. The adapter remains unqualified: visible package/text evidence cannot certify a remote purchase, message delivery or other business transaction.
 
 Screenshots and machine-readable acceptance records were saved locally under the ignored `output/playwright/` directory. They are local test artifacts, not checked-in evidence or a publicly hosted report.

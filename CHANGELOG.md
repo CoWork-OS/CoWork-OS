@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Android workflow continuity**: pending operation IDs/status and the latest approved observation now remain available across task steps. Loop wrap-up guidance distinguishes planned input from executed work and keeps unknown-effect reconciliation explicit.
+
+- **Restored Android sessions**: a generated title containing “Search” no longer hides an explicitly requested Android workflow behind the read-only review heuristic. Host desktop tools and explicit tool restrictions retain their existing limits.
+- **Android completion after long workflows**: completed input readbacks remain verified historical observations instead of expiring after 60 seconds while later steps run. The final screen still requires fresh evidence; other application routes keep their expiry rules.
+- **Android stale-input recovery**: a proven stale no-dispatch attempt can be explicitly superseded by the same action and criteria using a fresh observation and approval. Failed attempts remain auditable without leaving successful replacements marked as partial success; uncertain or dispatched effects cannot be superseded this way.
+- **Android search workflow**: approved observations identify the focused native editor so typing can avoid redundant stale coordinate taps. Post-action criteria explain delegated Android packages, and Settings search no longer triggers an unrelated web-research evidence requirement.
+- **Android screenshot deliverables**: approved phone screenshots now return linkable task-workspace PNGs and verified file evidence, so the model can include them in its answer and artifact checks can find them. Private captures retain their separate cleanup policy; screenshot existence does not certify an Android business outcome.
+
 - **"Database worker queue is full" at startup**: the attention snapshot no longer sends one database read per saved workspace at once (at most 8 run at a time, and overlapping snapshots share one), and requests past the worker's in-flight limit now wait in order instead of failing. Profiles with many workspaces no longer fail unrelated startup requests such as the temp workspace.
 - **Startup no longer waits on the follow-up recovery scan**: finding follow-ups a crash left queued used to read every finished task's messages before the first window. The scan now runs in the database worker's reporting reader while the app starts, and the tasks it finds resume with the other interrupted tasks; on a 1,700-task profile agent startup drops from about 250 ms to 50 ms.
 - **Startup no longer waits on opening the database**: the profile database (schema setup in its own worker) now opens while Electron and the keychain get ready instead of after, and that worker no longer loads stores and validation libraries just to read table definitions. On a 1,700-task profile the window appears about 340 ms sooner.

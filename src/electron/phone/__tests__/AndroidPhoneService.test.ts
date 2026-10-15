@@ -359,6 +359,14 @@ describe("Android tool approval and image delivery", () => {
     expect(toolResult.content).not.toContain(shot.imageBase64);
     const operationScreen = {
       ...shot,
+      path: "/workspace/android-screen.png",
+      focusedEditor: { id: "search", text: "", x: 10, y: 10, w: 80, h: 30 },
+      screenshot: {
+        path: "/workspace/android-screen.png",
+        taskId: "task",
+        size: 8,
+        sha256: "digest",
+      },
       phoneOperation: {
         operationId: "operation",
         execution: "completed",
@@ -373,6 +381,13 @@ describe("Android tool approval and image delivery", () => {
       sanitizeToolResult: (_n, text) => text,
       getToolFailureReason: (_r, text) => text,
     });
+    expect(JSON.parse(normalized.toolResult.content).path).toBe(operationScreen.path);
+    expect(JSON.parse(normalized.toolResult.content).focusedEditor).toEqual(
+      operationScreen.focusedEditor,
+    );
+    expect(JSON.parse(normalized.toolResult.content).screenshot).toEqual(
+      operationScreen.screenshot,
+    );
     expect(JSON.parse(normalized.toolResult.content).phoneOperation).toEqual(
       operationScreen.phoneOperation,
     );

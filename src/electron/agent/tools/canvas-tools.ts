@@ -14,7 +14,12 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
 import { assertResolvedHostAllowed } from "../../security/address-classes";
-import { evaluateWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
+import {
+  assertWorkspaceFilesystemAccessWithApproval,
+  assertWorkspaceReadableFileAccessWithApproval,
+  createWorkspaceFilesystemApprovalHandlers,
+  evaluateWorkspaceFilesystemAccess,
+} from "../../security/access-profile-paths";
 import { CanvasManager } from "../../canvas/canvas-manager";
 import { LLMTool } from "../llm/types";
 import * as fs from "fs/promises";
@@ -654,6 +659,114 @@ export class CanvasTools {
   }
 
   /**
+   * Copy a workspace media file (generated image, video clip, audio) into the
+   * canvas session so the page can load it by relative URL.
+   */
+  async addAsset(
+    sessionId: string,
+    sourcePath: string,
+    name?: string,
+  ): Promise<{ success: true; url: string; bytes: number; mimeType: string }> {
+    this.getOwnedSession(sessionId);
+    if (typeof sourcePath !== "string" || !sourcePath.trim()) {
+      throw new Error("canvas_add_asset requires a path");
+    }
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "canvas_add_asset",
+      sessionId,
+      path: sourcePath,
+    });
+
+    try {
+      // Same canonical read check (and external-path approval) as the file tools,
+      // re-validated after symlink resolution.
+      const resolvedSource = await assertWorkspaceReadableFileAccessWithApproval(
+        this.workspace,
+        sourcePath,
+        "canvas asset",
+        createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "canvas_add_asset"),
+      );
+      const asset = await this.manager.addAsset(sessionId, resolvedSource, name);
+
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "canvas_add_asset",
+        success: true,
+        url: asset.relativePath,
+        bytes: asset.bytes,
+      });
+      return {
+        success: true,
+        url: asset.relativePath,
+        bytes: asset.bytes,
+        mimeType: asset.mimeType,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.daemon.logEvent(this.taskId, "tool_error", {
+        tool: "canvas_add_asset",
+        error: message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Export the canvas page and its assets to a workspace folder.
+   */
+  async exportCanvas(
+    sessionId: string,
+    targetDir?: string,
+  ): Promise<{ success: true; targetDir: string; files: string[]; entry: string }> {
+    const session = this.getOwnedSession(sessionId);
+    const slug =
+      String(session?.title || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60) || `canvas-${sessionId.slice(0, 8)}`;
+    const requestedDir = typeof targetDir === "string" && targetDir.trim() ? targetDir : slug;
+    this.daemon.logEvent(this.taskId, "tool_call", {
+      tool: "canvas_export",
+      sessionId,
+      targetDir: requestedDir,
+    });
+
+    try {
+      if (this.workspace.permissions?.write === false) {
+        throw new Error("Write permission not granted for canvas export");
+      }
+      const resolvedTarget = await assertWorkspaceFilesystemAccessWithApproval(
+        this.workspace,
+        requestedDir,
+        "write",
+        "canvas export folder",
+        createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "canvas_export"),
+      );
+      const result = await this.manager.exportToFolder(sessionId, resolvedTarget);
+
+      this.daemon.logEvent(this.taskId, "tool_result", {
+        tool: "canvas_export",
+        success: true,
+        targetDir: result.targetDir,
+        fileCount: result.files.length,
+      });
+      return {
+        success: true,
+        targetDir: result.targetDir,
+        files: result.files,
+        entry: path.join(result.targetDir, "index.html"),
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.daemon.logEvent(this.taskId, "tool_error", {
+        tool: "canvas_export",
+        error: message,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Save a named checkpoint of the current canvas state
    */
   async saveCheckpoint(
@@ -922,6 +1035,53 @@ export class CanvasTools {
             session_id: {
               type: "string",
               description: "The canvas session ID",
+            },
+          },
+          required: ["session_id"],
+        },
+      },
+      {
+        name: "canvas_add_asset",
+        description:
+          "Copy a workspace media file (image, video clip or audio, e.g. output of generate_image or generate_video) " +
+          'into a canvas session\'s assets/ folder. Returns a relative url (e.g. "assets/scene-1.png") to use in ' +
+          "canvas_push HTML as <img src>, <video src> or a CSS url(). Use this instead of inlining base64 media. " +
+          "Allowed: png, jpg, gif, webp, avif, mp4, webm, mov, mp3, wav, ogg, m4a.",
+        input_schema: {
+          type: "object",
+          properties: {
+            session_id: {
+              type: "string",
+              description: "The canvas session ID returned from canvas_create",
+            },
+            path: {
+              type: "string",
+              description: "Workspace-relative or absolute path of the media file to copy",
+            },
+            name: {
+              type: "string",
+              description: "Optional file name inside assets/ (defaults to the source file name)",
+            },
+          },
+          required: ["session_id", "path"],
+        },
+      },
+      {
+        name: "canvas_export",
+        description:
+          "Export a canvas page with all of its files (index.html, CSS/JS, assets/) to a folder in the workspace " +
+          "so it can be opened in a browser or shared. Returns the folder and the entry index.html path.",
+        input_schema: {
+          type: "object",
+          properties: {
+            session_id: {
+              type: "string",
+              description: "The canvas session ID",
+            },
+            target_dir: {
+              type: "string",
+              description:
+                "Workspace-relative destination folder (defaults to a folder named after the canvas title)",
             },
           },
           required: ["session_id"],

@@ -620,6 +620,21 @@ export function CanvasPreview({
     }
   }, [session.id]);
 
+  // Export page + assets/ to a folder picked in the native dialog
+  const handleExportFolder = useCallback(async () => {
+    setShowExportMenu(false);
+    try {
+      const result = await window.electronAPI.canvasExportToFolder({ sessionId: session.id });
+      if (!result) return;
+      setCopyFeedback(`Exported ${result.files.length} files`);
+      setTimeout(() => setCopyFeedback(null), 2000);
+    } catch (err) {
+      console.error("Failed to export canvas folder:", err);
+      setCopyFeedback("Export failed");
+      setTimeout(() => setCopyFeedback(null), 2000);
+    }
+  }, [session.id]);
+
   // Open canvas in system browser
   const handleOpenInBrowser = useCallback(async () => {
     setShowExportMenu(false);
@@ -1055,6 +1070,19 @@ export function CanvasPreview({
                         <polyline points="14 2 14 8 20 8" />
                       </svg>
                       Export HTML
+                    </button>
+                    <button className="export-menu-item" onClick={handleExportFolder}>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                      </svg>
+                      Export folder with media
                     </button>
                     <button className="export-menu-item" onClick={handleOpenInBrowser}>
                       <svg

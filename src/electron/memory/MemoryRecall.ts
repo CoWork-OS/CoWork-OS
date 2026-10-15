@@ -27,6 +27,7 @@
  * hits they actually return in full or inject, never for a listing.
  */
 import {
+  getMemoryRepoBotFile,
   getMemoryRepoSwarmReadPrefix,
   isMemoryRepoReadAllowed,
 } from "../security/memory-repo-access";
@@ -47,6 +48,7 @@ import { redactSensitiveMarkdownContent } from "./markdown-index-sql";
 import { MemoryRepoService } from "./repo/MemoryRepoService";
 import {
   MEMORY_REPO_INBOX_FILE,
+  isBotRepoPath,
   isSwarmRepoPath,
   memoryRepoRef,
   parseMemoryRepoEntries,
@@ -1246,10 +1248,14 @@ export function defaultMemoryRecallDeps(): MemoryRecallDeps {
       // swarm member without the memoryRepo layer recalls from that folder alone.
       const swarmPrefix = getMemoryRepoSwarmReadPrefix();
       const inOwnSwarm = (file: string) => !!swarmPrefix && file.startsWith(`${swarmPrefix}/`);
+      // Bot files (`bots/<slug>.md`): only the task's own bot's file.
+      const ownBotFile = getMemoryRepoBotFile();
       if (isMemoryRepoReadAllowed()) {
         return memoryRepoRecallSource(
           service,
-          (file) => !isSwarmRepoPath(file) || inOwnSwarm(file),
+          (file) =>
+            (!isSwarmRepoPath(file) || inOwnSwarm(file)) &&
+            (!isBotRepoPath(file) || file === ownBotFile),
         );
       }
       return swarmPrefix ? memoryRepoRecallSource(service, inOwnSwarm) : null;

@@ -498,3 +498,38 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* ---- Bot memory ---- */
+
+.bot-memory-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bot-memory-entry {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bot-memory-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bot-memory-text small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.bot-memory-history .bot-memory-text {
+  color: var(--color-text-secondary, var(--color-text-muted));
+}

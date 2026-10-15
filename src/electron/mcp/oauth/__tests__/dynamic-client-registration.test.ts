@@ -6,6 +6,7 @@ import type { MCPAuthConfig } from "../../types";
 import {
   authorizeWithPkce,
   canRenewWithoutUser,
+  parseChallengeScopes,
   prepareDynamicClient,
   registerOAuthClient,
 } from "../mcp-oauth";
@@ -33,6 +34,8 @@ interface ProviderOptions {
   registration?: Record<string, unknown>;
   /** Overrides for the authorization server metadata. */
   metadata?: (base: string) => Record<string, unknown>;
+  /** WWW-Authenticate challenge for an unauthenticated MCP request; none answers 404. */
+  challenge?: (base: string) => string;
 }
 
 /**
@@ -55,6 +58,12 @@ async function startProvider(options: ProviderOptions = {}) {
       for await (const chunk of req) raw += chunk;
       return raw;
     };
+    if (url.pathname === "/mcp" && req.method === "POST") {
+      await readBody();
+      if (!options.challenge) return json({ error: "not found" }, 404);
+      res.writeHead(401, { "WWW-Authenticate": options.challenge(base) }).end();
+      return;
+    }
     if (url.pathname === "/.well-known/oauth-protected-resource/mcp")
       return json({
         resource: `${base}/mcp`,
@@ -146,6 +155,7 @@ describe("MCP OAuth dynamic client registration", () => {
         tokenAuthMethod: "none",
         resource: `${base}/mcp`,
         scopes: ["read", "write"],
+        scopesDiscovered: true,
         dynamicClientRegistration: true,
       },
     });
@@ -209,6 +219,62 @@ describe("MCP OAuth dynamic client registration", () => {
     expect(registrations[0].token_endpoint_auth_method).toBe("client_secret_basic");
     // No method in the answer: a client with a secret defaults to client_secret_basic (RFC 7591).
     expect(prepared.oauth?.tokenAuthMethod).toBe("client_secret_basic");
+  });
+
+  it("asks for the scopes the server's 401 challenge names over everything it supports", async () => {
+    const { base } = await startProvider({
+      challenge: (b) =>
+        `Bearer resource_metadata="${b}/.well-known/oauth-protected-resource/mcp", scope="read"`,
+    });
+    const prepared = await prepareDynamicClient(
+      registryAuth("http://127.0.0.1:18768/oauth/callback"),
+      `${base}/mcp`,
+      { fetchImpl: nativeFetch },
+    );
+    expect(prepared.oauth?.scopes).toEqual(["read"]);
+  });
+
+  it("asks a changed challenge's scopes again, unless the person typed the scopes", async () => {
+    const { base } = await startProvider({
+      challenge: (b) =>
+        `Bearer resource_metadata="${b}/.well-known/oauth-protected-resource/mcp", scope="read write"`,
+    });
+    const auth = registryAuth("http://127.0.0.1:18768/oauth/callback");
+    // Scopes a previous sign-in discovered: the server is asked again.
+    const rediscovered = await prepareDynamicClient(
+      { ...auth, oauth: { ...auth.oauth!, scopes: ["read"], scopesDiscovered: true } },
+      `${base}/mcp`,
+      { fetchImpl: nativeFetch },
+    );
+    expect(rediscovered.oauth?.scopes).toEqual(["read", "write"]);
+    expect(rediscovered.oauth?.scopesDiscovered).toBe(true);
+    // Scopes the person typed stay as typed.
+    const typed = await prepareDynamicClient(
+      { ...auth, oauth: { ...auth.oauth!, scopes: ["admin"] } },
+      `${base}/mcp`,
+      { fetchImpl: nativeFetch },
+    );
+    expect(typed.oauth?.scopes).toEqual(["admin"]);
+    expect(typed.oauth?.scopesDiscovered).toBe(false);
+  });
+
+  it("falls back to the metadata's scopes when the challenge names none", async () => {
+    const { base } = await startProvider({ challenge: () => 'Bearer error="invalid_token"' });
+    const prepared = await prepareDynamicClient(
+      registryAuth("http://127.0.0.1:18768/oauth/callback"),
+      `${base}/mcp`,
+      { fetchImpl: nativeFetch },
+    );
+    expect(prepared.oauth?.scopes).toEqual(["read", "write"]);
+  });
+
+  it("parses the scope parameter of a Bearer challenge", () => {
+    expect(parseChallengeScopes('Bearer realm="x", scope="mcp  operator"')).toEqual([
+      "mcp",
+      "operator",
+    ]);
+    expect(parseChallengeScopes('Bearer resource_metadata="https://a.example/prm"')).toEqual([]);
+    expect(parseChallengeScopes(null)).toEqual([]);
   });
 
   it("leaves servers without dynamic registration untouched", async () => {

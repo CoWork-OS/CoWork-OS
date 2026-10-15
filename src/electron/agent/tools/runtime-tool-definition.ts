@@ -143,6 +143,7 @@ const DEFERRED_BY_DEFAULT_TOOLS = new Set([
   "canvas_checkpoint",
   "canvas_restore",
   "canvas_checkpoints",
+  "canvas_export",
   "visual_open_annotator",
   "visual_update_annotator",
   // Monty transforms

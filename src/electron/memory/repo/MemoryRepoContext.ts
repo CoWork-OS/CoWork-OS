@@ -22,6 +22,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { InputSanitizer } from "../../agent/security/input-sanitizer";
 import {
+  MEMORY_REPO_BOT_FILE_TOKENS,
   MEMORY_REPO_ENTRY_FILE_TOKENS,
   MEMORY_REPO_MAX_TEAM_REPOS,
   MEMORY_REPO_TEAM_FILE_TOKENS,
@@ -33,6 +34,8 @@ import { MemoryRepoService } from "./MemoryRepoService";
 import {
   MEMORY_REPO_ENTRY_FILE,
   MEMORY_REPO_INBOX_FILE,
+  isExpiredMemoryRepoEntry,
+  isMemoryRepoMarker,
   memoryRepoRef,
   parseMemoryRepoLine,
   splitLines,
@@ -62,6 +65,8 @@ export interface MemoryRepoContextBlock {
 
 export interface MemoryRepoContextRequest {
   workspaceId?: string | null;
+  /** The task's bot (`AgentRole` id): its own file joins the block. */
+  botId?: string | null;
 }
 
 export interface MemoryRepoContextDeps {
@@ -100,8 +105,9 @@ export function renderMemoryRepoFile(
   relPath: string,
   markdown: string,
   budgetTokens: number,
-  options: { skipWorkspaceMarker?: boolean } = {},
+  options: { skipWorkspaceMarker?: boolean; today?: string } = {},
 ): RenderedFile {
+  const today = options.today ?? new Date().toISOString().slice(0, 10);
   const rows: Row[] = [];
   splitLines(markdown).forEach((raw, index) => {
     // Line by line, so line numbers (refs) stay those of the file on disk.
@@ -119,7 +125,9 @@ export function renderMemoryRepoFile(
     const entry = parseMemoryRepoLine(redacted, index + 1);
     if (!entry) return;
     // The line that names a workspace file's workspace: the heading already says it.
-    if (options.skipWorkspaceMarker && entry.metadata.workspace) return;
+    if (options.skipWorkspaceMarker && isMemoryRepoMarker(entry)) return;
+    // Past its `until` day the fact no longer applies; it stays in the file as history.
+    if (isExpiredMemoryRepoEntry(entry, today)) return;
     const text = inline(entry.text);
     if (!text) return;
     rows.push({
@@ -208,6 +216,7 @@ export class MemoryRepoContext {
     const personal = service?.isReady() ? service : null;
     try {
       const workspaceId = String(request.workspaceId ?? "");
+      const botId = String(request.botId ?? "");
       const teams = (this.deps.getTeamRepos ?? teamMemoryReposFor)(workspaceId || null)
         .filter((team) => team.service.isReady())
         .slice(0, MEMORY_REPO_MAX_TEAM_REPOS);
@@ -224,6 +233,8 @@ export class MemoryRepoContext {
         ) {
           files.push({ path: workspaceFile, budget: MEMORY_REPO_WORKSPACE_FILE_TOKENS });
         }
+        const botFile = botId ? await personal.botFile(botId) : null;
+        if (botFile) files.push({ path: botFile, budget: MEMORY_REPO_BOT_FILE_TOKENS });
       }
       const version = personal?.version() ?? "";
       // Hand edits are committed with the next write (team repos change by pulls); their
@@ -237,7 +248,17 @@ export class MemoryRepoContext {
             `team:${team.name}@${team.root}@${team.service.version()}@${await fileStamp(team.root, MEMORY_REPO_ENTRY_FILE)}`,
         ),
       );
-      const key = [personal?.root ?? "-", version, workspaceId, ...stamps, ...teamStamps].join("|");
+      // The day is in the key: an entry whose `until` passed leaves the block the next day.
+      const today = new Date().toISOString().slice(0, 10);
+      const key = [
+        personal?.root ?? "-",
+        version,
+        workspaceId,
+        botId,
+        today,
+        ...stamps,
+        ...teamStamps,
+      ].join("|");
       if (this.cache?.key === key) return this.cache.block;
 
       const sections: string[] = [];
@@ -249,6 +270,7 @@ export class MemoryRepoContext {
           if (!markdown) continue;
           const rendered = renderMemoryRepoFile(file.path, markdown, file.budget, {
             skipWorkspaceMarker: file.path !== MEMORY_REPO_ENTRY_FILE,
+            today,
           });
           if (rendered.lines.length === 0) continue;
           sections.push([`[${file.path}]`, ...rendered.lines].join("\n"));

@@ -789,6 +789,8 @@ export class MessageRouter {
     "canvas_checkpoint",
     "canvas_restore",
     "canvas_checkpoints",
+    "canvas_add_asset",
+    "canvas_export",
     "visual_open_annotator",
     "visual_update_annotator",
   ] as const;

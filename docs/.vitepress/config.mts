@@ -57,6 +57,7 @@ export default defineConfig({
         text: "Models, Access & Comparison",
         items: [
           { text: "Models & Access", link: "/providers" },
+          { text: "What You Own", link: "/what-you-own" },
           { text: "Jev Decision Support", link: "/jev" },
           { text: "MLX-LM Local Inference", link: "/mlx-lm" },
           { text: "Compare CoWork OS", link: "/comparisons/" },

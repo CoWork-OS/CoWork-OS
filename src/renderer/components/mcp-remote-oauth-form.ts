@@ -136,3 +136,15 @@ export function remoteOAuthRequest(form: RemoteOAuthForm): RemoteOAuthServerRequ
       : {}),
   };
 }
+
+/**
+ * The message of an error from main, without Electron's "Error invoking remote
+ * method" prefix, for the server card.
+ */
+export function mcpErrorMessage(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const cleaned = raw
+    .replace(/^Error invoking remote method '[^']+':\s*(?:\w*Error:\s*)?/, "")
+    .trim();
+  return cleaned || fallback;
+}

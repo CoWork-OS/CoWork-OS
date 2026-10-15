@@ -33,6 +33,51 @@ describe("volatile cross-step evidence", () => {
     expect(result).toContain("permission denied");
   });
 
+  it("carries pending phone operation IDs across steps without treating them as completed or approved", () => {
+    const operation = {
+      id: "op",
+      route: { id: "phone.android.v1" },
+      request: {
+        taskId: "task",
+        capability: "phone.android.action",
+        input: { deviceId: "phone", action: { kind: "type_text", text: "test" } },
+      },
+      execution: "planned",
+      verification: "pending",
+      dispatchRequested: false,
+    };
+    const context = new Map(collectCrossStepEvidence("application_operation", { operation }));
+    const text = formatCrossStepEvidence(context);
+    expect(text).toContain('"operationId":"op"');
+    expect(text).toContain('"execution":"planned"');
+    expect(text).toContain("not an approval grant");
+    expect(text).toContain("does not dispatch input");
+    operation.execution = "unknown";
+    for (const [key, value] of collectCrossStepEvidence("application_operation", { operation }))
+      context.set(key, value);
+    expect(context.size).toBe(1);
+    expect(formatCrossStepEvidence(context)).toContain('"execution":"unknown"');
+    expect(formatCrossStepEvidence(context)).toContain("without replay");
+  });
+  it("retains only the newest bounded phone observation and excludes image bytes", () => {
+    const context = new Map<string, string>();
+    for (const captureId of ["old", "new"])
+      for (const [key, value] of collectCrossStepEvidence("android_phone_observe", {
+        deviceId: "phone",
+        captureId,
+        path: "/workspace/screen.png",
+        texts: ["x".repeat(10000)],
+        imageBase64: "private pixels",
+      }))
+        context.set(key, value);
+    const text = formatCrossStepEvidence(context);
+    expect(context.size).toBe(1);
+    expect(text).toContain('"captureId":"new"');
+    expect(text).not.toContain("private pixels");
+    expect(text).toContain("untrusted data");
+    expect(text.length).toBeLessThan(3900);
+  });
+
   it("retains source excerpts with their qualification and bounds large fetched pages", () => {
     const search = collectCrossStepEvidence("web_search", {
       results: [{ url: "https://example.com/pricing", snippet: "$12 monthly" }],

@@ -176,6 +176,8 @@ export interface ApplicationOperation {
   error?: string;
   attemptCount: number;
   dispatchRequested: boolean;
+  /** Trusted adapter failure establishes that this attempt sent no effect. */
+  notDispatched?: boolean;
   pendingAction?: "prepare" | "execute" | "cancel";
   manualResolution?: {
     key: string;
@@ -231,8 +233,20 @@ export function projectApplicationOperation(
   operation: ApplicationOperation,
   now = Date.now(),
 ): ApplicationOperationProjection {
+  const receipt = operation.result?.data?.receipt as { status?: string } | undefined;
+  // Android action readback is historical evidence. Keep older persisted records
+  // usable too; their former 60-second TTL cannot erase an observed input outcome.
+  // A task's final/current screen still requires a new approved observation.
+  const historicalPhoneReadback =
+    operation.route.id === "phone.android.v1" &&
+    operation.request.capability === "phone.android.action" &&
+    receipt?.status === "completed" &&
+    operation.verificationResult?.status === "verified" &&
+    Number.isFinite(operation.verificationResult.checkedAt);
   const fresh =
-    !operation.verificationResult?.expiresAt || operation.verificationResult.expiresAt > now;
+    historicalPhoneReadback ||
+    !operation.verificationResult?.expiresAt ||
+    operation.verificationResult.expiresAt > now;
   const status: ApplicationOperationProjection["status"] = operation.supersededBy
     ? "superseded"
     : operation.execution === "cancelled"

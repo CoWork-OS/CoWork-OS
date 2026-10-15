@@ -8,6 +8,19 @@ export function hasNativeApplicationOutputIntent(text: string): boolean {
   );
 }
 
+// "with GIMP", "in LibreOffice Calc", "using Blender": the tool, not the subject.
+// A bare name stays a subject ("an image of a kitchen blender").
+const HARNESS_APP_REQUEST = new RegExp(
+  String.raw`\bcli-anything\b|\b(?:in|with|using|via|through|from)\s+(?:the\s+)?` +
+    String.raw`(?:gimp|inkscape|krita|blender|libre\s?office|audacity|draw\.io|drawio|kdenlive|shotcut|freecad|musescore)\b`,
+  "i",
+);
+
+/** The task asks for the work to be done in a desktop app that has a CLI-Anything harness. */
+export function requestsCliAnythingApp(text: string): boolean {
+  return HARNESS_APP_REQUEST.test(String(text || ""));
+}
+
 /** Returning existing results does not dispatch another application mutation. */
 export function isNativeApplicationPresentationStep(
   taskText: string,

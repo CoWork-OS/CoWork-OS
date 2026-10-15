@@ -519,6 +519,7 @@ export class ApplicationExecutionService {
                     ? "completed"
                     : "unknown",
               error: summary,
+              notDispatched: phase === "execute" && safeFailure,
               nextPollAt: this.now() + (this.options.pollMs ?? 5_000),
             };
       const next = await this.repository.finish(claim, update, this.now());

@@ -175,7 +175,7 @@ describe("memory layers for prompt surfaces", () => {
       l0: true,
       l1Tokens: 200,
     });
-    expect(repoBuild).toHaveBeenCalledWith({ workspaceId: "ws-1" });
+    expect(repoBuild).toHaveBeenCalledWith({ workspaceId: "ws-1", botId: null });
     expect(chat.repo).toMatch(/^<cowork_memory_repo>/);
     expect(build).toHaveBeenCalledWith(expect.objectContaining({ excludeHashes: ["h-tea"] }));
     expect(executor.emitEvent).toHaveBeenCalledWith("memory_used", {

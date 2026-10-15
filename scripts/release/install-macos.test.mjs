@@ -206,7 +206,9 @@ test("verify_sha512 compares electron-builder's base64 digest", () => {
     const ok = sourced('verify_sha512 "$1" "$2"', [file, `  ${expected}\n`]);
     assert.equal(ok.status, 0, ok.stderr);
 
-    const tampered = sourced('verify_sha512 "$1" "$2"', [file, `X${expected.slice(1)}`]);
+    // Change the first character to a different one (a digest can itself start with "X").
+    const swapped = expected[0] === "X" ? "Y" : "X";
+    const tampered = sourced('verify_sha512 "$1" "$2"', [file, `${swapped}${expected.slice(1)}`]);
     assert.equal(tampered.status, 1);
 
     const empty = sourced('verify_sha512 "$1" ""', [file]);

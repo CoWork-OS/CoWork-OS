@@ -49,6 +49,7 @@ function createBaseState(): SessionRuntimeState {
       toolUsageEventsSinceDecay: 0,
       toolSelectionEpoch: 0,
       discoveredDeferredToolNames: new Set(),
+      exposedToolNames: new Set(),
       availableToolsCacheKey: null,
       availableToolsCache: null,
       lastWebFetchFailure: null,
@@ -1358,6 +1359,18 @@ describe("SessionRuntime", () => {
         }),
       ]),
     );
+  });
+
+  it("records why a request missed the prompt cache in llm_usage", () => {
+    const harness = createHarness();
+    harness.runtime.state.promptCache.promptCacheInvalidationReason = "tool_schema_changed";
+    harness.runtime.updateTracking(120, 45, 0);
+    harness.runtime.state.promptCache.promptCacheInvalidationReason = null;
+    harness.runtime.updateTracking(130, 40, 100);
+
+    const usage = harness.emittedEvents.filter((event) => event.type === "llm_usage");
+    expect(usage[0]?.payload.delta.cacheInvalidation).toBe("tool_schema_changed");
+    expect(usage[1]?.payload.delta).not.toHaveProperty("cacheInvalidation");
   });
 
   it("emits llm_usage with structured provider metadata from model selection", () => {
@@ -3329,6 +3342,98 @@ describe("SessionRuntime", () => {
       "create_spreadsheet",
     );
     expect(renderToolsForContext).toHaveBeenCalledTimes(2);
+  });
+
+  describe("tools offered earlier stay offered", () => {
+    const graphTool = { name: "kg_create_entity", description: "Create a knowledge graph entity" };
+    const registry = (deferredGraph = false) => {
+      const kg = deferredGraph ? { ...graphTool, runtime: { deferLoad: true } } : graphTool;
+      return {
+        getTools: vi.fn(() => [{ name: "read_file" }, kg, { name: "web_search" }]),
+        getDeferredTools: vi.fn(() => (deferredGraph ? [kg] : [])),
+        getToolCatalogVersion: vi.fn(() => "catalog:sticky"),
+        cleanup: vi.fn(async () => undefined),
+      };
+    };
+    const names = (harness: ReturnType<typeof createHarness>) =>
+      harness.runtime.getAvailableTools().map((tool: Any) => tool.name);
+    // Stands in for the message-driven relevance filter.
+    const graphOnlyWhenAsked = (harness: ReturnType<typeof createHarness>) => {
+      harness.deps.applyAdaptiveToolAvailabilityFilter = (tools) =>
+        /graph/.test(String(harness.runtime.state.transcript.lastUserMessage || ""))
+          ? tools
+          : tools.filter((tool) => tool.name !== "kg_create_entity");
+    };
+
+    it("keeps the same list on a follow-up whose wording no longer matches", () => {
+      const harness = createHarness();
+      harness.setToolRegistry(registry());
+      graphOnlyWhenAsked(harness);
+
+      harness.runtime.state.transcript.lastUserMessage = "Hello";
+      expect(names(harness)).toEqual(["read_file", "web_search"]);
+
+      harness.runtime.state.transcript.lastUserMessage = "Add this to the knowledge graph";
+      const offered = harness.runtime.getAvailableTools();
+      expect(offered.map((tool: Any) => tool.name)).toEqual([
+        "read_file",
+        "kg_create_entity",
+        "web_search",
+      ]);
+
+      harness.runtime.state.transcript.lastUserMessage = "Thanks";
+      expect(JSON.stringify(harness.runtime.getAvailableTools())).toBe(JSON.stringify(offered));
+    });
+
+    it("keeps a deferred tool that a search surfaced once", () => {
+      const harness = createHarness();
+      harness.setToolRegistry(registry(true));
+
+      harness.runtime.state.transcript.lastUserMessage = "create a knowledge graph entity";
+      expect(names(harness)).toContain("kg_create_entity");
+
+      harness.runtime.state.transcript.lastUserMessage = "Thanks";
+      expect(names(harness)).toContain("kg_create_entity");
+    });
+
+    it("still drops a tool that a policy or step gate removes later", () => {
+      const harness = createHarness();
+      harness.setToolRegistry(registry());
+      harness.runtime.state.transcript.lastUserMessage = "Add this to the knowledge graph";
+      expect(names(harness)).toContain("kg_create_entity");
+
+      harness.deps.applyAgentPolicyToolFilter = (tools) =>
+        tools.filter((tool) => tool.name !== "kg_create_entity");
+      harness.runtime.state.transcript.lastUserMessage = "Now without it";
+      expect(names(harness)).toEqual(["read_file", "web_search"]);
+    });
+
+    it("restores the offered tools from a snapshot", () => {
+      const source = createHarness();
+      source.setToolRegistry(registry());
+      graphOnlyWhenAsked(source);
+      source.runtime.state.transcript.conversationHistory = [
+        { role: "user", content: "Add this to the knowledge graph" },
+      ];
+      source.runtime.state.transcript.lastUserMessage = "Add this to the knowledge graph";
+      source.runtime.getAvailableTools();
+      source.runtime.saveSnapshot();
+      const snapshot = source.emittedEvents.find((event) => event.type === "conversation_snapshot");
+      expect(snapshot?.payload.tooling.exposedToolNames).toEqual([
+        "read_file",
+        "kg_create_entity",
+        "web_search",
+      ]);
+
+      const restored = createHarness();
+      restored.setToolRegistry(registry());
+      graphOnlyWhenAsked(restored);
+      restored.runtime.restoreFromEvents([
+        { type: "conversation_snapshot", payload: snapshot?.payload } as Any,
+      ]);
+      restored.runtime.state.transcript.lastUserMessage = "Thanks";
+      expect(names(restored)).toEqual(["read_file", "kg_create_entity", "web_search"]);
+    });
   });
 
   it("restores pending slash-skill parameter collection from replay events", () => {

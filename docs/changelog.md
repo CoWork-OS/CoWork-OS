@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Android workflow continuity**: pending operation IDs/status and the latest approved observation now remain available across task steps. Loop wrap-up guidance distinguishes planned input from executed work and keeps unknown-effect reconciliation explicit.
+
+- **Restored Android sessions**: a generated title containing “Search” no longer hides an explicitly requested Android workflow behind the read-only review heuristic. Host desktop tools and explicit tool restrictions retain their existing limits.
+- **Android completion after long workflows**: completed input readbacks remain verified historical observations instead of expiring after 60 seconds while later steps run. The final screen still requires fresh evidence; other application routes keep their expiry rules.
+- **Android stale-input recovery**: a proven stale no-dispatch attempt can be explicitly superseded by the same action and criteria using a fresh observation and approval. Failed attempts remain auditable without leaving successful replacements marked as partial success; uncertain or dispatched effects cannot be superseded this way.
+- **Android search workflow**: approved observations identify the focused native editor so typing can avoid redundant stale coordinate taps. Post-action criteria explain delegated Android packages, and Settings search no longer triggers an unrelated web-research evidence requirement.
+- **Android screenshot deliverables**: approved phone screenshots now return linkable task-workspace PNGs and verified file evidence, so the model can include them in its answer and artifact checks can find them. Private captures retain their separate cleanup policy; screenshot existence does not certify an Android business outcome.
+
 - Finished sessions were listed as waiting for you when their last approval had timed out.
 - Paused session cards said only "Paused"; they now say why the session stopped.
 - Reading the needs-you queue counted suggestions as shown, skewing suggestion ranking.

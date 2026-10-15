@@ -234,6 +234,8 @@ export interface SessionRuntimeSnapshotV2 {
     toolUsageEventsSinceDecay: number;
     toolSelectionEpoch: number;
     discoveredDeferredToolNames: string[];
+    /** Tools offered earlier in this session. Optional for older V2 snapshots. */
+    exposedToolNames?: string[];
   };
   files: {
     filesReadTracker: Array<[string, { step: string; sizeBytes: number }]>;
@@ -360,6 +362,8 @@ export interface SessionRuntimeState {
     toolUsageEventsSinceDecay: number;
     toolSelectionEpoch: number;
     discoveredDeferredToolNames: Set<string>;
+    /** Tools offered to the model earlier in this session; they stay offered (see getAvailableTools). */
+    exposedToolNames: Set<string>;
     availableToolsCacheKey: string | null;
     availableToolsCache: Any[] | null;
     lastWebFetchFailure: {
@@ -1194,6 +1198,7 @@ export class SessionRuntime {
       const cumulativeInput = this.getCumulativeInputTokens();
       const cumulativeOutput = this.getCumulativeOutputTokens();
       const cumulativeCost = this.getCumulativeCost();
+      const cacheInvalidation = this.state.promptCache?.promptCacheInvalidationReason;
       this.deps.emitEvent("llm_usage", {
         providerType: this.deps.getModelMetadata().providerType,
         modelId: this.deps.getModelMetadata().modelId,
@@ -1203,6 +1208,8 @@ export class SessionRuntime {
           cachedTokens: safeCached,
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
           ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
+          // Why this request could not reuse the previous prompt cache, if known.
+          ...(cacheInvalidation ? { cacheInvalidation } : {}),
           cost: deltaCost,
           costKnown,
         },
@@ -1861,6 +1868,32 @@ export class SessionRuntime {
     };
   }
 
+  private getExposedToolNames(): Set<string> {
+    if (!(this.state.tooling.exposedToolNames instanceof Set)) {
+      this.state.tooling.exposedToolNames = new Set();
+    }
+    return this.state.tooling.exposedToolNames;
+  }
+
+  /**
+   * Keep offering every tool the session has offered before. Providers cache the
+   * request prefix, and the tool list sits at its start: when relevance filters
+   * driven by the latest message drop a tool, the next request (often the first
+   * of a follow-up) gets no cache at all. Only the relevance filters are undone
+   * here; `eligibleTools` has already passed policy, mode, intent and step gates,
+   * and the tool keeps its catalog position so the list stays byte-identical.
+   */
+  private keepExposedTools<T extends { name: string }>(
+    eligibleTools: T[],
+    selectedTools: T[],
+  ): T[] {
+    const exposed = this.getExposedToolNames();
+    const selected = new Set(selectedTools.map((tool) => tool.name));
+    const kept = eligibleTools.filter((tool) => selected.has(tool.name) || exposed.has(tool.name));
+    for (const tool of kept) exposed.add(tool.name);
+    return kept;
+  }
+
   private buildToolAvailabilityCacheKey(params: {
     baseKey: string;
     renderContext: LLMToolPromptRenderContext;
@@ -1891,36 +1924,42 @@ export class SessionRuntime {
       hasAllowlist && !allowedTools.has("*") && !allowedTools.has(name);
     const disabledTools = this.state.tooling.toolFailureTracker.getDisabledTools();
     const botPolicyContext = this.deps.getToolPolicyContext();
-    const cacheKey = JSON.stringify({
-      toolCatalogVersion: this.deps.getToolRegistry().getToolCatalogVersion?.() || null,
-      disabledTools,
-      restrictedTools: [...restrictedTools].sort(),
-      allowedTools: [...allowedTools].sort(),
-      hasAllowlist,
-      webSearchMode: this.deps.getWebSearchMode(),
-      shellEnabled: this.deps.getWorkspace().permissions.shell,
-      botConversation: botPolicyContext?.botConversation === true,
-      botTeamId: botPolicyContext?.botTeamId || "",
-      botMessagingAuthorized: botPolicyContext?.botMessagingAuthorized === true,
-      turnSuccessfulToolUsageCounts: Array.from(
-        this.state.tooling.turnSuccessfulToolUsageCounts.entries(),
-      )
-        .filter(([, count]) => count > 0)
-        .sort(([left], [right]) => left.localeCompare(right)),
-    });
     const task = this.deps.getTask();
     const renderContext = this.buildToolPromptRenderContext();
-    const renderedCacheKey = this.buildToolAvailabilityCacheKey({
-      baseKey: cacheKey,
-      renderContext,
-      taskTitle: String(task.title || ""),
-      taskPrompt: String(task.prompt || ""),
-      lastUserMessage: String(this.state.transcript.lastUserMessage || ""),
-      currentStepId: this.state.loop.currentStepId,
-      discoveredDeferredToolNames: Array.from(
-        this.state.tooling.discoveredDeferredToolNames,
-      ).sort(),
-    });
+    // Built again after filtering: keeping offered tools can grow the exposed set.
+    const buildCacheKey = () => {
+      const cacheKey = JSON.stringify({
+        toolCatalogVersion: this.deps.getToolRegistry().getToolCatalogVersion?.() || null,
+        disabledTools,
+        restrictedTools: [...restrictedTools].sort(),
+        allowedTools: [...allowedTools].sort(),
+        hasAllowlist,
+        webSearchMode: this.deps.getWebSearchMode(),
+        shellEnabled: this.deps.getWorkspace().permissions.shell,
+        botConversation: botPolicyContext?.botConversation === true,
+        botTeamId: botPolicyContext?.botTeamId || "",
+        botMessagingAuthorized: botPolicyContext?.botMessagingAuthorized === true,
+        turnSuccessfulToolUsageCounts: Array.from(
+          this.state.tooling.turnSuccessfulToolUsageCounts.entries(),
+        )
+          .filter(([, count]) => count > 0)
+          .sort(([left], [right]) => left.localeCompare(right)),
+        // The exposed set only grows, so its size identifies it.
+        exposedToolCount: this.getExposedToolNames().size,
+      });
+      return this.buildToolAvailabilityCacheKey({
+        baseKey: cacheKey,
+        renderContext,
+        taskTitle: String(task.title || ""),
+        taskPrompt: String(task.prompt || ""),
+        lastUserMessage: String(this.state.transcript.lastUserMessage || ""),
+        currentStepId: this.state.loop.currentStepId,
+        discoveredDeferredToolNames: Array.from(
+          this.state.tooling.discoveredDeferredToolNames,
+        ).sort(),
+      });
+    };
+    const renderedCacheKey = buildCacheKey();
     if (
       this.state.tooling.availableToolsCacheKey === renderedCacheKey &&
       this.state.tooling.availableToolsCache
@@ -1950,6 +1989,7 @@ export class SessionRuntime {
     const deferredMatchNames = new Set([
       ...deferredMatches.map((match) => match.name),
       ...this.state.tooling.discoveredDeferredToolNames,
+      ...this.getExposedToolNames(),
     ]);
     const allTools = this.deferredToolCatalog
       .getAll()
@@ -1972,12 +2012,15 @@ export class SessionRuntime {
       const agentPolicyFiltered = this.deps.applyAgentPolicyToolFilter(modeFiltered);
       const intentFiltered = this.deps.applyIntentFilter(agentPolicyFiltered);
       const stepScopedTools = this.deps.applyStepScopedToolPolicy(intentFiltered);
-      finalTools = this.deps.applyAdaptiveToolAvailabilityFilter(stepScopedTools);
+      finalTools = this.keepExposedTools(
+        stepScopedTools,
+        this.deps.applyAdaptiveToolAvailabilityFilter(stepScopedTools),
+      );
       const renderedTools =
         typeof (toolRegistry as Any).renderToolsForContext === "function"
           ? (toolRegistry as Any).renderToolsForContext(finalTools as LLMTool[], renderContext)
           : finalTools;
-      this.state.tooling.availableToolsCacheKey = renderedCacheKey;
+      this.state.tooling.availableToolsCacheKey = buildCacheKey();
       this.state.tooling.availableToolsCache = renderedTools.slice();
       return renderedTools;
     }
@@ -1996,12 +2039,15 @@ export class SessionRuntime {
     const agentPolicyFiltered = this.deps.applyAgentPolicyToolFilter(modeFiltered);
     const intentFiltered = this.deps.applyIntentFilter(agentPolicyFiltered);
     const stepScopedTools = this.deps.applyStepScopedToolPolicy(intentFiltered);
-    finalTools = this.deps.applyAdaptiveToolAvailabilityFilter(stepScopedTools);
+    finalTools = this.keepExposedTools(
+      stepScopedTools,
+      this.deps.applyAdaptiveToolAvailabilityFilter(stepScopedTools),
+    );
     const renderedTools =
       typeof (toolRegistry as Any).renderToolsForContext === "function"
         ? (toolRegistry as Any).renderToolsForContext(finalTools as LLMTool[], renderContext)
         : finalTools;
-    this.state.tooling.availableToolsCacheKey = renderedCacheKey;
+    this.state.tooling.availableToolsCacheKey = buildCacheKey();
     this.state.tooling.availableToolsCache = renderedTools.slice();
     return renderedTools;
   }
@@ -3654,6 +3700,7 @@ export class SessionRuntime {
           discoveredDeferredToolNames: Array.from(
             this.state.tooling.discoveredDeferredToolNames.values(),
           ),
+          exposedToolNames: Array.from(this.getExposedToolNames().values()),
         },
         files: {
           filesReadTracker: Array.from(this.state.files.filesReadTracker.entries()),
@@ -4872,6 +4919,7 @@ export class SessionRuntime {
     this.state.tooling.discoveredDeferredToolNames = new Set(
       payload.tooling.discoveredDeferredToolNames || [],
     );
+    this.state.tooling.exposedToolNames = new Set(payload.tooling.exposedToolNames || []);
     this.state.files.filesReadTracker = new Map(payload.files.filesReadTracker || []);
 
     this.state.loop = { ...this.state.loop, ...payload.loop };

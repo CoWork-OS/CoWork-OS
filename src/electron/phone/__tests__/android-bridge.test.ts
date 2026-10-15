@@ -21,6 +21,14 @@ describe("trusted Android worker guards", () => {
   it("allows caret paint changes only for typing into the same focused native text field", () => {
     const value = run("typing_caret");
     expect(value.observation.typingDigest).toBeTruthy();
+    expect(value.observation.focusedEditor).toEqual({
+      id: "input",
+      text: "",
+      x: 10,
+      y: 10,
+      w: 80,
+      h: 30,
+    });
     expect(value.result.receipt.status).toBe("completed");
     expect(value.inputCalls).toEqual(["input.text"]);
   });
@@ -52,7 +60,12 @@ describe("trusted Android worker guards", () => {
     "requires handoff when secure-field inspection returns %s",
     (caseName) => {
       const value = run(caseName);
-      expect(value.observation).toMatchObject({ securityKnown: false, texts: [], elements: [] });
+      expect(value.observation).toMatchObject({
+        securityKnown: false,
+        texts: [],
+        elements: [],
+        focusedEditor: null,
+      });
       expect(value.observation.imageBase64).toBeTruthy();
       expect(value.result).toMatchObject({
         notDispatched: true,
@@ -74,7 +87,12 @@ describe("trusted Android worker guards", () => {
   });
   it("still refuses secure screens", () => {
     const value = run("password");
-    expect(value.observation).toMatchObject({ secure: true, texts: [], elements: [] });
+    expect(value.observation).toMatchObject({
+      secure: true,
+      texts: [],
+      elements: [],
+      focusedEditor: null,
+    });
     expect(value.inputCalls).toEqual([]);
   });
   it("dispatches an unchanged safe screenshot exactly once", () => {

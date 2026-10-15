@@ -21,10 +21,14 @@ import {
 } from "../types";
 import { MCPSettingsManager } from "../settings";
 import { assertMcpServerNotBlocked } from "../connector-policy";
+import { HOSTED_MCP_SERVERS } from "./hosted-mcp-servers";
 
 // Cache duration in milliseconds (15 minutes)
 const REGISTRY_CACHE_DURATION = 15 * 60 * 1000;
 const MAX_NPM_PACKAGE_NAME_LENGTH = 214;
+// Same fixed loopback redirect as the Remote (OAuth) form (DEFAULT_OAUTH_REDIRECT_URI);
+// not imported, because that module pulls in the client manager.
+const REGISTRY_OAUTH_REDIRECT_URI = "http://127.0.0.1:18768/oauth/callback";
 const NPM_PACKAGE_PART_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 // Built-in registry of common MCP servers
@@ -171,6 +175,7 @@ const BASE_BUILTIN_SERVERS: MCPRegistryEntry[] = [
     verified: true,
     featured: true,
   },
+  ...HOSTED_MCP_SERVERS,
 ];
 
 const LOCAL_CONNECTOR_VERSION = "0.1.0";
@@ -3249,6 +3254,22 @@ export class MCPRegistryManager {
             env: entry.defaultEnv,
           }
         : { url: entry.defaultUrl }),
+      // Hosted servers that sign in with MCP OAuth register their own client on
+      // the first sign-in (see prepareDynamicClient).
+      ...(entry.transport !== "stdio" && entry.remoteAuth === "oauth"
+        ? {
+            auth: {
+              type: "bearer" as const,
+              oauth: {
+                grant: "authorization_code" as const,
+                redirectUri: REGISTRY_OAUTH_REDIRECT_URI,
+                dynamicClientRegistration: true,
+              },
+            },
+            // Reads run without prompts; any tool that can change data asks first.
+            defaultToolsApprovalMode: "writes" as const,
+          }
+        : {}),
       registryId: entry.id,
       version: entry.version,
       author: entry.author,

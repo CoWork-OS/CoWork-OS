@@ -9,6 +9,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { BotWorkDialog, type BotWorkDialogTab } from "./BotWorkDialog";
+import { BotMemorySection } from "./BotMemorySection";
 import { BOT_NOTIFICATION_POLICY_UPDATED_EVENT } from "./BotNotificationPanel";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { BotMascot } from "./bot-mascot/BotMascot";
@@ -421,6 +422,8 @@ export function BotDetailsRail({
           </button>
         )}
       </section>
+
+      {roleId ? <BotMemorySection botId={roleId} refreshKey={task.updatedAt} /> : null}
 
       <section className="bot-details-section">
         <h3 className="bot-details-section-heading">

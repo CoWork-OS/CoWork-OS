@@ -192,6 +192,7 @@ export const AgentConfigSchema = z
     taskOrigin: z.literal("build").optional(),
     providerType: z.enum(LLM_PROVIDER_TYPES).optional(),
     modelKey: z.string().max(200).optional(),
+    modelPinned: z.boolean().optional(),
     llmProfile: LlmProfileSchema.optional(),
     llmProfileForced: z.boolean().optional(),
     llmProfileHint: LlmProfileSchema.optional(),
@@ -432,6 +433,17 @@ export const TaskWorkspaceUpdateSchema = z.object({
   taskId: z.string().uuid(),
   workspaceId: WorkspaceIdSchema,
 });
+
+export const TaskModelSelectionSchema = z
+  .object({
+    taskId: z.string().uuid(),
+    providerType: z.enum(LLM_PROVIDER_TYPES),
+    modelKey: z.string().trim().min(1).max(200),
+    reasoningEffort: z
+      .enum(["none", "low", "medium", "high", "xhigh", "max", "ultra", "extra_high"])
+      .optional(),
+  })
+  .strict();
 
 export const TaskMessageSchema = z
   .object({
@@ -2622,6 +2634,7 @@ export const MCPAuthConfigSchema = z
         scopes: z.array(z.string().min(1).max(200)).max(50).optional(),
         resource: z.string().url().max(1000).optional(),
         tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic", "none"]).optional(),
+        dynamicClientRegistration: z.boolean().optional(),
         jwt: z
           .object({
             subject: z.string().min(1).max(500),

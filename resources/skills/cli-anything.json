@@ -1,0 +1,67 @@
+{
+  "id": "cli-anything",
+  "name": "CLI-Anything",
+  "description": "Drive LibreOffice, GIMP, Blender, Inkscape, Audacity, Draw.io and other desktop apps headless through CLI-Anything harnesses with JSON output, instead of native_app UI control.",
+  "icon": "🧰",
+  "category": "Tools",
+  "prompt": "# CLI-Anything\n\nBundled upstream source: https://github.com/HKUDS/CLI-Anything (pinned commit 34f519533bc175d2fe287ab8316b0dd99bb9cc43)\n\nUse this skill to produce or edit files with desktop apps such as LibreOffice, GIMP, Blender, Inkscape, Audacity or Draw.io through headless `cli-anything-<app>` harnesses, instead of clicking through the app window with native_app.\n\nExecution workflow:\n1. Read `{baseDir}/SKILL.md` for harness discovery, install commands, command patterns and known harness bugs.\n2. Find installed harnesses on PATH. If the needed one is missing, ask the user before installing it: installing runs third-party code.\n3. Run one `--json` subcommand per run_command call against a project file in the workspace. Never start the interactive REPL.\n4. Follow the known-bug workarounds: always pass `-p <preset>` to LibreOffice `export render`, and write computed values instead of Calc formulas.\n5. Verify the saved output (probe, re-import or convert) before reporting success.\n6. Fall back to native_app only when the user wants the app's window operated or the harness lacks the operation.\n\nSuccess criteria:\n- The requested file exists in the requested format and its content was read back.\n- Any install was approved by the user first.\n- The answer names the output paths and any harness limits hit.",
+  "parameters": [],
+  "enabled": true,
+  "requires": {
+    "tools": [
+      "run_command"
+    ]
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "author": "HKUDS",
+    "homepage": "https://github.com/HKUDS/CLI-Anything",
+    "tags": [
+      "cli",
+      "libreoffice",
+      "gimp",
+      "blender",
+      "inkscape",
+      "office",
+      "images",
+      "desktop-apps"
+    ],
+    "routing": {
+      "keywords": [
+        "cli-anything",
+        "libreoffice",
+        "gimp",
+        "blender",
+        "inkscape",
+        "audacity",
+        "draw.io",
+        "kdenlive",
+        "shotcut",
+        "odt",
+        "ods",
+        "odp"
+      ],
+      "useWhen": "Use when the user wants a file created, edited or exported with a desktop app that has a CLI-Anything harness (LibreOffice Writer/Calc/Impress, GIMP, Blender, Inkscape, Audacity, Draw.io, Kdenlive, Shotcut, Krita, FreeCAD, MuseScore), or in that app's format, without needing to watch its window.",
+      "dontUseWhen": "Do not use when the user asks to operate or watch the app's window (use native_app), when the task forbids scripting, for Photoshop (use the local Photoshop route), or for plain DOCX/XLSX/PPTX requests that built-in document tools cover.",
+      "outputs": "Saved files in the requested format produced by the app's own engine, with JSON command results and a readback of the output.",
+      "successCriteria": "The output file exists in the requested format, its content was verified by probe, re-import or conversion, and any harness install was approved first.",
+      "examples": {
+        "positive": [
+          "Make a one-page memo in LibreOffice Writer and export it as PDF.",
+          "Use GIMP to make a 1200x630 banner with an orange footer bar and a title.",
+          "Create a LibreOffice Calc budget sheet and save it as XLSX.",
+          "Render this Blender scene to a PNG without opening Blender."
+        ],
+        "negative": [
+          "Click through the GIMP menus while I watch so I learn where Filters are.",
+          "Edit the text layer in this Photoshop PSD.",
+          "Change the font in Pages without using any scripting.",
+          "Explain the difference between ODF and OOXML."
+        ]
+      }
+    },
+    "authoring": {
+      "complexity": "medium"
+    }
+  }
+}

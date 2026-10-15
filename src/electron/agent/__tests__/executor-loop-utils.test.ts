@@ -211,6 +211,12 @@ describe("executor-loop-utils guardrails", () => {
     expect(injected).toBe(true);
     expect(messages.length).toBe(1);
     expect(String((messages[0].content as Any[])[0]?.text || "")).toContain("repeated tool-use");
+    expect(String((messages[0].content as Any[])[0]?.text || "")).toContain(
+      "planned or prepared is not executed work",
+    );
+    expect(String((messages[0].content as Any[])[0]?.text || "")).toContain(
+      "Never repeat an unknown effect",
+    );
   });
 
   it("injects required-write nudge instead of stop-tools when suppressed", () => {

@@ -847,8 +847,9 @@ export class BrowserWorkbenchService {
         ? {
             needs_user_sign_in: true,
             hint:
-              "This page asks the user to sign in. Do not type credentials. Tell the user to sign " +
-              "in in the visible browser; they will reply when done, then continue on this tab.",
+              "This page requires sign-in. Use browser_vault action=list for matching logins, then fill; " +
+              "if none is saved, use save_login to offer a private prompt. Never ask for or type passwords or codes in chat. " +
+              "The user can also sign in manually. Verify the authenticated page before reporting success.",
           }
         : {}),
     };
@@ -1210,10 +1211,17 @@ export class BrowserWorkbenchService {
     return result;
   }
 
-  async evaluate(taskId: string, script: string, sessionId?: unknown): Promise<AnyRecord | null> {
+  async evaluate(
+    taskId: string,
+    script: string,
+    sessionId?: unknown,
+    assertCaptureAllowed?: () => void,
+  ): Promise<AnyRecord | null> {
     const contents = await this.getWebContents(this.getSession(taskId, sessionId));
     if (!contents) return null;
+    assertCaptureAllowed?.();
     const result = await contents.executeJavaScript(String(script || ""));
+    assertCaptureAllowed?.();
     return { success: true, result };
   }
 
@@ -1257,6 +1265,7 @@ export class BrowserWorkbenchService {
     filename?: string;
     includeDataUrl?: boolean;
     fullPage?: boolean;
+    assertCaptureAllowed?: () => void;
   }): Promise<{
     path: string;
     fullPath: string;
@@ -1266,9 +1275,12 @@ export class BrowserWorkbenchService {
   } | null> {
     const contents = await this.getWebContents(this.getSession(input.taskId, input.sessionId));
     if (!contents) return null;
+    input.assertCaptureAllowed?.();
     const capture =
       input.fullPage === true ? await this.captureFullPage(contents).catch(() => null) : null;
+    input.assertCaptureAllowed?.();
     const image = capture ? null : await contents.capturePage();
+    input.assertCaptureAllowed?.();
     const size = capture?.size || image.getSize();
     const png = capture?.png || image.toPNG();
     const safeName =
@@ -1288,6 +1300,7 @@ export class BrowserWorkbenchService {
         )
       : path.join(input.workspacePath, relativePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    input.assertCaptureAllowed?.();
     await fs.writeFile(fullPath, png);
     return {
       path: relativePath,

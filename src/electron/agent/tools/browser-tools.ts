@@ -1,3 +1,6 @@
+import { getBrowserCredentialService } from "../../browser/credentials/browser-credential-service";
+import type { BrowserVaultCommand } from "../../../shared/browser-vault";
+import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { maskFilledPasswords, passwordRecentlyFilled } from "../../browser/credentials/autofill";
 import * as os from "os";
@@ -1185,6 +1188,26 @@ export class BrowserTools {
     }
     return [
       {
+        name: "browser_vault",
+        description:
+          "Private login and checkout autofill in the visible Browser Workbench. list returns matching handles and manager status, never secrets. save_login privately asks the user for a login and fills it; fill uses a saved handle; enter_code generates saved TOTP or privately prompts for a code; unlock asks the user to unlock 1Password/Bitwarden; lock forgets manager access. save_item privately collects a payment or address item. Card fills require approval and NEVER authorize placing an order. Never put passwords, card data, authenticator keys or codes in chat or tool arguments. Stop on user_declined/payment_declined. Use manual sign-in for passkeys or device approvals, then verify the authenticated page.",
+        input_schema: {
+          type: "object" as const,
+          additionalProperties: false,
+          properties: {
+            action: {
+              type: "string",
+              enum: ["list", "save_login", "save_item", "fill", "enter_code", "unlock", "lock"],
+            },
+            handle: { type: "string", description: "Opaque handle returned by list." },
+            kind: { type: "string", enum: ["login", "payment", "address"] },
+            source: { type: "string", enum: ["onepassword", "bitwarden"] },
+            session_id: { type: "string" },
+          },
+          required: ["action"],
+        },
+      },
+      {
         name: "browser_attach",
         description:
           "Attach to an existing Chrome browser session via Chrome DevTools Protocol. " +
@@ -1981,12 +2004,33 @@ export class BrowserTools {
     }
   }
 
-  async executeTool(toolName: string, input: Any): Promise<Any> {
+  async executeTool(toolName: string, input: Any, runtime?: Record<string, unknown>): Promise<Any> {
     if (toolName.startsWith("browser_")) await this.refreshBrowserMention();
+    if (
+      getBrowserCredentialService()?.hasPrompt(this.taskId, this.getSessionId(input) || "default")
+    )
+      return {
+        success: false,
+        error: "private_input_pending",
+        message: "Wait for the private input request to finish.",
+      };
     if (DEVELOPER_MODE_BROWSER_TOOLS.has(toolName)) {
       const gate = await this.checkDeveloperModeAccess(toolName, input);
       if (gate) return gate;
     }
+    if (
+      PASSWORD_SENSITIVE_TOOLS.has(toolName) &&
+      getBrowserCredentialService()?.hasPrivateSurface()
+    )
+      return {
+        success: false,
+        error: "private_credential_page",
+        message:
+          "Page scripts, screenshots and storage reads are unavailable while a credential-bearing document is open. Use snapshots and normal page actions.",
+      };
+    const assertPrivateCapture = PASSWORD_SENSITIVE_TOOLS.has(toolName)
+      ? privateCaptureGuard()
+      : undefined;
     // Tool calls on the visible workbench show "CoWork is using this tab" and stop
     // while the user has taken over the tab.
     const drives = this.drivesVisibleWorkbench(toolName, input);
@@ -2019,7 +2063,8 @@ export class BrowserTools {
     const tabsBefore = drives ? this.workbenchTabState(sessionId) : null;
     let result: Any;
     try {
-      result = await this.executeBrowserTool(toolName, input);
+      result = await this.executeBrowserTool(toolName, input, runtime, assertPrivateCapture);
+      assertPrivateCapture?.();
       if (
         tabsBefore &&
         result &&
@@ -2041,7 +2086,12 @@ export class BrowserTools {
     return result;
   }
 
-  private async executeBrowserTool(toolName: string, input: Any): Promise<Any> {
+  private async executeBrowserTool(
+    toolName: string,
+    input: Any,
+    runtime?: Record<string, unknown>,
+    assertPrivateCapture?: () => void,
+  ): Promise<Any> {
     const scopeFingerprint = (workspace: Workspace) =>
       JSON.stringify({
         id: workspace.id,
@@ -2050,6 +2100,7 @@ export class BrowserTools {
       });
     const admittedScope = scopeFingerprint(this.workspace);
     const beforeEffect = async () => {
+      assertPrivateCapture?.();
       const checkScope = () => {
         const effective =
           typeof this.daemon.getEffectiveWorkspaceForTask === "function"
@@ -2081,10 +2132,51 @@ export class BrowserTools {
           throw new Error("Responsibility policy storage is unavailable");
       }
       checkScope();
+      assertPrivateCapture?.();
     };
     await beforeEffect();
     this.syncVisibleAccessPolicy(input);
     switch (toolName) {
+      case "browser_vault": {
+        if (
+          input?.force_headless === true ||
+          this.browserState.debuggerUrl ||
+          !this.hasVisibleWorkbenchSession(input)
+        )
+          return { success: false, error: "visible_browser_required" };
+        const service = getBrowserCredentialService();
+        if (!service) return { success: false, error: "private_credentials_unavailable" };
+        await beforeEffect();
+        return service.execute(
+          this.taskId,
+          input as BrowserVaultCommand,
+          async (item, origin) => {
+            const requester = this.daemon.requestApproval;
+            if (typeof requester !== "function") return false;
+            return Boolean(
+              await requester.call(
+                this.daemon,
+                this.taskId,
+                "browser",
+                `Fill ${item.label} on ${origin}?`,
+                {
+                  kind: "browser_payment_fill",
+                  origin,
+                  handle: item.id,
+                  tool: "browser_vault",
+                  note: "Autofill only. Placing an order requires separate approval.",
+                },
+                {
+                  allowAutoApprove: false,
+                  noStandingApproval: true,
+                  signal: runtime?.signal instanceof AbortSignal ? runtime.signal : undefined,
+                },
+              ),
+            );
+          },
+          runtime?.signal instanceof AbortSignal ? runtime.signal : undefined,
+        );
+      }
       case "browser_attach": {
         const debuggerUrl =
           typeof input?.debugger_url === "string" ? input.debugger_url.trim() : "";
@@ -2404,6 +2496,7 @@ export class BrowserTools {
             workspacePermissions: this.workspace.permissions,
             filename,
             fullPage: full_page === true,
+            assertCaptureAllowed: assertPrivateCapture,
           });
           if (result) {
             const fullPath = assertWorkspaceFilesystemAccess(
@@ -3331,6 +3424,7 @@ export class BrowserTools {
             this.taskId,
             input.script,
             this.getSessionId(input),
+            assertPrivateCapture,
           );
           if (result) {
             this.daemon.logEvent(this.taskId, "browser_action", {
@@ -3758,6 +3852,7 @@ export class BrowserTools {
    * Close the browser when done
    */
   async cleanup(): Promise<void> {
+    getBrowserCredentialService()?.cancelTask(this.taskId);
     await this.browserService.close();
     await this.stopBrowserUseCloudSession().catch(() => {});
   }

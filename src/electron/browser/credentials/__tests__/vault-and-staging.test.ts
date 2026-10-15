@@ -76,6 +76,36 @@ describe("BrowserVault", () => {
   });
 });
 
+describe("vault compatibility with checkout items", () => {
+  it("does not overwrite checkout items or erase saved 2FA during a password import", async () => {
+    const { vault } = fakeVault();
+    const card = vault.addItem("p", "payment", "https://a.example", {
+      cardNumber: "4111111111111111",
+      expMonth: "12",
+      expYear: "2030",
+    });
+    const login = vault.addItem("p", "login", "https://a.example", {
+      username: "fixture",
+      password: "before",
+      otpSecret: "JBSWY3DPEHPK3PXP",
+    });
+    vault.addMany("p", [
+      { origin: "https://a.example", username: "", password: "anonymous" },
+      { origin: "https://a.example", username: "fixture", password: "after" },
+    ]);
+    expect(await vault.withItemSecret("p", card.id, (fields) => fields.cardNumber)).toBe(
+      "4111111111111111",
+    );
+    expect(await vault.withItemSecret("p", login.id, (fields) => ({ ...fields }))).toMatchObject({
+      password: "after",
+      otpSecret: "JBSWY3DPEHPK3PXP",
+    });
+    expect(vault.listItems("p").find((item) => item.id === card.id)?.label).toBe(
+      "Card ending 1111",
+    );
+  });
+});
+
 describe("ImportSessions", () => {
   const data = (profileKey = "p") => ({
     profileKey,

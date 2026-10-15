@@ -66,6 +66,14 @@ describe("masking filled passwords", () => {
     forgetFilledPasswords("t", "s");
     expect(maskFilledPasswords("t", "s", { text: "hunter2" })).toEqual({ text: "hunter2" });
   });
+  it("masks common card and code formatting in page readbacks", () => {
+    registerFilledPassword("formatted", "default", "4111111111111111");
+    registerFilledPassword("formatted", "default", "987654");
+    expect(
+      maskFilledPasswords("formatted", "default", "Card 4111 1111 1111 1111; code 987-654"),
+    ).toBe("Card [saved password]; code [saved password]");
+    forgetFilledPasswords("formatted");
+  });
 });
 
 describe("credentials IPC trust", () => {

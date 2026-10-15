@@ -1,4 +1,11 @@
 import {
+  BROWSER_VAULT_IPC,
+  type BrowserVaultItem,
+  type BrowserVaultAnswer,
+  type BrowserVaultCommand,
+  type BrowserVaultPrompt,
+} from "../shared/browser-vault";
+import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
@@ -2426,6 +2433,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
       deleted?: boolean;
       error?: string;
     }>,
+  listBrowserVaultPrompts: () =>
+    ipcRenderer.invoke(BROWSER_VAULT_IPC.prompts) as Promise<BrowserVaultPrompt[]>,
+  respondBrowserVaultPrompt: (id: string, answer: BrowserVaultAnswer | null) =>
+    ipcRenderer.invoke(BROWSER_VAULT_IPC.respond, { id, answer }) as Promise<{ success: boolean }>,
+  dismissBrowserVaultPrompt: (id: string) =>
+    ipcRenderer.invoke(BROWSER_VAULT_IPC.dismiss, id) as Promise<{ success: boolean }>,
+  browserVaultCommand: (taskId: string, command: BrowserVaultCommand) =>
+    ipcRenderer.invoke(BROWSER_VAULT_IPC.command, { taskId, command }) as Promise<{
+      success: boolean;
+      error?: string;
+      [key: string]: unknown;
+    }>,
+  onBrowserVaultPromptChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on(BROWSER_VAULT_IPC.changed, listener);
+    return () => ipcRenderer.removeListener(BROWSER_VAULT_IPC.changed, listener);
+  },
   listBrowserLogins: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_VAULT_LIST, data) as Promise<BrowserLoginsResult>,
   listBrowserLoginsForPage: (data: { workspaceId: string; url: string }) =>
@@ -6139,6 +6163,7 @@ export interface BrowserSavedLogin {
   lastUsedAt?: number;
 }
 export interface BrowserLoginsResult {
+  items?: BrowserVaultItem[];
   success: boolean;
   logins: BrowserSavedLogin[];
   canStore?: boolean;
@@ -6467,6 +6492,17 @@ export interface ElectronAPI {
   browserImportDeleteFile: (data: {
     token: string;
   }) => Promise<{ success: boolean; deleted?: boolean; error?: string }>;
+  listBrowserVaultPrompts: () => Promise<BrowserVaultPrompt[]>;
+  dismissBrowserVaultPrompt: (id: string) => Promise<{ success: boolean }>;
+  respondBrowserVaultPrompt: (
+    id: string,
+    answer: BrowserVaultAnswer | null,
+  ) => Promise<{ success: boolean }>;
+  browserVaultCommand: (
+    taskId: string,
+    command: BrowserVaultCommand,
+  ) => Promise<{ success: boolean; error?: string; [key: string]: unknown }>;
+  onBrowserVaultPromptChanged: (callback: () => void) => () => void;
   listBrowserLogins: (data: { workspaceId: string }) => Promise<BrowserLoginsResult>;
   listBrowserLoginsForPage: (data: {
     workspaceId: string;

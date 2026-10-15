@@ -1075,6 +1075,7 @@ const SAFE_INTEGRATION_MENTION_TOOL_ALLOWLIST = new Set<string>([
   "sharepoint_action",
   "google_drive_action",
   "calendar_action",
+  "browser_vault",
   "browser_navigate",
   "browser_snapshot",
   "browser_click",
@@ -11487,6 +11488,9 @@ ${transcript}
       return normalizedSettingsTimeout ?? 45 * 60 * 1000;
     }
 
+    // Private input and approvals wait for a human; cancellation is forwarded to the credential service.
+    if (toolName === "browser_vault") return normalizedSettingsTimeout ?? 20 * 60 * 1000;
+
     if (toolName === "request_user_input") {
       // Structured user input waits on a real human response and can legitimately
       // exceed a single step window. Avoid timing this out at the step deadline.
@@ -20239,6 +20243,7 @@ ${transcript}
       "analyze_image",
       "get_video_generation_job",
       "cancel_video_generation_job",
+      "browser_vault",
       "browser_navigate",
       "browser_get_content",
       "browser_get_text",
@@ -20274,6 +20279,7 @@ ${transcript}
 
     const verification = new Set<string>([
       ...analysis,
+      "browser_vault",
       "browser_navigate",
       "browser_get_content",
       "browser_get_text",

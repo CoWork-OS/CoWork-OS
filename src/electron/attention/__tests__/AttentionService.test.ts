@@ -254,6 +254,206 @@ describe("AttentionService", () => {
     expect(findTask).not.toHaveBeenCalled();
   });
 
+  it("names the remote device a waiting session runs on, and carries on without names", async () => {
+    const remote = task("t1", {
+      status: "paused",
+      terminalStatus: "needs_user_action",
+      targetNodeId: "remote-gateway:mini",
+      error: "Approval request timed out",
+    });
+    const named = new AttentionService(
+      sources({
+        listRecentTasks: async () => [remote],
+        listDevices: async () => [{ id: "mini", name: "Mac mini" }],
+      }),
+    );
+    expect((await named.snapshot()).items[0].place).toEqual({
+      kind: "remote",
+      label: "Mac mini",
+      deviceId: "mini",
+    });
+    const unnamed = new AttentionService(
+      sources({
+        listRecentTasks: async () => [remote],
+        listDevices: async () => {
+          throw new Error("no settings");
+        },
+      }),
+    );
+    const snapshot = await unnamed.snapshot();
+    expect(snapshot.failedSources).toEqual([]);
+    expect(snapshot.items[0].place.label).toBe("Another device");
+  });
+
+  it("lists undoable memory changes as handled work, and reports a failing read", async () => {
+    const change = (id: string, overrides = {}) => ({
+      id,
+      op: "expire_commitment" as const,
+      origin: "auto" as const,
+      summary: "Closed: the report was sent on Monday.",
+      rationale: null,
+      items: [
+        {
+          id: `m-${id}`,
+          kind: "commitment" as const,
+          content: "Send the report",
+          before: "active",
+          after: "archived",
+        },
+      ],
+      appliedAt: NOW - 1000,
+      undoneAt: null,
+      canUndo: true,
+      ...overrides,
+    });
+    const service = new AttentionService(
+      sources({
+        listMemoryChanges: async () => [
+          { workspaceId: "ws", change: change("c1") },
+          { workspaceId: "ws", change: change("c2", { canUndo: false }) },
+          { workspaceId: "ws", change: change("c3", { undoneAt: NOW }) },
+        ],
+      }),
+    );
+    expect((await service.snapshot()).items).toEqual([
+      expect.objectContaining({
+        id: "memory_change:c1",
+        kind: "memory_change",
+        title: "Send the report",
+        urgent: false,
+        ref: { type: "memory_change", changeId: "c1", workspaceId: "ws" },
+      }),
+    ]);
+    const failing = new AttentionService(
+      sources({
+        listMemoryChanges: async () => {
+          throw new Error("engine not running");
+        },
+      }),
+    );
+    expect((await failing.snapshot()).failedSources).toEqual(["memory"]);
+  });
+
+  it("adds calendar proposals, and offers a hold on the first suggestion about making time", async () => {
+    const suggestionOf = (id: string, title: string) => ({
+      workspaceId: "ws",
+      suggestion: {
+        id,
+        type: "insight",
+        title,
+        description: "",
+        actionPrompt: "Do it",
+        confidence: 0.5,
+        createdAt: NOW,
+        expiresAt: NOW + 1,
+      } as ProactiveSuggestion,
+    });
+    const findCalendarHold = vi.fn(async () => ({ start: NOW + 10, end: NOW + 20 }));
+    const service = new AttentionService(
+      sources({
+        listSuggestions: async () => [
+          suggestionOf("s1", "Reply to Ana"),
+          suggestionOf("s2", "Block focus time for the deck"),
+          suggestionOf("s3", "Set aside time for planning"),
+        ],
+        listCalendarProposals: async () => [
+          {
+            kind: "conflict",
+            id: "conflict:a:b",
+            first: { eventId: "a", title: "A", start: NOW + 5, end: NOW + 50 },
+            second: { eventId: "b", title: "B", start: NOW + 10, end: NOW + 60 },
+            canDeclineSecond: false,
+          },
+        ],
+        findCalendarHold,
+      }),
+    );
+    const { items, failedSources } = await service.snapshot();
+    expect(failedSources).toEqual([]);
+    expect(items[0]).toMatchObject({ id: "calendar:conflict:a:b", urgent: true });
+    const held = items.filter((item) => item.calendarHold);
+    expect(held.map((item) => item.id)).toEqual(["suggestion:s2"]);
+    expect(held[0].calendarHold).toEqual({ start: NOW + 10, end: NOW + 20 });
+    expect(findCalendarHold).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the rest when the calendar can't be read", async () => {
+    const service = new AttentionService(
+      sources({
+        listPendingApprovals: async () => [approval("a1", "t1")],
+        listRecentTasks: async () => [task("t1", { status: "blocked" })],
+        listCalendarProposals: async () => {
+          throw new Error("offline");
+        },
+        findCalendarHold: async () => {
+          throw new Error("offline");
+        },
+      }),
+    );
+    const snapshot = await service.snapshot();
+    expect(snapshot.failedSources).toEqual(["calendar"]);
+    expect(snapshot.items.map((item) => item.id)).toEqual(["approval:a1"]);
+  });
+
+  it("lists drafted replies, and the offer to draft them when asked", async () => {
+    const draft = {
+      draftId: "d1",
+      threadId: "t1",
+      accountId: "gmail:me@example.com",
+      provider: "gmail" as const,
+      subject: "Q3 proposal",
+      to: ["Dana <dana@example.com>", "Lee", "Kim", "Ray"],
+      copies: 2,
+      attachments: 1,
+      sender: "Dana",
+      bodyText: "Thanks Dana, sending it Friday.",
+      createdAt: NOW - 60_000,
+    };
+    const service = new AttentionService(
+      sources({
+        listMailReplyDrafts: async () => [draft],
+        shouldOfferMailReplyDrafts: async () => true,
+      }),
+    );
+    const { items, failedSources } = await service.snapshot();
+    expect(failedSources).toEqual([]);
+    expect(items.map((item) => item.id)).toEqual(["mail_reply:d1", "mail_reply:offer"]);
+
+    const failing = new AttentionService(
+      sources({
+        listMailReplyDrafts: async () => {
+          throw new Error("locked");
+        },
+        shouldOfferMailReplyDrafts: async () => {
+          throw new Error("locked");
+        },
+      }),
+    );
+    const snapshot = await failing.snapshot();
+    expect(snapshot.failedSources).toEqual(["mail"]);
+    expect(snapshot.items).toEqual([]);
+  });
+
+  it("doesn't wait on a calendar that never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const service = new AttentionService(
+        sources({
+          listPendingApprovals: async () => [approval("a1", "t1")],
+          listRecentTasks: async () => [task("t1", { status: "blocked" })],
+          listCalendarProposals: () => new Promise(() => {}),
+        }),
+      );
+      const pending = service.snapshot();
+      await vi.advanceTimersByTimeAsync(5000);
+      const snapshot = await pending;
+      expect(snapshot.failedSources).toEqual(["calendar"]);
+      expect(snapshot.items.map((item) => item.id)).toEqual(["approval:a1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops at a cycle of parent links", async () => {
     const a = task("a", { status: "executing", parentTaskId: "b", assignedAgentRoleId: "ra" });
     const b = task("b", { status: "executing", parentTaskId: "a", assignedAgentRoleId: "rb" });

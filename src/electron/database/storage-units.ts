@@ -41,6 +41,7 @@ import {
   TaskAdmissionStore,
 } from "./browser-host-sql";
 import { ComposerDraftStore } from "./composer-draft-repository";
+import { FollowUpRecoveryStore } from "./follow-up-recovery-sql";
 import { TaskLabelStore } from "./TaskLabelRepository";
 import { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";
@@ -146,6 +147,12 @@ export const STORAGE_UNITS = {
     (db: Database.Database) => new TaskEventRepository(db),
     "findScopedMutationPage",
     { readonly: true },
+  ),
+  // Startup follow-up recovery: reads every follow-up receipt, so it runs on the reader.
+  taskEvent_findUnstartedFollowUpTaskIds: storeUnit(
+    (db: Database.Database) => new FollowUpRecoveryStore(db),
+    "findUnstartedFollowUpTaskIds",
+    { readonly: true, report: true },
   ),
   taskSessionMetadata_findBySessionId: storeUnit(
     (db: Database.Database) => new TaskSessionMetadataStore(db),

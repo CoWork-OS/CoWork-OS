@@ -94,6 +94,7 @@ import { registerControlPlaneCoreMethods } from "./registerControlPlaneCoreMetho
 import { registerAgentSecurityMethods } from "./registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "./registerStrategicPlannerMethods";
 import { registerWorkSessionMethods } from "./registerWorkSessionMethods";
+import { registerApplicationExecutionMethods } from "./registerApplicationExecutionMethods";
 import { getStrategicPlannerService } from "./StrategicPlannerService";
 import {
   getFleetConnectionManager,
@@ -393,7 +394,8 @@ function toManagedDeviceFromSaved(settings: ControlPlaneSettingsData, saved: Any
   });
 }
 
-function listStoredManagedDevices(): ManagedDevice[] {
+/** Remote devices saved in the control plane settings, without connecting to any. */
+export function listStoredManagedDevices(): ManagedDevice[] {
   const settings = ControlPlaneSettingsManager.loadSettings() as ControlPlaneSettingsData;
   const byId = new Map<string, ManagedDevice>();
 
@@ -2974,6 +2976,7 @@ export function registerTaskAndWorkspaceMethods(
     agentDaemon,
     requireScope,
   });
+  registerApplicationExecutionMethods({ server, agentDaemon, requireScope });
 
   const redactWorkspaceForRead = (workspace: any) => ({
     id: workspace.id,

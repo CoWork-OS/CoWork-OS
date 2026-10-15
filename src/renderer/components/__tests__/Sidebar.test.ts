@@ -103,6 +103,54 @@ describe("Sidebar top-level destinations", () => {
       expect(agents).not.toContain("sidebar-bot-add");
     });
 
+    it("keeps a short Recent list and hands every other session over to Work", () => {
+      vi.stubGlobal("document", {
+        documentElement: { classList: { contains: (name: string) => name === "visual-calm" } },
+      });
+      const now = Date.now();
+      const session = (index: number) => ({
+        id: `s${index}`,
+        title: `Session number ${index}`,
+        prompt: "Work",
+        status: "completed",
+        workspaceId: "ws-1",
+        createdAt: now - index * 60_000,
+        updatedAt: now - index * 60_000,
+      });
+      const markup = renderToStaticMarkup(
+        React.createElement(Sidebar, {
+          workspace: null,
+          tasks: [
+            ...Array.from({ length: 7 }, (_, index) => session(index + 1)),
+            {
+              id: "cron-approval",
+              title: "Scheduled approval",
+              prompt: "Review",
+              source: "cron",
+              status: "blocked",
+              terminalStatus: "awaiting_approval",
+              workspaceId: "ws-1",
+              createdAt: now,
+              updatedAt: now,
+            },
+          ] as Any,
+          selectedTaskId: null,
+          activeDestinationId: "home",
+          onNavigate: () => {},
+          onSelectTask: () => {},
+          onTasksChanged: () => {},
+        }),
+      );
+      expect(markup).toContain(">Recent</div>");
+      expect(markup).toContain("Session number 5");
+      expect(markup).not.toContain("Session number 6");
+      expect(markup).toContain('class="sidebar-work-link"');
+      expect(markup).toContain(">3 more sessions<");
+      expect(markup).toContain('aria-label="All work, 3 more sessions, some need you"');
+      // The automated drawer lives in Work in Calm.
+      expect(markup).not.toContain("automated-folder-header");
+    });
+
     it("stays out of the modern theme", () => {
       const markup = renderToStaticMarkup(
         React.createElement(Sidebar, {

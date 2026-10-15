@@ -1491,6 +1491,7 @@ export type ToolType =
   | "preview_web_page"
   // Computer use tools (CUA)
   | "screen_context_resolve"
+  | "native_app"
   | "screenshot"
   | "click"
   | "double_click"
@@ -1539,6 +1540,9 @@ export type ToolRiskLevel = "read" | "write" | "destructive" | "system" | "netwo
 export const TOOL_GROUPS = {
   // Read-only operations - lowest risk
   "group:read": [
+    "local_photoshop_inspect",
+    "local_photoshop_read",
+    "native_application_inspect",
     "read_file",
     "read_files",
     "parse_document",
@@ -1569,6 +1573,9 @@ export const TOOL_GROUPS = {
   ],
   // Write operations - medium risk
   "group:write": [
+    "local_photoshop_create",
+    "local_photoshop_edit",
+    "native_application_create",
     "manage_connector_events",
     "write_file",
     "edit_file",
@@ -1607,6 +1614,7 @@ export const TOOL_GROUPS = {
     "open_path",
     "show_in_folder",
     "screen_context_resolve",
+    "native_app",
     "screenshot",
     "click",
     "double_click",
@@ -1839,6 +1847,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   show_in_folder: "system",
   screen_context_resolve: "system",
   // Computer use operations (CUA)
+  native_app: "system",
   screenshot: "system",
   click: "system",
   double_click: "system",
@@ -2349,6 +2358,18 @@ export interface AgentConfig {
   permissionMode?: PermissionMode;
   /** Canonical access profile requested for this task. */
   accessProfileId?: AccessProfileId;
+  /**
+   * The most access this task may get, from its assigned agent role's "May do alone" limit.
+   * Set only by the daemon from the role (never accepted from the renderer); the resolver
+   * narrows the task's profile to it and never widens anything.
+   */
+  accessCeilingProfileId?: AccessProfileId;
+  /**
+   * Access limits inherited from the sessions that started this one (sub-agents, scheduled
+   * runs an agent created). Set when the task is created and never removed by its own role;
+   * every one of them narrows the task's profile.
+   */
+  inheritedAccessCeilingProfileIds?: AccessProfileId[];
   /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
@@ -5662,6 +5683,11 @@ export interface AgentRole {
 
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel; // How independently the agent can act
+  /**
+   * "May do alone": the most access any of this agent's work gets (its sessions, scheduled
+   * runs and Heartbeat dispatches). A ceiling only: a task can still be stricter.
+   */
+  accessProfileId?: AccessProfileId;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5753,6 +5779,8 @@ export interface UpdateAgentRoleRequest {
   sortOrder?: number;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** The agent's access limit; null clears it. */
+  accessProfileId?: AccessProfileId | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;
@@ -7618,6 +7646,138 @@ export interface ProactiveSuggestion {
 }
 
 // IPC Channel names
+/** Adds a remote MCP server that signs in with OAuth 2.1 (Workday preset or custom). */
+export interface RemoteOAuthServerRequest {
+  name: string;
+  kind: "workday" | "custom";
+  region?: string;
+  tenant?: string;
+  url?: string;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  grant: "authorization_code" | "jwt_bearer";
+  clientId: string;
+  clientSecret?: string;
+  redirectUri?: string;
+  scopes?: string[];
+  resource?: string;
+  jwtSubject?: string;
+  jwtKeyId?: string;
+  privateKey?: string;
+}
+
+/**
+ * Edits a Remote (OAuth) server. A blank clientSecret or privateKey keeps the stored
+ * value; changing the identity, endpoints or client signs the server out.
+ */
+export interface RemoteOAuthServerUpdateRequest {
+  serverId: string;
+  server: RemoteOAuthServerRequest;
+}
+
+/** A cancelled or replaced sign-in resolves with status "cancelled"; it is not an error. */
+export type RemoteOAuthAuthorizeResult =
+  | { status: "signed_in"; expiresAt?: number; grant: "authorization_code" | "jwt_bearer" }
+  | { status: "cancelled"; reason: "cancelled" | "superseded" };
+
+/**
+ * The Workday admin API client a Workday preset server uses for in-app agent setup
+ * (docs/remote-mcp-oauth.md). A blank or masked clientSecret keeps the stored one;
+ * servicesHost defaults to the tenant host's first label plus "-services1".
+ */
+export interface WorkdayAdminConnectionRequest {
+  serverId: string;
+  tenantHost: string;
+  servicesHost?: string;
+  clientId: string;
+  clientSecret?: string;
+  usePkce?: boolean;
+}
+
+/** The saved admin connection as the renderer sees it: never the secret or a token. */
+export interface WorkdayAdminConnectionSummary {
+  tenant: string;
+  tenantHost: string;
+  servicesHost: string;
+  clientId: string;
+  hasClientSecret: boolean;
+  usePkce: boolean;
+  signedIn: boolean;
+}
+
+/** A cancelled or replaced admin sign-in resolves with status "cancelled"; it is not an error. */
+export type WorkdayAdminSignInResult =
+  | { status: "signed_in"; expiresAt?: number }
+  | { status: "cancelled"; reason: "cancelled" | "superseded" };
+
+export type WorkdayAgentExecutionMode = "Delegate" | "Ambient";
+
+/** A Workday tool (agent resource) granted to a skill: its name and 32-hex WID. */
+export interface WorkdayAgentTool {
+  toolName: string;
+  wid: string;
+  description: string;
+}
+
+export interface WorkdayAgentSkill {
+  id: string;
+  name: string;
+  description: string;
+  executionMode: WorkdayAgentExecutionMode;
+  tools: WorkdayAgentTool[];
+}
+
+/** An editable Workday external agent definition (ASOR agentDefinition). */
+export interface WorkdayAgentModel {
+  /** Workday's ID of a saved definition; read-only, saves upsert by name and version. */
+  id?: string;
+  name: string;
+  description: string;
+  version: string;
+  url?: string;
+  documentationUrl?: string;
+  skills: WorkdayAgentSkill[];
+}
+
+export type WorkdayAgentListResult =
+  | { status: "signed_out" }
+  | { status: "ok"; total: number; agents: WorkdayAgentModel[] };
+
+/** A row of Workday's agent resource catalog. MCP tools have snake_case names. */
+export interface WorkdayAgentResource {
+  wid: string;
+  toolName: string;
+  kind: "mcp" | "operation";
+  /** Workday's description of the tool, when the catalog returns one. */
+  description?: string;
+}
+
+export interface WorkdayAgentSearchRequest {
+  serverId: string;
+  query: string;
+  /** Include SOAP and REST operations; MCP tools only when false or absent. */
+  includeOperations?: boolean;
+}
+
+export interface WorkdayAgentSearchResult {
+  resources: WorkdayAgentResource[];
+  /** Rows Workday returned before the MCP-only filter. */
+  matched: number;
+}
+
+export interface WorkdayAgentSaveRequest {
+  serverId: string;
+  agent: WorkdayAgentModel;
+}
+
+/** A save posts nothing while any tool's WID cannot be found in the tenant's catalog. */
+export type WorkdayAgentSaveResult =
+  | { status: "saved"; id?: string; name: string; skills: string[]; toolCount: number }
+  | {
+      status: "missing_tools";
+      missing: Array<{ toolName: string; wid: string; reason: "not_found" | "name_mismatch" }>;
+    };
+
 export const IPC_CHANNELS = {
   // Task operations
   TASK_CREATE: "task:create",
@@ -7807,6 +7967,7 @@ export const IPC_CHANNELS = {
   MAILBOX_RETRY_ACTION: "mailbox:retryAction",
   MAILBOX_RESOLVE_SEND_OUTCOME: "mailbox:resolveSendOutcome",
   MAILBOX_DISCARD_COMPOSE_DRAFT: "mailbox:discardComposeDraft",
+  MAILBOX_CANCEL_SEND: "mailbox:cancelSend",
   MAILBOX_UNDO_ACTION: "mailbox:undoAction",
   MAILBOX_SUMMARIZE_THREAD: "mailbox:summarizeThread",
   MAILBOX_GENERATE_DRAFT: "mailbox:generateDraft",
@@ -8389,6 +8550,19 @@ export const IPC_CHANNELS = {
 
   // MCP Connector OAuth
   MCP_CONNECTOR_OAUTH_START: "mcp:connectorOAuthStart",
+  MCP_ADD_REMOTE_OAUTH_SERVER: "mcp:addRemoteOAuthServer",
+  MCP_UPDATE_REMOTE_OAUTH_SERVER: "mcp:updateRemoteOAuthServer",
+  MCP_OAUTH_AUTHORIZE: "mcp:oauthAuthorize",
+  MCP_OAUTH_CANCEL: "mcp:oauthCancel",
+  MCP_OAUTH_DISCOVER: "mcp:oauthDiscover",
+
+  // Workday agent setup (admin API client on a Workday preset MCP server)
+  WORKDAY_AGENT_ADMIN_SAVE_CONNECTION: "workdayAgent:adminSaveConnection",
+  WORKDAY_AGENT_ADMIN_SIGN_IN: "workdayAgent:adminSignIn",
+  WORKDAY_AGENT_ADMIN_CANCEL: "workdayAgent:adminCancel",
+  WORKDAY_AGENT_LIST: "workdayAgent:list",
+  WORKDAY_AGENT_SEARCH: "workdayAgent:search",
+  WORKDAY_AGENT_SAVE: "workdayAgent:save",
 
   // MCP Host
   MCP_HOST_START: "mcp:hostStart",
@@ -8818,6 +8992,18 @@ export const IPC_CHANNELS = {
   SUGGESTIONS_SNOOZE: "suggestions:snooze",
   SUGGESTIONS_EDIT: "suggestions:edit",
   SUGGESTIONS_ACT: "suggestions:act",
+  /** Keep a follow-up suggestion as a commitment. */
+  SUGGESTIONS_ADD_COMMITMENT: "suggestions:addCommitment",
+  // Today's calendar cards
+  CALENDAR_PROPOSAL_ACCEPT: "calendar:acceptProposal",
+  CALENDAR_PROPOSAL_DISMISS: "calendar:dismissProposal",
+  CALENDAR_HOLD_FOR_SUGGESTION: "calendar:holdForSuggestion",
+  // Reply drafts on Today
+  MAIL_REPLY_DRAFT_SEND: "mailReplyDrafts:send",
+  MAIL_REPLY_DRAFT_UNDO_SEND: "mailReplyDrafts:undoSend",
+  MAIL_REPLY_DRAFT_DISCARD: "mailReplyDrafts:discard",
+  MAIL_REPLY_DRAFTS_SET_ENABLED: "mailReplyDrafts:setEnabled",
+  MAIL_REPLY_DRAFTS_DISMISS_OFFER: "mailReplyDrafts:dismissOffer",
 
   // Shared "needs you" queue (shared/attention.ts): the snapshot, and a signal when it changed
   ATTENTION_LIST: "attention:list",

@@ -1,7 +1,8 @@
 import { readDocumentArchiveBuffer } from "../../security/document-archive";
 import * as fs from "fs/promises";
 import * as path from "path";
-import ExcelJS from "exceljs";
+import type ExcelJS from "exceljs";
+import { loadExcelJS } from "../../utils/exceljs-loader";
 import { Workspace } from "../../../shared/types";
 import {
   applySpreadsheetNumberFormats,
@@ -68,7 +69,7 @@ export class SpreadsheetBuilder {
     }
 
     // Create Excel workbook
-    const workbook = new ExcelJS.Workbook();
+    const workbook = new (await loadExcelJS()).Workbook();
     workbook.creator = "CoWork OS";
     workbook.created = new Date();
 
@@ -186,7 +187,7 @@ export class SpreadsheetBuilder {
    * Read an existing Excel file and return sheet data
    */
   async read(inputPath: string): Promise<SheetData[]> {
-    const workbook = new ExcelJS.Workbook();
+    const workbook = new (await loadExcelJS()).Workbook();
     await workbook.xlsx.load(
       (await readDocumentArchiveBuffer(inputPath)) as unknown as ExcelJS.Buffer,
     );

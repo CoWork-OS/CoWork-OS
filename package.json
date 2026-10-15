@@ -111,9 +111,9 @@
     "qa:web:smoke": "npm run build:web && npm run build:daemon && node scripts/qa/smoke-browser-preview.mjs",
     "qa:web:ui-smoke": "npm run build:web && npm run build:daemon && cross-env COWORK_WEB_UI_SMOKE=1 node scripts/qa/smoke-browser-preview.mjs",
     "qa:web:desktop-smoke": "node scripts/qa/smoke-packaged-desktop-browser.mjs",
-    "build:electron": "node scripts/clean-build-output.mjs electron && tsc -p tsconfig.electron.json",
-    "build:daemon": "node scripts/clean-build-output.mjs daemon && tsc -p tsconfig.daemon.json",
-    "build:cli": "node scripts/clean-build-output.mjs cli && tsc -p tsconfig.cli.json",
+    "build:electron": "node scripts/clean-build-output.mjs electron && tsc -p tsconfig.electron.json && node scripts/build-native-session-probe.mjs electron",
+    "build:daemon": "node scripts/clean-build-output.mjs daemon && tsc -p tsconfig.daemon.json && node scripts/build-native-session-probe.mjs daemon",
+    "build:cli": "node scripts/clean-build-output.mjs cli && tsc -p tsconfig.cli.json && node scripts/build-native-session-probe.mjs cli",
     "build:connectors": "concurrently -n salesforce,jira,hubspot,zendesk,servicenow,linear,asana,okta,resend,discord,google-workspace,figma,vercel,monday,finance-data,maps,home-assistant,rhino,blender,comfyui \"tsc -p connectors/salesforce-mcp/tsconfig.json\" \"tsc -p connectors/jira-mcp/tsconfig.json\" \"tsc -p connectors/hubspot-mcp/tsconfig.json\" \"tsc -p connectors/zendesk-mcp/tsconfig.json\" \"tsc -p connectors/servicenow-mcp/tsconfig.json\" \"tsc -p connectors/linear-mcp/tsconfig.json\" \"tsc -p connectors/asana-mcp/tsconfig.json\" \"tsc -p connectors/okta-mcp/tsconfig.json\" \"tsc -p connectors/resend-mcp/tsconfig.json\" \"tsc -p connectors/discord-mcp/tsconfig.json\" \"tsc -p connectors/google-workspace-mcp/tsconfig.json\" \"tsc -p connectors/figma-mcp/tsconfig.json\" \"tsc -p connectors/vercel-mcp/tsconfig.json\" \"tsc -p connectors/monday-mcp/tsconfig.json\" \"tsc -p connectors/finance-data-mcp/tsconfig.json\" \"tsc -p connectors/maps-mcp/tsconfig.json\" \"tsc -p connectors/home-assistant-mcp/tsconfig.json\" \"tsc -p connectors/rhino-mcp/tsconfig.json\" \"tsc -p connectors/blender-mcp/tsconfig.json\" \"tsc -p connectors/comfyui-mcp/tsconfig.json\"",
     "prepack": "npm run build",
     "release:smoke": "npm run build && node scripts/release-smoke-install.mjs",
@@ -188,6 +188,9 @@
     "models:sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs",
     "models:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-model-metadata.mjs --check",
     "skills:check": "node scripts/qa/skills-check.mjs",
+    "qa:application-execution": "vitest run src/electron/applications/__tests__",
+    "qa:application-execution:smoke": "npm run build:electron && node scripts/qa/application-execution-smoke.cjs",
+    "qa:application-execution:smoke:daemon": "npm run build:daemon && cross-env COWORK_SMOKE_DIST=daemon node scripts/qa/application-execution-smoke.cjs",
     "type-check": "tsc --noEmit",
     "kit:lint": "npm run build:electron && node dist/electron/electron/context/kit-lint-cli.js",
     "test": "npm run skills:check && vitest run",
@@ -450,6 +453,9 @@
       "owner": "CoWork-OS",
       "repo": "CoWork-OS",
       "releaseType": "draft"
-    }
+    },
+    "asarUnpack": [
+      "**/native-session-probe"
+    ]
   }
 }

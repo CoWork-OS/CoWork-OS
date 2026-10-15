@@ -1,5 +1,5 @@
-import {
-  chromium,
+// Playwright is a large module tree; it loads on the first browser launch, not at app start.
+import type {
   Browser,
   Page,
   BrowserContext,
@@ -1733,6 +1733,7 @@ export class BrowserService {
         );
       }
 
+      const { chromium } = await import("playwright");
       if (this.options.userDataDir) {
         await fs.mkdir(this.options.userDataDir, { recursive: true });
 

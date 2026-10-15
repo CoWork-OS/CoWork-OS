@@ -26,6 +26,12 @@ export interface MCPAuthConfig {
   username?: string;
   password?: string; // Encrypted when stored
   headerName?: string; // Custom header name for API key auth
+  /**
+   * SSE only, for legacy servers that cannot read headers: also send the token as a
+   * `token`/`api_key` query parameter on the stream request. Off by default because
+   * URLs are recorded by proxies and server logs.
+   */
+  sendTokenInQuery?: boolean;
 
   // Optional OAuth refresh metadata. The access token still travels as a
   // bearer token; these fields let HTTP transports renew it when needed.
@@ -34,6 +40,46 @@ export interface MCPAuthConfig {
   clientSecret?: string; // Encrypted when stored
   tokenUrl?: string;
   expiresAt?: number;
+  /** When the refresh token stops working, if the provider says. */
+  refreshExpiresAt?: number;
+  /** PEM private key for JWT bearer (ambient) identities. Encrypted when stored. */
+  privateKey?: string;
+  /** OAuth 2.1 settings for remote servers that sign in (see mcp/oauth/mcp-oauth.ts). */
+  oauth?: MCPOAuthSettings;
+}
+
+export interface MCPOAuthSettings {
+  /**
+   * authorization_code: a person signs in once (PKCE); refresh tokens renew it.
+   * jwt_bearer: the agent signs a JWT with its own key (RFC 7523); no person needed.
+   */
+  grant: "authorization_code" | "jwt_bearer";
+  authorizationUrl?: string;
+  /** Registered loopback redirect, e.g. http://127.0.0.1:18768/oauth/callback. */
+  redirectUri?: string;
+  scopes?: string[];
+  /** RFC 8707 resource indicator. */
+  resource?: string;
+  tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
+  jwt?: { subject: string; audience?: string; keyId?: string; algorithm?: "RS256" | "ES256" };
+  preset?: { kind: "workday"; region: string; tenant: string };
+}
+
+/**
+ * The Workday admin API client ("Register API Client") a Workday preset server
+ * uses for in-app agent setup through the Agent System of Record API. Separate
+ * from auth: it never signs the MCP server in, and editing it does not sign the
+ * server out. See mcp/oauth/workday-agent-setup.ts.
+ */
+export interface WorkdayAdminConnection {
+  /** Tenant UI host, e.g. impl.wd5.myworkday.com. */
+  tenantHost: string;
+  /** Tenant services host; derived from tenantHost when absent. */
+  servicesHost?: string;
+  clientId: string;
+  clientSecret?: string; // Encrypted when stored
+  /** Send a PKCE challenge, for admin clients registered with PKCE. */
+  usePkce?: boolean;
 }
 
 // MCP Server Configuration
@@ -59,6 +105,9 @@ export interface MCPServerConfig {
 
   // Authentication
   auth?: MCPAuthConfig;
+
+  /** Workday preset servers only: admin client for in-app agent setup. */
+  workdayAdmin?: WorkdayAdminConnection;
 
   // Timeouts (in ms)
   connectionTimeout?: number; // Default: 30000
@@ -87,6 +136,8 @@ export interface MCPServerConfig {
 // MCP Tool Definition (follows MCP spec)
 export interface MCPTool {
   name: string;
+  /** The server's own name for the tool, when the catalog namespaced a colliding name. */
+  serverToolName?: string;
   description?: string;
   annotations?: {
     title?: string;

@@ -18,6 +18,21 @@ export type ApprovalDraftPresentation =
 /** UI signal for exact, one-time responsibility write review. It grants no authority. */
 export const RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID =
   "responsibility_action_review_decision";
+/**
+ * The desktop approval fallback is rendered as a task input card. Keeping a
+ * stable question id lets recovery code distinguish an approval decision from
+ * an ordinary `request_user_input` question without adding another durable
+ * table or reviving the legacy approval modal.
+ */
+export const ASSISTANT_APPROVAL_QUESTION_ID = "approval_decision";
+
+/** Whether a question is an approval decision in question form, which needs its full review. */
+export function isApprovalDecisionQuestionId(questionId: string): boolean {
+  return (
+    questionId === ASSISTANT_APPROVAL_QUESTION_ID ||
+    questionId === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
+  );
+}
 /** Presentation only. Execution still uses the trusted approval writer's revision checks. */
 export function approvalDraftPresentation(details: unknown): ApprovalDraftPresentation | undefined {
   if (!details || typeof details !== "object") return;

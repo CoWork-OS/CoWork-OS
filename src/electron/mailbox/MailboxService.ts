@@ -1627,6 +1627,7 @@ const MAILBOX_ATTACHMENT_TEXT_MAX_CHARS = 24000;
 const MAILBOX_COMPOSE_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const MAILBOX_OUTBOX_POLL_INTERVAL_MS = 30_000;
 const MAILBOX_OUTBOX_MAX_ATTEMPTS = 5;
+const MAILBOX_SEND_TOO_LATE_MESSAGE = "This message is already on its way and can't be undone.";
 const MAILBOX_ASK_MAX_TOKENS = 900;
 
 function sha256(value: string): string {
@@ -2407,7 +2408,14 @@ export class MailboxService {
     return this.getMailboxComposeDraft(draftId);
   }
 
-  async createMailboxDraft(input: MailboxComposeDraftInput): Promise<MailboxComposeDraft> {
+  /**
+   * `options.source` tags drafts CoWork wrote on its own (e.g. Today's reply drafts) so they
+   * aren't mistaken for the user's; it can't be set over IPC.
+   */
+  async createMailboxDraft(
+    input: MailboxComposeDraftInput,
+    options: { source?: "today_reply_draft" } = {},
+  ): Promise<MailboxComposeDraft> {
     const accountId = await this.resolveComposeAccountId(input.accountId, input.threadId);
     const now = Date.now();
     const seedThread = input.threadId ? await this.getThread(input.threadId) : null;
@@ -2443,7 +2451,7 @@ export class MailboxService {
       input.signatureId || null,
       JSON.stringify([]),
       JSON.stringify({
-        source: "mailbox_compose",
+        source: options.source ?? "mailbox_compose",
         ...(workspaceId ? { workspaceId } : {}),
       }),
       now,
@@ -2555,9 +2563,19 @@ export class MailboxService {
     return this.getMailboxClientSettings();
   }
 
+  /** Whether a send of this draft is waiting in the outbox or under way. */
+  async hasActiveDraftSend(draftId: string): Promise<boolean> {
+    const row = await this.sql.get<{ count: number }>("activeDraftSendCount", [draftId]);
+    return (row?.count ?? 0) > 0;
+  }
+
   async sendMailboxDraft(draftId: string): Promise<MailboxOutgoingMessage> {
     const draft = await this.getMailboxComposeDraft(draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
+    // A second send while one is queued or retrying would deliver the message twice.
+    if (await this.hasActiveDraftSend(draftId)) {
+      throw new Error("This draft is already being sent.");
+    }
     if (!draft.to.length && !draft.cc.length && !draft.bcc.length) {
       throw new Error("Add at least one recipient before sending.");
     }
@@ -2602,20 +2620,47 @@ export class MailboxService {
 
   async discardMailboxDraft(draftId: string): Promise<boolean> {
     const now = Date.now();
-    const result = await this.sql.run("discardMailboxDraft_1", [now, draftId]);
+    // Cancel a queued send before marking the draft, so the outbox can't pick it up between.
     await this.sql.run("discardMailboxDraft_2", [now, draftId]);
     await this.sql.run("discardMailboxDraft_3", [now, draftId]);
+    const result = await this.sql.run("discardMailboxDraft_1", [now, draftId]);
     return result.changes > 0;
   }
 
+  /**
+   * Takes back a send that hasn't started and returns the draft to editing, unlike
+   * discarding it. False when the outbox already picked the send up, or it is due within
+   * the next second.
+   */
+  async cancelMailboxDraftSend(draftId: string, now = Date.now()): Promise<boolean> {
+    const cancelled = await this.sql.run("cancelMailboxDraftSend_1", [now, draftId, now + 1000]);
+    if (cancelled.changes === 0) return false;
+    await this.sql.run("cancelMailboxDraftSend_2", [now, draftId]);
+    await this.sql.run("cancelMailboxDraftSend_3", [now, draftId]);
+    return true;
+  }
+
+  /**
+   * Undoes a queued action. Undoing a send returns its draft to editing instead of
+   * discarding it, and is refused once the outbox has picked the send up.
+   */
   async undoMailboxAction(actionId: string): Promise<MailboxQueuedAction> {
     const existing = await this.getMailboxQueuedAction(actionId);
     if (!existing) throw new Error("Mailbox action not found");
     const now = Date.now();
-    if (existing.type === "send" && existing.draftId) {
-      await this.discardMailboxDraft(existing.draftId);
+    if (existing.type === "send" && existing.draftId && existing.status === "queued") {
+      if (!(await this.cancelMailboxDraftSend(existing.draftId, now))) {
+        throw new Error(MAILBOX_SEND_TOO_LATE_MESSAGE);
+      }
+    } else if (existing.type === "send" && existing.status === "cancelled") {
+      throw new Error("This send was already undone.");
+    } else if (existing.type === "send" && existing.status !== "failed") {
+      // Running, sent or with an unknown outcome: there is nothing left to take back.
+      throw new Error(MAILBOX_SEND_TOO_LATE_MESSAGE);
+    } else {
+      // A failed send keeps its draft, so it can be fixed and sent again.
+      await this.sql.run("undoMailboxAction_1", [now, actionId]);
     }
-    await this.sql.run("undoMailboxAction_1", [now, actionId]);
     return this.enqueueMailboxAction({
       accountId: existing.accountId,
       threadId: existing.threadId,
@@ -10282,7 +10327,9 @@ export class MailboxService {
 
   private async processMailboxQueuedAction(action: MailboxQueuedAction): Promise<void> {
     const now = Date.now();
-    await this.sql.run("processMailboxQueuedAction_1", [now, action.id]);
+    const claimed = await this.sql.run("processMailboxQueuedAction_1", [now, action.id]);
+    // Cancelled (undone or discarded) after it was read: it must not run.
+    if (claimed.changes === 0) return;
 
     if (action.type === "send") {
       await this.executeQueuedDraftSend(action);
@@ -10339,6 +10386,11 @@ export class MailboxService {
     if (!action.draftId) throw new Error("Queued send is missing draft id.");
     const draft = await this.getMailboxComposeDraft(action.draftId);
     if (!draft) throw new Error("Mailbox compose draft not found");
+    // Already sent by another action, or discarded: never send it (again).
+    if (draft.status === "sent" || draft.status === "discarded") {
+      await this.sql.run("skipQueuedDraftSend_1", [Date.now(), action.id]);
+      return;
+    }
     const outgoingId = asString(action.payload.outgoingId);
     const now = Date.now();
     await this.sql.run("executeQueuedDraftSend_1", [now, draft.id]);

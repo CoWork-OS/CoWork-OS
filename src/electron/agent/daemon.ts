@@ -28,9 +28,14 @@ import {
   ApprovalRepository,
   ArtifactRepository,
   InputRequestRepository,
+  storageStatements,
   TaskSessionMetadataRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
+import {
+  FOLLOW_UP_RECOVERY_TASK_STATUSES,
+  hasUnstartedFollowUpReceipt,
+} from "../database/follow-up-recovery-sql";
 import { EventEmitter } from "events";
 import {
   authorizationFingerprint,
@@ -43,7 +48,11 @@ import * as path from "path";
 import { createLogger } from "../utils/logger";
 import { DatabaseManager } from "../database/schema";
 import { recordHostOperation } from "../database/sqlite-instrumentation";
-import { getDatabaseClient, isTimelineProjectionWorkerEnabled } from "../database/async/runtime";
+import {
+  getDatabaseClient,
+  getReportingReader,
+  isTimelineProjectionWorkerEnabled,
+} from "../database/async/runtime";
 import { TimelineProjectionQueue } from "../database/async/TimelineProjectionQueue";
 import { TimelineWriter } from "../database/async/TimelineWriter";
 import { pendingTimelineWritesCommitted } from "../database/timeline-write-registry";
@@ -78,6 +87,13 @@ import { SessionRetentionService } from "../sessions/SessionRetentionService";
 import { SessionProgressService } from "../sessions/SessionProgressService";
 import { WorkSessionProtocolService } from "../sessions/WorkSessionProtocolService";
 import { WorkSessionContractService } from "../sessions/WorkSessionContractService";
+import {
+  createDaemonApplicationExecution,
+  ApplicationTaskToolGateway,
+} from "../applications/daemon-application-execution";
+import type { ApplicationExecutionService } from "../applications/ApplicationExecutionService";
+import type { ApplicationToolGateway } from "../applications/ApplicationAdapterCatalog";
+import { APPLICATION_DECISION_PREFIX, resolveApplicationInput } from "./tools/application-tools";
 import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
@@ -184,6 +200,7 @@ import {
   type PendingBotHandoff,
 } from "../../shared/bot-handoff";
 import {
+  inheritableAccessCeilings,
   BUILTIN_ACCESS_PROFILE_IDS,
   hasAccessProfileScope,
   isAccessProfileAtMostPrivileged,
@@ -392,6 +409,10 @@ export const BOT_HANDOFF_REPLY_TIMEOUT_MS = 120_000;
 function hashBotMessage(message: string): string {
   return crypto.createHash("sha256").update(message, "utf8").digest("hex");
 }
+
+/** Shown when an agent's "May do alone" limit stops a session from running. */
+const ACCESS_LIMIT_UNAVAILABLE_MESSAGE =
+  "This agent's access limit is unavailable or can't be combined with this session's access. Change it in Team before continuing.";
 
 const FORK_REPLAY_EVENT_TYPES = new Set([
   "user_message",
@@ -822,6 +843,8 @@ export class AgentDaemon extends EventEmitter {
   private sessionProgressService: SessionProgressService;
   private workSessionProtocolService: WorkSessionProtocolService;
   private workSessionContractService: WorkSessionContractService;
+  private applicationExecutionService?: ApplicationExecutionService;
+  private applicationTaskTools = new ApplicationTaskToolGateway();
   private annotationRepo: AnnotationRepository;
   private activityRepo: ActivityStore;
   private agentRoleRepo: AgentRoleStore;
@@ -1070,6 +1093,57 @@ export class AgentDaemon extends EventEmitter {
   /** Return the durable Phase 4 contracts/evidence/lineage service. */
   getWorkSessionContractService(): WorkSessionContractService {
     return this.workSessionContractService;
+  }
+
+  getApplicationExecutionService(): ApplicationExecutionService {
+    this.applicationExecutionService ??= createDaemonApplicationExecution(
+      this,
+      this.applicationTaskTools,
+    );
+    return this.applicationExecutionService;
+  }
+
+  bindApplicationToolGateway(taskId: string, gateway: ApplicationToolGateway): void {
+    this.applicationTaskTools.bind(taskId, gateway);
+  }
+  getExistingApplicationExecutionService(): ApplicationExecutionService | undefined {
+    return this.applicationExecutionService;
+  }
+
+  async resumeAfterApplicationOperations(taskId: string): Promise<void> {
+    const task = this.getTask(taskId);
+    if (
+      !task ||
+      task.status !== "paused" ||
+      !this.applicationExecutionService ||
+      this.applicationExecutionService.isTaskCancellationRequested(taskId)
+    )
+      return;
+    const session = this.workSessionContractService.getForTask(taskId)?.session;
+    if (!session) return;
+    const requestId = `application_completion:${taskId}`;
+    const wait = this.workSessionContractService
+      .getRepository()
+      .findWaitStateByRequest(session.id, "external", requestId);
+    if (wait?.status !== "pending") return;
+    const operations = await this.applicationExecutionService.repository.list(taskId, 500);
+    const projections = operations.map((operation) =>
+      this.applicationExecutionService!.projection(operation),
+    );
+    if (
+      projections.some((projection) =>
+        ["in_progress", "needs_decision", "unknown"].includes(projection.status),
+      )
+    )
+      return;
+    if ((await this.getPendingInputRequests(taskId)).length > 0) return;
+    this.workSessionContractService.resolveWait(taskId, "external", requestId, "resolved", {
+      operations: projections,
+    });
+    await this.resumeTaskAfterDurableWait(
+      taskId,
+      `Application operations settled:\n${JSON.stringify(projections)}`,
+    );
   }
 
   /** Return Phase 5 projection, lease, metrics, replay, and rollout services. */
@@ -1641,7 +1715,52 @@ export class AgentDaemon extends EventEmitter {
       }
     }
 
+    // "May do alone": stamp the role's access limit so every profile resolution for this task
+    // narrows to it. It is persisted right away, because some resolutions read the stored
+    // task, and it follows the role: a cleared limit is removed again.
+    const ceiling =
+      typeof role.accessProfileId === "string" && role.accessProfileId.trim()
+        ? role.accessProfileId.trim()
+        : undefined;
+    if (nextAgentConfig.accessCeilingProfileId !== ceiling) {
+      if (ceiling) nextAgentConfig.accessCeilingProfileId = ceiling;
+      else delete nextAgentConfig.accessCeilingProfileId;
+      changed = true;
+      try {
+        const stored = this.taskRepo.findById(task.id);
+        if (stored) {
+          const storedConfig: AgentConfig = { ...(stored.agentConfig ?? {}) };
+          if (ceiling) storedConfig.accessCeilingProfileId = ceiling;
+          else delete storedConfig.accessCeilingProfileId;
+          this.taskRepo.update(task.id, { agentConfig: storedConfig });
+        }
+      } catch (error) {
+        console.warn("[AgentDaemon] Failed to persist the agent's access limit:", error);
+      }
+    }
+
     return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
+  }
+
+  /**
+   * After an agent's access limit changes, re-stamps it on that agent's active sessions and
+   * refreshes their executors, so running work follows the new limit right away.
+   */
+  refreshAgentRoleAccessCeiling(roleId: string): void {
+    this.activeTasks.forEach((cached, taskId) => {
+      const task = this.taskRepo.findById(taskId);
+      if (!task || task.assignedAgentRoleId !== roleId) return;
+      this.applyAgentRoleOverrides(task);
+      // The executor keeps its own copy of the task's config; give it the new limit too,
+      // keeping any narrower override the current turn runs with.
+      const current = this.getTaskWithTransientAgentConfig(this.taskRepo.findById(taskId));
+      try {
+        cached.executor?.updateTaskAgentConfig?.(current?.agentConfig);
+      } catch (error) {
+        console.warn(`[AgentDaemon] Failed to update the access limit for task ${taskId}:`, error);
+      }
+    });
+    this.refreshActiveExecutorsForAccessProfiles();
   }
 
   private maybeCaptureMentionedAgentRoleIds(task: Task): void {
@@ -2216,6 +2335,8 @@ export class AgentDaemon extends EventEmitter {
   }
 
   async initialize(): Promise<void> {
+    // Recover journalled operations even when no model executor is currently running.
+    this.getApplicationExecutionService();
     // Before recovery logs any event: the projection backend is fixed for the run.
     await this.configureTimelineProjection();
     this.orchestrationGraphEngine.start();
@@ -2291,8 +2412,9 @@ export class AgentDaemon extends EventEmitter {
     // A follow-up can be journaled before an idle executor changes a terminal
     // task back to executing. If the host exits in that short admission window,
     // recover the durable queued/started receipt instead of leaving it attached
-    // to a task that startup would otherwise treat as finished.
-    this.recoverUnstartedUserFollowUpsOnStartup();
+    // to a task that startup would otherwise treat as finished. The receipt scan
+    // runs off the host thread; its tasks are recovered with the delayed resume.
+    const followUpRecoveryCandidates = this.scanUnstartedUserFollowUps();
 
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
@@ -2420,12 +2542,12 @@ export class AgentDaemon extends EventEmitter {
     // (IPC handlers, tray, cron, UI) finish initializing first.
     if (tasksToResume.length > 0) {
       console.log(`[AgentDaemon] ${tasksToResume.length} task(s) scheduled for resume`);
-      setTimeout(() => {
-        this.resumeInterruptedTasks(tasksToResume).catch((error) => {
-          log.error("Failed to resume interrupted tasks:", error);
-        });
-      }, 2000);
     }
+    setTimeout(() => {
+      this.resumeTasksAfterStartup(tasksToResume, followUpRecoveryCandidates).catch((error) => {
+        log.error("Failed to resume interrupted tasks:", error);
+      });
+    }, 2000);
 
     await this.orchestrationGraphEngine.resumeRunningRuns();
   }
@@ -2992,8 +3114,9 @@ export class AgentDaemon extends EventEmitter {
         adminPolicies: loadPolicies(),
       });
       if (effectiveAccessProfile.profileUnavailable) {
-        const errorMessage =
-          "The selected access profile is unavailable. Choose a valid profile before running this task.";
+        const errorMessage = effectiveAccessProfile.accessLimitUnavailable
+          ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+          : "The selected access profile is unavailable. Choose a valid profile before running this task.";
         this.updateTask(executionTask.id, {
           status: "paused",
           terminalStatus: "needs_user_action",
@@ -3257,31 +3380,60 @@ export class AgentDaemon extends EventEmitter {
     return true;
   }
 
-  private recoverUnstartedUserFollowUpsOnStartup(): void {
-    const candidates = this.taskRepo.findByStatus([
-      "paused",
-      "blocked",
-      "completed",
-      "failed",
-      "cancelled",
-    ]);
-    let recoveredCount = 0;
+  /**
+   * Start the startup scan for follow-up receipts a crash left queued or started. On the
+   * worker backend it runs in the reporting reader (a report unit), so the host thread and
+   * the first window never wait for it; on the host backend it runs when the delayed resume
+   * consumes it. Resolves to candidate task ids, or null when the scan failed.
+   */
+  private scanUnstartedUserFollowUps(): () => Promise<string[] | null> {
+    const port = storageStatements(this.getDatabase());
+    const scan = () =>
+      port.unit("taskEvent_findUnstartedFollowUpTaskIds", []).catch((error: unknown) => {
+        log.warn("Follow-up recovery scan failed; checking every finished task instead:", error);
+        return null;
+      });
+    if (!port.usesWorker()) return scan;
+    // Report units use the reader once it is up instead of queueing on the write worker.
+    const pending = getReportingReader()
+      .catch(() => null)
+      .then(scan);
+    return () => pending;
+  }
+
+  /** The delayed startup resume: interrupted tasks plus tasks with a recovered follow-up. */
+  private async resumeTasksAfterStartup(
+    tasksToResume: Task[],
+    followUpRecoveryCandidates: () => Promise<string[] | null>,
+  ): Promise<void> {
+    if (this.shutdownRequested) return;
+    const candidateTaskIds = await followUpRecoveryCandidates();
+    if (this.shutdownRequested) return;
+    const recovered = this.recoverUnstartedUserFollowUpsOnStartup(candidateTaskIds ?? undefined);
+    if (recovered.length > 0) {
+      console.log(`[AgentDaemon] ${recovered.length} follow-up task(s) scheduled for resume`);
+    }
+    const tasks = [...tasksToResume, ...recovered];
+    if (tasks.length > 0) await this.resumeInterruptedTasks(tasks);
+  }
+
+  /**
+   * Interrupt finished tasks whose latest follow-up receipt is still queued or started, so
+   * the startup resume redispatches it. With the worker scan's candidate ids only those
+   * tasks are re-read and re-checked; without them every task in a recovery status is.
+   */
+  private recoverUnstartedUserFollowUpsOnStartup(candidateTaskIds?: readonly string[]): Task[] {
+    const statuses: readonly TaskStatus[] = FOLLOW_UP_RECOVERY_TASK_STATUSES;
+    const candidates = candidateTaskIds
+      ? candidateTaskIds
+          .map((taskId) => this.taskRepo.findById(taskId))
+          .filter((task): task is Task => Boolean(task && statuses.includes(task.status)))
+      : this.taskRepo.findByStatus([...statuses]);
+    const recovered: Task[] = [];
     for (const task of candidates) {
       if (!this.shouldResumeTaskOnStartup(task)) continue;
-
-      const latestReceipts = new Map<string, Record<string, unknown>>();
-      for (const event of readDurableTaskEvents(this, task.id, "user_message")) {
-        const payload = event.payload as Record<string, unknown> | undefined;
-        const messageId = typeof payload?.messageId === "string" ? payload.messageId.trim() : "";
-        if (messageId && payload?.deliveryMode === "follow_up") {
-          latestReceipts.set(messageId, payload);
-        }
-      }
-      const hasUnstartedFollowUp = Array.from(latestReceipts.values()).some((payload) => {
-        const status = payload.deliveryStatus ?? payload.status;
-        return status === "queued" || status === "started";
-      });
-      if (!hasUnstartedFollowUp) continue;
+      const receipts = readDurableTaskEvents(this, task.id, "user_message");
+      if (!hasUnstartedFollowUpReceipt(receipts.map((event) => event.payload))) continue;
 
       this.taskRepo.update(task.id, {
         status: "interrupted",
@@ -3291,11 +3443,12 @@ export class AgentDaemon extends EventEmitter {
         message: "A queued follow-up was interrupted by application restart. The task will resume.",
         reason: "user_follow_up_recovered_after_restart",
       });
-      recoveredCount += 1;
+      recovered.push({ ...task, status: "interrupted" });
     }
-    if (recoveredCount > 0) {
-      log.info(`[AgentDaemon] Recovering ${recoveredCount} task(s) with queued follow-ups`);
+    if (recovered.length > 0) {
+      log.info(`[AgentDaemon] Recovering ${recovered.length} task(s) with queued follow-ups`);
     }
+    return recovered;
   }
 
   private skipStartupResume(task: Task): void {
@@ -5350,6 +5503,23 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
+    // Access limits come only from the parent (below), never from the caller: drop any the
+    // caller passed before the child's requested profile is compared with the parent's.
+    if (
+      params.agentConfig &&
+      (Object.prototype.hasOwnProperty.call(params.agentConfig, "accessCeilingProfileId") ||
+        Object.prototype.hasOwnProperty.call(
+          params.agentConfig,
+          "inheritedAccessCeilingProfileIds",
+        ))
+    ) {
+      const {
+        accessCeilingProfileId: _ownLimit,
+        inheritedAccessCeilingProfileIds: _inheritedLimits,
+        ...rest
+      } = params.agentConfig;
+      params = { ...params, agentConfig: rest };
+    }
     const parent = this.taskRepo.findById(params.parentTaskId);
     const requestedWorkerRole = resolveWorkerRoleKind(params.workerRole);
     const workerRole = requestedWorkerRole || resolveDefaultWorkerRoleKind();
@@ -5694,6 +5864,13 @@ export class AgentDaemon extends EventEmitter {
           next.permissionMode = accessProfileInheritance.fallbackPermissionMode;
         }
       }
+      // A child works under every access limit its parent does: the parent's own agent limit
+      // and the ones the parent inherited. Caller-supplied limits are dropped first, so only
+      // the parent's stored ones count; the child's own role adds its limit when it starts.
+      delete next.accessCeilingProfileId;
+      delete next.inheritedAccessCeilingProfileIds;
+      const inheritedCeilings = inheritableAccessCeilings(parent?.agentConfig);
+      if (inheritedCeilings.length > 0) next.inheritedAccessCeilingProfileIds = inheritedCeilings;
       // ACP has its own execution and consent boundary. A native CoWork
       // profile must not silently promote the adapter to approve-all.
       return Object.keys(next).length > 0 ? next : undefined;
@@ -6313,6 +6490,7 @@ export class AgentDaemon extends EventEmitter {
     }
     if (options.scopeWorkspaceId && existing.workspaceId !== options.scopeWorkspaceId)
       throw new Error("Task control workspace changed");
+    await this.applicationExecutionService?.cancelForTask(taskId);
     // Background processes (run_command background: true) outlive a finished
     // turn so follow-ups can use them; cancelling or deleting the task, even a
     // completed one whose executor is gone, stops them.
@@ -7243,9 +7421,11 @@ export class AgentDaemon extends EventEmitter {
       try {
         const prefix = MCPSettingsManager.loadSettings().toolNamePrefix || "mcp_";
         const rawName = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : "";
+        const manager = MCPClientManager.getInstance();
+        const serverToolName = manager.getServerToolName(rawName) ?? rawName;
         trustedLocalComputerUse =
-          (rawName === "js" || rawName === "js_reset") &&
-          isCodexComputerUseServer(MCPClientManager.getInstance().getServerConfigForTool(rawName));
+          (serverToolName === "js" || serverToolName === "js_reset") &&
+          isCodexComputerUseServer(manager.getServerConfigForTool(rawName));
       } catch {
         // Unavailable or unknown drivers retain ordinary MCP policy.
       }
@@ -7637,7 +7817,7 @@ export class AgentDaemon extends EventEmitter {
   async getTaskConsentAuthority(
     taskId: string,
     details: Any,
-    approvalType: "external_service" | "network_access" = "external_service",
+    approvalType: "external_service" | "network_access" | "computer_use" = "external_service",
   ): Promise<string | null> {
     const task = this.taskRepo.findById(taskId);
     if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return null;
@@ -9955,6 +10135,11 @@ export class AgentDaemon extends EventEmitter {
         });
         inputRequestIdempotency.complete(idempotencyKey, { status: "handled" });
         return { status: "handled", requestId: response.requestId };
+      }
+      if (
+        request.questions.some((question) => question.id.startsWith(APPLICATION_DECISION_PREFIX))
+      ) {
+        await resolveApplicationInput(this.getApplicationExecutionService(), request, response);
       }
       if (
         !(await this.inputRequestRepo.resolve(
@@ -12382,6 +12567,12 @@ export class AgentDaemon extends EventEmitter {
       const fileBuffer = fs.readFileSync(filePath);
       const sha256 = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
+      if (
+        (await this.artifactRepo.findByTaskId(taskId)).some(
+          (a) => a.path === filePath && a.sha256 === sha256,
+        )
+      )
+        return;
       const artifact = await this.artifactRepo.create({
         taskId,
         path: filePath,
@@ -12544,6 +12735,7 @@ export class AgentDaemon extends EventEmitter {
   beginFollowUpRun(taskId: string): Task | undefined {
     const existing = this.taskRepo.findById(taskId);
     if (!existing) return undefined;
+    this.applicationExecutionService?.resetTaskCancellation(taskId);
 
     const currentStatus = deriveCanonicalTaskStatus(existing);
     if (!isTerminalTaskStatus(currentStatus)) {
@@ -14944,6 +15136,53 @@ export class AgentDaemon extends EventEmitter {
     }
     if (this.reconcilePendingUserUpdateBeforeCompletion(taskId).deferred) return;
 
+    let hasApplicationOperations = false;
+    if (this.applicationExecutionService) {
+      const operations = await this.applicationExecutionService.repository.list(taskId, 500);
+      hasApplicationOperations = operations.length > 0;
+      const projections = operations.map((operation) =>
+        this.applicationExecutionService!.projection(operation),
+      );
+      if (
+        projections.some((projection) =>
+          ["in_progress", "needs_decision", "unknown"].includes(projection.status),
+        )
+      ) {
+        const needsUser = projections.some((projection) =>
+          ["needs_decision", "unknown"].includes(projection.status),
+        );
+        this.updateTask(taskId, {
+          status: "paused",
+          terminalStatus: needsUser ? "needs_user_action" : undefined,
+        });
+        this.workSessionContractService.beginWait(taskId, {
+          kind: "external",
+          requestId: `application_completion:${taskId}`,
+          reason: "application_operations",
+          payload: { operations: projections },
+        });
+        this.logEvent(taskId, "application_operation_wait", {
+          reason: "application_operations",
+          message:
+            "Application work is still running, awaiting a decision, or requires reconciliation.",
+          operations: projections,
+        });
+        this.finishQueueSlot(taskId);
+        return;
+      }
+      if (
+        projections.some(
+          (projection) => projection.status !== "complete" && projection.status !== "superseded",
+        )
+      ) {
+        metadata = {
+          ...metadata,
+          terminalStatus: "partial_success",
+          failureClass: "contract_error",
+        };
+      }
+    }
+
     this.cleanupPendingApprovalsForTask(
       taskId,
       "Task ended before the approval request was resolved.",
@@ -14952,7 +15191,7 @@ export class AgentDaemon extends EventEmitter {
     const isChatSession =
       existingTask.agentConfig?.executionMode === "chat" &&
       existingTask.agentConfig?.executionModeSource === "user";
-    if (isChatSession) {
+    if (isChatSession && !hasApplicationOperations) {
       // A child chat task (team synthesis) hands its answer to the parent through
       // resultSummary; an interactive chat turn has no summary to keep.
       const handoffSummary =
@@ -16256,6 +16495,9 @@ export class AgentDaemon extends EventEmitter {
           agentConfig: {
             ...persistentWorkerRoleBoundary.task.agentConfig,
             ...effectiveOptions.agentConfigOverride,
+            // A follow-up override never lifts the agent's access limit.
+            accessCeilingProfileId:
+              persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
           },
         }
       : persistentWorkerRoleBoundary.task;
@@ -16314,8 +16556,9 @@ export class AgentDaemon extends EventEmitter {
       adminPolicies: loadPolicies(),
     });
     if (effectiveAccessProfile.profileUnavailable) {
-      const errorMessage =
-        "The selected access profile is unavailable. Choose a valid profile before continuing.";
+      const errorMessage = effectiveAccessProfile.accessLimitUnavailable
+        ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+        : "The selected access profile is unavailable. Choose a valid profile before continuing.";
       this.updateTask(taskId, {
         status: "paused",
         terminalStatus: "needs_user_action",
@@ -16991,7 +17234,9 @@ export class AgentDaemon extends EventEmitter {
     });
     if (effectiveAccessProfile.profileUnavailable) {
       throw new Error(
-        "The selected access profile is unavailable. Choose a valid profile before continuing.",
+        effectiveAccessProfile.accessLimitUnavailable
+          ? ACCESS_LIMIT_UNAVAILABLE_MESSAGE
+          : "The selected access profile is unavailable. Choose a valid profile before continuing.",
       );
     }
 
@@ -19048,6 +19293,11 @@ export class AgentDaemon extends EventEmitter {
   private async shutdownInternal(): Promise<void> {
     log.info("Shutting down agent daemon...");
     const shutdownErrors: unknown[] = [];
+    try {
+      await this.applicationExecutionService?.stop();
+    } catch (error) {
+      shutdownErrors.push(error);
+    }
     try {
       this.orchestrationGraphEngine.stop();
     } catch (error) {

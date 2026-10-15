@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, CalendarClock, Laptop, Plus, Server, Workflow, type LucideIcon } from "lucide-react";
+import { BUILTIN_ACCESS_PROFILES } from "../../../shared/access-profiles";
 import type { Task, Workspace } from "../../../shared/types";
 import { useAttentionSnapshot } from "../../hooks/useAttentionSnapshot";
 import { formatHomeSessionTime } from "../../utils/home-sessions";
@@ -14,6 +15,7 @@ import {
   type TeamRole,
   type TeamRoutine,
 } from "../../utils/team-view";
+import { AgentRoleEditorDialog } from "../AgentRoleEditorDialog";
 import "./team-view.css";
 
 const LOCAL_LABEL = navigator.userAgent.includes("Mac") ? "This Mac" : "This computer";
@@ -73,12 +75,21 @@ const EMPTY_SOURCES: TeamSources = {
 };
 
 /** Each list loads on its own; one that fails leaves its teammates out instead of the view. */
-function useTeamSources(): { sources: TeamSources; reloadSchedules: () => Promise<void> } {
+function useTeamSources(): {
+  sources: TeamSources;
+  reloadSchedules: () => Promise<void>;
+  reloadRoles: () => Promise<void>;
+} {
   const [sources, setSources] = useState<TeamSources>(EMPTY_SOURCES);
 
   const reloadSchedules = useCallback(async () => {
     const jobs = await window.electronAPI.listCronJobs({ includeDisabled: true }).catch(() => null);
     if (jobs) setSources((current) => ({ ...current, cronJobs: jobs as TeamCronJob[] }));
+  }, []);
+
+  const reloadRoles = useCallback(async () => {
+    const roles = await window.electronAPI.getAgentRoles(false).catch(() => null);
+    if (Array.isArray(roles)) setSources((current) => ({ ...current, roles: roles as TeamRole[] }));
   }, []);
 
   useEffect(() => {
@@ -110,7 +121,37 @@ function useTeamSources(): { sources: TeamSources; reloadSchedules: () => Promis
     };
   }, []);
 
-  return { sources, reloadSchedules };
+  return { sources, reloadSchedules, reloadRoles };
+}
+
+/** The access profiles a limit can name: the built-in ones, then the user's own. */
+function useAccessProfileChoices(): Array<{ id: string; label: string }> {
+  const [custom, setCustom] = useState<Array<{ id: string; label: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void window.electronAPI
+      .getPermissionSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        setCustom(
+          (settings?.accessProfiles ?? []).map((profile) => ({
+            id: profile.id,
+            label: profile.label || profile.id,
+          })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return useMemo(
+    () => [
+      ...BUILTIN_ACCESS_PROFILES.map((profile) => ({ id: profile.id, label: profile.label })),
+      ...custom.filter((profile) => !BUILTIN_ACCESS_PROFILES.some((b) => b.id === profile.id)),
+    ],
+    [custom],
+  );
 }
 
 /**
@@ -127,7 +168,12 @@ export function TeamView({
   onOpenDevices,
   onAddDevice,
 }: TeamViewProps) {
-  const { sources, reloadSchedules } = useTeamSources();
+  const { sources, reloadSchedules, reloadRoles } = useTeamSources();
+  const accessChoices = useAccessProfileChoices();
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [savingAccess, setSavingAccess] = useState(false);
+  /** The agent whose full settings are open, if any. */
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const attention = useAttentionSnapshot(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -156,7 +202,25 @@ export function TeamView({
 
   const selected = model.members.find((member) => member.id === selectedId) ?? model.members[0];
 
-  useEffect(() => setScheduleError(null), [selected?.id]);
+  useEffect(() => {
+    setScheduleError(null);
+    setAccessError(null);
+  }, [selected?.id]);
+
+  // "May do alone" is a limit: the main process checks the profile exists and narrows every
+  // session, schedule and check-in of this agent to it. Nothing here grants access.
+  const changeAccessLimit = async (roleId: string, profileId: string) => {
+    setSavingAccess(true);
+    setAccessError(null);
+    try {
+      await window.electronAPI.updateAgentRole({ id: roleId, accessProfileId: profileId || null });
+      await reloadRoles();
+    } catch {
+      setAccessError("The limit could not be changed. Try again.");
+    } finally {
+      setSavingAccess(false);
+    }
+  };
 
   const open = (target: TeamOpenTarget) => {
     if (target.type === "bots") onOpenBots();
@@ -308,6 +372,14 @@ export function TeamView({
                     <button type="button" className="primary" onClick={() => open(selected.open)}>
                       {OPEN_LABEL[selected.open.type]}
                     </button>
+                    {selected.access && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingRoleId(selected.access!.roleId)}
+                      >
+                        Edit agent
+                      </button>
+                    )}
                     {selected.schedule && (
                       <button
                         type="button"
@@ -322,6 +394,46 @@ export function TeamView({
                     <p className="team-view-error" role="alert">
                       {scheduleError}
                     </p>
+                  )}
+
+                  {selected.access && (
+                    <div className="team-view-block">
+                      <h4>
+                        <label htmlFor="team-view-access">May do alone</label>
+                      </h4>
+                      <select
+                        id="team-view-access"
+                        className="team-view-select"
+                        value={selected.access.profileId ?? ""}
+                        disabled={savingAccess}
+                        onChange={(event) =>
+                          void changeAccessLimit(selected.access!.roleId, event.target.value)
+                        }
+                      >
+                        <option value="">No limit: each session's own access</option>
+                        {accessChoices.map((choice) => (
+                          <option key={choice.id} value={choice.id}>
+                            {choice.label}
+                          </option>
+                        ))}
+                        {selected.access.profileId &&
+                          !accessChoices.some(
+                            (choice) => choice.id === selected.access!.profileId,
+                          ) && (
+                            <option value={selected.access.profileId}>Unavailable profile</option>
+                          )}
+                      </select>
+                      <p className="team-view-note">
+                        Its sessions, schedules and check-ins never get more access than this; a
+                        session can still be stricter. Work it does while you're away can't ask you,
+                        so anything that needs your OK is refused.
+                      </p>
+                      {accessError && (
+                        <p className="team-view-error" role="alert">
+                          {accessError}
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {selected.description && (
@@ -363,8 +475,9 @@ export function TeamView({
                         ))}
                       </dl>
                       <p className="team-view-note">
-                        Change these where they're set:{" "}
-                        {OPEN_LABEL[selected.open.type].replace("Open in ", "")}.
+                        {selected.access
+                          ? "Change these with Edit agent."
+                          : `Change these where they're set: ${OPEN_LABEL[selected.open.type].replace("Open in ", "")}.`}
                       </p>
                     </div>
                   )}
@@ -403,6 +516,13 @@ export function TeamView({
           )}
         </section>
       </div>
+      {editingRoleId && (
+        <AgentRoleEditorDialog
+          roleId={editingRoleId}
+          onClose={() => setEditingRoleId(null)}
+          onSaved={() => reloadRoles()}
+        />
+      )}
     </main>
   );
 }

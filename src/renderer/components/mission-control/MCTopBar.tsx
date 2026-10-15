@@ -36,6 +36,8 @@ const CORE_HARNESS_METHODS = [
 interface MCTopBarProps {
   data: MissionControlData;
   onOpenAgents?: () => void;
+  /** The agents link's label: "Bots" (formerly Agents Hub), or "Team" in Calm. */
+  agentsLabel?: string;
 }
 
 const TABS: { id: MCTab; label: string; requiresCompany?: boolean }[] = [
@@ -46,7 +48,7 @@ const TABS: { id: MCTab; label: string; requiresCompany?: boolean }[] = [
   { id: "ops", label: "Operations", requiresCompany: true },
 ];
 
-export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
+export function MCTopBar({ data, onOpenAgents, agentsLabel = "Bots" }: MCTopBarProps) {
   const {
     workspaces,
     selectedWorkspaceId,
@@ -166,10 +168,11 @@ export function MCTopBar({ data, onOpenAgents }: MCTopBarProps) {
                   : undefined
             }
           >
-            Teams
+            {/* Not "Teams": in Calm the next button is "Team", the roster of agents. */}
+            Agent teams
           </button>
           <button className="mc-v2-icon-btn" onClick={onOpenAgents}>
-            Agents Hub
+            {agentsLabel}
           </button>
           <span
             style={{

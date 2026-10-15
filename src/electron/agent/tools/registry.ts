@@ -170,6 +170,7 @@ import { KnowledgeGraphTools } from "./knowledge-graph-tools";
 import { ScrapingTools } from "./scraping-tools";
 import { DocumentTools } from "./document-tools";
 import { ComputerUseTools } from "./computer-use-tools";
+import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
 import { QATools } from "./qa-tools";
@@ -202,6 +203,15 @@ import {
   getDefaultRuntimeToolMetadata,
 } from "./runtime-tool-definition";
 import { ToolHandlerRegistry } from "../runtime/tool-handler-registry";
+import { ToolExecutionCoordinator } from "../runtime/ToolExecutionCoordinator";
+import type { ToolInvocationContext } from "../runtime/ToolInvocationContext";
+import { APPLICATION_OPERATION_TOOL, runApplicationTool } from "./application-tools";
+import {
+  LOCAL_PHOTOSHOP_TOOLS,
+  NATIVE_APPLICATION_TOOLS,
+  NativeApplicationTools,
+} from "./native-application-tools";
+import { ApplicationNotDispatchedError } from "../../applications/ApplicationAdapterCatalog";
 import {
   createStaticRuntimeToolSchedulerSpecResolver,
   resolveRuntimeToolSchedulerSpec,
@@ -227,6 +237,7 @@ import {
   withToolPromptMetadataList,
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
+import { buildMcpApprovalPresentation } from "./mcp-approval-preview";
 import { getNumbatService } from "../../security/numbat";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 import {
@@ -594,6 +605,9 @@ export function getMcpPaymentLimitError(input: unknown, toolSchema?: MCPTool): s
  */
 const registryLogger = createLogger("ToolRegistry");
 
+/** Servers exposing more tools than this load them through tool_search instead of every request. */
+export const MCP_DEFERRED_SERVER_TOOL_THRESHOLD = 25;
+
 export class ToolRegistry {
   private static mermaidValidationInitialized = false;
   private fileTools: FileTools;
@@ -615,6 +629,7 @@ export class ToolRegistry {
   private visionTools: VisionTools;
   private systemTools: SystemTools;
   private computerUseTools: ComputerUseTools;
+  private nativeAppTools: NativeAppTools;
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
   private canvasTools: CanvasTools;
@@ -652,6 +667,8 @@ export class ToolRegistry {
   private _deepWorkMode = false;
   private _codeExecTools?: CodeExecTools;
   private deniedTools: Set<string> = new Set();
+  /** MCP servers whose tools are deferred to tool_search (see getMCPToolDefinitions). */
+  private deferredMcpServers: Array<{ name: string; toolCount: number }> = [];
   private deniedGroups: Set<ToolGroupName> = new Set();
   private denyAllTools = false;
   private shadowedToolsLogged = false;
@@ -703,6 +720,7 @@ export class ToolRegistry {
     this.visionTools = new VisionTools(workspace, daemon, taskId);
     this.systemTools = new SystemTools(workspace, daemon, taskId);
     this.computerUseTools = new ComputerUseTools(workspace, daemon, taskId);
+    this.nativeAppTools = new NativeAppTools(this.fileTools, daemon, taskId);
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
@@ -1316,6 +1334,16 @@ export class ToolRegistry {
   /**
    * Check if a tool is allowed based on security policy
    */
+  /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
+  private isDeniedByTaskRestrictions(toolName: string): boolean {
+    if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
+    for (const groupName of this.deniedGroups) {
+      const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
+      if (tools && tools.includes(toolName)) return true;
+    }
+    return false;
+  }
+
   isToolAllowed(toolName: string): boolean {
     if (this.denyAllTools) {
       return false;
@@ -1354,6 +1382,21 @@ export class ToolRegistry {
       ...TextTools.getToolDefinitions(),
       ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
+      process.platform === "darwin"
+        ? {
+            ...APPLICATION_OPERATION_TOOL,
+            runtime: {
+              ...APPLICATION_OPERATION_TOOL.runtime!,
+              alwaysExpose: true,
+            },
+          }
+        : APPLICATION_OPERATION_TOOL,
+      ...(process.platform === "darwin" ? LOCAL_PHOTOSHOP_TOOLS : []),
+      ...(process.platform === "darwin"
+        ? NATIVE_APPLICATION_TOOLS.filter(
+            (tool) => tool.name !== "native_application_create" || this.workspace.permissions.shell,
+          )
+        : []),
     ];
     if (this.protectedCredentialService) {
       allTools.push(this.getProtectedCredentialToolDefinition());
@@ -1486,6 +1529,7 @@ export class ToolRegistry {
 
     // Computer use tools (native mouse/keyboard/screenshot — desktop platforms only, not headless)
     allTools.push(...ComputerUseTools.getToolDefinitions({ headless }));
+    if (!headless && process.platform === "darwin") allTools.push(NATIVE_APP_TOOL);
 
     // Batch image processing tools — only when image generation is available
     if (ImageTools.isAvailable()) {
@@ -1598,6 +1642,9 @@ export class ToolRegistry {
       allTools.push(...EmailImapTools.getToolDefinitions());
     }
 
+    // MCP definitions first: they decide which servers tool_search announces.
+    const mcpTools = this.getMCPToolDefinitions();
+
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
 
@@ -1607,7 +1654,6 @@ export class ToolRegistry {
     // Add MCP tools from connected servers, filtering out those that shadow built-in tools
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
-    const mcpTools = this.getMCPToolDefinitions();
     const shadowedTools: string[] = [];
 
     for (const mcpTool of mcpTools) {
@@ -1738,6 +1784,23 @@ export class ToolRegistry {
       this.getTools().find((tool) => tool.name === toolName)?.runtime ||
       getDefaultRuntimeToolMetadata(toolName)
     );
+  }
+
+  private async assertApplicationRecoveryBoundary(
+    name: string,
+    input: unknown,
+    runtime?: Record<string, unknown>,
+  ): Promise<void> {
+    if (name === "application_operation" || name === "request_user_input") return;
+    const service = this.daemon?.getExistingApplicationExecutionService?.();
+    if (service)
+      await service.assertToolDispatch(
+        this.taskId,
+        name === "http_request"
+          ? isReadOnlyHttpRequestInput(input)
+          : this.getRuntimeMetadata(name).readOnly,
+        runtime?.applicationAttempt,
+      );
   }
 
   getApprovalType(toolName: string, input?: Any): ApprovalType | null {
@@ -2167,6 +2230,9 @@ export class ToolRegistry {
       toolName === "run_command" ||
       toolName === "delete_file" ||
       toolName === "run_applescript" ||
+      toolName === "local_photoshop_create" ||
+      toolName === "local_photoshop_edit" ||
+      toolName === "native_application_create" ||
       toolName === "take_screenshot" ||
       toolName === "open_path" ||
       toolName === "show_in_folder" ||
@@ -2190,6 +2256,12 @@ export class ToolRegistry {
       },
       override,
     );
+  }
+
+  /** Connected MCP servers whose tools load through tool_search (refreshed by getTools). */
+  getDeferredMcpServers(): Array<{ name: string; toolCount: number }> {
+    this.getTools();
+    return this.deferredMcpServers.slice();
   }
 
   getDeferredTools(): LLMTool[] {
@@ -2360,10 +2432,14 @@ export class ToolRegistry {
       const pactApproval = context.request.name.startsWith("pact_")
         ? await this.pactTools.approvalDestination(context.request.name, context.request.input)
         : {};
+      const mcpApproval = serverName
+        ? buildMcpApprovalPresentation(context.request.name, serverName, context.request.input)
+        : null;
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
         ...(serverName ? { serverName } : {}),
+        ...(mcpApproval?.approvalPreview ? { approvalPreview: mcpApproval.approvalPreview } : {}),
         ...browserUseApproval,
         ...pactApproval,
         ...(approvalType === "external_file_access" && externalFilesystemBoundary
@@ -2443,6 +2519,11 @@ export class ToolRegistry {
         workspace: this.workspace,
         toolName: context.request.name,
         toolInput: context.request.input,
+        // Hiding a restricted tool from the catalog is not enough: a call that
+        // names it anyway (or arrives through application_operation) is denied.
+        deniedTools: this.isDeniedByTaskRestrictions(context.request.name)
+          ? new Set([context.request.name])
+          : undefined,
         gatewayContext: this.gatewayContext,
         policyContext: context.request.runtime?.toolPolicyContext as Any,
         approvalRequired: runtimeApprovalRequired && !codexFullAccess,
@@ -2527,7 +2608,9 @@ export class ToolRegistry {
             ? `Allow Browser Use to access ${browserUseApproval.origin}?`
             : effectiveApprovalType === "location_access"
               ? "Allow CoWork OS to access your current location once?"
-              : `Allow ${context.request.name} to access the requested resource?`;
+              : mcpApproval
+                ? mcpApproval.description
+                : `Allow ${context.request.name} to access the requested resource?`;
           const details = { ...approvalDetails, reason: pipeline.reason || null };
           const options = {
             allowAutoApprove:
@@ -3197,6 +3280,45 @@ export class ToolRegistry {
       async ({ request }) => this.systemTools.runAppleScript(request.input.script),
       exclusiveSchedulerSpec,
     );
+    register(
+      "native_application_create",
+      async ({ request }) => {
+        if (!this.workspace.permissions.shell)
+          throw new ApplicationNotDispatchedError(
+            "Native application commands require task shell authority",
+          );
+        return new NativeApplicationTools(this.fileTools, this.daemon, this.taskId).create(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        );
+      },
+      exclusiveSchedulerSpec,
+    );
+    register(
+      "native_application_inspect",
+      async ({ request }) =>
+        new NativeApplicationTools(this.fileTools, this.daemon, this.taskId).inspect(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      readParallelSchedulerSpec,
+    );
+    for (const action of ["create", "inspect", "read", "edit"] as const) {
+      register(
+        `local_photoshop_${action}`,
+        async ({ request }) => {
+          if (request.input.app !== "photoshop")
+            throw new ApplicationNotDispatchedError(
+              "Local background route supports Photoshop only",
+            );
+          return new NativeApplicationTools(this.fileTools, this.daemon, this.taskId, true)[action](
+            request.input,
+            request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+          );
+        },
+        action === "inspect" ? readParallelSchedulerSpec : exclusiveSchedulerSpec,
+      );
+    }
     register("generate_image", async ({ request }) =>
       this.imageTools.generateImage(request.input, {
         signal: request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
@@ -3212,6 +3334,11 @@ export class ToolRegistry {
     register("analyze_image", async ({ request }) => this.visionTools.analyzeImage(request.input));
     register("read_pdf_visual", async ({ request }) =>
       this.visionTools.readPdfVisual(request.input),
+    );
+    register(
+      "native_app",
+      async ({ request }) => this.nativeAppTools.run(request.input),
+      serialSchedulerSpec,
     );
     register(
       "screenshot",
@@ -3471,6 +3598,60 @@ export class ToolRegistry {
     register("task_events", async ({ request }) => this.taskEvents(request.input));
     register("request_user_input", async ({ request }) => this.requestUserInput(request.input));
     register(
+      "application_operation",
+      async ({ request }) => {
+        this.daemon.bindApplicationToolGateway(this.taskId, {
+          call: async (name, input, context) => {
+            const currentTask = this.daemon.getTask(this.taskId);
+            if (
+              (!currentTask ||
+                ["completed", "failed", "cancelled"].includes(currentTask.status) ||
+                this.daemon
+                  .getApplicationExecutionService()
+                  .isTaskCancellationRequested(this.taskId)) &&
+              ["prepare", "execute"].includes(context.phase)
+            )
+              throw new ApplicationNotDispatchedError(
+                "The original application task is terminal or stopping",
+              );
+            if (
+              context.operation.request.taskId !== this.taskId ||
+              context.operation.request.workspaceId !== this.workspace.id ||
+              name.startsWith("application_") ||
+              !this.getTools().some((tool) => tool.name === name)
+            )
+              throw new ApplicationNotDispatchedError(
+                "Application tool is unavailable in the original task context",
+              );
+            const execution = await new ToolExecutionCoordinator(this).executeTool(
+              name,
+              input,
+              {
+                taskId: this.taskId,
+                phase: "step",
+                signal: context.signal,
+                toolPolicyContext: request.runtime
+                  ?.toolPolicyContext as ToolInvocationContext["toolPolicyContext"],
+                applicationAttempt: {
+                  operationId: context.operation.id,
+                  attemptId: context.attemptId,
+                  generation: context.generation,
+                  phase: context.phase,
+                },
+              },
+              `${context.attemptId}:${name}`,
+            );
+            if (execution.error) throw execution.error;
+            if (execution.envelope.status === "error")
+              throw new Error(`${name} did not return a successful application result`);
+            return execution.result;
+          },
+        });
+        return runApplicationTool(this.daemon, this.taskId, request.input);
+      },
+      serialSchedulerSpec,
+    );
+    register(
       "task_list_create",
       async ({ request }) => this.taskListCreate(request.input),
       serialSchedulerSpec,
@@ -3689,11 +3870,26 @@ export class ToolRegistry {
       const serversById = new Map((settings.servers || []).map((server) => [server.id, server]));
       const policies = loadPolicies();
 
+      const serverIdFor = (tool: MCPTool): string | null =>
+        typeof (mcpManager as Any).getServerIdForTool === "function"
+          ? (mcpManager as Any).getServerIdForTool(tool.name)
+          : null;
+      // A server with hundreds of tools (Workday exposes 400+) would flood every
+      // request with schemas. Its tools load on demand through tool_search.
+      const toolCountByServer = new Map<string, number>();
+      for (const tool of mcpTools) {
+        const id = serverIdFor(tool);
+        if (id) toolCountByServer.set(id, (toolCountByServer.get(id) ?? 0) + 1);
+      }
+      this.deferredMcpServers = [];
+      for (const [id, count] of toolCountByServer) {
+        const server = serversById.get(id);
+        if (count > MCP_DEFERRED_SERVER_TOOL_THRESHOLD && server?.enabled !== false)
+          this.deferredMcpServers.push({ name: server?.name || id, toolCount: count });
+      }
+
       const definitions = mcpTools.flatMap((tool: MCPTool) => {
-        const serverId =
-          typeof (mcpManager as Any).getServerIdForTool === "function"
-            ? (mcpManager as Any).getServerIdForTool(tool.name)
-            : null;
+        const serverId = serverIdFor(tool);
         const server = serverId ? serversById.get(serverId) : undefined;
         if (server?.enabled === false) return [];
         // Admin-blocked connectors are not offered to the model; dispatch refuses them too.
@@ -3702,10 +3898,12 @@ export class ToolRegistry {
         const policy = server ? resolveMcpToolPolicy(tool, server) : undefined;
         const readOnly = policy?.readOnly === true;
         // Identify the installed driver from local configuration, not untrusted tool prose.
+        const serverToolName = tool.serverToolName ?? tool.name;
         const codexComputerUse =
-          isCodexComputerUseServer(server) && (tool.name === "js" || tool.name === "js_reset");
+          isCodexComputerUseServer(server) &&
+          (serverToolName === "js" || serverToolName === "js_reset");
         const desktopGuide =
-          codexComputerUse && tool.name === "js"
+          codexComputerUse && serverToolName === "js"
             ? 'Codex desktop computer use: at the start of each new task call await cua.rewriteDocumentation() alone and read its output. Bind a native app with let app = await cua.getApp("App name"). Use app.click(index), app.typeText(text), app.pressKey(key), app.getAXState(), and app.getScreenshot() as documented. Read fresh UI state after actions before choosing further indices. '
             : "";
         const baseDescription = desktopGuide + (tool.description || `MCP tool: ${tool.name}`);
@@ -3723,11 +3921,12 @@ export class ToolRegistry {
             interruptBehavior: readOnly ? ("cancel" as const) : ("block" as const),
             approvalKind: "external_service" as const,
             sideEffectLevel: readOnly ? ("none" as const) : ("medium" as const),
-            deferLoad: false,
-            alwaysExpose: true,
+            ...((serverId ? (toolCountByServer.get(serverId) ?? 0) : 0) >
+            MCP_DEFERRED_SERVER_TOOL_THRESHOLD
+              ? { deferLoad: true, alwaysExpose: false, exposure: "conditional" as const }
+              : { deferLoad: false, alwaysExpose: true, exposure: "always" as const }),
             supportsContextMutation: !readOnly,
             capabilityTags: ["mcp" as const, "integration" as const],
-            exposure: "always" as const,
             resultKind: "integration" as const,
             ...(codexComputerUse
               ? {
@@ -4603,6 +4802,7 @@ ${skillDescriptions}`;
     runtime?: Record<string, unknown>,
   ): Promise<{ result: Any; policyTrace?: Any }> {
     input = snapshotToolInput(input);
+    await ToolRegistry.prototype.assertApplicationRecoveryBoundary.call(this, name, input, runtime);
     if (this.handlerRegistry.has(name)) {
       return await this.executeWithRegisteredHandler(name, input, runtime);
     }
@@ -4639,6 +4839,12 @@ ${skillDescriptions}`;
 
   async executeTool(name: string, input: Any, _runtime?: Record<string, unknown>): Promise<Any> {
     input = snapshotToolInput(input);
+    await ToolRegistry.prototype.assertApplicationRecoveryBoundary.call(
+      this,
+      name,
+      input,
+      _runtime,
+    );
     await this.assertResponsibilityPolicy(name, input);
     if (this.handlerRegistry.has(name)) {
       const execution = await this.executeWithRegisteredHandler(name, input, _runtime);
@@ -5034,6 +5240,7 @@ ${skillDescriptions}`;
     if (name === "run_applescript") return await this.systemTools.runAppleScript(input.script);
 
     // Computer use tools (CUA)
+    if (name === "native_app") return await this.nativeAppTools.run(input);
     if (name === "screenshot")
       return await this.computerUseTools.screenshot({
         app: input.app,
@@ -13280,7 +13487,14 @@ ${skillDescriptions}`;
         name: "tool_search",
         description:
           "Search deferred or specialized tools by intent. Use this when the exact tool name is unknown, " +
-          "when a needed capability is not currently exposed, or when you suspect a long-tail integration/tool exists.",
+          "when a needed capability is not currently exposed, or when you suspect a long-tail integration/tool exists." +
+          (this.deferredMcpServers.length
+            ? ` Connected MCP servers whose tools load only through this search: ${this.deferredMcpServers
+                .map((server) => `${server.name} (${server.toolCount} tools)`)
+                .join(
+                  ", ",
+                )}. Search by the business task (for example "supplier invoices" or "time off balance").`
+            : ""),
         input_schema: {
           type: "object",
           properties: {

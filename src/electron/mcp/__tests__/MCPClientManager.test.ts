@@ -339,6 +339,39 @@ describe("MCPClientManager startup optimizations", () => {
       await expect(manager.callTool("tool-server-2")).rejects.toThrow(/not found/i);
     });
 
+    it("namespaces a tool name two servers share and routes each to its own server", async () => {
+      await manager.initialize();
+      const shared = (id: string) => [
+        { name: "search", description: `Search on ${id}`, inputSchema: { type: "object" } },
+        { name: `only-${id}`, description: "Unique", inputSchema: { type: "object" } },
+      ];
+      (manager as Any).connections.get("server-1").setTools(shared("server-1"));
+      (manager as Any).connections.get("server-2").setTools(shared("server-2"));
+
+      const names = manager.getAllTools().map((tool) => tool.name);
+      const namespaced = names.filter((name) => name.endsWith("__search"));
+      expect(namespaced).toHaveLength(2);
+      expect(names).not.toContain("search");
+      expect(names).toContain("only-server-1");
+      await expect(manager.callTool("search")).rejects.toThrow(/several MCP servers/);
+
+      const [first, second] = namespaced;
+      const firstServer = manager.getServerIdForTool(first);
+      const secondServer = manager.getServerIdForTool(second);
+      expect(new Set([firstServer, secondServer]).size).toBe(2);
+      expect(manager.getServerToolName(first)).toBe("search");
+      const reply = await manager.callTool(first, { q: 1 });
+      expect(JSON.parse(reply.content[0].text as string)).toEqual({
+        tool: "search",
+        args: { q: 1 },
+      });
+
+      // Once the collision is gone, the plain name returns.
+      (manager as Any).connections.get("server-2").setTools([]);
+      expect(manager.getAllTools().map((tool) => tool.name)).toContain("search");
+      expect(manager.getServerToolName("search")).toBe("search");
+    });
+
     it("removes disconnected tools from routing immediately", async () => {
       await manager.initialize();
 

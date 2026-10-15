@@ -16,6 +16,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/database/follow-up-recovery-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Startup follow-up recovery scan: one read of every user follow-up receipt, as a storage-domain report unit on the reporting reader. AgentDaemon starts it during initialize and consumes it with the delayed task resume, so it never holds up the first window; on the host backend it runs when that resume consumes it.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "agent runtime"
+    },
+    {
       "pattern": "^src/electron/browser/browser-platform-ipc\\.ts$",
       "domain": "runtime wiring",
       "access": "Browser platform IPC (history, settings, downloads) passes the database handle only to the BrowserHistoryRepository facade.",
@@ -278,6 +285,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/automation/responsibility-schema\\.ts$",
+      "domain": "shared SQL",
+      "access": "Bot responsibility table SQL and its one-time constraint upgrade, split from responsibility-store so schema initialization loads neither zod nor the store. Runs only inside schema initialization: in the bootstrap worker in the runtimes, in-thread for tests and the bootstrap fallback.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/database/schema\\.ts$",
       "domain": "lifecycle",
       "access": "Schema initialization (in the bootstrap worker in the runtimes; in-thread for tests and the fallback) and post-startup maintenance fallback.",
@@ -436,6 +450,29 @@
       "plan": "backstop: a file matched only here fails the audit; move its SQL into units or add a reviewed rule",
       "owner": "database platform",
       "backstop": true
+    },
+    {
+      "pattern": "^src/electron/applications/application-operation-store\\.ts$",
+      "domain": "shared SQL",
+      "access": "Application operation store (operations, attempts, events, leases): synchronous SQL run as services-domain units registered in application-operation-units.ts behind the async ApplicationOperationRepository facade; nothing calls the store on the host outside a unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
+      "pattern": "^src/electron/applications/daemon-application-execution\\.ts$",
+      "domain": "runtime wiring",
+      "access": "Daemon application execution wiring passes the database handle only to the ApplicationOperationRepository facade.",
+      "plan": "stays: handles only; SQL runs through the worker-backed facade",
+      "owner": "agent runtime",
+      "ratchetExemptKeys": ["getDatabase"]
+    },
+    {
+      "pattern": "^src/electron/(applications/ApplicationExecutionService|agent/tools/application-tools)\\.ts$",
+      "domain": "runtime wiring",
+      "access": "No SQLite access: the inventory counts calls to the application operation lifecycle method prepare() (ApplicationExecutionService.prepare and adapter.prepare), not Database.prepare. Persistence goes through the async ApplicationOperationRepository facade.",
+      "plan": "stays: no database access",
+      "owner": "agent runtime",
+      "ratchetExemptKeys": ["prepare"]
     },
     {
       "pattern": "^src/electron/agent/",

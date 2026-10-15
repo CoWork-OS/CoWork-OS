@@ -22,7 +22,21 @@ import type {
   BotResponsibilitySave,
   BotResponsibilityRevise,
 } from "../shared/bot-responsibility";
-import type { BotWorkQuery, BotWorkPage } from "../shared/types";
+import type {
+  BotWorkQuery,
+  BotWorkPage,
+  RemoteOAuthAuthorizeResult,
+  RemoteOAuthServerRequest,
+  RemoteOAuthServerUpdateRequest,
+  WorkdayAdminConnectionRequest,
+  WorkdayAdminConnectionSummary,
+  WorkdayAdminSignInResult,
+  WorkdayAgentListResult,
+  WorkdayAgentSaveRequest,
+  WorkdayAgentSaveResult,
+  WorkdayAgentSearchRequest,
+  WorkdayAgentSearchResult,
+} from "../shared/types";
 import * as path from "path";
 import { contextBridge, ipcRenderer } from "electron";
 import * as fs from "fs";
@@ -875,7 +889,7 @@ interface BuiltinToolsSettings {
   codexRuntimeMode: "native" | "acpx";
   computerUseAutomation: {
     browserAutomationMode: "background" | "visible" | "ask";
-    nativeComputerUseMode: "background_first" | "ask_visible" | "visible";
+    nativeComputerUseMode: "background" | "background_first" | "ask_visible" | "visible";
   };
   version: string;
 }
@@ -1634,6 +1648,16 @@ interface AgentToolRestrictions {
   deniedTools?: string[];
 }
 
+/** What a reply-draft card's action did (see MailReplyDraftsService). */
+type MailReplyDraftCardOutcome =
+  | { ok: true; sendAfter?: number }
+  | { ok: false; reason: "not_found" | "gone" | "too_late" | "failed"; message: string };
+
+/** What a calendar card's action did (see CalendarProposalsService). */
+type CalendarCardOutcome =
+  | { ok: true; kind: "focus_hold" | "conflict" | "meeting_prep" }
+  | { ok: false; reason: "not_connected" | "gone" | "not_allowed" | "failed"; message: string };
+
 type AgentAutonomyLevel = "intern" | "specialist" | "lead";
 
 interface AgentRoleData {
@@ -1660,6 +1684,8 @@ interface AgentRoleData {
   updatedAt: number;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** "May do alone": the most access this agent's work gets. */
+  accessProfileId?: string;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1731,6 +1757,8 @@ interface UpdateAgentRoleRequest {
   sortOrder?: number;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** The agent's access limit; null clears it. */
+  accessProfileId?: string | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -2855,6 +2883,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) as Promise<MailboxQueuedAction>,
   discardMailboxDraft: (draftId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_DISCARD_COMPOSE_DRAFT, { draftId }) as Promise<boolean>,
+  cancelMailboxDraftSend: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_CANCEL_SEND, { draftId }) as Promise<boolean>,
   undoMailboxAction: (actionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MAILBOX_UNDO_ACTION, {
       actionId,
@@ -4255,6 +4285,50 @@ contextBridge.exposeInMainWorld("electronAPI", {
     loginHint?: string;
     prompt?: "select_account" | "consent";
   }) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, payload),
+  addRemoteOAuthMCPServer: (payload: RemoteOAuthServerRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_ADD_REMOTE_OAUTH_SERVER, payload),
+  updateRemoteOAuthMCPServer: (payload: RemoteOAuthServerUpdateRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_UPDATE_REMOTE_OAUTH_SERVER, payload) as Promise<{
+      id: string;
+      name: string;
+      signedOut: boolean;
+    }>,
+  discoverMCPOAuth: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_DISCOVER, url),
+  authorizeMCPServer: (serverId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MCP_OAUTH_AUTHORIZE,
+      serverId,
+    ) as Promise<RemoteOAuthAuthorizeResult>,
+  cancelMCPOAuth: (serverId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_CANCEL, serverId) as Promise<{ cancelled: boolean }>,
+
+  // Workday agent setup (admin API client on a Workday preset server)
+  saveWorkdayAdminConnection: (payload: WorkdayAdminConnectionRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.WORKDAY_AGENT_ADMIN_SAVE_CONNECTION,
+      payload,
+    ) as Promise<WorkdayAdminConnectionSummary>,
+  signInWorkdayAdmin: (serverId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.WORKDAY_AGENT_ADMIN_SIGN_IN,
+      serverId,
+    ) as Promise<WorkdayAdminSignInResult>,
+  cancelWorkdayAdminSignIn: (serverId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKDAY_AGENT_ADMIN_CANCEL, serverId) as Promise<{
+      cancelled: boolean;
+    }>,
+  listWorkdayAgents: (serverId: string) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.WORKDAY_AGENT_LIST,
+      serverId,
+    ) as Promise<WorkdayAgentListResult>,
+  searchWorkdayAgentResources: (payload: WorkdayAgentSearchRequest) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.WORKDAY_AGENT_SEARCH,
+      payload,
+    ) as Promise<WorkdayAgentSearchResult>,
+  saveWorkdayAgent: (payload: WorkdayAgentSaveRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKDAY_AGENT_SAVE, payload) as Promise<WorkdayAgentSaveResult>,
 
   // MCP Status change event listener
   onMCPStatusChange: (callback: (status: Any[]) => void) => {
@@ -5036,6 +5110,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     toolRestrictions?: { allowedTools?: string[]; deniedTools?: string[] };
     isActive?: boolean;
     sortOrder?: number;
+    accessProfileId?: string | null;
   }) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_UPDATE, request),
   deleteAgentRole: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_DELETE, id),
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) =>
@@ -5655,6 +5730,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_SNOOZE, workspaceId, suggestionId, snoozedUntil),
   editSuggestion: (workspaceId: string, suggestionId: string, editedPrompt: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_EDIT, workspaceId, suggestionId, editedPrompt),
+  addSuggestionAsCommitment: (workspaceId: string, suggestionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, workspaceId, suggestionId),
+  // Today's calendar cards
+  acceptCalendarProposal: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_PROPOSAL_ACCEPT, proposalId),
+  dismissCalendarProposal: (proposalId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_PROPOSAL_DISMISS, proposalId),
+  holdCalendarTimeForSuggestion: (data: {
+    workspaceId: string;
+    suggestionId: string;
+    start: number;
+    end: number;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.CALENDAR_HOLD_FOR_SUGGESTION, data),
+  // Reply drafts on Today
+  sendMailReplyDraft: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFT_SEND, draftId),
+  undoMailReplyDraftSend: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFT_UNDO_SEND, draftId),
+  discardMailReplyDraft: (draftId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFT_DISCARD, draftId),
+  setMailReplyDraftsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFTS_SET_ENABLED, enabled),
+  dismissMailReplyDraftsOffer: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MAIL_REPLY_DRAFTS_DISMISS_OFFER),
   actOnSuggestion: (workspaceId: string, suggestionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SUGGESTIONS_ACT, workspaceId, suggestionId),
 
@@ -6678,6 +6777,8 @@ export interface ElectronAPI {
     resolution: MailboxSendOutcomeResolution,
   ) => Promise<MailboxQueuedAction>;
   discardMailboxDraft: (draftId: string) => Promise<boolean>;
+  /** Takes back a queued send and returns the draft to editing; false when it's too late. */
+  cancelMailboxDraftSend: (draftId: string) => Promise<boolean>;
   undoMailboxAction: (actionId: string) => Promise<MailboxQueuedAction>;
   summarizeMailboxThread: (threadId: string) => Promise<MailboxSummaryCard | null>;
   generateMailboxDraft: (
@@ -8241,6 +8342,31 @@ export interface ElectronAPI {
     workspaces?: Array<{ id: string; name: string }>;
     error?: string;
   }>;
+  addRemoteOAuthMCPServer: (
+    payload: RemoteOAuthServerRequest,
+  ) => Promise<{ id: string; name: string }>;
+  updateRemoteOAuthMCPServer: (
+    payload: RemoteOAuthServerUpdateRequest,
+  ) => Promise<{ id: string; name: string; signedOut: boolean }>;
+  cancelMCPOAuth: (serverId: string) => Promise<{ cancelled: boolean }>;
+  discoverMCPOAuth: (url: string) => Promise<{
+    authorizationUrl?: string;
+    tokenUrl?: string;
+    scopes?: string[];
+    resource?: string;
+    issuer?: string;
+  }>;
+  authorizeMCPServer: (serverId: string) => Promise<RemoteOAuthAuthorizeResult>;
+  saveWorkdayAdminConnection: (
+    payload: WorkdayAdminConnectionRequest,
+  ) => Promise<WorkdayAdminConnectionSummary>;
+  signInWorkdayAdmin: (serverId: string) => Promise<WorkdayAdminSignInResult>;
+  cancelWorkdayAdminSignIn: (serverId: string) => Promise<{ cancelled: boolean }>;
+  listWorkdayAgents: (serverId: string) => Promise<WorkdayAgentListResult>;
+  searchWorkdayAgentResources: (
+    payload: WorkdayAgentSearchRequest,
+  ) => Promise<WorkdayAgentSearchResult>;
+  saveWorkdayAgent: (payload: WorkdayAgentSaveRequest) => Promise<WorkdayAgentSaveResult>;
   startConnectorOAuth: (payload: {
     provider:
       | "box"
@@ -9649,6 +9775,23 @@ export interface ElectronAPI {
   refreshSuggestions: (workspaceId: string) => Promise<{ success: boolean }>;
   refreshSuggestionsForWorkspaces: (workspaceIds: string[]) => Promise<{ success: boolean }>;
   dismissSuggestion: (workspaceId: string, suggestionId: string) => Promise<{ success: boolean }>;
+  addSuggestionAsCommitment: (
+    workspaceId: string,
+    suggestionId: string,
+  ) => Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_eligible" | "unavailable" }>;
+  acceptCalendarProposal: (proposalId: string) => Promise<CalendarCardOutcome>;
+  sendMailReplyDraft: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
+  undoMailReplyDraftSend: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
+  discardMailReplyDraft: (draftId: string) => Promise<MailReplyDraftCardOutcome>;
+  setMailReplyDraftsEnabled: (enabled: boolean) => Promise<{ ok: boolean }>;
+  dismissMailReplyDraftsOffer: () => Promise<{ ok: boolean }>;
+  dismissCalendarProposal: (proposalId: string) => Promise<{ ok: boolean }>;
+  holdCalendarTimeForSuggestion: (data: {
+    workspaceId: string;
+    suggestionId: string;
+    start: number;
+    end: number;
+  }) => Promise<CalendarCardOutcome>;
   snoozeSuggestion: (
     workspaceId: string,
     suggestionId: string,

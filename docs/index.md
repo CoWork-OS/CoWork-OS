@@ -247,7 +247,7 @@ features:
   - title: Release 0.5.53
     details: Profile-first approval boundaries, MLX/Atomic Chat/Jev local execution, durable WorkSessions, bot collaboration, Box Brain, CoWork Pulse, and security/release hardening.
   - title: Inbox Agent
-    details: Local-first email workspace with Classic and Today modes, AI triage, Ask Inbox sidebar chat with live agentic steps and hybrid evidence retrieval, `@Inbox` main-composer routing, manual reply/reply-all/forward, editable AI drafts, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
+    details: Local-first email workspace with Classic and Today modes, AI triage, Ask Inbox sidebar chat with live agentic steps and hybrid evidence retrieval, `@Inbox` main-composer routing, manual reply/reply-all/forward, editable AI drafts, opt-in reply drafts on Today, commitment queues, sender cleanup, attachment indexing, and resync-safe background sync.
   - title: Managed Devices
     details: Connect local and remote CoWork nodes, inspect device summaries, browse remote workspaces, and launch tasks against selected machines from one Devices tab.
   - title: Core Automation

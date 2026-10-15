@@ -776,6 +776,12 @@ export class ToolLoopProgressTracker {
     } else if (succeeded && isFileMutationToolName(canonicalToolName)) {
       this.mutationEpoch += 1;
       madeProgress = true;
+    } else if (succeeded && canonicalToolName === "native_app") {
+      // Native UI work takes one action per fresh snapshot, so a multi-step
+      // entry is a long run of tool turns. Each dispatched action is progress;
+      // observation alone is not.
+      const action = (input as { action?: unknown } | null | undefined)?.action;
+      madeProgress = typeof action === "string" && action !== "observe" && action !== "windows";
     } else if (
       succeeded &&
       (canonicalToolName === "read_file" || canonicalToolName === "read_files")

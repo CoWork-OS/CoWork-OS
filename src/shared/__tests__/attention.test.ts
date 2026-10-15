@@ -2,17 +2,23 @@ import { describe, expect, it } from "vitest";
 import {
   attentionActorForTask,
   attentionFromApproval,
+  attentionFromCalendarProposal,
+  attentionFromMailReplyDraft,
+  attentionMailReplyOffer,
   attentionFromCommitment,
   attentionFromFlowStep,
   attentionFromInputRequest,
   attentionFromSuggestion,
   attentionFromTask,
+  indexDevicesByNode,
+  isLocalTaskNode,
   sessionWaitReason,
   attentionOriginForTask,
   attentionPlaceForTask,
   attentionWaitingByTask,
   classifyTaskActivity,
   rankAttention,
+  suggestsCalendarHold,
   type AttentionItem,
 } from "../attention";
 import type { ApprovalRequest, InputRequest, ProactiveSuggestion, Task } from "../types";
@@ -89,6 +95,29 @@ describe("classifyTaskActivity", () => {
   });
 });
 
+describe("devices", () => {
+  it("names the device a task is routed to by any node id its tasks carry", () => {
+    const devicesByNode = indexDevicesByNode([
+      { id: "mini", name: "Mac mini" },
+      { id: "studio", name: "Studio", taskNodeId: "node-studio", clientId: "client-7" },
+      { id: "local:this-device", name: "This Mac" },
+    ]);
+    const placed = (targetNodeId: string) =>
+      attentionPlaceForTask(task("r", { targetNodeId }), { ...context, devicesByNode });
+    expect(placed("remote-gateway:mini")).toEqual({
+      kind: "remote",
+      label: "Mac mini",
+      deviceId: "mini",
+    });
+    expect(placed("node-studio")).toMatchObject({ label: "Studio", deviceId: "studio" });
+    expect(placed("client-7")).toMatchObject({ label: "Studio", deviceId: "studio" });
+    expect(placed("mini")).toMatchObject({ label: "Mac mini", deviceId: "mini" });
+    expect(placed("gone")).toEqual({ kind: "remote", label: "Another device", deviceId: "gone" });
+    expect(isLocalTaskNode("local:this-device")).toBe(true);
+    expect(devicesByNode.has("local:this-device")).toBe(false);
+  });
+});
+
 describe("task context", () => {
   it("names the agent, what started the work and where it runs", () => {
     const remote = task("r", {
@@ -109,6 +138,10 @@ describe("task context", () => {
     });
     const mine = task("m");
     expect(attentionActorForTask(mine, context)).toEqual({ kind: "you", name: "You" });
+    // A task routed to this machine's own node id runs here.
+    expect(
+      attentionPlaceForTask(task("l", { targetNodeId: "local:this-device" }), context),
+    ).toEqual({ kind: "local", label: "This Mac" });
     expect(attentionOriginForTask(mine).kind).toBe("you");
     expect(attentionPlaceForTask(mine, context)).toEqual({ kind: "local", label: "This Mac" });
     expect(attentionActorForTask(task("h", { heartbeatRunId: "run" }), context).name).toBe(
@@ -152,6 +185,43 @@ describe("attention mappers", () => {
       state: "2 questions",
       title: "Which contacts?",
     });
+  });
+
+  it("offers a single question's plain options as choices, never an approval's", () => {
+    const request = (questions: InputRequest["questions"]): InputRequest => ({
+      id: "q1",
+      taskId: "t1",
+      questions,
+      status: "pending",
+      requestedAt: NOW,
+    });
+    const question = (overrides: Partial<InputRequest["questions"][number]> = {}) => ({
+      header: "Region",
+      id: "region",
+      question: "Which region?",
+      options: [
+        { label: "us-east (default)", description: "Closest to most users" },
+        { label: "eu-west", description: "" },
+      ],
+      ...overrides,
+    });
+    expect(attentionFromInputRequest(request([question()]), task("t1"), context).choices).toEqual({
+      questionId: "region",
+      // Labels go back as the answer, so they stay exactly as written.
+      options: [
+        { label: "us-east (default)", description: "Closest to most users" },
+        { label: "eu-west" },
+      ],
+    });
+    const none = (questions: InputRequest["questions"]) =>
+      attentionFromInputRequest(request(questions), task("t1"), context).choices;
+    expect(none([question(), question({ id: "size" })])).toBeUndefined();
+    expect(none([question({ id: "approval_decision" })])).toBeUndefined();
+    expect(none([question({ id: "responsibility_action_review_decision" })])).toBeUndefined();
+    expect(
+      none([question({ preview: { label: "Script", text: "rm -rf build" } })]),
+    ).toBeUndefined();
+    expect(none([question({ options: [{ label: "Only one", description: "" }] })])).toBeUndefined();
   });
 
   it("only makes session items for sessions waiting on the user", () => {
@@ -287,6 +357,137 @@ describe("rankAttention", () => {
       "nudge",
       "idea",
     ]);
+  });
+
+  it("puts calendar conflicts with commitments and calendar offers with the offers, soonest first", () => {
+    const ranked = rankAttention([
+      item("idea", "suggestion", { urgent: false }),
+      item("nudge", "suggestion"),
+      item("prep-late", "calendar", { urgent: false, createdAt: NOW + 20 }),
+      item("prep-soon", "calendar", { urgent: false, createdAt: NOW + 10 }),
+      item("conflict", "calendar", { createdAt: NOW + 30 }),
+      item("due", "commitment", { dueAt: NOW + 1, createdAt: NOW - 1 }),
+    ]);
+    expect(ranked.map((entry) => entry.id)).toEqual([
+      "conflict",
+      "due",
+      "nudge",
+      "prep-soon",
+      "prep-late",
+      "idea",
+    ]);
+  });
+});
+
+describe("mail reply items", () => {
+  it("asks to send a drafted reply, and only offers to start drafting", () => {
+    const draft = {
+      draftId: "d1",
+      threadId: "t1",
+      accountId: "gmail:me@example.com",
+      provider: "gmail" as const,
+      subject: "Q3 proposal",
+      to: ["Dana <dana@example.com>", "Lee", "Kim", "Ray"],
+      copies: 2,
+      attachments: 1,
+      sender: "Dana",
+      bodyText: "Thanks Dana, sending it Friday.",
+      createdAt: NOW - 60_000,
+    };
+    expect(attentionFromMailReplyDraft(draft, context)).toMatchObject({
+      id: "mail_reply:d1",
+      kind: "mail_reply",
+      state: "Reply drafted",
+      title: "Q3 proposal",
+      detail: "Dana is waiting on a reply.",
+      urgent: true,
+      actor: { kind: "background", name: "Mail" },
+      ref: { type: "mail_draft", draftId: "d1" },
+      mailDraft: draft,
+    });
+    expect(attentionMailReplyOffer(NOW, context)).toMatchObject({
+      id: "mail_reply:offer",
+      urgent: false,
+      ref: { type: "mail_offer" },
+    });
+    const ranked = rankAttention([
+      attentionMailReplyOffer(NOW, context),
+      attentionFromMailReplyDraft(draft, context),
+    ]);
+    expect(ranked.map((item) => item.id)).toEqual(["mail_reply:d1", "mail_reply:offer"]);
+  });
+});
+
+describe("calendar items", () => {
+  const event = (eventId: string, start: number) => ({
+    eventId,
+    title: `Event ${eventId}`,
+    start,
+    end: start + 3_600_000,
+  });
+
+  it("asks about a conflict and only offers holds and prep", () => {
+    expect(
+      attentionFromCalendarProposal(
+        {
+          kind: "conflict",
+          id: "conflict:a:b",
+          first: event("a", NOW + 10),
+          second: event("b", NOW + 20),
+          canDeclineSecond: true,
+        },
+        context,
+      ),
+    ).toMatchObject({
+      id: "calendar:conflict:a:b",
+      kind: "calendar",
+      state: "Conflict",
+      title: "Event a overlaps Event b",
+      createdAt: NOW + 10,
+      urgent: true,
+      actor: { kind: "background", name: "Calendar" },
+      origin: { kind: "event", label: "From your calendar" },
+      place: { kind: "local", label: "This Mac" },
+      ref: { type: "calendar_proposal", proposalId: "conflict:a:b" },
+    });
+    expect(
+      attentionFromCalendarProposal(
+        {
+          kind: "focus_hold",
+          id: "hold:c1",
+          title: "Send the SOW",
+          commitmentId: "c1",
+          dueAt: NOW + 100,
+          start: NOW + 10,
+          end: NOW + 20,
+        },
+        context,
+      ),
+    ).toMatchObject({
+      state: "Suggested hold",
+      title: "Send the SOW",
+      urgent: false,
+      dueAt: NOW + 100,
+    });
+    expect(
+      attentionFromCalendarProposal(
+        { kind: "meeting_prep", id: "prep:e:1", event: event("e", NOW + 50), attendees: ["Ana"] },
+        context,
+      ),
+    ).toMatchObject({
+      state: "Meeting soon",
+      title: "Event e",
+      urgent: false,
+      createdAt: NOW + 50,
+    });
+  });
+
+  it("recognizes suggestions about making time", () => {
+    expect(suggestsCalendarHold({ title: "Block focus time for the launch deck" })).toBe(true);
+    expect(suggestsCalendarHold({ title: "Plan", prompt: "Set aside time for deep work" })).toBe(
+      true,
+    );
+    expect(suggestsCalendarHold({ title: "Reply to Ana about the invoice" })).toBe(false);
   });
 });
 

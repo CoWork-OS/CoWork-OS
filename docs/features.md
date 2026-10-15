@@ -169,6 +169,7 @@ Desktop automation for **native apps** on macOS and Windows when MCP, browser au
 - **Built-in tools category**: Enable/disable and priority for the `computer_use` tool family alongside other built-in categories.
 - **Policy & planning**: Tool availability defers the computer-use lane unless the task signals native/desktop GUI intent; executor guidance treats computer use as last resort after integrations, `browser_*`, and shell. For native GUI tasks, routing prefers **`screenshot`**, **`click`**, **`type_text`**, **`keypress`**, and related tools (plus **`open_application`** when launching the app) over **`run_applescript`** / fragile shell GUI hacks.
 - **Tools**: `screenshot`, `click`, `double_click`, `move_mouse`, `drag`, `scroll`, `type_text`, `keypress`, `wait` (with blocklisted dangerous key chords).
+- **Background app control (macOS)**: `native_app` operates one exact window of an installed app without activating it, moving the pointer or using the clipboard, and pauses while you use that app. Mutations are journaled and never resent; success is judged from a fresh observation. See [Background App Control](local-background-app-control.md), and [Working with apps in the background](background-app-work.md) for how this fits with application operations, local Photoshop scripting and remote MCP.
 
 ### Chronicle (Desktop Research Preview)
 
@@ -193,6 +194,7 @@ Local-first inbox workspace for email triage, normal email handling, follow-up, 
 - **Mailbox views**: `Inbox`, `Sent`, and `All`, with `Recent` and `Priority` sorting, saved views, account filters, and domain filters
 - **Normal email actions**: manual reply, reply-all, forward, To/Cc/Bcc, editable subject/body, and provider-backed send
 - **AI draft review**: generated replies can be edited before sending, and the draft card clears after successful send
+- **Reply drafts on Today** (opt-in): up to three drafted replies a day for threads that need one, sent through the outbox with Undo until they go out
 - **Ask Inbox**: right-sidebar mailbox chat with live agentic steps, final answers, matched email evidence, and click-to-open results
 - **Hybrid mailbox search**: Ask Inbox searches local FTS, semantic mailbox embeddings, provider-native Gmail/Outlook search when available, and attachment text for statements, invoices, extracts, PDFs, payment notices, and similar evidence
 - **`@Inbox` composer routing**: type `@Inbox` or `@inbox ...` in the main composer to open Inbox Agent, switch to Ask Inbox, and route the remaining query there
@@ -776,7 +778,7 @@ Define per-role personality and operating guidelines in `.cowork/agents/<role-id
 | **Multitask Command**      | One-shot ephemeral team runs with auto-planned independent lanes from `/multitask [N] <task>` |
 | **Collaborative Thoughts** | Real-time thought panel shows agent reasoning as it happens                                   |
 
-Configure in **Mission Control** > **Teams**.
+Configure in **Mission Control** > **Agent teams**.
 
 ---
 
@@ -1355,6 +1357,7 @@ See [Remote Access](remote-access.md) for details.
 - **MCP Client**: Connect to external MCP servers
 - **MCP Host**: Expose CoWork's tools as an MCP server
 - **MCP Registry**: Browse and install servers from a catalog
+- **Remote MCP OAuth**: Connect remote servers that require OAuth 2.1 sign-in, such as Workday Agent-Ready Tools, as a person (PKCE) or with an agent key (JWT bearer) for headless runs. Tokens renew automatically, large catalogs load on demand through `tool_search`, tool names shared by several servers are namespaced, and write tools ask first with an approval card that shows the call's exact arguments. Saved servers can be edited in place and a pending sign-in can be cancelled. Workday servers also get **Agent setup**, which registers the agent's skills and tools in the tenant from inside CoWork. See [Remote MCP OAuth](remote-mcp-oauth.md).
 - **Secure MCP Tunnels**: Expose selected local/private MCP tools through an outbound-only CoWork relay you operate, with separate client/caller tokens, tool allowlists, read-only mode, and local audit logs. See [Secure MCP Tunnels](secure-mcp-tunnels.md).
 - **Versioned tool snapshots**: Tool discovery tracks a stable catalog hash across native tools and MCP state so status/tool changes invalidate caches immediately
 
@@ -1478,7 +1481,7 @@ Customize agent behavior via Settings or conversation:
 | ------------ | --------------------------------------------------------------- |
 | **Modern**   | Refined non-terminal UI style with rounded components (default) |
 | **Terminal** | CLI-inspired interface with prompt-style visuals                |
-| **Calm**     | Opt-in cool-neutral style with a Home screen Ask / Do switch, simplified sidebar, and the Library and Build views |
+| **Calm**     | Opt-in cool-neutral style with a Home screen Ask / Do switch, the Today stack of decisions on Home, simplified sidebar, and the Work, Team, Library and Build views |
 
 | Color Mode | Description                                   |
 | ---------- | --------------------------------------------- |
@@ -1487,6 +1490,17 @@ Customize agent behavior via Settings or conversation:
 | **Dark**   | Dark mode for reduced eye strain              |
 
 Configure in **Settings** > **Appearance**.
+
+### Today, Work and Team (Calm)
+
+- **Today**: Home shows what needs you as one card per decision, most pressing first, then what was handled. Approvals and simple questions are answered right on the card; paused sessions say why they stopped; commitments can be marked done; suggestions can be started (the exact prompt is shown first), edited, dismissed or kept as a commitment.
+- **One needs-you queue**: Today, the bell, the session panel's **Needs you** badge, the Bots page and Mission Control's Brief count the same decisions, and paired browsers read the same queue.
+- **Calendar cards** (Google Workspace): conflicts with **Decline** for the later event when you were invited to it, private focus holds before commitments are due, and meeting prep. Every change re-reads the calendar first.
+- **Reply drafts** (opt-in): up to three drafted replies a day to mail that needs one, with Send (undoable until it goes out), Edit and Discard. See [Inbox Agent](inbox-agent.md#reply-drafts-on-today).
+- **Undo for memory**: commitments memory closed because they looked done are listed with **Undo**.
+- **Work** lists every session by project with filters and the next decision for each; **Team** shows agents, bots, schedules, automations and devices, and sets each agent's [access limit](access-profiles.md#agent-access-limits).
+
+See [Getting Started](getting-started.md#today-work-and-team-calm).
 
 ---
 

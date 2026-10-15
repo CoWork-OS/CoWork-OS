@@ -111,6 +111,10 @@ policy, protected paths, and explicit tool opt-outs remain enforced. `approval: 
 requests while retaining the profile's filesystem and network restrictions. Pending approval
 state fails closed across restart.
 
+## Application Work in the Daemon
+
+The daemon exposes the same `application.*` Control Plane methods as the desktop app, so application operations can be created, executed, reconciled and cancelled without a desktop. API and MCP routes work headless, including [remote OAuth MCP servers](remote-mcp-oauth.md): an agent-key identity needs no person, and a person's sign-in made once in the desktop app keeps renewing headless until its refresh token expires. Routes that drive a local app (`native_app` and the local Photoshop route) need the macOS desktop app in an unlocked session. See [Working with apps in the background](background-app-work.md).
+
 ## Headless Limitations (Expected)
 
 Some tools are desktop-only (clipboard, screenshot capture, opening files in Finder/Explorer, etc). In the Node daemon these will return a clear error instead of trying to use Electron APIs.

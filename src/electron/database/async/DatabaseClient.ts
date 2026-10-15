@@ -29,8 +29,15 @@ export interface DatabaseClientOptions {
   writeDeadlineMs?: number;
   /** Extra time after the deadline before an unanswered request fails as a reply timeout. */
   replyGraceMs?: number;
+  /** Requests sent to the worker and not yet answered. */
   maxPending?: number;
   maxPendingBytes?: number;
+  /**
+   * Requests held on the host, in submission order, while `maxPending` is reached.
+   * Past this the request fails as `overloaded`. Waiting counts toward the deadline.
+   */
+  maxQueued?: number;
+  maxQueuedBytes?: number;
   /** Unexpected exits tolerated before the client stays failed. */
   maxRestarts?: number;
   /** Tests only: extra worker commands for crash and contention scenarios. */
@@ -59,6 +66,22 @@ export type DatabaseClientState =
   | "closed"
   | "failed";
 
+/** A request held on the host until the worker has room; it has not been sent. */
+interface QueuedRequest {
+  command: string;
+  kind: DatabaseCommandKind;
+  args: unknown;
+  bytes: number;
+  deadlineMs: number;
+  deadlineAt: number;
+  orderingKey?: string;
+  signal?: AbortSignal;
+  resolve(value: unknown): void;
+  reject(error: DatabaseRequestError): void;
+  timer: ReturnType<typeof setTimeout>;
+  onAbort?: () => void;
+}
+
 interface PendingRequest {
   command: string;
   kind: DatabaseCommandKind;
@@ -77,6 +100,8 @@ const DEFAULTS = {
   replyGraceMs: 30_000,
   maxPending: 256,
   maxPendingBytes: 8 * 1024 * 1024,
+  maxQueued: 4096,
+  maxQueuedBytes: 32 * 1024 * 1024,
   maxRestarts: 3,
 };
 const RESTART_BASE_DELAY_MS = 500;
@@ -96,8 +121,12 @@ function argumentBytes(args: unknown): number {
  * asynchronous and resolve only after the worker has committed; failures carry an
  * outcome that says whether anything may have been committed.
  *
- * Pending work is bounded by count and bytes, so an unavailable or slow worker yields
- * explicit `overloaded` or `worker_unavailable` errors instead of a growing queue.
+ * Work sent to the worker is bounded by count and bytes. A burst past that bound waits on
+ * the host in submission order (bounded too) instead of failing, so one caller's fan-out
+ * delays others rather than rejecting them. A waiting request is never sent twice: it
+ * fails as `not_committed` if its deadline passes, it is cancelled, or the client stops.
+ * Past both bounds, an unavailable or slow worker yields explicit `overloaded` or
+ * `worker_unavailable` errors instead of an unbounded queue.
  * Any unexpected worker exit, including code 0, fails in-flight requests (writes as
  * `unknown`) and triggers a bounded number of restarts with a new generation; replies
  * from an older generation are ignored.
@@ -112,6 +141,9 @@ export class DatabaseClient {
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private pendingBytes = 0;
+  private readonly queued: QueuedRequest[] = [];
+  private queuedBytes = 0;
+  private dispatching = false;
   private readonly commandKinds = new Map<string, DatabaseCommandKind>();
   private state: DatabaseClientState = "starting";
   private restarts = 0;
@@ -146,12 +178,14 @@ export class DatabaseClient {
     state: DatabaseClientState;
     generation: number;
     pending: number;
+    queued: number;
     restarts: number;
   } {
     return {
       state: this.state,
       generation: this.generation,
       pending: this.pending.size,
+      queued: this.queued.length,
       restarts: this.restarts,
     };
   }
@@ -195,32 +229,14 @@ export class DatabaseClient {
       });
     }
     const bytes = argumentBytes(args);
-    if (
-      this.pending.size >= this.options.maxPending ||
-      this.pendingBytes + bytes > this.options.maxPendingBytes
-    ) {
+    // A single request larger than the in-flight byte budget could never be sent.
+    if (bytes > this.options.maxPendingBytes) {
       return fail({
         code: "overloaded",
-        message: `Database worker queue is full (${this.pending.size} requests)`,
+        message: `${command} arguments (${bytes} bytes) exceed the database request limit`,
         outcome: "not_committed",
       });
     }
-
-    const deadlineMs =
-      options.deadlineMs ??
-      (kind === "write" ? this.options.writeDeadlineMs : this.options.readDeadlineMs);
-    const requestId = this.nextRequestId++;
-    const message: HostToWorkerMessage = {
-      type: "request",
-      requestId,
-      generation: this.generation,
-      command,
-      kind,
-      args,
-      deadlineAt: Date.now() + deadlineMs,
-      ...(options.orderingKey ? { orderingKey: options.orderingKey } : {}),
-    };
-
     if (options.signal?.aborted) {
       return fail({
         code: "cancelled",
@@ -229,53 +245,199 @@ export class DatabaseClient {
       });
     }
 
+    const deadlineMs =
+      options.deadlineMs ??
+      (kind === "write" ? this.options.writeDeadlineMs : this.options.readDeadlineMs);
+    // The deadline starts now, so time spent waiting on the host counts toward it.
+    const deadlineAt = Date.now() + deadlineMs;
+
+    // Keep submission order: once anything is waiting, later requests wait behind it.
+    if (this.queued.length === 0 && this.hasCapacity(bytes)) {
+      return new Promise((resolve, reject) =>
+        this.send(
+          { command, kind, args, bytes, deadlineMs, deadlineAt, ...options },
+          resolve,
+          reject,
+        ),
+      );
+    }
+    if (
+      this.queued.length >= this.options.maxQueued ||
+      this.queuedBytes + bytes > this.options.maxQueuedBytes
+    ) {
+      return fail({
+        code: "overloaded",
+        message: `Database worker queue is full (${this.pending.size} requests, ${this.queued.length} waiting)`,
+        outcome: "not_committed",
+      });
+    }
     return new Promise((resolve, reject) => {
-      const onAbort = () => {
-        if (!this.pending.has(requestId)) return;
-        try {
-          this.worker?.postMessage({ type: "cancel", requestId } satisfies HostToWorkerMessage);
-        } catch {
-          // The worker is gone; its exit handler settles the request.
-        }
-        if (kind === "read") {
-          this.settle(requestId, {
-            code: "cancelled",
-            message: `${command} was cancelled`,
-            outcome: "not_committed",
-          });
-        }
-      };
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-      const timer = setTimeout(() => {
-        this.settle(requestId, {
-          code: "reply_timeout",
-          message: `No reply for ${command} within ${deadlineMs + this.options.replyGraceMs} ms`,
-          outcome: kind === "write" ? "unknown" : "not_committed",
-        });
-      }, deadlineMs + this.options.replyGraceMs);
-      timer.unref?.();
-      this.pending.set(requestId, {
+      const entry: QueuedRequest = {
         command,
         kind,
+        args,
         bytes,
+        deadlineMs,
+        deadlineAt,
+        ...(options.orderingKey ? { orderingKey: options.orderingKey } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
         resolve,
         reject,
-        timer,
-        cleanup: options.signal
-          ? () => options.signal?.removeEventListener("abort", onAbort)
-          : undefined,
-      });
-      this.pendingBytes += bytes;
+        timer: setTimeout(
+          () =>
+            this.dropQueued(entry, {
+              code: "deadline_exceeded",
+              message: `${command} waited past its ${deadlineMs} ms deadline before it could be sent`,
+              outcome: "not_committed",
+            }),
+          Math.max(0, deadlineAt - Date.now()),
+        ),
+      };
+      entry.timer.unref?.();
+      if (options.signal) {
+        entry.onAbort = () =>
+          this.dropQueued(entry, {
+            code: "cancelled",
+            message: `${command} was cancelled before it was sent`,
+            outcome: "not_committed",
+          });
+        options.signal.addEventListener("abort", entry.onAbort, { once: true });
+      }
+      this.queued.push(entry);
+      this.queuedBytes += bytes;
+    });
+  }
+
+  private hasCapacity(bytes: number): boolean {
+    return (
+      this.pending.size < this.options.maxPending &&
+      this.pendingBytes + bytes <= this.options.maxPendingBytes
+    );
+  }
+
+  /** Removes a waiting request that was never sent and rejects it. */
+  private dropQueued(entry: QueuedRequest, error: DatabaseErrorPayload): void {
+    const index = this.queued.indexOf(entry);
+    if (index < 0) return;
+    this.queued.splice(index, 1);
+    this.releaseQueued(entry);
+    entry.reject(new DatabaseRequestError(error));
+  }
+
+  private releaseQueued(entry: QueuedRequest): void {
+    this.queuedBytes -= entry.bytes;
+    clearTimeout(entry.timer);
+    if (entry.onAbort) entry.signal?.removeEventListener("abort", entry.onAbort);
+  }
+
+  /** Sends waiting requests, oldest first, while the worker has room. */
+  private dispatchQueued(): void {
+    if (this.dispatching) return;
+    this.dispatching = true;
+    try {
+      while (
+        this.queued.length > 0 &&
+        this.state === "ready" &&
+        this.worker &&
+        this.hasCapacity(this.queued[0].bytes)
+      ) {
+        const entry = this.queued.shift()!;
+        this.releaseQueued(entry);
+        if (Date.now() >= entry.deadlineAt) {
+          entry.reject(
+            new DatabaseRequestError({
+              code: "deadline_exceeded",
+              message: `${entry.command} waited past its ${entry.deadlineMs} ms deadline before it could be sent`,
+              outcome: "not_committed",
+            }),
+          );
+          continue;
+        }
+        this.send(entry, entry.resolve, entry.reject);
+      }
+    } finally {
+      this.dispatching = false;
+    }
+  }
+
+  /** Rejects every waiting request; none was sent, so nothing can have committed. */
+  private failQueued(code: DatabaseErrorPayload["code"], message: string): void {
+    for (const entry of this.queued.splice(0)) {
+      this.releaseQueued(entry);
+      entry.reject(new DatabaseRequestError({ code, message, outcome: "not_committed" }));
+    }
+  }
+
+  private send(
+    request: {
+      command: string;
+      kind: DatabaseCommandKind;
+      args: unknown;
+      bytes: number;
+      deadlineMs: number;
+      deadlineAt: number;
+      orderingKey?: string;
+      signal?: AbortSignal;
+    },
+    resolve: (value: unknown) => void,
+    reject: (error: DatabaseRequestError) => void,
+  ): void {
+    const { command, kind, args, bytes, deadlineMs, deadlineAt, orderingKey, signal } = request;
+    const requestId = this.nextRequestId++;
+    const message: HostToWorkerMessage = {
+      type: "request",
+      requestId,
+      generation: this.generation,
+      command,
+      kind,
+      args,
+      deadlineAt,
+      ...(orderingKey ? { orderingKey } : {}),
+    };
+    const onAbort = () => {
+      if (!this.pending.has(requestId)) return;
       try {
-        this.worker!.postMessage(message);
-      } catch (error) {
+        this.worker?.postMessage({ type: "cancel", requestId } satisfies HostToWorkerMessage);
+      } catch {
+        // The worker is gone; its exit handler settles the request.
+      }
+      if (kind === "read") {
         this.settle(requestId, {
-          code: "invalid_request",
-          message: `Arguments for ${command} could not be sent: ${error instanceof Error ? error.message : String(error)}`,
+          code: "cancelled",
+          message: `${command} was cancelled`,
           outcome: "not_committed",
         });
       }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const remainingMs = Math.max(0, deadlineAt - Date.now());
+    const timer = setTimeout(() => {
+      this.settle(requestId, {
+        code: "reply_timeout",
+        message: `No reply for ${command} within ${deadlineMs + this.options.replyGraceMs} ms`,
+        outcome: kind === "write" ? "unknown" : "not_committed",
+      });
+    }, remainingMs + this.options.replyGraceMs);
+    timer.unref?.();
+    this.pending.set(requestId, {
+      command,
+      kind,
+      bytes,
+      resolve,
+      reject,
+      timer,
+      cleanup: signal ? () => signal.removeEventListener("abort", onAbort) : undefined,
     });
+    this.pendingBytes += bytes;
+    try {
+      this.worker!.postMessage(message);
+    } catch (error) {
+      this.settle(requestId, {
+        code: "invalid_request",
+        message: `Arguments for ${command} could not be sent: ${error instanceof Error ? error.message : String(error)}`,
+        outcome: "not_committed",
+      });
+    }
   }
 
   /**
@@ -290,6 +452,7 @@ export class DatabaseClient {
     if (this.state === "closed") return { drained: true };
     const worker = this.worker;
     this.state = "closing";
+    this.failQueued("closed", "Database client closed before the request was sent");
     if (!worker) {
       this.state = "closed";
       this.failAll("closed", "Database client closed");
@@ -397,6 +560,12 @@ export class DatabaseClient {
     this.worker = null;
     if (this.state === "closing" || this.state === "closed") return;
     logger.error(`Database worker exited unexpectedly (code ${code})`);
+    // Waiting requests were never sent. They fail now rather than run after a restart,
+    // behind in-flight writes whose outcome is unknown.
+    this.failQueued(
+      "worker_unavailable",
+      `Database worker exited (code ${code}); request not sent`,
+    );
     this.failAll(
       "worker_exited",
       `Database worker exited (code ${code}) before replying`,
@@ -445,5 +614,6 @@ export class DatabaseClient {
     request.cleanup?.();
     if (error) request.reject(new DatabaseRequestError(error));
     else request.resolve(result);
+    this.dispatchQueued();
   }
 }

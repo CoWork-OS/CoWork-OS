@@ -4,7 +4,13 @@ import type {
   RoutineWorkflowStepRecord,
 } from "../../../shared/routine-workflow";
 import type { ProactiveSuggestion, Workspace } from "../../../shared/types";
-import { listSuggestionsAcross, listWaitingFlowSteps } from "../attention-sources";
+import type { MemoryCurationChange } from "../../../shared/memory-review-types";
+import {
+  MEMORY_CHANGE_WINDOW_MS,
+  listMemoryChangesAcross,
+  listSuggestionsAcross,
+  listWaitingFlowSteps,
+} from "../attention-sources";
 
 function run(id: string, status: string, routineId = "r1"): RoutineWorkflowRunRecord {
   return {
@@ -88,7 +94,8 @@ describe("listSuggestionsAcross", () => {
       ],
       listActive,
     );
-    expect(listActive).toHaveBeenCalledWith("a", undefined, ["a", "b"]);
+    // A queue read is not a showing: no "surfaced" (and later "ignored") telemetry.
+    expect(listActive).toHaveBeenCalledWith("a", { recordSurface: false }, ["a", "b"]);
     expect(result.map((entry) => [entry.suggestion.id, entry.workspaceId])).toEqual([
       ["s1", "b"],
       ["s2", "a"],
@@ -101,5 +108,68 @@ describe("listSuggestionsAcross", () => {
       await listSuggestionsAcross([{ id: "t", isTemp: true } as Workspace], listActive),
     ).toEqual([]);
     expect(listActive).not.toHaveBeenCalled();
+  });
+});
+
+describe("listMemoryChangesAcross", () => {
+  const change = (id: string, appliedAt: number) => ({ id, appliedAt }) as MemoryCurationChange;
+  const NOW = 10 * MEMORY_CHANGE_WINDOW_MS;
+
+  it("reads hundreds of workspaces without a burst past the database queue", async () => {
+    let active = 0;
+    let peak = 0;
+    const recentSince = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return [];
+    });
+    const workspaces = Array.from({ length: 300 }, (_, i) => ({ id: `w${i}` }) as Workspace);
+    await listMemoryChangesAcross(workspaces, recentSince, NOW);
+    expect(recentSince).toHaveBeenCalledTimes(300);
+    expect(peak).toBeLessThanOrEqual(8);
+  });
+
+  it("reads recent expiries in each saved workspace, newest first", async () => {
+    const recentSince = vi.fn(async (workspaceId: string) =>
+      workspaceId === "a" ? [change("c1", NOW - 10)] : [change("c2", NOW - 5)],
+    );
+    const result = await listMemoryChangesAcross(
+      [
+        { id: "a" } as Workspace,
+        { id: "tmp", isTemp: true } as Workspace,
+        { id: "b" } as Workspace,
+      ],
+      recentSince,
+      NOW,
+    );
+    expect(recentSince.mock.calls).toEqual([
+      ["a", NOW - MEMORY_CHANGE_WINDOW_MS],
+      ["b", NOW - MEMORY_CHANGE_WINDOW_MS],
+    ]);
+    expect(result.map((entry) => [entry.change.id, entry.workspaceId])).toEqual([
+      ["c2", "b"],
+      ["c1", "a"],
+    ]);
+  });
+
+  it("skips a workspace it cannot read, and fails only when it can read none", async () => {
+    const partly = vi.fn(async (workspaceId: string) => {
+      if (workspaceId === "a") throw new Error("locked");
+      return [change("c2", NOW)];
+    });
+    expect(
+      (await listMemoryChangesAcross([{ id: "a" }, { id: "b" }] as Workspace[], partly, NOW)).map(
+        (entry) => entry.change.id,
+      ),
+    ).toEqual(["c2"]);
+    const never = vi.fn(async () => {
+      throw new Error("engine not running");
+    });
+    await expect(listMemoryChangesAcross([{ id: "a" }] as Workspace[], never, NOW)).rejects.toThrow(
+      "engine not running",
+    );
+    expect(await listMemoryChangesAcross([], never, NOW)).toEqual([]);
   });
 });

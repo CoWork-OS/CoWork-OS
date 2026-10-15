@@ -49,6 +49,20 @@ describe("AnthropicProvider", () => {
     });
   });
 
+  it("creates the SDK client on the first request and reuses it", async () => {
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-sonnet-4-6",
+      anthropicApiKey: "sk-ant-api-test",
+    });
+    expect(anthropicConstructorMock).not.toHaveBeenCalled();
+
+    await provider.createMessage(makeRequest());
+    await provider.createMessage(makeRequest());
+
+    expect(anthropicConstructorMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses API key auth for standard Claude API keys", async () => {
     const provider = new AnthropicProvider({
       type: "anthropic",

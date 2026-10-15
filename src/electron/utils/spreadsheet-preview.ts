@@ -1,5 +1,6 @@
 import { readDocumentArchiveBuffer } from "../security/document-archive";
-import ExcelJS from "exceljs";
+import type ExcelJS from "exceljs";
+import { loadExcelJS } from "./exceljs-loader";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {
@@ -108,7 +109,7 @@ function isStyled(cell: ExcelJS.Cell): boolean {
 export async function buildSpreadsheetPreviewFromFile(
   filePath: string,
 ): Promise<SpreadsheetPreview> {
-  const workbook = new ExcelJS.Workbook();
+  const workbook = new (await loadExcelJS()).Workbook();
   await workbook.xlsx.load(
     (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,
   );
@@ -447,7 +448,7 @@ export async function writeSpreadsheetPreviewToFile(
   filePath: string,
   preview: SpreadsheetPreview,
 ): Promise<SpreadsheetPreview> {
-  const workbook = new ExcelJS.Workbook();
+  const workbook = new (await loadExcelJS()).Workbook();
   try {
     await workbook.xlsx.load(
       (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,

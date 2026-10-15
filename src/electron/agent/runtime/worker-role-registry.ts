@@ -380,8 +380,24 @@ export function isReadOnlyWorkerRole(
  * exemption; only the team orchestrator sets it when creating the task.
  */
 export function stripTeamWorkItemLaneOverride<T extends AgentConfig | undefined>(config: T): T {
-  if (!config || !Object.prototype.hasOwnProperty.call(config, "teamWorkItemLane")) return config;
-  const { teamWorkItemLane: _ignored, ...rest } = config;
+  if (!config) return config;
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(config, key);
+  // Also never accepted from an override: the access limits. Only the daemon sets them, from
+  // the task's agent role and the sessions that started it; an override that carried them
+  // could replace a limit with a wider one or clear it.
+  if (
+    !has("teamWorkItemLane") &&
+    !has("accessCeilingProfileId") &&
+    !has("inheritedAccessCeilingProfileIds")
+  ) {
+    return config;
+  }
+  const {
+    teamWorkItemLane: _lane,
+    accessCeilingProfileId: _ceiling,
+    inheritedAccessCeilingProfileIds: _inherited,
+    ...rest
+  } = config;
   return rest as T;
 }
 

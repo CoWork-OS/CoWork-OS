@@ -240,6 +240,7 @@ const FILESYSTEM_READ_TOOLS = new Set([
 ]);
 
 const FILESYSTEM_WRITE_TOOLS = new Set([
+  "native_application_create",
   "write_file",
   "edit_file",
   "create_directory",
@@ -947,6 +948,22 @@ export class PermissionEngine {
     };
 
     switch (toolName) {
+      case "local_photoshop_edit":
+        add(input.sourcePath, "read");
+        add(input.path, "write");
+        add(input.exportPath, "write");
+        break;
+      case "local_photoshop_create":
+      case "native_application_create":
+        add(input.path, "write");
+        add(input.exportPath, "write");
+        break;
+      case "local_photoshop_inspect":
+      case "local_photoshop_read":
+      case "native_application_inspect":
+        add(input.path, "read");
+        add(input.exportPath, "read");
+        break;
       case "copy_file":
         add(input.sourcePath, "read");
         add(input.destPath, "write");

@@ -2,7 +2,6 @@ import {
   Children,
   Suspense,
   createContext,
-  lazy,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -30,10 +29,7 @@ import { replaceEmojisInChildren } from "../utils/emoji-replacer";
 import { CitationBadge } from "./CitationPanel";
 import { MarkdownImagePreview } from "./MarkdownImagePreview";
 import { useFileActionMenu } from "./FileActionMenu";
-
-const LazyHighlightedCodeBlock = lazy(() =>
-  import("./HighlightedCode").then((module) => ({ default: module.HighlightedCodeBlock })),
-);
+import { LazyHighlightedCodeBlock } from "./lazy-renderers";
 
 type CodeBlockProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode;

@@ -27,7 +27,6 @@ import {
   getProjectIdFromWorkspaceRelPath,
   getWorkspaceRelativePosixPath,
 } from "../../security/project-access";
-import mammoth from "mammoth";
 import { extractPptxContentFromFile } from "../../utils/pptx-extractor";
 import { extractPdfText } from "../../utils/pdf-text";
 import { detectWorkspacePathAlias, shouldRewriteWorkspaceAliasPath } from "../path-alias";
@@ -1747,6 +1746,8 @@ export class FileTools {
     window: ReadWindow;
   }> {
     try {
+      // mammoth loads on first DOCX read rather than at app start.
+      const mammoth = (await import("mammoth")).default;
       const result = await mammoth.extractRawText({
         buffer: await readDocumentArchiveBuffer(fullPath),
       });
@@ -2503,9 +2504,16 @@ export class FileTools {
     }
   }
 
-  /**
-   * Get file or directory metadata
-   */
+  /** Native application drivers must admit every target through the same file authority. */
+  async authorizeApplicationPath(inputPath: string, operation: "read" | "write"): Promise<string> {
+    this.checkPermission(operation);
+    const fullPath = this.resolvePath(inputPath, operation);
+    await this.enforceProjectAccess(fullPath);
+    await this.enforceSymlinkSafeAccess(fullPath, operation);
+    return fullPath;
+  }
+
+  /** Get file or directory metadata. */
   async getFileInfo(
     relativePath: string,
     inspectArtifact = false,

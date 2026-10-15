@@ -6,6 +6,7 @@
  * and routes tool calls to the appropriate server.
  */
 
+import { assignExposedToolNames, type ServerToolCatalog } from "./tool-namespacing";
 import { EventEmitter } from "events";
 import path from "path";
 import {
@@ -61,7 +62,9 @@ function getAllElectronWindows(): Any[] {
 export class MCPClientManager extends EventEmitter {
   private static instance: MCPClientManager | null = null;
   private connections: Map<string, MCPServerConnection> = new Map();
-  private toolServerMap: Map<string, string> = new Map(); // tool name -> server id
+  private toolServerMap: Map<string, string> = new Map(); // exposed tool name -> server id
+  private toolServerNames: Map<string, string> = new Map(); // exposed tool name -> server's tool name
+  private ambiguousToolNames: Map<string, string[]> = new Map(); // plain name -> namespaced names
   private toolCatalogSnapshot: { version: number; tools: MCPTool[] } = { version: 0, tools: [] };
   private initialized = false;
   private initializationPromise: Promise<void> | null = null;
@@ -264,6 +267,8 @@ export class MCPClientManager extends EventEmitter {
     await Promise.all(disconnectPromises);
     this.connections.clear();
     this.toolServerMap.clear();
+    this.toolServerNames.clear();
+    this.ambiguousToolNames = new Map();
     this.toolCatalogSnapshot = {
       version: this.toolCatalogSnapshot.version + 1,
       tools: [],
@@ -416,6 +421,12 @@ export class MCPClientManager extends EventEmitter {
     return this.toolServerMap.get(toolName) || null;
   }
 
+  /** The server's own name for an exposed tool (they differ only for namespaced collisions). */
+  getServerToolName(toolName: string): string | null {
+    if (!this.toolServerMap.has(toolName)) return null;
+    return this.toolServerNames.get(toolName) ?? toolName;
+  }
+
   getServerConfigForTool(toolName: string): MCPServerConfig | null {
     const serverId = this.getServerIdForTool(toolName);
     if (!serverId) return null;
@@ -489,6 +500,11 @@ export class MCPClientManager extends EventEmitter {
   ): Promise<MCPCallResult> {
     const serverId = this.toolServerMap.get(toolName);
     if (!serverId) {
+      const namespaced = this.ambiguousToolNames.get(toolName);
+      if (namespaced)
+        throw new Error(
+          `Tool ${toolName} is offered by several MCP servers; call one of: ${namespaced.join(", ")}`,
+        );
       throw new Error(`Tool ${toolName} not found`);
     }
 
@@ -501,7 +517,7 @@ export class MCPClientManager extends EventEmitter {
     }
 
     try {
-      return await connection.callTool(toolName, args, {
+      return await connection.callTool(this.toolServerNames.get(toolName) ?? toolName, args, {
         ...options,
         beforeSend: this.policyCheckedBeforeSend(serverId, options?.beforeSend),
       });
@@ -845,34 +861,34 @@ export class MCPClientManager extends EventEmitter {
    * Immediately rebuild the tool -> server mapping (no debounce)
    */
   private rebuildToolMapImmediate(): void {
-    const nextToolServerMap = new Map<string, string>();
-    const nextTools: MCPTool[] = [];
-
+    const catalogs: ServerToolCatalog[] = [];
     for (const [serverId, connection] of this.connections) {
-      if (connection.getStatus().status === "connected") {
-        for (const tool of connection.getTools()) {
-          if (nextToolServerMap.has(tool.name)) {
-            logger.warn(
-              `Tool name collision: ${tool.name} from ${serverId} conflicts with ${nextToolServerMap.get(tool.name)}`,
-            );
-          } else {
-            nextToolServerMap.set(tool.name, serverId);
-            nextTools.push({
-              ...tool,
-              inputSchema: tool.inputSchema ? { ...tool.inputSchema } : tool.inputSchema,
-            });
-          }
-        }
+      if (connection.getStatus().status !== "connected") continue;
+      let serverName = serverId;
+      try {
+        serverName = MCPSettingsManager.getServer(serverId)?.name || serverId;
+      } catch {
+        /* Settings unavailable: the id still yields a stable prefix. */
       }
+      catalogs.push({ serverId, serverName, tools: connection.getTools() });
     }
+    const { tools, ambiguous } = assignExposedToolNames(catalogs);
+    for (const [name, namespaced] of ambiguous)
+      logger.info(
+        `Tool name ${name} is offered by several servers; exposed as ${namespaced.join(", ")}`,
+      );
 
     this.toolServerMap.clear();
-    for (const [toolName, serverId] of nextToolServerMap.entries()) {
-      this.toolServerMap.set(toolName, serverId);
+    this.toolServerNames.clear();
+    for (const entry of tools) {
+      this.toolServerMap.set(entry.exposedName, entry.serverId);
+      if (entry.exposedName !== entry.serverToolName)
+        this.toolServerNames.set(entry.exposedName, entry.serverToolName);
     }
+    this.ambiguousToolNames = ambiguous;
     this.toolCatalogSnapshot = {
       version: this.toolCatalogSnapshot.version + 1,
-      tools: nextTools,
+      tools: tools.map((entry) => entry.tool),
     };
 
     logger.debug(`Tool map rebuilt: ${this.toolServerMap.size} tools`);

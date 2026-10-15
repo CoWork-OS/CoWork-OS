@@ -2,11 +2,13 @@
  * Adapters from the app's stores to the attention queue's sources. Kept apart from the IPC
  * wiring so each one can be tested with a plain fake.
  */
+import { mapBoundedSettled, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import type { AttentionCommitment, AttentionFlowStep } from "../../shared/attention";
 import type {
   RoutineWorkflowRunRecord,
   RoutineWorkflowStepRecord,
 } from "../../shared/routine-workflow";
+import type { MemoryCurationChange } from "../../shared/memory-review-types";
 import type { ProactiveSuggestion, Workspace } from "../../shared/types";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -72,21 +74,61 @@ export function suggestionWorkspaces(workspaces: Workspace[]): Workspace[] {
   );
 }
 
-/** Active suggestions across the saved workspaces, each with the workspace it belongs to. */
+/**
+ * Active suggestions across the saved workspaces, each with the workspace it belongs to.
+ * Reading the queue is not showing anyone a suggestion, so it records no "surfaced" event:
+ * otherwise every refresh would count as one, and a day later as "ignored", which lowers the
+ * suggestion's ranking.
+ */
 export async function listSuggestionsAcross(
   workspaces: Workspace[],
   listActive: (
     workspaceId: string,
-    options: undefined,
+    options: { recordSurface: false },
     workspaceIds: string[],
   ) => Promise<ProactiveSuggestion[]>,
 ): Promise<Array<{ workspaceId: string; suggestion: ProactiveSuggestion }>> {
   const saved = suggestionWorkspaces(workspaces);
   if (saved.length === 0) return [];
   const ids = saved.map((workspace) => workspace.id);
-  const suggestions = await listActive(ids[0], undefined, ids);
+  const suggestions = await listActive(ids[0], { recordSurface: false }, ids);
   return suggestions.map((suggestion) => ({
     workspaceId: suggestion.workspaceId || ids[0],
     suggestion,
   }));
+}
+
+/** How long an automatic commitment expiry stays in the queue for undo. */
+export const MEMORY_CHANGE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+type MemoryChangeEntry = { workspaceId: string; change: MemoryCurationChange };
+
+/**
+ * Recent automatic commitment expiries across the saved workspaces, newest first. A
+ * workspace that cannot be read is skipped; if none can be read the error is passed on, so
+ * the queue reports the source as failed.
+ */
+export async function listMemoryChangesAcross(
+  workspaces: Workspace[],
+  recentSince: (workspaceId: string, since: number) => Promise<MemoryCurationChange[]>,
+  now = Date.now(),
+): Promise<MemoryChangeEntry[]> {
+  const saved = suggestionWorkspaces(workspaces);
+  const since = now - MEMORY_CHANGE_WINDOW_MS;
+  const results = await mapBoundedSettled(saved, WORKSPACE_READ_CONCURRENCY, async (workspace) =>
+    (await recentSince(workspace.id, since)).map((change) => ({
+      workspaceId: workspace.id,
+      change,
+    })),
+  );
+  const read = results.filter(
+    (result): result is PromiseFulfilledResult<MemoryChangeEntry[]> =>
+      result.status === "fulfilled",
+  );
+  if (saved.length > 0 && read.length === 0) {
+    throw (results[0] as PromiseRejectedResult).reason;
+  }
+  return read
+    .flatMap((result) => result.value)
+    .sort((a, b) => b.change.appliedAt - a.change.appliedAt);
 }

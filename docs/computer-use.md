@@ -160,7 +160,7 @@ Rough order the stack encourages:
 2. **Browser tools** for web UIs.
 3. **Shell and file tools** for repo and CLI work.
 4. **`open_application`** when the missing piece is “the app is not running.”
-5. **`screenshot` + follow-up computer-use actions** when the task still requires **native GUI** interaction.
+5. **`native_app`** (macOS, background; see [Working with apps in the background](background-app-work.md)) or **`screenshot` + follow-up computer-use actions** when the task still requires **native GUI** interaction.
 
 **Native desktop GUI intent** is detected from the **user goal and step text** (not only from generic words like “browser” in strategy headers). Explicit mentions of native apps, windows, dialogs, or on-screen UI tend to unlock the computer-use lane; purely web or repo tasks should not.
 
@@ -168,7 +168,7 @@ Rough order the stack encourages:
 
 1. **Built-in tools**: Confirm the `computer_use` category is enabled if you want the agent to use this lane at all.
 2. **Permissions / platform status**: On macOS, Accessibility + Screen Recording granted for the helper binary; restart after Screen Recording changes if needed. On Windows, confirm the helper is installed and the target window is visible/non-minimized.
-3. **Operational model**: Expect a foreground-first controlled-window loop centered on `screenshot()` and the latest `captureId`.
+3. **Operational model**: On macOS the default is **Background only**: `native_app` targets an exact app window without taking the foreground, pointer, keyboard or clipboard (see [Local background app control](local-background-app-control.md)). Foreground modes are explicit opt-ins; on Windows, expect the visible controlled-window loop centered on `screenshot()` and the latest `captureId`.
 4. **Chronicle**: If your goal is contextual screen understanding rather than GUI control, enable **Settings > Tools > Chronicle**, keep the dedicated **Chronicle** built-in tool category enabled, and test `screen_context_resolve` before forcing a computer-use flow.
 
 ## Security and abuse considerations

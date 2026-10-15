@@ -122,6 +122,20 @@ describe("buildTeamModel", () => {
     expect(first.recent[0]).toMatchObject({ taskId: "t1", statusLabel: "Needs you" });
   });
 
+  it("carries each agent's access limit, and calls the level seniority", () => {
+    const model = build({
+      roles: [
+        role("ops", { accessProfileId: "ask_for_approval", autonomyLevel: "lead" }),
+        role("free"),
+      ],
+      tasks: [task("t1", { assignedAgentRoleId: "free" })],
+    });
+    const byId = Object.fromEntries(model.members.map((member) => [member.id, member]));
+    expect(byId["role:ops"].access).toEqual({ roleId: "ops", profileId: "ask_for_approval" });
+    expect(byId["role:free"].access).toEqual({ roleId: "free" });
+    expect(byId["role:ops"].facts).toContainEqual({ label: "Seniority", value: "Lead" });
+  });
+
   it("counts a decision in delegated work for every role the queue names", () => {
     const model = build({
       roles: [role("lead"), role("helper")],
@@ -181,7 +195,9 @@ describe("buildTeamModel", () => {
       ],
       tasks: [
         task("here", { status: "executing" }),
-        task("there", { status: "executing", targetNodeId: "mini" }),
+        // Tasks carry the device's node id, not its id; this machine's node id is local.
+        task("also-here", { status: "executing", targetNodeId: "local:this-device" }),
+        task("there", { status: "executing", targetNodeId: "remote-gateway:mini" }),
       ],
       attention: [approval("there", "mini")],
     });
@@ -192,7 +208,7 @@ describe("buildTeamModel", () => {
         local: true,
         online: true,
         statusLabel: "This device",
-        running: 1,
+        running: 2,
         waiting: 0,
       },
       {

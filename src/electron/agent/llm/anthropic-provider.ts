@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   LLMProvider,
   LLMProviderConfig,
@@ -34,6 +34,7 @@ import {
   prepareAnthropicConversation,
 } from "./anthropic-turn-context";
 import { createLogger } from "../../utils/logger";
+import { lazyClient, loadAnthropicSdk } from "./sdk-loaders";
 
 /**
  * Anthropic API provider implementation
@@ -60,7 +61,8 @@ interface BuiltRequest {
 
 export class AnthropicProvider implements LLMProvider {
   readonly type = "anthropic" as const;
-  private client: Anthropic;
+  /** The SDK client, created on the first request (see sdk-loaders). */
+  private readonly getClient: () => Promise<Anthropic>;
   private readonly configuredModel: string;
   private readonly reasoningEffort?: string;
   private promptCacheAutoSupported = true;
@@ -84,16 +86,17 @@ export class AnthropicProvider implements LLMProvider {
     this.reasoningEffort = config.anthropicReasoningEffort;
     const isSubscriptionToken = apiKey.includes("sk-ant-oat");
     this.subscriptionBetas = isSubscriptionToken ? "claude-code-20250219,oauth-2025-04-20" : "";
-    this.client = isSubscriptionToken
-      ? new Anthropic({
+    const clientOptions: ConstructorParameters<typeof Anthropic>[0] = isSubscriptionToken
+      ? {
           apiKey: null,
           authToken: apiKey,
           defaultHeaders: {
             "anthropic-beta": this.subscriptionBetas,
             "x-app": "cli",
           },
-        })
-      : new Anthropic({ apiKey });
+        }
+      : { apiKey };
+    this.getClient = lazyClient(async () => new (await loadAnthropicSdk())(clientOptions));
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
@@ -232,7 +235,8 @@ export class AnthropicProvider implements LLMProvider {
         this.configuredModel || ANTHROPIC_HEALTHCHECK_MODEL_ID,
       );
       // Send a minimal request to test the connection
-      await this.client.messages.create({
+      const client = await this.getClient();
+      await client.messages.create({
         model,
         max_tokens: 10,
         messages: [{ role: "user", content: "Hi" }],
@@ -386,18 +390,23 @@ export class AnthropicProvider implements LLMProvider {
     };
   }
 
-  private send(built: BuiltRequest, signal: AbortSignal | undefined): Promise<Anthropic.Message> {
-    return this.client.messages.create(
+  private async send(
+    built: BuiltRequest,
+    signal: AbortSignal | undefined,
+  ): Promise<Anthropic.Message> {
+    const client = await this.getClient();
+    return client.messages.create(
       built.payload,
       this.requestOptions(built, signal),
     ) as Promise<Anthropic.Message>;
   }
 
-  private sendStreaming(
+  private async sendStreaming(
     built: BuiltRequest,
     signal: AbortSignal | undefined,
   ): Promise<Anthropic.Message> {
-    const stream = this.client.messages.stream(built.payload, this.requestOptions(built, signal));
+    const client = await this.getClient();
+    const stream = client.messages.stream(built.payload, this.requestOptions(built, signal));
     return stream.finalMessage() as Promise<Anthropic.Message>;
   }
 

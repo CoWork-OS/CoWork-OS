@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComputerUseTools } from "../computer-use-tools";
+import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import { setComputerUseProviderFactoryForTesting } from "../../../computer-use/provider";
 import { ComputerUseSessionManager } from "../../../computer-use/session-manager";
 
@@ -140,6 +141,10 @@ describe("ComputerUseTools platform exposure", () => {
   });
 
   it("uses AX press for background-first left clicks without posting mouse events", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+      nativeComputerUseMode: "ask_visible",
+    });
     setPlatform("darwin");
     const provider = makeProvider({
       axPressAtPoint: vi.fn().mockResolvedValue({ pressed: true }),
@@ -156,6 +161,10 @@ describe("ComputerUseTools platform exposure", () => {
   });
 
   it("requires visible-control approval before falling back to a real mouse click", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+      nativeComputerUseMode: "ask_visible",
+    });
     setPlatform("darwin");
     const provider = makeProvider({
       axPressAtPoint: vi.fn().mockResolvedValue({ pressed: false }),
@@ -184,6 +193,23 @@ describe("ComputerUseTools platform exposure", () => {
     expect(provider.activateApp).not.toHaveBeenCalled();
   });
 
+  it("strict background refuses foreground fallback without asking or activating", async () => {
+    setPlatform("darwin");
+    const provider = makeProvider({
+      axPressAtPoint: vi.fn().mockResolvedValue({ pressed: false }),
+      axFocusAtPoint: vi.fn().mockResolvedValue({ focused: false }),
+    });
+    setComputerUseProviderFactoryForTesting(() => provider);
+    const daemon = { logEvent: vi.fn(), requestApproval: vi.fn() };
+    const tools = makeTools(daemon);
+    const capture = await tools.screenshot();
+    await expect(tools.click(10, 10, "left", capture.captureId)).rejects.toThrow(
+      /foreground fallback is disabled/,
+    );
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(provider.activateApp).not.toHaveBeenCalled();
+  });
+
   it("does not expose model-controlled foreground bypass fields in native tool schemas", () => {
     setPlatform("darwin");
     const tools = ComputerUseTools.getToolDefinitions({ headless: false });
@@ -196,6 +222,10 @@ describe("ComputerUseTools platform exposure", () => {
   });
 
   it("persists visible-control approval for the current task and window", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+      nativeComputerUseMode: "ask_visible",
+    });
     setPlatform("darwin");
     const provider = makeProvider({
       axPressAtPoint: vi.fn().mockResolvedValue({ pressed: false }),
@@ -218,6 +248,10 @@ describe("ComputerUseTools platform exposure", () => {
   });
 
   it("reports AX focus as partial progress instead of treating it as a completed click", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+      nativeComputerUseMode: "ask_visible",
+    });
     setPlatform("darwin");
     const provider = makeProvider({
       axPressAtPoint: vi.fn().mockResolvedValue({ pressed: false }),

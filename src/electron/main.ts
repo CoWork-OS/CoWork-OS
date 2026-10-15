@@ -228,8 +228,7 @@ import {
   startControlPlaneFromSettings,
   getControlPlaneServer,
 } from "./control-plane";
-import { createWebHostIdentity } from "../host/web/host-identity";
-import { createBrowserHostApplication } from "../host/services/browser-host-application";
+import { getAttentionService } from "./ipc/attention-handlers";
 import { isBrowserWebEnabled, webDeploymentFromEnv } from "../host/services/browser-web-config";
 import type { WebApplication } from "../host/web/WebApplication";
 import { sanitizeTaskMessageParams } from "./control-plane/sanitize";
@@ -373,6 +372,11 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
   if (!isBrowserWebEnabled()) return;
   try {
     if (!browserWebApplication) {
+      // Loaded only when browser web access is enabled; most desktop runs never need them.
+      const [{ createWebHostIdentity }, { createBrowserHostApplication }] = await Promise.all([
+        import("../host/web/host-identity"),
+        import("../host/services/browser-host-application"),
+      ]);
       const identity = await createWebHostIdentity({
         userDataDir: getUserDataDir(),
         profileId: getActiveProfileId(),
@@ -388,6 +392,7 @@ async function attachBrowserWebApplication(webAccessServer?: WebAccessServer): P
         agentDaemon,
         channelGateway,
         notificationService: getNotificationService() ?? undefined,
+        getAttentionService,
         getRoutineService: () => routineService,
         getEventTriggerService: () => eventTriggerService,
         getHeartbeatService: () => heartbeatService,
@@ -1751,6 +1756,12 @@ if (isMacSafeStorageMigrationWorker) {
       app.quit();
     }
   } else {
+    // Opening the profile database (schema initialization in its bootstrap worker, DB6)
+    // needs neither Electron readiness nor the keychain, so it starts now and overlaps
+    // app readiness and the keychain prime. Startup awaits it where it needs the database
+    // and handles its failures there.
+    const databaseOpening = DatabaseManager.open();
+    databaseOpening.catch(() => undefined);
     const startupActionGate = new StartupActionGate();
 
     function ensureMainWindowVisible(): void {
@@ -2152,8 +2163,8 @@ if (isMacSafeStorageMigrationWorker) {
       // Initialize database first - required for SecureSettingsRepository
       const coreInitStartedAt = Date.now();
       try {
-        // Schema initialization runs in a bootstrap worker (DB6).
-        dbManager = await DatabaseManager.open();
+        // Started once this process held the single-instance lock (see databaseOpening).
+        dbManager = await databaseOpening;
         setBackgroundDispatchBudget(
           new PersistentDispatchBudget(dbManager.getDatabase(), {
             getSchedulerFence: () => automationRuntime.captureFence(),
@@ -2253,6 +2264,7 @@ if (isMacSafeStorageMigrationWorker) {
       // This MUST be done before provider factories so they can migrate legacy settings
       new SecureSettingsRepository(dbManager.getDatabase());
       logger.info("SecureSettingsRepository initialized");
+      // Legacy remote app connections are retained for migration only; never start them.
       logStartupLane("blocking_startup", { event: "secure_settings_ready" });
       if (process.platform === "darwin") {
         await migrateLegacyMacSafeStorageSettings({
@@ -2293,6 +2305,7 @@ if (isMacSafeStorageMigrationWorker) {
           });
         });
       }
+      logStartupLane("blocking_startup", { event: "keychain_migrations_complete" });
       keychainIdentityMismatch = verifySecureSettingsKeychainIdentity();
       // One lifecycle-owned instance serves the timer and the Settings IPC, so a
       // user decision and an in-flight delivery share one fence and one shutdown.
@@ -2332,6 +2345,7 @@ if (isMacSafeStorageMigrationWorker) {
       }
       await normalizeTemplatedRoleCoreBoundary();
       await ensureCoreAutomationProfiles();
+      logStartupLane("blocking_startup", { event: "automation_profiles_ready" });
       // Shared with the memory repo startup below (workspace paths and names; recent tasks
       // for dreaming).
       let hostWorkspaceRepository: WorkspaceRepository | null = null;
@@ -2417,6 +2431,7 @@ if (isMacSafeStorageMigrationWorker) {
       PersonalityManager.initialize();
       MemoryFeaturesManager.initialize();
       logPhase("core-init", coreInitStartedAt);
+      logStartupLane("blocking_startup", { event: "core_services_ready" });
 
       // Migrate .env configuration to Settings (one-time upgrade path)
       const migrationResult = await migrateEnvToSettings();
@@ -2553,6 +2568,7 @@ if (isMacSafeStorageMigrationWorker) {
         // Don't fail app startup if memory init fails
       }
 
+      logStartupLane("blocking_startup", { event: "memory_services_ready" });
       try {
         BoxBrainService.initialize(dbManager.getDatabase());
         logger.info("Box Brain Service initialized");
@@ -2592,6 +2608,7 @@ if (isMacSafeStorageMigrationWorker) {
         logger.warn("Failed to initialize Chronicle:", error);
       }
 
+      logStartupLane("blocking_startup", { event: "optional_services_ready" });
       // Initialize agent daemon
       const numbatService = NumbatService.initialize(dbManager.getDatabase());
       recurringApprovalService = new RecurringApprovalService(dbManager.getDatabase());
@@ -2613,6 +2630,7 @@ if (isMacSafeStorageMigrationWorker) {
         agentDaemon?.logEvent(taskId, type, payload);
       });
       await agentDaemon.initialize();
+      logStartupLane("blocking_startup", { event: "agent_daemon_ready" });
       detachTaskLifecycleSync = attachControlPlaneTaskLifecycleSync({
         agentDaemon,
         db: dbManager.getDatabase(),
@@ -2670,12 +2688,18 @@ if (isMacSafeStorageMigrationWorker) {
             agentDaemon,
             runtime: "desktop",
           });
-          const owned = await kitWriterOwnership.start();
-          logger.info(
-            owned
-              ? "Kit writers started"
-              : "Kit writers waiting for the kit-writer lease (another process owns it)",
-          );
+          // The lease round trip and writer rebuild run alongside the first window instead
+          // of delaying it; stop() at shutdown queues behind this start.
+          void kitWriterOwnership
+            .start()
+            .then((owned) =>
+              logger.info(
+                owned
+                  ? "Kit writers started"
+                  : "Kit writers waiting for the kit-writer lease (another process owns it)",
+              ),
+            )
+            .catch((error) => logger.error("Failed to start the kit writers:", error));
         } catch (error) {
           logger.error("Failed to start the kit writers:", error);
         }
@@ -2720,8 +2744,12 @@ if (isMacSafeStorageMigrationWorker) {
         if (startupQuietMode) {
           logger.info("SubconsciousLoopService initialized (quiet mode; not started)");
         } else {
-          await subconsciousLoopService.start(agentDaemon);
-          logger.info("SubconsciousLoopService initialized");
+          // start() attaches the daemon and migrates synchronously; its remaining
+          // maintenance runs alongside the first window instead of delaying it.
+          void subconsciousLoopService
+            .start(agentDaemon)
+            .then(() => logger.info("SubconsciousLoopService initialized"))
+            .catch((error) => logger.error("Failed to start SubconsciousLoopService:", error));
         }
       } catch (error) {
         logger.error("Failed to initialize SubconsciousLoopService:", error);
@@ -2736,6 +2764,7 @@ if (isMacSafeStorageMigrationWorker) {
         // Don't fail app startup if KG init fails
       }
 
+      logStartupLane("blocking_startup", { event: "background_loops_ready" });
       const initializeMcpClientManager = async (): Promise<void> => {
         const mcpInitStartedAt = Date.now();
         const mcpClientManager = MCPClientManager.getInstance();
@@ -3250,6 +3279,7 @@ if (isMacSafeStorageMigrationWorker) {
         // Don't fail app startup if cron init fails
       }
 
+      logStartupLane("blocking_startup", { event: "cron_ready" });
       const initializeCustomSkillLoader = async (): Promise<void> => {
         const skillInitStartedAt = Date.now();
         const skillLoader = getCustomSkillLoader();
@@ -3304,6 +3334,7 @@ if (isMacSafeStorageMigrationWorker) {
         getPulseService: () => pulseService,
         getDailyBriefingService: () => dailyBriefingService,
       });
+      logStartupLane("blocking_startup", { event: "ipc_handlers_ready" });
       if (subconsciousLoopService) {
         setupSubconsciousHandlers(subconsciousLoopService);
         setupImprovementHandlers(subconsciousLoopService);
@@ -3566,6 +3597,7 @@ if (isMacSafeStorageMigrationWorker) {
         // Don't fail app startup if heartbeat init fails
       }
 
+      logStartupLane("blocking_startup", { event: "heartbeat_awareness_ready" });
       // Setup Mission Control IPC handlers
       try {
         if (
@@ -3684,6 +3716,7 @@ if (isMacSafeStorageMigrationWorker) {
         logger.error("Failed to initialize Strategic Planner:", error);
       }
 
+      logStartupLane("blocking_startup", { event: "strategic_planner_ready" });
       // Initialize Plugin Pack handlers (Customize panel)
       try {
         setupPluginPackHandlers();

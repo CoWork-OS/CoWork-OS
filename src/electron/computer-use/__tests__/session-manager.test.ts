@@ -27,6 +27,12 @@ describe("ComputerUseSessionManager", () => {
     ComputerUseSessionManager.resetForTesting();
   });
 
+  it("does not intercept the user's Escape key for background sessions", () => {
+    const sm = ComputerUseSessionManager.getInstance();
+    sm.acquire("background", makeDaemon(), { background: true });
+    expect((sm as Any).shortcutGuard.enable).not.toHaveBeenCalled();
+  });
+
   it("allows the same task to acquire repeatedly", () => {
     const sm = ComputerUseSessionManager.getInstance();
     const d = makeDaemon();

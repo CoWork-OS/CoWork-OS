@@ -4,7 +4,7 @@
  * renderer after task, approval and question events, so surfaces reload the snapshot
  * instead of trusting pushed data.
  */
-import { ipcMain, type BrowserWindow } from "electron";
+import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../../shared/types";
 import { createDebouncedSignal, type AttentionService } from "../attention/AttentionService";
 
@@ -32,12 +32,18 @@ type Handler = (raw: unknown) => Promise<unknown>;
 
 /** The handlers by channel, independent of Electron (tests call them directly). */
 export function createAttentionIpcHandlers(deps: AttentionIpcDeps): Record<string, Handler> {
+  // Mount, window focus and change events can ask at the same moment; they share
+  // one snapshot instead of each fanning out across every workspace.
+  let inFlight: ReturnType<AttentionIpcDeps["service"]["snapshot"]> | null = null;
   return {
     [IPC_CHANNELS.ATTENTION_LIST]: async (raw) => {
       if (raw !== undefined && raw !== null) {
         throw new Error("attention:list takes no arguments");
       }
-      return deps.service.snapshot();
+      inFlight ??= deps.service.snapshot().finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 }
@@ -50,13 +56,29 @@ export interface AttentionSetupDeps extends AttentionIpcDeps {
   /** The daemon, whose task, approval and question events can change the queue. */
   events: EventSource;
   getMainWindow: () => BrowserWindow | null;
+  /**
+   * Throws unless the call comes from the main app window. The queue carries drafted
+   * replies and calendar details, so other windows don't get it.
+   */
+  assertTrustedSender?: (event: IpcMainInvokeEvent) => void;
+}
+
+let sharedService: Pick<AttentionService, "snapshot"> | null = null;
+
+/** The queue the desktop app serves, so the browser host on the same profile can read it. */
+export function getAttentionService(): Pick<AttentionService, "snapshot"> | null {
+  return sharedService;
 }
 
 /** Registers the handlers and starts signalling changes. Returns the change trigger. */
 export function setupAttentionHandlers(deps: AttentionSetupDeps): { notifyChanged: () => void } {
+  sharedService = deps.service;
   const handlers = createAttentionIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
-    ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));
+    ipcMain.handle(channel, (event, raw: unknown) => {
+      deps.assertTrustedSender?.(event);
+      return handle(raw);
+    });
   }
   const signal = createDebouncedSignal(() => {
     const window = deps.getMainWindow();

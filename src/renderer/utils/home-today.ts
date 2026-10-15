@@ -1,4 +1,5 @@
 import { rankAttention, type AttentionItem, type AttentionKind } from "../../shared/attention";
+import { meetingPrepPrompt, type CalendarProposal } from "../../shared/calendar-proposals";
 import type { SuggestionType } from "../../shared/types";
 import type { HomeSessionSummary, HomeSessions } from "./home-sessions";
 
@@ -10,14 +11,19 @@ import type { HomeSessionSummary, HomeSessions } from "./home-sessions";
  * sessions the renderer already knows so a new one shows before the queue reloads. Every
  * card action goes through an existing path: opening a session (where its own approval or
  * question UI takes over), opening an automation, starting a suggestion's prompt as a new
- * task (the prompt is shown on the card first), snoozing a suggestion, or marking a
- * commitment done. Nothing here runs anything on its own.
+ * task (the prompt is shown on the card first), snoozing a suggestion, marking a
+ * commitment done, or a calendar change the card names (the main process checks the
+ * calendar again before making it). Nothing here runs anything on its own.
  */
 
 export type HomeTodayKind = AttentionKind;
 
 export type HomeTodayAction =
   | { type: "open-session"; taskId: string }
+  /** Shows the approval's own review dialog here; opens the session when it can't. */
+  | { type: "review-approval"; approvalId: string; taskId: string }
+  /** Answers a single question with one of its options. */
+  | { type: "answer-question"; requestId: string; questionId: string; optionLabel: string }
   | { type: "open-routine"; routineId: string }
   | {
       type: "start-suggestion";
@@ -27,12 +33,45 @@ export type HomeTodayAction =
       prompt: string;
     }
   | { type: "snooze-suggestion"; workspaceId: string; suggestionId: string }
+  /** Never show this suggestion again. */
+  | { type: "dismiss-suggestion"; workspaceId: string; suggestionId: string }
+  /** Put the suggestion's prompt in the composer; sending it records whether it was edited. */
+  | { type: "edit-suggestion"; workspaceId: string; suggestionId: string; prompt: string }
+  /** Keep a follow-up suggestion as a commitment. */
+  | { type: "add-commitment"; workspaceId: string; suggestionId: string }
   | { type: "complete-commitment"; commitmentId: string }
-  | { type: "draft-prompt"; prompt: string };
+  | { type: "draft-prompt"; prompt: string }
+  /** Hold the time or decline the event the calendar card names; `done` labels the row. */
+  | { type: "accept-calendar"; proposalId: string; done: string }
+  /** Stop showing a calendar card. */
+  | { type: "dismiss-calendar"; proposalId: string }
+  /** Start the meeting-prep prompt the card shows, then retire the card. */
+  | { type: "prepare-meeting"; proposalId: string; title: string; prompt: string }
+  /** Hold a free stretch on the calendar for a suggestion about making time. */
+  | {
+      type: "hold-for-suggestion";
+      workspaceId: string;
+      suggestionId: string;
+      start: number;
+      end: number;
+    }
+  | { type: "open-link"; url: string }
+  /** Queue a drafted reply in the outbox; it goes out after the send delay unless undone. */
+  | { type: "send-mail-draft"; draftId: string }
+  /** Edit a drafted reply's text right on the card. */
+  | { type: "edit-mail-draft"; draftId: string }
+  | { type: "discard-mail-draft"; draftId: string }
+  /** Take back a reply waiting in the outbox. */
+  | { type: "undo-mail-send"; draftId: string }
+  /** Turn reply drafts on or off. */
+  | { type: "set-mail-drafts"; enabled: boolean }
+  | { type: "dismiss-mail-offer" };
 
 export interface HomeTodayButton {
   label: string;
   action: HomeTodayAction;
+  /** More about the choice, shown as its tooltip. */
+  hint?: string;
 }
 
 export type HomeTodayIcon =
@@ -42,6 +81,10 @@ export type HomeTodayIcon =
   | "blocked"
   | "flow"
   | "commitment"
+  | "calendar_hold"
+  | "calendar_conflict"
+  | "calendar_prep"
+  | "mail_reply"
   | SuggestionType;
 
 /** A short fact under the card's header: what started the work, where it runs, its risk. */
@@ -68,6 +111,14 @@ export interface HomeTodayCard {
   preview?: { label: string; text: string };
   primary: HomeTodayButton;
   secondary?: HomeTodayButton;
+  /** A question's options, answered right on the card; the actions then only open the session. */
+  choices?: HomeTodayButton[];
+  /** Quieter actions after the main two (suggestions: Edit, Add as commitment, Dismiss). */
+  more?: HomeTodayButton[];
+  /** An offer, not a request: shown with the cards, but nothing counts it as needing you. */
+  offer?: boolean;
+  /** A drafted reply's id and text, which the card can edit. */
+  mailDraft?: { draftId: string; bodyText: string };
 }
 
 export interface HomeTodayHandledRow {
@@ -78,6 +129,12 @@ export interface HomeTodayHandledRow {
   at: number;
   /** Session to open when the row is clicked. */
   taskId?: string;
+  /** A commitment memory closed on its own, which the row can reopen. */
+  undo?: { workspaceId: string; changeId: string };
+  /** A reply waiting in the outbox, which the row can take back until it goes out. */
+  undoSend?: { cardId: string; draftId: string; until: number };
+  /** Why it was handled, for the row's tooltip. */
+  detail?: string;
 }
 
 export interface HomeToday {
@@ -91,7 +148,6 @@ export interface HomeToday {
 export const EMPTY_HOME_TODAY: HomeToday = { needsYou: [], idea: null, handled: [] };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_PREVIEW_CHARS = 320;
 const MAX_HANDLED_ROWS = 5;
 
 const SUGGESTION_SOURCE: Record<SuggestionType, string> = {
@@ -164,6 +220,25 @@ export function commitmentDueState(dueAt: number, now: number): string {
   return `Due ${weekday(dueAt)}`;
 }
 
+/** "today", "tomorrow" or "Thu". */
+function dayWord(timestamp: number, now: number): string {
+  const days = Math.round((startOfDay(timestamp) - startOfDay(now)) / DAY_MS);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return weekday(timestamp);
+}
+
+/** "today", "tomorrow" or "on Thu". */
+function dayPhrase(timestamp: number, now: number): string {
+  const word = dayWord(timestamp, now);
+  return word === "today" || word === "tomorrow" ? word : `on ${word}`;
+}
+
+/** A button label for holding time, e.g. "Hold 2:00 PM tomorrow". */
+function holdLabel(start: number, now: number): string {
+  return `Hold ${formatClock(start)} ${dayWord(start, now)}`;
+}
+
 function commitmentWhy(dueAt: number, now: number): string {
   if (dueAt < now) {
     const days = Math.round((startOfDay(now) - startOfDay(dueAt)) / DAY_MS);
@@ -195,12 +270,112 @@ function openSession(taskId: string, label: string): HomeTodayButton {
   return { label, action: { type: "open-session", taskId } };
 }
 
+function namesList(names: readonly string[]): string {
+  if (names.length <= 3) return names.join(", ");
+  return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+}
+
+function calendarCard(
+  item: AttentionItem,
+  proposal: CalendarProposal,
+  base: Pick<HomeTodayCard, "id" | "kind" | "at" | "chips">,
+  now: number,
+): HomeTodayCard {
+  const common = {
+    ...base,
+    // "From your calendar" would only repeat the source.
+    chips: base.chips.filter((chip) => chip.kind !== "origin"),
+    source: "Calendar",
+    state: item.state,
+    title: item.title,
+    ...(item.urgent ? {} : { offer: true }),
+  };
+  const dismiss = (label: string): HomeTodayButton => ({
+    label,
+    action: { type: "dismiss-calendar", proposalId: proposal.id },
+  });
+  switch (proposal.kind) {
+    case "focus_hold":
+      return {
+        ...common,
+        icon: "calendar_hold",
+        why:
+          `It's due by ${formatClock(proposal.dueAt)} ${dayPhrase(proposal.dueAt, now)}. ` +
+          `You're free ${dayPhrase(proposal.start, now)} ` +
+          `${formatClock(proposal.start)}–${formatClock(proposal.end)}.`,
+        primary: {
+          label: holdLabel(proposal.start, now),
+          hint: "Adds a private, busy block to your calendar. Nobody is invited.",
+          action: { type: "accept-calendar", proposalId: proposal.id, done: "Time held" },
+        },
+        secondary: dismiss("Not now"),
+      };
+    case "conflict": {
+      const { first, second } = proposal;
+      const link = second.htmlLink || first.htmlLink;
+      const openLink: HomeTodayButton | null = link
+        ? { label: "Open in Calendar", action: { type: "open-link", url: link } }
+        : null;
+      const why =
+        `${first.title} runs ${formatClock(first.start)}–${formatClock(first.end)} and ` +
+        `${second.title} ${formatClock(second.start)}–${formatClock(second.end)}, ` +
+        `${dayPhrase(first.start, now)}.`;
+      if (proposal.canDeclineSecond) {
+        return {
+          ...common,
+          icon: "calendar_conflict",
+          why,
+          primary: {
+            label: `Decline ${clip(second.title, 40)}`,
+            hint: "Declines the invitation and lets the organizer know.",
+            action: { type: "accept-calendar", proposalId: proposal.id, done: "Declined" },
+          },
+          secondary: dismiss("Keep both"),
+          ...(openLink ? { more: [openLink] } : {}),
+        };
+      }
+      // The user organizes the later event, or isn't on its guest list: CoWork won't change it.
+      return {
+        ...common,
+        icon: "calendar_conflict",
+        why,
+        primary: openLink ?? dismiss("Got it"),
+        ...(openLink ? { secondary: dismiss("Keep both") } : {}),
+      };
+    }
+    case "meeting_prep": {
+      const prompt = meetingPrepPrompt(
+        proposal,
+        (at) => `${formatClock(at)} ${dayPhrase(at, now)}`,
+      );
+      const people = proposal.attendees.length > 0 ? ` with ${namesList(proposal.attendees)}` : "";
+      return {
+        ...common,
+        icon: "calendar_prep",
+        why: `It starts ${dayPhrase(proposal.event.start, now)} at ${formatClock(proposal.event.start)}${people}.`,
+        // The whole prompt, exactly as it will run.
+        preview: { label: "Will run", text: prompt },
+        primary: {
+          label: "Prepare",
+          action: {
+            type: "prepare-meeting",
+            proposalId: proposal.id,
+            title: clip(`Prep: ${proposal.event.title}`, 140),
+            prompt,
+          },
+        },
+        secondary: dismiss("Not now"),
+      };
+    }
+  }
+}
+
 /** The card for one attention item, or null when the item has nothing to decide here. */
 export function cardForAttention(item: AttentionItem, now: number): HomeTodayCard | null {
   const base = { id: item.id, kind: item.kind, at: item.createdAt, chips: chipsFor(item) };
   switch (item.kind) {
     case "approval":
-      if (!item.taskId) return null;
+      if (!item.taskId || item.ref.type !== "approval") return null;
       return {
         ...base,
         icon: "approval",
@@ -208,10 +383,16 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         state: item.state,
         title: item.title,
         why: item.detail || "",
-        primary: openSession(item.taskId, "Review"),
+        primary: {
+          label: "Review",
+          action: { type: "review-approval", approvalId: item.ref.approvalId, taskId: item.taskId },
+        },
+        secondary: openSession(item.taskId, "Open session"),
       };
-    case "question":
-      if (!item.taskId) return null;
+    case "question": {
+      if (!item.taskId || item.ref.type !== "input_request") return null;
+      const { requestId } = item.ref;
+      const choices = item.choices;
       return {
         ...base,
         icon: "question",
@@ -219,8 +400,24 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         state: item.state,
         title: item.title,
         why: item.detail || "",
-        primary: openSession(item.taskId, "Answer"),
+        // A question with plain options is answered right here; the rest open the session.
+        ...(choices
+          ? {
+              choices: choices.options.map((option) => ({
+                label: option.label,
+                ...(option.description ? { hint: option.description } : {}),
+                action: {
+                  type: "answer-question" as const,
+                  requestId,
+                  questionId: choices.questionId,
+                  optionLabel: option.label,
+                },
+              })),
+              primary: openSession(item.taskId, "Open session"),
+            }
+          : { primary: openSession(item.taskId, "Answer") }),
       };
+    }
     case "session": {
       if (!item.taskId) return null;
       const copy = SESSION_COPY[item.state] || SESSION_COPY["Action needed"];
@@ -279,7 +476,7 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
         state: item.state,
         title: clip(plain(item.title), 140),
         why: clip(plain(item.detail || ""), 180),
-        preview: { label: "Will run", text: clip(item.prompt, MAX_PREVIEW_CHARS) },
+        preview: { label: "Will run", text: item.prompt },
         primary: {
           label: "Start",
           action: {
@@ -294,9 +491,128 @@ export function cardForAttention(item: AttentionItem, now: number): HomeTodayCar
           label: "Not now",
           action: { type: "snooze-suggestion", workspaceId, suggestionId },
         },
+        more: [
+          // A suggestion about making time can hold a free stretch on the calendar.
+          ...(item.calendarHold
+            ? [
+                {
+                  label: holdLabel(item.calendarHold.start, now),
+                  hint: "Adds a private, busy block to your calendar. Nobody is invited.",
+                  action: {
+                    type: "hold-for-suggestion" as const,
+                    workspaceId,
+                    suggestionId,
+                    start: item.calendarHold.start,
+                    end: item.calendarHold.end,
+                  },
+                },
+              ]
+            : []),
+          {
+            label: "Edit",
+            action: { type: "edit-suggestion", workspaceId, suggestionId, prompt: item.prompt },
+          },
+          // A follow-up is something the user means to do: it can be kept as a commitment.
+          ...(type === "follow_up"
+            ? [
+                {
+                  label: "Add as commitment",
+                  action: { type: "add-commitment" as const, workspaceId, suggestionId },
+                },
+              ]
+            : []),
+          {
+            label: "Dismiss",
+            action: { type: "dismiss-suggestion", workspaceId, suggestionId },
+          },
+        ],
       };
     }
+    case "memory_change":
+      // Handled work, not a decision: Today lists it with the handled rows.
+      return null;
+    case "calendar":
+      if (item.ref.type !== "calendar_proposal" || !item.calendar) return null;
+      return calendarCard(item, item.calendar, base, now);
+    case "mail_reply":
+      return mailReplyCard(item, base);
   }
+}
+
+function mailReplyCard(
+  item: AttentionItem,
+  base: Pick<HomeTodayCard, "id" | "kind" | "at" | "chips">,
+): HomeTodayCard | null {
+  const common = {
+    ...base,
+    // "From your inbox" would only repeat the source.
+    chips: base.chips.filter((chip) => chip.kind !== "origin"),
+    icon: "mail_reply" as const,
+    source: "Mail",
+    state: item.state,
+    title: item.title,
+    why: item.detail || "",
+  };
+  if (item.ref.type === "mail_offer") {
+    return {
+      ...common,
+      offer: true,
+      primary: { label: "Turn on", action: { type: "set-mail-drafts", enabled: true } },
+      secondary: { label: "Not now", action: { type: "dismiss-mail-offer" } },
+    };
+  }
+  if (item.ref.type !== "mail_draft" || !item.mailDraft) return null;
+  const { draftId, bodyText, to, failed, copies, attachments, sendingUntil } = item.mailDraft;
+  const extras = [
+    copies > 0 ? `${copies} more in copy` : "",
+    attachments > 0 ? (attachments === 1 ? "1 attachment" : `${attachments} attachments`) : "",
+  ].filter(Boolean);
+  // The whole reply and every recipient's address, exactly as it will be sent.
+  const preview = {
+    label: [to.length > 0 ? `To ${namesList(to)}` : "", ...extras].filter(Boolean).join(" · "),
+    text: bodyText,
+  };
+  if (item.mailDraft.retrying) {
+    return {
+      ...common,
+      offer: true,
+      preview,
+      primary: {
+        label: "Cancel send",
+        hint: "Stops the retries. The reply stays as a draft.",
+        action: { type: "undo-mail-send", draftId },
+      },
+    };
+  }
+  if (sendingUntil) {
+    return {
+      ...common,
+      why: `It goes out at ${formatClock(sendingUntil)}.`,
+      // Waiting to go out is not a decision; it only stays undoable until then.
+      offer: true,
+      preview,
+      primary: { label: "Undo send", action: { type: "undo-mail-send", draftId } },
+    };
+  }
+  return {
+    ...common,
+    preview,
+    mailDraft: { draftId, bodyText },
+    primary: {
+      label: failed ? "Send again" : "Send",
+      hint: "Sends after a short delay. You can undo until then.",
+      action: { type: "send-mail-draft", draftId },
+    },
+    secondary: { label: "Edit", action: { type: "edit-mail-draft", draftId } },
+    more: [
+      { label: "Discard draft", action: { type: "discard-mail-draft", draftId } },
+      {
+        label: "Stop drafting replies",
+        hint: "No new drafts. The ones already made stay until you send or discard them.",
+        action: { type: "set-mail-drafts", enabled: false },
+      },
+    ],
+  };
 }
 
 /** A waiting session the renderer knows about, as an attention item. */
@@ -340,11 +656,16 @@ export function buildHomeToday(input: {
       .map(sessionAttention),
   ]);
 
+  // A reply this view just sent already has a row with Undo; no second card for it.
+  const sentHere = new Set(
+    (input.actedRows ?? []).flatMap((row) => (row.undoSend ? [row.undoSend.draftId] : [])),
+  );
   const needsYou: HomeTodayCard[] = [];
   let idea: HomeTodayCard | null = null;
   for (const item of items) {
     const card = cardForAttention(item, now);
     if (!card || resolved.has(card.id)) continue;
+    if (item.mailDraft?.sendingUntil && sentHere.has(item.mailDraft.draftId)) continue;
     if (item.kind === "suggestion" && !item.urgent) {
       idea ??= card;
       continue;
@@ -352,19 +673,43 @@ export function buildHomeToday(input: {
     needsYou.push(card);
   }
 
+  // Commitments memory closed because they looked done: handled, but still undoable.
+  const memoryRows: HomeTodayHandledRow[] = input.attention.flatMap((item) =>
+    item.ref.type === "memory_change" && !resolved.has(item.id)
+      ? [
+          {
+            id: item.id,
+            title: item.title,
+            outcome: "Closed for you",
+            at: item.createdAt,
+            undo: { workspaceId: item.ref.workspaceId, changeId: item.ref.changeId },
+            detail: item.detail,
+          },
+        ]
+      : [],
+  );
+  // A reply whose send failed is back as a card, so its "Sent" row would contradict it.
+  const failedDrafts = new Set(
+    input.attention.flatMap((item) => (item.mailDraft?.failed ? [item.mailDraft.draftId] : [])),
+  );
   const handled: HomeTodayHandledRow[] = [
-    ...(input.actedRows ?? []),
-    // The queue is the authority on what still waits: a session it lists is never "handled",
-    // even when the renderer's copy of the task has not caught up yet.
-    ...input.sessions.handled
-      .filter((session) => !coveredTasks.has(session.id))
-      .map((session) => ({
-        id: `handled:${session.id}`,
-        title: session.title,
-        outcome: "Done",
-        at: session.updatedAt,
-        taskId: session.id,
-      })),
+    ...(input.actedRows ?? []).filter(
+      (row) => !row.undoSend || !failedDrafts.has(row.undoSend.draftId),
+    ),
+    ...[
+      ...memoryRows,
+      // The queue is the authority on what still waits: a session it lists is never
+      // "handled", even when the renderer's copy of the task has not caught up yet.
+      ...input.sessions.handled
+        .filter((session) => !coveredTasks.has(session.id))
+        .map((session) => ({
+          id: `handled:${session.id}`,
+          title: session.title,
+          outcome: "Done",
+          at: session.updatedAt,
+          taskId: session.id,
+        })),
+    ].sort((a, b) => b.at - a.at),
   ].slice(0, MAX_HANDLED_ROWS);
 
   if (needsYou.length === 0 && !idea && handled.length === 0) return EMPTY_HOME_TODAY;
@@ -385,13 +730,16 @@ export function formatHomeDate(now: Date): string {
   return now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
-/** The line under the greeting: how much needs the user, and whether the rest is handled. */
+/**
+ * The line under the greeting: how much needs the user, and whether the rest is handled.
+ * Offers (a suggested hold, meeting prep) are shown but not counted.
+ */
 export function homeStatusLine(today: HomeToday): string | null {
-  const count = today.needsYou.length;
+  const count = today.needsYou.filter((card) => !card.offer).length;
   const handled = today.handled.length > 0;
   if (count === 0) {
     if (handled) return "Nothing needs you. The rest is handled.";
-    return today.idea ? "Nothing needs you right now." : null;
+    return today.idea || today.needsYou.length > 0 ? "Nothing needs you right now." : null;
   }
   const needs = count === 1 ? "1 thing needs you." : `${count} things need you.`;
   return handled ? `${needs} The rest is handled.` : needs;

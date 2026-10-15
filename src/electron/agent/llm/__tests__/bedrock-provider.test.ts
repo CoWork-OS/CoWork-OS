@@ -42,7 +42,7 @@ describe("BedrockProvider", () => {
 
   it("does not retry a cache-related backend error when no cache controls were sent", async () => {
     const provider = new BedrockProvider(config);
-    const send = (provider as Any).client.send;
+    const send = (await (provider as Any).getRuntime()).client.send;
     const error = Object.assign(new Error("Unknown cachePoint parameter"), {
       $metadata: { httpStatusCode: 400 },
     });
@@ -64,7 +64,7 @@ describe("BedrockProvider", () => {
 
   it("remembers rejected cache points for subsequent calls to the same model", async () => {
     const provider = new BedrockProvider(config);
-    const send = (provider as Any).client.send;
+    const send = (await (provider as Any).getRuntime()).client.send;
     send.mockRejectedValueOnce(
       Object.assign(new Error("Unknown cachePoint parameter"), {
         $metadata: { httpStatusCode: 400 },
@@ -458,7 +458,8 @@ describe("BedrockProvider", () => {
           outputTokens: 20,
         },
       });
-    provider.client.send = send;
+    // The runtime client is created on first use.
+    (await provider.getRuntime()).client.send = send;
 
     await provider.createMessage({
       model: "anthropic.claude-haiku-4-5-20250514",

@@ -34,6 +34,7 @@ import { ORCHESTRATION_UNITS } from "../agent/orchestration-units";
 import { AGENT_SECURITY_UNITS } from "../security/numbat/agent-security-units";
 import { RECURRING_APPROVAL_UNITS } from "../security/recurring-approval-units";
 import { MCP_EVENT_UNITS } from "../mcp/events/mcp-event-units";
+import { APPLICATION_OPERATION_UNITS } from "../applications/application-operation-units";
 
 /**
  * The services domain's transaction units (async SQLite migration plan, DB6): the
@@ -42,6 +43,7 @@ import { MCP_EVENT_UNITS } from "../mcp/events/mcp-event-units";
  * catalog registry can load it without a cycle.
  */
 export const SERVICE_UNITS = {
+  ...APPLICATION_OPERATION_UNITS,
   ...TEAMS_REFERENCE_UNITS,
   ...CHANNEL_DECISION_UNITS,
   ...NOTIFICATION_INBOX_UNITS,

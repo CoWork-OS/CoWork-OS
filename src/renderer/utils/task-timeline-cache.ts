@@ -3,6 +3,7 @@ import {
   TASK_TIMELINE_CACHE_BYTE_LIMIT,
   TASK_TIMELINE_CACHE_TASK_LIMIT,
 } from "../../shared/task-timeline-limits";
+import { estimateJsonBytes } from "./json-size";
 
 export interface CachedTaskTimeline {
   taskId: string;
@@ -17,11 +18,9 @@ export interface CachedTaskTimeline {
 function estimateEventsPayloadBytes(events: TaskEvent[]): number {
   let bytes = 0;
   for (const event of events) {
-    try {
-      bytes += new Blob([JSON.stringify(event.payload ?? {})]).size;
-    } catch {
-      bytes += String(event.payload ?? "").length * 2;
-    }
+    // Memoized per payload: a page or live flush re-caches every event of the task.
+    const payloadBytes = estimateJsonBytes(event.payload ?? {});
+    bytes += Number.isFinite(payloadBytes) ? payloadBytes : String(event.payload ?? "").length * 2;
   }
   return bytes;
 }

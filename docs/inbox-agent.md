@@ -73,7 +73,7 @@ Current compose boundary:
 
 - The replacement-grade compose/outbox schema and IPC APIs exist for provider-backed drafts, scheduled send, undo send, and queued sends.
 - The visible thread-level manual composer currently sends directly through the existing provider path.
-- A full background outbox worker that drains queued compose drafts into Gmail API, Microsoft Graph, or SMTP is still a future provider execution pass.
+- Sent compose drafts wait in the outbox for the send delay (30 seconds by default), then go out through the provider on the outbox's next pass (every 30 seconds). A failed send is retried, up to five attempts. A draft that is already queued or being sent can't be sent a second time. **Undo send** returns the draft to editing until the outbox picks the send up; undoing a failed send keeps the draft so it can be fixed and sent again.
 
 ## Read, Unread, Done, And Commitments
 
@@ -86,6 +86,20 @@ Current compose boundary:
 - the thread is reclassified and no longer needs a reply
 
 `Open commitments` are extracted follow-up items, not the same thing as unread mail. If a commitment was already handled, use `Mark done` on the thread or update the commitment state in the commitments section.
+
+## Reply drafts on Today
+
+In the Calm theme, Today can draft replies to mail that needs one. It is off until you turn it on from the **Draft replies to mail that needs you?** card, which appears when mail is connected and something needs a reply (**Not now** hides it for two weeks).
+
+- While the app is open, CoWork drafts up to three replies a day, highest-priority threads first, using your AI model. It skips handled threads, threads you already answered, threads flagged as sensitive, no-reply senders, and promotions and updates.
+- Each draft is an ordinary compose draft. Its card shows the whole reply, every recipient's address, and any copies or attachments.
+- **Send** puts the reply in the outbox. Until it goes out, the handled row (or a **Sending** card) offers **Undo**, which brings the reply back as a draft to edit or send again.
+- **Edit** changes the reply's text right on the card. Recipients and subject are edited in the mailbox compose view.
+- If the send fails, the card says why: **Retrying** while the outbox tries again (with **Cancel send**), then **Not sent** with **Send again**.
+- A reply is marked **Out of date** when a newer message arrives in its thread after it was drafted.
+- **Discard draft** removes the draft and doesn't draft that thread again for two weeks. **Stop drafting replies** turns the feature off; drafts already made stay until you send or discard them.
+
+Nothing is sent without your click. The model has no tools when it drafts, and the thread is passed to it as data.
 
 ## Autosync And Local Cache
 
@@ -226,6 +240,7 @@ Every meaningful mailbox action emits a normalized mailbox event. Events current
 ## Privacy And Safety
 
 - Mailbox bodies, summaries, excerpts, and attachment text stay in the local database.
+- With reply drafts on Today turned on, the last four messages of each thread CoWork drafts a reply to (up to 2,000 characters each) are sent to your configured AI provider. Sensitive threads are never sent.
 - Attachment bytes are fetched on demand, not during ordinary sync.
 - Scripts and unsafe active content in email HTML remain blocked.
 - Remote images may load according to the product setting, but active content is not executed.

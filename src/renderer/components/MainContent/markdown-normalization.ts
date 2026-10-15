@@ -234,7 +234,29 @@ function cleanAssistantTextForDisplay(message: string): string {
   return normalizeMarkdownForDisplay(normalizeInlineLists(unwrapMarkdownCodeBlocks(sanitized)));
 }
 
+// The timeline projection cleans every assistant message again whenever events change (each
+// live event and history page); the result depends only on the text, so recent results
+// are kept. Oldest entries go first once the cache is full.
+const CLEANED_MESSAGE_CACHE_LIMIT = 512;
+const CLEANED_MESSAGE_CACHE_MAX_CHARS = 64 * 1024;
+const cleanedMessages = new Map<string, string>();
+
 export function cleanAssistantMessageForDisplay(message: string): string {
+  if (typeof message !== "string" || message.length > CLEANED_MESSAGE_CACHE_MAX_CHARS) {
+    return cleanAssistantMessageUncached(message);
+  }
+  const cached = cleanedMessages.get(message);
+  if (cached !== undefined) return cached;
+  const cleaned = cleanAssistantMessageUncached(message);
+  if (cleanedMessages.size >= CLEANED_MESSAGE_CACHE_LIMIT) {
+    const oldest = cleanedMessages.keys().next().value;
+    if (oldest !== undefined) cleanedMessages.delete(oldest);
+  }
+  cleanedMessages.set(message, cleaned);
+  return cleaned;
+}
+
+function cleanAssistantMessageUncached(message: string): string {
   if (!hasAnswerSurfaceBlock(message)) return cleanAssistantTextForDisplay(message);
   // Answer surface blocks are JSON: the list and link rewriting below would corrupt them.
   return splitAnswerSurfaceBlocks(message)

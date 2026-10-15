@@ -1,3 +1,4 @@
+import { mapBounded, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import { v4 as uuidv4 } from "uuid";
 import { MemoryService } from "../memory/MemoryService";
 import { PlaybookService } from "../memory/PlaybookService";
@@ -303,7 +304,9 @@ export class ProactiveSuggestionsService {
       const searchWorkspaceIds =
         Array.isArray(workspaceIds) && workspaceIds.length > 0 ? workspaceIds : [workspaceId];
       const results = (
-        await Promise.all(searchWorkspaceIds.map((id) => this.readStoredSuggestions(id)))
+        await mapBounded(searchWorkspaceIds, WORKSPACE_READ_CONCURRENCY, (id) =>
+          this.readStoredSuggestions(id),
+        )
       ).flat();
       const now = Date.now();
       const suggestions: ProactiveSuggestion[] = [];
@@ -401,6 +404,48 @@ export class ProactiveSuggestionsService {
     this.captureSuggestionFeedbackMemory(workspaceId, suggestion, "edited", editedPrompt);
     this.saveDismissed();
     return true;
+  }
+
+  /**
+   * A suggestion by id while it is still shown (not expired, snoozed, dismissed or acted on,
+   * and not private), for a card action to read its stored text.
+   */
+  static async getActive(
+    workspaceId: string,
+    suggestionId: string,
+    now = Date.now(),
+  ): Promise<ProactiveSuggestion | null> {
+    this.loadDismissed();
+    const suggestion = await this.findSuggestionById(workspaceId, suggestionId);
+    if (!suggestion) return null;
+    if (suggestion.expiresAt < now || (suggestion.snoozedUntil || 0) > now) return null;
+    if (suggestion.dismissed || suggestion.actedOn) return null;
+    if (this.dismissedIds.has(suggestion.id) || this.actedOnIds.has(suggestion.id)) return null;
+    return suggestion;
+  }
+
+  /**
+   * Keeps a follow-up suggestion as one of the user's commitments, due a day from now, and
+   * records the suggestion as acted on. Only follow-ups qualify: they are about something
+   * the user means to do.
+   */
+  static async addAsCommitment(
+    workspaceId: string,
+    suggestionId: string,
+    now = Date.now(),
+  ): Promise<{ ok: true } | { ok: false; reason: "not_found" | "not_eligible" | "unavailable" }> {
+    const suggestion = await this.findSuggestionById(workspaceId, suggestionId);
+    if (!suggestion) return { ok: false, reason: "not_found" };
+    if (suggestion.type !== "follow_up") return { ok: false, reason: "not_eligible" };
+    const { RelationshipMemoryService } = await import("../memory/RelationshipMemoryService");
+    const saved = await RelationshipMemoryService.rememberUserCommitment({
+      text: (suggestion.title || "").slice(0, 300),
+      dueAt: now + 24 * 60 * 60 * 1000,
+      suggestionId,
+    });
+    if (!saved) return { ok: false, reason: "unavailable" };
+    await this.actOn(workspaceId, suggestionId);
+    return { ok: true };
   }
 
   /**
@@ -872,7 +917,9 @@ export class ProactiveSuggestionsService {
     try {
       const store = await getProactiveSuggestionStore();
       return store ? await action(store) : null;
-    } catch {
+    } catch (error) {
+      // Still a no-op for callers, but an overloaded or failing store must be visible.
+      console.warn("[ProactiveSuggestions] Suggestion store request failed:", error);
       return null;
     }
   }

@@ -3,7 +3,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type {
   AgentRoleData,
   HeartbeatStatus,
-  AgentCapability,
   ActivityData,
   MentionData,
   TaskLabelData,
@@ -139,7 +138,7 @@ type RuntimeQueueStatusState = "loading" | "ready" | "unavailable" | "error";
 
 export type MissionControlCategoryFilter = "all" | MissionControlCategory;
 export type MissionControlSeverityFilter = "all" | MissionControlSeverity;
-export type MCTab = "overview" | "agents" | "board" | "intelligence" | "feed" | "ops";
+export type MCTab = "overview" | "board" | "intelligence" | "feed" | "ops";
 export type OpsSubTab =
   | "overview"
   | "operators"
@@ -150,7 +149,6 @@ export type OpsSubTab =
   | "automation";
 export type DetailPanelView =
   | { kind: "task"; taskId: string }
-  | { kind: "agent"; agentId: string }
   | { kind: "issue"; issueId: string }
   | null;
 
@@ -270,6 +268,79 @@ export function isTaskStaleForUi(
   return now - lastTouchedAt >= STALE_TASK_AGE_MS;
 }
 
+/**
+ * Completed or cancelled: work with nothing left to do. Failed and interrupted runs are terminal
+ * too, but their work still isn't done, so the board keeps flagging them.
+ */
+export function isFinishedTaskStatus(status: Task["status"]): boolean {
+  return status === "completed" || status === "cancelled";
+}
+
+/**
+ * A task's due date as the board shows it. Finished work has no deadline left to meet, so it
+ * shows the plain date and never counts as overdue or due soon.
+ */
+export function resolveTaskDueInfo(
+  task: Pick<Task, "status" | "dueDate">,
+  now = Date.now(),
+): TaskDueInfo | null {
+  if (!task.dueDate) return null;
+  if (isFinishedTaskStatus(task.status)) {
+    return {
+      label: new Date(task.dueDate).toLocaleDateString(),
+      tone: "muted",
+      isOverdue: false,
+      isDueSoon: false,
+    };
+  }
+  return getTaskDueInfo(task.dueDate, now);
+}
+
+/**
+ * Why a task needs attention on the board, or null when it doesn't. `waitingReason` is what
+ * the attention queue says waits on the task (a pending approval or question), and it wins.
+ */
+export function resolveTaskAttentionReason(
+  task: Pick<
+    Task,
+    | "status"
+    | "terminalStatus"
+    | "awaitingUserInputReasonCode"
+    | "failureClass"
+    | "assignedAgentRoleId"
+    | "dueDate"
+    | "boardColumn"
+    | "updatedAt"
+    | "createdAt"
+  >,
+  waitingReason?: string | null,
+  now = Date.now(),
+): string | null {
+  // A pending approval or question can wait on a task whose status still says running.
+  if (waitingReason) return waitingReason;
+  // Finished work waits on no one, as in classifyTaskActivity: a run finalized as completed
+  // after a denied or timed-out approval keeps its "needs user action" outcome with nothing
+  // pending, and a missing owner, past due date or age means nothing once it is done. Failed
+  // and interrupted runs are terminal too, but still say so below.
+  if (isFinishedTaskStatus(task.status)) return null;
+  if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
+  if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
+  if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
+    return "Waiting on you";
+  if (task.status === "blocked") return "Blocked";
+  if (task.status === "paused") return "Paused";
+  if (task.status === "failed") return "Run failed";
+  if (task.status === "interrupted") return "Interrupted";
+  if (task.failureClass === "dependency_unavailable") return "Dependency unavailable";
+  if (task.failureClass === "provider_quota") return "Provider quota issue";
+  if (task.failureClass === "user_blocker") return "Needs decision";
+  if (!task.assignedAgentRoleId) return "Needs owner";
+  if (resolveTaskDueInfo(task, now)?.isOverdue) return "Overdue";
+  if (resolveMissionColumnForTask(task) === "review") return "Needs review";
+  if (isTaskStaleForUi(task, now)) return "Stale";
+  return null;
+}
+
 export function useMissionControlData(
   initialCompanyId: string | null = null,
   initialIssueId: string | null = null,
@@ -338,9 +409,6 @@ export function useMissionControlData(
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // ── Agent editor ──
-  const [editingAgent, setEditingAgent] = useState<AgentRole | null>(null);
-  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
-  const [agentError, setAgentError] = useState<string | null>(null);
 
   // ── Comment ──
   const [commentText, setCommentText] = useState("");
@@ -1091,87 +1159,6 @@ export function useMissionControlData(
     };
   }, []);
 
-  // ── Agent actions ──
-  const handleCreateAgent = useCallback(() => {
-    setEditingAgent({
-      id: "",
-      name: "",
-      displayName: "",
-      description: "",
-      icon: "🤖",
-      color: "#6366f1",
-      capabilities: ["code"] as AgentCapability[],
-      isSystem: false,
-      isActive: true,
-      sortOrder: 100,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    setIsCreatingAgent(true);
-  }, []);
-
-  const handleEditAgent = useCallback((agent: AgentRole) => {
-    setEditingAgent({ ...agent });
-    setIsCreatingAgent(false);
-  }, []);
-
-  const handleSaveAgent = useCallback(
-    async (agent: AgentRole) => {
-      try {
-        setAgentError(null);
-        if (isCreatingAgent) {
-          const created = await window.electronAPI.createAgentRole({
-            name: agent.name,
-            displayName: agent.displayName,
-            description: agent.description,
-            icon: agent.icon,
-            color: agent.color,
-            personalityId: agent.personalityId,
-            modelKey: agent.modelKey,
-            providerType: agent.providerType,
-            systemPrompt: agent.systemPrompt,
-            capabilities: agent.capabilities,
-            toolRestrictions: agent.toolRestrictions,
-            autonomyLevel: agent.autonomyLevel,
-            soul: agent.soul,
-          });
-          setAgents((prev) => [...prev, normalizeMissionControlAgent(created)]);
-        } else {
-          const updated = await window.electronAPI.updateAgentRole({
-            id: agent.id,
-            displayName: agent.displayName,
-            description: agent.description,
-            icon: agent.icon,
-            color: agent.color,
-            personalityId: agent.personalityId,
-            modelKey: agent.modelKey,
-            providerType: agent.providerType,
-            systemPrompt: agent.systemPrompt,
-            capabilities: agent.capabilities,
-            toolRestrictions: agent.toolRestrictions,
-            isActive: agent.isActive,
-            sortOrder: agent.sortOrder,
-            autonomyLevel: agent.autonomyLevel,
-            soul: agent.soul,
-          });
-          if (updated) {
-            const normalized = normalizeMissionControlAgent(updated);
-            setAgents((prev) => prev.map((a) => (a.id === normalized.id ? normalized : a)));
-          }
-        }
-        setEditingAgent(null);
-        setIsCreatingAgent(false);
-        const statuses = hasHostMethod("getAllHeartbeatStatus")
-          ? await window.electronAPI.getAllHeartbeatStatus()
-          : [];
-        setHeartbeatStatuses(statuses);
-      } catch (err: Any) {
-        setAgentError(err.message || "Failed to save agent");
-      }
-    },
-    [isCreatingAgent],
-  );
-
   // ── Task actions ──
   const getMissionColumnForTask = useCallback((task: Task) => {
     return resolveMissionColumnForTask(task);
@@ -1325,29 +1312,8 @@ export function useMissionControlData(
   );
 
   const getTaskAttentionReason = useCallback(
-    (task: Task) => {
-      // A pending approval or question can wait on a task whose status still says running.
-      const waiting = attentionWaiting?.get(task.id);
-      if (waiting) return waiting;
-      if (task.terminalStatus === "awaiting_approval") return "Awaiting approval";
-      if (task.terminalStatus === "awaiting_verification") return "Verifying before completion";
-      if (task.terminalStatus === "needs_user_action" || task.awaitingUserInputReasonCode)
-        return "Waiting on you";
-      if (task.status === "blocked") return "Blocked";
-      if (task.status === "paused") return "Paused";
-      if (task.status === "failed") return "Run failed";
-      if (task.status === "interrupted") return "Interrupted";
-      if (task.failureClass === "dependency_unavailable") return "Dependency unavailable";
-      if (task.failureClass === "provider_quota") return "Provider quota issue";
-      if (task.failureClass === "user_blocker") return "Needs decision";
-      if (!task.assignedAgentRoleId) return "Needs owner";
-      const due = getTaskDueInfo(task.dueDate);
-      if (due?.isOverdue) return "Overdue";
-      if (getMissionColumnForTask(task) === "review") return "Needs review";
-      if (isTaskStale(task)) return "Stale";
-      return null;
-    },
-    [attentionWaiting, getMissionColumnForTask, isTaskStale],
+    (task: Task) => resolveTaskAttentionReason(task, attentionWaiting?.get(task.id)),
+    [attentionWaiting],
   );
 
   const isTaskAttentionRequired = useCallback(
@@ -1751,10 +1717,6 @@ export function useMissionControlData(
     currentTime,
 
     // Agent editor
-    editingAgent,
-    setEditingAgent,
-    isCreatingAgent,
-    agentError,
 
     // Comment
     commentText,
@@ -1825,15 +1787,12 @@ export function useMissionControlData(
     handlePlannerConfigChange,
     handleRunPlanner,
     handlePostComment,
-    handleCreateAgent,
-    handleEditAgent,
-    handleSaveAgent,
     loadMissionControlIntelligence,
     loadMissionControlEvidence,
     toggleMissionControlEvidence,
     formatRelativeTime,
     formatTaskEstimate,
-    getTaskDueInfo,
+    getTaskDueInfo: resolveTaskDueInfo,
     getTaskPriorityMeta,
     agentContext,
   };

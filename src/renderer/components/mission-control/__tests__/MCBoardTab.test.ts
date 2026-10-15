@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentRoleData } from "../../../../electron/preload";
 import type { Task } from "../../../../shared/types";
 import { MCBoardTab } from "../MCBoardTab";
-import type { MissionControlData } from "../useMissionControlData";
+import { resolveMissionColumnForTask, type MissionControlData } from "../useMissionControlData";
 
 function renderBoard(data: MissionControlData): string {
   return renderToStaticMarkup(React.createElement(MCBoardTab, { data }));
@@ -86,6 +86,18 @@ function makeData(taskOverrides: Partial<Task> = {}): MissionControlData {
   } as unknown as MissionControlData;
 }
 
+function makeDataWithTasks(tasks: Task[]): MissionControlData {
+  return {
+    ...makeData(),
+    tasks,
+    getMissionColumnForTask: (task: Task) => resolveMissionColumnForTask(task),
+  } as MissionControlData;
+}
+
+function kanbanMarkup(markup: string): string {
+  return markup.slice(markup.indexOf('<div class="mc-v2-kanban">'));
+}
+
 describe("MCBoardTab", () => {
   it("renders task action icons and draws the assignee as its character", () => {
     const markup = renderBoard(makeData());
@@ -104,5 +116,59 @@ describe("MCBoardTab", () => {
     expect(markup).toContain("lucide-flag");
     expect(markup).toContain("lucide-arrow-right");
     expect(markup).not.toContain("lucide-zap");
+  });
+
+  it("offers no New task or Link existing actions in any lane", () => {
+    const markup = renderBoard(
+      makeDataWithTasks([
+        makeTask({ id: "t-inbox", boardColumn: "backlog", assignedAgentRoleId: undefined }),
+        makeTask({ id: "t-ready", boardColumn: "todo" }),
+        makeTask({ id: "t-working", boardColumn: "in_progress", status: "executing" }),
+        makeTask({ id: "t-review", boardColumn: "review" }),
+      ]),
+    );
+
+    expect(markup).not.toContain("New task");
+    expect(markup).not.toContain("Link existing");
+    expect(markup).not.toContain("mc-v2-column-footer");
+    expect(markup).not.toContain("lucide-plus");
+    expect(markup).not.toContain("lucide-arrow-up-right");
+    expect(markup).not.toContain("__new__");
+    expect(markup).not.toContain("__link__");
+  });
+
+  it("keeps every button inside the lanes on a task card", () => {
+    const markup = kanbanMarkup(
+      renderBoard(
+        makeDataWithTasks([
+          makeTask({ id: "t-inbox", boardColumn: "backlog", assignedAgentRoleId: undefined }),
+          makeTask({ id: "t-ready", boardColumn: "todo" }),
+        ]),
+      ),
+    );
+    const buttonClasses = [...markup.matchAll(/<button[^>]*class="([^"]*)"/g)].map(
+      (match) => match[1],
+    );
+
+    // Unassigned card: details, priority, next stage. Assigned card adds Wake owner.
+    expect(buttonClasses).toHaveLength(7);
+    expect(new Set(buttonClasses)).toEqual(new Set(["mc-v2-task-action-btn"]));
+  });
+
+  it("ends an empty lane with its empty copy", () => {
+    const markup = renderBoard(
+      makeDataWithTasks([
+        makeTask({ id: "t-inbox", boardColumn: "backlog", assignedAgentRoleId: undefined }),
+      ]),
+    );
+
+    for (const label of ["Ready to start", "Working", "Needs review"]) {
+      expect(markup).toContain(`<span class="mc-v2-column-label">${label}</span>`);
+    }
+    // Ready to start, Working and Needs review are empty; Done is hidden in the Active view.
+    const emptyLaneEnd =
+      '<div class="mc-v2-column-tasks"><div class="mc-v2-column-empty">No tasks yet</div></div></div>';
+    expect(markup.split(emptyLaneEnd)).toHaveLength(4);
+    expect(markup).not.toContain('<span class="mc-v2-column-label">Done</span>');
   });
 });

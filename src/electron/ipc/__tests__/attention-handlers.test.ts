@@ -18,6 +18,26 @@ afterEach(() => {
 });
 
 describe("attention IPC", () => {
+  it("shares one in-flight snapshot between overlapping requests", async () => {
+    let release!: () => void;
+    const service = {
+      snapshot: vi.fn(
+        () => new Promise<typeof snapshot>((resolve) => (release = () => resolve(snapshot))),
+      ),
+    };
+    const list = createAttentionIpcHandlers({ service })[IPC_CHANNELS.ATTENTION_LIST];
+    const first = list(undefined);
+    const second = list(undefined);
+    release();
+    await expect(Promise.all([first, second])).resolves.toEqual([snapshot, snapshot]);
+    expect(service.snapshot).toHaveBeenCalledOnce();
+    // A later request after it settles reads a fresh snapshot.
+    const third = list(undefined);
+    release();
+    await third;
+    expect(service.snapshot).toHaveBeenCalledTimes(2);
+  });
+
   it("returns the snapshot and rejects arguments", async () => {
     const service = { snapshot: vi.fn(async () => snapshot) };
     const handlers = createAttentionIpcHandlers({ service });

@@ -1,4 +1,9 @@
-import { classifyTaskActivity, type AttentionItem } from "../../shared/attention";
+import {
+  classifyTaskActivity,
+  indexDevicesByNode,
+  isLocalTaskNode,
+  type AttentionItem,
+} from "../../shared/attention";
 import { getAccessProfileLabel } from "../../shared/access-profiles";
 import { deriveCanonicalTaskStatus } from "../../shared/task-status";
 import type { AgentAutonomyLevel, Task } from "../../shared/types";
@@ -26,6 +31,8 @@ export interface TeamRole {
   roleKind?: string;
   sourceTemplateId?: string;
   autonomyLevel?: AgentAutonomyLevel;
+  /** "May do alone": the most access this agent's work gets. */
+  accessProfileId?: string;
   heartbeatEnabled?: boolean;
   pulseEveryMinutes?: number;
   heartbeatIntervalMinutes?: number;
@@ -78,6 +85,9 @@ export interface TeamDeviceInput {
   name: string;
   role: "local" | "remote";
   status: string;
+  /** The node id tasks routed to the device carry. */
+  taskNodeId?: string | null;
+  clientId?: string;
 }
 
 export type TeamMemberKind = "bot" | "agent" | "schedule" | "automation";
@@ -116,6 +126,8 @@ export interface TeamMember {
   open: TeamOpenTarget;
   /** Scheduled tasks can be paused and resumed from here. */
   schedule?: { cronJobId: string; enabled: boolean };
+  /** Agents and bots: their "May do alone" limit, set from here; none means no limit. */
+  access?: { roleId: string; profileId?: string };
   lastActiveAt: number;
 }
 
@@ -299,7 +311,9 @@ export function buildTeamModel(input: {
 
     const facts: TeamMember["facts"] = [];
     if (role.autonomyLevel) {
-      facts.push({ label: "Autonomy level", value: AUTONOMY_LABEL[role.autonomyLevel] });
+      // The level sets check-in pacing and who leads shared work; it grants no access. What an
+      // agent may do alone is its access limit, set in the panel.
+      facts.push({ label: "Seniority", value: AUTONOMY_LABEL[role.autonomyLevel] });
     }
     if (role.heartbeatEnabled) {
       const minutes = role.pulseEveryMinutes || role.heartbeatIntervalMinutes || 15;
@@ -325,6 +339,10 @@ export function buildTeamModel(input: {
         at: task.updatedAt || task.createdAt,
       })),
       open: { type: "bots" },
+      access: {
+        roleId: role.id,
+        ...(role.accessProfileId ? { profileId: role.accessProfileId } : {}),
+      },
       lastActiveAt,
     });
   }
@@ -420,12 +438,18 @@ export function buildTeamModel(input: {
       a.name.localeCompare(b.name),
   );
 
-  // Devices: this machine, then every remote device the app manages.
+  // Devices: this machine, then every remote device the app manages. Tasks name their device
+  // by node id, which differs from the device id.
+  const devicesByNode = indexDevicesByNode(
+    input.devices.filter((device) => device.role === "remote"),
+  );
+  const deviceOf = (task: Task) =>
+    isLocalTaskNode(task.targetNodeId)
+      ? undefined
+      : (devicesByNode.get(task.targetNodeId as string)?.id ?? task.targetNodeId);
   const running = (deviceId?: string) =>
     roots.filter(
-      (task) =>
-        (task.targetNodeId || undefined) === deviceId &&
-        classifyTaskActivity(task)?.category === "running",
+      (task) => deviceOf(task) === deviceId && classifyTaskActivity(task)?.category === "running",
     ).length;
   const waiting = (deviceId?: string) =>
     input.attention.filter((item) =>

@@ -138,6 +138,10 @@ export type SettingsCategory =
   | "conway-wallet"
   | "infra-wallet"
   | "proactive-suggestions-state"
+  // Calendar cards on Today the user dismissed or accepted, so they don't come back.
+  | "calendar-proposals"
+  // Reply drafts on Today: whether it's on, and which drafts it prepared.
+  | "mail-reply-drafts"
   | "improvement-loop"
   | "improvement-owner"
   | "improvement-history"

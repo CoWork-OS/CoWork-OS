@@ -1,3 +1,4 @@
+import { mapBounded, WORKSPACE_READ_CONCURRENCY } from "../utils/bounded-concurrency";
 import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
@@ -56,6 +57,8 @@ import {
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
 import { estimateTaskCost } from "../agent/llm/usage-telemetry";
+import { setupMcpOAuthHandlers } from "./mcp-oauth-handlers";
+import { setupWorkdayAgentHandlers } from "./workday-agent-handlers";
 import {
   ipcMain,
   shell,
@@ -377,6 +380,7 @@ import { buildTaskExportJson } from "../reports/task-export";
 import { listIntegrationMentionOptions } from "../integrations/integration-mention-options";
 import { ProfileManager } from "../profiles/ProfileManager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
+import { resolveAccessProfileDefinitionWithStatus } from "../../shared/access-profiles";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import {
   appendWorkspacePermissionManifestRule,
@@ -427,6 +431,7 @@ import {
   UUIDSchema,
   WorkspaceIdSchema,
   StringIdSchema,
+  AgentRoleAccessProfileIdSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -565,8 +570,21 @@ import {
 } from "../memory/memory-review-wiring";
 import { setupMemoryReviewHandlers } from "./memory-review-handlers";
 import { setupAttentionHandlers } from "./attention-handlers";
+import { createAgentRoleAssignmentHandler } from "./agent-role-assignment-handlers";
+import { setupCalendarHandlers } from "./calendar-handlers";
+import { setupMailReplyDraftHandlers } from "./mail-reply-draft-handlers";
+import {
+  MailReplyDraftsService,
+  type MailReplyDraftsState,
+} from "../mailbox/MailReplyDraftsService";
+import { mailboxLlmReplyDraft } from "../mailbox/mailbox-inbox-product-llm";
+import { CalendarService } from "../calendar/CalendarService";
+import { CalendarProposalsService } from "../calendar/CalendarProposalsService";
+import { googleCalendarRequest } from "../utils/google-calendar-api";
+import { googleWorkspaceScopeReady } from "../agent/tools/integration-effect-guard";
 import { AttentionService } from "../attention/AttentionService";
 import {
+  listMemoryChangesAcross,
   listSuggestionsAcross,
   listWaitingFlowSteps,
   toAttentionCommitment,
@@ -1147,6 +1165,7 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_DISMISS, RATE_LIMIT_CONFIGS.limit
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_SNOOZE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_EDIT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -4004,6 +4023,14 @@ export async function setupIpcHandlers(
     const draftId = typeof data?.draftId === "string" ? data.draftId : "";
     if (!draftId) throw new Error("Missing mailbox draft id");
     return mailboxService.discardMailboxDraft(draftId);
+  });
+
+  // Undo send: returns a queued draft to editing; false once the outbox has picked it up.
+  ipcMain.handle(IPC_CHANNELS.MAILBOX_CANCEL_SEND, async (event, data?: Any) => {
+    assertTrustedMailboxSender(event);
+    const draftId = typeof data?.draftId === "string" ? data.draftId : "";
+    if (!draftId) throw new Error("Missing mailbox draft id");
+    return mailboxService.cancelMailboxDraftSend(draftId);
   });
 
   ipcMain.handle(IPC_CHANNELS.MAILBOX_UNDO_ACTION, async (event, data?: Any) => {
@@ -9643,10 +9670,29 @@ export async function setupIpcHandlers(
         "company ID",
       );
     }
+    // "May do alone": a limit must name an access profile that exists right now; null clears
+    // it. The limit only narrows the agent's work (see the access profile resolver).
+    const accessLimitChanged = normalizedRequest.accessProfileId !== undefined;
+    if (accessLimitChanged && normalizedRequest.accessProfileId !== null) {
+      const profileId = validateInput(
+        AgentRoleAccessProfileIdSchema,
+        normalizedRequest.accessProfileId,
+        "access profile ID",
+      );
+      const resolution = resolveAccessProfileDefinitionWithStatus(
+        profileId,
+        PermissionSettingsManager.loadSettings().accessProfiles || [],
+      );
+      if (resolution.status !== "resolved") {
+        throw new Error("That access profile does not exist.");
+      }
+      normalizedRequest.accessProfileId = profileId;
+    }
     const result = await agentRoleRepo.update(normalizedRequest);
     if (!result) {
       throw new Error("Agent role not found");
     }
+    if (accessLimitChanged) agentDaemon.refreshAgentRoleAccessCeiling(result.id);
     return result;
   });
 
@@ -9660,55 +9706,19 @@ export async function setupIpcHandlers(
     return true;
   });
 
+  const assignAgentRoleToTask = createAgentRoleAssignmentHandler({
+    authorizeTask: authorizeTaskForEvent,
+    sessionMembershipService,
+    taskRepo,
+    agentRoleRepo,
+    activityRepo,
+    getMainWindow,
+  });
   ipcMain.handle(
     IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK,
-    async (_, taskId: string, agentRoleId: string | null) => {
+    async (event, taskId: unknown, agentRoleId: unknown) => {
       checkRateLimit(IPC_CHANNELS.AGENT_ROLE_ASSIGN_TO_TASK);
-      const validatedTaskId = validateInput(UUIDSchema, taskId, "task ID");
-      if (agentRoleId !== null) {
-        const validatedRoleId = validateInput(UUIDSchema, agentRoleId, "agent role ID");
-        const role = await agentRoleRepo.findById(validatedRoleId);
-        if (!role) {
-          throw new Error("Agent role not found");
-        }
-      }
-      const taskUpdate: Partial<Task> = {
-        assignedAgentRoleId: agentRoleId ?? undefined,
-      };
-      await taskRepo.update(validatedTaskId, taskUpdate);
-      const task = await taskRepo.findById(validatedTaskId);
-      if (task) {
-        if (agentRoleId) {
-          const role = await agentRoleRepo.findById(agentRoleId);
-          const activity = await activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            agentRoleId,
-            actorType: "system",
-            activityType: "agent_assigned",
-            title: `Assigned to ${role?.displayName || "agent"}`,
-            description: task.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
-            type: "created",
-            activity,
-          });
-        } else {
-          const activity = await activityRepo.create({
-            workspaceId: task.workspaceId,
-            taskId: task.id,
-            actorType: "system",
-            activityType: "info",
-            title: "Task unassigned",
-            description: task.title,
-          });
-          getMainWindow()?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, {
-            type: "created",
-            activity,
-          });
-        }
-      }
-      return { success: true };
+      return assignAgentRoleToTask(event, taskId, agentRoleId);
     },
   );
 
@@ -10520,8 +10530,10 @@ export async function setupIpcHandlers(
     return service.generateBriefing(normalizedWorkspaceId, undefined, {
       deps: {
         getRecentTasks: async (_workspaceId, sinceMs) => {
-          const perWorkspace = await Promise.all(
-            briefingWorkspaceIds.map(async (id) =>
+          const perWorkspace = await mapBounded(
+            briefingWorkspaceIds,
+            WORKSPACE_READ_CONCURRENCY,
+            async (id) =>
               (
                 (await taskRepo.findByCreatedAtRange({
                   startMs: sinceMs,
@@ -10533,7 +10545,6 @@ export async function setupIpcHandlers(
                 ...task,
                 workspaceName: labelForWorkspace(id),
               })),
-            ),
           );
           const tasks = perWorkspace.flat();
           return tasks.sort((a: Any, b: Any) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -10801,6 +10812,21 @@ export async function setupIpcHandlers(
         validatedSuggestionId,
       );
       return { actionPrompt };
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT,
+    async (_, workspaceId: string, suggestionId: string) => {
+      checkRateLimit(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT);
+      const validatedWorkspaceId = validateInput(WorkspaceIdSchema, workspaceId, "workspace ID");
+      const validatedSuggestionId = validateInput(UUIDSchema, suggestionId, "suggestion ID");
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      // The text comes from the stored suggestion, never from the renderer.
+      return ProactiveSuggestionsService.addAsCommitment(
+        validatedWorkspaceId,
+        validatedSuggestionId,
+      );
     },
   );
 
@@ -11198,9 +11224,72 @@ export async function setupIpcHandlers(
     },
   });
 
+  // Shared by Memory Hub "Review" and the needs-you queue, which lists recent expiries.
+  const memoryReviewService = createMemoryReviewService(db);
+
+  // Today's calendar cards read the connected Google Calendar (cached briefly) and change it
+  // only on the user's click, after re-reading it.
+  const calendarService = new CalendarService({
+    isConnected: () =>
+      googleWorkspaceScopeReady(
+        GoogleWorkspaceSettingsManager.loadSettings(),
+        "workspace",
+        "workspace",
+      ),
+    request: (request) =>
+      googleCalendarRequest(GoogleWorkspaceSettingsManager.loadSettings(), request),
+    accountKey: () => {
+      const settings = GoogleWorkspaceSettingsManager.loadSettings();
+      return settings.activeAccountEmail || settings.loginHint || "";
+    },
+  });
+  // Reply drafts on Today (opt-in): a few drafted replies a day, sent only on the user's click.
+  let notifyAttentionChanged = () => {};
+  const mailReplyDrafts = new MailReplyDraftsService({
+    mailbox: mailboxService,
+    writeReply: mailboxLlmReplyDraft,
+    loadState: () =>
+      SecureSettingsRepository.isInitialized()
+        ? SecureSettingsRepository.getInstance().load<MailReplyDraftsState>("mail-reply-drafts")
+        : undefined,
+    updateState: (mutate) => {
+      if (!SecureSettingsRepository.isInitialized()) return false;
+      SecureSettingsRepository.getInstance().update<MailReplyDraftsState>(
+        "mail-reply-drafts",
+        (current) => mutate(current ?? { enabled: false, prepared: [], hiddenThreads: {} }),
+      );
+      return true;
+    },
+    onPrepared: () => notifyAttentionChanged(),
+  });
+  if (!shouldDisableBackgroundAutostart()) {
+    // Off until the user turns it on; each run stops at the day's allowance.
+    const draftMailReplies = () => void mailReplyDrafts.draftReplies().catch(() => 0);
+    setTimeout(draftMailReplies, 2 * 60 * 1000).unref?.();
+    setInterval(draftMailReplies, 20 * 60 * 1000).unref?.();
+  }
+
+  const calendarProposals = new CalendarProposalsService({
+    calendar: calendarService,
+    listCommitments: () =>
+      RelationshipMemoryService.listDueSoonCommitments(72).flatMap((item) =>
+        typeof item.dueAt === "number" ? [{ id: item.id, text: item.text, dueAt: item.dueAt }] : [],
+      ),
+    loadState: () =>
+      SecureSettingsRepository.isInitialized()
+        ? SecureSettingsRepository.getInstance().load<{ hidden: Record<string, number> }>(
+            "calendar-proposals",
+          )
+        : undefined,
+    saveState: (state) =>
+      SecureSettingsRepository.isInitialized() &&
+      SecureSettingsRepository.getInstance().save("calendar-proposals", state),
+  });
+
   // Shared "needs you" queue: one snapshot of everything waiting on the user (approvals,
-  // agent questions, paused sessions, flow steps, due commitments and suggestions).
-  setupAttentionHandlers({
+  // agent questions, paused sessions, flow steps, due commitments and suggestions), plus
+  // commitments memory recently closed, which can still be undone.
+  const attentionSignal = setupAttentionHandlers({
     service: new AttentionService({
       listPendingApprovals: () => approvalRepo.findAllPending(),
       listPendingInputRequests: () => inputRequestRepo.findAllPending(),
@@ -11214,6 +11303,11 @@ export async function setupIpcHandlers(
         new Map(
           (await agentRoleRepo.findAll()).map((role) => [role.id, role.displayName || role.name]),
         ),
+      // Reads the saved device list only; no device is contacted.
+      listDevices: async () => {
+        const { listStoredManagedDevices } = await import("../control-plane/handlers");
+        return listStoredManagedDevices();
+      },
       listWaitingFlowSteps: () => listWaitingFlowSteps(options?.getRoutineService?.() ?? null),
       listDueCommitments: async () =>
         RelationshipMemoryService.listDueSoonCommitments(24).map(toAttentionCommitment),
@@ -11224,16 +11318,48 @@ export async function setupIpcHandlers(
           ProactiveSuggestionsService.listActive(id, opts, ids),
         );
       },
+      listCalendarProposals: () => calendarProposals.list(),
+      findCalendarHold: () => calendarProposals.suggestedHold(),
+      listMailReplyDrafts: () => mailReplyDrafts.list(),
+      shouldOfferMailReplyDrafts: () => mailReplyDrafts.shouldOffer(),
+      listMemoryChanges: async () =>
+        listMemoryChangesAcross(await workspaceRepo.findAll(), (id, since) =>
+          memoryReviewService.recentSince(id, since),
+        ),
       localLabel: process.platform === "darwin" ? "This Mac" : "This computer",
       log: (message, error) => logger.warn(message, error),
     }),
     events: agentDaemon,
     getMainWindow,
+    assertTrustedSender: assertTrustedMailboxSender,
+  });
+
+  // Today's calendar cards: accept or dismiss a proposal, hold time for a suggestion.
+  setupCalendarHandlers({
+    proposals: calendarProposals,
+    getSuggestionTitle: async (workspaceId, suggestionId) => {
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      const suggestion = await ProactiveSuggestionsService.getActive(workspaceId, suggestionId);
+      return suggestion?.title?.trim() || null;
+    },
+    markSuggestionActedOn: async (workspaceId, suggestionId) => {
+      const { ProactiveSuggestionsService } = await import("../agent/ProactiveSuggestionsService");
+      await ProactiveSuggestionsService.actOn(workspaceId, suggestionId);
+    },
+    onChanged: attentionSignal.notifyChanged,
+  });
+  notifyAttentionChanged = attentionSignal.notifyChanged;
+
+  // Reply drafts on Today: send, undo a send, discard, turn drafting on or off.
+  setupMailReplyDraftHandlers({
+    drafts: mailReplyDrafts,
+    onChanged: attentionSignal.notifyChanged,
+    assertTrustedSender: assertTrustedMailboxSender,
   });
 
   // Memory Hub "Review": automatic commitment expiries with undo.
   setupMemoryReviewHandlers({
-    service: createMemoryReviewService(db),
+    service: memoryReviewService,
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
   });
 
@@ -11549,6 +11675,10 @@ function setupMCPHandlers(): void {
     );
     for (const server of validated.servers || []) {
       assertMcpServerEnableAllowed(previousServers.get(server.id), server);
+      // The Workday admin connection is edited only through its own handlers; the
+      // renderer sees its secret masked, so a whole-settings save keeps the stored one.
+      const workdayAdmin = previousServers.get(server.id)?.workdayAdmin;
+      if (workdayAdmin) server.workdayAdmin = workdayAdmin;
     }
     MCPSettingsManager.saveSettings(validated);
     MCPSettingsManager.clearCache();
@@ -11703,6 +11833,11 @@ function setupMCPHandlers(): void {
     assertMcpServerNotBlocked({ id: "", name: validated.provider, registryId: validated.provider });
     return startConnectorOAuth(validated);
   });
+
+  // Remote MCP servers that sign in with OAuth 2.1 (e.g. Workday Agent-Ready Tools)
+  setupMcpOAuthHandlers({ openExternal: (url) => shell.openExternal(url) });
+  // In-app Workday agent setup through the tenant's Agent System of Record API
+  setupWorkdayAgentHandlers({ openExternal: (url) => shell.openExternal(url) });
 
   // MCP Host handlers
   ipcMain.handle(IPC_CHANNELS.MCP_HOST_START, async (_, requestedPort?: number) => {

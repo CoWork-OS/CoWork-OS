@@ -19,6 +19,12 @@ import {
 import { MCPSettingsManager } from "../../settings";
 import { BoxSettingsManager } from "../../../settings/box-manager";
 import { BOX_TOKEN_URL, getBoxAccessToken } from "../../../utils/box-api";
+import {
+  canRenewWithoutUser,
+  McpAuthorizationRequiredError,
+  oauthSettings,
+  renewOAuthToken,
+} from "../../oauth/mcp-oauth";
 
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 const SESSION_HEADER = "Mcp-Session-Id";
@@ -95,7 +101,34 @@ function formatHttpError(status: number, statusText: string, body: string): Erro
     .trim()
     .slice(0, 500);
   const suffix = detail ? `: ${detail}` : statusText ? `: ${statusText}` : "";
-  return new Error(`MCP Streamable HTTP error ${status}${suffix}`);
+  return Object.assign(new Error(`MCP Streamable HTTP error ${status}${suffix}`), { status });
+}
+
+const MAX_RATE_LIMIT_RETRIES = 2;
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/** Retry-After as seconds or an HTTP date; falls back to exponential backoff. */
+function retryDelayMs(header: string | null, attempt: number): number {
+  const seconds = header && /^\d+$/.test(header.trim()) ? Number(header) : NaN;
+  const dateMs = header && Number.isNaN(seconds) ? Date.parse(header) - Date.now() : NaN;
+  const fromHeader = Number.isFinite(seconds) ? seconds * 1000 : dateMs;
+  const delay = Number.isFinite(fromHeader) && fromHeader >= 0 ? fromHeader : 1000 * 2 ** attempt;
+  return Math.min(delay, MAX_RETRY_AFTER_MS);
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("MCP tool call cancelled"));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("MCP tool call cancelled"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export class StreamableHttpTransport extends EventEmitter implements MCPTransport {
@@ -244,6 +277,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     expectsResponse: boolean,
     allowSessionRecovery = true,
     options: MCPTransportRequestOptions = {},
+    retry: { auth?: boolean; rateLimit?: number } = {},
   ): Promise<Any | undefined> {
     if (!this.config.url) {
       throw new Error("No URL configured for Streamable HTTP transport");
@@ -306,6 +340,47 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
       this.lastInitializeRequest = initializeRequest;
       await this.postMessage(initializeRequest, true, false, options);
       return this.postMessage(message, expectsResponse, false, options);
+    }
+
+    // 401: the server rejected the credential before running anything, so one
+    // renewal and resend is safe even for tools/call.
+    if (response.status === 401) {
+      const challenge = response.headers.get("WWW-Authenticate");
+      await response.text().catch(() => undefined);
+      this.releaseResponse(response);
+      if (!retry.auth && canRenewWithoutUser(this.config.auth)) {
+        await this.ensureFreshToken(true);
+        return this.postMessage(message, expectsResponse, allowSessionRecovery, options, {
+          ...retry,
+          auth: true,
+        });
+      }
+      throw Object.assign(
+        new McpAuthorizationRequiredError(
+          `MCP server "${this.config.name}" needs authorization${
+            challenge && /error="([^"]+)"/.exec(challenge)?.[1]
+              ? ` (${/error="([^"]+)"/.exec(challenge)![1]})`
+              : ""
+          }: sign in from Settings > MCP Servers`,
+        ),
+        { status: 401 },
+      );
+    }
+
+    // 429 is a rejection before execution. 503 may follow partial work, so a
+    // tool call is not resent; other methods back off and retry.
+    const rateLimited =
+      response.status === 429 || (response.status === 503 && message.method !== "tools/call");
+    if (rateLimited && (retry.rateLimit ?? 0) < MAX_RATE_LIMIT_RETRIES) {
+      const attempt = retry.rateLimit ?? 0;
+      const delay = retryDelayMs(response.headers.get("Retry-After"), attempt);
+      await response.text().catch(() => undefined);
+      this.releaseResponse(response);
+      await sleep(delay, options.signal);
+      return this.postMessage(message, expectsResponse, allowSessionRecovery, options, {
+        ...retry,
+        rateLimit: attempt + 1,
+      });
     }
 
     try {
@@ -414,7 +489,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     }
   }
 
-  private async ensureFreshToken(): Promise<void> {
+  private async ensureFreshToken(force = false): Promise<void> {
     if (this.config.registryId === "box") {
       const boxSettings = BoxSettingsManager.loadSettings();
       if (boxSettings.accessToken || boxSettings.refreshToken) {
@@ -463,12 +538,21 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     }
 
     const auth = this.config.auth ? structuredClone(this.config.auth) : undefined;
-    if (!auth?.refreshToken || !auth.clientId || !auth.clientSecret || !auth.tokenUrl) {
+    if (!canRenewWithoutUser(auth)) {
+      // An OAuth server with no usable token cannot be called until someone signs in.
+      if (oauthSettings(auth) && !auth?.token)
+        throw new McpAuthorizationRequiredError(
+          `MCP server "${this.config.name}" needs authorization: sign in from Settings > MCP Servers`,
+        );
       return;
     }
 
     const refreshBefore = 60_000;
-    if (auth.token && (!auth.expiresAt || auth.expiresAt > Date.now() + refreshBefore)) {
+    if (
+      !force &&
+      auth!.token &&
+      (!auth!.expiresAt || auth!.expiresAt > Date.now() + refreshBefore)
+    ) {
       return;
     }
 
@@ -478,72 +562,27 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
     }
 
     this.refreshPromise = (async () => {
-      const response = await this.fetchWithTimeout(auth.tokenUrl!, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-        },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          client_id: auth.clientId!,
-          client_secret: auth.clientSecret!,
-          refresh_token: auth.refreshToken!,
-        }).toString(),
-      });
+      // The token request carries its own timeout and manual-redirect policy.
+      const nextAuth = await renewOAuthToken(auth!, (url, init) => fetch(url, init));
+      // A manual credential edit during refresh must not be overwritten by its late response.
+      let currentAuth = auth;
       try {
-        const body = await response.text();
-        if (!response.ok) {
-          throw formatHttpError(response.status, response.statusText, body);
-        }
+        currentAuth = MCPSettingsManager.getServer(this.config.id)?.auth ?? auth;
+      } catch {
+        /* Unavailable settings retain the local flow. */
+      }
+      if (
+        credentialFingerprint(currentAuth) !== credentialFingerprint(auth) ||
+        credentialFingerprint(this.config.auth) !== credentialFingerprint(auth)
+      )
+        throw new Error("MCP credentials changed during token refresh");
+      this.config.auth = nextAuth;
+      recordOAuthRefresh(auth!, nextAuth);
 
-        let tokenData: Any;
-        try {
-          tokenData = JSON.parse(body);
-        } catch {
-          throw new Error("MCP OAuth token refresh returned invalid JSON");
-        }
-
-        if (
-          typeof tokenData?.access_token !== "string" ||
-          !tokenData.access_token.trim() ||
-          (tokenData.refresh_token !== undefined &&
-            (typeof tokenData.refresh_token !== "string" || !tokenData.refresh_token.trim()))
-        ) {
-          throw new Error("MCP OAuth token refresh did not return an access_token");
-        }
-
-        const nextAuth = {
-          ...auth,
-          token: tokenData.access_token,
-          refreshToken: tokenData.refresh_token || auth.refreshToken,
-          expiresAt:
-            typeof tokenData.expires_in === "number"
-              ? Date.now() + tokenData.expires_in * 1000
-              : undefined,
-        };
-        // A manual credential edit during refresh must not be overwritten by its late response.
-        let currentAuth = auth;
-        try {
-          currentAuth = MCPSettingsManager.getServer(this.config.id)?.auth ?? auth;
-        } catch {
-          /* Unavailable settings retain the local flow. */
-        }
-        if (
-          credentialFingerprint(currentAuth) !== credentialFingerprint(auth) ||
-          credentialFingerprint(this.config.auth) !== credentialFingerprint(auth)
-        )
-          throw new Error("MCP credentials changed during token refresh");
-        this.config.auth = nextAuth;
-        recordOAuthRefresh(auth, nextAuth);
-
-        try {
-          MCPSettingsManager.updateServer(this.config.id, { auth: nextAuth });
-        } catch {
-          // The in-memory token remains usable if settings persistence is unavailable.
-        }
-      } finally {
-        this.releaseResponse(response);
+      try {
+        MCPSettingsManager.updateServer(this.config.id, { auth: nextAuth });
+      } catch {
+        // The in-memory token remains usable if settings persistence is unavailable.
       }
     })().finally(() => {
       this.refreshPromise = null;

@@ -265,8 +265,20 @@ describe("DatabaseClient with a real worker", () => {
     expect(markers()).toEqual([]);
   });
 
-  it("bounds pending work and rejects the overflow explicitly", async () => {
+  it("holds a burst past maxPending on the host and sends it in submission order", async () => {
     const client = await start({ maxPending: 2 });
+    const busy = client.executeCommand("test.sleep", { ms: 100 });
+    const writes = Array.from({ length: 20 }, (_, i) =>
+      client.executeCommand("test.insertMarker", { name: `m${i}` }),
+    );
+    expect(client.getStatus()).toMatchObject({ pending: 2, queued: 19 });
+    await Promise.all([busy, ...writes]);
+    expect(markers()).toEqual(Array.from({ length: 20 }, (_, i) => `m${i}`));
+    expect(client.getStatus()).toMatchObject({ pending: 0, queued: 0 });
+  });
+
+  it("bounds the host queue too and rejects the overflow explicitly", async () => {
+    const client = await start({ maxPending: 1, maxQueued: 1 });
     const first = client.executeCommand("test.sleep", { ms: 150 });
     const second = client.executeCommand("test.listMarkers", undefined);
     await expectDatabaseError(client.executeCommand("test.listMarkers", undefined), {
@@ -274,6 +286,49 @@ describe("DatabaseClient with a real worker", () => {
       outcome: "not_committed",
     });
     await Promise.all([first, second]);
+  });
+
+  it("never sends a waiting write whose deadline passed or that was cancelled", async () => {
+    const client = await start({ maxPending: 1 });
+    const busy = client.executeCommand("test.sleep", { ms: 200 });
+    const expired = client.executeCommand(
+      "test.insertMarker",
+      { name: "expired" },
+      { deadlineMs: 50 },
+    );
+    const controller = new AbortController();
+    const cancelled = client.executeCommand(
+      "test.insertMarker",
+      { name: "cancelled" },
+      { signal: controller.signal },
+    );
+    const kept = client.executeCommand("test.insertMarker", { name: "kept" });
+    controller.abort();
+    await expectDatabaseError(cancelled, { code: "cancelled", outcome: "not_committed" });
+    await expectDatabaseError(expired, { code: "deadline_exceeded", outcome: "not_committed" });
+    await Promise.all([busy, kept]);
+    expect(markers()).toEqual(["kept"]);
+  });
+
+  it("fails waiting requests as not committed when the client closes or the worker exits", async () => {
+    const closing = await start({ maxPending: 1 });
+    const busy = closing.executeCommand("test.sleep", { ms: 100 });
+    const waiting = closing.executeCommand("test.insertMarker", { name: "never" });
+    const closed = closing.close();
+    await expectDatabaseError(waiting, { code: "closed", outcome: "not_committed" });
+    await busy.catch(() => undefined);
+    await closed;
+
+    const crashing = await start({ maxPending: 1 });
+    const exit = crashing.executeCommand("test.commitThenExit", { name: "committed" });
+    const behind = crashing.executeCommand("test.insertMarker", { name: "after-exit" });
+    await expectDatabaseError(behind, { code: "worker_unavailable", outcome: "not_committed" });
+    await expectDatabaseError(exit, { code: "worker_exited", outcome: "unknown" });
+    await waitFor(() => crashing.getState() === "ready");
+    // The waiting write was not replayed after the restart.
+    await expect(crashing.executeCommand("test.listMarkers", undefined)).resolves.toEqual([
+      "committed",
+    ]);
   });
 
   it("reports a commit before an exit as unknown, restarts, and reconciles", async () => {

@@ -121,7 +121,7 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-class HelperTransportError extends Error {
+export class HelperTransportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HelperTransportError";
@@ -621,6 +621,9 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
       return;
     }
 
+    if (this.pending.size > 0)
+      throw new Error("Computer-use helper update waits for active requests to settle");
+    this.stop();
     const compileArgs = [
       "swiftc",
       "-O",
@@ -685,18 +688,18 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
     child.stderr.on("data", () => {
       // Helper diagnostics stay local to the runtime.
     });
+    // A replaced helper (stop() already rejected its requests) must not reject
+    // requests sent to its successor when its exit/error event arrives late.
     child.on("error", (error) => {
-      if (this.helper === child) {
-        this.helper = null;
-      }
+      if (this.helper !== child) return;
+      this.helper = null;
       this.rejectAllPending(
         new HelperTransportError(`Computer-use helper crashed: ${error.message}`),
       );
     });
     child.on("exit", (code, signal) => {
-      if (this.helper === child) {
-        this.helper = null;
-      }
+      if (this.helper !== child) return;
+      this.helper = null;
       const reason = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
       this.rejectAllPending(new HelperTransportError(`Computer-use helper exited (${reason}).`));
     });
@@ -748,6 +751,10 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
     }
   }
 
+  async background(request: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.bridgeCommand("background", request, 25_000);
+  }
+
   private async bridgeCommand<T = unknown>(
     cmd: string,
     args: Record<string, unknown> = {},
@@ -791,10 +798,37 @@ export class ComputerUseHelperRuntime implements ComputerUseProvider {
           });
           return result;
         } catch (error) {
-          if (error instanceof HelperTransportError && attempt === 0) {
+          // A long-lived AX client can lose a target's window inventory while
+          // WindowServer still sees it. Refresh only a read, never an action.
+          if (
+            attempt === 0 &&
+            error instanceof HelperCommandError &&
+            ["ax_inventory_failed", "ax_inventory_unavailable"].includes(error.code || "") &&
+            (cmd === "listWindows" || (cmd === "background" && args.action === "observe"))
+          ) {
             this.stop();
             continue;
           }
+          if (
+            error instanceof HelperTransportError &&
+            attempt === 0 &&
+            [
+              "checkPermissions",
+              "listApps",
+              "listWindows",
+              "getFrontmost",
+              "screenshot",
+              "axDescribeAtPoint",
+              "focusedElement",
+              "axFindTextInput",
+              "axFindFocusableElement",
+              "axFindActionableElement",
+            ].includes(cmd)
+          ) {
+            this.stop();
+            continue;
+          }
+          if (error instanceof HelperTransportError) this.stop();
           throw normalizeError(error);
         }
       }

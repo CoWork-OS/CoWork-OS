@@ -85,6 +85,8 @@ const PermissionModeSchema = z.enum([
   "bypass_permissions",
 ]);
 const AccessProfileIdSchema = z.string().trim().min(1).max(120);
+/** An agent role's "May do alone" access limit. */
+export const AgentRoleAccessProfileIdSchema = AccessProfileIdSchema;
 const AccessFilesystemRuleSchema = z
   .object({
     path: z.string().trim().min(1).max(MAX_PATH_LENGTH),
@@ -2598,16 +2600,45 @@ export const MCPTransportTypeSchema = z.enum(["stdio", "sse", "websocket", "stre
 export const MCPAuthConfigSchema = z
   .object({
     type: z.enum(["none", "bearer", "api-key", "basic"]),
-    token: z.string().max(2000).optional(),
+    // OAuth access and refresh tokens are often long JWTs.
+    token: z.string().max(MAX_OAUTH_TOKEN_LENGTH).optional(),
     apiKey: z.string().max(2000).optional(),
     username: z.string().max(500).optional(),
     password: z.string().max(500).optional(),
     headerName: z.string().max(100).optional(),
-    refreshToken: z.string().max(4000).optional(),
+    sendTokenInQuery: z.boolean().optional(),
+    refreshToken: z.string().max(MAX_OAUTH_TOKEN_LENGTH).optional(),
     clientId: z.string().max(500).optional(),
     clientSecret: z.string().max(2000).optional(),
     tokenUrl: z.string().url().max(500).optional(),
     expiresAt: z.number().int().nonnegative().optional(),
+    refreshExpiresAt: z.number().int().nonnegative().optional(),
+    privateKey: z.string().max(10000).optional(),
+    oauth: z
+      .object({
+        grant: z.enum(["authorization_code", "jwt_bearer"]),
+        authorizationUrl: z.string().url().max(1000).optional(),
+        redirectUri: z.string().url().max(500).optional(),
+        scopes: z.array(z.string().min(1).max(200)).max(50).optional(),
+        resource: z.string().url().max(1000).optional(),
+        tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic", "none"]).optional(),
+        jwt: z
+          .object({
+            subject: z.string().min(1).max(500),
+            audience: z.string().max(1000).optional(),
+            keyId: z.string().max(200).optional(),
+            algorithm: z.enum(["RS256", "ES256"]).optional(),
+          })
+          .optional(),
+        preset: z
+          .object({
+            kind: z.literal("workday"),
+            region: z.string().regex(/^[a-z0-9][a-z0-9-]{0,30}$/),
+            tenant: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/),
+          })
+          .optional(),
+      })
+      .optional(),
   })
   .optional();
 

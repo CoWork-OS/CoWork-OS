@@ -21,7 +21,7 @@ Then choose an identity:
 
 For delegate sign-in, register the redirect URI with the provider exactly as shown: `http://127.0.0.1:18768/oauth/callback` for custom servers, or `https://127.0.0.1:18768/oauth/callback` for Workday. You can enter a different `http` or `https` loopback address (`127.0.0.1`, `[::1]` or `localhost`) with an explicit port if you need one. An https redirect is served with a self-signed certificate generated in memory for each sign-in and never saved, so the browser shows a certificate warning for 127.0.0.1 once per sign-in; accept it to finish signing in. Client secrets, private keys and tokens are stored encrypted.
 
-**Add and sign in** saves the server, signs it in, and connects it. **Sign in** on a server row signs in again, for example after a refresh token expires.
+**Add and sign in** saves the server, signs it in, and connects it. **Sign in** on a server row signs it in; once the server is connected the button reads **Sign in again**, for example after a refresh token expires or after the agent's tools change.
 
 **Edit** on a server row opens the same form with the saved settings. Secret fields start empty: leave a client secret or private key blank to keep the saved one, or type a new one to replace it. Changing the identity, endpoints, client ID, secret, redirect URI or scopes signs the server out (its tokens are deleted and it disconnects), so the next sign-in uses the new settings and earlier tool-call approvals are asked again. A rename keeps the sign-in. **Save and sign in** saves and starts the sign-in straight away.
 

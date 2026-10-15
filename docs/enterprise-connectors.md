@@ -18,6 +18,8 @@ This document describes the current shipped MCP connector surface in CoWork OS. 
 
 Shipped connectors run as MCP servers and expose tools over MCP (stdio, SSE, or WebSocket). Service connectors still use direct APIs under the hood (OAuth, REST, GraphQL), while local creative connectors drive localhost-only app bridges or APIs such as Rhino, Blender, and ComfyUI. The app consumes both styles consistently through MCP.
 
+Remote MCP servers that require an OAuth 2.1 sign-in, such as Workday Agent-Ready Tools, connect over streamable HTTP from **Settings > MCP Servers > + Add Server > Remote (OAuth)** instead of a bundled connector. See [Remote MCP servers with OAuth](remote-mcp-oauth.md).
+
 For some integrations with strong native CoWork paths, the runtime now prefers direct APIs first and only falls back to MCP when needed. Today that applies to GitHub and Notion.
 
 Connector notifications are also part of the runtime surface now: MCP resource updates and catalog-change notifications can be bridged into CoWork's Event Triggers so connector-side content changes can wake agents or create follow-up tasks.

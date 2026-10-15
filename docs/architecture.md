@@ -121,6 +121,13 @@ policy; on-request networking requires a grant bound to the specific invocation 
 approved OS sandbox. Offline macOS servers may listen locally under the loopback listener guard,
 which terminates their process group if a non-loopback listener appears.
 
+Direct one-shot shell commands on POSIX systems also lead their own process
+group. Abort, timeout, and the final stop escalation signal that owned group in addition to the
+existing parent-first descendant cleanup, so a failed process lookup cannot
+leave ordinary child processes holding command output pipes open. Sandboxed
+commands retain their sandbox lifecycle, and Windows retains tree termination
+through `taskkill`.
+
 See [Access Profiles](access-profiles.md) for the product, API, migration, and edge-case contract.
 
 ## Gateway context admission

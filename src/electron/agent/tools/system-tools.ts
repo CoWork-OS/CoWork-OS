@@ -1,3 +1,4 @@
+import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import * as os from "os";
@@ -406,6 +407,7 @@ export class SystemTools {
     height: number;
   }> {
     const filename = options?.filename || `screenshot-${Date.now()}.png`;
+    const assertPrivateCaptureAllowed = privateCaptureGuard();
     const requestedOutputPath = path.isAbsolute(filename)
       ? filename
       : path.resolve(this.workspace.path, filename);
@@ -413,6 +415,7 @@ export class SystemTools {
       throw new Error("Write permission not granted for screenshot capture");
     }
     const outputPath = await this.resolveAccessibleLocalPath(requestedOutputPath, "write");
+    assertPrivateCaptureAllowed();
 
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "take_screenshot",
@@ -426,10 +429,12 @@ export class SystemTools {
       }
 
       // Get all available sources (screens and windows)
+      assertPrivateCaptureAllowed();
       const sources = await desktopCapturer.getSources({
         types: ["screen"],
         thumbnailSize: { width: 1920, height: 1080 },
       });
+      assertPrivateCaptureAllowed();
 
       if (sources.length === 0) {
         throw new Error("No screen sources available for capture");

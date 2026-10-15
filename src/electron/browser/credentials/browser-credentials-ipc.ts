@@ -50,6 +50,12 @@ export interface CredentialsIpcDeps {
   promptBiometric: ((reason: string) => Promise<boolean>) | null;
   /** Overwrite then remove a file. */
   shredFile: (file: string) => Promise<void>;
+  fillSavedLogin?: (
+    taskId: string,
+    sessionId: string,
+    id: string,
+    workspaceId: string,
+  ) => Promise<unknown>;
   now?: () => number;
 }
 
@@ -356,6 +362,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
         ? {
             success: true as const,
             logins: vault.list(profile.profileKey),
+            items: vault.listItems(profile.profileKey),
             canStore: vault.canStore(),
           }
         : { success: false as const, logins: [], canStore: false };
@@ -396,7 +403,7 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
       const profile = profileOf(data);
       if (!profile) return { success: false as const, removed: 0 };
       const approved = await deps.confirm({
-        message: "Remove all saved logins?",
+        message: "Remove all saved passwords and autofill items?",
         detail: "They are deleted from this app. Your other browsers are not affected.",
         confirmLabel: "Remove all",
       });
@@ -416,6 +423,8 @@ export function registerBrowserCredentialsIpc(deps: CredentialsIpcDeps): void {
       const sessionId = readString(data?.sessionId, 200) ?? "default";
       if (!profile || !id || !taskId)
         return { success: false as const, code: "invalid", error: "Invalid request." };
+      if (deps.fillSavedLogin)
+        return deps.fillSavedLogin(taskId, sessionId, id, profile.workspaceId);
       if (now() < fillCooldownUntil || busy) {
         return { success: false as const, code: "busy", error: "Try again in a moment." };
       }

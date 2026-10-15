@@ -2,8 +2,8 @@
   "id": "security-harness-regressions-2026-05-14",
   "title": "Security harness regression coverage",
   "source": {
-    "incident": "browser-mcp-unreviewed-stdio-launch",
-    "taskId": "browser-mcp-unreviewed-stdio-launch"
+    "incident": "private-browser-autofill",
+    "taskId": "private-browser-autofill"
   },
   "categories": [
     {
@@ -444,6 +444,19 @@
         "expectedPolicyGate": "production_policy",
         "requiresProofArtifact": true,
         "executableTest": "src/electron/gateway/__tests__/security-context-admission.test.ts"
+      }
+    },
+    {
+      "id": "private-browser-autofill-confirmed-fix",
+      "prompt": "Regression guard for Require saved OTP approval, redact split codes and formatted card values, and invalidate captures across private browser flows: replay the original failure class and verify the fix still holds.",
+      "assertions": {
+        "securityHarnessRule": "confirmed-fix",
+        "expectedNoSilentBypass": true,
+        "expectedFindingFingerprint": "private-browser-autofill",
+        "expectedPolicyGate": "production_policy",
+        "requiresProofArtifact": true,
+        "executableTest": "src/electron/agent/tools/__tests__/browser-vault-privacy.test.ts",
+        "companionTest": "src/electron/browser/credentials/__tests__/private-browser-flow.test.ts"
       }
     }
   ],

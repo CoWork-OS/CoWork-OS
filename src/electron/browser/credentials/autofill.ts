@@ -1,7 +1,8 @@
 /**
  * Filling a saved login into the page the user is looking at.
  *
- * - The user starts it (the key button in the toolbar). The agent has no tool for it.
+ * - This legacy helper is used by the import IPC fallback. The private credential service
+ *   owns the shared toolbar/agent flow and native approval.
  * - The page's address must be exactly the login's origin (https, or loopback http). The
  *   check happens here against the live page address, not against anything the renderer sent.
  * - Only the top page is filled, never a frame inside it.
@@ -96,17 +97,30 @@ export const MASK = "[saved password]";
 /** How long after a fill the agent may not take screenshots or run page scripts on that tab. */
 const SENSITIVE_WINDOW_MS = 2 * 60_000;
 
-const filled = new Map<string, { secrets: Set<string>; filledAt: number }>();
+const filled = new Map<
+  string,
+  { secrets: Set<string>; fragments: Set<string>; filledAt: number }
+>();
 
 const keyOf = (taskId: string, sessionId: string) => `${taskId}\u0000${sessionId}`;
 
 export function registerFilledPassword(taskId: string, sessionId: string, password: string): void {
   if (!password) return;
   const key = keyOf(taskId, sessionId);
-  const entry = filled.get(key) ?? { secrets: new Set<string>(), filledAt: 0 };
+  const entry = filled.get(key) ?? {
+    secrets: new Set<string>(),
+    fragments: new Set<string>(),
+    filledAt: 0,
+  };
   entry.secrets.add(password);
   entry.filledAt = Date.now();
   filled.set(key, entry);
+}
+
+/** Split OTP inputs expose one character per AX node. Match whole values so refs and URLs stay usable. */
+export function registerFilledFragment(taskId: string, sessionId: string, fragment: string): void {
+  const entry = filled.get(keyOf(taskId, sessionId));
+  if (fragment && entry) entry.fragments.add(fragment);
 }
 
 export function forgetFilledPasswords(taskId: string, sessionId?: string): void {
@@ -128,11 +142,15 @@ export function passwordRecentlyFilled(taskId: string, sessionId: string): boole
   return Boolean(entry && Date.now() - entry.filledAt < SENSITIVE_WINDOW_MS);
 }
 
-function maskString(text: string, secrets: Set<string>): string {
+function maskString(text: string, secrets: Set<string>, fragments: Set<string>): string {
+  if (fragments.has(text.trim())) return MASK;
   let out = text;
   // Longest first so one password that contains another is masked whole.
   for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
     if (out.includes(secret)) out = out.split(secret).join(MASK);
+    // Sites commonly insert spaces or hyphens into card numbers and verification codes.
+    if (/^\d{4,19}$/.test(secret))
+      out = out.replace(new RegExp(secret.split("").join("[\\s-]*"), "g"), MASK);
   }
   return out;
 }
@@ -141,13 +159,14 @@ function maskString(text: string, secrets: Set<string>): string {
 export function maskFilledPasswords<T>(taskId: string, sessionId: string, value: T): T {
   if (!hasFilledPasswords(taskId, sessionId)) return value;
   const secrets = filled.get(keyOf(taskId, sessionId))!.secrets;
+  const fragments = filled.get(keyOf(taskId, sessionId))!.fragments;
   const walk = (node: unknown, depth: number): unknown => {
-    if (typeof node === "string") return maskString(node, secrets);
+    if (typeof node === "string") return maskString(node, secrets, fragments);
     if (depth > 24 || node === null || typeof node !== "object") return node;
     if (Array.isArray(node)) return node.map((item) => walk(item, depth + 1));
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(node))
-      out[maskString(key, secrets)] = walk(item, depth + 1);
+      out[maskString(key, secrets, fragments)] = walk(item, depth + 1);
     return out;
   };
   return walk(value, 0) as T;

@@ -193,6 +193,7 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings["categories"]> 
   sharepoint_action: "webfetch",
   voice_call: "webfetch",
   // Browser tools
+  browser_vault: "browser",
   browser_navigate: "browser",
   browser_screenshot: "browser",
   browser_snapshot: "browser",

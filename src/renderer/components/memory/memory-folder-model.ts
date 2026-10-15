@@ -68,6 +68,8 @@ export function folderFileHint(file: Pick<MemoryRepoHubFile, "role">): string {
       return "This workspace";
     case "inbox":
       return "Unreviewed: not used until you keep it";
+    case "bot":
+      return "This bot's own memory: used in its conversations only";
     default:
       return "Topic";
   }
@@ -119,7 +121,10 @@ export function filterFolderFiles(
 }
 
 export function countFolderEntries(report: MemoryRepoEntriesReport): number {
-  return report.files.reduce((total, file) => total + file.entries.length, 0);
+  return [...report.files, ...(report.bots ?? [])].reduce(
+    (total, file) => total + file.entries.length,
+    0,
+  );
 }
 
 function errorMessage(error: unknown, fallback: string): string {

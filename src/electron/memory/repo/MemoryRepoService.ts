@@ -1330,6 +1330,30 @@ export class MemoryRepoService {
     return true;
   }
 
+  /**
+   * Delete a bot's own file (the bot was deleted and the user chose to drop its memory), in
+   * one commit. Like Forget, the text stays in git history until the history is compacted.
+   */
+  async removeBotFile(botId: string): Promise<{ removed: boolean; entries: number }> {
+    if (!this.isWritable()) return { removed: false, entries: 0 };
+    const file = await this.botFile(botId);
+    if (!file || !isBotRepoPath(file)) return { removed: false, entries: 0 };
+    return this.serialized(() =>
+      this.locked(async () => {
+        await this.commitHandEdits();
+        const entries = parseMemoryRepoEntries((await this.readFile(file)) ?? "").filter(
+          (entry) => !isMemoryRepoMarker(entry),
+        ).length;
+        await fs.rm(path.join(this.root, file), { force: true });
+        this.invalidateFileMaps();
+        await this.commitPaths([file], `Delete bot memory: ${preview(file)}`, {
+          origin: "memory_hub",
+        });
+        return { removed: true, entries };
+      }),
+    );
+  }
+
   /** Empty the user's global files (Clear global memories), then compact. */
   async clearGlobal(): Promise<void> {
     if (!this.isWritable()) return;

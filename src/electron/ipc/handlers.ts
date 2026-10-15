@@ -11478,6 +11478,10 @@ export async function setupIpcHandlers(
     // A bot's own memory file, shown in the bot's details panel.
     getBotService: () => MemoryRepoService.get(),
     botExists: async (botId) => Boolean(await agentRoleRepo.findById(botId)),
+    lookupBot: async (botId) => {
+      const role = await agentRoleRepo.findById(botId);
+      return role ? { name: role.displayName || role.name, deleted: !role.isActive } : null;
+    },
     workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
     // "Import notes from a folder": the folder is chosen here, never sent by the renderer.
     pickFolder: async () => {

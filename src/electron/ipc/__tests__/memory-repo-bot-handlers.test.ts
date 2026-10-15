@@ -139,6 +139,37 @@ describeWithGit("bot memory IPC", () => {
     );
   });
 
+  it("deletes a bot's whole memory and names bots in the Hub", async () => {
+    await expect(
+      call(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY, { botId: "bot-missing" }),
+    ).rejects.toThrow("Bot not found");
+    await expect(
+      call(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY, { botId: "bot-scout", path: "x" }),
+    ).rejects.toThrow();
+    expect(await call(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY, { botId: "bot-scout" })).toEqual({
+      ok: true,
+      entries: 1,
+    });
+    expect((await report("bot-scout")).path).toBeNull();
+    expect((await report()).entries).toHaveLength(1);
+    expect(limited).toContain(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY);
+
+    handlers = createMemoryRepoIpcHandlers({
+      status: vi.fn() as Any,
+      getService: () => null,
+      readLines: vi.fn() as Any,
+      openPath: vi.fn() as Any,
+      checkRateLimit: () => {},
+      getHubService: () => service,
+      lookupBot: async (botId) =>
+        botId === "bot-ember" ? { name: "Ember", deleted: false } : null,
+    });
+    const hub = (await call(IPC_CHANNELS.MEMORY_REPO_ENTRIES, {
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+    })) as Any;
+    expect(hub.bots.map((file: Any) => [file.title, file.botId])).toEqual([["Ember", "bot-ember"]]);
+  });
+
   it("reports the folder as unavailable without a service", async () => {
     handlers = createMemoryRepoIpcHandlers({
       status: vi.fn() as Any,

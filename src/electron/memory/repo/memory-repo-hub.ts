@@ -27,6 +27,7 @@ import {
   MEMORY_REPO_WORKSPACES_DIR,
   isBotRepoPath,
   isMemoryRepoMarker,
+  isSafeRepoPath,
   isSwarmRepoPath,
   memoryRepoRef,
   parseMemoryRepoEntries,
@@ -64,14 +65,18 @@ export function memoryRepoFileRole(relPath: string): MemoryRepoHubFileRole {
   if (relPath === MEMORY_REPO_LESSONS_FILE) return "lessons";
   if (relPath === MEMORY_REPO_INBOX_FILE) return "inbox";
   if (relPath.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) return "workspace";
+  if (isBotRepoPath(relPath)) return "bot";
   return "topic";
 }
 
-/** Whether a workspace's Hub may see a file: global files and the inbox, or its own file. */
+/**
+ * Whether a workspace's Hub may see a file: global files and the inbox, its own workspace
+ * file, and bots' own files (a bot's memory belongs to the bot, not to a workspace).
+ */
 function visibleIn(relPath: string, ownWorkspaceFile: string | null): boolean {
-  // Swarm folders are agents' shared notes, not the user's memory (phase 5 §2); a bot's
-  // file is shown with that bot.
-  if (isSwarmRepoPath(relPath) || isBotRepoPath(relPath)) return false;
+  // Swarm folders are agents' shared notes, not the user's memory (phase 5 §2).
+  if (isSwarmRepoPath(relPath)) return false;
+  if (isBotRepoPath(relPath)) return isSafeRepoPath(relPath);
   if (!relPath.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) return true;
   return relPath === ownWorkspaceFile;
 }
@@ -127,15 +132,43 @@ async function hubFile(
   };
 }
 
+/** A bot's display name and whether it was deleted, by `AgentRole` id. */
+export type MemoryRepoBotLookup = (
+  botId: string,
+) => Promise<{ name: string; deleted: boolean } | null>;
+
+/** A bot file for the Hub: titled with the bot's name, tagged with its id. */
+async function hubBotFile(
+  service: MemoryRepoHubPort,
+  relPath: string,
+  lookupBot?: MemoryRepoBotLookup,
+): Promise<MemoryRepoHubFile | null> {
+  const view = await hubFile(service, relPath);
+  if (!view) return null;
+  const marker = parseMemoryRepoEntries((await service.readFile(relPath)) ?? "").find(
+    (entry) => entry.metadata.bot,
+  );
+  const botId = marker?.metadata.bot;
+  const bot = botId && lookupBot ? await lookupBot(botId).catch(() => null) : null;
+  return {
+    ...view,
+    ...(bot?.name ? { title: bot.name.slice(0, 200) } : {}),
+    ...(botId ? { botId } : {}),
+    ...(bot?.deleted ? { botDeleted: true } : {}),
+  };
+}
+
 /** The files and entries the workspace's Hub shows; `available: false` when the folder is off. */
 export async function listMemoryRepoEntries(
   service: MemoryRepoHubPort | null,
   workspaceId: string,
+  lookupBot?: MemoryRepoBotLookup,
 ): Promise<MemoryRepoEntriesReport> {
   if (!service?.isReady()) return { available: false, writable: false, files: [], inbox: null };
   const own = await service.workspaceFile(workspaceId);
-  const paths = (await service.listFiles()).filter(
-    (file) => file !== MEMORY_REPO_INBOX_FILE && visibleIn(file, own),
+  const listed = await service.listFiles();
+  const paths = listed.filter(
+    (file) => file !== MEMORY_REPO_INBOX_FILE && !isBotRepoPath(file) && visibleIn(file, own),
   );
   const rank = (file: string) =>
     FIXED_ORDER[file] ?? (file.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`) ? 4 : 3);
@@ -145,11 +178,18 @@ export async function listMemoryRepoEntries(
     const view = await hubFile(service, file);
     if (view) files.push(view);
   }
+  const bots: MemoryRepoHubFile[] = [];
+  for (const file of listed.filter((name) => isBotRepoPath(name) && visibleIn(name, own))) {
+    const view = await hubBotFile(service, file, lookupBot);
+    if (view) bots.push(view);
+  }
+  bots.sort((a, b) => a.title.localeCompare(b.title));
   return {
     available: true,
     writable: service.isWritable(),
     files,
     inbox: await hubFile(service, MEMORY_REPO_INBOX_FILE),
+    bots,
   };
 }
 
@@ -196,9 +236,10 @@ export async function removeMemoryRepoEntry(
   if ("error" in target) return { ok: false, error: target.error };
   const markdown = (await target.service.readFile(target.path)) ?? "";
   const entry = parseMemoryRepoLine(splitLines(markdown)[target.line - 1] ?? "", target.line);
-  // The workspace marker line keeps the file mapped to its workspace.
-  if (entry?.metadata.workspace) {
-    return { ok: false, error: "That line names the workspace; it cannot be deleted here." };
+  // The marker line keeps the file mapped to its workspace or bot.
+  if (entry && isMemoryRepoMarker(entry)) {
+    const owner = entry.metadata.workspace ? "workspace" : "bot";
+    return { ok: false, error: `That line names the ${owner}; it cannot be deleted here.` };
   }
   const result = await target.service.forget(target.path, target.line, {
     expectHash: request.hash,
@@ -215,6 +256,10 @@ export async function pinMemoryRepoEntry(
 ): Promise<MemoryRepoEntryActionResult> {
   const target = await resolveRef(service, request);
   if ("error" in target) return { ok: false, error: target.error };
+  // Pinning puts a line in every prompt; a bot's memory stays with that bot.
+  if (isBotRepoPath(target.path)) {
+    return { ok: false, error: "A bot's memory stays with the bot; it cannot be pinned." };
+  }
   const result = await target.service.moveEntry(target.path, target.line, MEMORY_REPO_ENTRY_FILE, {
     expectHash: request.hash,
     by: "user",

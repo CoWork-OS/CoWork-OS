@@ -7701,11 +7701,14 @@ export function App() {
       selectTaskAfterDraftFlush,
     ],
   );
-  const handleOpenBotMemory = useCallback((workspaceId: string, botName: string) => {
-    requestBotMemoryContext(workspaceId, botName);
-    setSettingsTab("memory");
-    setCurrentView("settings");
-  }, []);
+  const handleOpenBotMemory = useCallback(
+    (workspaceId: string, botName: string, botId?: string) => {
+      requestBotMemoryContext(workspaceId, botName, botId);
+      setSettingsTab("memory");
+      setCurrentView("settings");
+    },
+    [],
+  );
   const handleOpenMissionControl = useCallback(() => {
     setMissionControlInitialCompanyId(null);
     setMissionControlInitialIssueId(null);

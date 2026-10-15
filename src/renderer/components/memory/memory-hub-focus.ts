@@ -7,6 +7,8 @@
 export interface MemoryHubFocusRequest {
   itemId: string;
   contextBotName?: string;
+  /** The bot whose own memory (its file in the memory folder) the Hub shows first. */
+  contextBotId?: string;
   /** Text the tab's search is set to, so the item is in the first page. */
   query: string;
   /** The workspace the Hub should show (the task's workspace). */
@@ -41,16 +43,30 @@ export function takeMemoryHubFocus(workspaceId?: string): MemoryHubFocusRequest 
 }
 
 /** Opens workspace context from a bot without claiming ownership of historical records. */
-export function requestBotMemoryContext(workspaceId: string, botName: string): void {
+export function requestBotMemoryContext(
+  workspaceId: string,
+  botName: string,
+  botId?: string,
+): void {
+  const id = botId?.trim().slice(0, 128);
   pending = {
     workspaceId: workspaceId.trim(),
     itemId: "",
     query: "",
     contextBotName: botName.trim().slice(0, 100),
+    ...(id ? { contextBotId: id } : {}),
   };
 }
-export function peekBotMemoryContext(): { workspaceId: string; botName: string } | null {
+export function peekBotMemoryContext(): {
+  workspaceId: string;
+  botName: string;
+  botId?: string;
+} | null {
   return pending?.workspaceId && pending.contextBotName
-    ? { workspaceId: pending.workspaceId, botName: pending.contextBotName }
+    ? {
+        workspaceId: pending.workspaceId,
+        botName: pending.contextBotName,
+        ...(pending.contextBotId ? { botId: pending.contextBotId } : {}),
+      }
     : null;
 }

@@ -108,7 +108,7 @@ export interface MemoryKnowledgeViewProps {
    */
   folderView?: { report: MemoryRepoEntriesReport } & Omit<
     MemoryFolderKnowledgeProps,
-    "files" | "inbox"
+    "files" | "inbox" | "bots"
   >;
 }
 
@@ -291,8 +291,9 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
   const folderInbox = folder?.report.inbox
     ? (filterFolderFiles([folder.report.inbox], filters)[0] ?? null)
     : null;
+  const folderBots = folder ? filterFolderFiles(folder.report.bots ?? [], filters) : [];
   const folderCount =
-    folderFiles.reduce((total, file) => total + file.entries.length, 0) +
+    [...folderFiles, ...folderBots].reduce((total, file) => total + file.entries.length, 0) +
     (folderInbox?.entries.length ?? 0);
   const hasGlobal =
     props.items.some((item) => item.scope === "global") ||
@@ -427,7 +428,14 @@ export function MemoryKnowledgeView(props: MemoryKnowledgeViewProps) {
         </div>
       )}
 
-      {folder && <MemoryFolderKnowledge {...folder} files={folderFiles} inbox={folderInbox} />}
+      {folder && (
+        <MemoryFolderKnowledge
+          {...folder}
+          files={folderFiles}
+          inbox={folderInbox}
+          bots={folderBots}
+        />
+      )}
 
       {props.loading && props.items.length === 0 && folderCount === 0 ? (
         <div className="settings-loading">Loading memories...</div>
@@ -528,6 +536,7 @@ export function MemoryKnowledgeTab({
   confirm = (message: string) => window.confirm(message),
   initialSourceFilter = "",
   onOpenTask,
+  focusBotId,
 }: {
   workspaceId: string;
   canWrite?: boolean;
@@ -538,6 +547,8 @@ export function MemoryKnowledgeTab({
   confirm?: (message: string) => boolean;
   /** Open the task a memory folder entry was learned in. */
   onOpenTask?: (taskId: string) => void;
+  /** Bring this bot's own memory into view (opened from the bot's "What this bot knows"). */
+  focusBotId?: string;
 }) {
   const [items, setItems] = useState<MemoryHubItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -781,6 +792,7 @@ export function MemoryKnowledgeTab({
               canDelete: canDelete && folderReport.writable,
               canOpenFile,
               onOpenTask,
+              focusBotId,
               onStartEdit: (entry: MemoryRepoHubEntry) =>
                 setFolderEditing({ ref: entry.ref, draft: entry.text }),
               onEditDraftChange: (draft: string) =>
@@ -829,7 +841,11 @@ export function MemoryKnowledgeTab({
 }
 
 function findFolderEntry(report: MemoryRepoEntriesReport, ref: string): MemoryRepoHubEntry | null {
-  for (const file of [...report.files, ...(report.inbox ? [report.inbox] : [])]) {
+  for (const file of [
+    ...report.files,
+    ...(report.bots ?? []),
+    ...(report.inbox ? [report.inbox] : []),
+  ]) {
     const entry = file.entries.find((candidate) => candidate.ref === ref);
     if (entry) return entry;
   }

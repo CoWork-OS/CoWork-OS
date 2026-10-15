@@ -4840,6 +4840,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_FORGET, data),
   undoBotMemoryChange: (data: { botId: string; commit: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_UNDO, data),
+  deleteBotMemory: (data: { botId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY, data),
 
   // PACT business agents (docs/pact.md)
   getPactStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_STATUS),
@@ -8994,6 +8996,9 @@ export interface ElectronAPI {
     botId: string;
     commit: string;
   }) => Promise<MemoryRepoEntryActionResult>;
+  deleteBotMemory: (data: {
+    botId: string;
+  }) => Promise<MemoryRepoEntryActionResult & { entries?: number }>;
 
   // PACT business agents. Sign-in links never reach the desktop renderer; openPactSignIn
   // opens the business's own login in the system browser from main.

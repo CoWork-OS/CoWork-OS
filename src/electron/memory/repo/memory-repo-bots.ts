@@ -21,7 +21,8 @@ import { toMemoryRepoHubEntry } from "./memory-repo-hub";
 export type MemoryRepoBotPort = Pick<
   MemoryRepoService,
   "isReady" | "isWritable" | "readFile" | "botFile" | "forget" | "fileHistory" | "undoFileChange"
->;
+> &
+  Partial<Pick<MemoryRepoService, "removeBotFile">>;
 
 function isoDay(at: number): string {
   return new Date(at).toISOString().slice(0, 10);
@@ -87,4 +88,18 @@ export async function undoBotMemoryChange(
   if (!path) return { ok: false, error: "This bot has no memory yet." };
   const result = await service.undoFileChange(path, commit, { origin: "memory_hub" });
   return result.undone ? { ok: true } : { ok: false, error: result.error ?? "Not undone." };
+}
+
+/** Delete the bot's whole file (after the bot itself was deleted and the user agreed). */
+export async function deleteBotMemory(
+  service: MemoryRepoBotPort | null,
+  botId: string,
+): Promise<MemoryRepoEntryActionResult & { entries?: number }> {
+  if (!service?.isWritable() || !service.removeBotFile) {
+    return { ok: false, error: "The memory folder is not available." };
+  }
+  const result = await service.removeBotFile(botId);
+  return result.removed
+    ? { ok: true, entries: result.entries }
+    : { ok: false, error: "This bot has no memory to delete." };
 }

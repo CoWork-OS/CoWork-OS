@@ -432,6 +432,15 @@ the same format, writer, screening and git history as the rest of the folder
 - **Reviewing.** The bot's details panel has a **Memory** section: the saved entries with
   **Forget**, and **Recent changes** (the file's last 20 commits) with **Undo**, which removes
   what a change added and restores what it removed in a new commit.
+- **In the Memory Hub.** Settings > Memory > What CoWork knows lists every bot's file under
+  **Bots** (in every workspace, since a bot's memory is not tied to one), with Edit and Delete
+  but no Pin: pinning would put a bot's fact into every conversation. **What this bot knows**
+  in a bot's work view opens the Hub on that bot's section. A deleted bot's file is marked
+  "Bot deleted" until you remove it.
+- **Deleting a bot.** When the bot saved anything, deleting it asks a second question: also
+  delete what it remembers? Yes removes its file in one commit; Cancel keeps the file in the
+  memory folder. Like Forget, removed lines stay in the folder's git history until you
+  compact it in Memory settings.
 
 CoWork does not log every turn into the bot's file (each line would be a commit); the
 conversation index already holds that history and `memory_recall` scope `bot` reads it.

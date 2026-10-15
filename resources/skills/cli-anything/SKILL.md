@@ -68,6 +68,8 @@ On macOS, install a missing app with Homebrew only after the user agrees, for ex
 - Keep state in a project file in the workspace: create it with `-o <abs path>`, then pass
   `--project <abs path>` to every later command. Each command saves the project.
 - Read `cli-anything-<app> <group> <command> --help` before guessing flags.
+- Do not use shell here-documents (`python3 - <<'PY'`): the sandboxed shell cannot create
+  their temp files. Use `python3 -c '...'` or write a script file into the workspace.
 - Failure: exit code 1 with `{"error": ..., "type": ...}` on stdout, or a Python traceback.
   Read the error, fix the arguments, and do not retry blindly.
 
@@ -102,6 +104,9 @@ $G --json --project "$P" export render "$PWD/banner.png" -p png --overwrite
 - LibreOffice Calc formulas from `calc set-cell --formula` evaluate to `Err:510`/`#VALUE!`
   in LibreOffice and in XLSX. Compute values yourself and write them with `--type float`;
   mention that the cells hold values, not live formulas.
+- GIMP `--type text` layers draw their `text` property at 24 px in the top-left corner,
+  and `layer set` cannot change it. For titles, use a transparent `--type image` layer
+  plus `draw text` (as in the example) and leave text layers out.
 - GIMP renders through Pillow when GIMP is absent; without Pillow it fails with
   "Neither GIMP nor Pillow is available".
 

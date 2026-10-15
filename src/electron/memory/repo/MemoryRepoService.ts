@@ -656,18 +656,23 @@ export class MemoryRepoService {
     if (!this.isReady() || !this.hasGit || !isSafeRepoPath(relPath)) return [];
     const count = Math.min(Math.max(Math.floor(limit) || 20, 1), 50);
     try {
+      // One git call: each record is the commit, its time, its message and its patch.
       const log = await this.runGit([
         "log",
         `-n${count}`,
-        "--format=%x1e%H%x1f%ct%x1f%B",
+        "--format=%x1e%H%x1f%ct%x1f%B%x1f",
+        "-p",
+        "--unified=0",
+        "--no-color",
+        "--no-ext-diff",
         "--",
         relPath,
       ]);
       const changes: MemoryRepoFileChange[] = [];
       for (const record of log.split("\x1e")) {
-        const [commit, seconds, body = ""] = record.split("\x1f");
+        const [commit, seconds, body = "", patch = ""] = record.split("\x1f");
         if (!commit || !/^[0-9a-f]{7,64}$/.test(commit.trim())) continue;
-        const lines = await this.commitEntryLines(commit.trim(), relPath);
+        const lines = entryLinesFromDiff(patch);
         changes.push({
           commit: commit.trim(),
           at: Number(seconds) * 1000,
@@ -759,18 +764,7 @@ export class MemoryRepoService {
       "--",
       relPath,
     ]);
-    const added: Array<{ raw: string; text: string }> = [];
-    const removed: Array<{ raw: string; text: string }> = [];
-    for (const row of splitLines(diff)) {
-      if (row.startsWith("+++") || row.startsWith("---")) continue;
-      const sign = row[0];
-      if (sign !== "+" && sign !== "-") continue;
-      const raw = row.slice(1);
-      const entry = parseMemoryRepoLine(raw, 1);
-      if (!entry || isMemoryRepoMarker(entry)) continue;
-      (sign === "+" ? added : removed).push({ raw, text: entry.text });
-    }
-    return { added, removed };
+    return entryLinesFromDiff(diff);
   }
 
   /** The entry at a line, for approval prompts and attribution. */
@@ -2349,6 +2343,25 @@ function extraMetadata(
 }
 
 /** Why an entry cannot be edited, moved or removed from the Hub; null when it can. */
+/** Memory lines a unified diff adds and removes (no markers, no headings, no file headers). */
+function entryLinesFromDiff(diff: string): {
+  added: Array<{ raw: string; text: string }>;
+  removed: Array<{ raw: string; text: string }>;
+} {
+  const added: Array<{ raw: string; text: string }> = [];
+  const removed: Array<{ raw: string; text: string }> = [];
+  for (const row of splitLines(diff)) {
+    if (row.startsWith("+++") || row.startsWith("---")) continue;
+    const sign = row[0];
+    if (sign !== "+" && sign !== "-") continue;
+    const raw = row.slice(1);
+    const entry = parseMemoryRepoLine(raw, 1);
+    if (!entry || isMemoryRepoMarker(entry)) continue;
+    (sign === "+" ? added : removed).push({ raw, text: entry.text });
+  }
+  return { added, removed };
+}
+
 function editableEntryProblem(entry: MemoryRepoEntry | null, expectHash?: string): string | null {
   if (!entry) return "That line is not a saved memory.";
   if (expectHash && entry.hash !== expectHash) {

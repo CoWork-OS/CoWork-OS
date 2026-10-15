@@ -434,8 +434,9 @@ export class MemoryTools {
     const botResult = botRequested
       ? await this.recallBotConversations(query, since, input?.limit)
       : null;
-    // Only the bot scope was asked for (or it failed): that is the whole answer.
-    if (botResult && (requestedScopes.length === 0 || botResult.error)) return botResult;
+    // Only the bot scope was asked for: that is the whole answer. With other scopes, a
+    // failed bot lane is reported in `unavailable` and the other lanes still answer.
+    if (botResult && requestedScopes.length === 0) return botResult;
     const scopes: MemoryRecallScope[] =
       requestedScopes.length > 0 ? requestedScopes : [...DEFAULT_MEMORY_RECALL_SCOPES];
     const kinds = pickEnum(input?.kinds, MEMORY_ITEM_KINDS);
@@ -483,7 +484,10 @@ export class MemoryTools {
       await MemoryRecallService.getDefault().markUsed(result.hits.map((hit) => hit.ref));
     }
 
-    const unavailable: Record<string, string> = { ...result.laneErrors };
+    const unavailable: Record<string, string> = {
+      ...result.laneErrors,
+      ...(botResult?.error ? { [BOT_RECALL_SCOPE]: String(botResult.error) } : {}),
+    };
     const results = result.hits
       .filter((hit) => !since || !hit.createdAt || hit.createdAt >= since)
       .map((hit) => this.formatHit(hit, full));
@@ -537,6 +541,9 @@ export class MemoryTools {
       );
     }
     const limit = clampLimit(rawLimit, MEMORY_RECALL_DEFAULT_LIMIT, MEMORY_RECALL_MAX_LIMIT);
+    // The index ranks without a time window: with `since`, read more per conversation so
+    // older matches cannot crowd out the ones inside the window.
+    const perConversation = since ? Math.max(limit, MEMORY_RECALL_MAX_LIMIT) : limit;
     const conversations = (
       this.daemon.listBotConversationRefs?.(this.workspace.id, bot.id, BOT_RECALL_CONVERSATIONS) ??
       []
@@ -552,13 +559,13 @@ export class MemoryTools {
                 workspaceId: this.workspace.id,
                 taskId: conversation.id,
                 query,
-                limit,
+                limit: perConversation,
                 mode: "auto",
               })
             : DurableContextService.recentConversation({
                 workspaceId: this.workspace.id,
                 taskId: conversation.id,
-                limit,
+                limit: perConversation,
               })
           ).catch(() => []),
         ),

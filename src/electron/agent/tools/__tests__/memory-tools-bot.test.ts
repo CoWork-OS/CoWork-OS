@@ -237,6 +237,11 @@ describeWithGit("memory tools in a bot's tasks", () => {
     );
     const tools = new MemoryTools(workspace, makeDaemon(), "task-1");
     const result = (await tools.recall({ query: "invoice", scopes: ["bot"], since: "3d" })) as Any;
+    // With a window, each conversation is read deeper than `limit`, so older matches
+    // cannot crowd out the ones inside the window before the filter runs.
+    expect(mocks.searchConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-old", limit: 30 }),
+    );
     expect(result.results).toEqual([
       expect.objectContaining({
         id: "event:dce_1",
@@ -279,5 +284,12 @@ describeWithGit("memory tools in a bot's tasks", () => {
     expect(await tools.recall({ query: "x", scopes: ["bot"] })).toMatchObject({
       error: expect.stringContaining("turned off"),
     });
+    // Asked for together with other scopes, a failed bot lane is reported, not the answer.
+    const mixed = (await inScope(() =>
+      tools.recall({ query: "x", scopes: ["memory", "bot"] }),
+    )) as Any;
+    expect(mixed.error).toBeUndefined();
+    expect(mixed.unavailable?.bot).toContain("turned off");
+    expect(Array.isArray(mixed.results)).toBe(true);
   });
 });

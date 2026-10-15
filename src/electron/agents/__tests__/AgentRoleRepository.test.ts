@@ -147,6 +147,20 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
     ).toBeUndefined();
   });
 
+  it("stores a bot's Works on setting and resets it to Auto", () => {
+    const created = agentRoleRepo.create({
+      name: "browser-bot",
+      displayName: "Browser bot",
+      capabilities: ["code"],
+      worksOn: "browser",
+    });
+    expect(created.worksOn).toBe("browser");
+    expect(agentRoleRepo.findById(created.id)?.worksOn).toBe("browser");
+    expect(agentRoleRepo.update({ id: created.id, worksOn: "off" })?.worksOn).toBe("off");
+    expect(agentRoleRepo.update({ id: created.id, displayName: "Renamed" })?.worksOn).toBe("off");
+    expect(agentRoleRepo.update({ id: created.id, worksOn: null })?.worksOn).toBeUndefined();
+  });
+
   it("deactivates custom roles without breaking historical task references", () => {
     const db = manager.getDatabase();
     const workspaceId = "workspace-for-role-delete";

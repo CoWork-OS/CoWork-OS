@@ -1,3 +1,4 @@
+import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
@@ -5869,6 +5870,17 @@ export class AgentDaemon extends EventEmitter {
       // the parent's stored ones count; the child's own role adds its limit when it starts.
       delete next.accessCeilingProfileId;
       delete next.inheritedAccessCeilingProfileIds;
+      // A child works on no more computer than the bot it was delegated from: its own bot's
+      // setting and any limit it inherited. A caller cannot set this.
+      delete next.inheritedBotWorksOn;
+      const parentRoleWorksOn = parent?.assignedAgentRoleId
+        ? this.getAgentRoleById(parent.assignedAgentRoleId)?.worksOn
+        : undefined;
+      const parentWorksOn = narrowestBotWorksOn(
+        parentRoleWorksOn,
+        parent?.agentConfig?.inheritedBotWorksOn,
+      );
+      if (parentWorksOn && parentWorksOn !== "auto") next.inheritedBotWorksOn = parentWorksOn;
       const inheritedCeilings = inheritableAccessCeilings(parent?.agentConfig);
       if (inheritedCeilings.length > 0) next.inheritedAccessCeilingProfileIds = inheritedCeilings;
       // ACP has its own execution and consent boundary. A native CoWork
@@ -16498,6 +16510,8 @@ export class AgentDaemon extends EventEmitter {
             // A follow-up override never lifts the agent's access limit.
             accessCeilingProfileId:
               persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
+            // Nor the "Works on" limit inherited from a delegating bot.
+            inheritedBotWorksOn: persistentWorkerRoleBoundary.task.agentConfig?.inheritedBotWorksOn,
           },
         }
       : persistentWorkerRoleBoundary.task;

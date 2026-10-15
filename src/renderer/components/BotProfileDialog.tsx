@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AgentRoleData } from "../../electron/preload";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { botMascotIcon, resolveBotMascot } from "../../shared/bot-mascots";
+import { normalizeBotWorksOn } from "../../shared/bot-computer";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 import { AgentRoleEditorDialog } from "./AgentRoleEditorDialog";
 
@@ -22,6 +23,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     description: "",
     systemPrompt: "",
     icon: "",
+    worksOn: "auto",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,6 +46,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           systemPrompt: loaded.systemPrompt || "",
           // Edit the character the bot is drawn as, so saving keeps what it shows.
           icon: botMascotIcon(resolveBotMascot(loaded.icon)),
+          worksOn: normalizeBotWorksOn(loaded.worksOn),
         });
       } catch (cause) {
         if (!cancelled) {
@@ -79,6 +82,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         description: normalizeBotProfileText(values.description),
         systemPrompt: normalizeBotProfileText(values.systemPrompt),
         icon: values.icon,
+        worksOn: values.worksOn,
       });
       if (!updated) throw new Error("Could not save this bot.");
       await onSaved?.(updated);

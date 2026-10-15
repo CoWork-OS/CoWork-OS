@@ -77,7 +77,8 @@
 }
 
 .bot-form-field input,
-.bot-form-field textarea {
+.bot-form-field textarea,
+.bot-form-field select {
   width: 100%;
   box-sizing: border-box;
   padding: 9px 11px;
@@ -95,13 +96,20 @@
   min-height: 0;
 }
 
+.bot-form-field .bot-form-hint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .bot-form-field input::placeholder,
 .bot-form-field textarea::placeholder {
   color: var(--color-text-muted);
 }
 
 .bot-form-field input:focus,
-.bot-form-field textarea:focus {
+.bot-form-field textarea:focus,
+.bot-form-field select:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--color-text-primary) 45%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-text-primary) 8%, transparent);

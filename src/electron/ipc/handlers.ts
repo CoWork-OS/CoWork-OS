@@ -432,6 +432,7 @@ import {
   WorkspaceIdSchema,
   StringIdSchema,
   AgentRoleAccessProfileIdSchema,
+  AgentRoleWorksOnSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -9658,6 +9659,10 @@ export async function setupIpcHandlers(
     if (request.companyId !== undefined && request.companyId !== null) {
       request.companyId = validateInput(UUIDSchema, request.companyId, "company ID");
     }
+    if (request.worksOn !== undefined) {
+      request.worksOn =
+        validateInput(AgentRoleWorksOnSchema, request.worksOn, "works on") ?? undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -9689,6 +9694,15 @@ export async function setupIpcHandlers(
         throw new Error("That access profile does not exist.");
       }
       normalizedRequest.accessProfileId = profileId;
+    }
+    // "Works on": which computer the bot's tasks may drive. Running sessions pick up a change
+    // on their next tool call, because the executor reads it from the role.
+    if (normalizedRequest.worksOn !== undefined) {
+      normalizedRequest.worksOn = validateInput(
+        AgentRoleWorksOnSchema,
+        normalizedRequest.worksOn,
+        "works on",
+      );
     }
     const result = await agentRoleRepo.update(normalizedRequest);
     if (!result) {

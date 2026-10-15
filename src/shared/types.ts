@@ -1,6 +1,7 @@
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
+import type { BotWorksOn } from "./bot-computer";
 
 // Core types shared between main and renderer processes
 
@@ -2375,6 +2376,11 @@ export interface AgentConfig {
    * narrows the task's profile to it and never widens anything.
    */
   accessCeilingProfileId?: AccessProfileId;
+  /**
+   * The narrowest "Works on" setting of the bots this task was delegated from. Set only by the
+   * daemon when it creates a child task; it can only take computer tools away.
+   */
+  inheritedBotWorksOn?: BotWorksOn;
   /**
    * Access limits inherited from the sessions that started this one (sub-agents, scheduled
    * runs an agent created). Set when the task is created and never removed by its own role;
@@ -5699,6 +5705,8 @@ export interface AgentRole {
    * runs and Heartbeat dispatches). A ceiling only: a task can still be stricter.
    */
   accessProfileId?: AccessProfileId;
+  /** Where this bot works: which computer its tasks may drive. Unset means Auto. */
+  worksOn?: BotWorksOn;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5747,6 +5755,8 @@ export interface CreateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** Where this bot works; unset means Auto. */
+  worksOn?: BotWorksOn;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -5792,6 +5802,8 @@ export interface UpdateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** The agent's access limit; null clears it. */
   accessProfileId?: AccessProfileId | null;
+  /** Where this bot works; null resets it to Auto. */
+  worksOn?: BotWorksOn | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;

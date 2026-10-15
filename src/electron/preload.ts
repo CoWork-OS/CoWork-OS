@@ -1694,6 +1694,8 @@ interface AgentRoleData {
   autonomyLevel?: AgentAutonomyLevel;
   /** "May do alone": the most access this agent's work gets. */
   accessProfileId?: string;
+  /** Where this bot works; unset means Auto. */
+  worksOn?: import("../shared/bot-computer").BotWorksOn;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1735,6 +1737,7 @@ interface CreateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  worksOn?: import("../shared/bot-computer").BotWorksOn;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1767,6 +1770,7 @@ interface UpdateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** The agent's access limit; null clears it. */
   accessProfileId?: string | null;
+  worksOn?: import("../shared/bot-computer").BotWorksOn | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];

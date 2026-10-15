@@ -8,6 +8,7 @@ import {
 } from "../utils/bot-profile";
 import { BotMascot } from "./bot-mascot/BotMascot";
 import { BotIconPicker } from "./bot-mascot/BotIconPicker";
+import { BOT_WORKS_ON_OPTIONS, type BotWorksOn } from "../../shared/bot-computer";
 import "./bot-form.css";
 
 export interface BotFormValues {
@@ -16,6 +17,8 @@ export interface BotFormValues {
   systemPrompt: string;
   /** `mascot:<id>`; older icon values show as the character they map to. */
   icon: string;
+  /** Where the bot works: which computer its tasks may drive. */
+  worksOn: BotWorksOn;
 }
 
 export interface BotFormDialogProps {
@@ -198,6 +201,24 @@ export function BotFormDialog({
                   maxLength={BOT_PROFILE_INSTRUCTIONS_MAX_LENGTH}
                   rows={4}
                 />
+              </label>
+              <label className="bot-form-field">
+                <span>Works on</span>
+                <select
+                  className="bot-form-works-on"
+                  value={values.worksOn}
+                  onChange={(event) => set({ worksOn: event.target.value as BotWorksOn })}
+                >
+                  {BOT_WORKS_ON_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <small className="bot-form-hint">
+                  {BOT_WORKS_ON_OPTIONS.find((option) => option.value === values.worksOn)
+                    ?.description ?? ""}
+                </small>
               </label>
             </>
           )}

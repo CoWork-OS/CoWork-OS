@@ -76,11 +76,18 @@ export const AndroidPhoneInputSchema = z
       })
       .strict()
       .refine((v) => !!v.package || !!v.text, "Supply a package or visible text to verify")
+      .describe(
+        "Post-action readback criterion. Android apps may delegate activities such as Settings search to a different package. Use observed destination packages; when unknown, use expected visible text instead of guessing the entry package.",
+      )
       .optional(),
   })
   .strict();
 export type AndroidPhoneInput = z.infer<typeof AndroidPhoneInputSchema>;
 export interface AndroidPhoneObservation {
+  /** Approved screenshot delivered into the task workspace. */
+  path?: string;
+  artifactWarning?: string;
+  screenshot?: { taskId: string; path: string; size: number; sha256: string };
   captureId: string;
   deviceId: string;
   createdAt: number;
@@ -89,6 +96,8 @@ export interface AndroidPhoneObservation {
   package: string | null;
   stateDigest: string;
   typingDigest?: string | null;
+  /** Uniquely focused safe native editor; typing does not need a redundant coordinate tap. */
+  focusedEditor?: { id: string; text: string; x: number; y: number; w: number; h: number } | null;
   texts: string[];
   elements: {
     text: string;

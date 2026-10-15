@@ -12,6 +12,7 @@ import { AndroidPhoneService } from "../../phone/AndroidPhoneService";
 import { runPhoneProcess } from "../../phone/AndroidPhoneService";
 import type { AndroidPhoneInput, AndroidPhoneObservation } from "../../../shared/android-phone";
 import type { ApplicationToolGateway } from "../ApplicationAdapterCatalog";
+import { projectApplicationOperation } from "../../../shared/application-execution";
 
 const databases: Database.Database[] = [];
 afterEach(() => {
@@ -79,6 +80,20 @@ describe("durable Android operations", () => {
     const done = await service.execute(operation.id);
     expect(done.execution).toBe("completed");
     expect(done.verification).toBe("verified");
+    expect(done.verificationResult?.expiresAt).toBeUndefined();
+    const historical = {
+      ...done,
+      verificationResult: { ...done.verificationResult!, expiresAt: Date.now() + 60_000 },
+    };
+    expect(projectApplicationOperation(historical, Date.now() + 86_400_000).status).toBe(
+      "complete",
+    );
+    expect(
+      projectApplicationOperation(
+        { ...historical, route: { ...done.route, id: "another.route" } },
+        Date.now() + 86_400_000,
+      ).status,
+    ).toBe("unverified");
     expect(JSON.stringify(done.result)).not.toContain("imageBase64");
     await service.execute(operation.id);
     expect(

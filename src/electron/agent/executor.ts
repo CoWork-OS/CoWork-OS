@@ -1,3 +1,6 @@
+import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
+import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
+import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
 import {
   buildNativeActionLedger,
@@ -7127,7 +7130,7 @@ ${transcript}
       ...(this.task.agentConfig?.chronicleMode === "disabled" ? ["screen_context_resolve"] : []),
       ...(isReadOnlyReview
         ? [
-            "group:system",
+            ...readOnlyReviewSystemRestrictions(this.task.rawPrompt || this.task.prompt || ""),
             "take_screenshot",
             "type_text",
             "screenshot",
@@ -12144,6 +12147,19 @@ ${transcript}
         files = result.files;
       }
       this.fileOperationTracker.recordDirectoryListing(input.path, files);
+    }
+
+    // Approved phone captures are real workspace artifacts, not evidence of app-side success.
+    if (toolSucceeded && result?.screenshot) {
+      const screenshotPath = verifiedPhoneScreenshotPath(
+        toolName,
+        input,
+        result,
+        this.task?.id,
+        this.workspace.path,
+      );
+      if (screenshotPath && this.canReadWorkspacePath(screenshotPath))
+        this.fileOperationTracker.recordFileCreation(screenshotPath);
     }
 
     // Record file creations
@@ -28130,28 +28146,7 @@ You are continuing a previous conversation. The context from the previous conver
     // file exploration), not web research — skip the web evidence requirement.
     if (this.task.parentTaskId && this.task.agentType === "sub") return false;
 
-    const prompt = `${this.task.title}\n${this.getContractPrompt()}`.toLowerCase();
-    // Use word-boundary regex to avoid false positives (e.g. "Researcher" matching "search")
-    const researchSignalPattern =
-      /\b(?:news|latest|today|trending|breaking|reddit|search|headline|current events)\b/;
-    if (!researchSignalPattern.test(prompt)) return false;
-    // Build/creation tasks mentioning news-related keywords don't need web evidence —
-    // they are building a tool about news, not fetching news itself.
-    const buildSignals = [
-      "create an app",
-      "build an app",
-      "make an app",
-      "write an app",
-      "create a tool",
-      "build a tool",
-      "create a website",
-      "build a website",
-      "implement",
-      "develop an app",
-      "develop a tool",
-    ];
-    if (buildSignals.some((signal) => prompt.includes(signal))) return false;
-    return true;
+    return needsTaskWebEvidence(this.task.title, this.getContractPrompt());
   }
 
   private taskRequiresTodayContext(): boolean {

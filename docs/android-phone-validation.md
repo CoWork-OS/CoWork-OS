@@ -37,6 +37,8 @@ The real-provider runs exposed and repaired these issues:
 
 The expanded focused suite passes **321 tests**, with one separate opt-in live scenario skipped. Regression coverage includes no-dispatch supersession, rejection of unknown/completed/mismatched/legacy inputs, historical phone verification, screenshot authorization and integrity, focused-editor output, context continuity, and local versus web search classification.
 
+Before opening the follow-up PR, the branch merged `main` at `e0529cb1f` without conflicts. The same suite plus task-strategy, application-intent and CLI-Anything routing regressions passed **407 tests**, with the same one opt-in live scenario skipped, across 15 files. The real-provider acceptance below predates this merge; it was not repeated for the merge-only integration.
+
 The emulator needed host GPU rendering, four virtual cores and 3 GiB RAM after a System UI ANR in an early attempt. Test setup restarted only this emulator and dismissed its ANR; the model did not alter settings or enter credentials. Repeated stale screens caused a pause and one bounded continuation instruction in the final recovery run. Three stale typing attempts produced no input receipts; revision 4 completed with one typing receipt. Screen and input approvals remained per-call. A separately approved local command checked only screenshot existence/readability/byte count; phone input used `application_operation`, not shell commands.
 
 After the final fixes and app restart, the same task completed its post-restart check: a fresh approved observation confirmed the exact query, and its new PNG opened in the in-app viewer at **1920 × 1080, 91,062 bytes**, with no renderer page errors. The original three completed receipts matched the persisted journal, all three stale attempts remained superseded without receipts, and zero device locks remained. This check dispatched no new phone input. The task finished as Completed without a partial-success marker.
@@ -64,6 +66,24 @@ npx vitest run \
   src/electron/agent/__tests__/executor-tool-allowlist.test.ts \
   src/electron/agent/__tests__/executor-tool-timeouts.test.ts \
   src/electron/agent/tools/__tests__/native-app-tools.test.ts
+```
+
+To reproduce the follow-up PR's 407-test integration check:
+
+```sh
+npx vitest run \
+  src/electron/phone/__tests__ \
+  src/electron/agent/__tests__/cross-step-evidence.test.ts \
+  src/electron/agent/__tests__/executor-loop-utils.test.ts \
+  src/electron/agent/__tests__/executor-helpers-cache.test.ts \
+  src/electron/agent/__tests__/task-web-evidence-policy.test.ts \
+  src/electron/agent/__tests__/executor-tool-allowlist.test.ts \
+  src/electron/agent/__tests__/tool-policy-engine.test.ts \
+  src/electron/applications/__tests__/android-phone-adapter.test.ts \
+  src/electron/applications/__tests__/ApplicationExecutionService.test.ts \
+  src/electron/agent/strategy/__tests__/TaskStrategyService.test.ts \
+  src/electron/applications/__tests__/application-task-intent.test.ts \
+  src/electron/applications/__tests__/cli-anything-harnesses.test.ts
 ```
 
 With a disposable, unlocked emulator connected:

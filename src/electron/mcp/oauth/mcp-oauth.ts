@@ -470,7 +470,7 @@ async function listenForCallback(
   loopbackListeners.set(port, entry);
   const onAbort = () => fail(cancelledBy(signal!));
   signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => fail(new Error("Authorization timed out")), timeoutMs);
+  const timer = setTimeout(() => fail(new Error("Sign-in timed out. Try again.")), timeoutMs);
   const listening = new Promise<void>((resolve, reject) => {
     server.once("error", (error: NodeJS.ErrnoException) =>
       reject(
@@ -700,6 +700,54 @@ function isLoopbackUrl(url: URL): boolean {
   return LOOPBACK_HOSTNAMES.has(url.hostname);
 }
 
+/** The scopes a WWW-Authenticate Bearer challenge asks for, if it names any. */
+export function parseChallengeScopes(wwwAuthenticate: string | null | undefined): string[] {
+  const match = /\bscope="([^"]*)"/i.exec(wwwAuthenticate || "");
+  return match ? match[1].split(/\s+/).filter(Boolean) : [];
+}
+
+/**
+ * The WWW-Authenticate challenge of an unauthenticated MCP initialize request:
+ * it can name the scopes this server needs and where its resource metadata
+ * lives. Null when the server does not answer 401 with a challenge.
+ */
+export async function fetchAuthChallenge(
+  mcpUrl: string,
+  options: { fetchImpl?: FetchLike; signal?: AbortSignal } = {},
+): Promise<string | null> {
+  const url = new URL(mcpUrl);
+  if (url.protocol !== "https:" && !isLoopbackUrl(url)) return null;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const signals = [AbortSignal.timeout(METADATA_TIMEOUT_MS)];
+  if (options.signal) signals.push(options.signal);
+  try {
+    const response = await fetchImpl(mcpUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "CoWork OS", version: "1" },
+        },
+      }),
+      redirect: "manual",
+      signal: AbortSignal.any(signals),
+    });
+    await response.body?.cancel().catch(() => {});
+    return response.status === 401 ? response.headers.get("www-authenticate") : null;
+  } catch {
+    if (options.signal?.aborted) throw cancelledBy(options.signal);
+    return null;
+  }
+}
+
 /**
  * MCP authorization discovery: RFC 9728 protected-resource metadata (from the
  * 401 WWW-Authenticate header or the well-known path), then the authorization
@@ -893,10 +941,20 @@ export async function prepareDynamicClient(
   if (auth.type !== "bearer" || !oauth?.dynamicClientRegistration) return auth;
   if (auth.clientId && oauth.authorizationUrl && auth.tokenUrl) return auth;
   if (!oauth.redirectUri) throw new Error("OAuth redirect URI is required");
+  const challenge = await fetchAuthChallenge(mcpUrl, options);
   const discovered = await discoverOAuthMetadata(mcpUrl, {
     fetchImpl: options.fetchImpl,
     signal: options.signal,
+    wwwAuthenticate: challenge,
   });
+  // MCP scope selection: the scopes the server's challenge asks for, else
+  // everything its resource metadata lists, else none (the server's default).
+  const challengeScopes = parseChallengeScopes(challenge);
+  const scopes = oauth.scopes?.length
+    ? oauth.scopes
+    : challengeScopes.length
+      ? challengeScopes
+      : discovered.scopes;
   const local = isLoopbackUrl(new URL(mcpUrl));
   const authorizationUrl = requireSecureEndpoint(
     discovered.authorizationUrl,
@@ -927,7 +985,7 @@ export async function prepareDynamicClient(
       authorizationUrl,
       tokenAuthMethod: client.tokenAuthMethod,
       ...(discovered.resource ? { resource: discovered.resource } : {}),
-      ...(discovered.scopes?.length && !oauth.scopes?.length ? { scopes: discovered.scopes } : {}),
+      ...(scopes?.length ? { scopes } : {}),
     },
   };
 }

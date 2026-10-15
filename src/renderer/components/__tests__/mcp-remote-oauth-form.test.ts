@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_REMOTE_OAUTH_FORM,
+  mcpErrorMessage,
   remoteOAuthFormFromServer,
   remoteOAuthFormReady,
   remoteOAuthRequest,
@@ -69,5 +70,24 @@ describe("Remote (OAuth) server form", () => {
     expect(remoteOAuthFormReady(form)).toBe(false);
     expect(remoteOAuthFormReady(form, stored)).toBe(true);
     expect(remoteOAuthRequest(form)).not.toHaveProperty("privateKey");
+  });
+
+  it("shows main's error without Electron's IPC prefix", () => {
+    expect(
+      mcpErrorMessage(
+        new Error(
+          "Error invoking remote method 'mcp:oauthAuthorize': Error: Sign-in timed out. Try again.",
+        ),
+        "Sign-in failed",
+      ),
+    ).toBe("Sign-in timed out. Try again.");
+    expect(
+      mcpErrorMessage(new Error("Error invoking remote method 'mcp:connect': TypeError: bad"), "x"),
+    ).toBe("bad");
+    expect(mcpErrorMessage(new Error("Plain failure"), "x")).toBe("Plain failure");
+    expect(
+      mcpErrorMessage(new Error("Error invoking remote method 'mcp:connect': "), "Fallback"),
+    ).toBe("Fallback");
+    expect(mcpErrorMessage(undefined, "Fallback")).toBe("Fallback");
   });
 });

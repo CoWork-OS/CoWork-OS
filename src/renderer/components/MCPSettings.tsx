@@ -11,6 +11,7 @@ import type { AddToolsSelection } from "./AddToolsPanel";
 import type { RemoteOAuthAuthorizeResult } from "../../shared/types";
 import {
   EMPTY_REMOTE_OAUTH_FORM,
+  mcpErrorMessage,
   remoteOAuthFormFromServer,
   remoteOAuthFormReady,
   remoteOAuthRequest,
@@ -461,7 +462,10 @@ export function MCPSettings({
       await invokeMcpApi<RemoteOAuthAuthorizeResult>("authorizeMCPServer", serverId);
       await loadData();
     } catch (error: Any) {
-      setConnectionErrors((prev) => ({ ...prev, [serverId]: error.message || "Sign-in failed" }));
+      setConnectionErrors((prev) => ({
+        ...prev,
+        [serverId]: mcpErrorMessage(error, "Sign-in failed"),
+      }));
     } finally {
       setAuthorizingServers((prev) => {
         const next = new Set(prev);
@@ -556,7 +560,7 @@ export function MCPSettings({
       // Store error in state for inline display
       setConnectionErrors((prev) => ({
         ...prev,
-        [serverId]: error.message || "Connection failed",
+        [serverId]: mcpErrorMessage(error, "Connection failed"),
       }));
     } finally {
       setConnectingServer(null);
@@ -577,7 +581,7 @@ export function MCPSettings({
       console.error("Failed to disconnect server:", error);
       setConnectionErrors((prev) => ({
         ...prev,
-        [serverId]: error.message || "Disconnect failed",
+        [serverId]: mcpErrorMessage(error, "Disconnect failed"),
       }));
     } finally {
       setConnectingServer(null);

@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import type { LLMModelInfo, LLMProviderType, LLMReasoningEffort, Task } from "../../shared/types";
+import type {
+  LLMModelInfo,
+  LLMProviderInfo,
+  LLMProviderType,
+  LLMReasoningEffort,
+  Task,
+} from "../../shared/types";
 
 export interface ThreadModelSelection {
   modelKey: string;
@@ -35,6 +41,8 @@ export function useThreadModelSelection(options: {
   globalProvider: LLMProviderType;
   globalModels: LLMModelInfo[];
   globalReasoningEffort?: LLMReasoningEffort;
+  /** Provider status, for the saved effort of a pinned provider other than the global one. */
+  globalProviders?: LLMProviderInfo[];
 }): ThreadModelSelection & { models: LLMModelInfo[]; reasoningEffort?: LLMReasoningEffort } {
   const { task, globalModel, globalProvider, globalModels, globalReasoningEffort } = options;
   const selection = resolveThreadModelSelection(task, globalModel, globalProvider);
@@ -63,7 +71,9 @@ export function useThreadModelSelection(options: {
   return {
     ...selection,
     models: loaded?.provider === otherProvider ? loaded.models : [],
-    // The saved effort belongs to the global provider; another provider shows its default.
-    reasoningEffort: undefined,
+    // The global effort belongs to the global provider; a pinned provider shows its own
+    // saved effort (the one task:setModel writes), else its default.
+    reasoningEffort: options.globalProviders?.find((provider) => provider.type === otherProvider)
+      ?.reasoningEffort,
   };
 }

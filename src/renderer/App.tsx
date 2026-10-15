@@ -2503,6 +2503,7 @@ export function App() {
   >(undefined);
   const [sessionModelOverride, setSessionModelOverride] = useState<string>("");
   const [availableModels, setAvailableModels] = useState<LLMModelInfo[]>([]);
+  const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
   // The open conversation's own model (when pinned) drives the picker inside that conversation.
   const threadModel = useThreadModelSelection({
     task: remoteTaskView ? undefined : selectedTask,
@@ -2510,8 +2511,8 @@ export function App() {
     globalProvider: selectedProvider,
     globalModels: availableModels,
     globalReasoningEffort: selectedReasoningEffort,
+    globalProviders: availableProviders,
   });
-  const [availableProviders, setAvailableProviders] = useState<LLMProviderInfo[]>([]);
 
   // Update notification state
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -7296,6 +7297,13 @@ export function App() {
         }
         if (selection.reasoningEffort && providerType === selectedProvider) {
           setSelectedReasoningEffort(selection.reasoningEffort);
+        }
+        if (selection.reasoningEffort) {
+          // task:setModel saved it as the provider's effort; show it without a reload.
+          const effort = selection.reasoningEffort;
+          setAvailableProviders((prev) =>
+            prev.map((p) => (p.type === providerType ? { ...p, reasoningEffort: effort } : p)),
+          );
         }
       } catch (error) {
         console.error("Failed to set the conversation model:", error);

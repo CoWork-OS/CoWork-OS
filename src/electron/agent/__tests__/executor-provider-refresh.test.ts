@@ -765,4 +765,49 @@ describe("TaskExecutor provider refresh", () => {
     expect(executor.modelId).toBe("claude-opus-4-5");
     expect(executor.takeModelHandoffNote()).toBeNull();
   });
+
+  it("does not note a handoff for a global provider switch on an unpinned task", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "anthropic",
+      anthropic: { apiKey: "anthropic-key" },
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "resolveTaskModelSelection").mockReturnValue({
+      providerType: "anthropic",
+      modelId: "claude-opus-4-5",
+      modelKey: "opus-4-5",
+      llmProfileUsed: "cheap",
+      resolvedModelKey: "opus-4-5",
+      modelSource: "provider_default",
+      warnings: [],
+    } as Any);
+
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { id: "task-global-switch", title: "Task", agentConfig: {} };
+    executor.provider = { type: "openai", createMessage: vi.fn() };
+    executor.modelId = "gpt-4o";
+    executor.llmProfileUsed = "cheap";
+    executor.providerFailoverIndex = 0;
+    executor.logTag = "[Executor:test]";
+    executor.emitEvent = vi.fn();
+    executor.emitRoutingState = vi.fn();
+    executor.applyResolvedProviderSelection = vi.fn((selection: Any) => {
+      executor.provider = { type: selection.providerType, createMessage: vi.fn() };
+      executor.modelId = selection.modelId;
+    });
+    executor.rebuildProviderFailoverSelections = vi.fn();
+    executor.isVerificationTaskRoute = vi.fn(() => false);
+    executor.hasExplicitTaskRouteOverride = vi.fn(() => false);
+    executor.conversationHistory = [];
+    // A note left over from an earlier switch is dropped by the next route change.
+    executor.pendingModelHandoff = {
+      from: { providerType: "gemini", modelId: "g" },
+      to: { providerType: "openai", modelId: "gpt-4o" },
+    };
+
+    executor.refreshProviderIfSettingsChanged();
+
+    expect(executor.provider.type).toBe("anthropic");
+    expect(executor.takeModelHandoffNote()).toBeNull();
+  });
 });

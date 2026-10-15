@@ -6580,19 +6580,15 @@ ${skillDescriptions}`;
       artifactDir,
       workspaceArtifactDir,
     });
+    // Tool prerequisites determine eligibility; they are not an exhaustive
+    // task allowlist. Promoting them to allowedTools would hide unrelated
+    // capabilities needed by later steps (for example, saving a summary).
     const contextDirectives: SkillContextDirectives = {
-      ...(Array.isArray((skill.requires as Any)?.tools) &&
-      ((skill.requires as Any)?.tools as unknown[]).some((tool) => typeof tool === "string")
-        ? {
-            allowedTools: ((skill.requires as Any).tools as unknown[]).filter(
-              (tool): tool is string => typeof tool === "string" && tool.trim().length > 0,
-            ),
-          }
-        : {}),
       artifactDirectories: [artifactDir, workspaceArtifactDir],
       metadata: {
         source: skill.source || "unknown",
         category: skill.category || "General",
+        requiredTools,
       },
     };
     const skillApplication: SkillApplication = {

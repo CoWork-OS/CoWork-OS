@@ -3054,7 +3054,8 @@ export class ToolRegistry {
     );
     registerPredicate(
       (name) => BrowserTools.isBrowserTool(name),
-      async ({ request }) => this.browserTools.executeTool(request.name, request.input),
+      async ({ request }) =>
+        this.browserTools.executeTool(request.name, request.input, request.runtime),
       serialSchedulerSpec,
     );
     registerPredicate(
@@ -5090,7 +5091,7 @@ ${skillDescriptions}`;
           };
         }
       }
-      return await this.browserTools.executeTool(name, input);
+      return await this.browserTools.executeTool(name, input, _runtime);
     }
 
     // QA tools (Playwright automated visual testing)

@@ -223,11 +223,6 @@ describe("OpenAIProvider structured errors", () => {
         input: [
           {
             type: "message",
-            role: "system",
-            content: [{ type: "input_text", text: "Current time: 2026-04-04T10:00:00Z" }],
-          },
-          {
-            type: "message",
             role: "assistant",
             phase: "commentary",
             content: [{ type: "output_text", text: "I will check status." }],
@@ -242,6 +237,11 @@ describe("OpenAIProvider structured errors", () => {
                 image_url: "data:image/png;base64,base64-image",
               },
             ],
+          },
+          {
+            type: "message",
+            role: "system",
+            content: [{ type: "input_text", text: "Current time: 2026-04-04T10:00:00Z" }],
           },
         ],
       }),
@@ -815,8 +815,8 @@ describe("OpenAIProvider structured errors", () => {
         prompt_cache_retention: "24h",
         messages: [
           { role: "system", content: "Stable instructions" },
-          { role: "system", content: "Current time: 2026-04-04T10:00:00Z" },
           { role: "user", content: "hello" },
+          { role: "system", content: "Current time: 2026-04-04T10:00:00Z" },
         ],
       }),
       undefined,
@@ -1269,7 +1269,97 @@ describe("OpenAIProvider structured errors", () => {
     });
     const context = completeMock.mock.calls.at(-1)?.[1];
     expect(context.systemPrompt).toBeUndefined();
-    expect(JSON.stringify(context.messages).match(/Current turn context/g)).toHaveLength(1);
+    expect(JSON.stringify(context.messages)).not.toContain("Current turn context");
+    const payload = { input: [{ role: "user", content: "test" }] };
+    const options = completeMock.mock.calls.at(-1)?.[2];
+    const body = options.onPayload(payload);
+    expect(body.input.at(-1)).toEqual({
+      role: "developer",
+      content: [{ type: "input_text", text: "Current turn context" }],
+    });
+    expect(JSON.stringify(body).match(/Current turn context/g)).toHaveLength(1);
+  });
+
+  it("keeps subscription history unchanged when turn context changes across tool rounds and follow-ups", async () => {
+    completeMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 100, output: 5, cacheRead: 2_048, cacheWrite: 128 },
+    });
+    const provider = new OpenAIProvider(makeConfig());
+    const messages: LLMRequest["messages"] = [
+      { role: "user", content: "Inspect the report" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "call_1", name: "read_file", input: {} }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "call_1", content: "Report contents" }],
+      },
+    ];
+    const request: LLMRequest = {
+      ...makeRequest(),
+      systemBlocks: [
+        { text: "Stable instructions", scope: "session", cacheable: true },
+        { text: "Current time: first", scope: "turn", cacheable: false },
+      ],
+      messages,
+      promptCache: {
+        mode: "openai_key",
+        ttl: "5m",
+        cacheKey: "stable-session",
+        explicitRecentMessages: 3,
+      },
+    };
+    const snapshot = structuredClone(request);
+    const first = await provider.createMessage(request);
+    await provider.createMessage({
+      ...request,
+      systemBlocks: [
+        request.systemBlocks![0],
+        { text: "Current time: second", scope: "turn", cacheable: false },
+      ],
+      messages: [
+        ...messages,
+        { role: "assistant", content: "The report is ready" },
+        { role: "user", content: "Summarize it" },
+      ],
+    });
+
+    const [firstCall, secondCall] = completeMock.mock.calls;
+    expect(firstCall[1].systemPrompt).toBe("Stable instructions");
+    expect(secondCall[1].systemPrompt).toBe(firstCall[1].systemPrompt);
+    // Conversion timestamps are local SDK metadata, never request content.
+    const withoutTimestamps = (items: Any[]) =>
+      items.map(({ timestamp: _timestamp, ...item }) => item);
+    expect(withoutTimestamps(secondCall[1].messages.slice(0, 3))).toEqual(
+      withoutTimestamps(firstCall[1].messages),
+    );
+    expect(firstCall[1].messages[0].content).toEqual([
+      { type: "text", text: "Inspect the report" },
+    ]);
+    for (const [index, call] of [firstCall, secondCall].entries()) {
+      const input = [
+        { type: "function_call_output", call_id: "call_1", output: "Report contents" },
+      ];
+      const payload = { input, prompt_cache_key: "stable-session" };
+      const body = call[2].onPayload(payload);
+      expect(body.input.slice(0, -1)).toEqual(input);
+      expect(body.input.at(-1).role).toBe("developer");
+      expect(body.input.at(-1).content[0].text).toBe(
+        `Current time: ${index === 0 ? "first" : "second"}`,
+      );
+      expect(body.prompt_cache_key).toBe("stable-session");
+      expect(call[2].sessionId).toBe("stable-session");
+    }
+    expect(request).toEqual(snapshot);
+    expect(first.usage).toEqual({
+      inputTokens: 2_276,
+      outputTokens: 5,
+      cachedTokens: 2_048,
+      cacheWriteTokens: 128,
+    });
   });
 
   it("sends only the session prompt_cache_key on the subscription transport", async () => {
@@ -1293,6 +1383,7 @@ describe("OpenAIProvider structured errors", () => {
     });
 
     const options = completeMock.mock.calls.at(-1)?.[2] as Any;
+    expect(options.transport).toBe("sse");
     expect(options.cacheRetention).toBe("long");
     // pi-ai's Codex transport sends sessionId as prompt_cache_key and session routing.
     expect(options.sessionId).toBe("codex-session");

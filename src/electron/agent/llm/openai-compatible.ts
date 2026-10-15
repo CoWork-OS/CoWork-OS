@@ -90,6 +90,8 @@ export function parseOpenAICompatibleToolArguments(
 }
 
 export interface OpenAICompatibleMessageOptions {
+  /** Only enable for endpoints known to accept system messages after conversation history. */
+  volatileSystemPlacement?: "tail";
   /** Set to false to replace image blocks with text fallback (default: false) */
   supportsImages?: boolean;
   systemBlocks?: LLMSystemBlock[];
@@ -167,7 +169,16 @@ export function toOpenAICompatibleMessages(
   const supportsImages = options?.supportsImages === true;
   const mapToolCallId = createToolCallIdMapper(options?.maxToolCallIdLength);
 
-  result.push(...buildOpenAICompatibleSystemMessages(system, options?.systemBlocks));
+  const { stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
+    system || "",
+    options?.systemBlocks,
+  );
+  const tailContext = options?.volatileSystemPlacement === "tail" ? volatileText : "";
+  if (tailContext) {
+    if (stableText) result.push({ role: "system", content: stableText });
+  } else {
+    result.push(...buildOpenAICompatibleSystemMessages(system, options?.systemBlocks));
+  }
 
   for (const msg of sanitizedMessages) {
     if (typeof msg.content === "string") {
@@ -306,6 +317,7 @@ export function toOpenAICompatibleMessages(
     }
   }
 
+  if (tailContext) cleaned.push({ role: "system", content: tailContext });
   return cleaned;
 }
 

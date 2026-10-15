@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import http from "node:http";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MCPEventService } from "../MCPEventService";
@@ -9,9 +10,16 @@ vi.mock("electron", () => ({ safeStorage: undefined }));
 
 const key = Buffer.alloc(32, 7).toString("base64");
 const running: MCPEventService[] = [];
+const listeners: http.Server[] = [];
 afterEach(async () => {
   await Promise.all(running.splice(0).map((service) => service.stop()));
+  await Promise.all(
+    listeners
+      .splice(0)
+      .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+  );
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   delete process.env.COWORK_MCP_EVENTS_KEY;
   delete process.env.COWORK_MCP_EVENTS_PUBLIC_URL;
 });
@@ -44,7 +52,7 @@ function trigger(delivery: "webhook" | "poll"): EventTrigger {
   };
 }
 
-function fixture(delivery: "webhook" | "poll") {
+function fixture(delivery: "webhook" | "poll", port = 0) {
   vi.spyOn(MCPSettingsManager, "getServer").mockReturnValue({
     id: "server-1",
     name: "Server",
@@ -92,12 +100,91 @@ function fixture(delivery: "webhook" | "poll") {
       return {};
     }),
   };
-  const service = new MCPEventService(db, client as Any, triggers as Any, 0);
+  const service = new MCPEventService(db, client as Any, triggers as Any, port);
   running.push(service);
   return { db, active, triggers, client, service };
 }
 
 describe("MCPEventService", () => {
+  async function occupiedPort() {
+    const listener = http.createServer((_req, res) => res.end("other profile"));
+    listeners.push(listener);
+    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+    return (listener.address() as { port: number }).port;
+  }
+
+  it("selects another loopback port and accepts signed webhooks without disrupting another profile", async () => {
+    vi.stubEnv("COWORK_MCP_EVENTS_PORT", "");
+    vi.stubEnv("COWORK_MCP_EVENTS_PUBLIC_URL", "");
+    process.env.COWORK_MCP_EVENTS_KEY = key;
+    const occupied = await occupiedPort();
+    const { db, active, service } = fixture("webhook", occupied);
+    active.clear();
+    await service.start();
+    const port = service.receiverPort();
+    expect(port).toBeTruthy();
+    expect(port).not.toBe(occupied);
+    active.set("trigger-1", trigger("webhook"));
+    await service.sync();
+    const row = db.prepare("SELECT * FROM mcp_event_subscriptions").get() as Any;
+    const secret = (service as Any).decryptSecret(row.secret_encrypted) as string;
+    const body = JSON.stringify({ type: "verification", challenge: "fallback-port-challenge" });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = createHmac("sha256", Buffer.from(secret.slice(6), "base64"))
+      .update(`verification.${timestamp}.${body}`)
+      .digest("base64");
+    const response = await fetch(`http://127.0.0.1:${port}/mcp-events/trigger-1`, {
+      method: "POST",
+      body,
+      headers: {
+        "webhook-id": "verification",
+        "webhook-timestamp": timestamp,
+        "webhook-signature": `v1,${signature}`,
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ challenge: "fallback-port-challenge" });
+    await service.stop();
+    expect(await (await fetch(`http://127.0.0.1:${occupied}`)).text()).toBe("other profile");
+    db.close();
+  });
+
+  it.each(["port", "public callback"])(
+    "preserves an explicit %s and continues polling when the receiver port is occupied",
+    async (setting) => {
+      const occupied = await occupiedPort();
+      vi.stubEnv("COWORK_MCP_EVENTS_PORT", setting === "port" ? String(occupied) : "");
+      vi.stubEnv(
+        "COWORK_MCP_EVENTS_PUBLIC_URL",
+        setting === "public callback" ? "https://events.example" : "",
+      );
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { db, triggers, service } = fixture("poll", occupied);
+      await service.start();
+      expect(service.receiverPort()).toBeNull();
+      expect(triggers.evaluateEvent).toHaveBeenCalledOnce();
+      db.close();
+    },
+  );
+
+  it("keeps existing webhook routing fixed and reports a binding failure before subscribing", async () => {
+    vi.stubEnv("COWORK_MCP_EVENTS_PORT", "");
+    vi.stubEnv("COWORK_MCP_EVENTS_PUBLIC_URL", "");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.COWORK_MCP_EVENTS_KEY = key;
+    const { db, client, service } = fixture("webhook", await occupiedPort());
+    await service.start();
+    expect(service.receiverPort()).toBeNull();
+    expect(client.requestServerEventMethod).not.toHaveBeenCalled();
+    expect(await service.status()).toContainEqual(
+      expect.objectContaining({
+        status: "error",
+        error: expect.stringContaining("receiver unavailable"),
+      }),
+    );
+    db.close();
+  });
+
   it("holds the server connection across task completion and reconnects after restart", async () => {
     const { db, active, client, service } = fixture("poll");
     client.getServerStatus.mockReturnValue({ status: "disconnected" });

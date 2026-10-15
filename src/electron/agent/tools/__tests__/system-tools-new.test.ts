@@ -39,6 +39,8 @@ vi.mock("../../../memory/MemoryService", () => ({
 }));
 
 import { SystemTools } from "../system-tools";
+import { beginPrivateSurface } from "../../../browser/credentials/private-capture-guard";
+import { createRequire } from "node:module";
 import { shell } from "electron";
 
 beforeEach(() => {
@@ -256,5 +258,66 @@ describe("SystemTools.getCurrentLocation", () => {
         error: expect.stringContaining("Location Services"),
       }),
     );
+  });
+});
+
+describe("SystemTools private screenshot races", () => {
+  function makeTools() {
+    return new SystemTools(
+      { id: "w", name: "W", path: "/tmp", createdAt: 0, permissions: { write: true } } as Any,
+      { logEvent: vi.fn() } as Any,
+      "private-capture-test",
+    );
+  }
+
+  it("rejects after path authorization if a private flow opened and closed meanwhile", async () => {
+    const tools = makeTools();
+    let authorizePath!: (path: string) => void;
+    vi.spyOn(tools as Any, "resolveAccessibleLocalPath").mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          authorizePath = resolve;
+        }),
+    );
+    const operation = tools.takeScreenshot();
+    await vi.waitFor(() => expect(authorizePath).toBeDefined());
+    beginPrivateSurface()();
+    authorizePath("/tmp/unused-private-capture.png");
+    await expect(operation).rejects.toThrow(/private/i);
+  });
+
+  it("discards a capture completed across a private flow before converting or writing pixels", async () => {
+    const tools = makeTools();
+    vi.spyOn(tools as Any, "resolveAccessibleLocalPath").mockResolvedValue(
+      "/tmp/unused-private-capture.png",
+    );
+    // getElectronApis deliberately uses CommonJS require rather than the renderer import.
+    const nodeRequire = createRequire(import.meta.url);
+    const electronPath = nodeRequire.resolve("electron");
+    nodeRequire("electron");
+    const cached = nodeRequire.cache[electronPath]!;
+    const originalExports = cached.exports;
+    let finishCapture!: (value: unknown) => void;
+    const toPNG = vi.fn();
+    cached.exports = {
+      desktopCapturer: {
+        getSources: vi.fn(
+          () =>
+            new Promise((resolve) => {
+              finishCapture = resolve;
+            }),
+        ),
+      },
+    };
+    try {
+      const operation = tools.takeScreenshot();
+      await vi.waitFor(() => expect(finishCapture).toBeDefined());
+      beginPrivateSurface()();
+      finishCapture([{ thumbnail: { toPNG, isEmpty: () => false } }]);
+      await expect(operation).rejects.toThrow(/private/i);
+      expect(toPNG).not.toHaveBeenCalled();
+    } finally {
+      cached.exports = originalExports;
+    }
   });
 });

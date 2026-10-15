@@ -217,7 +217,7 @@ For sites that require an existing signed-in Chrome profile, use an explicit fal
 - Annotate: click an element, or drag to annotate an area (the elements inside it are recorded). For one element, Adjust edits text, font, size, weight, line height, colors, margin, padding, radius and alignment with a live preview in the page; the annotation carries the requested changes and before/after screenshots, and the page is put back when the annotation is saved or cancelled.
 
 - While CoWork acts in the workbench, a banner says what it is doing and a click on the page asks whether to take over. Taking over pauses CoWork: its next browser tool calls return `paused_by_user` until you press Resume.
-- When an agent navigation lands on a sign-in page (a known identity provider, or a login page with a password field), the tool result says `needs_user_sign_in` and the workbench asks you to sign in; Done tells CoWork to continue.
+- When an agent navigation lands on a sign-in page (a known identity provider, or a login page with a password field), the tool result says `needs_user_sign_in`. CoWork can offer a private login prompt or an existing saved login through `browser_vault`. You can also sign in yourself; Done tells CoWork to continue. Filling fields is not proof of authentication: CoWork must verify the resulting signed-in page.
 - The profile menu (person icon) clears browsing data, signs out of all sites, opens the page in the system browser, and opens Settings > Browser.
 
 ## Downloads, Uploads, Dialogs, And Permissions
@@ -255,13 +255,41 @@ Settings > Browser > Import from another browser brings in cookies (to stay sign
 How it is kept safe:
 
 - **Nothing is imported without you.** Reading another browser's key makes macOS ask for permission; if you refuse, nothing is read. You then review counts and site names, and a native confirmation (outside the page UI) approves the import. The staged data lives only in the main process, expires after 5 minutes, works once and only for that workspace, and is wiped on commit or cancel.
-- **Secrets never reach the app UI.** The window sees counts and site names only. Passwords are sealed one by one with the OS keychain (Electron `safeStorage`); if the OS would only obfuscate them (for example a Linux basic text backend), saving is refused rather than weakened. Saved logins can't be viewed, copied or exported from the app.
-- **Filling is user-started and origin-locked.** The key button in the toolbar appears only when the current page's exact origin (https, or loopback http) has a saved login. Choosing one needs Touch ID (or a native confirmation where Touch ID is unavailable), then fills only the top page, only if the live address still matches, in an isolated script world. CoWork has no tool to fill logins, and any filled password is masked in everything CoWork reads back from that page.
+- **Imported secrets never reach the app UI.** The window sees counts and site names only. Passwords are sealed one by one with the OS keychain (Electron `safeStorage`); if the OS would only obfuscate them (for example a Linux basic text backend), saving is refused rather than weakened. Saved logins can't be viewed, copied or exported from the app.
+- **Filling is approved and origin-locked.** The toolbar key button opens Passwords & autofill. Both this menu and the agent use the same credential service. Choosing a login needs Touch ID (or a native confirmation where Touch ID is unavailable), then fills only the top page on its saved exact origin (https, or loopback http), in an isolated script world. An isolated document token and fresh task/tab/policy checks prevent a delayed approval from filling a replacement document. Filled values are masked in subsequent browser results.
 - **Other browsers' files are never modified.** Their databases are copied to a private temporary folder, read read-only with the system `sqlite3`, and the copies are deleted. Profile ids are validated and never used as paths directly.
 - **CSV files are untrusted input.** Size, row and field limits apply; binary or non-UTF-8 files, non-web and `http://` (non-loopback) logins and rows without a password are skipped and counted. After importing, you can delete the plain-text file (overwrite then remove; on SSDs this can't be guaranteed, so keep disk encryption on and empty the Trash).
 - Cookies are validated (host, name, value and prefix rules, expiry) before being set on the workspace profile; partitioned, container and expired cookies are skipped.
 
 Limits worth knowing: a page you fill a login into can read that field, as with any password manager; JavaScript strings holding a secret can't be wiped from memory on demand; Chrome-family Windows and Linux browsers aren't read directly (export a CSV).
+
+## Private Login, Password Managers, 2FA, And Checkout
+
+Ask CoWork to sign into a site in `@Browser`, or use **Passwords & autofill** (the key button).
+
+- **First login:** a private app dialog collects the username, password, and optional authenticator setup key. Choose **Save & sign in** to encrypt it in the current workspace vault, or uncheck Remember to use it once. The answer travels through owner-only IPC and never becomes a conversation message, tool argument, memory entry, or task event. Request/resolution audit events contain metadata only. Browser tools pause while the private prompt is open.
+- **Saved login:** the agent calls `browser_vault` with `action: list` for handles matching the current page, then `fill`. Usernames are visible metadata; passwords are resolved inside the main process. Username-first forms can fill the username, continue, and fill the password on the next page. New-password and confirmation fields, hidden/disabled inputs, cross-origin form actions, and frames are excluded.
+- **1Password and Bitwarden:** install and sign in to the `op` or `bw` CLI, respectively. Detected CLIs appear in the autofill menu. Unlock explicitly through its private dialog. 1Password also supports desktop-app integration by leaving the master password blank. Child processes receive a minimal environment; passwords/tokens never appear in argv or forwarded CLI output. Unlock tokens are scoped to the workspace, held in memory only, and expire after 30 minutes idle. Lock immediately forgets access, including an unlock still in progress. Multiple saved website origins are honored exactly; parent domains and subdomains are not inferred. Manager adapters currently provide login/password/OTP access; checkout items use the local vault.
+- **Two-factor authentication:** `enter_code` with a saved login handle first requires native approval, then generates RFC 6238 TOTP from its encrypted setup key, or obtains the code from the unlocked manager. Saved verification codes are also available in the toolbar menu. Without a saved key, a private code dialog collects a phone/email/authenticator code. Codes are never saved. Single inputs and split one-digit inputs are supported; split values are masked individually in page readbacks. Passkeys, security keys, and device approval taps remain manual handoffs; CoWork must wait and verify the result.
+- **Addresses:** Add address for this site privately collects and optionally saves an address. A native confirmation precedes filling text/select controls.
+- **Payment cards:** Add payment card for this site privately collects a card. Every fill needs explicit native confirmation. Agent fills additionally use the existing browser approval path with automatic approval disabled. Approval is bound to the card handle and exact destination; it never authorizes placing an order. Security codes are used once and never saved; later fills ask for a fresh code. Declining writes no fields. Cards and addresses can be removed under Settings > Browser > Saved passwords & autofill. Card listings and confirmations identify the selected card by its last four digits.
+
+Private prompts expire after five minutes. Cancellation, timeout, navigation, task cancellation, tab changes, takeover, or changed access policy prevents subsequent filling. Agent retries after a decline are suppressed for five minutes; a fresh explicit toolbar action can retry. Restarting the app discards pending prompts and manager unlock sessions. Only request metadata is durable, so a restart cannot resume secret entry automatically. If a page auto-submits or the browser disconnects during a write, the result is `fill_outcome_unknown`; inspect the current page before attempting another fill.
+
+Screenshots, page scripts, storage reads, and native computer control (including `native_app`) are blocked while a private prompt or a document filled by this service is active. Prompt protection lasts until the owner UI acknowledges that the cleared form has painted. A privacy generation check also discards captures that overlap a private flow, even if it closes before the capture finishes. The document restriction ends on a full navigation or tab destruction; text snapshots remain usable and filled values are masked for the tab session, including common card-number formatting. A filled site can read its own fields, as with any password manager. When OS encryption is unavailable, private dialogs offer one-use entry and disable saving.
+
+This flow requires the local Browser Workbench. Headless, externally attached, and cloud browser routes cannot fall back to secret-bearing shell commands or ordinary browser typing. In unattended sessions, private prompts and new approval requests are unavailable.
+
+Regression coverage and running-app checks:
+
+```bash
+npx vitest run src/electron/browser/credentials/__tests__ src/renderer/components/__tests__/private-browser-prompt.test.ts src/electron/agent/__tests__/executor-tool-timeouts.test.ts
+npm run build:electron
+npm run build:react
+npm run qa:browser:vault
+```
+
+The Electron smoke uses a disposable encrypted profile, loopback-only fixture server, synthetic accounts/cards, and fixture `op`/`bw` CLIs. Native confirmation decisions and Touch ID availability are stubbed in the QA process only. It exercises real renderer IPC, isolated-world DOM fills, fixture authentication/2FA, checkout rejection/acceptance, and secret-free task events and CLI arguments. It does not establish live personal-vault access, Touch ID acceptance, or third-party account compatibility. Evidence is written to the temporary directory printed by the command.
 
 ## Relationship To Web Page Artifacts
 

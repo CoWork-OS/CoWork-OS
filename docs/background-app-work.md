@@ -1,10 +1,12 @@
 # Working with apps in the background
 
-CoWork does work in other applications without taking over your computer. It runs apps on your own computer, not on a remote worker, and it does not borrow your screen, pointer, keyboard or clipboard. It reaches each application the most direct way it can, in this order:
+CoWork does work in other applications without taking over your computer. It runs apps on your own computer, not on a remote worker, and it does not borrow your screen, pointer, keyboard or clipboard. It reaches each application through one of three kinds of route:
 
 1. **The application's API**, through an MCP server or a connector. Remote services such as Workday Agent-Ready Tools are reached this way.
 2. **The application's own scripting**, wrapped in a durable application operation. The background Photoshop route works this way.
 3. **The application's window**, through `native_app`, which operates one exact window of an installed macOS app without activating it.
+
+The route is chosen for what the task needs, not by a fixed ranking. It has to reach the same document, record or account, at the fidelity the task needs, and offer a way to check the result. A structured API with good readback is usually the better choice, but not when it would replace a native operation with a lossy approximation, and an app the user names is used as named. A refused or denied route is not worked around through another.
 
 All three routes run under the task's normal access profile, approvals and tool restrictions, and treat an action as done only once a fresh readback confirms it.
 

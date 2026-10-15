@@ -53,6 +53,16 @@ describe("TaskExecutor getToolTimeoutMs", () => {
     }
   });
 
+  it("allows private prompts and checkout approval to outlast the step budget", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: { deepWorkMode: false } };
+    const spy = vi.spyOn(BuiltinToolsSettingsManager, "getToolTimeoutMs").mockReturnValue(null);
+    expect(executor.getToolTimeoutMs("browser_vault", { action: "save_login" })).toBe(
+      20 * 60 * 1000,
+    );
+    spy.mockRestore();
+  });
+
   it("gives orchestrate_agents enough time to wait for child agents", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: { deepWorkMode: false } };

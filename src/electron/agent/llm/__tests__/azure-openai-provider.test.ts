@@ -346,8 +346,8 @@ describe("AzureOpenAIProvider", () => {
     expect(body.prompt_cache_retention).toBe("24h");
     expect(body.messages).toEqual([
       { role: "system", content: "Stable instructions" },
-      { role: "system", content: "Current time: 2026-04-04T10:00:00Z" },
       { role: "user", content: "hi" },
+      { role: "system", content: "Current time: 2026-04-04T10:00:00Z" },
     ]);
   });
 
@@ -662,12 +662,12 @@ describe("AzureOpenAIProvider", () => {
     expect(body.prompt_cache_key).toBe("stable-prefix-hash");
     expect(body.prompt_cache_retention).toBeUndefined();
     expect(body.instructions).toBe("Stable instructions");
-    expect(body.input[0]).toEqual({
+    expect(body.input.at(-1)).toEqual({
       type: "message",
       role: "system",
       content: [{ type: "input_text", text: "Current time: 2026-04-04T10:00:00Z" }],
     });
-    expect(body.input[1].role).toBe("user");
+    expect(body.input[0].role).toBe("user");
   });
 
   it("honors toolChoice=none on chat completions and Responses requests", async () => {

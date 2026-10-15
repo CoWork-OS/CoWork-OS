@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComputerUseTools } from "../computer-use-tools";
 import { BuiltinToolsSettingsManager } from "../builtin-settings";
+import { beginPrivateSurface } from "../../../browser/credentials/private-capture-guard";
 import { setComputerUseProviderFactoryForTesting } from "../../../computer-use/provider";
 import { ComputerUseSessionManager } from "../../../computer-use/session-manager";
 
@@ -271,5 +272,103 @@ describe("ComputerUseTools platform exposure", () => {
     expect(provider.mouseClick).not.toHaveBeenCalled();
     expect(provider.activateApp).not.toHaveBeenCalled();
     expect(daemon.requestApproval).not.toHaveBeenCalled();
+  });
+});
+
+describe("ComputerUseTools private capture races", () => {
+  it("stops after permissions initialize if a private flow opened and closed meanwhile", async () => {
+    setPlatform("darwin");
+    let ready!: () => void;
+    const provider = makeProvider({
+      ensureReadyWithInteractivePermissions: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            ready = resolve;
+          }),
+      ),
+    });
+    setComputerUseProviderFactoryForTesting(() => provider);
+    const tools = makeTools();
+    const operation = tools.screenshot();
+    await vi.waitFor(() => expect(ready).toBeDefined());
+    beginPrivateSurface()();
+    ready();
+    await expect(operation).rejects.toThrow(/private/i);
+    expect(provider.getFrontmost).not.toHaveBeenCalled();
+    expect(provider.screenshot).not.toHaveBeenCalled();
+  });
+
+  it("discards pixels captured across a private flow before saving capture state", async () => {
+    setPlatform("darwin");
+    let finishCapture!: (value: unknown) => void;
+    const provider = makeProvider({
+      screenshot: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finishCapture = resolve;
+          }),
+      ),
+    });
+    setComputerUseProviderFactoryForTesting(() => provider);
+    const tools = makeTools();
+    const operation = tools.screenshot();
+    await vi.waitFor(() => expect(finishCapture).toBeDefined());
+    beginPrivateSurface()();
+    finishCapture({ pngBase64: "private pixels", width: 300, height: 200, scaleFactor: 1 });
+    await expect(operation).rejects.toThrow(/private/i);
+    expect((tools as Any).currentCapture).toBeNull();
+  });
+
+  it("does not activate or click after a private flow starts while visible control approval waits", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+      nativeComputerUseMode: "ask_visible",
+    });
+    setPlatform("darwin");
+    let approve!: (value: boolean) => void;
+    const provider = makeProvider({
+      axPressAtPoint: vi.fn().mockResolvedValue({ pressed: false }),
+      axFocusAtPoint: vi.fn().mockResolvedValue({ focused: false }),
+    });
+    setComputerUseProviderFactoryForTesting(() => provider);
+    const tools = makeTools({
+      logEvent: vi.fn(),
+      requestApproval: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            approve = resolve;
+          }),
+      ),
+    });
+    await tools.screenshot();
+    const operation = tools.click(10, 10);
+    await vi.waitFor(() => expect(approve).toBeDefined());
+    beginPrivateSurface()();
+    approve(true);
+    await expect(operation).rejects.toThrow(/private/i);
+    expect(provider.unminimizeWindow).not.toHaveBeenCalled();
+    expect(provider.activateApp).not.toHaveBeenCalled();
+    expect(provider.mouseClick).not.toHaveBeenCalled();
+  });
+
+  it("does not swallow private-flow invalidation in the text focus fallback", async () => {
+    vi.spyOn(BuiltinToolsSettingsManager, "getComputerUseAutomationSettings").mockReturnValue({
+      browserAutomationMode: "background",
+      nativeComputerUseMode: "ask_visible",
+    });
+    setPlatform("darwin");
+    const provider = makeProvider({
+      axFocusTextInput: vi.fn(async () => {
+        beginPrivateSurface()();
+        throw new Error("focus failed");
+      }),
+    });
+    setComputerUseProviderFactoryForTesting(() => provider);
+    const daemon = { logEvent: vi.fn(), requestApproval: vi.fn().mockResolvedValue(true) };
+    const tools = makeTools(daemon);
+    await tools.screenshot();
+    await expect(tools.typeText("example")).rejects.toThrow(/private/i);
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+    expect(provider.typeText).not.toHaveBeenCalled();
   });
 });

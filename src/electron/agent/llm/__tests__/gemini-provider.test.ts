@@ -2,6 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { GeminiProvider } from "../gemini-provider";
 
 describe("GeminiProvider image handling", () => {
+  it("preserves provider-reported implicit cache reads inside the total prompt tokens", () => {
+    const provider = new GeminiProvider({
+      type: "gemini",
+      model: "gemini-2.5-flash",
+      geminiApiKey: "test-key",
+    });
+    const response = (provider as Any).convertResponse({
+      candidates: [{ finishReason: "STOP", content: { parts: [{ text: "ok" }] } }],
+      usageMetadata: {
+        promptTokenCount: 4_096,
+        candidatesTokenCount: 10,
+        cachedContentTokenCount: 3_072,
+      },
+    });
+    expect(response.usage).toEqual({ inputTokens: 4_096, outputTokens: 10, cachedTokens: 3_072 });
+  });
+
   const imageMessage = [
     {
       role: "user" as const,

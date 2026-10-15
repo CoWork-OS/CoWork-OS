@@ -1,3 +1,4 @@
+import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
 import * as crypto from "crypto";
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
@@ -109,6 +110,7 @@ interface ActionPreparationResult {
   target: ComputerUseTargetState;
   capture: ComputerUseCaptureState;
   visibleControl: boolean;
+  assertPrivateCaptureAllowed: () => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -429,7 +431,8 @@ export class ComputerUseTools {
     });
   }
 
-  private async ensureReady(): Promise<void> {
+  private async ensureReady(): Promise<() => void> {
+    const assertPrivateCaptureAllowed = privateCaptureGuard();
     if (process.platform !== "darwin" && process.platform !== "win32") {
       throw new Error("Computer use is only supported on macOS and Windows desktop builds.");
     }
@@ -438,11 +441,19 @@ export class ComputerUseTools {
     });
     this.session().checkNotAborted();
     await this.helper().ensureReadyWithInteractivePermissions();
+    assertPrivateCaptureAllowed();
+    return assertPrivateCaptureAllowed;
   }
 
-  private async bringTargetToFront(target: ComputerUseTargetState): Promise<void> {
+  private async bringTargetToFront(
+    target: ComputerUseTargetState,
+    assertPrivateCaptureAllowed: () => void,
+  ): Promise<void> {
+    assertPrivateCaptureAllowed();
     await this.helper().unminimizeWindow(target.pid, target.windowId);
+    assertPrivateCaptureAllowed();
     await this.helper().activateApp(target.pid);
+    assertPrivateCaptureAllowed();
     await this.helper().raiseWindow(target.pid, target.windowId);
     await sleep(CUA_CAPTURE_REFRESH_WAIT_MS);
   }
@@ -570,16 +581,22 @@ export class ComputerUseTools {
     };
   }
 
-  private async captureTarget(toolName: string, note?: string): Promise<ComputerUseToolResult> {
+  private async captureTarget(
+    assertPrivateCaptureAllowed: () => void,
+    toolName: string,
+    note?: string,
+  ): Promise<ComputerUseToolResult> {
     if (!this.currentTarget) {
       throw new Error(CONTROLLED_WINDOW_ERROR);
     }
     let payload;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
+        assertPrivateCaptureAllowed();
         payload = await this.helper().screenshot(this.currentTarget.windowId);
         break;
       } catch (error) {
+        assertPrivateCaptureAllowed();
         const message = error instanceof Error ? error.message : String(error);
         if (
           attempt > 0 ||
@@ -588,18 +605,20 @@ export class ComputerUseTools {
           throw error;
         }
         this.currentTarget = await this.refreshCurrentTarget();
+        assertPrivateCaptureAllowed();
         await this.ensureVisibleControlAllowed(
           toolName,
           this.currentTarget,
           "background_window_capture_failed",
         );
-        await this.bringTargetToFront(this.currentTarget);
+        await this.bringTargetToFront(this.currentTarget, assertPrivateCaptureAllowed);
         await sleep(CUA_SCREENSHOT_RETRY_WAIT_MS);
       }
     }
     if (!payload) {
       throw new Error("Failed to capture the current controlled window.");
     }
+    assertPrivateCaptureAllowed();
     this.currentCapture = this.makeCaptureState(this.currentTarget, payload);
     this.persistState();
     this.daemon.logEvent(this.taskId, "tool_result", {
@@ -916,7 +935,7 @@ export class ComputerUseTools {
       throw new Error(
         "background_unavailable: use native_app exact-window control; foreground fallback is disabled.",
       );
-    await this.ensureReady();
+    const assertPrivateCaptureAllowed = await this.ensureReady();
     const target = await this.refreshCurrentTarget();
     const capture = this.requireCurrentCapture(captureId);
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -928,13 +947,14 @@ export class ComputerUseTools {
     });
     const visibleControl = this.isVisibleControlAllowed(target);
     if (visibleControl) {
-      await this.bringTargetToFront(target);
+      await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
     }
-    return { target, capture, visibleControl };
+    assertPrivateCaptureAllowed();
+    return { target, capture, visibleControl, assertPrivateCaptureAllowed };
   }
 
   async screenshot(selection: ScreenshotSelection = {}): Promise<ComputerUseToolResult> {
-    await this.ensureReady();
+    const assertPrivateCaptureAllowed = await this.ensureReady();
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "screenshot",
       app: selection.app,
@@ -951,9 +971,9 @@ export class ComputerUseTools {
 
     this.persistState();
     if (this.isVisibleControlAllowed(this.currentTarget)) {
-      await this.bringTargetToFront(this.currentTarget);
+      await this.bringTargetToFront(this.currentTarget, assertPrivateCaptureAllowed);
     }
-    return await this.captureTarget("screenshot");
+    return await this.captureTarget(assertPrivateCaptureAllowed, "screenshot");
   }
 
   async click(
@@ -962,10 +982,12 @@ export class ComputerUseTools {
     button: ComputerUseMouseButton = "left",
     captureId?: string,
   ): Promise<ComputerUseToolResult> {
-    const { target, capture, visibleControl } = await this.prepareAction("click", captureId);
+    const { target, capture, visibleControl, assertPrivateCaptureAllowed } =
+      await this.prepareAction("click", captureId);
     validatePointInCapture(x, y, capture);
     try {
       if (button === "left") {
+        assertPrivateCaptureAllowed();
         const axResult = await this.helper().axPressAtPoint({
           windowId: target.windowId,
           pid: target.pid,
@@ -975,6 +997,7 @@ export class ComputerUseTools {
           captureHeight: capture.height,
         });
         if (!axResult.pressed) {
+          assertPrivateCaptureAllowed();
           const focusResult = await this.helper().axFocusAtPoint({
             windowId: target.windowId,
             pid: target.pid,
@@ -985,14 +1008,17 @@ export class ComputerUseTools {
           });
           if (focusResult.focused) {
             return await this.captureTarget(
+              assertPrivateCaptureAllowed,
               "click",
               "Background accessibility focused the target, but did not confirm a press. Use another action or approve visible control if a real mouse click is required.",
             );
           }
+          assertPrivateCaptureAllowed();
           await this.ensureVisibleControlAllowed("click", target, "background_ax_press_failed");
           if (!visibleControl) {
-            await this.bringTargetToFront(target);
+            await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
           }
+          assertPrivateCaptureAllowed();
           await this.helper().mouseClick({
             windowId: target.windowId,
             pid: target.pid,
@@ -1005,10 +1031,12 @@ export class ComputerUseTools {
           });
         }
       } else {
+        assertPrivateCaptureAllowed();
         await this.ensureVisibleControlAllowed("click", target, "non_left_mouse_button");
         if (!visibleControl) {
-          await this.bringTargetToFront(target);
+          await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
         }
+        assertPrivateCaptureAllowed();
         await this.helper().mouseClick({
           windowId: target.windowId,
           pid: target.pid,
@@ -1020,7 +1048,7 @@ export class ComputerUseTools {
           clickCount: 1,
         });
       }
-      return await this.captureTarget("click");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "click");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "click",
@@ -1031,13 +1059,16 @@ export class ComputerUseTools {
   }
 
   async doubleClick(x: number, y: number, captureId?: string): Promise<ComputerUseToolResult> {
-    const { target, capture, visibleControl } = await this.prepareAction("double_click", captureId);
+    const { target, capture, visibleControl, assertPrivateCaptureAllowed } =
+      await this.prepareAction("double_click", captureId);
     validatePointInCapture(x, y, capture);
     try {
       if (!visibleControl) {
+        assertPrivateCaptureAllowed();
         await this.ensureVisibleControlAllowed("double_click", target, "double_click");
-        await this.bringTargetToFront(target);
+        await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
       }
+      assertPrivateCaptureAllowed();
       await this.helper().mouseClick({
         windowId: target.windowId,
         pid: target.pid,
@@ -1048,7 +1079,7 @@ export class ComputerUseTools {
         button: "left",
         clickCount: 2,
       });
-      return await this.captureTarget("double_click");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "double_click");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "double_click",
@@ -1059,13 +1090,16 @@ export class ComputerUseTools {
   }
 
   async moveMouse(x: number, y: number, captureId?: string): Promise<ComputerUseToolResult> {
-    const { target, capture, visibleControl } = await this.prepareAction("move_mouse", captureId);
+    const { target, capture, visibleControl, assertPrivateCaptureAllowed } =
+      await this.prepareAction("move_mouse", captureId);
     validatePointInCapture(x, y, capture);
     try {
       if (!visibleControl) {
+        assertPrivateCaptureAllowed();
         await this.ensureVisibleControlAllowed("move_mouse", target, "mouse_move");
-        await this.bringTargetToFront(target);
+        await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
       }
+      assertPrivateCaptureAllowed();
       await this.helper().mouseMove({
         windowId: target.windowId,
         pid: target.pid,
@@ -1074,7 +1108,7 @@ export class ComputerUseTools {
         captureWidth: capture.width,
         captureHeight: capture.height,
       });
-      return await this.captureTarget("move_mouse");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "move_mouse");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "move_mouse",
@@ -1091,7 +1125,8 @@ export class ComputerUseTools {
     if (!Array.isArray(path) || path.length < 2) {
       throw new Error("drag requires a path with at least two points.");
     }
-    const { target, capture, visibleControl } = await this.prepareAction("drag", captureId);
+    const { target, capture, visibleControl, assertPrivateCaptureAllowed } =
+      await this.prepareAction("drag", captureId);
     const normalizedPath = path.map((point, index) => {
       const px = requireFiniteCoordinate(`path[${index}].x`, point.x);
       const py = requireFiniteCoordinate(`path[${index}].y`, point.y);
@@ -1100,9 +1135,11 @@ export class ComputerUseTools {
     });
     try {
       if (!visibleControl) {
+        assertPrivateCaptureAllowed();
         await this.ensureVisibleControlAllowed("drag", target, "mouse_drag");
-        await this.bringTargetToFront(target);
+        await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
       }
+      assertPrivateCaptureAllowed();
       await this.helper().mouseDrag({
         windowId: target.windowId,
         pid: target.pid,
@@ -1110,7 +1147,7 @@ export class ComputerUseTools {
         captureWidth: capture.width,
         captureHeight: capture.height,
       });
-      return await this.captureTarget("drag");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "drag");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "drag",
@@ -1127,15 +1164,18 @@ export class ComputerUseTools {
     scrollY: number,
     captureId?: string,
   ): Promise<ComputerUseToolResult> {
-    const { target, capture, visibleControl } = await this.prepareAction("scroll", captureId);
+    const { target, capture, visibleControl, assertPrivateCaptureAllowed } =
+      await this.prepareAction("scroll", captureId);
     validatePointInCapture(x, y, capture);
     const normalizedScrollX = requireIntegerInRange("scrollX", scrollX, -10_000, 10_000);
     const normalizedScrollY = requireIntegerInRange("scrollY", scrollY, -10_000, 10_000);
     try {
       if (!visibleControl) {
+        assertPrivateCaptureAllowed();
         await this.ensureVisibleControlAllowed("scroll", target, "mouse_scroll");
-        await this.bringTargetToFront(target);
+        await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
       }
+      assertPrivateCaptureAllowed();
       await this.helper().scrollAtPoint({
         windowId: target.windowId,
         pid: target.pid,
@@ -1146,7 +1186,7 @@ export class ComputerUseTools {
         scrollX: normalizedScrollX,
         scrollY: normalizedScrollY,
       });
-      return await this.captureTarget("scroll");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "scroll");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "scroll",
@@ -1164,7 +1204,7 @@ export class ComputerUseTools {
     if (typeof text !== "string" || text.length === 0) {
       throw new Error("type_text requires a non-empty text string.");
     }
-    await this.ensureReady();
+    const assertPrivateCaptureAllowed = await this.ensureReady();
     const target = await this.refreshCurrentTarget();
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "type_text",
@@ -1176,19 +1216,23 @@ export class ComputerUseTools {
     try {
       let nextVisibleControl = this.isVisibleControlAllowed(target);
       if (nextVisibleControl) {
-        await this.bringTargetToFront(target);
+        await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
       }
+      assertPrivateCaptureAllowed();
       const focused = await this.helper().focusedElement(target.pid);
       if (focused.exists && focused.canSetValue && !focused.isSecure && focused.elementRef) {
+        assertPrivateCaptureAllowed();
         await this.helper().setValue(focused.elementRef, text);
       } else {
         let focusedTextInput: Awaited<ReturnType<ComputerUseProvider["axFocusTextInput"]>>;
         try {
+          assertPrivateCaptureAllowed();
           focusedTextInput = await this.helper().axFocusTextInput({
             pid: target.pid,
             windowId: target.windowId,
           });
         } catch {
+          assertPrivateCaptureAllowed();
           focusedTextInput = { focused: false };
         }
         if (
@@ -1197,21 +1241,24 @@ export class ComputerUseTools {
           !focusedTextInput.isSecure &&
           focusedTextInput.elementRef
         ) {
+          assertPrivateCaptureAllowed();
           await this.helper().setValue(focusedTextInput.elementRef, text);
         } else {
           if (!nextVisibleControl) {
+            assertPrivateCaptureAllowed();
             await this.ensureVisibleControlAllowed(
               "type_text",
               target,
               "background_text_value_set_failed",
             );
             nextVisibleControl = true;
-            await this.bringTargetToFront(target);
+            await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
           }
+          assertPrivateCaptureAllowed();
           await this.helper().typeText(text, target.pid, target.windowId);
         }
       }
-      return await this.captureTarget("type_text");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "type_text");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "type_text",
@@ -1231,7 +1278,7 @@ export class ComputerUseTools {
     if (BLOCKED_KEY_COMBOS.has(normalized)) {
       throw new Error(`Blocked key combination: ${keys.join("+")}.`);
     }
-    await this.ensureReady();
+    const assertPrivateCaptureAllowed = await this.ensureReady();
     const target = await this.refreshCurrentTarget();
     this.daemon.logEvent(this.taskId, "tool_call", {
       tool: "keypress",
@@ -1241,13 +1288,15 @@ export class ComputerUseTools {
       keys,
     });
     try {
+      assertPrivateCaptureAllowed();
       await this.ensureVisibleControlAllowed("keypress", target, "keyboard_event");
-      await this.bringTargetToFront(target);
+      await this.bringTargetToFront(target, assertPrivateCaptureAllowed);
+      assertPrivateCaptureAllowed();
       await this.helper().pressKeys({
         ...parseKeypressSpec(target.pid, keys),
         windowId: target.windowId,
       });
-      return await this.captureTarget("keypress");
+      return await this.captureTarget(assertPrivateCaptureAllowed, "keypress");
     } catch (error) {
       this.daemon.logEvent(this.taskId, "tool_error", {
         tool: "keypress",
@@ -1260,7 +1309,7 @@ export class ComputerUseTools {
   async wait(ms?: number): Promise<ComputerUseToolResult> {
     const delayMs =
       ms === undefined ? DEFAULT_WAIT_MS : requireIntegerInRange("ms", ms, 0, MAX_WAIT_MS);
-    await this.ensureReady();
+    const assertPrivateCaptureAllowed = await this.ensureReady();
     await this.refreshCurrentTarget();
     this.requireCurrentCapture();
     this.daemon.logEvent(this.taskId, "tool_call", {
@@ -1268,7 +1317,7 @@ export class ComputerUseTools {
       ms: delayMs,
     });
     await sleep(delayMs);
-    return await this.captureTarget("wait");
+    return await this.captureTarget(assertPrivateCaptureAllowed, "wait");
   }
 
   static getToolDefinitions(options?: { headless?: boolean }): LLMTool[] {

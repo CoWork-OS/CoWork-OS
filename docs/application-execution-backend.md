@@ -119,4 +119,17 @@ The conformance suite requires real SQLite and includes a real database worker, 
 
 [The compiled-runtime smoke](../scripts/qa/application-execution-smoke.cjs) uses a real AgentDaemon, ToolRegistry, coordinator, permission boundary, SQLite profile, and file tools without a model. It checks qualified verification, legacy uncertainty, blocked direct retries, and original-route recovery. Both builds run on Node; this does not establish live Electron UI behavior or packaged release proof. All smoke state is temporary.
 
-For each pilot, qualify installation/account readiness, input/resource identity, native fidelity, conditional writes/conflict detection, observation after a lost reply, cancellation, domain verifiers, and the actual browser/desktop environment when needed. Measure verified outcomes and intervention/recovery effort. Add the pilot's failures to this conformance suite before expanding categories.
+For each pilot, qualify installation/account readiness, input/resource identity, native fidelity, conditional writes/conflict detection, observation after a lost reply, cancellation, domain verifiers, and the actual browser/desktop environment when needed. Add the pilot's failures to this conformance suite before expanding categories.
+
+### Measuring progress
+
+Judge each route and pilot by the work it completes, not by tool success:
+
+- **Verified outcomes:** requests finished with fresh domain evidence, with partial and unknown outcomes counted separately.
+- **Human effort:** interventions, takeovers and corrections the user had to make.
+- **Unnecessary interruptions:** decisions asked for when the request, its limits and earlier answers already settled them.
+- **Recovery correctness:** lost replies, interruptions and cancellations resolved without a duplicate or blind retry.
+- **Latency and cost:** time to a verified result, and every billed attempt.
+- **Adapter effort:** code a new application needs. A new application should mostly need an adapter and domain verifiers; repeated changes to the shared lifecycle point to a missing abstraction.
+
+Tool success, an accepted job and a hidden window are not proof that work is complete.

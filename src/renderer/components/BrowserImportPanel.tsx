@@ -1,10 +1,7 @@
+import type { BrowserVaultItem } from "../../shared/browser-vault";
 import { useCallback, useEffect, useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
-import type {
-  BrowserImportableBrowser,
-  BrowserImportPrepareResult,
-  BrowserSavedLogin,
-} from "../../electron/preload";
+import type { BrowserImportableBrowser, BrowserImportPrepareResult } from "../../electron/preload";
 
 type Staged = Extract<BrowserImportPrepareResult, { success: true }>;
 
@@ -26,7 +23,7 @@ export function BrowserImportPanel({
   const [error, setError] = useState("");
   const [staged, setStaged] = useState<Staged | null>(null);
   const [fileToken, setFileToken] = useState("");
-  const [logins, setLogins] = useState<BrowserSavedLogin[]>([]);
+  const [logins, setLogins] = useState<BrowserVaultItem[]>([]);
 
   const api = window.electronAPI;
   const selected = browsers.find((browser) => browser.id === browserId);
@@ -34,7 +31,16 @@ export function BrowserImportPanel({
   const loadLogins = useCallback(async () => {
     if (!workspaceId) return;
     const result = await api.listBrowserLogins?.({ workspaceId });
-    setLogins(result?.logins ?? []);
+    setLogins(
+      result?.items ??
+        (result?.logins ?? []).map((login) => ({
+          ...login,
+          kind: "login",
+          label: login.username,
+          allowedOrigins: [login.origin],
+          source: "local",
+        })),
+    );
   }, [api, workspaceId]);
 
   useEffect(() => {
@@ -290,18 +296,22 @@ export function BrowserImportPanel({
 
       {logins.length > 0 && (
         <div className="browser-saved-logins">
-          <label>Saved logins ({logins.length})</label>
+          <label>Saved passwords & autofill ({logins.length})</label>
           <ul className="browser-settings-list">
             {logins.slice(0, 200).map((login) => (
               <li key={login.id}>
                 <KeyRound size={13} aria-hidden="true" />
                 <span>
                   {new URL(login.origin).host}
-                  {login.username ? ` · ${login.username}` : ""}
+                  {login.kind !== "login"
+                    ? ` · ${login.kind === "payment" ? "Payment card" : "Address"}`
+                    : login.username
+                      ? ` · ${login.username}`
+                      : ""}
                 </span>
                 <button
                   type="button"
-                  aria-label={`Remove saved login for ${login.origin}`}
+                  aria-label={`Remove saved ${login.kind} for ${login.origin}`}
                   onClick={() =>
                     void api.removeBrowserLogin?.({ workspaceId, id: login.id }).then(loadLogins)
                   }
@@ -316,7 +326,7 @@ export function BrowserImportPanel({
             className="settings-button small"
             onClick={() => void api.clearBrowserLogins?.({ workspaceId }).then(loadLogins)}
           >
-            Remove all saved logins…
+            Remove all saved items…
           </button>
         </div>
       )}

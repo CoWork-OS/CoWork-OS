@@ -37,6 +37,34 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
+  it("keeps initial and follow-up reminders outside the stable chat policy", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = { agentConfig: {} };
+    executor.workspace = { path: "/tmp/chat-cache" };
+    executor.shouldOfferAnswerSurfaces = () => false;
+    const blocks = (reminder: string) =>
+      executor.buildChatOrThinkSystemBlocks(false, {
+        identityPrompt: "Identity",
+        roleContext: "Role",
+        profileContext: "Profile",
+        personalityPrompt: "Personality",
+        extraChatRules: [reminder],
+      });
+    const initial = blocks("Initial turn reminder");
+    const followUp = blocks("Follow-up reminder");
+    expect(initial.filter((block: Any) => block.scope === "session")).toEqual(
+      followUp.filter((block: Any) => block.scope === "session"),
+    );
+    expect(initial.find((block: Any) => block.stableKey === "chat_turn_rules")).toMatchObject({
+      scope: "turn",
+      cacheable: false,
+      text: "Initial turn reminder",
+    });
+    expect(followUp.find((block: Any) => block.stableKey === "chat_turn_rules").text).toBe(
+      "Follow-up reminder",
+    );
+  });
+
   it.each([false, true])(
     "incorporates queued chat before provider execution (snapshot fails=%s)",
     async (fails) => {
@@ -1131,10 +1159,27 @@ describe("TaskExecutor chat mode", () => {
 
   it("continues a truncated companion response without an assistant prefill turn", async () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
+    const providerContext = {
+      format: "anthropic-turn-context-v1",
+      model: "claude-opus-5-5",
+      provider: "anthropic",
+      prefixHash: "prefix",
+      contentHash: "visible",
+      text: "Current context",
+    };
+    const reasoning = [
+      {
+        format: "anthropic",
+        model: "claude-opus-5-5",
+        data: { block: { type: "thinking", signature: "signature", thinking: "" } },
+      },
+    ];
     const createMessageWithTimeout = vi
       .fn()
       .mockResolvedValueOnce({
         content: [{ type: "text", text: "First half" }],
+        providerContext,
+        reasoning,
         stopReason: "max_tokens",
         usage: { inputTokens: 1, outputTokens: 1 },
       })
@@ -1185,11 +1230,17 @@ describe("TaskExecutor chat mode", () => {
     expect(continuationMessages.at(-2)).toEqual({
       role: "assistant",
       content: [{ type: "text", text: "First half" }],
+      providerContext,
+      reasoning,
     });
     const assistantMessages = executor.emitEvent.mock.calls
       .filter(([type]: [string]) => type === "assistant_message")
       .map(([, payload]: [string, Any]) => String(payload.message));
     expect(assistantMessages).toEqual(["First half second half."]);
+    expect(executor.updateConversationHistory).toHaveBeenCalledWith([
+      ...continuationMessages,
+      { role: "assistant", content: [{ type: "text", text: " second half." }] },
+    ]);
   });
 
   it("replaces unexecuted tool-call syntax in chat streaming events", () => {

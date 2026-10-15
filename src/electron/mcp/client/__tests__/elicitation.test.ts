@@ -70,6 +70,8 @@ describe("MCP approval form elicitation", () => {
       transport: "stdio",
       command: process.execPath,
       args: ["-e", script],
+      // This legacy fixture ignores discovery; bound that probe separately from tool calls.
+      connectionTimeout: 1000,
       requestTimeout: 5000,
     });
     const onElicitation = vi.fn(async () => ({ action: "accept" as const, content: {} }));

@@ -6,12 +6,14 @@ Recorded on 2026-10-15 for the initial `phone.android.v1` integration and its ed
 
 | Surface | Result | Scope |
 | --- | --- | --- |
-| Focused regression suite | 219 passed, 1 live opt-in skipped | Phone service/worker guards, durable execution, Android adapter, policy, tool allowlists/timeouts and native-app tool regression coverage |
+| Focused regression suite | 227 passed, 1 live opt-in skipped | Phone service/worker guards, durable execution, Android adapter, policy, tool allowlists/timeouts and native-app tool regression coverage |
 | Live-enabled Android adapter suite | 5 passed in 209.17 seconds | Four adapter tests plus one real-device scenario on an Android API 34 emulator (`emulator-5554`) |
 | Electron acceptance | Passed | Running source app via `npm run dev`, real ADB/phone-harness, visible screen/action approval cards and a local deterministic model fixture |
 | Type checks | Passed | Electron, renderer and daemon TypeScript configurations |
 | Builds | Passed | Electron and React renderer; renderer reported existing chunk-size warnings |
 | Lint and patch checks | Passed | Oxlint with existing warnings, async SQLite lint, scoped formatting and `git diff --check` |
+
+The focused suite originally passed 219 tests. After merging current `main` and preserving both timeout regression cases, it passed 227 tests with the live opt-in scenario skipped. The live and Electron results below were recorded before that merge; the hardware scenario was not repeated for the merge-only resolution.
 
 The live device scenario observed the selected emulator, opened Settings, exercised tapping and ASCII typing, checked screenshots and fresh package/text verification, restarted the service and reconciled the original receipt. A simulated lost response after a completed worker receipt resolved through readback with input dispatched once. Denied approval produced no input receipt.
 

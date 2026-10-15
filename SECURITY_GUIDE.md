@@ -180,21 +180,24 @@ The app connects to these services based on your configuration:
 
 | Destination             | Purpose                                   |
 | ----------------------- | ----------------------------------------- |
-| `api.github.com`        | Update checks                             |
+| `pulse.coworkosapp.com` | Update checks at startup                  |
+| `api.github.com`        | Update checks (fallback and manual)       |
 | `api.telegram.org`      | Telegram bot (if configured)              |
 | Discord API             | Discord bot (if configured)               |
 | Signal (via signal-cli) | Signal bot (if configured, local process) |
 
-### No Telemetry
+### Analytics and Outbound Data
 
-CoWork OS does **not**:
+CoWork Pulse usage reporting is off by default and needs explicit opt-in. If you opt in, it sends
+one daily record of aggregate counts. It never includes prompts, responses, file names or contents,
+commands, URLs, or model routes. Automatic update checks in installed builds send the app version,
+platform, architecture and surface to `pulse.coworkosapp.com`, with no installation identifier. See
+[CoWork Pulse](docs/cowork-pulse.md).
 
-- Send usage analytics
-- Track user behavior
-- Phone home to any server
-- Share your data with third parties
-
-Your data stays on your machine and only goes to the LLM provider you explicitly configure.
+Model providers, gateways, web search, connectors and channels also receive the data a task needs.
+Dreaming, which is on by default with the memory folder, sends the memory folder and recent task
+conversations to your model provider about once a day. See [What You Own](docs/what-you-own.md) for
+where your data is stored and what leaves your machine.
 
 ---
 

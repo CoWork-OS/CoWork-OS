@@ -53,7 +53,7 @@ export function createPhotoshopEditAdapter(): ApplicationAdapter {
       remoteFencing: false,
     },
     description:
-      "Edit named/nested layers of an existing PSD: text, text size/color, visibility, opacity, rename and leaf translation. Read source with local_photoshop_read to obtain layer paths and sourceSha256. Saves fresh revised PSD/PNG, preserves source and rejects unsaved documents. Local background scripting; unlocked Mac required, no VM or shell.",
+      "Edit named/nested layers of an existing PSD: text, text size/color, visibility, opacity, rename and leaf translation. Read source with local_photoshop_read to obtain layer paths and sourceSha256. Saves fresh revised PSD/PNG, preserves source and rejects unsaved documents. Local background scripting; unlocked Mac required, no shell.",
     inputSchema: z.toJSONSchema(PhotoshopEditSchema),
   });
   const read = async (

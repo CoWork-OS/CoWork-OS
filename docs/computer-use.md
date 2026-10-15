@@ -160,7 +160,7 @@ Rough order the stack encourages:
 2. **Browser tools** for web UIs.
 3. **Shell and file tools** for repo and CLI work.
 4. **`open_application`** when the missing piece is “the app is not running.”
-5. **`native_app`** (macOS, background) or **`screenshot` + follow-up computer-use actions** when the task still requires **native GUI** interaction.
+5. **`native_app`** (macOS, background; see [Working with apps in the background](background-app-work.md)) or **`screenshot` + follow-up computer-use actions** when the task still requires **native GUI** interaction.
 
 **Native desktop GUI intent** is detected from the **user goal and step text** (not only from generic words like “browser” in strategy headers). Explicit mentions of native apps, windows, dialogs, or on-screen UI tend to unlock the computer-use lane; purely web or repo tasks should not.
 

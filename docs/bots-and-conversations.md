@@ -458,7 +458,7 @@ team.
 
 ### Host computer and computer use
 
-Bots do not receive a separate hosted computer or VM. When computer-use tools
+Bots do not receive a separate hosted computer. When computer-use tools
 are selected, they operate on the computer running CoWork OS. The Bot details
 rail reports whether the local helper is installed, Accessibility is trusted,
 Screen Recording is granted, and the computer is already in use by another

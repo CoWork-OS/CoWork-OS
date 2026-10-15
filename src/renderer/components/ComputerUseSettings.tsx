@@ -144,7 +144,7 @@ function ComputerUseSettingsPanel() {
 
       <div className="computer-use-platform-note">
         Computer use runs on this computer with its local permissions; it does not create a separate
-        hosted computer or VM.
+        hosted computer.
       </div>
 
       {error ? <div className="settings-error">{error}</div> : null}

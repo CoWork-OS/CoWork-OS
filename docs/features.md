@@ -169,7 +169,7 @@ Desktop automation for **native apps** on macOS and Windows when MCP, browser au
 - **Built-in tools category**: Enable/disable and priority for the `computer_use` tool family alongside other built-in categories.
 - **Policy & planning**: Tool availability defers the computer-use lane unless the task signals native/desktop GUI intent; executor guidance treats computer use as last resort after integrations, `browser_*`, and shell. For native GUI tasks, routing prefers **`screenshot`**, **`click`**, **`type_text`**, **`keypress`**, and related tools (plus **`open_application`** when launching the app) over **`run_applescript`** / fragile shell GUI hacks.
 - **Tools**: `screenshot`, `click`, `double_click`, `move_mouse`, `drag`, `scroll`, `type_text`, `keypress`, `wait` (with blocklisted dangerous key chords).
-- **Background app control (macOS)**: `native_app` operates one exact window of an installed app without activating it, moving the pointer or using the clipboard, and pauses while you use that app. Mutations are journaled and never resent; success is judged from a fresh observation. See [Background App Control](local-background-app-control.md).
+- **Background app control (macOS)**: `native_app` operates one exact window of an installed app without activating it, moving the pointer or using the clipboard, and pauses while you use that app. Mutations are journaled and never resent; success is judged from a fresh observation. See [Background App Control](local-background-app-control.md), and [Working with apps in the background](background-app-work.md) for how this fits with application operations, local Photoshop scripting and remote MCP.
 
 ### Chronicle (Desktop Research Preview)
 

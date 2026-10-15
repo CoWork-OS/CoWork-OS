@@ -98,8 +98,8 @@ export const LOCAL_PHOTOSHOP_TOOLS: LLMTool[] = NATIVE_APPLICATION_TOOLS.map((to
   ...tool,
   name: tool.name.replace("native_application", "local_photoshop"),
   description: tool.name.endsWith("create")
-    ? "Bounded local background Photoshop banner creation. Auto-launches installed Photoshop without activation. Fresh editable PSD/PNG files only; no arbitrary code, overwrite, VM, network or shell permission. Prefer application_operation for durable verification."
-    : "Read-only original local Photoshop document and saved PSD/PNG verification. Never launches or activates an app; no VM or network dependency.",
+    ? "Bounded local background Photoshop banner creation. Auto-launches installed Photoshop without activation. Fresh editable PSD/PNG files only; no arbitrary code, overwrite, network or shell permission. Prefer application_operation for durable verification."
+    : "Read-only original local Photoshop document and saved PSD/PNG verification. Never launches or activates an app; no network dependency.",
   input_schema: {
     ...tool.input_schema,
     properties: {

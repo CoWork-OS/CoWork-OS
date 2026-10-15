@@ -378,6 +378,67 @@ describe("DatabaseClient with a real worker", () => {
     expect(client.getState()).toBe("ready");
   });
 
+  describe("with openAfter (spawned while the host prepares the schema)", () => {
+    const gate = () => {
+      let open!: () => void;
+      let fail!: (error: Error) => void;
+      const promise = new Promise<void>((resolve, reject) => {
+        open = resolve;
+        fail = reject;
+      });
+      return { promise, open, fail };
+    };
+    const startGated = (openAfter: Promise<unknown>, options: Partial<DatabaseClientOptions>) =>
+      DatabaseClient.start(
+        {
+          dbPath,
+          requiredTables: ["worker_test_markers"],
+          workerPath,
+          testCommandsModule,
+          ...options,
+        },
+        { openAfter },
+      ).then((client) => {
+        clients.push(client);
+        return client;
+      });
+
+    it("opens the database only after the host's open has finished", async () => {
+      const opened = gate();
+      let ready = false;
+      // The fixture is still at version 0: a worker that opened now would fail its check.
+      const starting = startGated(opened.promise, { expectedSchemaVersion: 1 }).then((client) => {
+        ready = true;
+        return client;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(ready).toBe(false);
+      const db = new Database(dbPath);
+      db.pragma("user_version = 1");
+      db.close();
+      opened.open();
+      const client = await starting;
+      expect(client.getState()).toBe("ready");
+      await client.executeCommand("test.insertMarker", { name: "after-open" });
+      expect(markers()).toEqual(["after-open"]);
+    });
+
+    it("starts the ready deadline when the open finishes, not at spawn", async () => {
+      const opened = gate();
+      const starting = startGated(opened.promise, { startupTimeoutMs: 1_000 });
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      opened.open();
+      expect((await starting).getState()).toBe("ready");
+    });
+
+    it("fails with the open's error when the host could not open the database", async () => {
+      const opened = gate();
+      const starting = startGated(opened.promise, {});
+      opened.fail(new Error("unsupported schema version"));
+      await expect(starting).rejects.toThrow("unsupported schema version");
+    });
+  });
+
   it("drains accepted work on close and rejects new requests afterwards", async () => {
     const client = await start();
     const writes = ["x", "y", "z"].map((name) =>

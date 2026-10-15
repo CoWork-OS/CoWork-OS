@@ -106,6 +106,12 @@ export function isSettingsWorkerEnabled(): boolean {
 export function startDatabaseWorker(options: {
   dbPath: string;
   runtime: DatabaseRuntime;
+  /**
+   * The host's open of this database. When given, the worker spawns at once and opens
+   * the file once this resolves, so its startup overlaps schema setup (DB6). If the open
+   * fails, so does this start, without a worker error: startup reports the open itself.
+   */
+  openAfter?: Promise<unknown>;
 }): Promise<DatabaseClient | null> {
   if (startup) return startup;
   configureDatabaseRuntime(options.runtime);
@@ -113,11 +119,15 @@ export function startDatabaseWorker(options: {
     startup = Promise.resolve(null);
     return startup;
   }
-  startup = DatabaseClient.start({
-    dbPath: options.dbPath,
-    requiredTables: requiredTablesFor(DATABASE_COMMANDS),
-    expectedSchemaVersion: CURRENT_SCHEMA_VERSION,
-  })
+  const openAfter = options.openAfter;
+  startup = DatabaseClient.start(
+    {
+      dbPath: options.dbPath,
+      requiredTables: requiredTablesFor(DATABASE_COMMANDS),
+      expectedSchemaVersion: CURRENT_SCHEMA_VERSION,
+    },
+    { openAfter },
+  )
     .then((client) => {
       activeClient = client;
       // DB4: legacy events converted on host reads of this database are written here.
@@ -132,7 +142,9 @@ export function startDatabaseWorker(options: {
       logger.info(`Database worker ready (${options.runtime})`);
       return client;
     })
-    .catch((error) => {
+    .catch(async (error) => {
+      // A failed host open is reported by startup itself; this worker never opened.
+      if (await openAfter?.then(() => false).catch(() => true)) return null;
       logger.error(
         "Database worker unavailable; migrated domains use the host backend for this run:",
         error,

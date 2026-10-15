@@ -58,6 +58,7 @@ interface MCPServerConfig {
       scopes?: string[];
       jwt?: { subject?: string };
       preset?: { kind: "workday"; region?: string; tenant?: string };
+      dynamicClientRegistration?: boolean;
     };
   };
   /** Workday preset servers: the admin client for agent setup (secret masked). */
@@ -1461,15 +1462,18 @@ export function MCPSettings({
                             </button>
                           )}
 
-                        {config?.auth?.oauth && !isBrowserHost && (
-                          <button
-                            className="button-small button-secondary"
-                            onClick={() => handleOpenEditRemote(serverStatus.id)}
-                            title="Edit the server's sign-in settings"
-                          >
-                            Edit
-                          </button>
-                        )}
+                        {/* Registry servers register their own client, so there is nothing to edit. */}
+                        {config?.auth?.oauth &&
+                          !config.auth.oauth.dynamicClientRegistration &&
+                          !isBrowserHost && (
+                            <button
+                              className="button-small button-secondary"
+                              onClick={() => handleOpenEditRemote(serverStatus.id)}
+                              title="Edit the server's sign-in settings"
+                            >
+                              Edit
+                            </button>
+                          )}
 
                         {config?.auth?.oauth?.preset?.kind === "workday" && !isBrowserHost && (
                           <button

@@ -6,6 +6,7 @@ import {
   TaskCreateSchema,
   TaskWorkspaceUpdateSchema,
   TaskModelSelectionSchema,
+  AgentRoleModelFieldsSchema,
   TaskMessageSchema,
   ApprovalResponseSchema,
   GuardrailSettingsSchema,
@@ -837,5 +838,28 @@ describe("TaskModelSelectionSchema", () => {
     expect(AgentConfigSchema.parse({ modelKey: "opus-4-5", modelPinned: true })).toMatchObject({
       modelPinned: true,
     });
+  });
+});
+
+describe("AgentRoleModelFieldsSchema", () => {
+  it("accepts a known provider and model, or a cleared choice", () => {
+    expect(
+      AgentRoleModelFieldsSchema.parse({ providerType: "anthropic", modelKey: " opus-4-5 " }),
+    ).toEqual({ providerType: "anthropic", modelKey: "opus-4-5" });
+    expect(AgentRoleModelFieldsSchema.parse({ providerType: "", modelKey: "" })).toEqual({
+      providerType: "",
+      modelKey: "",
+    });
+    expect(AgentRoleModelFieldsSchema.parse({ providerType: null, modelKey: null })).toEqual({
+      providerType: null,
+      modelKey: null,
+    });
+    expect(AgentRoleModelFieldsSchema.parse({})).toEqual({});
+  });
+
+  it("rejects unknown providers and oversized model keys", () => {
+    expect(() => AgentRoleModelFieldsSchema.parse({ providerType: "nope" })).toThrow();
+    expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: "x".repeat(201) })).toThrow();
+    expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: 42 })).toThrow();
   });
 });

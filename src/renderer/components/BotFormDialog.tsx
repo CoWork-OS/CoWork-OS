@@ -8,6 +8,7 @@ import {
 } from "../utils/bot-profile";
 import { BotMascot } from "./bot-mascot/BotMascot";
 import { BotIconPicker } from "./bot-mascot/BotIconPicker";
+import { BotModelField } from "./BotModelField";
 import "./bot-form.css";
 
 export interface BotFormValues {
@@ -16,6 +17,9 @@ export interface BotFormValues {
   systemPrompt: string;
   /** `mascot:<id>`; older icon values show as the character they map to. */
   icon: string;
+  /** The bot's own model: provider and model key, both "" to follow the default model. */
+  providerType: string;
+  modelKey: string;
 }
 
 export interface BotFormDialogProps {
@@ -199,6 +203,11 @@ export function BotFormDialog({
                   rows={4}
                 />
               </label>
+              <BotModelField
+                value={{ providerType: values.providerType, modelKey: values.modelKey }}
+                onChange={(model) => set(model)}
+                disabled={busy}
+              />
             </>
           )}
           {error ? (

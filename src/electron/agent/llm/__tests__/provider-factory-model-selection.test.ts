@@ -1141,4 +1141,17 @@ describe("LLMProviderFactory thread model pin", () => {
     expect(resolved.modelSource).toBe("provider_default");
     expect(resolved.warnings.join("\n")).toContain("gemini/gemini-2.5-pro is not available");
   });
+
+  it("uses the current provider for a pinned model that names no provider", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);
+
+    const resolved = LLMProviderFactory.resolveTaskModelSelection({
+      modelKey: "gpt-4o-mini",
+      modelPinned: true,
+    });
+
+    expect(resolved.providerType).toBe("openai");
+    expect(resolved.modelKey).toBe("gpt-4o-mini");
+    expect(resolved.modelSource).toBe("explicit_override");
+  });
 });

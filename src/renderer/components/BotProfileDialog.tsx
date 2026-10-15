@@ -22,6 +22,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     description: "",
     systemPrompt: "",
     icon: "",
+    providerType: "",
+    modelKey: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,6 +46,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           systemPrompt: loaded.systemPrompt || "",
           // Edit the character the bot is drawn as, so saving keeps what it shows.
           icon: botMascotIcon(resolveBotMascot(loaded.icon)),
+          providerType: loaded.modelKey ? loaded.providerType || "" : "",
+          modelKey: loaded.modelKey || "",
         });
       } catch (cause) {
         if (!cancelled) {
@@ -70,6 +74,10 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       setError("Bot editing is unavailable in this session.");
       return;
     }
+    if (values.providerType && !values.modelKey) {
+      setError("Choose a model, or switch back to the default model.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -79,6 +87,9 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         description: normalizeBotProfileText(values.description),
         systemPrompt: normalizeBotProfileText(values.systemPrompt),
         icon: values.icon,
+        // "" clears both: the bot follows the default model again.
+        providerType: values.modelKey ? values.providerType : "",
+        modelKey: values.modelKey,
       });
       if (!updated) throw new Error("Could not save this bot.");
       await onSaved?.(updated);

@@ -9,7 +9,7 @@ describe("resolveThreadModelSelection", () => {
         "gpt-4o",
         "openai",
       ),
-    ).toEqual({ modelKey: "opus-4-5", providerType: "anthropic", pinned: true });
+    ).toEqual({ modelKey: "opus-4-5", providerType: "anthropic", pinned: true, source: "thread" });
   });
 
   it("follows the global model when the conversation has no pin", () => {
@@ -19,7 +19,7 @@ describe("resolveThreadModelSelection", () => {
         "gpt-4o",
         "openai",
       ),
-    ).toEqual({ modelKey: "gpt-4o", providerType: "openai", pinned: false });
+    ).toEqual({ modelKey: "gpt-4o", providerType: "openai", pinned: false, source: "global" });
     expect(resolveThreadModelSelection(undefined, "gpt-4o", "openai").pinned).toBe(false);
   });
 
@@ -31,5 +31,25 @@ describe("resolveThreadModelSelection", () => {
         "openai",
       ).pinned,
     ).toBe(false);
+  });
+
+  it("shows the bot's model when the conversation has no pick of its own", () => {
+    expect(
+      resolveThreadModelSelection({ agentConfig: { botConversation: true } }, "gpt-4o", "openai", {
+        modelKey: "opus-4-5",
+        providerType: "anthropic",
+      }),
+    ).toEqual({ modelKey: "opus-4-5", providerType: "anthropic", pinned: false, source: "bot" });
+    expect(
+      resolveThreadModelSelection(undefined, "gpt-4o", "openai", { modelKey: "gpt-4o-mini" }),
+    ).toMatchObject({ modelKey: "gpt-4o-mini", providerType: "openai", source: "bot" });
+    expect(
+      resolveThreadModelSelection(
+        { agentConfig: { providerType: "openai", modelKey: "gpt-4o-mini", modelPinned: true } },
+        "gpt-4o",
+        "openai",
+        { modelKey: "opus-4-5", providerType: "anthropic" },
+      ),
+    ).toMatchObject({ modelKey: "gpt-4o-mini", source: "thread", pinned: true });
   });
 });

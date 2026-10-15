@@ -230,3 +230,34 @@
   border-color: var(--color-text-primary);
   background: var(--color-bg-hover);
 }
+
+.bot-form-model {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bot-form-model select {
+  flex: 1 1 160px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 9px 30px 9px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background-color: var(--color-bg-input, var(--color-bg-primary));
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.bot-form-model select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-text-primary) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+}
+
+.bot-form-hint {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}

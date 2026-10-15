@@ -271,6 +271,14 @@ provider is later disconnected, the conversation falls back to the global
 model. An effort level picked there is saved as that provider's effort setting.
 With no conversation open, the picker still changes the global default.
 
+A bot can also have its own model: choose it under **Model** when you create or edit the bot.
+Every conversation of that bot (and the work it runs for responsibilities) uses it, unless the
+conversation picked its own model in the picker. The order is: the conversation's pick, then
+the bot's model, then the global default. The bot's model is read on every turn, so changing it
+applies to its conversations on their next message; choosing **Default model** sends them back
+to the global default. A bot model on a provider that is no longer connected falls back to the
+global default.
+
 ### 5. Start a separate conversation
 
 Open the bot's header menu and select **New conversation**, or choose **New**

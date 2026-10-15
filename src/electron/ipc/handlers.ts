@@ -301,6 +301,7 @@ import {
   isTempWorkspaceId,
   AgentConfig,
   LLMReasoningEffort,
+  LLMProviderType,
   LLM_PROVIDER_TYPES,
   PdfReviewSummary,
   TaskLearningProgress,
@@ -398,6 +399,7 @@ import {
   TaskRenameSchema,
   TaskWorkspaceUpdateSchema,
   TaskModelSelectionSchema,
+  AgentRoleModelFieldsSchema,
   TaskMessageSchema,
   FileImportSchema,
   FileImportDataSchema,
@@ -1007,6 +1009,26 @@ export function getNotificationService(): NotificationService | null {
 }
 
 // Helper to check rate limit and throw if exceeded
+/**
+ * A bot's own model from the renderer: a known provider and a model key, or cleared (empty or
+ * null becomes null, "follow the default model"). Fields that were not sent stay absent.
+ */
+function normalizeAgentRoleModelFields(request: unknown): {
+  providerType?: LLMProviderType | null;
+  modelKey?: string | null;
+} {
+  const raw = (request && typeof request === "object" ? request : {}) as Record<string, unknown>;
+  const value = validateInput(
+    AgentRoleModelFieldsSchema,
+    { providerType: raw.providerType, modelKey: raw.modelKey },
+    "bot model",
+  );
+  return {
+    ...(value.providerType !== undefined ? { providerType: value.providerType || null } : {}),
+    ...(value.modelKey !== undefined ? { modelKey: value.modelKey || null } : {}),
+  };
+}
+
 function checkRateLimit(
   channel: string,
   _config: {
@@ -9680,13 +9702,18 @@ export async function setupIpcHandlers(
     if (request.companyId !== undefined && request.companyId !== null) {
       request.companyId = validateInput(UUIDSchema, request.companyId, "company ID");
     }
+    Object.assign(request, normalizeAgentRoleModelFields(request));
     return agentRoleRepo.create(request);
   });
 
   ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_UPDATE, async (_, request) => {
     checkRateLimit(IPC_CHANNELS.AGENT_ROLE_UPDATE);
     const validated = validateInput(UUIDSchema, request.id, "agent role ID");
-    const normalizedRequest = { ...request, id: validated };
+    const normalizedRequest = {
+      ...request,
+      id: validated,
+      ...normalizeAgentRoleModelFields(request),
+    };
     if (normalizedRequest.companyId !== undefined && normalizedRequest.companyId !== null) {
       normalizedRequest.companyId = validateInput(
         UUIDSchema,

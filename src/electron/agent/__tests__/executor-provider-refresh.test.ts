@@ -765,4 +765,76 @@ describe("TaskExecutor provider refresh", () => {
     expect(executor.modelId).toBe("claude-opus-4-5");
     expect(executor.takeModelHandoffNote()).toBeNull();
   });
+
+  it("runs a bot's conversation on the bot's model, below the conversation's own pick", () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "openai",
+      openai: { apiKey: "openai-key", model: "gpt-4o" },
+      anthropic: { apiKey: "anthropic-key" },
+    } as Any);
+    const resolveSpy = vi.spyOn(LLMProviderFactory, "resolveTaskModelSelection").mockReturnValue({
+      providerType: "anthropic",
+      modelId: "claude-opus-4-5",
+      modelKey: "opus-4-5",
+      llmProfileUsed: "cheap",
+      resolvedModelKey: "opus-4-5",
+      modelSource: "explicit_override",
+      warnings: [],
+    } as Any);
+    let role: Any = { id: "role-1", modelKey: "opus-4-5", providerType: "anthropic" };
+
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "task-bot-model",
+      title: "Bot conversation",
+      assignedAgentRoleId: "role-1",
+      agentConfig: { botConversation: true, modelKey: "stale-copy" },
+    };
+    executor.daemon = { getAgentRoleById: vi.fn(() => role) };
+    executor.provider = { type: "openai", createMessage: vi.fn() };
+    executor.modelId = "gpt-4o";
+    executor.llmProfileUsed = "cheap";
+    executor.providerFailoverIndex = 0;
+    executor.logTag = "[Executor:test]";
+    executor.emitEvent = vi.fn();
+    executor.emitRoutingState = vi.fn();
+    executor.applyResolvedProviderSelection = vi.fn();
+    executor.rebuildProviderFailoverSelections = vi.fn();
+    executor.isVerificationTaskRoute = vi.fn(() => false);
+    executor.hasExplicitTaskRouteOverride = vi.fn(() => true);
+    executor.conversationHistory = [];
+
+    executor.refreshProviderIfSettingsChanged();
+    // The global provider differs, yet the bot's model is kept, not dropped.
+    expect(resolveSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        providerType: "anthropic",
+        modelKey: "opus-4-5",
+        modelPinned: true,
+      }),
+      expect.any(Object),
+    );
+
+    // The person picked a model for this conversation: that wins over the bot's.
+    executor.task.agentConfig = {
+      botConversation: true,
+      providerType: "openai",
+      modelKey: "gpt-4o-mini",
+      modelPinned: true,
+    };
+    executor.refreshProviderIfSettingsChanged();
+    expect(resolveSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ providerType: "openai", modelKey: "gpt-4o-mini" }),
+      expect.any(Object),
+    );
+
+    // No pick and the bot's model cleared: back to the global model.
+    executor.task.agentConfig = { botConversation: true, modelKey: "stale-copy" };
+    role = { id: "role-1", modelKey: null, providerType: null };
+    executor.refreshProviderIfSettingsChanged();
+    expect(resolveSpy).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ modelPinned: true }),
+      expect.any(Object),
+    );
+  });
 });

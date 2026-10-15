@@ -151,8 +151,8 @@ describe("MCPRegistryManager install defaults", () => {
     const registry = await MCPRegistryManager.fetchRegistry();
     const hosted = registry.servers.filter((server) => server.remoteAuth);
 
-    expect(hosted).toHaveLength(44);
-    expect(new Set(hosted.map((server) => server.id)).size).toBe(44);
+    expect(hosted).toHaveLength(43);
+    expect(new Set(hosted.map((server) => server.id)).size).toBe(43);
     for (const server of hosted) {
       expect(server.transport).toBe("streamable-http");
       expect(server[REGISTRY_ENTRY_PROVENANCE as keyof typeof server]).toBe("bundled");
@@ -161,7 +161,7 @@ describe("MCPRegistryManager install defaults", () => {
       if (server.id === "unreal-engine") expect(url.hostname).toBe("127.0.0.1");
       else expect(url.protocol).toBe("https:");
     }
-    expect(hosted.filter((server) => server.remoteAuth === "oauth")).toHaveLength(34);
+    expect(hosted.filter((server) => server.remoteAuth === "oauth")).toHaveLength(33);
   });
 
   it("curates overlapping official MCP servers out of the built-in registry", async () => {

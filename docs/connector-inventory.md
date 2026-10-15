@@ -10,7 +10,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | --- | ---: |
 | Native app integrations | 14 |
 | Gateway channels | 17 |
-| MCP connectors (Settings > Connectors) | 111 |
+| MCP connectors (Settings > Connectors) | 110 |
 | Bundled skills | 152 |
 
 Requirement keys: `macos-only`, `local-service` (a local app or server must be running), `public-webhook` (a reachable HTTPS URL is needed in production), `oauth-consent`, `api-key`, `cli-binary`, `personal-account-session`.
@@ -145,7 +145,6 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `railway` | Railway |  | oauth-consent | first-party-api |
 | `resend` | Resend | read, write | api-key | first-party-api |
 | `rhino` | Rhino | read, write | local-service | first-party-api |
-| `robinhood` | Robinhood |  | oauth-consent | first-party-api |
 | `spglobal` | S&P Global | read | api-key | first-party-api |
 | `salesforce` | Salesforce | read, write | oauth-consent | first-party-api |
 | `semgrep` | Semgrep |  | oauth-consent | first-party-api |

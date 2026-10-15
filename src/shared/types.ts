@@ -1393,6 +1393,7 @@ export type ToolType =
   | "youtube_list_ingested_videos"
   | "x_search"
   | "voice_call"
+  | "browser_vault"
   | "browser_navigate"
   | "browser_screenshot"
   | "browser_snapshot"
@@ -1666,6 +1667,7 @@ export const TOOL_GROUPS = {
     "apple_calendar_action",
     "dropbox_action",
     "sharepoint_action",
+    "browser_vault",
     "browser_navigate",
     "browser_screenshot",
     "browser_snapshot",
@@ -1870,6 +1872,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   youtube_list_ingested_videos: "read",
   x_search: "network",
   voice_call: "network",
+  browser_vault: "network",
   browser_navigate: "network",
   browser_screenshot: "network",
   browser_snapshot: "network",
@@ -9051,6 +9054,7 @@ export const IPC_CHANNELS = {
   TRIGGER_HISTORY: "trigger:history",
   MCP_EVENTS_LIST: "mcpEvents:list",
   MCP_EVENTS_STATUS: "mcpEvents:status",
+  MCP_EVENTS_RECEIVER_PORT: "mcpEvents:receiverPort",
 
   // Routines
   ROUTINE_LIST: "routine:list",

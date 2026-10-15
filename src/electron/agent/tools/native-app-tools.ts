@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { LLMTool } from "../llm/types";
@@ -184,10 +185,25 @@ export class NativeAppTools {
     );
   }
   async run(raw: unknown): Promise<Record<string, unknown>> {
+    const guard = privateCaptureGuard();
+    let dispatched = false;
+    const assertPrivateCaptureAllowed = () => {
+      try {
+        guard();
+      } catch (error) {
+        if (dispatched)
+          throw new HelperCommandError(
+            "outcome_unknown: Private browser input interrupted native control; inspect without replay",
+            "outcome_unknown",
+          );
+        throw error;
+      }
+    };
     if (process.platform !== "darwin")
       throw new Error("Local background native app control requires macOS");
     const input = NativeAppInputSchema.parse(raw);
     await requireNativeDesktopSession();
+    assertPrivateCaptureAllowed();
     const readOnly = input.action === "observe" || input.action === "windows";
     if (!readOnly && this.hasUnknownAttempt())
       throw new Error(
@@ -196,10 +212,13 @@ export class NativeAppTools {
     ComputerUseSessionManager.getInstance().acquire(this.taskId, this.daemon, { background: true });
     ComputerUseSessionManager.getInstance().checkNotAborted();
     await this.runtime.ensureReadyWithInteractivePermissions();
+    assertPrivateCaptureAllowed();
     if (input.action === "launch" && input.documentPath)
       await this.files.authorizeApplicationPath(input.documentPath, "read");
+    assertPrivateCaptureAllowed();
     const pid = "pid" in input && input.pid ? input.pid : 0;
     const apps = input.action === "launch" ? [] : await this.runtime.listApps();
+    assertPrivateCaptureAllowed();
     const bundleId =
       input.action === "launch" || (input.action === "windows" && !pid)
         ? input.bundleId
@@ -217,6 +236,7 @@ export class NativeAppTools {
       typeof this.daemon.getTaskConsentAuthority === "function"
         ? await this.daemon.getTaskConsentAuthority(this.taskId, details, "computer_use")
         : null;
+    assertPrivateCaptureAllowed();
     if (!authority || this.appConsents.get(bundleId) !== authority) {
       this.appConsents.delete(bundleId);
       const approved = await this.daemon.requestApproval(
@@ -225,18 +245,25 @@ export class NativeAppTools {
         `Control ${bundleId} in the background for this task`,
         details,
       );
+      assertPrivateCaptureAllowed();
       if (!approved) throw new Error("Local background app control was denied");
       const current =
         typeof this.daemon.getTaskConsentAuthority === "function"
           ? await this.daemon.getTaskConsentAuthority(this.taskId, details, "computer_use")
           : null;
+      assertPrivateCaptureAllowed();
       if (authority && current !== authority)
         throw new Error("App control authority changed during consent");
       if (current) this.appConsents.set(bundleId, current);
     }
     ComputerUseSessionManager.getInstance().checkNotAborted();
+    assertPrivateCaptureAllowed();
     if (input.action === "windows") {
-      if (pid) return { pid, windows: await this.runtime.listWindows(pid), background: true };
+      if (pid) {
+        const windows = await this.runtime.listWindows(pid);
+        assertPrivateCaptureAllowed();
+        return { pid, windows, background: true };
+      }
       const pids = apps.filter((app) => app.bundleId === bundleId).map((app) => app.pid);
       if (!pids.length)
         return {
@@ -247,8 +274,11 @@ export class NativeAppTools {
           note: "Not running; launch it first.",
         };
       const processes = [];
-      for (const each of pids)
-        processes.push({ pid: each, windows: await this.runtime.listWindows(each) });
+      for (const each of pids) {
+        const windows = await this.runtime.listWindows(each);
+        assertPrivateCaptureAllowed();
+        processes.push({ pid: each, windows });
+      }
       return { bundleId, running: true, processes, background: true };
     }
     const attemptId = randomUUID();
@@ -267,9 +297,13 @@ export class NativeAppTools {
       await this.daemon.timelineRowsCommitted(this.taskId);
     }
     try {
+      assertPrivateCaptureAllowed();
+      dispatched = !readOnly;
       let result = await this.runtime.background({ ...input, session: this.session, attemptId });
+      assertPrivateCaptureAllowed();
       if (!readOnly && input.action !== "launch") {
         try {
+          assertPrivateCaptureAllowed();
           const fresh = await this.runtime.background({
             action: "observe",
             pid: input.pid,
@@ -277,6 +311,7 @@ export class NativeAppTools {
             session: this.session,
             screenshot: true,
           });
+          assertPrivateCaptureAllowed();
           result = {
             ...fresh,
             action: input.action,
@@ -295,6 +330,7 @@ export class NativeAppTools {
         record("acknowledged", { effect: "unverified", preservation: result.preservation });
         await this.daemon.timelineRowsCommitted(this.taskId);
       }
+      assertPrivateCaptureAllowed();
       const capture = result.capture as
         | { pngBase64?: string; width?: number; height?: number; scaleFactor?: number }
         | undefined;
@@ -322,9 +358,10 @@ export class NativeAppTools {
     } catch (error) {
       if (!readOnly) {
         const unknown =
-          error instanceof HelperTransportError ||
-          !(error instanceof HelperCommandError) ||
-          error.code === "outcome_unknown";
+          dispatched &&
+          (error instanceof HelperTransportError ||
+            !(error instanceof HelperCommandError) ||
+            error.code === "outcome_unknown");
         this.uncertain = unknown;
         record(unknown ? "outcome_unknown" : "not_dispatched", {
           code: error instanceof HelperCommandError ? error.code : "transport_or_host_failure",

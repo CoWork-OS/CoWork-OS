@@ -21,6 +21,7 @@ export function setupTriggerHandlers(
     return MCPClientManager.getInstance().listServerEvents(serverId);
   });
   ipcMain.handle(IPC_CHANNELS.MCP_EVENTS_STATUS, async () => mcpEvents?.status() || []);
+  ipcMain.handle(IPC_CHANNELS.MCP_EVENTS_RECEIVER_PORT, () => mcpEvents?.receiverPort() ?? null);
   ipcMain.handle(
     IPC_CHANNELS.TRIGGER_LIST,
     async (_, workspaceId: string): Promise<EventTrigger[]> => {

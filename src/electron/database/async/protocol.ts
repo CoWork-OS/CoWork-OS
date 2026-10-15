@@ -48,6 +48,12 @@ export interface DatabaseWorkerData {
    * runs heavy scans without holding up the write worker (plan decision 2).
    */
   readonly?: boolean;
+  /**
+   * Load the worker's modules at once but open the database only on an `open` message.
+   * Startup spawns the worker while the host is still preparing the schema (DB6) and
+   * sends `open` once that has finished.
+   */
+  awaitOpen?: boolean;
 }
 
 export interface DatabaseRequestMessage {
@@ -76,10 +82,16 @@ export interface DatabaseCancelMessage {
   requestId: number;
 }
 
+/** Open the database now; sent once to a worker started with `awaitOpen`. */
+export interface DatabaseOpenMessage {
+  type: "open";
+}
+
 export type HostToWorkerMessage =
   | DatabaseRequestMessage
   | DatabaseShutdownMessage
-  | DatabaseCancelMessage;
+  | DatabaseCancelMessage
+  | DatabaseOpenMessage;
 
 export interface DatabaseReadyMessage {
   type: "ready";

@@ -358,7 +358,7 @@ describe("AnthropicCompatibleProvider prompt caching", () => {
 
     expect(capturedBody.cache_control).toEqual({ type: "ephemeral" });
     expect(capturedBody.system).toEqual([
-      { type: "text", text: "Stable instructions" },
+      { type: "text", text: "Stable instructions", cache_control: { type: "ephemeral" } },
       { type: "text", text: "Current time: 2026-04-04T10:00:00Z" },
     ]);
     expect(response.usage).toEqual({

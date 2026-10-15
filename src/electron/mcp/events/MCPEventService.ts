@@ -65,15 +65,51 @@ export class MCPEventService {
       });
     });
     try {
-      await new Promise<void>((resolve, reject) => {
-        this.server!.once("error", reject);
-        this.server!.listen(this.port, "127.0.0.1", resolve);
-      });
+      try {
+        await this.listen(this.port);
+      } catch (error) {
+        // A second local profile can use another port before webhook routing is
+        // configured. Never silently move an explicitly routed receiver.
+        const fixedRouting =
+          process.env.COWORK_MCP_EVENTS_PORT?.trim() ||
+          process.env.COWORK_MCP_EVENTS_PUBLIC_URL?.trim() ||
+          this.triggers
+            .listTriggers()
+            .some(
+              (trigger) =>
+                trigger.enabled &&
+                trigger.source === "mcp_event" &&
+                trigger.action.config.mcpEvent?.delivery === "webhook",
+            );
+        if ((error as NodeJS.ErrnoException)?.code !== "EADDRINUSE" || fixedRouting) throw error;
+        await this.listen(0);
+        log.info(
+          `MCP webhook port ${this.port} is occupied; receiver selected 127.0.0.1:${this.receiverPort()}.`,
+        );
+      }
+      log.info(`MCP webhook receiver listening on http://127.0.0.1:${this.receiverPort()}`);
     } catch (error) {
       log.warn("MCP webhook receiver unavailable; poll subscriptions remain available:", error);
       this.server = null;
     }
     await this.sync();
+  }
+
+  private async listen(port: number): Promise<void> {
+    const server = this.server!;
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.removeListener("listening", onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        server.removeListener("error", onError);
+        resolve();
+      };
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, "127.0.0.1");
+    });
   }
 
   async stop(): Promise<void> {
@@ -296,6 +332,11 @@ export class MCPEventService {
       if (!row) continue;
       if (!this.matches(row, trigger)) continue;
       try {
+        if (row.delivery === "webhook" && !this.receiverPort()) {
+          throw new Error(
+            "MCP webhook receiver unavailable; configure COWORK_MCP_EVENTS_PORT and callback forwarding",
+          );
+        }
         await this.holdServer(row.trigger_id, row.server_id);
         await this.ensureServer(row.server_id);
         if (row.delivery === "webhook") {

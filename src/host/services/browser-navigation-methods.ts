@@ -4318,6 +4318,11 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
       },
       { minArgs: 0, maxArgs: 0 },
     );
+    definitions.getMcpEventsReceiverPort = definition(
+      automation,
+      async () => MCPEventService.getActive()?.receiverPort() ?? null,
+      { minArgs: 0, maxArgs: 0 },
+    );
     definitions.listTriggers = definition(
       automation,
       async ([rawWorkspaceId]) => {

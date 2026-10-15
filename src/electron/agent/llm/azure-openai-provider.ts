@@ -155,6 +155,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       supportsImages: true,
       systemBlocks: request.systemBlocks,
       maxToolCallIdLength: AZURE_CHAT_MAX_TOOL_CALL_ID_LENGTH,
+      volatileSystemPlacement: "tail",
     });
     const rawTools = request.tools ? toOpenAICompatibleTools(request.tools) : undefined;
     if (rawTools && rawTools.length > AZURE_MAX_TOOLS) {
@@ -189,14 +190,6 @@ export class AzureOpenAIProvider implements LLMProvider {
     const input: Any[] = [];
     const systemMessages = buildOpenAICompatibleSystemMessages(system, systemBlocks);
     const mapToolCallId = createToolCallIdMapper(AZURE_RESPONSES_MAX_CALL_ID_LENGTH);
-
-    for (const systemMessage of systemMessages) {
-      input.push({
-        type: "message",
-        role: systemMessage.role,
-        content: [{ type: "input_text", text: systemMessage.content }],
-      });
-    }
 
     for (const msg of messages) {
       if (typeof msg.content === "string") {
@@ -261,6 +254,13 @@ export class AzureOpenAIProvider implements LLMProvider {
       }
     }
 
+    for (const systemMessage of systemMessages) {
+      input.push({
+        type: "message",
+        role: systemMessage.role,
+        content: [{ type: "input_text", text: systemMessage.content }],
+      });
+    }
     return input;
   }
 

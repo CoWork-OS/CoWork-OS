@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { NativeAppTools, NativeAppInputSchema, NATIVE_APP_TOOL } from "../native-app-tools";
+import { beginPrivateSurface } from "../../../browser/credentials/private-capture-guard";
 import { HelperTransportError, HelperCommandError } from "../../../computer-use/helper-runtime";
 import {
   normalizeNativeComputerUseMode,
@@ -36,7 +37,7 @@ function fixture(events: any[] = []) {
     ensureReadyWithInteractivePermissions: vi.fn(async () => {}),
     background: vi.fn(async () => ({ dispatch: "acknowledged", effect: "unverified" })),
     listApps: vi.fn(async () => [{ pid: 42, bundleId: "com.example.target" }]),
-    listWindows: vi.fn(async () => []),
+    listWindows: vi.fn(async (): Promise<Array<{ title?: string }>> => []),
   };
   const daemon = {
     getTaskConsentAuthority: vi.fn(async () => "authority-1"),
@@ -177,5 +178,142 @@ describe("strict background native app control", () => {
       getToolFailureReason: () => "",
     } as any);
     expect(JSON.stringify(result)).toContain(token);
+  });
+});
+
+describe("native app private input races", () => {
+  it("refuses an already active private surface before asking for app consent", async () => {
+    const f = fixture();
+    const close = beginPrivateSurface();
+    try {
+      await expect(f.tools.run(action)).rejects.toThrow(/private/i);
+    } finally {
+      close();
+    }
+    expect(f.runtime.ensureReadyWithInteractivePermissions).not.toHaveBeenCalled();
+    expect(f.daemon.requestApproval).not.toHaveBeenCalled();
+    expect(f.runtime.background).not.toHaveBeenCalled();
+  });
+
+  it("refuses dispatch if private input opens and closes while app consent waits", async () => {
+    const f = fixture();
+    let approve!: (value: boolean) => void;
+    f.daemon.requestApproval.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          approve = resolve;
+        }),
+    );
+    const operation = f.tools.run(action);
+    await vi.waitFor(() => expect(approve).toBeDefined());
+    beginPrivateSurface()();
+    approve(true);
+    await expect(operation).rejects.toThrow(/private/i);
+    expect(f.runtime.background).not.toHaveBeenCalled();
+    expect(f.events).toEqual([]);
+  });
+
+  it("discards an observation that crosses private input", async () => {
+    const f = fixture();
+    let finish!: (
+      value: Awaited<ReturnType<typeof f.runtime.background>> & Record<string, unknown>,
+    ) => void;
+    f.runtime.background.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const operation = f.tools.run({ action: "observe", pid: 42, windowId: 100 });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    beginPrivateSurface()();
+    finish({
+      dispatch: "acknowledged",
+      effect: "unverified",
+      capture: { pngBase64: "private pixels" },
+      elements: [{ value: "private field" }],
+    });
+    await expect(operation).rejects.toThrow(/private/i);
+    expect(f.events).toEqual([]);
+  });
+
+  it("records an interrupted dispatched action as unknown and blocks replay", async () => {
+    const f = fixture();
+    let finish!: (
+      value: Awaited<ReturnType<typeof f.runtime.background>> & Record<string, unknown>,
+    ) => void;
+    f.runtime.background.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const operation = f.tools.run(action);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    beginPrivateSurface()();
+    finish({
+      dispatch: "acknowledged",
+      effect: "unverified",
+      preservation: { secret: "private field" },
+    });
+    await expect(operation).rejects.toThrow(/outcome_unknown/);
+    expect(f.events.map((event) => event.payload.status)).toEqual([
+      "dispatching",
+      "outcome_unknown",
+    ]);
+    expect(JSON.stringify(f.events)).not.toContain("private field");
+    expect(f.runtime.background).toHaveBeenCalledTimes(1);
+    await expect(f.tools.run(action)).rejects.toThrow(/outcome_unknown/);
+  });
+
+  it("discards mandatory post-action readback that crosses private input", async () => {
+    const f = fixture();
+    let finish!: (
+      value: Awaited<ReturnType<typeof f.runtime.background>> & Record<string, unknown>,
+    ) => void;
+    f.runtime.background.mockImplementationOnce(async () => ({
+      dispatch: "acknowledged",
+      effect: "unverified",
+    }));
+    f.runtime.background.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const operation = f.tools.run(action);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    beginPrivateSurface()();
+    finish({
+      dispatch: "acknowledged",
+      effect: "unverified",
+      capture: { pngBase64: "private pixels" },
+    });
+    await expect(operation).rejects.toThrow(/readback failed/);
+    expect(f.events.map((event) => event.payload.status)).toEqual([
+      "dispatching",
+      "outcome_unknown",
+    ]);
+    expect(JSON.stringify(f.events)).not.toContain("private pixels");
+  });
+
+  it.each([
+    { action: "windows", pid: 42 },
+    { action: "windows", bundleId: "com.example.target" },
+  ])("discards private window titles during discovery: %j", async (input) => {
+    const f = fixture();
+    let finish!: (value: Awaited<ReturnType<typeof f.runtime.listWindows>>) => void;
+    f.runtime.listWindows.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const operation = f.tools.run(input);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    beginPrivateSurface()();
+    finish([{ title: "private field" }]);
+    await expect(operation).rejects.toThrow(/private/i);
+    expect(f.events).toEqual([]);
   });
 });

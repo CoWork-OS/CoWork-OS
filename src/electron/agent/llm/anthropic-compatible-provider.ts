@@ -23,12 +23,16 @@ import { isOpenCodeGoBaseUrl, normalizeOpenCodeGoModelId } from "./opencode-go-r
 import { ensureNoTrailingAssistantPrefill } from "./assistant-prefill";
 import {
   anthropicReasoningFromResponse,
-  anthropicThinkingPrefixSeed,
-  applyAnthropicThinkingReplay,
   classifyAnthropicThinkingRejection,
   planAnthropicThinking,
   trailingToolTurnStartsWithThinking,
 } from "./anthropic-thinking";
+import {
+  ANTHROPIC_TURN_CONTEXT_BETA,
+  anthropicContextFromResponse,
+  isAnthropicTurnContextUnsupported,
+  prepareAnthropicConversation,
+} from "./anthropic-turn-context";
 import { createLogger } from "../../utils/logger";
 
 const logger = createLogger("AnthropicCompatible");
@@ -116,11 +120,13 @@ export class AnthropicCompatibleProvider implements LLMProvider {
   private defaultModel: string;
   private providerName: string;
   private promptCacheAutoSupported = true;
+  private readonly promptCacheRejectedModels = new Set<string>();
   private managedPromptCacheSupported = true;
   private readonly sendThinkingConfig: boolean;
   private readonly reasoningEffort?: string;
   /** Models whose endpoint rejected thinking/effort parameters (sticky per instance). */
   private readonly thinkingConfigRejectedModels = new Set<string>();
+  private readonly turnContextRejectedModels = new Set<string>();
 
   constructor(options: AnthropicCompatibleProviderOptions) {
     this.type = options.type;
@@ -152,7 +158,9 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       model,
     );
     const requestedPromptCache =
-      request.promptCache?.mode === "disabled" || !this.managedPromptCacheSupported
+      request.promptCache?.mode === "disabled" ||
+      !this.managedPromptCacheSupported ||
+      this.promptCacheRejectedModels.has(model)
         ? undefined
         : request.promptCache;
     const effectivePromptCache =
@@ -209,6 +217,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
           error?.providerMessage || error?.message,
         )
       ) {
+        this.promptCacheRejectedModels.add(model);
         console.warn(
           `[${this.providerName}] Prompt cache controls rejected; retrying without cache controls`,
         );
@@ -386,19 +395,19 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     promptCache: LLMRequest["promptCache"] | undefined;
     thinking: ThinkingRequestOptions;
   }): Promise<LLMResponse> {
-    const systemTexts = normalizeSystemBlocks(args.request.system, args.request.systemBlocks).map(
-      (block) => block.text,
-    );
-    const replay = applyAnthropicThinkingReplay({
+    const replay = prepareAnthropicConversation({
+      request: args.request,
       messages: args.normalizedMessages,
       converted: this.convertMessages(args.normalizedMessages),
       model: args.model,
       provider: this.type,
-      seed: anthropicThinkingPrefixSeed(
-        systemTexts.length > 0 ? systemTexts : [args.request.system],
-        args.tools,
-      ),
+      tools: args.tools,
       replay: args.thinking.replay,
+      enableTurnContext:
+        this.managedPromptCacheSupported &&
+        (args.request.promptCache?.mode === "anthropic_auto" ||
+          args.request.promptCache?.mode === "anthropic_explicit") &&
+        !this.turnContextRejectedModels.has(args.model),
     });
     let plan = args.thinking.sendConfig
       ? planAnthropicThinking({
@@ -421,6 +430,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       headers: {
         "Content-Type": "application/json",
         "anthropic-version": ANTHROPIC_VERSION,
+        ...(replay.usesTurnContext ? { "anthropic-beta": ANTHROPIC_TURN_CONTEXT_BETA } : {}),
         ...(this.apiKey
           ? {
               "x-api-key": this.apiKey,
@@ -431,7 +441,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
       body: JSON.stringify({
         model: args.model,
         max_tokens: plan.maxTokens,
-        system: this.buildSystemPayload(args.request, args.promptCache),
+        system: this.buildSystemPayload(replay.systemRequest, args.promptCache),
         messages,
         ...(args.tools && { tools: args.tools }),
         ...(plan.thinking && { thinking: plan.thinking }),
@@ -446,6 +456,17 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     if (!response.ok) {
       const errorData = (await response.json().catch(() => ({}))) as Any;
       const providerMessage = extractProviderErrorMessage(errorData);
+      if (
+        replay.usesTurnContext &&
+        isAnthropicTurnContextUnsupported(response.status, providerMessage)
+      ) {
+        this.turnContextRejectedModels.add(args.model);
+        logger.warn("Scoped turn context rejected; retrying with all current system instructions", {
+          model: args.model,
+          status: response.status,
+        });
+        return this.sendRequest(args);
+      }
       if (
         args.promptCache?.mode === "anthropic_auto" &&
         isPromptCacheAutoUnsupportedError(response.status, providerMessage)
@@ -476,7 +497,11 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     }
 
     const data = (await response.json()) as Any;
-    return this.convertResponse(data, { model: args.model, prefixHash: replay.prefixHash });
+    return this.convertResponse(data, {
+      model: args.model,
+      prefixHash: replay.prefixHash,
+      pendingContext: replay.pendingContext,
+    });
   }
 
   private buildSystemPayload(
@@ -491,7 +516,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     }
 
     const parts = convertSystemBlocksToTextParts(request.system, request.systemBlocks);
-    if (promptCache?.mode === "anthropic_explicit") {
+    if (promptCache?.mode === "anthropic_explicit" || promptCache?.mode === "anthropic_auto") {
       applyExplicitSystemBlockMarker(parts, blocks, promptCache.ttl);
     }
 
@@ -513,7 +538,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
     return applyAnthropicExplicitCacheControl(converted, {
       ttl: promptCache.ttl,
       includeSystem: false,
-      maxBreakpoints: Math.max(0, promptCache.explicitRecentMessages || 3),
+      maxBreakpoints: Math.min(3, Math.max(0, promptCache.explicitRecentMessages ?? 3)),
       nativeAnthropic: true,
     }) as Array<{ role: string; content: Any }>;
   }
@@ -530,7 +555,11 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
   private convertResponse(
     response: Any,
-    produced: { model: string; prefixHash: string },
+    produced: {
+      model: string;
+      prefixHash: string;
+      pendingContext: ReturnType<typeof prepareAnthropicConversation>["pendingContext"];
+    },
   ): LLMResponse {
     const content: LLMContent[] = (response.content || [])
       .filter((block: Any) => block.type === "text" || block.type === "tool_use")
@@ -551,10 +580,12 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
     const visibleContent: LLMContent[] =
       content.length > 0 ? content : [{ type: "text", text: "" }];
+    const wireContent = this.convertMessages([{ role: "assistant", content: visibleContent }])[0]
+      ?.content;
+    const providerContext = anthropicContextFromResponse(produced.pendingContext, wireContent);
     const reasoning = anthropicReasoningFromResponse({
       content: response.content,
-      visibleContent: this.convertMessages([{ role: "assistant", content: visibleContent }])[0]
-        ?.content,
+      visibleContent: wireContent,
       model: produced.model,
       provider: this.type,
       prefixHash: produced.prefixHash,
@@ -562,6 +593,7 @@ export class AnthropicCompatibleProvider implements LLMProvider {
 
     return {
       content: visibleContent,
+      ...(providerContext ? { providerContext } : {}),
       ...(reasoning.length > 0 ? { reasoning } : {}),
       stopReason: this.mapStopReason(response.stop_reason),
       usage: extractAnthropicUsage(response.usage),

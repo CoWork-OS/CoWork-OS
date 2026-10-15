@@ -1,3 +1,4 @@
+import { PrivateBrowserPrompts } from "./components/BrowserWorkbench/PrivateBrowserPrompt";
 import { requestBotMemoryContext } from "./components/memory/memory-hub-focus";
 import {
   BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
@@ -8357,6 +8358,7 @@ export function App() {
           onResolve={contextualConnectorSetup.resolve}
         />
       )}
+      <PrivateBrowserPrompts />
       <div
         className={`title-bar${RAIL_VIEWS.has(currentView) ? " title-bar-shell" : ""}`}
         style={

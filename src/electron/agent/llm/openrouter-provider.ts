@@ -396,7 +396,7 @@ export class OpenRouterProvider implements LLMProvider {
       ...(applyAnthropicExplicitCacheControl(nonSystemMessages as Any[], {
         ttl: promptCache.ttl,
         includeSystem: false,
-        maxBreakpoints: Math.max(0, promptCache.explicitRecentMessages || 3),
+        maxBreakpoints: Math.min(3, Math.max(0, promptCache.explicitRecentMessages ?? 3)),
         nativeAnthropic: false,
       }) as Array<{ role: string; content: Any; tool_call_id?: string }>),
     ];

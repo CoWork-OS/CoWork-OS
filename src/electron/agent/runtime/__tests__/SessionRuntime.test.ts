@@ -8,6 +8,12 @@ import type { LLMMessage } from "../../llm";
 import { estimateTotalTokens } from "../../context-manager";
 import { fromOpenAICompatibleResponse } from "../../llm/openai-compatible";
 import { extractAnthropicUsage } from "../../llm/prompt-cache";
+import {
+  prepareAnthropicConversation,
+  anthropicContextFromResponse,
+} from "../../llm/anthropic-turn-context";
+import { anthropicReasoningFromResponse } from "../../llm/anthropic-thinking";
+import { appendAssistantResponseToConversation } from "../../executor-loop-utils";
 import { FileOperationTracker, ToolFailureTracker } from "../../executor-helpers";
 import { DurableContextService } from "../../../memory/DurableContextService";
 import {
@@ -578,6 +584,63 @@ describe("SessionRuntime", () => {
     expect(harness.runtime.takeNextFollowUpAtTurnBoundary()?.message).toBe("Plan first");
     expect(harness.runtime.takeNextFollowUpAtTurnBoundary()?.message).toBe("Then continue");
   });
+  it("preserves scoped Claude context and signed thinking through real snapshot save and restoration", () => {
+    const source = createHarness();
+    const messages = source.runtime.state.transcript.conversationHistory;
+    messages.push({ role: "user", content: [{ type: "text", text: "Go" }] });
+    const request = {
+      model: "claude-opus-5-5",
+      maxTokens: 64,
+      system: "Stable\n\nCurrent",
+      messages,
+      systemBlocks: [
+        { text: "Stable", scope: "session" as const, cacheable: true, stableKey: "stable" },
+        { text: "Current", scope: "turn" as const, cacheable: false, stableKey: "turn" },
+      ],
+    };
+    const build = (history: LLMMessage[]) =>
+      prepareAnthropicConversation({
+        request,
+        messages: history,
+        converted: history.map((message) => ({ role: message.role, content: message.content })),
+        tools: undefined,
+        model: request.model,
+        provider: "anthropic",
+        replay: true,
+        enableTurnContext: true,
+      });
+    const first = build(messages);
+    const content = [{ type: "text" as const, text: "Done" }];
+    appendAssistantResponseToConversation(
+      messages,
+      {
+        content,
+        providerContext: anthropicContextFromResponse(first.pendingContext, content),
+        reasoning: anthropicReasoningFromResponse({
+          content: [{ type: "thinking", thinking: "", signature: "signature" }, ...content],
+          visibleContent: content,
+          model: request.model,
+          provider: "anthropic",
+          prefixHash: first.prefixHash,
+        }),
+      },
+      0,
+    );
+    messages.push({ role: "user", content: "Next" });
+    expect(source.runtime.saveSnapshot()).toBe(true);
+    const snapshot = source.emittedEvents
+      .filter((event) => event.type === "conversation_snapshot")
+      .at(-1)!;
+    const restored = createHarness();
+    restored.runtime.restoreFromEvents([JSON.parse(JSON.stringify(snapshot)) as Any]);
+    const history = restored.runtime.state.transcript.conversationHistory;
+    expect(history).toEqual(messages);
+    const replay = build(history);
+    expect(replay.replayedBlocks).toBe(1);
+    expect(replay.messages[1]).toEqual(first.messages[1]);
+    expect(replay.messages[2].content[0].signature).toBe("signature");
+  });
+
   it("holds mode-bearing messages for a turn boundary and restores their selections", () => {
     const harness = createHarness();
     harness.runtime.queueFollowUp("Discuss", undefined, undefined, undefined, undefined, {
@@ -2191,10 +2254,27 @@ describe("SessionRuntime", () => {
 
   it("continues a max_tokens text turn with a user turn instead of an assistant prefill", async () => {
     const harness = createHarness();
+    const providerContext = {
+      format: "anthropic-turn-context-v1",
+      model: "claude-opus-5-5",
+      provider: "anthropic",
+      prefixHash: "prefix",
+      contentHash: "visible",
+      text: "Current context",
+    };
+    const reasoning = [
+      {
+        format: "anthropic",
+        model: "claude-opus-5-5",
+        data: { block: { type: "thinking", signature: "signature", thinking: "" } },
+      },
+    ];
     harness.createMessageWithTimeout
       .mockResolvedValueOnce({
         stopReason: "max_tokens",
         content: [{ type: "text", text: "Hello" }],
+        providerContext,
+        reasoning,
         usage: { inputTokens: 10, outputTokens: 5, cachedTokens: 0 },
       })
       .mockResolvedValueOnce({
@@ -2220,12 +2300,14 @@ describe("SessionRuntime", () => {
     expect(continuationMessages.at(-2)).toEqual({
       role: "assistant",
       content: [{ type: "text", text: "Hello" }],
+      providerContext,
+      reasoning,
     });
     expect(result.assistantText).toBe("Hello world");
-    // The stored transcript keeps one joined assistant answer, not the nudge.
+    // Keep each provider response and the continuation turn unchanged for replay.
     expect(result.messages).toEqual([
-      { role: "user", content: "Start" },
-      { role: "assistant", content: [{ type: "text", text: "Hello world" }] },
+      ...continuationMessages,
+      { role: "assistant", content: [{ type: "text", text: " world" }] },
     ]);
   });
 

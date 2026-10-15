@@ -24,10 +24,11 @@ import { loadPiAiModule } from "./pi-ai-loader";
 import { parseOpenAICompatibleToolArguments } from "./openai-compatible";
 import {
   buildOpenAIPromptCacheFields,
+  applyExplicitSystemBlockMarker,
+  convertSystemBlocksToTextParts,
   extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
   mapPromptCacheTtlToPiAiRetention,
-  prependVolatileSystemContextToMessages,
   splitSystemBlocksForOpenAIPrefix,
 } from "./prompt-cache";
 
@@ -56,6 +57,7 @@ export class PiProvider implements LLMProvider {
   private piProvider: KnownProvider;
   private apiKey: string;
   private modelId: string;
+  private readonly promptCacheRejectedModels = new Set<string>();
 
   constructor(config: LLMProviderConfig) {
     const requestedProvider = config.piProvider || DEFAULT_PI_PROVIDER;
@@ -77,7 +79,10 @@ export class PiProvider implements LLMProvider {
     console.log(`[Pi] Initialized with provider: ${this.piProvider}, model: ${this.modelId}`);
   }
 
-  async createMessage(request: LLMRequest): Promise<LLMResponse> {
+  async createMessage(originalRequest: LLMRequest): Promise<LLMResponse> {
+    const request = this.promptCacheRejectedModels.has(originalRequest.model)
+      ? { ...originalRequest, promptCache: undefined }
+      : originalRequest;
     try {
       const { complete: piAiComplete } = await loadPiAiModule();
       // Resolve the model from pi-ai's registry
@@ -87,24 +92,29 @@ export class PiProvider implements LLMProvider {
         `[Pi] Calling ${this.piProvider} with model: ${model.id} (requested: ${request.model})`,
       );
 
-      const { stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
+      const { allBlocks, stableText, volatileText } = splitSystemBlocksForOpenAIPrefix(
         request.system || "",
         request.systemBlocks,
       );
-      const piMessageInput =
-        request.promptCache && request.promptCache.mode !== "disabled"
-          ? prependVolatileSystemContextToMessages(request.messages, volatileText)
-          : request.messages;
+      const cacheEnabled = Boolean(request.promptCache && request.promptCache.mode !== "disabled");
+      const api = String(model.api || "");
+      const useTailContext =
+        cacheEnabled &&
+        volatileText &&
+        api.includes("responses") &&
+        ["openai", "openai-codex", "azure-openai-responses"].includes(this.piProvider);
+      const fullSystemText = allBlocks.map((block) => block.text).join("\n\n") || request.system;
+      const protectAnthropicPrefix = cacheEnabled && api === "anthropic-messages";
 
       // Convert messages to pi-ai format
-      const piAiMessages = this.convertMessagesToPiAi(piMessageInput);
+      const piAiMessages = this.convertMessagesToPiAi(request.messages);
 
       // Convert tools to pi-ai format
       const piAiTools = request.tools ? this.convertToolsToPiAi(request.tools) : undefined;
 
       // Build context
       const context: PiAiContext = {
-        systemPrompt: stableText || request.system,
+        systemPrompt: useTailContext ? stableText || undefined : fullSystemText,
         messages: piAiMessages,
         tools: piAiTools,
       };
@@ -123,6 +133,7 @@ export class PiProvider implements LLMProvider {
               ? { ...request.promptCache, mode: "openai_key" }
               : undefined,
             model.id,
+            api === "openai-codex-responses" ? "key_only" : "full",
           )
         : {};
       const response = await piAiComplete(model, context, {
@@ -131,31 +142,67 @@ export class PiProvider implements LLMProvider {
         signal: request.signal,
         cacheRetention,
         ...(sessionId ? { sessionId } : {}),
-        ...(Object.keys(cacheFields).length > 0
+        ...(api === "openai-codex-responses" ? { transport: "sse" as const } : {}),
+        ...(Object.keys(cacheFields).length > 0 || useTailContext || protectAnthropicPrefix
           ? {
-              onPayload: (payload: unknown) => ({
-                ...((payload || {}) as Record<string, Any>),
-                ...cacheFields,
-              }),
+              onPayload: (payload: unknown) => {
+                const body: Record<string, Any> = {
+                  ...((payload || {}) as Record<string, Any>),
+                  ...cacheFields,
+                };
+                if (useTailContext) {
+                  body.input = [
+                    ...body.input,
+                    { role: "developer", content: [{ type: "input_text", text: volatileText }] },
+                  ];
+                }
+                if (protectAnthropicPrefix && Array.isArray(body.system)) {
+                  // Preserve SDK-owned OAuth identity blocks and their cache markers.
+                  // Only replace the block containing CoWork's own system prompt.
+                  body.system = body.system.flatMap((part: Any) => {
+                    if (part.type !== "text" || part.text !== fullSystemText) return [part];
+                    const parts = convertSystemBlocksToTextParts(fullSystemText, allBlocks);
+                    applyExplicitSystemBlockMarker(
+                      parts,
+                      allBlocks,
+                      part.cache_control?.ttl === "1h" ? "1h" : "5m",
+                    );
+                    return parts;
+                  });
+                }
+                return body;
+              },
             }
           : {}),
       });
 
+      // pi-ai returns failed/aborted requests as AssistantMessages, not rejected
+      // promises. Surface them before conversion so fallback and cancellation work.
+      if (response.stopReason === "aborted") throw new Error("Request cancelled");
+      if (response.stopReason === "error")
+        throw new Error(response.errorMessage || "Pi request failed");
+
       // Convert pi-ai response to CoWork OS format
       return this.convertPiAiResponse(response);
     } catch (error: Any) {
-      if (error.name === "AbortError" || error.message?.includes("aborted")) {
+      if (
+        error.name === "AbortError" ||
+        error.message?.includes("aborted") ||
+        error.message === "Request cancelled"
+      ) {
         console.log(`[Pi] Request aborted`);
         throw new Error("Request cancelled");
       }
 
       if (
         request.promptCache &&
+        request.promptCache.mode !== "disabled" &&
         isPromptCacheRequestUnsupportedError(
           error?.status,
           error?.providerMessage || error?.message,
         )
       ) {
+        this.promptCacheRejectedModels.add(originalRequest.model);
         console.warn(`[Pi] Prompt cache controls rejected; retrying without cache controls`);
         return this.createMessage({ ...request, promptCache: undefined });
       }

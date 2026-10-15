@@ -1,4 +1,10 @@
 import {
+  configureBrowserCredentialService,
+  getBrowserCredentialService,
+} from "./browser/credentials/browser-credential-service";
+import { registerBrowserVaultIpc } from "./browser/credentials/browser-vault-ipc";
+import { BROWSER_VAULT_IPC } from "../shared/browser-vault";
+import {
   parseCliApprovalResponse as getCliApprovalResponseArgv,
   respondToCliApprovalResponse,
   type CliApprovalResponse,
@@ -245,6 +251,7 @@ import {
   shouldTrustControlPlaneProxyFromEnv,
 } from "./utils/runtime-mode";
 import { getActiveProfileId, getUserDataDir, hasNonDefaultProfile } from "./utils/user-data-dir";
+import { resolveDatabasePath } from "./database/connection";
 import type { AccessProfileId } from "../shared/access-profiles";
 // Live Canvas feature
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from "./canvas";
@@ -1762,6 +1769,22 @@ if (isMacSafeStorageMigrationWorker) {
     // and handles its failures there.
     const databaseOpening = DatabaseManager.open();
     databaseOpening.catch(() => undefined);
+    // The database worker's thread and modules need no database, so it spawns now and
+    // loads them while the schema is prepared; it opens the file only once the open above
+    // has finished (DB6). Startup awaits the same worker before routing work to it.
+    const databasePath = resolveDatabasePath(getUserDataDir());
+    void startDatabaseWorker({
+      dbPath: databasePath,
+      runtime: "desktop",
+      openAfter: databaseOpening.then((manager) => {
+        if (manager.getDatabasePath() !== databasePath) {
+          logger.error(
+            `Profile database opened at ${manager.getDatabasePath()}, not ${databasePath}; the database worker stays off for this run.`,
+          );
+          throw new Error("Profile database path changed during startup");
+        }
+      }),
+    });
     const startupActionGate = new StartupActionGate();
 
     function ensureMainWindowVisible(): void {
@@ -1923,6 +1946,10 @@ if (isMacSafeStorageMigrationWorker) {
       });
 
       if (hideMainWindowForAcceptance) app.dock?.hide();
+      // Reloading the app clears forms that could no longer acknowledge their dismissal.
+      mainWindow.webContents.on("did-finish-load", () =>
+        getBrowserCredentialService()?.dismissClosedPrompts(),
+      );
 
       if (shouldStartMaximized) {
         mainWindow.maximize();
@@ -2128,7 +2155,9 @@ if (isMacSafeStorageMigrationWorker) {
       if (hasNonDefaultProfile()) {
         logger.info(`Active profile: ${activeProfileId}`);
       }
-      installDevelopmentBranding();
+      // Decoding the full-size icon takes tens of milliseconds, and the Dock already shows
+      // the bundle's icon (or Electron's in development) until then.
+      deferStartupTask("dock-icon", async () => installDevelopmentBranding());
       installNativeApplicationMenu();
 
       // Set up Content Security Policy for production builds
@@ -2187,9 +2216,10 @@ if (isMacSafeStorageMigrationWorker) {
       }
       dbManager.beginRun("desktop");
       logStartupLane("blocking_startup", { event: "database_manager_ready" });
-      // Database worker (async SQLite plan, DB2); starts after schema setup. Awaited so
-      // each domain's backend is chosen once for the run (DB7): a worker that fails to
-      // start leaves the whole run on the host backend.
+      // Database worker (async SQLite plan, DB2); spawned with the profile open and opened
+      // once the schema was set up (see databaseOpening), so it is usually ready by now.
+      // Awaited so each domain's backend is chosen once for the run (DB7): a worker that
+      // fails to start leaves the whole run on the host backend.
       logStartupLane("blocking_startup", { event: "database_worker_start" });
       await startDatabaseWorker({ dbPath: dbManager.getDatabasePath(), runtime: "desktop" });
       logStartupLane("blocking_startup", { event: "database_worker_ready" });
@@ -2253,7 +2283,9 @@ if (isMacSafeStorageMigrationWorker) {
           logger.warn("Failed to prune temp sandbox profiles:", error);
         }
       };
-      runTempSandboxProfilePrune();
+      // The prune lists the whole temp directory synchronously, which can hold tens of
+      // thousands of entries, so its first run waits until the window is up.
+      deferStartupTask("temp-sandbox-profile-prune", async () => runTempSandboxProfilePrune());
       tempSandboxProfilePruneTimer = setInterval(
         runTempSandboxProfilePrune,
         TEMP_SANDBOX_PROFILE_PRUNE_INTERVAL_MS,
@@ -4923,6 +4955,7 @@ if (isMacSafeStorageMigrationWorker) {
         },
         { name: "automation ownership", run: () => automationRuntime.shutdown() },
         // Keep lifecycle listeners, MCP, memory, and storage alive until tasks settle.
+        { name: "private browser prompts", run: () => getBrowserCredentialService()?.dispose() },
         { name: "agent daemon", run: () => agentDaemon?.shutdown() },
         {
           name: "task lifecycle sync",
@@ -5323,6 +5356,77 @@ if (isMacSafeStorageMigrationWorker) {
       downloads: getBrowserDownloadManager(),
       sessionFromPartition: (partition) => session.fromPartition(partition),
     });
+    const isVaultOwner = (event: Any) =>
+      Boolean(
+        mainWindow &&
+        !mainWindow.isDestroyed() &&
+        event?.sender === mainWindow.webContents &&
+        (!event.senderFrame || event.senderFrame.parent === null),
+      );
+    const credentialService = configureBrowserCredentialService({
+      target: async (taskId, sessionId) => {
+        if (!agentDaemon || !(await applyBrowserWorkbenchAccessPolicy(taskId, sessionId)))
+          return null;
+        const task = await agentDaemon.getTaskById(taskId);
+        const service = getBrowserWorkbenchService();
+        const tab = service.getSession(taskId, sessionId);
+        if (
+          !task ||
+          task.status === "cancelled" ||
+          !tab ||
+          service.isPausedByUser(taskId, sessionId)
+        )
+          return null;
+        const contents = await service.getTabContents(taskId, sessionId);
+        if (
+          !contents ||
+          contents.isDestroyed() ||
+          getBrowserSessionManager().explainUrlBlock(taskId, contents.getURL(), sessionId)
+        )
+          return null;
+        return { contents, workspaceId: task.workspaceId, tabId: tab.tabId || "default" };
+      },
+      canPrompt: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+      changed: () => {
+        if (mainWindow && !mainWindow.isDestroyed())
+          mainWindow.webContents.send(BROWSER_VAULT_IPC.changed);
+      },
+      authorize: async (item, origin, purpose) => {
+        if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return false;
+        if (
+          item.kind === "login" &&
+          process.platform === "darwin" &&
+          systemPreferences.canPromptTouchID()
+        ) {
+          try {
+            await systemPreferences.promptTouchID(
+              `fill ${purpose === "code" ? "a verification code" : "a login"} on ${new URL(origin).host}`,
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        }
+        const result = await dialog.showMessageBox(mainWindow, {
+          type: "question",
+          message:
+            purpose === "code"
+              ? "Fill a verification code?"
+              : item.kind === "payment"
+                ? "Fill this payment card?"
+                : item.kind === "address"
+                  ? "Fill this saved address?"
+                  : "Fill this saved login?",
+          detail: `Destination: ${origin}\nSaved item: ${item.label}\n${item.kind === "payment" ? "This enters card details only. It does not approve placing an order." : "The saved fields will be entered on this site only."}`,
+          buttons: ["Fill", "Cancel"],
+          defaultId: 1,
+          cancelId: 1,
+        });
+        return result.response === 0;
+      },
+      audit: (taskId, data) => agentDaemon?.logEvent(taskId, "log", data),
+    });
+    registerBrowserVaultIpc(ipcMain, credentialService, isVaultOwner);
     registerBrowserCredentialsIpc({
       ipcMain,
       // Only the app's own window; never a page inside a browser tab.
@@ -5335,6 +5439,15 @@ if (isMacSafeStorageMigrationWorker) {
           (!event.senderFrame || event.senderFrame.parent === null),
         ),
       vault: getBrowserVault(),
+      fillSavedLogin: async (taskId, sessionId, id, workspaceId) => {
+        const task = await agentDaemon?.getTaskById(taskId);
+        if (!task || task.workspaceId !== workspaceId) return { success: false, error: "denied" };
+        return credentialService.executeFromUser(taskId, {
+          action: "fill",
+          handle: id,
+          session_id: sessionId,
+        });
+      },
       external: defaultExternalBrowserDeps(),
       sessions: new ImportSessions(),
       cookieJar: (partition) => {

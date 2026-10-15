@@ -9051,6 +9051,7 @@ export const IPC_CHANNELS = {
   TRIGGER_HISTORY: "trigger:history",
   MCP_EVENTS_LIST: "mcpEvents:list",
   MCP_EVENTS_STATUS: "mcpEvents:status",
+  MCP_EVENTS_RECEIVER_PORT: "mcpEvents:receiverPort",
 
   // Routines
   ROUTINE_LIST: "routine:list",

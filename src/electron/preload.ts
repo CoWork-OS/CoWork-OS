@@ -5769,6 +5769,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   listTriggers: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_LIST, workspaceId),
   listMcpEvents: (serverId: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_LIST, serverId),
   getMcpEventsStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_STATUS),
+  getMcpEventsReceiverPort: () => ipcRenderer.invoke(IPC_CHANNELS.MCP_EVENTS_RECEIVER_PORT),
   addTrigger: (data: Any) => ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_ADD, data),
   updateTrigger: (id: string, updates: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.TRIGGER_UPDATE, { id, updates }),
@@ -9811,6 +9812,9 @@ export interface ElectronAPI {
   listAttention: () => Promise<import("../shared/attention").AttentionSnapshot>;
   /** Fires, without data, when the queue may have changed; reload it with listAttention. */
   onAttentionChanged: (callback: () => void) => () => void;
+
+  // MCP Events
+  getMcpEventsReceiverPort: () => Promise<number | null>;
 
   // Playwright QA APIs
   qaGetRuns: () => Promise<Any[]>;

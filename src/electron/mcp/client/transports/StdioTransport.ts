@@ -421,7 +421,9 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
           this.pendingRequests.delete(id);
           reject(new Error(`Request timeout for method: ${method}`));
         },
-        method === "server/discover" ? 5000 : this.config.requestTimeout || 60000,
+        method === "server/discover"
+          ? this.config.connectionTimeout || 30_000
+          : this.config.requestTimeout || 60000,
       );
 
       this.pendingRequests.set(id, { resolve, reject, timeout });

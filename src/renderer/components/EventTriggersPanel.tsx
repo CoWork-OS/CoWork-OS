@@ -240,6 +240,7 @@ export const EventTriggersPanel: React.FC<{
   const [mcpArgsJson, setMcpArgsJson] = useState("{}");
   const [mcpMode, setMcpMode] = useState<"webhook" | "poll">("webhook");
   const [mcpCallbackUrl, setMcpCallbackUrl] = useState("");
+  const [mcpReceiverPort, setMcpReceiverPort] = useState<number | null>(null);
   const [formError, setFormError] = useState("");
   const [subscriptionStatuses, setSubscriptionStatuses] = useState<
     Array<{
@@ -305,6 +306,10 @@ export const EventTriggersPanel: React.FC<{
         .getMcpEventsStatus?.()
         .then((statuses: typeof subscriptionStatuses) => setSubscriptionStatuses(statuses || []))
         .catch(() => undefined);
+      void window.electronAPI
+        .getMcpEventsReceiverPort?.()
+        .then((port: number | null) => setMcpReceiverPort(port))
+        .catch(() => setMcpReceiverPort(null));
     };
     loadStatuses();
     const interval = setInterval(loadStatuses, 15_000);
@@ -725,7 +730,9 @@ export const EventTriggersPanel: React.FC<{
                     placeholder="https://your-domain.example"
                   />
                   <span style={{ color: "var(--color-text-muted)" }}>
-                    Forward /mcp-events/* to 127.0.0.1:8766. CoWork verifies signed deliveries.
+                    {mcpReceiverPort
+                      ? `Forward /mcp-events/* to 127.0.0.1:${mcpReceiverPort}. CoWork verifies signed deliveries.`
+                      : "The webhook receiver is unavailable. Resolve its port conflict before configuring callback forwarding."}
                   </span>
                 </label>
               )}

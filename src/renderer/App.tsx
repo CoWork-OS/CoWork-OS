@@ -6324,7 +6324,7 @@ export function App() {
   ): Promise<boolean> => {
     const effectiveWorkspace = workspaceOverride ?? currentWorkspace;
     if (!effectiveWorkspace) return false;
-    if (!(await contextualConnectorSetup.prepare(prompt))) return false;
+    if (!(await contextualConnectorSetup.prepareSubmission(prompt))) return false;
 
     const multitaskCommand = findMultitaskCommand(prompt, title);
     if (multitaskCommand?.isMultitask && !multitaskCommand.valid) {
@@ -7011,7 +7011,7 @@ export function App() {
     if (
       !remoteTaskView &&
       !options?.verbatim &&
-      !(await contextualConnectorSetup.prepare(message))
+      !(await contextualConnectorSetup.prepareSubmission(message))
     ) {
       throw new Error("Message not sent. Your request is ready to edit or try again.");
     }

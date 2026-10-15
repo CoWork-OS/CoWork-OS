@@ -1,0 +1,51 @@
+{
+  "id": "first-result-onboarding-2026-10-15",
+  "title": "First-result setup preserves source intent and read-only report preparation",
+  "source": {
+    "incident": "local-first-result-electron-acceptance",
+    "pullRequest": 551
+  },
+  "categories": [
+    {
+      "id": "report-scope-is-not-a-file-write",
+      "prompt": "Establish the report scope from the retrieved issues, grouping by project where project fields are available. Retrieve remaining pages where supported, and identify missing fields or inaccessible records that limit the update.",
+      "assertions": {
+        "requiresFileWrite": false,
+        "readOnlyIntent": true,
+        "executableTest": "src/electron/agent/__tests__/step-contract.test.ts",
+        "executableTestNames": [
+          "keeps report scope discovery read-only when update is a noun"
+        ]
+      }
+    },
+    {
+      "id": "intermediate-source-discovery-preserves-final-artifact-contract",
+      "prompt": "Read issues from Linear, establish the scope of a project update, then write the update to project-update.md. The scope discovery step must not fail because the final report does not exist yet; the later write step must still require artifact evidence.",
+      "assertions": {
+        "scopeStepRequiresArtifactEvidence": false,
+        "writeStepRequiresArtifactEvidence": true,
+        "executableTest": "src/electron/agent/__tests__/executor-step-failures.test.ts",
+        "executableTestNames": [
+          "does not require the final report during an intermediate issue-scope discovery step"
+        ]
+      }
+    },
+    {
+      "id": "connector-readiness-is-not-saved-credentials",
+      "prompt": "Prepare a task using a named app. A saved token, expired connection, or Gmail-only permission must not count as a connected Drive source; a status timeout must leave setup actionable.",
+      "assertions": {
+        "savedCredentialsImplyConnected": false,
+        "missingPermissionsImplyConnected": false,
+        "statusCheckIsBounded": true,
+        "executableTest": "src/renderer/utils/__tests__/contextual-connectors.test.ts",
+        "executableTestNames": [
+          "does not equate configured MCP credentials with a live connection",
+          "requires a live native status rather than a saved token",
+          "does not claim Drive is connected with Gmail-only permissions",
+          "bounds an unresponsive host check so the request can still be recovered"
+        ]
+      }
+    }
+  ],
+  "notes": "Scenario specifications are linked to executable tests; they do not themselves establish measured coverage. The running-app acceptance script separately checks cancellation, exact request restoration, one task admission, real local MCP execution, and saved-file readback with a configured model."
+}

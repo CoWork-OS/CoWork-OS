@@ -32,7 +32,7 @@ export function useContextualConnectorSetup() {
     callback?.(proceed);
   }, []);
 
-  const prepare = useCallback(async (prompt: string): Promise<boolean> => {
+  const prepareSubmission = useCallback(async (prompt: string): Promise<boolean> => {
     const connectors = findContextualConnectors(prompt);
     if (!connectors.length) return true;
     // A second click cannot replace or resolve the first submission.
@@ -52,5 +52,5 @@ export function useContextualConnectorSetup() {
     }
   }, []);
 
-  return { request, prepare, resolve };
+  return { request, prepareSubmission, resolve };
 }

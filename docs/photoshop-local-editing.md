@@ -1,6 +1,6 @@
 # Local Photoshop document editing
 
-CoWork can inspect and revise an existing layered PSD through local background Photoshop scripting. Use `npm run dev` for development acceptance; no VM, SSH connection, separate test package, or shell authority is required.
+CoWork can inspect and revise an existing layered PSD through local background Photoshop scripting. Use `npm run dev` for development acceptance; no SSH connection, separate test package, or shell authority is required.
 
 The installed, licensed Photoshop application executes fixed commands. It can start in the background. This route requires an unlocked macOS session and normal Automation consent. It is an experimental, bounded document route, not generic mouse/keyboard automation or unrestricted Photoshop scripting.
 

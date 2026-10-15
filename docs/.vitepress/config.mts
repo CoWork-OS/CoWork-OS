@@ -73,6 +73,7 @@ export default defineConfig({
           { text: "Runtime Visibility", link: "/operator-runtime-visibility" },
           { text: "CoWork CLI", link: "/cli" },
           { text: "Terminal Tabs", link: "/terminal-tabs" },
+          { text: "Background App Work", link: "/background-app-work" },
           { text: "Computer Use (macOS)", link: "/computer-use" },
           { text: "Background App Control", link: "/local-background-app-control" },
           { text: "Application Execution Backend", link: "/application-execution-backend" },

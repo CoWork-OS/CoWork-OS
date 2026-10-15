@@ -171,7 +171,7 @@ export function createNativePilotAdapter(
       remoteFencing: false,
     },
     description: background
-      ? "Local background Photoshop scripting: auto-launch without activation, fresh PSD/PNG outputs, no pointer or keyboard input, original-output reconciliation. Requires an unlocked Mac and Photoshop installed; no VM or network dependency."
+      ? "Local background Photoshop scripting: auto-launch without activation, fresh PSD/PNG outputs, no pointer or keyboard input, original-output reconciliation. Requires an unlocked Mac and Photoshop installed; no network dependency."
       : `Experimental bounded ${app} pilot: new local documents only. Requires an unlocked macOS session and running app. No replay or in-app cancellation; exact-file readback verifies native fidelity.`,
     inputSchema: inputSchema(app),
   });

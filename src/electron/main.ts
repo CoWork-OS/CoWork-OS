@@ -2264,7 +2264,7 @@ if (isMacSafeStorageMigrationWorker) {
       // This MUST be done before provider factories so they can migrate legacy settings
       new SecureSettingsRepository(dbManager.getDatabase());
       logger.info("SecureSettingsRepository initialized");
-      // Legacy VM connections are retained for migration only; never start them.
+      // Legacy remote app connections are retained for migration only; never start them.
       logStartupLane("blocking_startup", { event: "secure_settings_ready" });
       if (process.platform === "darwin") {
         await migrateLegacyMacSafeStorageSettings({

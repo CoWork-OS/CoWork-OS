@@ -1,6 +1,6 @@
 # Generic local background app control
 
-CoWork's `native_app` tool controls an installed macOS app through its own native helper. No VM, SSH connection, external runtime, shell access or clipboard is required. Application acceptance runs with `npm run dev`.
+CoWork's `native_app` tool controls an installed macOS app through its own native helper. No SSH connection, external runtime, shell access or clipboard is required. Application acceptance runs with `npm run dev`.
 
 ## Control and harness contract
 
@@ -19,7 +19,7 @@ Native computer use defaults to **Background only**. Legacy `background_first` s
 
 This is a generic app/window/control interface, not a promise that every application implements background input. Minimized windows, ambiguous targets, secure text fields, stale controls, unsupported semantic actions and menu control are refused. Apps may ignore process-targeted input or activate themselves; those operations need separate qualification. Raw delivery alone is never proof of success. Hidden/occluded rendering and custom canvases also need qualification per app.
 
-An unlocked local macOS session, Accessibility and Screen Recording permission are required. Locked-host control needs a separate authorization design and is not implemented by this route. No VM fallback is offered.
+An unlocked local macOS session, Accessibility and Screen Recording permission are required. Locked-host control needs a separate authorization design and is not implemented by this route.
 
 Structured APIs, MCP and application scripting remain preferable when they provide a qualified operation. The existing durable Photoshop document adapters continue to handle supported create/edit/export requests; `native_app` covers UI operations through the same normal tool authority and task execution harness.
 

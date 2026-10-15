@@ -40,10 +40,11 @@ export function resolveThreadModelSelection(
     return { modelKey, providerType: config.providerType, pinned: true, source: "thread" };
   }
   const botKey = botModel?.modelKey?.trim();
-  if (botKey) {
+  // A bot model without a provider is not used (see effectiveTaskModelConfig).
+  if (botKey && botModel?.providerType) {
     return {
       modelKey: botKey,
-      providerType: botModel?.providerType || globalProvider,
+      providerType: botModel.providerType,
       pinned: false,
       source: "bot",
     };

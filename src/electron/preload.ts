@@ -22,7 +22,13 @@ import type {
   BotResponsibilitySave,
   BotResponsibilityRevise,
 } from "../shared/bot-responsibility";
-import type { BotWorkQuery, BotWorkPage, RemoteOAuthServerRequest } from "../shared/types";
+import type {
+  BotWorkQuery,
+  BotWorkPage,
+  RemoteOAuthAuthorizeResult,
+  RemoteOAuthServerRequest,
+  RemoteOAuthServerUpdateRequest,
+} from "../shared/types";
 import * as path from "path";
 import { contextBridge, ipcRenderer } from "electron";
 import * as fs from "fs";
@@ -4273,12 +4279,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.MCP_CONNECTOR_OAUTH_START, payload),
   addRemoteOAuthMCPServer: (payload: RemoteOAuthServerRequest) =>
     ipcRenderer.invoke(IPC_CHANNELS.MCP_ADD_REMOTE_OAUTH_SERVER, payload),
+  updateRemoteOAuthMCPServer: (payload: RemoteOAuthServerUpdateRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_UPDATE_REMOTE_OAUTH_SERVER, payload) as Promise<{
+      id: string;
+      name: string;
+      signedOut: boolean;
+    }>,
   discoverMCPOAuth: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_DISCOVER, url),
   authorizeMCPServer: (serverId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_AUTHORIZE, serverId) as Promise<{
-      expiresAt?: number;
-      grant: "authorization_code" | "jwt_bearer";
-    }>,
+    ipcRenderer.invoke(
+      IPC_CHANNELS.MCP_OAUTH_AUTHORIZE,
+      serverId,
+    ) as Promise<RemoteOAuthAuthorizeResult>,
+  cancelMCPOAuth: (serverId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MCP_OAUTH_CANCEL, serverId) as Promise<{ cancelled: boolean }>,
 
   // MCP Status change event listener
   onMCPStatusChange: (callback: (status: Any[]) => void) => {
@@ -8295,6 +8309,10 @@ export interface ElectronAPI {
   addRemoteOAuthMCPServer: (
     payload: RemoteOAuthServerRequest,
   ) => Promise<{ id: string; name: string }>;
+  updateRemoteOAuthMCPServer: (
+    payload: RemoteOAuthServerUpdateRequest,
+  ) => Promise<{ id: string; name: string; signedOut: boolean }>;
+  cancelMCPOAuth: (serverId: string) => Promise<{ cancelled: boolean }>;
   discoverMCPOAuth: (url: string) => Promise<{
     authorizationUrl?: string;
     tokenUrl?: string;
@@ -8302,9 +8320,7 @@ export interface ElectronAPI {
     resource?: string;
     issuer?: string;
   }>;
-  authorizeMCPServer: (
-    serverId: string,
-  ) => Promise<{ expiresAt?: number; grant: "authorization_code" | "jwt_bearer" }>;
+  authorizeMCPServer: (serverId: string) => Promise<RemoteOAuthAuthorizeResult>;
   startConnectorOAuth: (payload: {
     provider:
       | "box"

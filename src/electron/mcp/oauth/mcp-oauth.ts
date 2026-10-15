@@ -381,6 +381,8 @@ interface LoopbackCallback {
   /** Settles with the authorization code, or rejects (timeout, cancel, takeover, provider error). */
   code: Promise<string>;
   close: () => void;
+  /** Resolves once the listener has stopped and left the registry. */
+  closed: Promise<void>;
 }
 
 /**
@@ -516,7 +518,7 @@ async function listenForCallback(
     await closed;
     throw failure;
   }
-  return { code, close };
+  return { code, close, closed };
 }
 
 /**
@@ -558,6 +560,9 @@ export async function authorizeCodeFlow<T>(options: {
     return await options.exchange(code, pkce?.verifier, options.signal);
   } finally {
     callback.close();
+    // Settle only once the port is released, so a cancelled or finished sign-in
+    // never leaves its listener registered behind it.
+    await callback.closed;
   }
 }
 

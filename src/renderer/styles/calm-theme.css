@@ -3081,6 +3081,11 @@ html.visual-calm .right-panel .cli-context-file-list {
   scrollbar-gutter: auto;
 }
 
+html.visual-calm .right-panel .cli-file-list {
+  --right-panel-file-row-height: 32px;
+  --right-panel-file-row-gap: 0px;
+}
+
 html.visual-calm .right-panel .cli-progress-item,
 html.visual-calm .right-panel .cli-file-item,
 html.visual-calm .right-panel .cli-context-item {

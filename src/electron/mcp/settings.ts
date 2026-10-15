@@ -7,7 +7,13 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { MCPSettings, MCPServerConfig, MCPAuthConfig, DEFAULT_MCP_SETTINGS } from "./types";
+import {
+  MCPSettings,
+  MCPServerConfig,
+  MCPAuthConfig,
+  DEFAULT_MCP_SETTINGS,
+  type WorkdayAdminConnection,
+} from "./types";
 import { v4 as uuidv4 } from "uuid";
 import { SecureSettingsRepository, type LoadStatus } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -25,6 +31,8 @@ const SECRET_AUTH_KEYS = [
   "clientSecret",
   "privateKey",
 ] as const;
+/** Secrets of a Workday preset server's admin connection (MCPServerConfig.workdayAdmin). */
+const SECRET_WORKDAY_ADMIN_KEYS = ["clientSecret"] as const;
 const ENCRYPTED_PREFIX = "encrypted:";
 const CONNECTOR_SCRIPT_PATH_REGEX = /(?:^|[\\/])connectors[\\/]([^\\/]+)[\\/]dist[\\/]index\.js$/;
 const logger = createLogger("MCP Settings");
@@ -192,6 +200,22 @@ function decryptServerAuth(auth?: MCPAuthConfig): MCPAuthConfig | undefined {
   };
 }
 
+function encryptWorkdayAdmin(admin?: WorkdayAdminConnection): WorkdayAdminConnection | undefined {
+  return admin ? { ...admin, clientSecret: encryptSecret(admin.clientSecret) } : undefined;
+}
+
+function decryptWorkdayAdmin(admin?: WorkdayAdminConnection): WorkdayAdminConnection | undefined {
+  return admin ? { ...admin, clientSecret: decryptSecret(admin.clientSecret) } : undefined;
+}
+
+/** The admin connection as the renderer sees it: secrets masked. */
+function maskWorkdayAdmin(admin?: WorkdayAdminConnection): WorkdayAdminConnection | undefined {
+  if (!admin) return undefined;
+  const masked: WorkdayAdminConnection = { ...admin };
+  for (const key of SECRET_WORKDAY_ADMIN_KEYS) masked[key] = admin[key] ? MASKED_VALUE : undefined;
+  return masked;
+}
+
 /**
  * Encrypt all credentials in settings before saving to disk
  */
@@ -201,6 +225,7 @@ function _encryptSettings(settings: MCPSettings): MCPSettings {
     servers: settings.servers.map((server) => ({
       ...server,
       auth: encryptServerAuth(server.auth),
+      ...(server.workdayAdmin ? { workdayAdmin: encryptWorkdayAdmin(server.workdayAdmin) } : {}),
     })),
   };
 }
@@ -214,6 +239,7 @@ function decryptSettings(settings: MCPSettings): MCPSettings {
     servers: settings.servers.map((server) => ({
       ...server,
       auth: decryptServerAuth(server.auth),
+      ...(server.workdayAdmin ? { workdayAdmin: decryptWorkdayAdmin(server.workdayAdmin) } : {}),
     })),
   };
 }
@@ -477,6 +503,17 @@ export class MCPSettingsManager {
       }
       validUpdates.auth = auth;
     }
+    if (validUpdates.workdayAdmin) {
+      const existing = settings.servers[index].workdayAdmin;
+      const admin: WorkdayAdminConnection = { ...validUpdates.workdayAdmin };
+      for (const key of SECRET_WORKDAY_ADMIN_KEYS) {
+        if (admin[key] === MASKED_VALUE) {
+          if (existing?.[key] !== undefined) admin[key] = existing[key];
+          else delete admin[key];
+        }
+      }
+      validUpdates.workdayAdmin = admin;
+    }
 
     settings.servers[index] = {
       ...settings.servers[index],
@@ -588,6 +625,7 @@ export class MCPSettingsManager {
               privateKey: server.auth.privateKey ? MASKED_VALUE : undefined,
             }
           : undefined,
+        ...(server.workdayAdmin ? { workdayAdmin: maskWorkdayAdmin(server.workdayAdmin) } : {}),
       })),
     };
   }

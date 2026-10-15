@@ -38,7 +38,7 @@ export type McpOAuthAuthorizeResult =
 
 type Handler = (raw: unknown) => Promise<unknown>;
 
-function defaultRateLimit(channel: string): void {
+export function defaultRateLimit(channel: string): void {
   if (!rateLimiter.check(channel)) {
     const resetSec = Math.ceil(rateLimiter.getResetTime(channel) / 1000);
     throw new Error(`Rate limit exceeded. Try again in ${resetSec} seconds.`);
@@ -46,6 +46,22 @@ function defaultRateLimit(channel: string): void {
 }
 
 const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
+
+/**
+ * Opens a provider's sign-in page: https only (http only on this machine's
+ * loopback). Shared by every OAuth sign-in the renderer can start.
+ */
+export function createSignInPageOpener(
+  openExternal: (url: string) => Promise<void>,
+): (url: string) => Promise<void> {
+  return async (url: string) => {
+    const page = new URL(url);
+    const loopback = LOOPBACK_HOSTS.includes(page.hostname);
+    if (page.protocol !== "https:" && !(page.protocol === "http:" && loopback))
+      throw new Error("Sign-in page must use https");
+    await openExternal(url);
+  };
+}
 
 /** The handlers by channel, independent of Electron (tests call them directly). */
 export function createMcpOAuthIpcHandlers(deps: McpOAuthIpcDeps): Record<string, Handler> {
@@ -57,13 +73,7 @@ export function createMcpOAuthIpcHandlers(deps: McpOAuthIpcDeps): Record<string,
     authorize: authorizeMcpServer,
     cancel: cancelMcpServerSignIn,
   };
-  const openUrl = async (url: string) => {
-    const page = new URL(url);
-    const loopback = LOOPBACK_HOSTS.includes(page.hostname);
-    if (page.protocol !== "https:" && !(page.protocol === "http:" && loopback))
-      throw new Error("Sign-in page must use https");
-    await deps.openExternal(url);
-  };
+  const openUrl = createSignInPageOpener(deps.openExternal);
   return {
     // Adding shares the generic add-server budget.
     [IPC_CHANNELS.MCP_ADD_REMOTE_OAUTH_SERVER]: async (raw) => {

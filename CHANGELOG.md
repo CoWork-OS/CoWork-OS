@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **MCP approvals show the call**: the approval card for a remote MCP tool names the server and shows the call's arguments exactly as they will be sent, instead of "access the requested resource".
 - **Faster startup, screen opens and long-session scrolling**: the desktop window appears about a third sooner. Chat-channel SDKs (Teams, Discord, Slack, Telegram, WhatsApp), LLM SDKs, Playwright and the document libraries now load on first use instead of at launch, a mutation-journal cleanup no longer scans every row on each start, and the kit writers and reflection loop start alongside the window. First opens of Settings, Agents, Automations and the first task no longer pause for about 300 ms, and scrolling back through a long session no longer stutters.
 - **In-app browser uses native tabs by default**: pages now stay loaded when the browser closes or the task switches. Settings > Browser > Browser engine > Standard (webview) switches back; a choice you already made is kept.
 - **Developer mode for page scripts**: `browser_evaluate`, `browser_storage` and `browser_trace_start`/`browser_trace_stop` are offered to CoWork only with Settings > Browser > Developer mode on, and their first use on a site in a task asks for approval. File uploads by CoWork ask each time by default.

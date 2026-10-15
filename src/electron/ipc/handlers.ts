@@ -58,6 +58,7 @@ import {
 } from "../database/repository-facades";
 import { estimateTaskCost } from "../agent/llm/usage-telemetry";
 import { setupMcpOAuthHandlers } from "./mcp-oauth-handlers";
+import { setupWorkdayAgentHandlers } from "./workday-agent-handlers";
 import {
   ipcMain,
   shell,
@@ -11674,6 +11675,10 @@ function setupMCPHandlers(): void {
     );
     for (const server of validated.servers || []) {
       assertMcpServerEnableAllowed(previousServers.get(server.id), server);
+      // The Workday admin connection is edited only through its own handlers; the
+      // renderer sees its secret masked, so a whole-settings save keeps the stored one.
+      const workdayAdmin = previousServers.get(server.id)?.workdayAdmin;
+      if (workdayAdmin) server.workdayAdmin = workdayAdmin;
     }
     MCPSettingsManager.saveSettings(validated);
     MCPSettingsManager.clearCache();
@@ -11831,6 +11836,8 @@ function setupMCPHandlers(): void {
 
   // Remote MCP servers that sign in with OAuth 2.1 (e.g. Workday Agent-Ready Tools)
   setupMcpOAuthHandlers({ openExternal: (url) => shell.openExternal(url) });
+  // In-app Workday agent setup through the tenant's Agent System of Record API
+  setupWorkdayAgentHandlers({ openExternal: (url) => shell.openExternal(url) });
 
   // MCP Host handlers
   ipcMain.handle(IPC_CHANNELS.MCP_HOST_START, async (_, requestedPort?: number) => {

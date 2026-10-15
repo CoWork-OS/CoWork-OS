@@ -37,20 +37,57 @@ While a sign-in waits for the browser, **Cancel** next to **Signing in...** stop
 - **Large catalogs:** a server with more than 25 tools (Workday has 400+) doesn't add every schema to every request. Its tools load on demand through `tool_search`, and `tool_search` lists such servers so the agent knows to search by business task.
 - **Tool names across servers:** a tool name offered by one server keeps its plain name (`mcp_<tool>`). A name that several connected servers offer is namespaced on every one of them (`mcp_<server>__<tool>`), so calls never depend on which server connected first, and calling the bare name returns the namespaced options. Per-tool approval settings stay keyed by the server's own tool name.
 - **Legacy SSE servers:** credentials are sent as `Authorization` or API-key headers on the event stream and on every message, never in the URL. A redirect is followed only within the configured origin. A server that can only read a query token can opt in with `auth.sendTokenInQuery`; this applies to the stream request only and is off by default, because proxies and server logs record URLs.
-- **Write approvals:** new remote OAuth servers default to running read-only tools without prompts and asking before any tool that can change data.
+- **Write approvals:** new remote OAuth servers default to running read-only tools without prompts and asking before any tool that can change data. The approval card names the server and shows the call's arguments exactly as they will be sent, so you decide on the actual change. Approval needs an access profile that asks (**Ask for approval** or **Approve for me**): under **Full access**, which never asks, a tool that requires consent is blocked instead of prompted.
 
 ## Headless use
 
 Token renewal is plain Node and needs neither Electron nor a browser, so it runs in the desktop app, in `--headless` runs and in the daemon. An agent-key identity works entirely without a person. A delegate identity needs one sign-in in the desktop app; after that the stored refresh token keeps it working headless until the refresh token expires (24 hours for Workday unless it is used).
 
+## In-app Workday agent setup
+
+A Workday server signs in as an external agent, and that agent's skills decide which Workday tools CoWork can use. **Agent setup** on a Workday server row (servers added with the Workday preset) registers or updates the agent in the tenant's Agent System of Record (ASOR) without scripts.
+
+**Admin client.** Agent setup signs in with a separate Workday admin API client, not the agent's own client. In Workday, run **Register API Client** with:
+
+- Grant type: Authorization Code.
+- Scopes: **Agent System of Record** and **Workday Owned Scope**.
+- Redirect URI: `https://127.0.0.1:18768/oauth/callback`.
+- PKCE: optional. Tick **Use PKCE** in CoWork only if the client has PKCE enabled.
+
+**Hosts.** Enter the tenant host you sign in to Workday at, for example `impl.wd5.myworkday.com`. CoWork derives the services host by adding `-services1` to its first label (`impl-services1.wd5.myworkday.com`); change it only if your tenant uses another one. Both must be https hosts under `myworkday.com` or `workday.com`. The agent gateway (`<region>.agent.workday.com`) is refused here, because it rejects tenant-issued tokens.
+
+**What it does.**
+
+1. **Sign in** saves the connection and opens the tenant's `/<tenant>/authorize` page; the code is exchanged at `https://<services host>/ccx/oauth2/<tenant>/token`. The admin token stays in memory only, for this session, and is never saved, logged or shown. The admin client secret is stored encrypted with the server's settings; leave the field blank to keep it.
+2. The panel lists the tenant's agent definitions. Pick one, or **New agent** (named CoWork by default).
+3. Search the tool catalog. MCP tools (snake_case names such as `find_absence_balances`) are shown by default; **Include SOAP and REST operations** shows the rest of the catalog. **Add** grants a tool to the chosen skill; skills have an ID, a name, a description and an execution mode (Delegate by default, or Ambient).
+4. **Save agent** first checks every tool's WID against the tenant's catalog. If any is missing, nothing is saved and the panel lists them. Otherwise CoWork posts the definition to `https://<services host>/ccx/api/asor/v1/<tenant>/agentDefinition`, which creates it or updates the one with the same name and version, and shows Workday's agent ID and tool count.
+
+Tools whose names start with `create_`, `update_`, `delete_`, `submit_` or `request_` change Workday data; CoWork asks for approval before running them.
+
+**Sign in again after changing tools.** A Workday token carries the tools the agent had when it was issued. After a save, sign the Workday server in again (the panel has a button for it) so CoWork sees the new tools.
+
 ## Workday setup checklist
 
 1. Join the Workday Developer Program and submit **Request Tenant Access** for a personal development tenant. Workday reviews the request and emails the tenant's sign-in details when it is ready; change the temporary password promptly (Workday asks for it within 72 hours).
-2. Set up Agent System of Record (ASOR) in the tenant, register an external agent through the ASOR API, and configure its skills and tool security. Workday documents these steps under **Agents > External Agents**. The ASOR registration call goes to the tenant's services host, `https://<tenant>-services1.<dc>.myworkday.com/ccx/api/asor/v1/<tenant>/agentDefinition`, with a token from a **Register API Client** client that has the Agent System of Record scope, signed in through the tenant's own `/authorize` and `/ccx/oauth2/<tenant>/token` endpoints. The agent gateway rejects tenant-issued tokens, so don't send this call there.
-   - If the agent's skills need a worker ID, register a tool that resolves the signed-in worker too (for example, `create_worker_preferred_name_change` requires `workersId`).
-3. Copy the agent's client ID and secret from **View External Agent Credentials**. For a delegate identity, register `https://127.0.0.1:18768/oauth/callback`. Workday rejects `http://` redirect URIs for authorization-code clients.
-4. In CoWork, add a **Remote (OAuth)** server with the Workday preset and sign in. Expect a certificate warning for 127.0.0.1 in the browser on each sign-in; accept it to finish.
-   - Developer Program tenants are served by `odp.agent.workday.com` (region `odp`), even when the agent's Credentials tab lists `us.agent.workday.com`. The wrong region answers every request for the tenant with `{"error":"Invalid request"}`; a quick check is `https://<region>.agent.workday.com/.well-known/oauth-authorization-server/<tenant>`, which returns metadata only on the right region.
-5. Ask CoWork for something that needs Workday data, for example "What is my time off balance?". The agent finds the right Workday tool through `tool_search`.
+2. Create the external agent's credentials in the tenant (Workday documents this under **Agents > External Agents**) and copy its client ID and secret from **View External Agent Credentials**. For a delegate identity, register `https://127.0.0.1:18768/oauth/callback`; Workday rejects `http://` redirect URIs for authorization-code clients.
+3. In CoWork, add a **Remote (OAuth)** server with the Workday preset. Developer Program tenants are served by `odp.agent.workday.com` (region `odp`), even when the agent's Credentials tab lists `us.agent.workday.com`. The wrong region answers every request for the tenant with `{"error":"Invalid request"}`; a quick check is `https://<region>.agent.workday.com/.well-known/oauth-authorization-server/<tenant>`, which returns metadata only on the right region.
+4. Open **Agent setup** on the server row, sign in with an admin API client, and give the agent its skills and tools (see [In-app Workday agent setup](#in-app-workday-agent-setup)). If a skill needs a worker ID, add a tool that resolves the signed-in worker too (for example, `create_worker_preferred_name_change` requires `workersId`).
+5. **Sign in** on the server row. Expect a certificate warning for 127.0.0.1 in the browser on each sign-in; accept it to finish.
+6. Ask CoWork for something that needs Workday data, for example "What is my time off balance?". The agent finds the right Workday tool through `tool_search`.
+7. To try a write, set the task's Access to **Ask for approval** and ask for a change, for example a preferred-name change. Workday validates the whole proposed name, not only the field you change: `create_worker_preferred_name_change` needs `proposedName.firstName`, `proposedName.lastName` and `proposedName.country` as a reference with an `id` (the country's WID; an ISO code alone is rejected with `S25`, and a missing field with `A6`). A request that worked on a Developer tenant:
 
-Implementation: `src/electron/mcp/oauth/mcp-oauth.ts` (flows, loopback listener, renewal, discovery), `src/electron/mcp/oauth/mcp-server-authorization.ts` (server setup, edit, sign-in and cancel), `src/electron/ipc/mcp-oauth-handlers.ts` (IPC), and `src/electron/mcp/client/transports/StreamableHttpTransport.ts` (renewal, 401 and rate-limit handling).
+   ```json
+   {
+     "workersId": "<worker WID from find_staffing_workers>",
+     "proposedName": {
+       "firstName": "Logan Test",
+       "lastName": "McNeil",
+       "country": { "id": "bc33aa3152ec42d4995f4791a106ed09" }
+     }
+   }
+   ```
+
+   `bc33aa3152ec42d4995f4791a106ed09` is the United States in Workday's demo data; check the country WID in your own tenant. Workday answers with the business process and its status (`Successfully Completed`).
+
+Implementation: `src/electron/mcp/oauth/mcp-oauth.ts` (flows, loopback listener, renewal, discovery), `src/electron/mcp/oauth/mcp-server-authorization.ts` (server setup, edit, sign-in and cancel), `src/electron/mcp/oauth/workday-agent-setup.ts` (admin sign-in and ASOR agent setup), `src/electron/ipc/mcp-oauth-handlers.ts` and `src/electron/ipc/workday-agent-handlers.ts` (IPC), and `src/electron/mcp/client/transports/StreamableHttpTransport.ts` (renewal, 401 and rate-limit handling).

@@ -65,15 +65,22 @@ function cancelledBy(signal: AbortSignal): McpSignInCancelledError {
 const JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const TOKEN_TIMEOUT_MS = 20_000;
 
-function sanitize(text: string): string {
+/**
+ * Redacts credentials from provider text before it reaches an error message:
+ * JSON secret fields, secret query parameters and Authorization header values.
+ */
+export function redactOAuthText(text: string): string {
   return text
     .replace(
       /("(?:client_secret|code|access_token|refresh_token|code_verifier|assertion|id_token)":\s*")([^"]+)(")/gi,
       "$1[REDACTED]$3",
     )
     .replace(/([?&](?:code|client_secret|token|assertion)=)[^&\s"]+/gi, "$1[REDACTED]")
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/g, "$1 [REDACTED]")
     .slice(0, 500);
 }
+
+const sanitize = redactOAuthText;
 
 /** Workday documents that expires_in may arrive as an integer or a string. */
 export function parseExpiresIn(value: unknown): number | undefined {
@@ -113,23 +120,32 @@ function clientAuth(
     body.set("client_secret", auth.clientSecret);
 }
 
-async function tokenRequest(
-  auth: MCPAuthConfig,
-  params: Record<string, string>,
+/** A successful token endpoint answer. The access token never leaves the caller's process. */
+export interface OAuthTokenResponse {
+  accessToken: string;
+  refreshToken?: string;
+  /** Seconds. */
+  expiresIn?: number;
+  /** Seconds, when the provider says how long the refresh token lasts. */
+  refreshExpiresIn?: number;
+}
+
+/**
+ * Posts a form to a token endpoint: bounded by a timeout, abandoned when the
+ * signal aborts, redirects never followed and provider errors redacted.
+ */
+export async function postTokenRequest(
+  tokenUrl: string,
+  body: URLSearchParams,
+  extraHeaders: Record<string, string>,
   fetchImpl: FetchLike,
   signal?: AbortSignal,
-): Promise<MCPAuthConfig> {
-  if (!auth.tokenUrl || !auth.clientId) throw new Error("OAuth token endpoint is not configured");
-  const body = new URLSearchParams(params);
+): Promise<OAuthTokenResponse> {
   const headers: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
     Accept: "application/json",
+    ...extraHeaders,
   };
-  clientAuth(auth, body, headers);
-  if (auth.oauth?.resource) body.set("resource", auth.oauth.resource);
-  if (auth.oauth?.scopes?.length && params.grant_type !== "authorization_code")
-    body.set("scope", auth.oauth.scopes.join(" "));
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOKEN_TIMEOUT_MS);
   // A cancelled sign-in also abandons a token exchange already in flight.
@@ -137,7 +153,7 @@ async function tokenRequest(
   signal?.addEventListener("abort", onCancel, { once: true });
   let response: Response;
   try {
-    response = await fetchImpl(auth.tokenUrl, {
+    response = await fetchImpl(tokenUrl, {
       method: "POST",
       headers,
       body: body.toString(),
@@ -176,8 +192,34 @@ async function tokenRequest(
     typeof data.refresh_token === "string" && data.refresh_token.trim()
       ? data.refresh_token
       : undefined;
-  const expiresIn = parseExpiresIn(data.expires_in);
-  const refreshExpiresIn = parseExpiresIn(data.refresh_token_expires_in ?? data.refresh_expires_in);
+  return {
+    accessToken,
+    refreshToken,
+    expiresIn: parseExpiresIn(data.expires_in),
+    refreshExpiresIn: parseExpiresIn(data.refresh_token_expires_in ?? data.refresh_expires_in),
+  };
+}
+
+async function tokenRequest(
+  auth: MCPAuthConfig,
+  params: Record<string, string>,
+  fetchImpl: FetchLike,
+  signal?: AbortSignal,
+): Promise<MCPAuthConfig> {
+  if (!auth.tokenUrl || !auth.clientId) throw new Error("OAuth token endpoint is not configured");
+  const body = new URLSearchParams(params);
+  const headers: Record<string, string> = {};
+  clientAuth(auth, body, headers);
+  if (auth.oauth?.resource) body.set("resource", auth.oauth.resource);
+  if (auth.oauth?.scopes?.length && params.grant_type !== "authorization_code")
+    body.set("scope", auth.oauth.scopes.join(" "));
+  const { accessToken, refreshToken, expiresIn, refreshExpiresIn } = await postTokenRequest(
+    auth.tokenUrl,
+    body,
+    headers,
+    fetchImpl,
+    signal,
+  );
   const now = Date.now();
   const next: MCPAuthConfig = {
     ...auth,
@@ -276,6 +318,33 @@ export function parseLoopbackRedirect(redirectUri: string): URL {
   return url;
 }
 
+/** What an authorization-code request carries; the PKCE challenge only when PKCE is on. */
+export interface AuthorizationRequest {
+  authorizationUrl: string;
+  clientId: string;
+  redirectUri: string;
+  scopes?: string[];
+  resource?: string;
+}
+
+export function buildAuthorizationRequestUrl(
+  request: AuthorizationRequest,
+  params: { state: string; challenge?: string },
+): string {
+  const url = new URL(request.authorizationUrl);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", request.clientId);
+  url.searchParams.set("redirect_uri", request.redirectUri);
+  url.searchParams.set("state", params.state);
+  if (params.challenge) {
+    url.searchParams.set("code_challenge", params.challenge);
+    url.searchParams.set("code_challenge_method", "S256");
+  }
+  if (request.scopes?.length) url.searchParams.set("scope", request.scopes.join(" "));
+  if (request.resource) url.searchParams.set("resource", request.resource);
+  return url.toString();
+}
+
 export function buildAuthorizeUrl(
   auth: MCPAuthConfig,
   params: { state: string; challenge: string },
@@ -283,16 +352,16 @@ export function buildAuthorizeUrl(
   const oauth = auth.oauth;
   if (!oauth?.authorizationUrl || !oauth.redirectUri || !auth.clientId)
     throw new Error("OAuth authorization URL, redirect URI and client ID are required");
-  const url = new URL(oauth.authorizationUrl);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", auth.clientId);
-  url.searchParams.set("redirect_uri", oauth.redirectUri);
-  url.searchParams.set("state", params.state);
-  url.searchParams.set("code_challenge", params.challenge);
-  url.searchParams.set("code_challenge_method", "S256");
-  if (oauth.scopes?.length) url.searchParams.set("scope", oauth.scopes.join(" "));
-  if (oauth.resource) url.searchParams.set("resource", oauth.resource);
-  return url.toString();
+  return buildAuthorizationRequestUrl(
+    {
+      authorizationUrl: oauth.authorizationUrl,
+      clientId: auth.clientId,
+      redirectUri: oauth.redirectUri,
+      scopes: oauth.scopes,
+      resource: oauth.resource,
+    },
+    params,
+  );
 }
 
 /**
@@ -453,26 +522,28 @@ async function listenForCallback(
 }
 
 /**
- * Interactive authorization code + PKCE. The person signs in at the provider in
- * their browser; the code returns to the registered loopback redirect. Aborting
+ * Interactive authorization code flow on a registered loopback redirect, with
+ * or without PKCE. The person signs in at the provider in their browser; the
+ * code returns to the loopback listener, and exchange turns it into whatever
+ * the caller needs (it receives the PKCE verifier when PKCE is on). Aborting
  * the signal (or a newer sign-in on the same port) closes the listener and
  * rejects with McpSignInCancelledError before any token request.
  */
-export async function authorizeWithPkce(
-  auth: MCPAuthConfig,
-  options: {
-    openUrl: (url: string) => Promise<void> | void;
-    timeoutMs?: number;
-    fetchImpl?: FetchLike;
-    signal?: AbortSignal;
-  },
-): Promise<MCPAuthConfig> {
-  if (auth.type !== "bearer" || auth.oauth?.grant === "jwt_bearer")
-    throw new Error("Interactive authorization applies to authorization-code servers");
-  const redirect = parseLoopbackRedirect(auth.oauth?.redirectUri || "");
+export async function authorizeCodeFlow<T>(options: {
+  request: AuthorizationRequest;
+  pkce: boolean;
+  openUrl: (url: string) => Promise<void> | void;
+  exchange: (code: string, verifier: string | undefined, signal?: AbortSignal) => Promise<T>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}): Promise<T> {
+  const redirect = parseLoopbackRedirect(options.request.redirectUri);
   const state = base64Url(randomBytes(24));
-  const { verifier, challenge } = createPkcePair();
-  const authorizeUrl = buildAuthorizeUrl(auth, { state, challenge });
+  const pkce = options.pkce ? createPkcePair() : undefined;
+  const authorizeUrl = buildAuthorizationRequestUrl(options.request, {
+    state,
+    challenge: pkce?.challenge,
+  });
   const callback = await listenForCallback(
     redirect,
     state,
@@ -486,23 +557,57 @@ export async function authorizeWithPkce(
     const opened = Promise.resolve().then(() => options.openUrl(authorizeUrl));
     const code = await Promise.race([callback.code, opened.then(() => callback.code)]);
     if (options.signal?.aborted) throw cancelledBy(options.signal);
-    return await tokenRequest(
-      auth,
-      {
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: auth.oauth!.redirectUri!,
-        code_verifier: verifier,
-      },
-      options.fetchImpl ?? fetch,
-      options.signal,
-    );
+    return await options.exchange(code, pkce?.verifier, options.signal);
   } finally {
     callback.close();
     // Settle only once the port is released, so a cancelled or finished sign-in
     // never leaves its listener registered behind it.
     await callback.closed;
   }
+}
+
+/** Interactive authorization code + PKCE (S256) for a remote MCP server. */
+export async function authorizeWithPkce(
+  auth: MCPAuthConfig,
+  options: {
+    openUrl: (url: string) => Promise<void> | void;
+    timeoutMs?: number;
+    fetchImpl?: FetchLike;
+    signal?: AbortSignal;
+  },
+): Promise<MCPAuthConfig> {
+  if (auth.type !== "bearer" || auth.oauth?.grant === "jwt_bearer")
+    throw new Error("Interactive authorization applies to authorization-code servers");
+  const oauth = auth.oauth;
+  parseLoopbackRedirect(oauth?.redirectUri || "");
+  if (!oauth?.authorizationUrl || !oauth.redirectUri || !auth.clientId)
+    throw new Error("OAuth authorization URL, redirect URI and client ID are required");
+  const redirectUri = oauth.redirectUri;
+  return authorizeCodeFlow({
+    request: {
+      authorizationUrl: oauth.authorizationUrl,
+      clientId: auth.clientId,
+      redirectUri,
+      scopes: oauth.scopes,
+      resource: oauth.resource,
+    },
+    pkce: true,
+    openUrl: options.openUrl,
+    timeoutMs: options.timeoutMs,
+    signal: options.signal,
+    exchange: (code, verifier, signal) =>
+      tokenRequest(
+        auth,
+        {
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: verifier!,
+        },
+        options.fetchImpl ?? fetch,
+        signal,
+      ),
+  });
 }
 
 /** Mints the first token for an ambient (JWT bearer) identity. */
@@ -513,7 +618,8 @@ export async function authorizeWithoutUser(
   return renewOAuthToken(auth, fetchImpl);
 }
 
-const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** A Workday tenant name or similar URL path segment. */
+export const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
 /**
  * Workday Agent-Ready MCP Tools: https://{region}.agent.workday.com/{tenant}/mcp,

@@ -237,6 +237,7 @@ import {
   withToolPromptMetadataList,
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
+import { buildMcpApprovalPresentation } from "./mcp-approval-preview";
 import { getNumbatService } from "../../security/numbat";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 import {
@@ -2431,10 +2432,14 @@ export class ToolRegistry {
       const pactApproval = context.request.name.startsWith("pact_")
         ? await this.pactTools.approvalDestination(context.request.name, context.request.input)
         : {};
+      const mcpApproval = serverName
+        ? buildMcpApprovalPresentation(context.request.name, serverName, context.request.input)
+        : null;
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
         ...(serverName ? { serverName } : {}),
+        ...(mcpApproval?.approvalPreview ? { approvalPreview: mcpApproval.approvalPreview } : {}),
         ...browserUseApproval,
         ...pactApproval,
         ...(approvalType === "external_file_access" && externalFilesystemBoundary
@@ -2603,7 +2608,9 @@ export class ToolRegistry {
             ? `Allow Browser Use to access ${browserUseApproval.origin}?`
             : effectiveApprovalType === "location_access"
               ? "Allow CoWork OS to access your current location once?"
-              : `Allow ${context.request.name} to access the requested resource?`;
+              : mcpApproval
+                ? mcpApproval.description
+                : `Allow ${context.request.name} to access the requested resource?`;
           const details = { ...approvalDetails, reason: pipeline.reason || null };
           const options = {
             allowAutoApprove:

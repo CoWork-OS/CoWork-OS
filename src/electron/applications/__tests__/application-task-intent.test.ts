@@ -3,6 +3,7 @@ import {
   isNativeApplicationPreparationStep,
   isNativeApplicationReadbackStep,
   isNativeUiOperationStep,
+  requestsCliAnythingApp,
 } from "../application-task-intent";
 
 const task =
@@ -51,5 +52,25 @@ describe("native application preparation steps", () => {
     expect(
       isNativeUiOperationStep("Save the banner through the background Photoshop service."),
     ).toBe(false);
+  });
+});
+
+describe("CLI-Anything app requests", () => {
+  it.each([
+    "Make a 1200x630 banner PNG with GIMP.",
+    "Build the Q4 budget in LibreOffice Calc and save it as XLSX.",
+    "Render this scene using Blender.",
+    "Draw the architecture via draw.io and export a PNG.",
+    "Use cli-anything to export the deck.",
+  ])("treats %j as app work", (text) => {
+    expect(requestsCliAnythingApp(text)).toBe(true);
+  });
+
+  it.each([
+    "Generate an image of a kitchen blender on a marble counter.",
+    "Create a poster of a gimp-free mascot.",
+    "Write a short story about LibreOffice's history.",
+  ])("leaves %j to other routes", (text) => {
+    expect(requestsCliAnythingApp(text)).toBe(false);
   });
 });

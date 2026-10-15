@@ -256,6 +256,22 @@ describe("TaskStrategyService decoratePrompt", () => {
     expect(prompt).toContain("Do not search files");
   });
 
+  it("routes an image made with a CLI-Anything app away from the image generation contract", () => {
+    const route = makeRoute({
+      intent: "execution",
+      signals: ["image-creation-intent"],
+      domain: "media",
+    });
+    const text = "Make a 1200x630 launch banner PNG named banner.png in this workspace with GIMP.";
+    const strategy = TaskStrategyService.derive(route, undefined, {
+      title: "Banner",
+      prompt: text,
+    });
+    const prompt = TaskStrategyService.decoratePrompt(text, route, strategy);
+
+    expect(prompt).not.toContain("image_generation_contract:");
+  });
+
   it.each([
     "Generate a 16:9 banner for our launch that reads \u201cCOWORK OS 2.0\u201d, dark background, neon accents",
     "Generate a COWORK OS 2.0 banner",

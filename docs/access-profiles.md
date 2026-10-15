@@ -63,8 +63,10 @@ potential writes, even when a tool name contains “search” or “read”. Dis
 servers, task restrictions, explicit permission rules, administrator policy,
 network denials, endpoint domain restrictions, and read-only profile ceilings
 still apply. An explicit `prompt` or write approval requirement combined with
-`approval: "never"` denies the call. MCP payment tools retain their separate
-payment consent and limits.
+`approval: "never"` denies the call: to approve an MCP write such as a Workday
+change, run the task under **Ask for approval** or **Approve for me**. The
+approval card names the server and shows the call's arguments exactly as they
+will be sent. MCP payment tools retain their separate payment consent and limits.
 
 MCP calls execute through the configured server; the local subprocess sandbox
 does not sandbox that server's internals. Configuring a server establishes the

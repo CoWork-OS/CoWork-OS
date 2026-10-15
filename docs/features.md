@@ -1357,7 +1357,7 @@ See [Remote Access](remote-access.md) for details.
 - **MCP Client**: Connect to external MCP servers
 - **MCP Host**: Expose CoWork's tools as an MCP server
 - **MCP Registry**: Browse and install servers from a catalog
-- **Remote MCP OAuth**: Connect remote servers that require OAuth 2.1 sign-in, such as Workday Agent-Ready Tools, as a person (PKCE) or with an agent key (JWT bearer) for headless runs. Tokens renew automatically, large catalogs load on demand through `tool_search`, tool names shared by several servers are namespaced, and write tools ask first. See [Remote MCP OAuth](remote-mcp-oauth.md).
+- **Remote MCP OAuth**: Connect remote servers that require OAuth 2.1 sign-in, such as Workday Agent-Ready Tools, as a person (PKCE) or with an agent key (JWT bearer) for headless runs. Tokens renew automatically, large catalogs load on demand through `tool_search`, tool names shared by several servers are namespaced, and write tools ask first with an approval card that shows the call's exact arguments. Saved servers can be edited in place and a pending sign-in can be cancelled. Workday servers also get **Agent setup**, which registers the agent's skills and tools in the tenant from inside CoWork. See [Remote MCP OAuth](remote-mcp-oauth.md).
 - **Secure MCP Tunnels**: Expose selected local/private MCP tools through an outbound-only CoWork relay you operate, with separate client/caller tokens, tool allowlists, read-only mode, and local audit logs. See [Secure MCP Tunnels](secure-mcp-tunnels.md).
 - **Versioned tool snapshots**: Tool discovery tracks a stable catalog hash across native tools and MCP state so status/tool changes invalidate caches immediately
 

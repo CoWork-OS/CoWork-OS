@@ -153,13 +153,18 @@ CoWork OS enables prompt caching by default in `auto` mode for supported model r
 
 ### Strategy by provider family
 
-- **Claude API / Azure Anthropic / Anthropic-compatible**: CoWork sends structured `systemBlocks` and prefers Anthropic automatic caching. If a route rejects automatic cache control, the session downgrades to explicit Anthropic breakpoints.
+- **Claude API / subscription tokens / Azure Anthropic / Anthropic-compatible**: CoWork marks the stable system prefix and prefers Anthropic automatic caching for the conversation. On supported Claude models, changing turn context is appended after the latest user/tool results as a scoped system message. Earlier context snapshots are persisted with assistant responses and replayed unchanged, including across session restoration; signed thinking is preserved when its original prefix still matches. If an endpoint rejects scoped context, CoWork remembers the rejection for that model and retries with the complete current global system prompt. If a route rejects automatic cache control, CoWork tries explicit breakpoints, then removes rejected cache controls for that model while retaining all instructions. Explicit caching uses at most four breakpoints, including the stable system marker; scoped system messages never receive cache markers.
 - **OpenRouter Claude**: CoWork uses explicit cache breakpoints over the stable system prefix plus the last 3 non-system messages, with a maximum of 4 total breakpoints.
-- **OpenAI / Azure OpenAI**: CoWork derives a deterministic stable-prefix cache key and sends it through OpenAI-style prompt-cache fields. This keeps GPT routes such as `gpt-5.4` and `gpt-5.4-mini` aligned under the same stable-prefix strategy.
-- **OpenAI ChatGPT subscriptions**: CoWork forwards the stable cache session and the configured short/long retention to the Codex Responses transport, so subscription calls use the provider's cache-write path as well as API-key calls.
+- **OpenAI / Azure OpenAI**: CoWork derives a deterministic stable-prefix cache key and sends it through OpenAI-style prompt-cache fields. Changing turn context follows conversation history as a system message, preserving earlier message prefixes on both Chat Completions and Responses routes.
+- **OpenAI ChatGPT subscriptions**: CoWork uses the Codex HTTP/SSE transport and forwards a stable session key as `prompt_cache_key` and session routing headers. Stable instructions and conversation history stay unchanged; changing turn context is sent as a developer message after the history, so it does not invalidate earlier messages. This route uses backend-managed implicit caching and omits the API-only `prompt_cache_options` / `prompt_cache_retention` fields. The configured short/long retention is passed to the SDK, but does not guarantee that lifetime on the ChatGPT backend.
 - **OpenRouter automatic routes**: CoWork participates in stable-prefix partitioning and cache-epoch tracking, sends model-scoped OpenRouter session affinity, and does not add Anthropic-specific markers.
 - **OpenRouter Qwen/DeepSeek explicit-cache routes**: CoWork uses Anthropic-compatible `cache_control` breakpoints where OpenRouter documents that syntax; other OpenRouter models use router-managed implicit caching and fall back cleanly if a route rejects the optional metadata.
-- **Bedrock Claude and Pi-backed Claude/OpenAI routes**: CoWork forwards the provider-native cache retention controls (Bedrock cache points or pi-ai cache options) and preserves cache-read/cache-write usage in telemetry.
+- **Bedrock Claude/Nova and Pi-backed Claude/OpenAI routes**: CoWork forwards provider-native cache retention controls and preserves cache-read/cache-write usage in telemetry. Pi keeps every system block when caching is off or rejected, preserves SDK-owned authentication instructions, and surfaces failed requests for normal error handling. Bedrock only retries cache compatibility errors when cache controls were sent. Nova uses system/message checkpoints with its supported short TTL; tool checkpoints and long TTLs remain Claude-specific where supported.
+- **Gemini and DeepSeek**: Their upstream implicit caches operate automatically. CoWork records Gemini's `cachedContentTokenCount` and DeepSeek's `prompt_cache_hit_tokens` as cached input tokens, including through the shared compatible-provider adapters where applicable.
+
+Claude's scoped-context path uses the `mid-conversation-system-clear-at-2026-08-21` beta and is limited to the [documented supporting models](https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages): Fable 5/5.1, Mythos 5/5.1, Opus 4.8/5/5.5, Sonnet 5.5, and Haiku 5.5. Sonnet 5 and older unsupported models keep the complete global system prompt. Cleared context remains byte-for-byte in the request history and costs no input tokens. On the request that clears it, Claude may reprocess the latest assistant reply; the reusable prefix ends at the user turn preceding that context. Stable system instructions and tools must still match, and compaction or history edits intentionally invalidate affected replay metadata.
+
+Routes that still use one global system field, including Bedrock Converse, Pi-backed Claude, OpenRouter Claude, Gemini, and unsupported compatible gateways, reuse the stable system prefix. Reusing later conversation history also requires the preceding system text to remain unchanged. Current turn instructions retain their system priority on these routes.
 
 ### What stays cacheable
 
@@ -190,6 +195,8 @@ When an upstream provider reports prompt-cache usage, CoWork records:
 - `cacheWriteTtl`: the provider-reported `5m` or `1h` write window when available; otherwise CoWork uses the configured request TTL for local cost estimation
 
 These values flow into Usage Insights and cost accounting.
+
+Cache hits depend on the upstream backend and an eligible matching prefix. Sending a cache key alone does not prove reuse; check provider-reported `cachedTokens` on repeated requests. Turning CoWork caching off removes its cache metadata and prefix splitting; provider-managed implicit caching may still occur.
 
 ---
 

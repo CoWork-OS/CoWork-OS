@@ -314,6 +314,17 @@ export interface LLMReasoningItem {
   data: unknown;
 }
 
+/** Transport-only context that preceded an assistant response; never user content. */
+export interface LLMProviderContext {
+  format: "anthropic-turn-context-v1";
+  provider: string;
+  model: string;
+  /** Bind restoration to the original request prefix and visible response. */
+  prefixHash: string;
+  contentHash: string;
+  text: string;
+}
+
 export interface LLMMessage {
   role: "user" | "assistant";
   content: string | LLMContent[] | LLMToolResult[];
@@ -321,6 +332,7 @@ export interface LLMMessage {
   phase?: "commentary" | "final_answer";
   /** Reasoning state from the response that produced this assistant message. */
   reasoning?: LLMReasoningItem[];
+  providerContext?: LLMProviderContext;
 }
 
 export type LLMSystemBlockScope = "session" | "turn" | "none";
@@ -404,6 +416,8 @@ export interface LLMResponse {
   content: LLMContent[];
   /** Opaque reasoning state to carry on the assistant message (see reasoning-replay.ts). */
   reasoning?: LLMReasoningItem[];
+  /** Persist with the assistant message, including responses without thinking. */
+  providerContext?: LLMProviderContext;
   /**
    * `refusal`: the provider's safety system declined or filtered the response
    * (Anthropic refusal, OpenAI/Azure content_filter, Gemini SAFETY and similar,

@@ -21,6 +21,7 @@ import {
   convertSystemBlocksToTextParts,
   isPromptCacheRequestUnsupportedError,
   normalizeSystemBlocks,
+  resolvePromptCacheProviderFamily,
 } from "./prompt-cache";
 import { lazyClient, loadAwsIniCredentialProvider, loadBedrockRuntimeSdk } from "./sdk-loaders";
 
@@ -41,6 +42,7 @@ export class BedrockProvider implements LLMProvider {
   private model: string;
   private region: string;
   private resolvedModelCache = new Map<string, string>();
+  private readonly promptCacheRejectedModels = new Set<string>();
   private inferenceProfileCache?: { fetchedAt: number; profiles: InferenceProfileCandidate[] };
   private static readonly CONTINUE_PLACEHOLDER_TEXT = "I understand. Let me continue.";
 
@@ -81,13 +83,20 @@ export class BedrockProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
+    const requestedCache = this.promptCacheRejectedModels.has(request.model)
+      ? undefined
+      : request.promptCache;
+    const isNova = resolvePromptCacheProviderFamily("bedrock", request.model) === "bedrock-nova";
+    const shortCacheOnly = isNova || /claude-3-[57]/i.test(request.model);
+    const promptCache =
+      requestedCache && shortCacheOnly ? { ...requestedCache, ttl: "5m" as const } : requestedCache;
     const toolNameMap = request.tools?.length ? this.buildToolNameMap(request.tools) : undefined;
     const preparedMessages = this.prepareMessagesForConverse(request.messages);
-    const messages = this.convertMessages(preparedMessages, toolNameMap, request.promptCache);
-    const system = this.convertSystem(request.system, request.systemBlocks, request.promptCache);
+    const messages = this.convertMessages(preparedMessages, toolNameMap, promptCache);
+    const system = this.convertSystem(request.system, request.systemBlocks, promptCache);
     const toolConfig =
       request.tools && request.tools.length > 0
-        ? this.convertTools(request.tools, toolNameMap, request.promptCache)
+        ? this.convertTools(request.tools, toolNameMap, isNova ? undefined : promptCache)
         : undefined;
 
     const resolvedModelId = await this.resolveModelId(request.model);
@@ -155,9 +164,10 @@ export class BedrockProvider implements LLMProvider {
       }
 
       if (
-        request.promptCache?.mode !== "disabled" &&
+        this.isPromptCacheEnabled(promptCache) &&
         isPromptCacheRequestUnsupportedError(error?.$metadata?.httpStatusCode, rawMessage)
       ) {
+        this.promptCacheRejectedModels.add(request.model);
         console.warn(`${logTag} Prompt cache unsupported; retrying without cache controls`);
         return this.createMessage({ ...request, promptCache: undefined });
       }

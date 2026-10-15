@@ -9,6 +9,7 @@ import {
   buildSystemBlock,
   extractAnthropicUsage,
   extractPiAiUsage,
+  extractOpenAICompatibleCacheUsage,
   isPromptCacheRequestUnsupportedError,
   buildOpenAIPromptCacheFields,
   mapPromptCacheTtlToOpenAIRetention,
@@ -513,6 +514,28 @@ describe("prompt-cache stable prefix hashing", () => {
       true,
     );
     expect(isPromptCacheRequestUnsupportedError(400, "Invalid API key")).toBe(false);
+    expect(isPromptCacheRequestUnsupportedError(401, "Invalid prompt_cache_key credentials")).toBe(
+      false,
+    );
+    expect(
+      isPromptCacheRequestUnsupportedError(
+        429,
+        "Prompt cache temporarily unsupported while rate limited",
+      ),
+    ).toBe(false);
+    expect(isPromptCacheRequestUnsupportedError(500, "Invalid prompt cache backend state")).toBe(
+      false,
+    );
+  });
+
+  it("recognizes DeepSeek's native cache-hit counter without double-counting input", () => {
+    expect(
+      extractOpenAICompatibleCacheUsage({
+        prompt_tokens: 4_096,
+        prompt_cache_hit_tokens: 3_072,
+        prompt_cache_miss_tokens: 1_024,
+      }),
+    ).toEqual({ cachedTokens: 3_072 });
   });
 });
 

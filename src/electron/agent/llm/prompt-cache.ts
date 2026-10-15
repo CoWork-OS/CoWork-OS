@@ -462,6 +462,7 @@ export function extractOpenAICompatibleCacheUsage(usage: Any): {
     usage.prompt_tokens_details?.cached_tokens ??
       usage.input_tokens_details?.cached_tokens ??
       usage.cached_tokens ??
+      usage.prompt_cache_hit_tokens ??
       usage.cache_read_input_tokens ??
       0,
   );
@@ -769,6 +770,9 @@ export function isPromptCacheRequestUnsupportedError(
       lower,
     );
   if (!mentionsCache) return false;
+  // An authentication, rate-limit, or server error is not a capability rejection.
+  // SDK adapters that omit a status still use the incompatibility wording below.
+  if (normalizedStatus && ![400, 404, 422, 501].includes(normalizedStatus)) return false;
   return (
     [400, 404, 422, 501].includes(normalizedStatus) ||
     /unsupported|not support|unknown|unrecognized|unexpected|invalid/.test(lower)

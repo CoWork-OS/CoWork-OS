@@ -2115,6 +2115,10 @@ export class BrowserTools {
           "user resumes CoWork (they will press Resume or reply in the conversation).",
       };
     }
+    // Show "Using the browser" in the bot's panel from the start of the action.
+    if (toolName.startsWith("browser_")) {
+      ComputerViewService.getInstance().noteWorking(this.taskId, "browser");
+    }
     if (drives) this.browserWorkbenchService.beginDriving?.(this.taskId, sessionId, toolName);
     const tabsBefore = drives ? this.workbenchTabState(sessionId) : null;
     let result: Any;

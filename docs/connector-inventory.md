@@ -10,7 +10,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | --- | ---: |
 | Native app integrations | 14 |
 | Gateway channels | 17 |
-| MCP connectors (Settings > Connectors) | 67 |
+| MCP connectors (Settings > Connectors) | 111 |
 | Bundled skills | 152 |
 
 Requirement keys: `macos-only`, `local-service` (a local app or server must be running), `public-webhook` (a reachable HTTPS URL is needed in production), `oauth-consent`, `api-key`, `cli-binary`, `personal-account-session`.
@@ -63,27 +63,47 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `ahrefs` | Ahrefs | read | api-key | third-party-package |
 | `aiera` | Aiera | read | api-key | first-party-api |
 | `airtable` | Airtable | read, write | api-key | third-party-package |
+| `algolia` | Algolia |  | oauth-consent | first-party-api |
+| `alltrails` | AllTrails |  |  | first-party-api |
 | `amplitude` | Amplitude | read, write | api-key | third-party-package |
 | `asana` | Asana | read, write | api-key | first-party-api |
 | `attio` | Attio | read, write | api-key | third-party-package |
+| `aws-knowledge` | AWS Knowledge |  |  | first-party-api |
+| `betterstack` | Better Stack |  | oauth-consent | first-party-api |
 | `blender` | Blender | read, write | local-service | first-party-api |
 | `box` | Box | read, write | oauth-consent | first-party-api |
+| `buildkite` | Buildkite |  | oauth-consent | first-party-api |
 | `calcom` | Cal.com | read, write | api-key | third-party-package |
+| `calendly` | Calendly |  | oauth-consent | first-party-api |
+| `canva` | Canva |  | oauth-consent | first-party-api |
 | `chronograph` | Chronograph | read | api-key | first-party-api |
+| `circleci` | CircleCI |  | oauth-consent | first-party-api |
 | `clerk` | Clerk | read, write | api-key | third-party-package |
+| `clickup` | ClickUp |  | oauth-consent | first-party-api |
 | `clinical-trials` | Clinical Trials | read |  | third-party-package |
+| `close` | Close |  | oauth-consent | first-party-api |
 | `cloudflare` | Cloudflare Developer Platform | read |  | third-party-package |
 | `cloudinary` | Cloudinary | read, write | api-key | third-party-package |
+| `comfy-cloud` | Comfy Cloud |  | oauth-consent | first-party-api |
 | `comfyui` | ComfyUI | read | local-service | first-party-api |
+| `context7` | Context7 |  |  | first-party-api |
+| `craft` | Craft |  | oauth-consent | first-party-api |
 | `daloopa` | Daloopa | read | api-key | first-party-api |
+| `datadog` | Datadog |  | oauth-consent | first-party-api |
+| `deepwiki` | DeepWiki |  |  | first-party-api |
 | `discord` | Discord | read, write | api-key | first-party-api |
 | `drafts` | Drafts | read, write | macos-only | third-party-package |
+| `dropbox` | Dropbox |  | oauth-consent | first-party-api |
 | `egnyte` | Egnyte | read | api-key | first-party-api |
 | `everything` | Everything (Demo) | read, write |  | third-party-package |
 | `excalidraw` | Excalidraw | read, write |  | third-party-package |
 | `factset` | FactSet | read | api-key | first-party-api |
 | `fantastical` | Fantastical | read, write | macos-only | third-party-package |
 | `figma` | Figma | read | api-key | first-party-api |
+| `fireflies` | Fireflies |  | oauth-consent | first-party-api |
+| `gamma` | Gamma |  | oauth-consent | first-party-api |
+| `gitlab` | GitLab |  | oauth-consent | first-party-api |
+| `globalping` | Globalping |  | oauth-consent | first-party-api |
 | `google-workspace` | Google Workspace | read, write | oauth-consent | first-party-api |
 | `grafana` | Grafana | read | api-key | third-party-package |
 | `growthbook` | GrowthBook | read, write | api-key | third-party-package |
@@ -91,7 +111,11 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `honeycomb` | Honeycomb | read, write | api-key | third-party-package |
 | `hubspot` | HubSpot | read, write | oauth-consent | first-party-api |
 | `huggingface` | Hugging Face | read, write | api-key | third-party-package |
+| `indeed` | Indeed |  | oauth-consent | first-party-api |
+| `intercom` | Intercom |  | oauth-consent | first-party-api |
 | `jira` | Jira | read, write | oauth-consent | first-party-api |
+| `kiwi` | Kiwi.com |  |  | first-party-api |
+| `klaviyo` | Klaviyo |  | oauth-consent | first-party-api |
 | `linear` | Linear | read | api-key | first-party-api |
 | `lseg` | LSEG (Refinitiv) | read | api-key | first-party-api |
 | `mailtrap` | Mailtrap | read, write | api-key | third-party-package |
@@ -100,32 +124,52 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `mem` | Mem | read, write | api-key | third-party-package |
 | `mermaid-chart` | Mermaid Chart | read, write |  | third-party-package |
 | `metabase` | Metabase | read, write | api-key | third-party-package |
+| `microsoft-learn` | Microsoft Learn |  |  | first-party-api |
 | `miro` | Miro | read, write | oauth-consent | third-party-package |
+| `mixpanel` | Mixpanel |  | oauth-consent | first-party-api |
 | `monday` | monday.com | read | api-key | first-party-api |
 | `moodys` | Moody's | read | api-key | first-party-api |
 | `morningstar` | Morningstar | read | api-key | first-party-api |
+| `motherduck` | MotherDuck |  | oauth-consent | first-party-api |
 | `mtnewswires` | MT Newswires | read | api-key | first-party-api |
+| `neon` | Neon |  | oauth-consent | first-party-api |
 | `netlify` | Netlify | read, write | api-key | third-party-package |
+| `notion` | Notion |  | oauth-consent | first-party-api |
 | `okta` | Okta | read, write | api-key | first-party-api |
 | `paypal` | PayPal | read, write | api-key | third-party-package |
 | `pitchbook` | PitchBook | read | api-key | first-party-api |
+| `plaid` | Plaid |  | oauth-consent | first-party-api |
 | `postgres` | PostgreSQL | read |  | third-party-package |
+| `postman` | Postman |  | oauth-consent | first-party-api |
+| `prisma-postgres` | Prisma Postgres |  | oauth-consent | first-party-api |
+| `railway` | Railway |  | oauth-consent | first-party-api |
 | `resend` | Resend | read, write | api-key | first-party-api |
 | `rhino` | Rhino | read, write | local-service | first-party-api |
+| `robinhood` | Robinhood |  | oauth-consent | first-party-api |
 | `spglobal` | S&P Global | read | api-key | first-party-api |
 | `salesforce` | Salesforce | read, write | oauth-consent | first-party-api |
+| `semgrep` | Semgrep |  | oauth-consent | first-party-api |
+| `sentry` | Sentry |  | oauth-consent | first-party-api |
 | `sequential-thinking` | Sequential Thinking | read |  | third-party-package |
 | `servicenow` | ServiceNow | read, write | api-key | first-party-api |
 | `shadcn-ui` | Shadcn UI | read |  | third-party-package |
 | `smartsheet` | Smartsheet | read, write | api-key | third-party-package |
 | `socket` | Socket | read | api-key | third-party-package |
 | `square` | Square | read | api-key | third-party-package |
+| `strava` | Strava |  | oauth-consent | first-party-api |
 | `stripe` | Stripe | read, write | api-key | third-party-package |
 | `supabase` | Supabase | read | api-key | third-party-package |
 | `tavily` | Tavily | read | api-key | third-party-package |
 | `tldraw` | tldraw | read, write |  | third-party-package |
+| `todoist` | Todoist |  | oauth-consent | first-party-api |
 | `tomba` | Tomba | read | api-key | third-party-package |
+| `trivago` | trivago |  |  | first-party-api |
+| `twelve-data` | Twelve Data |  | oauth-consent | first-party-api |
+| `twilio-docs` | Twilio Docs |  |  | first-party-api |
+| `unreal-engine` | Unreal Engine |  | local-service | first-party-api |
 | `vercel` | Vercel | read | api-key | first-party-api |
+| `webflow` | Webflow |  | oauth-consent | first-party-api |
+| `wolfram` | Wolfram |  |  | first-party-api |
 | `zendesk` | Zendesk | read, write | oauth-consent | first-party-api |
 
 ## Bundled skills

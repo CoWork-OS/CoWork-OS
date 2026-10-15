@@ -63,6 +63,11 @@ export interface MCPOAuthSettings {
   tokenAuthMethod?: "client_secret_post" | "client_secret_basic" | "none";
   jwt?: { subject: string; audience?: string; keyId?: string; algorithm?: "RS256" | "ES256" };
   preset?: { kind: "workday"; region: string; tenant: string };
+  /**
+   * Discover the endpoints and register a client (RFC 7591) on the first
+   * sign-in; the registered client is then stored in clientId/clientSecret.
+   */
+  dynamicClientRegistration?: boolean;
 }
 
 /**
@@ -506,6 +511,8 @@ export interface MCPRegistryEntry {
     resultLabel?: string;
   }>;
   iconUrl?: string;
+  /** Remote servers only: "oauth" installs it to sign in with MCP OAuth (dynamic client registration). */
+  remoteAuth?: "oauth" | "none";
 }
 
 // Full registry response

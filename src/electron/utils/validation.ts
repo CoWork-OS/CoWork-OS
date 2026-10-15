@@ -2622,6 +2622,7 @@ export const MCPAuthConfigSchema = z
         scopes: z.array(z.string().min(1).max(200)).max(50).optional(),
         resource: z.string().url().max(1000).optional(),
         tokenAuthMethod: z.enum(["client_secret_post", "client_secret_basic", "none"]).optional(),
+        dynamicClientRegistration: z.boolean().optional(),
         jwt: z
           .object({
             subject: z.string().min(1).max(500),

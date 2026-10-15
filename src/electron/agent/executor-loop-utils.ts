@@ -241,6 +241,7 @@ export function appendAssistantResponseToConversation(
     messages.push({
       role: "assistant",
       content: response.content,
+      ...(response.providerContext ? { providerContext: response.providerContext } : {}),
       ...(Array.isArray(response.reasoning) && response.reasoning.length > 0
         ? { reasoning: response.reasoning }
         : {}),

@@ -9259,7 +9259,6 @@ ${transcript}
           "- When supplied attachment content is partial, say so; do not invent unseen content or claim to read the full file.",
           "- Respond naturally as a friendly teammate.",
           ...sideChatRules,
-          ...(ctx.extraChatRules || []),
         ].join("\n");
 
     return [
@@ -9315,6 +9314,12 @@ ${transcript}
         "session",
       ),
       buildSystemBlock(`chat_rules:${hashPromptCacheValue(rules)}`, rules, "session"),
+      buildSystemBlock(
+        "chat_turn_rules",
+        !isThinkMode ? (ctx.extraChatRules || []).join("\n") : "",
+        "turn",
+        false,
+      ),
     ].filter((block) => block.text.length > 0);
   }
 
@@ -30307,6 +30312,7 @@ You are continuing a previous conversation. The context from the previous conver
     });
 
     const companionUserContent = await this.buildUserContent(rawPrompt, this.initialImages);
+    const companionMessages: LLMMessage[] = [{ role: "user", content: companionUserContent }];
     const emptyFallback = isThinkMode
       ? "I'd like to help you think through this. Could you share more about what's on your mind?"
       : this.generateCompanionFallbackResponse(rawPrompt);
@@ -30327,7 +30333,7 @@ You are continuing a previous conversation. The context from the previous conver
               model: this.modelId,
               maxTokens: companionMaxTokens,
               system: systemPrompt,
-              messages: [{ role: "user", content: companionUserContent }],
+              messages: [...companionMessages],
               ...promptCacheExtras,
             },
             this.getRetryTimeoutMs(LLM_TIMEOUT_MS, attempt, false, companionMaxTokens),
@@ -30350,10 +30356,15 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       let text = this.extractTextFromLLMContent(response.content || []);
+      if (text.trim()) appendAssistantResponseToConversationUtil(companionMessages, response, 0);
 
       // If the response was truncated (hit max_tokens), do a single continuation
       // call so the reply doesn't cut off mid-sentence.
       if (response.stopReason === "max_tokens" && text && !isThinkMode) {
+        companionMessages.push({
+          role: "user",
+          content: [{ type: "text", text: TEXT_CONTINUATION_PROMPT }],
+        });
         try {
           const contResponse = await this.createMessageWithTimeout(
             {
@@ -30361,11 +30372,7 @@ You are continuing a previous conversation. The context from the previous conver
               maxTokens: CHAT_REPLY_MAX_OUTPUT_TOKENS,
               system: systemPrompt,
               // End on a user turn: Claude 4.6+ rejects assistant prefill.
-              messages: [
-                { role: "user", content: companionUserContent },
-                { role: "assistant", content: [{ type: "text", text }] },
-                { role: "user", content: [{ type: "text", text: TEXT_CONTINUATION_PROMPT }] },
-              ],
+              messages: [...companionMessages],
               ...promptCacheExtras,
             },
             this.getRetryTimeoutMs(LLM_TIMEOUT_MS, 0, false, CHAT_REPLY_MAX_OUTPUT_TOKENS),
@@ -30387,9 +30394,13 @@ You are continuing a previous conversation. The context from the previous conver
           }
           const contText = this.extractTextFromLLMContent(contResponse.content || []);
           if (contText) {
+            appendAssistantResponseToConversationUtil(companionMessages, contResponse, 0);
             text = text + contText;
+          } else {
+            companionMessages.pop();
           }
         } catch {
+          companionMessages.pop();
           // Continuation failed — use the partial response as-is
         }
       }
@@ -30408,10 +30419,14 @@ You are continuing a previous conversation. The context from the previous conver
         typeof companionUserContent === "string"
           ? [{ type: "text" as const, text: companionUserContent }]
           : companionUserContent;
-      this.updateConversationHistory([
-        { role: "user", content: userHistoryContent },
-        { role: "assistant", content: [{ type: "text", text: assistantText }] },
-      ]);
+      this.updateConversationHistory(
+        text.trim() && assistantText === text.trim()
+          ? companionMessages
+          : [
+              { role: "user", content: userHistoryContent },
+              { role: "assistant", content: [{ type: "text", text: assistantText }] },
+            ],
+      );
       const resultSummary = this.buildResultSummary() || assistantText;
       // Companion mode (both chat and think) runs with 0 tools and a
       // minimal token budget, so strict guard checks designed for full

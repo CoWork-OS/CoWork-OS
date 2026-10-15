@@ -51,7 +51,6 @@ import {
   extractPiAiUsage,
   isPromptCacheRequestUnsupportedError,
   mapPromptCacheTtlToPiAiRetention,
-  prependVolatileSystemContextToMessages,
   splitSystemBlocksForOpenAIPrefix,
 } from "./prompt-cache";
 import { createLogger } from "../../utils/logger";
@@ -438,14 +437,6 @@ export class OpenAIProvider implements LLMProvider {
     const input: Any[] = [];
     const { volatileText } = splitSystemBlocksForOpenAIPrefix(system || "", systemBlocks);
 
-    if (volatileText) {
-      input.push({
-        type: "message",
-        role: "system",
-        content: [{ type: "input_text", text: volatileText }],
-      });
-    }
-
     const turnStart = currentTurnStartIndex(messages);
 
     for (const [msgIndex, msg] of messages.entries()) {
@@ -518,6 +509,13 @@ export class OpenAIProvider implements LLMProvider {
       }
     }
 
+    if (volatileText) {
+      input.push({
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text: volatileText }],
+      });
+    }
     return input;
   }
 
@@ -1046,13 +1044,10 @@ export class OpenAIProvider implements LLMProvider {
         request.systemBlocks,
       );
       const useStableCachePrefix = request.promptCache && request.promptCache.mode !== "disabled";
-      const piMessageInput = useStableCachePrefix
-        ? prependVolatileSystemContextToMessages(request.messages, volatileText)
-        : request.messages;
 
       // Convert messages to pi-ai format
       const piAiMessages = this.convertMessagesToPiAi(
-        piMessageInput,
+        request.messages,
         Array.isArray((model as Any).input) && (model as Any).input.includes("image"),
       );
 
@@ -1099,8 +1094,32 @@ export class OpenAIProvider implements LLMProvider {
         apiKey,
         maxTokens: withReasoningOutputHeadroom(request.maxTokens, piAiReasoningEffort),
         signal: request.signal,
+        // CoWork sends stateless full-history requests. Keep the established
+        // HTTP/SSE route instead of inheriting the SDK's WebSocket default.
+        transport: "sse",
         cacheRetention,
         ...(sessionId ? { sessionId } : {}),
+        // Keep changing time/memory/guidance after the conversation, at developer
+        // priority. Rewriting the first user message invalidates every later
+        // cached message on each tool round and follow-up. Apply this after SDK
+        // conversion so its single-system-prompt adapter cannot hoist it again.
+        ...(useStableCachePrefix && volatileText
+          ? {
+              onPayload: (payload: unknown) => {
+                const body = payload as { input: unknown[] };
+                return {
+                  ...body,
+                  input: [
+                    ...body.input,
+                    {
+                      role: "developer",
+                      content: [{ type: "input_text", text: volatileText }],
+                    },
+                  ],
+                };
+              },
+            }
+          : {}),
         reasoningEffort: piAiReasoningEffort,
         textVerbosity: this.getOpenAITextVerbosity(request),
       });
@@ -1707,6 +1726,7 @@ export class OpenAIProvider implements LLMProvider {
     return toOpenAICompatibleMessages(messages, system, {
       supportsImages: true,
       systemBlocks,
+      volatileSystemPlacement: "tail",
     }) as OpenAI.ChatCompletionMessageParam[];
   }
 

@@ -53,6 +53,7 @@ import type {
 import { estimateTokens, estimateTotalTokens, type ContextManager } from "../context-manager";
 import { calculateCost, isModelPriced } from "../llm/pricing";
 import { sanitizeToolCallHistory } from "../llm/openai-compatible";
+import { appendAssistantResponseToConversation } from "../executor-loop-utils";
 import {
   FileOperationTracker,
   ToolFailureTracker,
@@ -780,7 +781,7 @@ export class SessionRuntime {
     messages: LLMMessage[];
     assistantText: string;
   }> {
-    let messages = opts.messages;
+    const messages = [...opts.messages];
     let continuationPrefix = "";
     let continuationAttempts = 0;
     let assistantText = "";
@@ -796,22 +797,6 @@ export class SessionRuntime {
       },
       {
         requestResponse: async () => {
-          // Continue with the partial answer followed by a user turn: ending the
-          // request on the assistant turn (prefill) is rejected by Claude 4.6+.
-          const requestMessages: LLMMessage[] =
-            continuationPrefix.trim().length > 0
-              ? [
-                  ...messages,
-                  {
-                    role: "assistant" as const,
-                    content: [{ type: "text" as const, text: continuationPrefix }],
-                  },
-                  {
-                    role: "user" as const,
-                    content: [{ type: "text" as const, text: TEXT_CONTINUATION_PROMPT }],
-                  },
-                ]
-              : messages;
           const promptCacheExtras = this.deps.buildPromptCacheRequestExtras
             ? this.deps.buildPromptCacheRequestExtras({
                 systemPrompt: opts.systemPrompt,
@@ -833,7 +818,7 @@ export class SessionRuntime {
                   model: this.deps.getModelMetadata().modelId,
                   maxTokens,
                   system: opts.systemPrompt,
-                  messages: requestMessages,
+                  messages: [...messages],
                   ...promptCacheExtras,
                   ...(opts.onStreamProgress ? { onStreamProgress: opts.onStreamProgress } : {}),
                 },
@@ -864,6 +849,17 @@ export class SessionRuntime {
         },
         handleResponse: async ({ response }, state) => {
           const text = this.extractTextFromLLMContent(response.content || []);
+          const appendResponse = () =>
+            appendAssistantResponseToConversation(
+              messages,
+              {
+                ...response,
+                // Text loops offer no tools. Keep original text blocks and replay
+                // metadata instead of flattening/merging assistant responses.
+                content: (response.content || []).filter((block: Any) => block?.type === "text"),
+              },
+              0,
+            );
           if (
             response.stopReason === "max_tokens" &&
             !text.trim() &&
@@ -888,19 +884,28 @@ export class SessionRuntime {
             text &&
             continuationAttempts < 1
           ) {
+            appendResponse();
+            messages.push({
+              role: "user",
+              content: [{ type: "text", text: TEXT_CONTINUATION_PROMPT }],
+            });
             continuationPrefix = `${continuationPrefix}${text}`;
             continuationAttempts += 1;
             return { continueLoop: true, emptyResponseCount: 0 };
           }
 
           assistantText = String(`${continuationPrefix}${text || ""}`).trim() || opts.emptyFallback;
-          messages = [
-            ...messages,
-            {
+          if (text.trim()) {
+            appendResponse();
+          } else if (continuationPrefix) {
+            // No second answer was produced; keep the original partial response.
+            messages.pop();
+          } else {
+            messages.push({
               role: "assistant",
               content: [{ type: "text", text: assistantText }],
-            },
-          ];
+            });
+          }
           state.messages = messages;
           return { continueLoop: false, emptyResponseCount: 0 };
         },
@@ -3732,7 +3737,7 @@ export class SessionRuntime {
     return sanitizedHistory.map((msg) => {
       if (typeof msg.content === "string") {
         return {
-          role: msg.role,
+          ...msg,
           content:
             msg.content.length > MAX_CONTENT_LENGTH
               ? msg.content.slice(0, MAX_CONTENT_LENGTH) +
@@ -3768,10 +3773,10 @@ export class SessionRuntime {
           }
           return block;
         });
-        return { role: msg.role, content: truncatedContent };
+        return { ...msg, content: truncatedContent };
       }
 
-      return { role: msg.role, content: msg.content };
+      return { ...msg };
     });
   }
 
@@ -4621,6 +4626,7 @@ export class SessionRuntime {
         phase: ContextCompactionPhase;
       } | null = null;
       let restoredHistory: LLMMessage[] = payload.conversationHistory.map((msg: Any) => ({
+        ...msg,
         role: msg.role as "user" | "assistant",
         content: msg.content,
       }));

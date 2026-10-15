@@ -63,6 +63,53 @@ describe("AnthropicProvider", () => {
     });
   });
 
+  it("falls back through automatic and explicit cache rejection once, preserving instructions", async () => {
+    const cacheError = Object.assign(new Error("cache_control is not supported"), { status: 400 });
+    anthropicCreateMock.mockRejectedValueOnce(cacheError).mockRejectedValueOnce(cacheError);
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-sonnet-4-6",
+      anthropicApiKey: "test-key",
+    });
+    const input = {
+      ...makeRequest(),
+      promptCache: { mode: "anthropic_auto", ttl: "5m" },
+    } as LLMRequest;
+    await provider.createMessage(input);
+    await provider.createMessage(input);
+    expect(anthropicCreateMock).toHaveBeenCalledTimes(4);
+    const payloads = anthropicCreateMock.mock.calls.map(([payload]) => payload);
+    expect(payloads[0].cache_control).toBeDefined();
+    expect(payloads[1].cache_control).toBeUndefined();
+    expect(payloads[1].system[0].cache_control).toBeDefined();
+    for (const payload of payloads.slice(2)) {
+      expect(JSON.stringify(payload)).not.toContain("cache_control");
+      expect(JSON.stringify(payload.system)).toContain("system");
+    }
+  });
+
+  it.each([0, 10])(
+    "keeps explicit cache breakpoints within the provider limit for %s recent messages",
+    async (recent) => {
+      const provider = new AnthropicProvider({
+        type: "anthropic",
+        model: "claude-sonnet-4-6",
+        anthropicApiKey: "test-key",
+      });
+      await provider.createMessage({
+        ...makeRequest(),
+        messages: Array.from({ length: 8 }, (_, i) => ({
+          role: i % 2 ? "assistant" : "user",
+          content: `message ${i}`,
+        })),
+        promptCache: { mode: "anthropic_explicit", ttl: "5m", explicitRecentMessages: recent },
+      });
+      const count =
+        JSON.stringify(anthropicCreateMock.mock.calls[0][0]).split('"cache_control"').length - 1;
+      expect(count).toBe(recent === 0 ? 1 : 4);
+    },
+  );
+
   it("uses authToken headers for Claude subscription tokens", async () => {
     const provider = new AnthropicProvider({
       type: "anthropic",
@@ -102,6 +149,45 @@ describe("AnthropicProvider", () => {
       expect.objectContaining({ cache_control: { type: "ephemeral", ttl: "1h" } }),
       undefined,
     );
+  });
+
+  it("preserves scoped-context headers and handles feature/cache fallbacks on SDK streaming requests", async () => {
+    anthropicCreateMock.mockRejectedValue(
+      new Error("Streaming is required for operations that may take longer than 10 minutes"),
+    );
+    anthropicStreamFinalMessageMock
+      .mockRejectedValueOnce(Object.assign(new Error("clear_at is not supported"), { status: 400 }))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("cache_control is not supported"), { status: 400 }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("cache_control is not supported"), { status: 400 }),
+      );
+    const provider = new AnthropicProvider({
+      type: "anthropic",
+      model: "claude-opus-5-5",
+      anthropicApiKey: "sk-ant-oat01-fixture",
+    });
+    const response = await provider.createMessage({
+      ...makeRequest(),
+      model: "claude-opus-5-5",
+      systemBlocks: [
+        { text: "Stable", scope: "session", cacheable: true, stableKey: "stable" },
+        { text: "Current", scope: "turn", cacheable: false, stableKey: "turn" },
+      ],
+      promptCache: { mode: "anthropic_auto", ttl: "5m" },
+    });
+    expect(anthropicStreamMock).toHaveBeenCalledTimes(4);
+    expect(anthropicStreamMock.mock.calls[0][1].headers["anthropic-beta"]).toContain(
+      "oauth-2025-04-20",
+    );
+    expect(anthropicStreamMock.mock.calls[0][1].headers["anthropic-beta"]).toContain(
+      "mid-conversation-system-clear-at-2026-08-21",
+    );
+    const payload = anthropicStreamMock.mock.calls[3][0];
+    expect(JSON.stringify(payload)).not.toContain("cache_control");
+    expect(payload.system.map((block: Any) => block.text)).toEqual(["Stable", "Current"]);
+    expect(response.providerContext).toBeUndefined();
   });
 
   it("normalizes legacy Claude snapshot IDs before making requests", async () => {

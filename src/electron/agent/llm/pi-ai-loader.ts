@@ -12,6 +12,7 @@ type PiAiCompleteOptions = {
   apiKey?: string;
   maxTokens?: number;
   signal?: AbortSignal;
+  transport?: "sse" | "websocket" | "auto";
   sessionId?: string;
   cacheRetention?: CacheRetention;
   onPayload?: (

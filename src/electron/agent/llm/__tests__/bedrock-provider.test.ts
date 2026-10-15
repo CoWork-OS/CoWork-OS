@@ -40,6 +40,77 @@ describe("BedrockProvider", () => {
     vi.clearAllMocks();
   });
 
+  it("does not retry a cache-related backend error when no cache controls were sent", async () => {
+    const provider = new BedrockProvider(config);
+    const send = (provider as Any).client.send;
+    const error = Object.assign(new Error("Unknown cachePoint parameter"), {
+      $metadata: { httpStatusCode: 400 },
+    });
+    send.mockRejectedValueOnce(error).mockResolvedValueOnce({
+      output: { message: { content: [{ text: "unexpected retry" }] } },
+      stopReason: "end_turn",
+      usage: {},
+    });
+    await expect(
+      provider.createMessage({
+        model: config.model,
+        maxTokens: 64,
+        system: "system",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    ).rejects.toBe(error);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("remembers rejected cache points for subsequent calls to the same model", async () => {
+    const provider = new BedrockProvider(config);
+    const send = (provider as Any).client.send;
+    send.mockRejectedValueOnce(
+      Object.assign(new Error("Unknown cachePoint parameter"), {
+        $metadata: { httpStatusCode: 400 },
+      }),
+    );
+    const input: LLMRequest = {
+      model: config.model,
+      maxTokens: 64,
+      system: "Complete system instructions",
+      messages: [{ role: "user", content: "hello" }],
+      promptCache: { mode: "bedrock", ttl: "5m" },
+    };
+    await provider.createMessage(input);
+    await provider.createMessage(input);
+    expect(send).toHaveBeenCalledTimes(3);
+    for (const [command] of send.mock.calls.slice(1)) {
+      expect(JSON.stringify(command.input)).not.toContain("cachePoint");
+      expect(command.input.system).toEqual([{ text: input.system }]);
+    }
+  });
+
+  it("uses Nova's supported cache fields and short TTL even when long caching is requested", async () => {
+    const provider = new BedrockProvider({ ...config, model: "us.amazon.nova-pro-v1:0" });
+    await provider.createMessage({
+      model: "us.amazon.nova-pro-v1:0",
+      maxTokens: 64,
+      system: "Stable system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          name: "read_fixture",
+          description: "Read fixture",
+          input_schema: { type: "object", properties: {} },
+        },
+      ],
+      promptCache: { mode: "bedrock", ttl: "1h" },
+    });
+    expect(capturedConverseInput.system.at(-1)).toEqual({ cachePoint: { type: "default" } });
+    expect(capturedConverseInput.messages.at(-1).content.at(-1)).toEqual({
+      cachePoint: { type: "default" },
+    });
+    expect(capturedConverseInput.toolConfig.tools).toHaveLength(1);
+    expect(capturedConverseInput.toolConfig.tools[0].toolSpec.name).toBe("read_fixture");
+    expect(JSON.stringify(capturedConverseInput.toolConfig)).not.toContain("cachePoint");
+  });
+
   it("rewrites terminal synthetic assistant placeholder into a user message for Bedrock", async () => {
     const provider = new BedrockProvider(config);
 

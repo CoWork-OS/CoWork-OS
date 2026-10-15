@@ -183,8 +183,12 @@ export function anthropicThinkingPrefixSeed(
   return sha256(JSON.stringify({ v: 1, system: systemTexts, tools: tools || [] }));
 }
 
-function contentHash(content: unknown): string {
+export function anthropicContentHash(content: unknown): string {
   return sha256(JSON.stringify(content ?? null));
+}
+
+export function advanceAnthropicPrefixHash(hash: string, message: unknown): string {
+  return sha256(`${hash}\n${JSON.stringify(message)}`);
 }
 
 function anthropicItems(message: LLMMessage, provider: string, model: string) {
@@ -215,6 +219,13 @@ export function applyAnthropicThinkingReplay<T extends { role: string; content: 
   provider: string;
   seed: string;
   replay: boolean;
+  /** Restore transport context before validating the assistant's thinking. */
+  beforeMessage?: (
+    source: LLMMessage,
+    converted: T,
+    prefixHash: string,
+    index: number,
+  ) => T | undefined;
 }): AnthropicThinkingReplayResult<T> {
   let hash = opts.seed;
   let replayedBlocks = 0;
@@ -224,10 +235,15 @@ export function applyAnthropicThinkingReplay<T extends { role: string; content: 
   opts.converted.forEach((converted, index) => {
     let next = converted;
     const source = opts.messages[index];
+    const context = source && opts.beforeMessage?.(source, converted, hash, index);
+    if (context) {
+      out.push(context);
+      hash = advanceAnthropicPrefixHash(hash, context);
+    }
     const items = source ? anthropicItems(source, opts.provider, opts.model) : [];
     if (items.length > 0 && Array.isArray(converted.content)) {
       const data = items.map((item) => item.data as AnthropicReasoningData);
-      const visibleHash = contentHash(converted.content);
+      const visibleHash = anthropicContentHash(converted.content);
       const valid =
         opts.replay &&
         data.every((entry) => entry.prefixHash === hash && entry.contentHash === visibleHash);
@@ -243,7 +259,7 @@ export function applyAnthropicThinkingReplay<T extends { role: string; content: 
       }
     }
     out.push(next);
-    hash = sha256(`${hash}\n${JSON.stringify(next)}`);
+    hash = advanceAnthropicPrefixHash(hash, next);
   });
 
   return { messages: out, prefixHash: hash, replayedBlocks, droppedBlocks };
@@ -262,7 +278,7 @@ export function anthropicReasoningFromResponse(opts: {
   prefixHash: string;
 }): LLMReasoningItem[] {
   if (!Array.isArray(opts.content)) return [];
-  const visibleHash = contentHash(opts.visibleContent);
+  const visibleHash = anthropicContentHash(opts.visibleContent);
   const items: LLMReasoningItem[] = [];
   let position = 0;
   for (const block of opts.content as Any[]) {

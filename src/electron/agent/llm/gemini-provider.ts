@@ -390,6 +390,10 @@ export class GeminiProvider implements LLMProvider {
         ? {
             inputTokens: response.usageMetadata.promptTokenCount || 0,
             outputTokens: response.usageMetadata.candidatesTokenCount || 0,
+            ...(Number.isFinite(response.usageMetadata.cachedContentTokenCount) &&
+            Number(response.usageMetadata.cachedContentTokenCount) > 0
+              ? { cachedTokens: response.usageMetadata.cachedContentTokenCount }
+              : {}),
           }
         : undefined,
     };

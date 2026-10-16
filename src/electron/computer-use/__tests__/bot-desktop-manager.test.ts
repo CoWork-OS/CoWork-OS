@@ -326,14 +326,48 @@ describe("BotDesktopManager", () => {
       expect(reads).toHaveLength(0);
     });
 
+    // What Docker prints when its SSH connection fails, around ssh's own message.
+    const sshFailure = (stderr: string) =>
+      new Error(
+        `error during connect: Get "http://docker.example.com/v1.55/containers/json": command ` +
+          `[ssh -o ConnectTimeout=30 -T -- my-server docker system dial-stdio] has exited with ` +
+          `exit status 255, make sure the URL is valid: stderr=${stderr}`,
+      );
+
     it("explains an untrusted host key instead of accepting it", async () => {
       configureRemote(async (command, args) => {
-        if (args[0] === "--host") throw new Error("Host key verification failed.");
+        if (args[0] === "--host") throw sshFailure("Host key verification failed.");
         return runner(command, args);
       });
       await expect(
         BotDesktopManager.getInstance().withDesktop("bot-1", async () => undefined),
       ).rejects.toThrow(/doesn't trust my-server yet.*ssh my-server/);
+    });
+
+    it("explains other connection failures with ssh's own words", async () => {
+      configureRemote(async (command, args) => {
+        if (args[0] === "--host") throw sshFailure("Connection closed by 10.0.0.5 port 22");
+        return runner(command, args);
+      });
+      await expect(
+        BotDesktopManager.getInstance().withDesktop("bot-1", async () => undefined),
+      ).rejects.toThrow(
+        /couldn't connect to my-server over SSH \(Connection closed by 10\.0\.0\.5/,
+      );
+    });
+
+    it("reports a command's own Permission denied as it is, not as an SSH sign-in problem", async () => {
+      configureRemote(async (command, args) => {
+        if (args[0] === "--host" && args.includes("exec") && args.includes("touch")) {
+          throw new Error("touch: cannot touch 'x': Permission denied");
+        }
+        return runner(command, args);
+      });
+      await expect(
+        BotDesktopManager.getInstance().withDesktop("bot-1", (desktop) =>
+          desktop.exec(["touch", "x"]),
+        ),
+      ).rejects.toThrow("touch: cannot touch 'x': Permission denied");
     });
   });
 

@@ -113,9 +113,16 @@ async function waitForLocalPort(port: number, timeoutMs: number): Promise<boolea
   return false;
 }
 
-/** Turns SSH failures into what the person should do about them. */
+/**
+ * Turns failures to reach or sign in to the server into what the person should do about them.
+ * Docker reports those as "error during connect … dial-stdio … stderr=<ssh's message>"; any other
+ * error came from a command that did run on the server (its own "Permission denied", say) and is
+ * passed on as it is.
+ */
 function explainRemoteError(host: string, error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
+  const original = error instanceof Error ? error : new Error(message);
+  if (!/error during connect|dial-stdio|^ssh: /im.test(message)) return original;
   if (
     /host key verification failed|no matching host key|REMOTE HOST IDENTIFICATION/i.test(message)
   ) {
@@ -129,7 +136,11 @@ function explainRemoteError(host: string, error: unknown): Error {
   if (/could not resolve|connection refused|timed out|no route/i.test(message)) {
     return new Error(`CoWork couldn't reach ${host} over SSH.`);
   }
-  return error instanceof Error ? error : new Error(message);
+  const detail = /stderr=([^\n]*)/.exec(message)?.[1]?.trim();
+  return new Error(
+    `CoWork couldn't connect to ${host} over SSH${detail ? ` (${detail})` : ""}. Check that ` +
+      `"ssh ${host}" works in Terminal without asking for anything, and that Docker runs there.`,
+  );
 }
 
 export interface BotDesktopStatus {

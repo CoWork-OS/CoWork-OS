@@ -9,6 +9,7 @@ import {
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
 import { isComputerTool, type BotWorksOn } from "../../shared/bot-computer";
 import {
+  allowsHardBlockerHumanInput,
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../shared/human-input-policy";
@@ -793,6 +794,12 @@ function applyHumanInputGate(
   mode: ExecutionMode,
   policy?: HumanInputPolicy,
 ): string | null {
+  // A take-over waits on the person like any hard blocker: never in a task that must not ask.
+  if (toolName === "request_takeover") {
+    const resolved = policy ?? resolveHumanInputPolicy({ executionMode: mode });
+    if (allowsHardBlockerHumanInput(resolved)) return null;
+    return `Tool "${toolName}" is blocked because this task may not wait for the person.`;
+  }
   if (toolName !== "request_user_input") return null;
   const resolved = policy ?? resolveHumanInputPolicy({ executionMode: mode });
   if (allowsStructuredHumanInput(resolved)) return null;

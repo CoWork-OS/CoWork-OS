@@ -1,11 +1,16 @@
 import type { LLMTool } from "../llm/types";
-import type { InputRequestResponse, RequestUserInputArgs } from "../../../shared/types";
+import type { InputRequestResponse, RequestUserInputArgs, Task } from "../../../shared/types";
+import {
+  allowsHardBlockerHumanInput,
+  resolveHumanInputPolicy,
+} from "../../../shared/human-input-policy";
 import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { COMPUTER_TAKEOVER_REASON_MAX_LENGTH } from "../../../shared/computer-view";
 
 interface HandoffDaemon {
   /** Asks the person a structured question and waits for the answer (inbox, phone, app). */
   requestUserInput?: (taskId: string, args: RequestUserInputArgs) => Promise<InputRequestResponse>;
+  getTaskById?: (taskId: string) => Promise<Pick<Task, "agentConfig"> | undefined>;
 }
 
 const QUESTION_ID = "takeover";
@@ -50,6 +55,19 @@ export class ComputerHandoffTools {
   async requestTakeover(input: {
     reason?: unknown;
   }): Promise<{ success: boolean; message: string }> {
+    // A task that may not wait on the person (no human input) never pauses for a take-over.
+    if (this.daemon?.getTaskById) {
+      const task = await this.daemon.getTaskById(this.taskId);
+      if (
+        !allowsHardBlockerHumanInput(resolveHumanInputPolicy({ agentConfig: task?.agentConfig }))
+      ) {
+        return {
+          success: false,
+          message:
+            "This task can't wait for the person. Don't try the step yourself; report what is blocked.",
+        };
+      }
+    }
     const view = ComputerViewService.getInstance();
     const state = view.requestTakeover(
       this.taskId,
@@ -82,7 +100,14 @@ export class ComputerHandoffTools {
         ],
       });
     } catch (error) {
-      // Another question is already waiting: the rail still shows this request.
+      // Only "another question is already waiting" keeps the request on the rail; a cancelled or
+      // failed task withdraws it.
+      if (
+        !(error instanceof Error && /already has a pending structured input/.test(error.message))
+      ) {
+        view.clearTakeoverRequest(this.taskId);
+        throw error;
+      }
       return {
         success: true,
         message:

@@ -310,6 +310,22 @@ describe("BotDesktopManager", () => {
       expect(Number(url.port)).toBe(tunnels[0].localPort);
     });
 
+    it("refuses a link in the work folder instead of reading through it", async () => {
+      const reads: string[][] = [];
+      configureRemote(async (command, args) => {
+        const exec = args.indexOf("exec");
+        if (exec >= 0 && args.includes("stat")) {
+          return { stdout: Buffer.from("symbolic link\t9\n"), stderr: "" };
+        }
+        if (exec >= 0 && args.includes("head")) reads.push(args);
+        return runner(command, args);
+      });
+      await expect(BotDesktopManager.getInstance().readFile("bot-1", "zero")).rejects.toThrow(
+        /not a file/,
+      );
+      expect(reads).toHaveLength(0);
+    });
+
     it("explains an untrusted host key instead of accepting it", async () => {
       configureRemote(async (command, args) => {
         if (args[0] === "--host") throw new Error("Host key verification failed.");

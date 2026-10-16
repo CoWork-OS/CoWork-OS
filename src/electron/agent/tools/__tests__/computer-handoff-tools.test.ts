@@ -72,4 +72,25 @@ describe("ComputerHandoffTools", () => {
     expect(result.success).toBe(true);
     expect(view.getState("task-1").takeoverRequest?.reason).toBe("Solve the CAPTCHA");
   });
+
+  it("withdraws the request when the task is stopped while waiting", async () => {
+    const pending = new ComputerHandoffTools("task-1", {
+      requestUserInput: vi.fn(async () => {
+        throw new Error("Task stopped by user; current progress accepted.");
+      }),
+    }).requestTakeover({ reason: "Solve the CAPTCHA" });
+    await expect(pending).rejects.toThrow(/stopped/);
+    expect(view.getState("task-1").takeoverRequest).toBeUndefined();
+  });
+
+  it("never pauses a task that may not wait for the person", async () => {
+    const requestUserInput = vi.fn();
+    const result = await new ComputerHandoffTools("task-1", {
+      requestUserInput,
+      getTaskById: vi.fn(async () => ({ agentConfig: { humanInputPolicy: "none" as const } })),
+    }).requestTakeover({ reason: "Approve the payment" });
+    expect(result.success).toBe(false);
+    expect(requestUserInput).not.toHaveBeenCalled();
+    expect(view.getState("task-1").takeoverRequest).toBeUndefined();
+  });
 });

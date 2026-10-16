@@ -175,6 +175,14 @@ describe("BotDesktopTools", () => {
     });
     expect(second.path).toBe(path.join("artifacts", "bot-desktop", "report (2).pdf"));
     expect(fs.readFileSync(path.join(workspacePath, first.path), "utf8")).toBe("pdf-bytes");
+    // A name taken by the person's own file is skipped, never replaced.
+    const own = path.join(workspacePath, "artifacts", "bot-desktop", "report (3).pdf");
+    fs.writeFileSync(own, "mine");
+    const third = (await tools.execute("desktop_save_file", {
+      path: "Downloads/report.pdf",
+    })) as Any;
+    expect(third.path).toBe(path.join("artifacts", "bot-desktop", "report (4).pdf"));
+    expect(fs.readFileSync(own, "utf8")).toBe("mine");
     expect(daemon.logEvent).toHaveBeenCalledWith(
       "task-1",
       "artifact_created",

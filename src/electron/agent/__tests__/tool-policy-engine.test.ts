@@ -659,4 +659,17 @@ describe("request_takeover exposure", () => {
       "allow",
     );
   });
+
+  it("is denied when the task may not wait for the person", () => {
+    expect(
+      evaluateToolPolicy("request_takeover", { executionMode: "execute", humanInputPolicy: "none" })
+        .decision,
+    ).toBe("deny");
+    expect(
+      evaluateToolPolicy("request_takeover", {
+        executionMode: "execute",
+        humanInputPolicy: "hard_blockers",
+      }).decision,
+    ).toBe("allow");
+  });
 });

@@ -646,14 +646,26 @@ export class BotDesktopManager {
     }
     await this.ensureRunning(botId);
     const session = this.session(botId);
-    const size = Number(
-      (await session.exec(["stat", "--format", "%s", "--", `${WORK_DIR}/${rel}`])).stdout
-        .toString("utf8")
-        .trim(),
-    );
-    if (!Number.isFinite(size)) throw new Error("That file was not found on the bot's desktop.");
+    // stat does not follow links: a link (to /dev/zero, or a huge file) is refused, not read.
+    const [type, rawSize] = (
+      await session.exec(["stat", "--format", "%F\t%s", "--", `${WORK_DIR}/${rel}`])
+    ).stdout
+      .toString("utf8")
+      .trim()
+      .split("\t");
+    const size = Number(rawSize);
+    if (!type || !Number.isFinite(size))
+      throw new Error("That file was not found on the bot's desktop.");
+    if (type !== "regular file" && type !== "regular empty file")
+      throw new Error("That is not a file.");
     if (size > BOT_DESKTOP_FILE_MAX_BYTES) throw new Error("That file is larger than 25 MB.");
-    const result = await session.exec(["cat", "--", `${WORK_DIR}/${rel}`], { timeoutMs: 120_000 });
+    // Read at most one byte past the limit, so a file swapped after the check stays bounded.
+    const result = await session.exec(
+      ["head", "--bytes", String(BOT_DESKTOP_FILE_MAX_BYTES + 1), "--", `${WORK_DIR}/${rel}`],
+      { timeoutMs: 120_000 },
+    );
+    if (result.stdout.length > BOT_DESKTOP_FILE_MAX_BYTES)
+      throw new Error("That file is larger than 25 MB.");
     return { path: rel, data: result.stdout };
   }
 

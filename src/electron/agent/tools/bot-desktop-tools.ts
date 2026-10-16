@@ -353,19 +353,27 @@ export class BotDesktopTools {
     const base = path.posix.basename(source).replace(/[^A-Za-z0-9._ -]+/g, "_") || "file";
     const ext = path.extname(base);
     const stem = ext ? base.slice(0, -ext.length) : base;
-    let relative = path.join("artifacts", "bot-desktop", base);
-    for (let n = 2; fs.existsSync(path.join(workspace.path, relative)) && n < 1000; n += 1) {
-      relative = path.join("artifacts", "bot-desktop", `${stem} (${n})${ext}`);
+    // Create-only ("wx"): an existing file, or one another save just took, is never replaced.
+    let relative = "";
+    let destination = "";
+    for (let n = 1; ; n += 1) {
+      if (n >= 1000) throw new Error(`Too many copies of ${base} in artifacts/bot-desktop.`);
+      relative = path.join("artifacts", "bot-desktop", n === 1 ? base : `${stem} (${n})${ext}`);
+      // The workspace's own write rules decide whether the copy may land there.
+      destination = assertWorkspaceFilesystemAccess(
+        workspace,
+        relative,
+        "write",
+        "file from the bot's desktop",
+      );
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      try {
+        fs.writeFileSync(destination, data, { flag: "wx" });
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
     }
-    // The workspace's own write rules decide whether the copy may land there.
-    const destination = assertWorkspaceFilesystemAccess(
-      workspace,
-      relative,
-      "write",
-      "file from the bot's desktop",
-    );
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(destination, data);
     this.daemon.logEvent(this.taskId, "artifact_created", {
       path: destination,
       source: "bot_desktop",

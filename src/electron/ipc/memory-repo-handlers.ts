@@ -16,6 +16,7 @@ import { IPC_CHANNELS } from "../../shared/types";
 import {
   MEMORY_REPO_SYNC_FOLDER_OFF_ERROR,
   MEMORY_REPO_SYNC_OFF_ERROR,
+  type MemoryRepoBotMemoryReport,
   type MemoryRepoCompactResult,
   type MemoryRepoDreamActionResult,
   type MemoryRepoDreamNowResult,
@@ -41,6 +42,7 @@ import {
   removeMemoryRepoEntry,
   updateMemoryRepoEntry,
   type MemoryRepoHubPort,
+  type MemoryRepoBotLookup,
 } from "../memory/repo/memory-repo-hub";
 import {
   buildMemoryRepoDreamsReport,
@@ -51,9 +53,19 @@ import {
   type MemoryRepoDreamServicePort,
   type MemoryRepoDreamSettings,
 } from "../memory/repo/memory-repo-dream-report";
+import {
+  botMemoryReport,
+  deleteBotMemory,
+  forgetBotMemoryEntry,
+  undoBotMemoryChange,
+  type MemoryRepoBotPort,
+} from "../memory/repo/memory-repo-bots";
 import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
 import {
+  MemoryRepoBotForgetRequestSchema,
+  MemoryRepoBotMemoryRequestSchema,
+  MemoryRepoBotUndoRequestSchema,
   MemoryRepoDreamDiffRequestSchema,
   MemoryRepoDreamRequestSchema,
   MemoryRepoEntriesRequestSchema,
@@ -98,6 +110,12 @@ export interface MemoryRepoIpcDeps {
   getImportService?: () => MemoryRepoImportService | null;
   /** The workspace's name, for a workspace file Keep creates (default: none). */
   workspaceName?: (workspaceId: string) => Promise<string | null>;
+  /** The running service for a bot's own memory (default: none). */
+  getBotService?: () => MemoryRepoBotPort | null;
+  /** Whether the bot exists (default: any). */
+  botExists?: (botId: string) => Promise<boolean>;
+  /** A bot's name and whether it was deleted, for its file in the Hub (default: none). */
+  lookupBot?: MemoryRepoBotLookup;
 }
 
 type Handler = (raw: unknown) => Promise<unknown>;
@@ -124,6 +142,10 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
   const getHubService = deps.getHubService ?? (() => null);
   const getSyncService = deps.getSyncService ?? (() => MemoryRepoService.get());
   const getImportService = deps.getImportService ?? (() => MemoryRepoService.get());
+  const getBotService = deps.getBotService ?? (() => null);
+  const requireBot = async (botId: string) => {
+    if (deps.botExists && !(await deps.botExists(botId))) throw new Error("Bot not found");
+  };
   const requireWorkspace = async (workspaceId: string) => {
     if (deps.workspaceExists && !(await deps.workspaceExists(workspaceId))) {
       throw new Error("Workspace not found");
@@ -193,7 +215,7 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
       limit(IPC_CHANNELS.MEMORY_REPO_ENTRIES);
       const value = validateInput(MemoryRepoEntriesRequestSchema, raw, "memory folder entries");
       await requireWorkspace(value.workspaceId);
-      return listMemoryRepoEntries(getHubService(), value.workspaceId);
+      return listMemoryRepoEntries(getHubService(), value.workspaceId, deps.lookupBot);
     },
     [IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY]: async (raw): Promise<MemoryRepoEntryActionResult> => {
       limit(IPC_CHANNELS.MEMORY_REPO_UPDATE_ENTRY);
@@ -254,6 +276,32 @@ export function createMemoryRepoIpcHandlers(deps: MemoryRepoIpcDeps): Record<str
         return toMemoryRepoDreamNowResult(dreamer ? await dreamer.run("manual") : null);
       },
     ),
+    [IPC_CHANNELS.MEMORY_REPO_BOT_MEMORY]: async (raw): Promise<MemoryRepoBotMemoryReport> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_BOT_MEMORY);
+      const value = validateInput(MemoryRepoBotMemoryRequestSchema, raw, "bot memory");
+      await requireBot(value.botId);
+      return botMemoryReport(getBotService(), value.botId);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_BOT_FORGET]: async (raw): Promise<MemoryRepoEntryActionResult> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_BOT_FORGET);
+      const value = validateInput(MemoryRepoBotForgetRequestSchema, raw, "bot memory forget");
+      await requireBot(value.botId);
+      return forgetBotMemoryEntry(getBotService(), value.botId, value.ref, value.hash);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_BOT_UNDO]: async (raw): Promise<MemoryRepoEntryActionResult> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_BOT_UNDO);
+      const value = validateInput(MemoryRepoBotUndoRequestSchema, raw, "bot memory undo");
+      await requireBot(value.botId);
+      return undoBotMemoryChange(getBotService(), value.botId, value.commit);
+    },
+    [IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY]: async (
+      raw,
+    ): Promise<MemoryRepoEntryActionResult & { entries?: number }> => {
+      limit(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY);
+      const value = validateInput(MemoryRepoBotMemoryRequestSchema, raw, "bot memory delete");
+      await requireBot(value.botId);
+      return deleteBotMemory(getBotService(), value.botId);
+    },
     [IPC_CHANNELS.MEMORY_REPO_SYNC_NOW]: noArgs(
       IPC_CHANNELS.MEMORY_REPO_SYNC_NOW,
       async (): Promise<MemoryRepoSyncNowResult> => {
@@ -289,6 +337,12 @@ export function setupMemoryRepoHandlers(deps: MemoryRepoIpcDeps): void {
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER, RATE_LIMIT_CONFIGS.limited);
   rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW, SYNC_NOW_RATE_LIMIT);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_BOT_MEMORY, RATE_LIMIT_CONFIGS.standard);
+  // Forget and undo commit to the folder; one button each is the only caller.
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_BOT_FORGET, RATE_LIMIT_CONFIGS.limited);
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_BOT_UNDO, RATE_LIMIT_CONFIGS.limited);
+  // Deletes a whole bot file; the bot's delete confirmation is the only caller.
+  rateLimiter.configure(IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY, RATE_LIMIT_CONFIGS.limited);
   const handlers = createMemoryRepoIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
     ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));

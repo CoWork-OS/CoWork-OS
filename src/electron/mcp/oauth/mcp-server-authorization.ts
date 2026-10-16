@@ -126,7 +126,7 @@ export function buildRemoteOAuthServer(input: RemoteOAuthServerInput): Omit<MCPS
               ...(input.jwtKeyId ? { keyId: input.jwtKeyId } : {}),
             },
           }),
-      ...(input.scopes?.length ? { scopes: input.scopes } : {}),
+      ...(input.scopes?.length ? { scopes: input.scopes, scopesDiscovered: false } : {}),
       ...(input.resource ? { resource: input.resource } : {}),
       ...(input.kind === "workday"
         ? { preset: { kind: "workday" as const, region: input.region!, tenant: input.tenant! } }

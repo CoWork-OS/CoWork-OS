@@ -15,6 +15,7 @@ import {
 } from "./approval-draft-preview";
 import { BotNotificationService } from "../notifications/BotNotificationService";
 import { BotWorkResultService } from "../agents/BotWorkResultService";
+import { BotOutcomeMetricsService } from "../agents/BotOutcomeMetricsService";
 import { getAutomationRuntime } from "../automation/AutomationRuntime";
 import { BotWorkControlService } from "../automation/BotWorkControlService";
 import { BotResponsibilityService } from "../automation/BotResponsibilityService";
@@ -301,6 +302,7 @@ import {
   isTempWorkspaceId,
   AgentConfig,
   LLMReasoningEffort,
+  LLMProviderType,
   LLM_PROVIDER_TYPES,
   PdfReviewSummary,
   TaskLearningProgress,
@@ -342,6 +344,7 @@ import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
 import { approvalPromptsDisabled } from "../agent/approval-policy";
 import { generateAndApplyTaskTitle } from "../agent/task-title-generator";
+import { effectiveTaskModelConfigFor } from "../agent/task-model-config";
 import { RuntimeVisibilityService } from "../agent/RuntimeVisibilityService";
 import {
   LLMProviderFactory,
@@ -397,6 +400,8 @@ import {
   TaskCreateSchema,
   TaskRenameSchema,
   TaskWorkspaceUpdateSchema,
+  TaskModelSelectionSchema,
+  AgentRoleModelFieldsSchema,
   TaskMessageSchema,
   FileImportSchema,
   FileImportDataSchema,
@@ -1011,6 +1016,26 @@ export function getNotificationService(): NotificationService | null {
 }
 
 // Helper to check rate limit and throw if exceeded
+/**
+ * A bot's own model from the renderer: a known provider and a model key, or cleared (empty or
+ * null becomes null, "follow the default model"). Fields that were not sent stay absent.
+ */
+function normalizeAgentRoleModelFields(request: unknown): {
+  providerType?: LLMProviderType | null;
+  modelKey?: string | null;
+} {
+  const raw = (request && typeof request === "object" ? request : {}) as Record<string, unknown>;
+  const value = validateInput(
+    AgentRoleModelFieldsSchema,
+    { providerType: raw.providerType, modelKey: raw.modelKey },
+    "bot model",
+  );
+  return {
+    ...(value.providerType !== undefined ? { providerType: value.providerType || null } : {}),
+    ...(value.modelKey !== undefined ? { modelKey: value.modelKey || null } : {}),
+  };
+}
+
 function checkRateLimit(
   channel: string,
   _config: {
@@ -1161,6 +1186,8 @@ rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_FORK_SESSION, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST_FOR_WORKSPACES, RATE_LIMIT_CONFIGS.frequent);
@@ -1781,7 +1808,12 @@ export async function setupIpcHandlers(
       )
         return null;
       const { resolveComposerPredictionModel } = await import("../agent/composer-prediction-model");
-      const selection = resolveComposerPredictionModel(task);
+      // A bot's conversation predicts with the bot's own model, like its turns.
+      const selection = resolveComposerPredictionModel({
+        agentConfig: await effectiveTaskModelConfigFor(task, (roleId) =>
+          agentRoleRepo.findById(roleId),
+        ),
+      });
       const key = `${taskId}:${request.revision}:${selection.providerType}:${selection.modelId}`;
       const prediction = await composerPredictions.request(
         event.sender.id,
@@ -1942,12 +1974,21 @@ export async function setupIpcHandlers(
     prompt: string,
     agentConfig?: AgentConfig,
   ): void => {
-    void generateAndApplyTaskTitle(
-      task,
-      prompt,
-      taskRepo,
-      (taskId, title) => agentDaemon.emitTaskTitleUpdated(taskId, title),
-      agentConfig,
+    // A bot's task titles with the bot's own model, like its turns.
+    void effectiveTaskModelConfigFor(
+      {
+        agentConfig: agentConfig ?? task.agentConfig,
+        assignedAgentRoleId: task.assignedAgentRoleId,
+      },
+      (roleId) => agentRoleRepo.findById(roleId),
+    ).then((modelConfig) =>
+      generateAndApplyTaskTitle(
+        task,
+        prompt,
+        taskRepo,
+        (taskId, title) => agentDaemon.emitTaskTitleUpdated(taskId, title),
+        modelConfig,
+      ),
     );
   };
 
@@ -5642,6 +5683,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.BOT_WORK_LIST, async (_, query: unknown) =>
     botWorkQueryService.list(query),
   );
+  // A bot's recent outcomes and model usage (cost, tokens, cache reads) for its details panel.
+  // The request is validated by the service's zod schema.
+  const botOutcomeMetricsService = new BotOutcomeMetricsService(db);
+  ipcMain.handle(IPC_CHANNELS.BOT_METRICS_SUMMARY, async (_, request: unknown) => {
+    checkRateLimit(IPC_CHANNELS.BOT_METRICS_SUMMARY);
+    return botOutcomeMetricsService.summary(request);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.BOT_CONVERSATIONS_LIST,
@@ -5946,6 +5994,28 @@ export async function setupIpcHandlers(
     checkRateLimit(IPC_CHANNELS.TASK_UPDATE_WORKSPACE);
     const validated = validateInput(TaskWorkspaceUpdateSchema, data, "task workspace update");
     return agentDaemon.updateTaskWorkspace(validated.taskId, validated.workspaceId);
+  });
+
+  // Model picked in an open conversation: pinned to that task only. The global default
+  // model is unchanged; an effort choice updates that provider's saved effort.
+  ipcMain.handle(IPC_CHANNELS.TASK_SET_MODEL, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SET_MODEL);
+    const validated = validateInput(TaskModelSelectionSchema, data, "task model selection");
+    await authorizeTaskForEvent(event, validated.taskId, "manage");
+    const task = agentDaemon.setTaskModelSelection(validated.taskId, {
+      providerType: validated.providerType,
+      modelKey: validated.modelKey,
+    });
+    if (validated.reasoningEffort) {
+      LLMProviderFactory.saveSettings(
+        LLMProviderFactory.applyReasoningEffortSelection(
+          LLMProviderFactory.loadSettings(),
+          validated.providerType,
+          validated.reasoningEffort as LLMReasoningEffort,
+        ),
+      );
+    }
+    return task;
   });
 
   ipcMain.handle(IPC_CHANNELS.TASK_PIN, async (_, id: string) => {
@@ -9796,6 +9866,7 @@ export async function setupIpcHandlers(
     if (request.companyId !== undefined && request.companyId !== null) {
       request.companyId = validateInput(UUIDSchema, request.companyId, "company ID");
     }
+    Object.assign(request, normalizeAgentRoleModelFields(request));
     if (request.worksOn !== undefined) {
       request.worksOn =
         validateInput(AgentRoleWorksOnSchema, request.worksOn, "works on") ?? undefined;
@@ -9811,7 +9882,11 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_UPDATE, async (_, request) => {
     checkRateLimit(IPC_CHANNELS.AGENT_ROLE_UPDATE);
     const validated = validateInput(UUIDSchema, request.id, "agent role ID");
-    const normalizedRequest = { ...request, id: validated };
+    const normalizedRequest = {
+      ...request,
+      id: validated,
+      ...normalizeAgentRoleModelFields(request),
+    };
     if (normalizedRequest.companyId !== undefined && normalizedRequest.companyId !== null) {
       normalizedRequest.companyId = validateInput(
         UUIDSchema,
@@ -11640,6 +11715,13 @@ export async function setupIpcHandlers(
     // Memory Hub "What CoWork knows" over the folder: entries, edit, delete, pin, open file.
     getHubService: () => MemoryRepoService.get(),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+    // A bot's own memory file, shown in the bot's details panel.
+    getBotService: () => MemoryRepoService.get(),
+    botExists: async (botId) => Boolean(await agentRoleRepo.findById(botId)),
+    lookupBot: async (botId) => {
+      const role = await agentRoleRepo.findById(botId);
+      return role ? { name: role.displayName || role.name, deleted: !role.isActive } : null;
+    },
     workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
     // "Import notes from a folder": the folder is chosen here, never sent by the renderer.
     pickFolder: async () => {

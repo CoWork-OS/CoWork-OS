@@ -29,3 +29,4 @@
 {"prompt":"Create a motion graphics promo for our new feature announcement.","expectedSkillIds":["motion-film"],"forbiddenSkillIds":["motion-editor","video-frames"]}
 {"prompt":"Build me a motion-design editor app with a keyframe timeline and MP4 export.","expectedSkillIds":["motion-editor"],"forbiddenSkillIds":["motion-film","manim-video"]}
 {"prompt":"Create an After Effects-lite animation editor I can run locally.","expectedSkillIds":["motion-editor"],"forbiddenSkillIds":["motion-film"]}
+{"prompt":"Turn this research PDF into an illustrated, animated storybook I can scroll through.","expectedSkillIds":["pdf-storybook"],"forbiddenSkillIds":["summarize"]}

@@ -12,6 +12,7 @@ import { BotWorkDialog, type BotWorkDialogTab } from "./BotWorkDialog";
 import { BotComputerSection } from "./BotComputerSection";
 import { BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
 import { normalizeBotWorksOn } from "../../shared/bot-computer";
+import { BotMemorySection } from "./BotMemorySection";
 import { BOT_NOTIFICATION_POLICY_UPDATED_EVENT } from "./BotNotificationPanel";
 import { hasHostMethods } from "../host/browser-capabilities";
 import { BotMascot } from "./bot-mascot/BotMascot";
@@ -23,6 +24,7 @@ import { resolveBotMascot } from "../../shared/bot-mascots";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
 import { botAttentionItems, withQueueNeedsYou } from "../utils/bot-attention";
 import { useAttentionSnapshot } from "../hooks/useAttentionSnapshot";
+import { formatBotUsage, useBotUsage } from "../hooks/useBotUsage";
 import type { BotNotificationPolicy, BotWorkView, Task, TaskStatus } from "../../shared/types";
 import type { BotConversationProjection } from "../../shared/bot-lifecycle";
 import type { AgentRoleData } from "../../electron/preload";
@@ -214,6 +216,8 @@ export function BotDetailsRail({
 
   // The bot's work at a glance; the full view opens in the work dialog.
   const workAvailable = Boolean(onSelectTask && task.workspaceId && hasHostMethods("listBotWork"));
+  const usage = useBotUsage(task.workspaceId, roleId || undefined, task.updatedAt);
+  const usageLine = usage ? formatBotUsage(usage) : null;
   useEffect(() => {
     if (!workAvailable || !roleId) return;
     let cancelled = false;
@@ -397,6 +401,14 @@ export function BotDetailsRail({
               </button>
             ))}
           </div>
+          {usageLine ? (
+            <p
+              className="bot-details-usage"
+              title="Model calls by this bot's work in this workspace"
+            >
+              Last {usage?.days} days: {usageLine}
+            </p>
+          ) : null}
           <button type="button" className="bot-details-link" onClick={() => setWorkTab("setup")}>
             Responsibilities and setup
           </button>
@@ -432,6 +444,8 @@ export function BotDetailsRail({
           </button>
         )}
       </section>
+
+      {roleId ? <BotMemorySection botId={roleId} refreshKey={task.updatedAt} /> : null}
 
       <section className="bot-details-section">
         <h3 className="bot-details-section-heading">

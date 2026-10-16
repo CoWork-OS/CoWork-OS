@@ -314,13 +314,19 @@ export function MemoryHubSettings(props?: {
     return (
       <div className="settings-section">
         {hubHeader}
-        {botOrigin?.workspaceId === selectedWorkspaceId && (
-          <p className="settings-form-hint">
-            Workspace context opened from {botOrigin.botName}. This Hub also includes private
-            context visible to you. Workspace records without a recorded bot source are shared
-            workspace context.
-          </p>
-        )}
+        {botOrigin?.workspaceId === selectedWorkspaceId &&
+          (botOrigin.botId && memoryRepoOn ? (
+            <p className="settings-form-hint">
+              {botOrigin.botName}'s own memory is under Bots below. Everything else here is your
+              personal and workspace memory, shared by every conversation in this workspace.
+            </p>
+          ) : (
+            <p className="settings-form-hint">
+              Workspace context opened from {botOrigin.botName}. This Hub also includes private
+              context visible to you. Workspace records without a recorded bot source are shared
+              workspace context.
+            </p>
+          ))}
         {selectedWorkspaceId ? (
           <MemoryKnowledgeTab
             key={`${selectedWorkspaceId}:${knowledgeSourceFilter}`}
@@ -329,6 +335,9 @@ export function MemoryHubSettings(props?: {
             canDelete={canDeleteWorkspace}
             initialSourceFilter={knowledgeSourceFilter}
             onOpenTask={props?.onOpenTask}
+            focusBotId={
+              botOrigin?.workspaceId === selectedWorkspaceId ? botOrigin.botId : undefined
+            }
           />
         ) : null}
       </div>

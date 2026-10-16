@@ -22,12 +22,15 @@ import {
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
+import { buildModelHandoffNote, type ModelHandoff } from "./model-handoff-note";
+import { effectiveTaskModelConfig } from "./task-model-config";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { resolveInteractionMode } from "./strategy/interaction-mode";
 import { QUALITY_PASS_SYSTEM_PROMPT, isQualityRewriteSafe } from "./quality-pass-output";
 import {
   AgentConfig,
+  AgentRole,
   Task,
   Workspace,
   Plan,
@@ -692,6 +695,9 @@ const DEFAULT_PROMPT_SECTION_BUDGETS = {
 // (was capped at 1,200), and design-system context, project guidance and the
 // external profile have their own sections instead of sharing that cap.
 // Overflow still drops/shrinks optional sections by drop priority.
+/** A bot's own memory (memory folder `bots/<slug>.md`) and its earlier conversations. */
+const BOT_MEMORY_GUIDANCE =
+  'You have your own memory as this bot: what you save with memory_remember scope bot (your job, what the user wants from you, decisions you made together) is shown to you in every conversation you have with the user. Before asking the user to repeat something or redoing earlier work, search your earlier conversations with memory_recall scopes ["bot"] (add since, e.g. "3d", for recent ones).';
 const EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET = 7600;
 type BasePromptRoutingBlock = "cloud_storage" | "messaging" | "maps" | "pdf" | "rich_surfaces";
 // Same provider list the IntentRouter uses for its cloud-storage signals.
@@ -7076,6 +7082,8 @@ ${transcript}
   > = [];
   private providerFailoverIndex = 0;
   private providerFailoverPreserveUntil = 0;
+  /** Set when a thread moves to another provider; noted once on the next user message. */
+  private pendingModelHandoff: ModelHandoff | null = null;
   private providerFailoverRequiresImageInput = false;
   private toolBatchExecutor?: ToolBatchExecutor;
 
@@ -8638,7 +8646,7 @@ ${transcript}
       /^verify\s*:/i.test(task.title) ||
       /^verification\s*:/i.test(task.title);
     this.cachedLlmSettings = LLMProviderFactory.loadSettings();
-    const llmSelection = LLMProviderFactory.resolveTaskModelSelection(task.agentConfig, {
+    const llmSelection = LLMProviderFactory.resolveTaskModelSelection(this.modelSelectionConfig(), {
       isVerificationTask,
     });
     this.applyResolvedProviderSelection(llmSelection);
@@ -8893,6 +8901,12 @@ ${transcript}
         if (rolePersona) {
           lines.push(rolePersona);
         }
+        if (
+          this.task.agentConfig?.botConversation === true &&
+          MemoryRepoService.get()?.isWritable()
+        ) {
+          lines.push(BOT_MEMORY_GUIDANCE);
+        }
       }
     }
 
@@ -9085,7 +9099,10 @@ ${transcript}
   ): Promise<MemoryRepoContextBlock | null> {
     if (!decision.layers.memoryRepo) return null;
     try {
-      return await getMemoryRepoContext().build({ workspaceId: this.workspace?.id ?? null });
+      return await getMemoryRepoContext().build({
+        workspaceId: this.workspace?.id ?? null,
+        botId: this.task.assignedAgentRoleId ?? null,
+      });
     } catch (error) {
       logger.warn("[Executor] Memory repo block build failed:", (error as Error)?.message ?? error);
       return null;
@@ -11758,10 +11775,17 @@ ${transcript}
             swarm ? swarmFolderPath(swarm.slug) : null,
           )
         : null;
+    // A bot's task recalls from its own bot file and no other bot's.
+    const botFile =
+      memoryRepoReadAllowed && this.task.assignedAgentRoleId
+        ? await MemoryRepoService.get()
+            ?.botFile(this.task.assignedAgentRoleId)
+            .catch(() => null)
+        : null;
 
     try {
       const coordinated = await withTimeout(
-        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix }, () =>
+        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
           this.toolExecutionCoordinator.executeTool(
             toolName,
             input as Any,
@@ -42407,6 +42431,28 @@ Return ONLY a JSON object:
     );
   }
 
+  private takeModelHandoffNote(): string | null {
+    const handoff = this.pendingModelHandoff;
+    if (!handoff) return null;
+    this.pendingModelHandoff = null;
+    return buildModelHandoffNote(handoff, this.conversationHistory);
+  }
+
+  /**
+   * The model config this task runs on: the conversation's own pick, then its bot's model
+   * (looked up each time, so a change to the bot applies on the next turn), then the global.
+   */
+  private modelSelectionConfig(): AgentConfig | undefined {
+    const roleId = this.task.assignedAgentRoleId;
+    let role: AgentRole | undefined;
+    try {
+      role = roleId ? this.daemon.getAgentRoleById(roleId) : undefined;
+    } catch {
+      role = undefined;
+    }
+    return effectiveTaskModelConfig(this.task.agentConfig, role);
+  }
+
   private hasExplicitTaskRouteOverride(): boolean {
     return Boolean(this.task.agentConfig?.providerType || this.task.agentConfig?.modelKey);
   }
@@ -42442,7 +42488,7 @@ Return ONLY a JSON object:
     this.providerFailoverRequiresImageInput = opts?.requiresImageInput === true;
     this.providerFailoverSelections = LLMProviderFactory.resolveProviderFailoverChain(
       primarySelection,
-      this.task.agentConfig,
+      this.modelSelectionConfig(),
       {
         forceProfile,
         isVerificationTask: this.isVerificationTaskRoute(),
@@ -42607,7 +42653,7 @@ Return ONLY a JSON object:
       task: {
         title: this.task.title,
         prompt: this.task.prompt,
-        agentConfig: this.task.agentConfig,
+        agentConfig: this.modelSelectionConfig(),
         source: this.task.source,
         status: this.task.status,
       },
@@ -42670,16 +42716,19 @@ Return ONLY a JSON object:
     const currentSettings = LLMProviderFactory.loadSettings();
     this.cachedLlmSettings = currentSettings;
     const currentSettingsProvider = String(currentSettings.providerType || "").trim();
+    const modelConfig = this.modelSelectionConfig();
     const providerChangedInSettings =
-      currentSettingsProvider.length > 0 && currentSettingsProvider !== this.provider.type;
+      modelConfig?.modelPinned !== true &&
+      currentSettingsProvider.length > 0 &&
+      currentSettingsProvider !== this.provider.type;
 
     const selectionConfig = providerChangedInSettings
       ? {
-          ...this.task.agentConfig,
+          ...modelConfig,
           // A task-scoped model choice should not pin the task to the previous provider.
           modelKey: undefined,
         }
-      : this.task.agentConfig;
+      : modelConfig;
 
     const desiredProfile = forceProfile || this.llmProfileUsed;
     const newSelection = LLMProviderFactory.resolveTaskModelSelection(selectionConfig, {
@@ -42698,8 +42747,19 @@ Return ONLY a JSON object:
       logger.info(
         `${this.logTag} Provider/model changed mid-session: ${this.provider.type}/${this.modelId} → ${newSelection.providerType}/${newSelection.modelId}`,
       );
+      const previousRoute = { providerType: this.provider.type, modelId: this.modelId };
       try {
         this.applyResolvedProviderSelection(newSelection);
+        // Only a pinned model (the thread's own pick, or its bot's model) gets a handoff
+        // note; a global provider switch (or a later switch back) clears any pending note.
+        this.pendingModelHandoff =
+          modelConfig?.modelPinned === true &&
+          previousRoute.providerType !== newSelection.providerType
+            ? {
+                from: previousRoute,
+                to: { providerType: newSelection.providerType, modelId: newSelection.modelId },
+              }
+            : null;
         this.rebuildProviderFailoverSelections(newSelection, desiredProfile);
         this.emitEvent("log", {
           message:
@@ -43144,9 +43204,14 @@ Return ONLY a JSON object:
     }
     // Both the chat path and the task path below add this to the message the model sees.
     const answerSurfaceNote = await this.takeAnswerSurfaceChanges();
+    const modelHandoffNote =
+      recoveredFromTurnLimit || opts?.transcriptAlreadyContainsMessage
+        ? null
+        : this.takeModelHandoffNote();
     const withAnswerState = (text: string) => {
       const noted = withSurfaceOriginNote(text, opts?.messageContext?.surfaceOrigin);
-      return answerSurfaceNote ? `${noted}\n\n${answerSurfaceNote}` : noted;
+      const withHandoff = modelHandoffNote ? `${modelHandoffNote}\n\n${noted}` : noted;
+      return answerSurfaceNote ? `${withHandoff}\n\n${answerSurfaceNote}` : withHandoff;
     };
     const followUpConversationMessage = this.buildQuotedAssistantContextMessage(
       withAnswerState(executionMessage),

@@ -11,7 +11,7 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | Native app integrations | 14 |
 | Gateway channels | 17 |
 | MCP connectors (Settings > Connectors) | 110 |
-| Bundled skills | 153 |
+| Bundled skills | 154 |
 
 Requirement keys: `macos-only`, `local-service` (a local app or server must be running), `public-webhook` (a reachable HTTPS URL is needed in production), `oauth-consent`, `api-key`, `cli-binary`, `personal-account-session`.
 
@@ -274,6 +274,7 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `openai-whisper` | Openai-whisper | Tools |  |
 | `openai-whisper-api` | Openai-whisper-api | Tools |  |
 | `ordercli` | Ordercli | Tools |  |
+| `pdf-storybook` | PDF Storybook | Tools |  |
 | `peekaboo` | Peekaboo | Tools |  |
 | `pi-context-pipeline` | Pi-context-pipeline | Tools | cli-binary |
 | `pi-finder-subagent` | Pi-finder-subagent | Tools | cli-binary |

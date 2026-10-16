@@ -134,7 +134,7 @@ interface SidebarProps {
   onBotUpdated?: (bot: BotRole) => void | Promise<void>;
   onBotDeleted?: (botId: string) => void | Promise<void>;
   onNewSession?: () => void;
-  onOpenBotMemory?: (workspaceId: string, botName: string) => void;
+  onOpenBotMemory?: (workspaceId: string, botName: string, botId?: string) => void;
   isDevicesActive?: boolean;
 
   onTasksChanged: () => void;

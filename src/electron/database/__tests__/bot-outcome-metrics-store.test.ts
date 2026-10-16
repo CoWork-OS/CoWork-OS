@@ -93,7 +93,7 @@ describe("bot outcome metrics baseline", () => {
       "delivery_unknown",
     );
     db.prepare(
-      "INSERT INTO llm_call_events (id, timestamp, workspace_id, task_id, source_kind, input_tokens, output_tokens) VALUES (?, ?, ?, ?, 'task', 40, 10)",
+      "INSERT INTO llm_call_events (id, timestamp, workspace_id, task_id, source_kind, input_tokens, output_tokens, cached_tokens, cost) VALUES (?, ?, ?, ?, 'task', 40, 10, 30, 0.012)",
     ).run(randomUUID(), now - 100, workspaceId, plain.id);
     db.prepare(
       "INSERT INTO llm_call_events (id, timestamp, workspace_id, task_id, source_kind, input_tokens, output_tokens) VALUES (?, ?, ?, NULL, 'heartbeat', 7, 3)",
@@ -115,6 +115,10 @@ describe("bot outcome metrics baseline", () => {
     expect(metrics.modelUsage).toEqual({
       taskCalls: 1,
       taskTokens: 50,
+      taskInputTokens: 40,
+      taskOutputTokens: 10,
+      taskCachedTokens: 30,
+      taskCost: 0.012,
       unattachedCalls: 1,
       unattachedTokens: 10,
     });

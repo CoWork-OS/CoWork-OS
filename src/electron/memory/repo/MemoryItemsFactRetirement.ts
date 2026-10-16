@@ -30,7 +30,7 @@ import {
   type MemoryRepoExportDeps,
   type MemoryRepoRerun,
 } from "./MemoryRepoExport";
-import { isSwarmRepoPath } from "./memory-repo-format";
+import { isBotRepoPath, isSwarmRepoPath } from "./memory-repo-format";
 import { MemoryRepoBusyError, withMemoryRepoLock } from "./memory-repo-lock";
 
 const logger = createLogger("MemoryItemsFactRetirement");
@@ -87,8 +87,8 @@ export async function runMemoryItemsFactRetirement(
         const now = (deps.now ?? Date.now)();
         const inFolder = new Set<string>();
         for (const file of await service.listFiles()) {
-          // Swarm notes are agents' notes, not the user's facts.
-          if (isSwarmRepoPath(file)) continue;
+          // Swarm notes are agents' notes and bot files a bot's own memory, not the user's facts.
+          if (isSwarmRepoPath(file) || isBotRepoPath(file)) continue;
           for (const entry of await service.entries(file)) inFolder.add(entry.hash);
         }
         const rows = (await deps.listItems()).filter(

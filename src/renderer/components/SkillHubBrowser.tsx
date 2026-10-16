@@ -448,6 +448,10 @@ export function SkillHubBrowser({
         setExternalSource("");
         await installSucceeded(result.skill);
         setActiveTab("installed");
+        // A multi-skill Git repository can install partially; say which skills were skipped.
+        if (result.error) {
+          setError(result.error);
+        }
       } else {
         setError(installMessageForOutcome(result.security, result.error || "Import failed"));
         await loadSkillStatus();

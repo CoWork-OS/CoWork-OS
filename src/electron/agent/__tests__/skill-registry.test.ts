@@ -174,7 +174,27 @@ vi.mock("child_process", () => ({
             mockFiles.set(`${targetDir}/${mockGitLinkPath}`, "outside data");
           }
         }
-        if (sourceUrl.includes("nested-skill-repo")) {
+        const writeBundle = (dir: string, name: string) => {
+          ensureDir(`${targetDir}/${dir}`);
+          mockFiles.set(
+            `${targetDir}/${dir}/SKILL.md`,
+            `---\nname: ${name}\ndescription: ${name} from a multi-skill repo\n---\n# ${name}\n`,
+          );
+        };
+        if (sourceUrl.includes("multi-skill-repo")) {
+          writeBundle("skills/beta", "Beta Skill");
+          writeBundle("skills/alpha", "Alpha Skill");
+          writeBundle("skills/alpha-copy", "Alpha Skill");
+          ensureDir(`${targetDir}/skills/not-a-skill`);
+          mockFiles.set(`${targetDir}/skills/not-a-skill/README.md`, "no skill here");
+        } else if (sourceUrl.includes("multi-root-skill-repo")) {
+          writeBundle("alpha", "Alpha Skill");
+          writeBundle("beta", "Beta Skill");
+        } else if (sourceUrl.includes("huge-skill-repo")) {
+          for (let index = 0; index < 51; index += 1) {
+            writeBundle(`skills/skill-${index}`, `Skill ${index}`);
+          }
+        } else if (sourceUrl.includes("nested-skill-repo")) {
           ensureDir(`${targetDir}/skills/karpathy-guidelines`);
           mockFiles.set(
             `${targetDir}/skills/karpathy-guidelines/SKILL.md`,
@@ -898,6 +918,64 @@ describe("SkillRegistry", () => {
       expect(result.skill?.id).toBe("git-imported-skill");
       expect(mockFiles.has(managedPath("git-imported-skill.json"))).toBe(true);
       expect(mockFiles.has(managedPath("git-imported-skill/SKILL.md"))).toBe(true);
+    });
+
+    it("installs every skills/*/SKILL.md bundle from a multi-skill git repository", async () => {
+      const result = await registry.installFromGit("https://github.com/example/multi-skill-repo");
+
+      expect(result.success).toBe(true);
+      expect(result.skill?.id).toBe("alpha-skill");
+      expect(result.results?.map((entry) => [entry.bundle, entry.success])).toEqual([
+        ["alpha", true],
+        ["alpha-copy", false],
+        ["beta", true],
+      ]);
+      expect(result.error).toBe(
+        "Installed 2 of 3 skills. Not installed: alpha-copy (Skill alpha-skill is already installed)",
+      );
+      for (const id of ["alpha-skill", "beta-skill"]) {
+        expect(mockFiles.has(managedPath(`${id}.json`))).toBe(true);
+        expect(mockFiles.has(managedPath(`${id}/SKILL.md`))).toBe(true);
+      }
+    });
+
+    it("installs every top-level */SKILL.md bundle from a git repository", async () => {
+      const result = await registry.installFromGit(
+        "https://github.com/example/multi-root-skill-repo",
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.results?.map((entry) => entry.skill?.id)).toEqual([
+        "alpha-skill",
+        "beta-skill",
+      ]);
+    });
+
+    it("reports skills that are already installed when re-importing a multi-skill repository", async () => {
+      await registry.installFromGit("https://github.com/example/multi-root-skill-repo");
+
+      const result = await registry.installFromGit(
+        "https://github.com/example/multi-root-skill-repo",
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.results?.every((entry) => !entry.success)).toBe(true);
+      expect(result.error).toBe(
+        "Installed 0 of 2 skills. Not installed: alpha (Skill alpha-skill is already installed); beta (Skill beta-skill is already installed)",
+      );
+    });
+
+    it("rejects repositories with more skills than the import limit", async () => {
+      const result = await registry.installFromGit("https://github.com/example/huge-skill-repo");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "Repository contains 51 skills; Git import supports up to 50 per repository",
+      );
+      expect([...mockFiles.keys()].some((file) => file.startsWith(managedPath("skill-")))).toBe(
+        false,
+      );
     });
 
     it("installs a single nested skills/*/SKILL.md bundle from a git repository", async () => {

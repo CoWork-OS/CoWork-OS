@@ -8,7 +8,11 @@ import {
   type UpsertManagedAccountInput,
 } from "../../electron/accounts/managed-account-manager";
 import { SecureSettingsRepository } from "../../electron/database/SecureSettingsRepository";
-import { getSkillRegistry, type SkillRegistry } from "../../electron/agent/skill-registry";
+import {
+  getSkillRegistry,
+  type SkillBundleInstallResult,
+  type SkillRegistry,
+} from "../../electron/agent/skill-registry";
 import {
   getCustomSkillLoader,
   type CustomSkillLoader,
@@ -591,6 +595,29 @@ function safeSkillProgress(
   };
 }
 
+/** Per-bundle outcomes for a multi-skill import, without host error details. */
+function safeSkillBundleResults(results: SkillBundleInstallResult[] | undefined) {
+  if (!results) return {};
+  const notInstalled = results.filter((result) => !result.success);
+  return {
+    results: results.map((result) => ({
+      bundle: result.bundle,
+      success: result.success,
+      ...(result.security ? { security: { state: result.security.state } } : {}),
+    })),
+    ...(notInstalled.length > 0
+      ? {
+          error: `Installed ${results.length - notInstalled.length} of ${results.length} skills. Not installed: ${notInstalled
+            .map(
+              (result) =>
+                `${result.bundle} (${result.security?.state === "quarantined" ? "quarantined" : "not installed"})`,
+            )
+            .join("; ")}`,
+        }
+      : {}),
+  };
+}
+
 function safeSkillInstallResult(result: Awaited<ReturnType<SkillRegistryPort["install"]>>) {
   if (!result.success || !result.skill) {
     return {
@@ -602,10 +629,12 @@ function safeSkillInstallResult(result: Awaited<ReturnType<SkillRegistryPort["in
       ...(result.security
         ? { security: { state: result.security.state, summary: "Host security review completed." } }
         : {}),
+      ...safeSkillBundleResults(result.results),
     };
   }
   const skill = result.skill;
   return {
+    ...safeSkillBundleResults(result.results),
     success: true,
     skill: {
       id: skill.id,

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentRoleDesktopGroupSchema,
+  AgentRoleDesktopHostSchema,
   AgentRoleWorksOnSchema,
   validateInput,
   AgentConfigSchema,
   WorkspaceCreateSchema,
+  WorkspacePermissionsUpdateSchema,
   TaskCreateSchema,
   TaskWorkspaceUpdateSchema,
   TaskModelSelectionSchema,
@@ -24,6 +27,40 @@ import {
 } from "../validation";
 import { z } from "zod";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../../shared/guardrail-defaults";
+
+describe("SPACE workspace configuration", () => {
+  it("preserves explicit file selection and strips legacy shell switches", () => {
+    const selection = {
+      sandboxType: "space",
+      spaceConfig: {
+        template: "offline:latest",
+        inputPaths: ["input.csv"],
+        outputPaths: ["result.csv"],
+      },
+    };
+    expect(WorkspacePermissionsUpdateSchema.parse({ ...selection, shell: true })).toEqual(
+      selection,
+    );
+    expect(
+      WorkspaceCreateSchema.parse({ name: "test", path: "/tmp/test", permissions: selection })
+        .permissions,
+    ).toMatchObject(selection);
+  });
+  it("refuses credentials, traversal, and oversized selections", () => {
+    for (const spaceConfig of [
+      { template: "test", token: "secret" },
+      { template: "bad@tag" },
+      { template: "test", inputPaths: ["input", "input"] },
+      { template: "test", outputPaths: [".git /config"] },
+      { template: "test", inputPaths: ["../secret"] },
+      { template: "test", outputPaths: [".cowork/policy/local.json"] },
+      { template: "test", inputPaths: Array(65).fill("a") },
+    ])
+      expect(
+        WorkspacePermissionsUpdateSchema.safeParse({ sandboxType: "space", spaceConfig }).success,
+      ).toBe(false);
+  });
+});
 
 describe("task checkout configuration", () => {
   it("preserves valid per-task worktree options", () => {
@@ -871,5 +908,34 @@ describe("AgentRoleModelFieldsSchema", () => {
     expect(() => AgentRoleModelFieldsSchema.parse({ providerType: "nope" })).toThrow();
     expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: "x".repeat(201) })).toThrow();
     expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: 42 })).toThrow();
+  });
+});
+
+describe("bot desktop server", () => {
+  it("accepts SSH hosts from your config and clears on empty", () => {
+    expect(AgentRoleDesktopHostSchema.parse("my-server")).toBe("my-server");
+    expect(AgentRoleDesktopHostSchema.parse(" me@example.com ")).toBe("me@example.com");
+    expect(AgentRoleDesktopHostSchema.parse("")).toBeNull();
+    expect(AgentRoleDesktopHostSchema.parse(null)).toBeNull();
+  });
+
+  it("refuses anything that could become an SSH option or a command", () => {
+    for (const bad of ["-oProxyCommand=evil", "a b", "host;rm -rf ~", "host:22", "x".repeat(101)]) {
+      expect(() => AgentRoleDesktopHostSchema.parse(bad)).toThrow();
+    }
+  });
+});
+
+describe("bot shared desktop name", () => {
+  it("accepts simple names, lowercased, and clears on empty", () => {
+    expect(AgentRoleDesktopGroupSchema.parse("Research-Team")).toBe("research-team");
+    expect(AgentRoleDesktopGroupSchema.parse("")).toBeNull();
+    expect(AgentRoleDesktopGroupSchema.parse(null)).toBeNull();
+  });
+
+  it("refuses anything else", () => {
+    for (const bad of ["-team", "a b", "team/../x", "x".repeat(41)]) {
+      expect(() => AgentRoleDesktopGroupSchema.parse(bad)).toThrow();
+    }
   });
 });

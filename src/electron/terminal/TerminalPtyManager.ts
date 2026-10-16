@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -26,6 +27,8 @@ type TerminalPtyRuntime = {
   rows: number;
   closeRequested: boolean;
   cwdParseBuffer: string;
+  /** Secret in this tab's shell-integration marks, so command output cannot fake them. */
+  markNonce: string;
 };
 
 const MAX_TERMINAL_TABS_PER_WORKSPACE = 12;
@@ -49,6 +52,17 @@ function resolveTerminalShellExecutable(): string {
   return "/bin/sh";
 }
 
+export type TerminalShellIntegration = "zsh" | "bash" | "none";
+
+/** Which shell-integration marks this machine's terminal tabs emit (see buildZshPromptSetup). */
+export function getTerminalShellIntegration(): TerminalShellIntegration {
+  if (process.platform === "win32") return "none";
+  const shellName = path.basename(resolveTerminalShellExecutable());
+  if (shellName === "zsh") return "zsh";
+  if (shellName === "bash") return "bash";
+  return "none";
+}
+
 function getTerminalShellArgs(shell: string): string[] {
   if (process.platform === "win32") {
     return shell.toLowerCase().endsWith("cmd.exe") ? ["/Q"] : [];
@@ -56,7 +70,7 @@ function getTerminalShellArgs(shell: string): string[] {
   return ["-l"];
 }
 
-function buildTerminalEnv(): Record<string, string> {
+function buildTerminalEnv(markNonce: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
@@ -70,9 +84,14 @@ function buildTerminalEnv(): Record<string, string> {
   } else {
     env.PS1 = "\\W \\$ ";
   }
-  if (process.platform !== "win32" && path.basename(resolveTerminalShellExecutable()) === "zsh") {
+  const shellName = getTerminalShellIntegration();
+  if (shellName === "zsh") {
     env.ZDOTDIR = ensureTerminalZdotdir();
     env.COWORK_TERMINAL_ZDOTDIR = env.ZDOTDIR;
+    env.COWORK_TERMINAL_MARK_NONCE = markNonce;
+  } else if (shellName === "bash") {
+    const doneMark = buildBashDoneMarkPromptCommand(markNonce);
+    env.PROMPT_COMMAND = env.PROMPT_COMMAND ? `${doneMark}; ${env.PROMPT_COMMAND}` : doneMark;
   }
   return env;
 }
@@ -85,6 +104,12 @@ function buildZshSourceLine(filePath: string): string {
   return `[[ -r ${shellSingleQuote(filePath)} ]] && source ${shellSingleQuote(filePath)}\n`;
 }
 
+/**
+ * Shell-integration marks (OSC 133) let code block runs find where a command's output
+ * starts (C) and where it finished, with its exit status (D). Each mark carries the tab's
+ * nonce, which the shell takes out of its environment so commands cannot print a valid
+ * mark. The done mark runs first among the precmd hooks so it sees the command's status.
+ */
 function buildZshPromptSetup(): string {
   return [
     "PROMPT='%1~ %# '",
@@ -94,13 +119,34 @@ function buildZshPromptSetup(): string {
     "function __cowork_terminal_emit_cwd() {",
     '  printf \'\\e]7;file://%s%s\\a\' "$HOST" "${PWD// /%20}"',
     "}",
+    "if [[ -n ${COWORK_TERMINAL_MARK_NONCE-} ]]; then",
+    "  typeset -g __cowork_mark_nonce=$COWORK_TERMINAL_MARK_NONCE",
+    "  unset COWORK_TERMINAL_MARK_NONCE",
+    "fi",
+    "function __cowork_terminal_mark_start() {",
+    "  printf '\\e]133;C;%s\\a' \"$__cowork_mark_nonce\"",
+    "}",
+    "function __cowork_terminal_mark_done() {",
+    "  local exit_status=$?",
+    '  printf \'\\e]133;D;%s;%s\\a\' "$__cowork_mark_nonce" "$exit_status"',
+    "}",
     "autoload -Uz add-zsh-hook 2>/dev/null",
     "if (( $+functions[add-zsh-hook] )); then",
     "  add-zsh-hook precmd __cowork_terminal_emit_cwd",
     "  add-zsh-hook chpwd __cowork_terminal_emit_cwd",
+    "  add-zsh-hook preexec __cowork_terminal_mark_start",
     "fi",
+    "precmd_functions=(__cowork_terminal_mark_done ${precmd_functions:#__cowork_terminal_mark_done})",
     "",
   ].join("\n");
+}
+
+/**
+ * Bash has no preexec hook, so it only reports the done mark, from PROMPT_COMMAND. The
+ * first prompt un-exports PROMPT_COMMAND so commands do not see the nonce.
+ */
+function buildBashDoneMarkPromptCommand(markNonce: string): string {
+  return `__cowork_ec=$?; export -n PROMPT_COMMAND 2>/dev/null; printf "\\033]133;D;${markNonce};%s\\007" "$__cowork_ec"; (exit $__cowork_ec)`;
 }
 
 function ensureTerminalZdotdir(): string {
@@ -235,6 +281,7 @@ export class TerminalPtyManager {
       rows: params.rows || DEFAULT_ROWS,
       closeRequested: false,
       cwdParseBuffer: "",
+      markNonce: crypto.randomBytes(12).toString("hex"),
     };
     this.tabs.set(info.id, runtime);
     this.spawn(runtime);
@@ -362,6 +409,23 @@ export class TerminalPtyManager {
     return { ...runtime.info };
   }
 
+  /** The secret this tab's shell-integration marks carry (see buildZshPromptSetup). */
+  getShellMarkNonce(tabId: string): string {
+    return this.getRuntime(tabId).markNonce;
+  }
+
+  /** Total output the tab has produced so far, in UTF-16 code units (see the listener offsets). */
+  getOutputOffset(tabId: string): number {
+    return this.getRuntime(tabId).outputOffset;
+  }
+
+  /** Send Ctrl-C to the tab's foreground command, as a user pressing it would. */
+  interruptTab(tabId: string): ShellSessionInfo {
+    const runtime = this.getRuntime(tabId);
+    runtime.process?.write(String.fromCharCode(3));
+    return { ...runtime.info };
+  }
+
   private getRuntime(tabId: string): TerminalPtyRuntime {
     const runtime = this.tabs.get(tabId);
     if (!runtime) throw new Error("Terminal tab not found.");
@@ -378,7 +442,7 @@ export class TerminalPtyManager {
       cols: runtime.cols,
       rows: runtime.rows,
       cwd: runtime.info.cwd,
-      env: buildTerminalEnv(),
+      env: buildTerminalEnv(runtime.markNonce),
     });
     this.updateInfo(runtime, { status: "active" });
     runtime.process.onData((output) => {

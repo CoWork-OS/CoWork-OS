@@ -48,7 +48,7 @@ const log = createLogger("MacOSSandbox");
 /**
  * Default sandbox options
  */
-const DEFAULT_OPTIONS: Required<SandboxOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<SandboxOptions, "signal">> = {
   privateDocumentWorkspace: false,
   cwd: process.cwd(),
   timeout: 5 * 60 * 1000, // 5 minutes

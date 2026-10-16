@@ -205,6 +205,12 @@ export class ComputerViewService {
     this.update(taskId, { status: "idle", waitingSince: undefined });
   }
 
+  /** The bot's request to take over was answered or withdrawn. */
+  clearTakeoverRequest(taskId: string): void {
+    if (this.states.get(taskId)?.takeoverRequest)
+      this.update(taskId, { takeoverRequest: undefined });
+  }
+
   /** The task finished: forget its view and release any take-over. */
   clearTask(taskId: string): void {
     if (this.isHeldByPerson(taskId)) this.deps.setBrowserPaused?.(taskId, false);

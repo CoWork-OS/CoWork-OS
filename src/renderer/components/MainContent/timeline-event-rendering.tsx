@@ -22,6 +22,7 @@ import {
   isLongOsascriptCommandText,
 } from "../AssistantMessageContent";
 import { formatProviderErrorForDisplay } from "../../../shared/provider-error-format";
+import { parseCodeBlockRunMessage } from "../../../shared/terminal-output-text";
 import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
 import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
 import {
@@ -41,6 +42,7 @@ import { getAgentMessageReceipt } from "../../utils/agent-message-receipt";
 import {
   DeferredMarkdown,
   HighlightedCodePreview,
+  MessageCopyButton,
   MessageForkButton,
   MessageSpeakButton,
 } from "./message-ui";
@@ -788,6 +790,14 @@ export function renderEventTitle(
         typeof event.payload?.followUpMessage === "string"
           ? event.payload.followUpMessage.trim()
           : "";
+      // A code block run's output reads as the command it came from, not the whole output.
+      const codeBlockRun = parseCodeBlockRunMessage(followUpMessage);
+      if (codeBlockRun) {
+        const command = codeBlockRun.command.split("\n")[0];
+        return command.includes("`")
+          ? `Follow-up: terminal output of ${command}`
+          : `Follow-up: terminal output of \`${command}\``;
+      }
       return followUpMessage ? `Follow-up: ${followUpMessage}` : "Follow-up received";
     }
     case "plan_created":
@@ -1494,6 +1504,7 @@ export function renderEventDetails(
             />
           </div>
           <div className="message-actions">
+            <MessageCopyButton text={linkedMessage} />
             <MessageSpeakButton text={event.payload.message} voiceEnabled={voiceEnabled} />
             {event.id && onForkTaskSession && options?.isLastAssistantMessage && (
               <MessageForkButton onFork={() => onForkTaskSession(event)} />

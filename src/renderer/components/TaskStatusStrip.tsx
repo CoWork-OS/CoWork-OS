@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   AlertCircle,
   Bot,
@@ -14,10 +22,13 @@ import type {
   TaskImpactMetric,
   TaskStatusStripViewModel,
 } from "../../shared/types";
-import { MarkdownRenderer } from "./MarkdownRenderer";
-import { normalizeMarkdownForDisplay } from "./MainContent/markdown-normalization";
+import { LivePlan } from "./LivePlan";
+import { TaskStatusPlanStepDescription } from "./TaskStatusPlanStepDescription";
 import { formatTaskImpactMetric } from "../utils/task-impact-metrics";
 import { incrementRendererPerfCounter } from "../utils/renderer-perf";
+import type { LivePlanItem, LivePlanModel } from "../utils/live-plan";
+
+export { TaskStatusPlanStepDescription };
 
 interface TaskStatusStripProps {
   model: TaskStatusStripViewModel;
@@ -33,46 +44,10 @@ interface TaskStatusStripProps {
   leading?: ReactNode;
   /** Controls shown at the strip's right edge; kept outside the toggle button. */
   actions?: ReactNode;
-}
-
-type InlineMarkdownNodeProps = {
-  children?: ReactNode;
-};
-
-function createInlinePlanMarkdownComponents(markdownComponents: unknown) {
-  const baseComponents =
-    markdownComponents && typeof markdownComponents === "object"
-      ? (markdownComponents as Record<string, unknown>)
-      : {};
-
-  return {
-    ...baseComponents,
-    // Plan rows live inside a button, so keep Markdown flow content inline.
-    p: ({ children }: InlineMarkdownNodeProps) => <>{children}</>,
-    // Avoid nesting another interactive element inside the plan-row button.
-    a: ({ children }: InlineMarkdownNodeProps) => <span>{children}</span>,
-  };
-}
-
-export function TaskStatusPlanStepDescription({
-  description,
-  markdownComponents,
-}: {
-  description: string;
-  markdownComponents?: unknown;
-}) {
-  const inlineMarkdownComponents = useMemo(
-    () => createInlinePlanMarkdownComponents(markdownComponents),
-    [markdownComponents],
-  );
-
-  return (
-    <span className="task-status-plan-step-description markdown-content">
-      <MarkdownRenderer components={inlineMarkdownComponents}>
-        {normalizeMarkdownForDisplay(description)}
-      </MarkdownRenderer>
-    </span>
-  );
+  /** The running task's plan, listed above the strip until the task ends. */
+  livePlan?: LivePlanModel | null;
+  /** Identifies the task, so a plan only folds away within the task that ran it. */
+  livePlanScopeKey?: string;
 }
 
 function StatusIcon({ model }: { model: TaskStatusStripViewModel }) {
@@ -125,6 +100,8 @@ export function TaskStatusStrip({
   markdownComponents,
   leading,
   actions,
+  livePlan = null,
+  livePlanScopeKey = "",
 }: TaskStatusStripProps) {
   const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -159,6 +136,20 @@ export function TaskStatusStrip({
     return groups;
   }, [activityGroups]);
 
+  const getLivePlanTarget = useCallback(
+    (item: LivePlanItem) =>
+      item.planStepId ? groupsByPlanStep.get(item.planStepId)?.id : undefined,
+    [groupsByPlanStep],
+  );
+  const scrollToLivePlanTarget = useCallback(
+    (groupId: string) => {
+      document
+        .getElementById(`activity-group-${groupId}`)
+        ?.scrollIntoView({ block: "center", behavior: replay ? "auto" : "smooth" });
+    },
+    [replay],
+  );
+
   const scrollToGroup = (groupId: string | undefined) => {
     if (!groupId) return;
     const element = document.getElementById(`activity-group-${groupId}`);
@@ -184,6 +175,14 @@ export function TaskStatusStrip({
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {announcement}
       </span>
+      <LivePlan
+        plan={livePlan}
+        scopeKey={livePlanScopeKey}
+        replay={replay}
+        markdownComponents={markdownComponents}
+        getItemTarget={getLivePlanTarget}
+        onSelectTarget={scrollToLivePlanTarget}
+      />
       {open && (
         <div id="task-status-drawer" className="task-status-drawer">
           <div className="task-status-drawer-header">
@@ -203,7 +202,8 @@ export function TaskStatusStrip({
             </div>
           )}
 
-          {model.planSteps.length > 0 && (
+          {/* The live plan above already lists the planner's steps. */}
+          {model.planSteps.length > 0 && livePlan?.source !== "plan" && (
             <section className="task-status-drawer-section" aria-labelledby="task-status-plan">
               <h3 id="task-status-plan">Plan</h3>
               <ol className="task-status-plan-list">

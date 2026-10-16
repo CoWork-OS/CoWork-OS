@@ -7,8 +7,9 @@ import {
   type RuntimeToolMetadata,
 } from "../../shared/types";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
-import { isComputerTool } from "../../shared/bot-computer";
+import { isComputerTool, type BotWorksOn } from "../../shared/bot-computer";
 import {
+  allowsHardBlockerHumanInput,
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
 } from "../../shared/human-input-policy";
@@ -56,6 +57,8 @@ export interface ToolPolicyContext {
   humanInputPolicy?: HumanInputPolicy;
   /** True only for a persistent bot conversation, never a generic task. */
   botConversation?: boolean;
+  /** The bot's "Works on" setting for this task; unset outside bot work. */
+  botWorksOn?: BotWorksOn;
   /** Verified workspace-scoped persistent team identifier. */
   botTeamId?: string;
   /** Set only after the daemon verifies the sender's active team membership. */
@@ -489,6 +492,8 @@ export function evaluateToolAvailability(
 
   // Asking the person to take over belongs wherever the agent drives a browser or this computer.
   if (normalizedToolName === "request_takeover") {
+    // A bot that works on a computer can always hand a step to the person.
+    if (ctx.botWorksOn && ctx.botWorksOn !== "off") return { decision: "allow", metadata };
     const usedComputer = Array.from(ctx.recentlyUsedTools ?? []).some(
       (name) => name !== "request_takeover" && isComputerTool(name),
     );
@@ -789,6 +794,12 @@ function applyHumanInputGate(
   mode: ExecutionMode,
   policy?: HumanInputPolicy,
 ): string | null {
+  // A take-over waits on the person like any hard blocker: never in a task that must not ask.
+  if (toolName === "request_takeover") {
+    const resolved = policy ?? resolveHumanInputPolicy({ executionMode: mode });
+    if (allowsHardBlockerHumanInput(resolved)) return null;
+    return `Tool "${toolName}" is blocked because this task may not wait for the person.`;
+  }
   if (toolName !== "request_user_input") return null;
   const resolved = policy ?? resolveHumanInputPolicy({ executionMode: mode });
   if (allowsStructuredHumanInput(resolved)) return null;

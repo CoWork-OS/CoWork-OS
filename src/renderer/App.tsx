@@ -1,4 +1,6 @@
 import { PrivateBrowserPrompts } from "./components/BrowserWorkbench/PrivateBrowserPrompt";
+import { OPEN_TERMINAL_TAB_EVENT, type OpenTerminalTabRequest } from "./utils/code-block-runs";
+import type { TerminalTabFocusRequest } from "./components/TerminalTabsDock";
 import { requestBotMemoryContext } from "./components/memory/memory-hub-focus";
 import {
   BROWSER_HOST_UNSUPPORTED_ACTION_EVENT,
@@ -137,6 +139,7 @@ import {
   TaskTimelinePageResult,
   TaskEventDetailResult,
   BotNotificationPolicy,
+  type MessageSurfaceOrigin,
 } from "../shared/types";
 import type { ComposerDraft, DraftAttachmentRef } from "../shared/composer-drafts";
 import { getTaskEventStatus } from "../shared/task-event-status-map";
@@ -873,6 +876,8 @@ type SelectedTaskWorkspaceViewProps = {
   effectiveRightCollapsed: boolean;
   onCloseRightPanel: () => void;
   terminalTabsOpen: boolean;
+  /** Tab the terminal panel should show, set when a code block's output asks for it. */
+  terminalFocusRequest: TerminalTabFocusRequest | null;
   browserWorkbenchRequest: BrowserWorkbenchOpenRequest | null;
   sideChat: SideChatState | null;
   sideChatDraftValue: string;
@@ -1052,6 +1057,7 @@ const SelectedTaskWorkspaceView = memo(
     effectiveRightCollapsed,
     onCloseRightPanel,
     terminalTabsOpen,
+    terminalFocusRequest,
     browserWorkbenchRequest,
     sideChat,
     sideChatDraftValue,
@@ -2055,6 +2061,7 @@ const SelectedTaskWorkspaceView = memo(
               <TerminalTabsDock
                 workspace={workspace}
                 taskId={task?.id ?? selectedTaskId ?? null}
+                focusRequest={terminalFocusRequest}
                 onClose={onCloseTerminalTabs}
               />
             </Suspense>
@@ -2106,6 +2113,7 @@ const SelectedTaskWorkspaceView = memo(
     prev.rendererPerfLoggingEnabled === next.rendererPerfLoggingEnabled &&
     prev.effectiveRightCollapsed === next.effectiveRightCollapsed &&
     prev.terminalTabsOpen === next.terminalTabsOpen &&
+    prev.terminalFocusRequest === next.terminalFocusRequest &&
     prev.browserWorkbenchRequest?.requestId === next.browserWorkbenchRequest?.requestId &&
     prev.sideChat === next.sideChat &&
     prev.sideChatDraftValue === next.sideChatDraftValue &&
@@ -2574,8 +2582,22 @@ export function App() {
   const [sidebarPanelTab, setSidebarPanelTab] = useState<SidebarPanelTab>("sessions");
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
   const [terminalTabsOpen, setTerminalTabsOpen] = useState(false);
+  const [terminalFocusRequest, setTerminalFocusRequest] = useState<TerminalTabFocusRequest | null>(
+    null,
+  );
   const handleCloseTerminalTabs = useCallback(() => {
     setTerminalTabsOpen(false);
+  }, []);
+  // "Show in terminal" on a code block's output opens the panel on the tab it ran in.
+  useEffect(() => {
+    const openTab = (event: Event) => {
+      const tabId = (event as CustomEvent<OpenTerminalTabRequest>).detail?.tabId;
+      if (typeof tabId !== "string" || !tabId) return;
+      setTerminalFocusRequest({ tabId, requestId: Date.now() });
+      setTerminalTabsOpen(true);
+    };
+    window.addEventListener(OPEN_TERMINAL_TAB_EVENT, openTab);
+    return () => window.removeEventListener(OPEN_TERMINAL_TAB_EVENT, openTab);
   }, []);
 
   // Ref to track current tasks for use in event handlers (avoids stale closure)
@@ -7016,7 +7038,7 @@ export function App() {
       /** Send exactly this text (an approved answer action), never a rewritten reply. */
       verbatim?: boolean;
       /** Where an approved answer action came from; shown to the model and in the timeline. */
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => {
     if (!selectedTaskId) return;
@@ -9024,6 +9046,7 @@ export function App() {
                   effectiveRightCollapsed={effectiveRightCollapsed}
                   onCloseRightPanel={handleRightSidebarToggle}
                   terminalTabsOpen={terminalTabsOpen}
+                  terminalFocusRequest={terminalFocusRequest}
                   browserWorkbenchRequest={browserWorkbenchRequest}
                   sideChat={sideChat}
                   sideChatDraftValue={sideChatDraft.draft?.text ?? ""}

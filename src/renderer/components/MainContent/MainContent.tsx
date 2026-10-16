@@ -70,7 +70,18 @@ import {
   AppNotification,
   IntegrationMentionOption,
   IntegrationMentionSelection,
+  type MessageSurfaceOrigin,
+  type TerminalBlockRunResult,
 } from "../../../shared/types";
+import {
+  buildCodeBlockRunMessage,
+  parseCodeBlockRunMessage,
+} from "../../../shared/terminal-output-text";
+import {
+  OPEN_TERMINAL_TAB_EVENT,
+  type CodeBlockRunTarget,
+  type OpenTerminalTabRequest,
+} from "../../utils/code-block-runs";
 import type { ComposerDraft, DraftAttachmentRef } from "../../../shared/composer-drafts";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
 import {
@@ -149,6 +160,7 @@ import {
   resolveTaskOutputSummaryFromTask,
 } from "../../utils/task-outputs";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
+import { deriveLivePlan } from "../../utils/live-plan";
 import {
   getAgentMessageReceipt,
   formatAgentMessageProtocolForDisplay,
@@ -222,6 +234,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   Clock,
+  ThumbsDown,
+  ThumbsUp,
   X,
 } from "lucide-react";
 import { InlineImagePreview } from "../InlineImagePreview";
@@ -647,7 +661,7 @@ interface MainContentProps {
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
       verbatim?: boolean;
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => void | boolean | Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -775,8 +789,7 @@ export function AgentReasoningPanel(props: {
   const stepLabel = currentStep?.description?.trim() || "";
   // The answer renders its interactive blocks itself; the preview shows only the prose.
   const activeStreamText = withoutAnswerSurfaceBlocks(state.activeStreamText);
-  const hasStreamText = activeStreamText.trim().length > 0;
-  const streamSignature = hasStreamText ? activeStreamText : state.recentUpdates.join("\n");
+  const streamSignature = activeStreamText;
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -803,7 +816,7 @@ export function AgentReasoningPanel(props: {
       <div className="agent-reasoning-panel-header">
         <div className="agent-reasoning-panel-title">
           <Sparkles size={13} strokeWidth={1.8} />
-          <span>{state.isStreaming ? "Reasoning" : "Recent reasoning"}</span>
+          <span>Reasoning</span>
         </div>
         {stepLabel ? (
           <span className="agent-reasoning-step" title={stepLabel}>
@@ -830,20 +843,9 @@ export function AgentReasoningPanel(props: {
         className={`agent-reasoning-stream ${state.isStreaming ? "is-streaming" : ""}`}
         onScroll={handleScroll}
       >
-        {hasStreamText ? (
-          <div className="agent-reasoning-stream-text markdown-content">
-            <MarkdownRenderer withBreaks>{activeStreamText}</MarkdownRenderer>
-          </div>
-        ) : (
-          state.recentUpdates.map((message, index) => (
-            <div
-              key={`${index}:${message.slice(0, 48)}`}
-              className="agent-reasoning-update markdown-content"
-            >
-              <MarkdownRenderer withBreaks>{withoutAnswerSurfaceBlocks(message)}</MarkdownRenderer>
-            </div>
-          ))
-        )}
+        <div className="agent-reasoning-stream-text markdown-content">
+          <MarkdownRenderer withBreaks>{activeStreamText}</MarkdownRenderer>
+        </div>
       </div>
     </div>
   );
@@ -1694,6 +1696,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     React.SetStateAction<number>
   >;
   const isReplayMode = props.isReplayMode as boolean;
+  const codeBlockRunTarget = props.codeBlockRunTarget as CodeBlockRunTarget | undefined;
   const defaultTranscriptMode = props.defaultTranscriptMode as TranscriptMode;
   const transcriptMode = props.transcriptMode as TranscriptMode;
   const lastAssistantMessage = props.lastAssistantMessage as TaskEvent | null;
@@ -2238,7 +2241,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         currentStep?.description || "",
         reasoningPanelState.isStreaming ? "1" : "0",
         reasoningPanelState.activeStreamText,
-        reasoningPanelState.recentUpdates.join("\n"),
       ].join("::")
     : "";
   const feedRowRenderCacheRef = useRef<Map<string, { signature: string; node: React.ReactNode }>>(
@@ -3166,6 +3168,29 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   attachmentNames,
                   attachmentMetadata,
                 );
+                // Output of a code block the user ran: it already shows under the block, so the
+                // message is one quiet line; the full text the agent got opens on demand.
+                const codeBlockRun =
+                  surfaceOrigin === "code_block" && typeof rawMessage === "string"
+                    ? parseCodeBlockRunMessage(rawMessage)
+                    : null;
+                if (codeBlockRun) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      <details className="code-block-run-sent">
+                        <summary>
+                          <span>Sent the output of</span>
+                          <code>{codeBlockRun.command.split("\n")[0]}</code>
+                          {codeBlockRun.exitCode !== null && codeBlockRun.exitCode !== 0 && (
+                            <span>· exit code {codeBlockRun.exitCode}</span>
+                          )}
+                        </summary>
+                        <pre className="code-block-run-sent-text">{rawMessage}</pre>
+                      </details>
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message user-message">
@@ -3357,6 +3382,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 surfacesSuperseded={
                                   Boolean(event.id) && supersededSurfaceEventIds.has(event.id)
                                 }
+                                codeBlockRunTarget={isReplayMode ? undefined : codeBlockRunTarget}
+                                messageKey={event.id || undefined}
                               />
                             </div>
                           </div>
@@ -3379,10 +3406,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               )}
                             </div>
                           )}
-                          {/* Copy with ⌘C and reply by selecting text (SelectionReplyPopover). */}
+                          {/* Icon-only actions; reply to a passage by selecting it (SelectionReplyPopover). */}
                           <div className="message-actions">
-                            {/* Bot chats have no selection-reply popover, so offer an explicit copy. */}
-                            {isBotConversation && <MessageCopyButton text={cleanedMessageText} />}
+                            <MessageCopyButton text={cleanedMessageText} />
                             <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
                             {event.id &&
                               onForkTaskSessionFromEvent &&
@@ -3395,8 +3421,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             {isLastAssistant && event.id && !isTaskWorking && (
                               <>
                                 <button
-                                  className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
+                                  type="button"
+                                  className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
                                   title="Helpful"
+                                  aria-label="Helpful"
+                                  aria-pressed={messageFeedbackMap.get(event.id) === "accepted"}
                                   onClick={() =>
                                     void handleMessageFeedback({
                                       messageId: event.id!,
@@ -3404,25 +3433,29 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                     })
                                   }
                                 >
-                                  👍
+                                  <ThumbsUp size={15} strokeWidth={1.75} aria-hidden="true" />
                                 </button>
                                 <div
                                   ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
                                   className="message-feedback-thumbdown-wrap"
                                 >
                                   <button
-                                    className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
+                                    type="button"
+                                    className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
                                     title="Not helpful"
+                                    aria-label="Not helpful"
+                                    aria-haspopup="menu"
+                                    aria-expanded={rejectMenuOpenFor === event.id}
                                     onClick={() =>
                                       setRejectMenuOpenFor((v) =>
                                         v === event.id ? null : (event.id ?? null),
                                       )
                                     }
                                   >
-                                    👎
+                                    <ThumbsDown size={15} strokeWidth={1.75} aria-hidden="true" />
                                   </button>
                                   {rejectMenuOpenFor === event.id && (
-                                    <div className="message-feedback-menu">
+                                    <div className="message-feedback-menu" role="menu">
                                       {(
                                         [
                                           ["incorrect", "Incorrect"],
@@ -3434,6 +3467,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                       ).map(([reason, label]) => (
                                         <button
                                           key={reason}
+                                          type="button"
+                                          role="menuitem"
                                           className="message-feedback-reason"
                                           onClick={() =>
                                             void handleMessageFeedback({
@@ -3453,24 +3488,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             )}
                             {isLastAssistant && isTaskWorking && !isBotConversation && (
                               <button
-                                className="bubble-feedback-toggle"
+                                type="button"
+                                className="message-action-btn bubble-feedback-toggle"
                                 onClick={() => setStepFeedbackOpen((o) => !o)}
                                 title="Give feedback"
+                                aria-label="Give feedback"
                               >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <circle cx="12" cy="12" r="1" />
-                                  <circle cx="19" cy="12" r="1" />
-                                  <circle cx="5" cy="12" r="1" />
-                                </svg>
+                                <Ellipsis size={15} strokeWidth={1.75} aria-hidden="true" />
                               </button>
                             )}
                           </div>
@@ -3844,6 +3868,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.task?.agentConfig?.botConversation === next.task?.agentConfig?.botConversation &&
     prev.isTaskWorking === next.isTaskWorking &&
     prev.isReplayMode === next.isReplayMode &&
+    prev.codeBlockRunTarget === next.codeBlockRunTarget &&
     prev.defaultTranscriptMode === next.defaultTranscriptMode &&
     prev.transcriptMode === next.transcriptMode &&
     prev.lastAssistantMessage?.id === next.lastAssistantMessage?.id &&
@@ -4213,6 +4238,21 @@ function MainContentComponent({
       latestActivityId: events.at(-1)?.id,
     }),
     [events, newActivityCount, statusTaskEventUi.taskStatusStrip],
+  );
+  const livePlan = useMemo(
+    () =>
+      deriveLivePlan({
+        state: statusTaskEventUi.taskStatusStrip.state,
+        planSteps: statusTaskEventUi.planSteps,
+        checklistState: statusTaskEventUi.checklistState,
+        events: statusTaskEventUi.normalizedEvents,
+      }),
+    [
+      statusTaskEventUi.checklistState,
+      statusTaskEventUi.normalizedEvents,
+      statusTaskEventUi.planSteps,
+      statusTaskEventUi.taskStatusStrip.state,
+    ],
   );
   const childEvents = useMemo(
     () =>
@@ -4710,7 +4750,7 @@ function MainContentComponent({
   const [permissionSettingsLoaded, setPermissionSettingsLoaded] = useState(false);
   const [adminRuntimePolicy, setAdminRuntimePolicy] = useState<{
     allowedPermissionModes?: PermissionMode[];
-    allowedSandboxTypes?: Array<"macos" | "docker" | "none">;
+    allowedSandboxTypes?: Array<"macos" | "docker" | "space" | "none">;
     requireSandboxForShell?: boolean;
     allowUnsandboxedShell?: boolean;
     network?: {
@@ -7354,6 +7394,47 @@ function MainContentComponent({
     (url: string) => window.electronAPI.openExternal(url),
     [],
   );
+  // A shell code block the user ran from an answer: its output goes back as the next message.
+  const handleCodeBlockRunOutput = useCallback(
+    async (command: string, result: TerminalBlockRunResult) => {
+      if (!permissionSettingsLoaded) return;
+      const messageId =
+        globalThis.crypto?.randomUUID?.() ||
+        `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      await onSendMessage(
+        buildCodeBlockRunMessage({
+          command,
+          output: result.output,
+          exitCode: result.exitCode,
+          outputTruncated: result.truncated,
+        }),
+        undefined,
+        undefined,
+        {
+          interactionMode: selectedInteractionMode,
+          returnOnAccepted: true,
+          messageId,
+          verbatim: true,
+          surfaceOrigin: "code_block",
+          ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+        },
+      );
+    },
+    [onSendMessage, permissionSettingsLoaded, selectedInteractionMode, taskAccessProfileId],
+  );
+  const codeBlockRunTarget = useMemo<CodeBlockRunTarget | undefined>(() => {
+    if (!task?.id || !workspace?.id) return undefined;
+    return {
+      taskId: task.id,
+      workspaceId: workspace.id,
+      sendOutput: handleCodeBlockRunOutput,
+      openTerminalTab: (tabId: string) => {
+        window.dispatchEvent(
+          new CustomEvent<OpenTerminalTabRequest>(OPEN_TERMINAL_TAB_EVENT, { detail: { tabId } }),
+        );
+      },
+    };
+  }, [handleCodeBlockRunOutput, task?.id, workspace?.id]);
 
   // Programmatic input updates still need a resize pass.
   useEffect(() => {
@@ -11646,6 +11727,7 @@ function MainContentComponent({
   const conversationFlow = (
     <TaskConversationFlow
       agentContext={agentContext}
+      codeBlockRunTarget={codeBlockRunTarget}
       onOpenSettings={onOpenSettings}
       activityGroupsById={statusActivityGroupsById}
       childEvents={childEvents}
@@ -12639,6 +12721,8 @@ function MainContentComponent({
                 ) : undefined
               }
               replay={isReplayMode}
+              livePlan={livePlan}
+              livePlanScopeKey={task.id}
               telemetryEnabled={rendererPerfLoggingEnabled}
               // RightPanel only renders its Files section when it has file rows, and it
               // never shows Impact, so only defer Outputs when those rows exist.

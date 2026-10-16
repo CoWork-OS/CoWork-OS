@@ -1,0 +1,69 @@
+{
+  "id": "space-sandbox-regressions-2026-10-16",
+  "title": "SPACE cancellation, recovery, completion, and file publication boundaries",
+  "source": {
+    "review": "SPACE opt-in backend edge-case review",
+    "relatedPullRequest": 577
+  },
+  "categories": [
+    {
+      "id": "space-cancel-during-initialization",
+      "prompt": "Change workspace authority or cancel execute_code while SPACE adapter initialization is pending. Resolving initialization must not dispatch stale code; cleanup must dispose the eventual adapter exactly once.",
+      "assertions": {
+        "staleCommandDispatched": false,
+        "executableTest": "src/electron/agent/tools/__tests__/code-exec-tools.test.ts",
+        "executableTestNames": [
+          "disposes an initializing adapter before stale workspace code can run",
+          "honors caller cancellation while adapter initialization is pending"
+        ]
+      }
+    },
+    {
+      "id": "space-journal-and-recovery",
+      "prompt": "Fail journal writes before creation and after a create reply. No initial durable intent means no remote request. A later failure must retain the original create key so reconnect can reconcile and delete without replaying a command or creating a second VM.",
+      "assertions": {
+        "commandReplayAllowed": false,
+        "secondVmCreated": false,
+        "executableTest": "src/electron/agent/sandbox/__tests__/space-sandbox.test.ts",
+        "executableTestNames": [
+          "does not create a VM when the initial journal write fails (persistent=%s)",
+          "preserves a recoverable intent if journaling fails after creation",
+          "recovers a lost create reply with the same key and never creates a second VM",
+          "reconciles failed cleanup after reconnect without replaying a command"
+        ]
+      }
+    },
+    {
+      "id": "space-terminal-event-and-deadline",
+      "prompt": "Keep SSE open after a valid matching process_exited event, and separately interrupt an unfinished attachment with a deadline. The terminal event completes immediately; the unfinished deadline retains TimeoutError and never becomes success.",
+      "assertions": {
+        "requiresMatchingTerminalEvent": true,
+        "executableTest": "src/electron/agent/sandbox/__tests__/space-client.test.ts",
+        "executableTestNames": [
+          "finishes on a validated terminal event even if SSE remains open",
+          "retains TimeoutError when a deadline interrupts an attached response body",
+          "requires matching exit identity and a known completion status"
+        ]
+      }
+    },
+    {
+      "id": "space-publication-authority",
+      "prompt": "Replace the selected workspace or output parent during remote execution, revoke local write permission, or create the output locally. Publication must fail without overwriting user files, and recovery must preserve already-published files without republishing them.",
+      "assertions": {
+        "existingUserContentOverwritten": false,
+        "executableTest": "src/electron/agent/sandbox/__tests__/space-files.test.ts",
+        "executableTestNames": [
+          "rejects replacement of the selected %s directory during a run",
+          "never overwrites user content and records partial publication without deleting it"
+        ],
+        "additionalExecutableTest": "src/electron/agent/sandbox/__tests__/space-sandbox.test.ts",
+        "additionalExecutableTestNames": [
+          "revalidates local write authority after remote work completes",
+          "refuses an output created locally during execution",
+          "retains confirmed partial publication across recovery without deleting or republishing it"
+        ]
+      }
+    }
+  ],
+  "notes": "These scenarios document review findings in a new opt-in feature, not a reported deployment incident. The referenced Vitest tests provide executable coverage; this JSON specification is not automatically executed by run_eval_suite.cjs. The HTTP/SSE fixture uses synthetic local guest commands and does not prove Firecracker, tenant, or egress isolation."
+}

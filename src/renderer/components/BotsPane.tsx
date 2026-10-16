@@ -14,7 +14,7 @@ import {
   type BotMascotId,
 } from "../../shared/bot-mascots";
 import { BotMascot } from "./bot-mascot/BotMascot";
-import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
+import { BotFormDialog, describeDesktopHostError, type BotFormValues } from "./BotFormDialog";
 import "./bot-roster.css";
 import type { MascotExpression } from "./bot-mascot/mascot-eyes";
 import { BOT_PROFILE_UPDATED_EVENT, BotProfileDialog } from "./BotProfileDialog";
@@ -525,6 +525,8 @@ export function CreateBotDialog({
     providerType: "",
     modelKey: "",
     worksOn: "auto",
+    desktopHost: "",
+    desktopGroup: "",
   }));
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -545,6 +547,11 @@ export function CreateBotDialog({
       setError("Bot creation is unavailable in this session.");
       return;
     }
+    const desktopHostError = describeDesktopHostError(values);
+    if (desktopHostError) {
+      setError(desktopHostError);
+      return;
+    }
 
     setIsCreating(true);
     setError(null);
@@ -558,6 +565,12 @@ export function CreateBotDialog({
           systemPrompt: normalizeBotProfileText(values.systemPrompt) || undefined,
           icon: values.icon,
           ...(values.worksOn !== "auto" ? { worksOn: values.worksOn } : {}),
+          ...(values.worksOn === "own_desktop" && values.desktopHost.trim()
+            ? { desktopHost: values.desktopHost.trim() }
+            : {}),
+          ...(values.worksOn === "own_desktop" && values.desktopGroup.trim()
+            ? { desktopGroup: values.desktopGroup.trim().toLowerCase() }
+            : {}),
           color: DEFAULT_BOT_COLOR,
           capabilities: ["code"],
           ...(values.modelKey

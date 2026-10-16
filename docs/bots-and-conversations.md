@@ -554,6 +554,44 @@ CoWork quits. Tasks of the same bot take turns on it. **Open desktop** shows
 it in a window: read-only while the bot works, and yours to use after **Take
 over**.
 
+**Files on its desktop.** The rail lists the newest files in the bot's work
+folder (`~/work`), with **Show** to reveal one in Finder when the desktop runs on
+this computer. The bot hands a file to you with `desktop_save_file`, which
+copies it (up to 25 MB) into the conversation's workspace under
+`artifacts/bot-desktop/`, following the workspace's write rules.
+
+**A shared desktop.** Leave **Shared desktop** empty and the bot gets a
+desktop of its own. Give bots the same name there and they share one desktop:
+its files, browser and sign-ins, so any of them can act as the others there.
+They take turns on it. This is never the default.
+
+**Teach a task.** Show the bot a task once on its own desktop, and it can do
+it again exactly the same way. Take over, choose **Record a task**, do the task
+in the desktop window, then name it and choose **Stop and save** (or
+**Discard**). Recording captures your keys, clicks and pointer moves and stops
+on its own after ten minutes. The bot lists what it was taught with
+`desktop_taught_tasks` and plays one back with `desktop_replay_task`, which
+replays your input with its original timing (long pauses shortened to ten
+seconds) and then returns a screenshot so the bot can check the result. Replay
+is exact: it doesn't adapt if a page moved, so the bot brings the desktop to
+where the task starts first. Recordings are kept in CoWork's app data,
+encrypted with the system keychain when it's available, and never on the
+desktop itself, so the bot's own commands can't read what you typed. Even so,
+don't type passwords while recording; take over for those instead. The bot
+can't act on its desktop while you record. The rail's **Taught tasks** list
+shows each task's length, with **Delete**.
+
+**Its own desktop on your server.** In the bot's dialog, **Runs on** takes an
+SSH host from your SSH config (like `my-server` or `me@example.com`). The
+desktop then runs on that server with Docker, driven from this computer over
+SSH (`docker --host ssh://<host>`), and the bot's files and sign-ins live in a
+volume there. The viewer reaches the server's loopback through an SSH tunnel.
+CoWork never accepts an unknown host key and never stores SSH keys: run
+`ssh <host>` once in Terminal to trust the server and make sure your key signs
+in without a prompt. The server needs Docker; this computer needs the Docker
+command-line tool. CoWork itself still runs on this computer, so the bot works
+while CoWork is open (or run the headless CoWork daemon on the server).
+
 **One task at a time on this computer.** This computer has one cursor and one
 focus, so one task drives it at a time. Another task waits its turn, first come
 first served, for up to two minutes, and then gets a "this computer is busy"
@@ -568,7 +606,11 @@ one-time code is on screen. **Take over** stops the bot's computer and browser
 actions (they are refused, not queued) until you press **Hand back**. A bot
 asks you to take over with the `request_takeover` tool when a step needs you:
 passwords, passkeys, one-time codes, CAPTCHAs, payments or identity checks. The
-request shows in the rail.
+request shows in the rail and arrives as a question (**Done** or **Skip**)
+wherever your questions do: in the app, the notification inbox, and your phone
+through a connected messaging channel. The bot waits for your answer, gets the
+computer back when you choose **Done**, and doesn't try the step itself if you
+choose **Skip**.
 
 ### Markdown and message rendering
 

@@ -10,7 +10,7 @@ import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
-import type { ApprovalRequest } from "../shared/types";
+import type { ApprovalRequest, SpaceSandboxConfig, SandboxType } from "../shared/types";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   ApprovalDraftPreview,
@@ -274,6 +274,10 @@ import type {
   ShellSessionLifecycleEvent,
   TerminalTabRunResult,
   TerminalTabOutputEvent,
+  TerminalBlockRunRequest,
+  TerminalBlockRunResult,
+  TerminalBlockOutputEvent,
+  MessageSurfaceOrigin,
   LLMRoutingRuntimeState,
   AgentMailApiKeySummary,
   AgentMailConnectionTestResult,
@@ -1699,6 +1703,8 @@ interface AgentRoleData {
   accessProfileId?: string;
   /** Where this bot works; unset means Auto. */
   worksOn?: import("../shared/bot-computer").BotWorksOn;
+  desktopHost?: string;
+  desktopGroup?: string;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1741,6 +1747,8 @@ interface CreateAgentRoleRequest {
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
   worksOn?: import("../shared/bot-computer").BotWorksOn;
+  desktopHost?: string;
+  desktopGroup?: string;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1774,6 +1782,8 @@ interface UpdateAgentRoleRequest {
   /** The agent's access limit; null clears it. */
   accessProfileId?: string | null;
   worksOn?: import("../shared/bot-computer").BotWorksOn | null;
+  desktopHost?: string | null;
+  desktopGroup?: string | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -2281,6 +2291,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_: Any, event: TerminalTabOutputEvent) => callback(event);
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_TAB_OUTPUT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_TAB_OUTPUT, handler);
+  },
+  runTerminalBlock: (data: TerminalBlockRunRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_BLOCK_RUN, data) as Promise<TerminalBlockRunResult>,
+  stopTerminalBlock: (data: { runId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_BLOCK_STOP, data) as Promise<{ stopped: boolean }>,
+  onTerminalBlockOutput: (callback: (event: TerminalBlockOutputEvent) => void) => {
+    const handler = (_: Any, event: TerminalBlockOutputEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.TERMINAL_BLOCK_OUTPUT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_BLOCK_OUTPUT, handler);
   },
   listLocalPreviewTemplates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.LOCAL_PREVIEW_TEMPLATES) as Promise<
@@ -3377,7 +3396,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => {
     const validatedImages = validateSendMessageAttachments(images);
@@ -3432,6 +3451,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       read?: boolean;
       write?: boolean;
       delete?: boolean;
+      sandboxType?: SandboxType;
+      spaceConfig?: SpaceSandboxConfig;
     },
   ) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
@@ -4475,6 +4496,18 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_OPEN_DESKTOP, taskId),
   stopBotDesktop: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP, taskId),
+  listBotDesktopFiles: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES, taskId),
+  revealBotDesktopFile: (taskId: string, filePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_REVEAL_DESKTOP_FILE, taskId, filePath),
+  startTeachingTask: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_START_RECORDING, taskId),
+  finishTeachingTask: (taskId: string, name: string | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_FINISH_RECORDING, taskId, name),
+  listTaughtTasks: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_TAUGHT_TASKS, taskId),
+  deleteTaughtTask: (taskId: string, taughtTaskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_DELETE_TAUGHT_TASK, taskId, taughtTaskId),
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
     const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
     const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
@@ -7165,7 +7198,7 @@ export interface ElectronAPI {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => Promise<{
     queued: boolean;
@@ -7242,6 +7275,10 @@ export interface ElectronAPI {
     taskId?: string;
   }) => Promise<{ success: boolean }>;
   onTerminalTabOutput: (callback: (event: TerminalTabOutputEvent) => void) => () => void;
+  /** Run a shell code block from an answer in the task's terminal tab and wait for it to finish. */
+  runTerminalBlock: (data: TerminalBlockRunRequest) => Promise<TerminalBlockRunResult>;
+  stopTerminalBlock: (data: { runId: string }) => Promise<{ stopped: boolean }>;
+  onTerminalBlockOutput: (callback: (event: TerminalBlockOutputEvent) => void) => () => void;
   createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;
@@ -7267,6 +7304,8 @@ export interface ElectronAPI {
       read?: boolean;
       write?: boolean;
       delete?: boolean;
+      sandboxType?: SandboxType;
+      spaceConfig?: SpaceSandboxConfig;
     },
   ) => Promise<Any>;
   getInputRequestDraftReview: (
@@ -8626,6 +8665,20 @@ export interface ElectronAPI {
   /** Opens the bot's own desktop in a window (full view; you can use it after taking over). */
   openBotDesktop: (taskId: string) => Promise<{ opened: boolean }>;
   stopBotDesktop: (taskId: string) => Promise<{ stopped: boolean }>;
+  /** The newest files in the bot's work folder on its own desktop. */
+  listBotDesktopFiles: (
+    taskId: string,
+  ) => Promise<Array<{ path: string; size: number; modifiedAt: number }>>;
+  revealBotDesktopFile: (taskId: string, filePath: string) => Promise<{ revealed: boolean }>;
+  /** Teach a task: starts recording what you do on the bot's desktop (after taking over). */
+  startTeachingTask: (taskId: string) => Promise<{ recording: boolean }>;
+  /** Stops recording; saves it under the name, or discards it when the name is null. */
+  finishTeachingTask: (
+    taskId: string,
+    name: string | null,
+  ) => Promise<import("../shared/bot-computer").TaughtTask | null>;
+  listTaughtTasks: (taskId: string) => Promise<import("../shared/bot-computer").TaughtTask[]>;
+  deleteTaughtTask: (taskId: string, taughtTaskId: string) => Promise<{ deleted: boolean }>;
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;
@@ -9513,7 +9566,7 @@ export interface ElectronAPI {
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
     runtime: {
       allowedPermissionModes: PermissionMode[];
-      allowedSandboxTypes: Array<"macos" | "docker" | "none">;
+      allowedSandboxTypes: Array<"macos" | "docker" | "space" | "none">;
       requireSandboxForShell: boolean;
       allowUnsandboxedShell: boolean;
       network: {
@@ -9541,7 +9594,7 @@ export interface ElectronAPI {
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
     runtime: {
       allowedPermissionModes: PermissionMode[];
-      allowedSandboxTypes: Array<"macos" | "docker" | "none">;
+      allowedSandboxTypes: Array<"macos" | "docker" | "space" | "none">;
       requireSandboxForShell: boolean;
       allowUnsandboxedShell: boolean;
       network: {

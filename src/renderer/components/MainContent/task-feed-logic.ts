@@ -1,7 +1,7 @@
 import type { RefObject, MutableRefObject } from "react";
 import type { TaskEvent, Task, CustomSkill } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
-import { getCompletionSummaryText, humanizeTimelineMessage } from "./task-event-presentation";
+import { getCompletionSummaryText } from "./task-event-presentation";
 import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
 import {
   resolveTaskOutputSummaryFromCompletionEvent,
@@ -127,7 +127,6 @@ export const LIVE_TRANSCRIPT_TRANSIENT_RAW_EVENT_TYPES = new Set([
   "llm_output_budget_escalation",
   "llm_streaming",
 ]);
-export const MAX_AGENT_REASONING_UPDATE_COUNT = 6;
 
 export const LIVE_TRANSCRIPT_URGENT_EFFECTIVE_EVENT_TYPES = new Set([
   "approval_requested",
@@ -190,10 +189,13 @@ export function isUserFacingProgressMessage(message: string): boolean {
   return true;
 }
 
+/**
+ * The model's reasoning while it streams. Progress lines, step names and replies are
+ * not repeated here: the status strip, the live plan and the transcript show them.
+ */
 export interface AgentReasoningPanelState {
   activeStreamText: string;
   isStreaming: boolean;
-  recentUpdates: string[];
 }
 
 export function cleanAgentReasoningText(text: string): string {
@@ -221,28 +223,7 @@ export function deriveAgentReasoningPanelState(args: {
   isTaskWorking: boolean;
 }): AgentReasoningPanelState {
   if (!args.taskId || !args.isTaskWorking) {
-    return { activeStreamText: "", isStreaming: false, recentUpdates: [] };
-  }
-
-  const recentUpdates: string[] = [];
-  let lastVisibleUpdate = "";
-
-  for (const event of args.events) {
-    if (event.taskId !== args.taskId || isAgentReasoningStreamingEvent(event)) continue;
-    const effectiveType = getEffectiveTaskEventType(event);
-    if (effectiveType !== "progress_update" && effectiveType !== "assistant_message") continue;
-    if (effectiveType === "assistant_message" && event.payload?.internal === true) continue;
-    const rawMessage = typeof event.payload?.message === "string" ? event.payload.message : "";
-    if (!isUserFacingProgressMessage(rawMessage)) continue;
-    const message = cleanAgentReasoningText(
-      effectiveType === "progress_update" ? humanizeTimelineMessage(rawMessage) : rawMessage,
-    );
-    if (!message || message === lastVisibleUpdate) continue;
-    lastVisibleUpdate = message;
-    recentUpdates.push(message);
-    if (recentUpdates.length > MAX_AGENT_REASONING_UPDATE_COUNT) {
-      recentUpdates.shift();
-    }
+    return { activeStreamText: "", isStreaming: false };
   }
 
   let activeStreamText = "";
@@ -274,11 +255,11 @@ export function deriveAgentReasoningPanelState(args: {
     break;
   }
 
-  return { activeStreamText, isStreaming, recentUpdates };
+  return { activeStreamText, isStreaming };
 }
 
 export function hasAgentReasoningPanelContent(state: AgentReasoningPanelState): boolean {
-  return state.activeStreamText.trim().length > 0 || state.recentUpdates.length > 0;
+  return state.isStreaming && state.activeStreamText.trim().length > 0;
 }
 
 export function isTransientLiveTranscriptRow(row: TaskFeedRow): boolean {

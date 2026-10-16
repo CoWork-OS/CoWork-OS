@@ -4,8 +4,13 @@
  */
 
 import * as path from "path";
-import { BOT_WORKS_ON_VALUES } from "../../shared/bot-computer";
+import {
+  BOT_WORKS_ON_VALUES,
+  DESKTOP_GROUP_PATTERN,
+  DESKTOP_HOST_PATTERN,
+} from "../../shared/bot-computer";
 import { z } from "zod";
+import { isSpaceRelativePath, isSpaceTemplate } from "../../shared/space-sandbox";
 import {
   EXTERNAL_RUNTIME_AGENTS,
   CoreEvalCaseStatus,
@@ -90,6 +95,27 @@ const AccessProfileIdSchema = z.string().trim().min(1).max(120);
 export const AgentRoleAccessProfileIdSchema = AccessProfileIdSchema;
 /** A bot's "Works on" setting; null resets it to Auto. */
 export const AgentRoleWorksOnSchema = z.enum(BOT_WORKS_ON_VALUES).nullable();
+/** The SSH host a bot's own desktop runs on; null or empty means this computer. */
+export const AgentRoleDesktopHostSchema = z
+  .string()
+  .trim()
+  .max(100)
+  .refine((value) => value === "" || DESKTOP_HOST_PATTERN.test(value), {
+    message: "Use an SSH host from your SSH config, like my-server or me@example.com",
+  })
+  .transform((value) => value || null)
+  .nullable();
+/** A shared desktop's name; null or empty means a desktop of its own. */
+export const AgentRoleDesktopGroupSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(40)
+  .refine((value) => value === "" || DESKTOP_GROUP_PATTERN.test(value), {
+    message: "Use lowercase letters, digits and dashes, like research-team",
+  })
+  .transform((value) => value || null)
+  .nullable();
 const AccessFilesystemRuleSchema = z
   .object({
     path: z.string().trim().min(1).max(MAX_PATH_LENGTH),
@@ -161,6 +187,50 @@ const PermissionRuleSchema = z.object({
 
 // ============ Workspace Schemas ============
 
+export const SpaceSandboxConfigSchema = z
+  .object({
+    template: z.string().refine(isSpaceTemplate, "Invalid SPACE template"),
+    inputPaths: z
+      .array(
+        z
+          .string()
+          .refine(
+            isSpaceRelativePath,
+            "Use a workspace-relative regular file outside private configuration",
+          ),
+      )
+      .max(64)
+      .optional(),
+    outputPaths: z
+      .array(
+        z
+          .string()
+          .refine(
+            isSpaceRelativePath,
+            "Use a workspace-relative new file outside private configuration",
+          ),
+      )
+      .max(64)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      [value.inputPaths, value.outputPaths].every(
+        (paths) => !paths || new Set(paths).size === paths.length,
+      ),
+    "Duplicate SPACE file selection",
+  );
+
+export const WorkspacePermissionsUpdateSchema = z.object({
+  network: z.boolean().optional(),
+  read: z.boolean().optional(),
+  write: z.boolean().optional(),
+  delete: z.boolean().optional(),
+  sandboxType: z.enum(["auto", "macos", "docker", "space", "none"]).optional(),
+  spaceConfig: SpaceSandboxConfigSchema.optional(),
+});
+
 export const WorkspaceCreateSchema = z.object({
   name: z.string().min(1).max(MAX_TITLE_LENGTH),
   path: z.string().min(1).max(MAX_PATH_LENGTH),
@@ -174,6 +244,8 @@ export const WorkspaceCreateSchema = z.object({
       // Broader filesystem access
       unrestrictedFileAccess: z.boolean().default(false),
       allowedPaths: z.array(z.string().max(MAX_PATH_LENGTH)).max(50).optional(),
+      sandboxType: z.enum(["auto", "macos", "docker", "space", "none"]).optional(),
+      spaceConfig: SpaceSandboxConfigSchema.optional(),
     })
     .optional(),
 });
@@ -475,7 +547,7 @@ export const TaskMessageSchema = z
         truncated: z.boolean().optional(),
       })
       .optional(),
-    surfaceOrigin: z.enum(["answer", "page"]).optional(),
+    surfaceOrigin: z.enum(["answer", "page", "code_block"]).optional(),
     permissionMode: PermissionModeSchema.optional(),
     shellAccess: z.boolean().optional(),
     accessProfileId: AccessProfileIdSchema.optional(),
@@ -3184,6 +3256,36 @@ export const CronRunModeSchema = z.enum(["due", "force"]).optional();
 /**
  * Validate input against a schema and throw a user-friendly error if invalid
  */
+/**
+ * Characters a code block command may not contain: control characters other than tab and
+ * newlines (the line editor would treat them as keys) and invisible or direction-changing
+ * characters (the shell would run something other than what the block shows).
+ */
+const UNSAFE_COMMAND_CHARACTERS = new RegExp(
+  "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]",
+);
+
+/** A shell code block the user runs from an answer (see TerminalBlockRunner). */
+export const TerminalBlockRunRequestSchema = z.object({
+  runId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,80}$/, "Run id must be 1-80 letters, digits, '-' or '_'."),
+  workspaceId: WorkspaceIdSchema,
+  taskId: UUIDSchema,
+  command: z
+    .string()
+    .trim()
+    .min(1)
+    .max(16_000)
+    .refine((command) => !UNSAFE_COMMAND_CHARACTERS.test(command), {
+      message: "The command contains control or invisible characters.",
+    }),
+});
+
+export const TerminalBlockStopRequestSchema = z.object({
+  runId: TerminalBlockRunRequestSchema.shape.runId,
+});
+
 export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown, context?: string): T {
   const result = schema.safeParse(input);
   if (!result.success) {

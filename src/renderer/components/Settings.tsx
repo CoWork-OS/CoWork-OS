@@ -218,6 +218,10 @@ const SuggestionsPanel = lazySettingsPanel(() => import("./SuggestionsPanel"), "
 const CustomizePanel = lazySettingsPanel(() => import("./CustomizePanel"), "CustomizePanel");
 const AddToolsPanel = lazySettingsPanel(() => import("./AddToolsPanel"), "AddToolsPanel");
 const ProfileSettings = lazySettingsPanel(() => import("./ProfileSettings"), "ProfileSettings");
+const SpaceSandboxSettings = lazySettingsPanel(
+  () => import("./SpaceSandboxSettings"),
+  "SpaceSandboxSettings",
+);
 const AdminPoliciesPanel = lazySettingsPanel(
   () => import("./AdminPoliciesPanel"),
   "AdminPoliciesPanel",
@@ -9334,6 +9338,13 @@ export function Settings({
                     description="Tune the default approval experience and manage profile or workspace-specific rules."
                   >
                     <PermissionSettingsPanel workspaceId={workspaceId} />
+                  </SystemSettingsSection>
+                  <SystemSettingsSection
+                    icon={<Shield {...S} />}
+                    title="SPACE sandbox"
+                    description="Choose remote Linux execution and the files it may exchange for this workspace."
+                  >
+                    <SpaceSandboxSettings workspaceId={workspaceId} />
                   </SystemSettingsSection>
                   <SystemSettingsSection
                     className="system-security-section--admin"

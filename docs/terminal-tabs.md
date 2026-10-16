@@ -85,6 +85,27 @@ commands. There is no separate shell enable/disable switch for new tasks. If a t
 downgraded, new tabs and further use of the task's command lane are revalidated against the
 narrower profile.
 
+## Running code blocks from an answer
+
+Shell code blocks in an answer (` ```bash `, `sh`, `zsh`, `shell`) show a **Run** button next to
+**Copy**. Run types the command into the task's terminal tab, exactly as if the user had typed it,
+and streams the output into a panel under the block. When the command finishes on its own, CoWork
+sends the command, its exit code and its output to the agent as the next message, so the agent can
+react to what happened. A quiet "Sent the output of …" line marks that message in the transcript.
+
+- **Same terminal**: runs reuse one tab per task, so `cd`, environment changes and history carry
+  over between runs. The terminal button in the output panel opens the dock on that tab.
+- **Stop**: while a command runs, the Run button shows a spinner that turns into Stop on hover. Stop
+  sends Ctrl+C. A stopped run is not sent to the agent.
+- **Finish detection**: the zsh integration emits shell-integration marks (OSC 133 `C` when output
+  starts, `D;<status>` when the prompt returns); bash emits the `D` mark from `PROMPT_COMMAND`. Other
+  shells and Windows `cmd.exe` do not show the Run button.
+- **Policy**: a run is the user's own input to their terminal, so it is gated like typing into a
+  tab: the task's access profile must allow command tools, and dangerous-command guardrails still
+  apply. The agent cannot start a run; only a click can.
+- **Output limits**: the panel keeps the last 256 KB of output; the message to the agent keeps the
+  head and tail of long output, about 12,000 characters.
+
 ## Reliability and packaging notes
 
 - `node-pty` native files are unpacked from Electron ASAR so PTY helpers can run in packaged builds.
@@ -122,6 +143,8 @@ Validate these flows on each platform before release:
 - resize dock while a command is running
 - close a running tab and confirm the child process exits
 - packaged-app launch with node-pty native files available
+- Run a shell code block from an answer: output streams under the block, the agent gets the
+  output once it finishes, and Stop interrupts a long-running command
 
 ## Related docs
 

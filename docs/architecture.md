@@ -128,6 +128,17 @@ leave ordinary child processes holding command output pipes open. Sandboxed
 commands retain their sandbox lifecycle, and Windows retains tree termination
 through `taskkill`.
 
+SPACE is an opt-in remote backend for `run_command` and `execute_code`. Both workspace selection
+and administrator permission are required; automatic selection stays local, and explicit SPACE
+selection survives Full access without local fallback. Each invocation creates a fresh offline
+Linux microVM, copies only selected regular inputs, and publishes only selected new output files
+after successful completion and permission/identity checks. Host file tools remain local.
+Host-private journals persist mutation intent, bounded output, and publication receipts before
+recovery reconciles creation/deletion using their original keys. Unknown commands are never
+replayed, cancellation requests independent VM deletion, and failed cleanup blocks adapter reuse.
+The settings panel configures file selection; connection credentials stay in the host environment.
+See [SPACE sandbox](space-sandbox.md) for limits, experimental API contracts, and live qualification.
+
 See [Access Profiles](access-profiles.md) for the product, API, migration, and edge-case contract.
 
 ## Gateway context admission

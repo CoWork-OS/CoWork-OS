@@ -35,6 +35,7 @@ import { createVideoObjectUrl } from "../utils/videoPlayback";
 import { PDFDocumentSurface } from "./PDFDocumentSurface";
 import { PresentationViewer } from "./PresentationViewer";
 import { ImageLightbox } from "./ImageLightbox";
+import { VideoLightbox } from "./VideoLightbox";
 import { ThemeIcon } from "./ThemeIcon";
 import {
   AlertTriangleIcon,
@@ -183,6 +184,7 @@ const formatDuration = (seconds: number): string => {
 };
 
 const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|heic|tiff?)$/i;
+const VIDEO_PATH_RE = /\.(mp4|webm)$/i;
 
 interface JsonNodeProps {
   value: unknown;
@@ -304,6 +306,9 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
   // Images render in ImageLightbox, which handles its own keyboard shortcuts.
   const showImageLightbox =
     fileData?.fileType === "image" || (loading && !fileData && IMAGE_PATH_RE.test(filePath));
+  // Videos play in VideoLightbox, which shares the image viewer's look.
+  const showVideoLightbox =
+    fileData?.fileType === "video" || (loading && !fileData && VIDEO_PATH_RE.test(filePath));
 
   // Prepare video / audio playback URL
   useEffect(() => {
@@ -727,21 +732,6 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
           </div>
         );
 
-      case "video":
-        return (
-          <div className="file-viewer-video-container">
-            <video
-              key={videoPlaybackUrl || fileData.playbackUrl || ""}
-              src={videoPlaybackUrl || ""}
-              className="file-viewer-video"
-              controls
-              preload="auto"
-              playsInline
-              poster={fileData.posterDataUrl}
-            />
-          </div>
-        );
-
       case "audio":
         return (
           <div className="file-viewer-audio-container">
@@ -862,6 +852,23 @@ export function FileViewer({ filePath, workspacePath, onClose }: FileViewerProps
         fileName={fileData?.fileName || filePath.split("/").pop()}
         meta={subtitle || undefined}
         onClose={onClose}
+        onShowInFinder={handleShowInFinder}
+        onOpenExternal={handleOpenExternal}
+      />
+    );
+  }
+
+  if (showVideoLightbox && !error) {
+    const fileName = fileData?.fileName || filePath.split("/").pop();
+    return (
+      <VideoLightbox
+        src={videoPlaybackUrl || undefined}
+        poster={fileData?.posterDataUrl}
+        fileName={fileName}
+        formatLabel={fileName?.split(".").pop()?.toUpperCase() || "Video"}
+        sizeLabel={fileData ? formatSize(fileData.size) || undefined : undefined}
+        onClose={onClose}
+        onCopyPath={() => navigator.clipboard.writeText(filePath)}
         onShowInFinder={handleShowInFinder}
         onOpenExternal={handleOpenExternal}
       />

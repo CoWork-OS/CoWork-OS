@@ -1490,6 +1490,9 @@ export type ToolType =
   | "desktop_scroll"
   | "desktop_drag"
   | "desktop_run"
+  | "desktop_save_file"
+  | "desktop_taught_tasks"
+  | "desktop_replay_task"
   // Orchestration tools
   | "orchestrate_agents"
   // QA tools (Playwright visual QA)
@@ -1991,6 +1994,10 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // A shell command, like run_command: approval and policy treat it as destructive even
   // though it runs in the container, since it can reach the network with the bot's sign-ins.
   desktop_run: "destructive",
+  desktop_save_file: "write",
+  desktop_taught_tasks: "read",
+  // Replays the person's own recorded clicks and typing on the bot's desktop, like desktop_click.
+  desktop_replay_task: "write",
   // Orchestration
   orchestrate_agents: "write",
   // Meta
@@ -3249,6 +3256,13 @@ export interface QuotedAssistantMessage {
 }
 
 /** Follow-up payload sent to an existing task. */
+/** Where a user message came from when the desktop app sent it on the user's behalf. */
+export type MessageSurfaceOrigin = "answer" | "page" | "code_block";
+
+export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceOrigin {
+  return value === "answer" || value === "page" || value === "code_block";
+}
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3286,9 +3300,10 @@ export interface TaskFollowUpInput {
   /**
    * The user sent this exact text by approving an action in an interactive answer: a
    * button the model wrote ("answer") or a request from page code in an HTML frame
-   * ("page"). Set only by the desktop app's own send path.
+   * ("page"), or the output of a shell code block the user ran from an answer
+   * ("code_block"). Set only by the desktop app's own send path.
    */
-  surfaceOrigin?: "answer" | "page";
+  surfaceOrigin?: MessageSurfaceOrigin;
 }
 
 export type AgentMessageDeliveryStatus =
@@ -4378,6 +4393,32 @@ export interface TerminalTabOutputEvent {
   timestamp: number;
 }
 
+/** Run a shell code block from an assistant answer in the task's terminal tab. */
+export interface TerminalBlockRunRequest {
+  /** Renderer-chosen id that tags the streamed output events for this run. */
+  runId: string;
+  workspaceId: string;
+  taskId: string;
+  command: string;
+}
+
+export interface TerminalBlockRunResult {
+  runId: string;
+  tabId: string;
+  /** Output between the command start and its finish, with terminal escapes kept. */
+  output: string;
+  /** The output was longer than the capture limit; only its tail is kept. */
+  truncated: boolean;
+  exitCode: number | null;
+  terminationReason: CommandTerminationReason;
+}
+
+export interface TerminalBlockOutputEvent {
+  runId: string;
+  tabId: string;
+  output: string;
+}
+
 export type GithubReviewThreadState = "open" | "resolved" | "outdated" | "unknown";
 
 export interface GithubPullRequestReviewComment {
@@ -4881,7 +4922,18 @@ export function isTempWorkspaceId(id: string | null | undefined): boolean {
 /**
  * Sandbox type for command execution isolation
  */
-export type SandboxType = "auto" | "macos" | "docker" | "none";
+export type SandboxType = "auto" | "macos" | "docker" | "space" | "none";
+
+/** Explicit workspace file selection for the opt-in remote SPACE backend.
+ * Connection credentials live in the host environment, never in workspace JSON. */
+export interface SpaceSandboxConfig {
+  /** Published Linux template with python3, /bin/sh, and (for JavaScript) node. */
+  template: string;
+  /** Regular files relative to the workspace. No directories, links, or implicit sync. */
+  inputPaths?: string[];
+  /** Remote workspace-relative files to publish locally. Destinations must be new files. */
+  outputPaths?: string[];
+}
 
 /**
  * Docker sandbox configuration
@@ -4910,6 +4962,7 @@ export interface WorkspacePermissions {
   // Sandbox configuration
   sandboxType?: SandboxType; // Which sandbox to use (auto-detect if not specified)
   dockerConfig?: DockerSandboxConfig; // Docker-specific configuration
+  spaceConfig?: SpaceSandboxConfig;
   /** Effective access-profile metadata applied to an agent workspace view. */
   accessProfileId?: AccessProfileId;
   accessSandboxMode?: import("./access-profiles").AccessSandboxMode;
@@ -5737,6 +5790,16 @@ export interface AgentRole {
   accessProfileId?: AccessProfileId;
   /** Where this bot works: which computer its tasks may drive. Unset means Auto. */
   worksOn?: BotWorksOn;
+  /**
+   * For "Its own desktop": the SSH host (from your SSH config) its desktop runs on. Unset means
+   * this computer.
+   */
+  desktopHost?: string;
+  /**
+   * For "Its own desktop": a shared desktop's name. Bots with the same name share one desktop,
+   * with its files, browser and sign-ins. Unset means a desktop of its own.
+   */
+  desktopGroup?: string;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5787,6 +5850,10 @@ export interface CreateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** Where this bot works; unset means Auto. */
   worksOn?: BotWorksOn;
+  /** The SSH host its own desktop runs on; unset means this computer. */
+  desktopHost?: string;
+  /** A shared desktop's name; unset means a desktop of its own. */
+  desktopGroup?: string;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -5834,6 +5901,10 @@ export interface UpdateAgentRoleRequest {
   accessProfileId?: AccessProfileId | null;
   /** Where this bot works; null resets it to Auto. */
   worksOn?: BotWorksOn | null;
+  /** The SSH host its own desktop runs on; null means this computer. */
+  desktopHost?: string | null;
+  /** A shared desktop's name; null means a desktop of its own. */
+  desktopGroup?: string | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;
@@ -7913,6 +7984,9 @@ export const IPC_CHANNELS = {
   TERMINAL_TAB_STOP: "terminalTab:stop",
   TERMINAL_TAB_CLOSE: "terminalTab:close",
   TERMINAL_TAB_OUTPUT: "terminalTab:output",
+  TERMINAL_BLOCK_RUN: "terminalBlock:run",
+  TERMINAL_BLOCK_STOP: "terminalBlock:stop",
+  TERMINAL_BLOCK_OUTPUT: "terminalBlock:output",
   SPREADSHEET_OPEN_WORKBOOK: "spreadsheet:openWorkbook",
   SPREADSHEET_GET_VIEWPORT: "spreadsheet:getViewport",
   SPREADSHEET_APPLY_PATCHES: "spreadsheet:applyPatches",
@@ -8682,6 +8756,12 @@ export const IPC_CHANNELS = {
   COMPUTER_VIEW_EVENT: "computerView:event",
   COMPUTER_VIEW_OPEN_DESKTOP: "computerView:openDesktop",
   COMPUTER_VIEW_STOP_DESKTOP: "computerView:stopDesktop",
+  COMPUTER_VIEW_DESKTOP_FILES: "computerView:desktopFiles",
+  COMPUTER_VIEW_REVEAL_DESKTOP_FILE: "computerView:revealDesktopFile",
+  COMPUTER_VIEW_START_RECORDING: "computerView:startRecording",
+  COMPUTER_VIEW_FINISH_RECORDING: "computerView:finishRecording",
+  COMPUTER_VIEW_TAUGHT_TASKS: "computerView:taughtTasks",
+  COMPUTER_VIEW_DELETE_TAUGHT_TASK: "computerView:deleteTaughtTask",
 
   // Tray (Menu Bar)
   TRAY_GET_SETTINGS: "tray:getSettings",

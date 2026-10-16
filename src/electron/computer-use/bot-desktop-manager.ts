@@ -9,12 +9,18 @@
  * - Tasks of the same bot take turns on its desktop (first come, first served, bounded wait).
  * - A desktop stops after an hour without use, and when CoWork quits.
  * - All container commands are run with argument lists, never through a shell on the host.
+ * - A bot can run its desktop on your own server instead: an SSH host from your SSH config.
+ *   Docker then runs there over SSH (`docker --host ssh://<host>`), the bot's files live in a
+ *   volume on that server, and the viewer comes through an SSH tunnel to 127.0.0.1. Unknown
+ *   host keys are never accepted; connect with `ssh <host>` once to trust the server.
  */
 
-import { execFile, spawn } from "child_process";
+import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash, randomBytes } from "crypto";
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
+import * as net from "net";
 import * as path from "path";
+import { isValidDesktopGroup, isValidDesktopHost } from "../../shared/bot-computer";
 
 export type ContainerRuntimeName = "docker" | "podman";
 
@@ -40,10 +46,101 @@ export interface BotDesktopDeps {
   now?: () => number;
   idleStopMs?: number;
   waitMs?: number;
+  /** The SSH host a bot's desktop runs on, or undefined for this computer. */
+  desktopHostFor?: (botId: string) => string | undefined;
+  /** The shared desktop a bot uses with other bots, or undefined for a desktop of its own. */
+  desktopGroupFor?: (botId: string) => string | undefined;
+  /** Opens an SSH tunnel from a local port to a port on the server's loopback. */
+  openTunnel?: (host: string, localPort: number, remotePort: number) => ChildProcess;
+  /** Every server bots' desktops are set to run on, so leftovers there are stopped too. */
+  desktopHosts?: () => string[];
   /** The uid CoWork runs as (default: the process uid); decides how the home folder is mounted. */
   hostUid?: number;
-  /** Whether the person is using the bot's desktop (its viewer is open): idle stop skips it. */
-  inUse?: (botId: string) => boolean;
+  /**
+   * Whether the person is using a desktop (its viewer is open): idle stop skips it. Gets the
+   * desktop key (see desktopKey), which is the bot's id unless bots share the desktop.
+   */
+  inUse?: (desktopKey: string) => boolean;
+}
+
+const defaultOpenTunnel = (host: string, localPort: number, remotePort: number): ChildProcess =>
+  spawn(
+    "ssh",
+    [
+      "-N",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "StrictHostKeyChecking=yes",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "ServerAliveInterval=30",
+      "-L",
+      `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`,
+      "--",
+      host,
+    ],
+    { stdio: "ignore", env: { ...process.env, PATH: withCommonBinPaths(process.env.PATH) } },
+  );
+
+async function freeLocalPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function waitForLocalPort(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const open = await new Promise<boolean>((resolve) => {
+      const socket = net.connect(port, "127.0.0.1");
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", () => resolve(false));
+    });
+    if (open) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+/**
+ * Turns failures to reach or sign in to the server into what the person should do about them.
+ * Docker reports those as "error during connect … dial-stdio … stderr=<ssh's message>"; any other
+ * error came from a command that did run on the server (its own "Permission denied", say) and is
+ * passed on as it is.
+ */
+function explainRemoteError(host: string, error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const original = error instanceof Error ? error : new Error(message);
+  if (!/error during connect|dial-stdio|^ssh: /im.test(message)) return original;
+  if (
+    /host key verification failed|no matching host key|REMOTE HOST IDENTIFICATION/i.test(message)
+  ) {
+    return new Error(
+      `CoWork doesn't trust ${host} yet. Run "ssh ${host}" once in Terminal to check and accept its host key.`,
+    );
+  }
+  if (/permission denied|authentication/i.test(message)) {
+    return new Error(`CoWork couldn't sign in to ${host} over SSH. Set up an SSH key for it.`);
+  }
+  if (/could not resolve|connection refused|timed out|no route/i.test(message)) {
+    return new Error(`CoWork couldn't reach ${host} over SSH.`);
+  }
+  const detail = /stderr=([^\n]*)/.exec(message)?.[1]?.trim();
+  return new Error(
+    `CoWork couldn't connect to ${host} over SSH${detail ? ` (${detail})` : ""}. Check that ` +
+      `"ssh ${host}" works in Terminal without asking for anything, and that Docker runs there.`,
+  );
 }
 
 export interface BotDesktopStatus {
@@ -55,6 +152,8 @@ export interface BotDesktopStatus {
 
 const CONTAINER_PREFIX = "cowork-desktop-";
 const IMAGE_NAME = "cowork-bot-desktop";
+/** The files the desktop image is built from; its tag follows their contents. */
+const BOT_DESKTOP_IMAGE_FILES = ["Dockerfile", "start-desktop.sh", "cowork-teach.py"];
 const VIEWER_PORT = 6080;
 const DEFAULT_IDLE_STOP_MS = 60 * 60 * 1000;
 const DEFAULT_WAIT_MS = 2 * 60 * 1000;
@@ -116,12 +215,50 @@ export function pngSize(png: Buffer): { width: number; height: number } {
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
+/** A file in the bot's work folder on its desktop. */
+export interface BotDesktopFile {
+  /** Relative to the work folder, with forward slashes. */
+  path: string;
+  size: number;
+  modifiedAt: number;
+}
+
+/** The largest file a bot can hand from its desktop to a conversation. */
+export const BOT_DESKTOP_FILE_MAX_BYTES = 25 * 1024 * 1024;
+const WORK_DIR = "/home/bot/work";
+/** The desktop browser's profile lives in the work folder; it is not the bot's files. */
+const HIDDEN_WORK_ENTRIES = new Set([".browser"]);
+
+/**
+ * A path inside the bot's work folder, normalized, or an error: no absolute paths, no "..",
+ * nothing in the browser profile.
+ */
+export function normalizeDesktopFilePath(raw: unknown): string {
+  const value = typeof raw === "string" ? raw.trim().replace(/\\/g, "/") : "";
+  const relative = value.replace(/^~\/work\//, "").replace(/^\/home\/bot\/work\//, "");
+  const parts = relative.split("/").filter((part) => part && part !== ".");
+  if (
+    !relative ||
+    relative.startsWith("/") ||
+    parts.length === 0 ||
+    parts.some((part) => part === "..") ||
+    HIDDEN_WORK_ENTRIES.has(parts[0]) ||
+    relative.length > 1024
+  ) {
+    throw new Error("Use a file path inside ~/work on the bot's desktop, like report.pdf");
+  }
+  return parts.join("/");
+}
+
 interface DesktopRecord {
   /** Full-access viewer password (after take-over). */
   password: string;
+  /** The SSH host it runs on, or undefined for this computer. */
+  host?: string;
   /** View-only viewer password (watching). */
   viewPassword: string;
   viewerPort?: number;
+  tunnel?: ChildProcess;
   lastUsedAt: number;
   /** When the container was last seen running. */
   checkedAt?: number;
@@ -164,9 +301,12 @@ export class BotDesktopManager {
   private runtimeMissingAt: number | null = null;
   private readonly records = new Map<string, DesktopRecord>();
   private readonly starting = new Map<string, Promise<void>>();
-  private imagePromise: Promise<string> | null = null;
+  /** The image build per place (this computer is ""), so each server builds it once. */
+  private readonly imagePromises = new Map<string, Promise<string>>();
   private readonly queues = new Map<string, Array<() => void>>();
   private readonly busy = new Set<string>();
+  /** Desktops where the person is recording a task right now. */
+  private readonly recording = new Set<string>();
   private idleTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly deps: BotDesktopDeps) {
@@ -181,6 +321,60 @@ export class BotDesktopManager {
 
   private run(command: string, args: string[], options?: { timeoutMs?: number; input?: string }) {
     return (this.deps.run ?? defaultRunner)(command, args, options);
+  }
+
+  /** Where the bot's desktop runs: an SSH host, or undefined for this computer. */
+  desktopHost(botId: string): string | undefined {
+    if (this.keyHosts.has(botId)) return this.keyHosts.get(botId);
+    const host = this.deps.desktopHostFor?.(botId);
+    return isValidDesktopHost(host) ? host : undefined;
+  }
+
+  /** The SSH host of each desktop key (a bot, or a shared desktop on a host). */
+  private readonly keyHosts = new Map<string, string | undefined>();
+
+  /**
+   * Which desktop a bot uses: its own (keyed by the bot), or a shared one that bots with the
+   * same shared-desktop name use on the same host. Everything about a desktop (container, home
+   * folder, turns) is keyed by this.
+   */
+  desktopKey(botId: string): string {
+    const host = this.desktopHost(botId);
+    const group = this.deps.desktopGroupFor?.(botId);
+    if (!isValidDesktopGroup(group)) return botId;
+    const key = `shared:${group}${host ? `@${host}` : ""}`;
+    this.keyHosts.set(key, host);
+    return key;
+  }
+
+  /**
+   * Whether the bot's files are a folder on this computer (bind-mounted) rather than a named
+   * volume. The container runs as uid 1000: Docker Desktop maps file ownership, but on a Linux
+   * host with another uid a bind-mounted folder would be unwritable, so a volume holds them
+   * there, as on a server.
+   */
+  private bindsHome(host: string | undefined): boolean {
+    if (host) return false;
+    const hostUid = this.deps.hostUid ?? process.getuid?.() ?? CONTAINER_UID;
+    return process.platform !== "linux" || hostUid === CONTAINER_UID;
+  }
+
+  /** Runs a container command for the bot's desktop, on its server when it has one. */
+  private async container(
+    host: string | undefined,
+    args: string[],
+    options?: { timeoutMs?: number; input?: string },
+  ): Promise<RunResult> {
+    const runtime = this.runtime!;
+    if (!host) return this.run(runtime.binary, args, options);
+    if (runtime.name !== "docker") {
+      throw new Error("A bot desktop on your own server needs Docker on this computer.");
+    }
+    try {
+      return await this.run(runtime.binary, ["--host", `ssh://${host}`, ...args], options);
+    } catch (error) {
+      throw explainRemoteError(host, error);
+    }
   }
 
   private now(): number {
@@ -215,6 +409,7 @@ export class BotDesktopManager {
   }
 
   async getStatus(botId: string): Promise<BotDesktopStatus> {
+    botId = this.desktopKey(botId);
     const runtime = await this.detectRuntime();
     if (!runtime) {
       return {
@@ -246,6 +441,7 @@ export class BotDesktopManager {
     work: (session: BotDesktopSession) => Promise<T>,
     options: { onStarting?: () => void } = {},
   ): Promise<T> {
+    botId = this.desktopKey(botId);
     await this.takeTurn(botId);
     try {
       await this.ensureRunning(botId, options.onStarting);
@@ -264,10 +460,19 @@ export class BotDesktopManager {
    * view-only unless the person has taken over.
    */
   async viewerUrl(botId: string, options: { viewOnly?: boolean } = {}): Promise<string> {
+    botId = this.desktopKey(botId);
     await this.ensureRunning(botId);
     const record = this.records.get(botId)!;
-    const port = record.viewerPort ?? (await this.readViewerPort(botId));
-    record.viewerPort = port;
+    if (
+      !record.viewerPort ||
+      (record.host && (!record.tunnel || record.tunnel.exitCode !== null))
+    ) {
+      const remotePort = await this.readViewerPort(botId);
+      record.viewerPort = record.host
+        ? await this.openViewerTunnel(record, remotePort)
+        : remotePort;
+    }
+    const port = record.viewerPort;
     record.lastUsedAt = this.now();
     const params = new URLSearchParams({
       autoconnect: "1",
@@ -282,21 +487,33 @@ export class BotDesktopManager {
   }
 
   async stop(botId: string): Promise<void> {
+    botId = this.desktopKey(botId);
     const runtime = await this.detectRuntime();
     if (!runtime) return;
-    await this.run(runtime.binary, ["stop", "--time", "5", this.containerName(botId)]).catch(
-      () => undefined,
-    );
+    const record = this.records.get(botId);
+    record?.tunnel?.kill();
+    await this.container(record?.host ?? this.desktopHost(botId), [
+      "stop",
+      "--time",
+      "5",
+      this.containerName(botId),
+    ]).catch(() => undefined);
     this.records.delete(botId);
+    this.recording.delete(botId);
   }
 
   /** Rebuilds the desktop from the image; the bot's home folder (files, sign-ins) is kept. */
   async reset(botId: string): Promise<void> {
+    botId = this.desktopKey(botId);
     const runtime = await this.detectRuntime();
     if (!runtime) return;
-    await this.run(runtime.binary, ["rm", "--force", this.containerName(botId)]).catch(
-      () => undefined,
-    );
+    const record = this.records.get(botId);
+    record?.tunnel?.kill();
+    await this.container(record?.host ?? this.desktopHost(botId), [
+      "rm",
+      "--force",
+      this.containerName(botId),
+    ]).catch(() => undefined);
     this.records.delete(botId);
   }
 
@@ -305,17 +522,29 @@ export class BotDesktopManager {
    * finishes after CoWork exits.
    */
   stopAllOnQuit(): void {
-    const names = Array.from(this.records.keys()).map((botId) => this.containerName(botId));
-    if (!this.runtime || names.length === 0) return;
-    try {
-      const child = spawn(this.runtime.binary, ["stop", "--time", "5", ...names], {
-        detached: true,
-        stdio: "ignore",
-        env: { ...process.env, PATH: withCommonBinPaths(process.env.PATH) },
-      });
-      child.unref();
-    } catch {
-      // Left running; the next start stops it.
+    if (!this.runtime) return;
+    const byHost = new Map<string, string[]>();
+    for (const [botId, record] of this.records) {
+      record.tunnel?.kill();
+      const names = byHost.get(record.host ?? "") ?? [];
+      names.push(this.containerName(botId));
+      byHost.set(record.host ?? "", names);
+    }
+    for (const [host, names] of byHost) {
+      try {
+        const child = spawn(
+          this.runtime.binary,
+          [...(host ? ["--host", `ssh://${host}`] : []), "stop", "--time", "5", ...names],
+          {
+            detached: true,
+            stdio: "ignore",
+            env: { ...process.env, PATH: withCommonBinPaths(process.env.PATH) },
+          },
+        );
+        child.unref();
+      } catch {
+        // Left running; it stops after its idle time on the next start.
+      }
     }
     this.records.clear();
   }
@@ -324,23 +553,192 @@ export class BotDesktopManager {
   async stopLeftovers(): Promise<void> {
     const runtime = await this.detectRuntime();
     if (!runtime) return;
-    const listed = await this.run(runtime.binary, [
-      "ps",
-      "--filter",
-      "label=cowork.bot-desktop",
-      "--format",
-      "{{.Names}}",
-    ]).catch(() => null);
-    const names = (listed?.stdout.toString("utf8") ?? "")
-      .split(/\s+/)
-      .filter((name) => name.startsWith(CONTAINER_PREFIX));
-    if (names.length > 0) {
-      await this.run(runtime.binary, ["stop", "--time", "5", ...names]).catch(() => undefined);
+    // This computer, then each server a bot's desktop is set to run on (a crash leaves no
+    // record of what was running there).
+    const hosts = new Set<string | undefined>([undefined]);
+    if (runtime.name === "docker") {
+      for (const host of this.deps.desktopHosts?.() ?? []) {
+        if (isValidDesktopHost(host)) hosts.add(host);
+      }
     }
+    for (const host of hosts) {
+      const listed = await this.container(host, [
+        "ps",
+        "--filter",
+        "label=cowork.bot-desktop",
+        "--format",
+        "{{.Names}}",
+      ]).catch(() => null);
+      const names = (listed?.stdout.toString("utf8") ?? "")
+        .split(/\s+/)
+        .filter((name) => name.startsWith(CONTAINER_PREFIX));
+      if (names.length > 0) {
+        await this.container(host, ["stop", "--time", "5", ...names]).catch(() => undefined);
+      }
+    }
+  }
+
+  /**
+   * The newest files in the bot's work folder. On this computer they are read from its home
+   * folder (also while the desktop is stopped); on a server, only while the desktop runs.
+   */
+  async listFiles(botId: string, limit = 20): Promise<BotDesktopFile[]> {
+    botId = this.desktopKey(botId);
+    const host = this.records.get(botId)?.host ?? this.desktopHost(botId);
+    const files: BotDesktopFile[] = [];
+    if (this.bindsHome(host)) {
+      const home = this.homeFolder(botId);
+      if (!existsSync(home)) return [];
+      const walk = (dir: string, prefix: string, depth: number) => {
+        if (depth > 6 || files.length > 2000) return;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (!prefix && HIDDEN_WORK_ENTRIES.has(entry.name)) continue;
+          const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full, rel, depth + 1);
+          else if (entry.isFile()) {
+            const stat = statSync(full);
+            files.push({ path: rel, size: stat.size, modifiedAt: stat.mtimeMs });
+          }
+        }
+      };
+      walk(home, "", 0);
+    } else {
+      if (!this.runtime || !this.records.has(botId)) return [];
+      const result = await this.session(botId)
+        .exec([
+          "find",
+          WORK_DIR,
+          "-path",
+          `${WORK_DIR}/.browser`,
+          "-prune",
+          "-o",
+          "-type",
+          "f",
+          "-printf",
+          "%T@\\t%s\\t%P\\n",
+        ])
+        .catch(() => null);
+      for (const line of (result?.stdout.toString("utf8") ?? "").split("\n")) {
+        const [time, size, rel] = line.split("\t");
+        if (rel)
+          files.push({ path: rel, size: Number(size) || 0, modifiedAt: Number(time) * 1000 });
+      }
+    }
+    return files.sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, Math.max(1, limit));
+  }
+
+  /** Where a work-folder file of a bot on this computer is, for Show in Finder. */
+  localFilePath(botId: string, rawPath: unknown): string {
+    botId = this.desktopKey(botId);
+    if (this.desktopHost(botId)) throw new Error("This bot's desktop runs on a server.");
+    if (!this.bindsHome(undefined)) throw new Error("This bot's files are kept in a volume.");
+    const rel = normalizeDesktopFilePath(rawPath);
+    let home: string;
+    let full: string;
+    try {
+      home = realpathSync(this.homeFolder(botId));
+      full = realpathSync(path.join(home, rel));
+    } catch {
+      throw new Error(`~/work/${rel} was not found on the bot's desktop.`);
+    }
+    // A link inside the work folder must not lead outside it.
+    if (!full.startsWith(`${home}${path.sep}`))
+      throw new Error("That file is outside the bot's work folder.");
+    return full;
+  }
+
+  /** A file from the bot's work folder, to hand to a conversation. */
+  async readFile(botId: string, rawPath: unknown): Promise<{ path: string; data: Buffer }> {
+    botId = this.desktopKey(botId);
+    const rel = normalizeDesktopFilePath(rawPath);
+    if (this.bindsHome(this.records.get(botId)?.host ?? this.desktopHost(botId))) {
+      const full = this.localFilePath(botId, rel);
+      const stat = statSync(full);
+      if (!stat.isFile()) throw new Error("That is not a file.");
+      if (stat.size > BOT_DESKTOP_FILE_MAX_BYTES)
+        throw new Error("That file is larger than 25 MB.");
+      return { path: rel, data: readFileSync(full) };
+    }
+    await this.ensureRunning(botId);
+    const session = this.session(botId);
+    // stat does not follow links: a link (to /dev/zero, or a huge file) is refused, not read.
+    const [type, rawSize] = (
+      await session.exec(["stat", "--format", "%F\t%s", "--", `${WORK_DIR}/${rel}`])
+    ).stdout
+      .toString("utf8")
+      .trim()
+      .split("\t");
+    const size = Number(rawSize);
+    if (!type || !Number.isFinite(size))
+      throw new Error("That file was not found on the bot's desktop.");
+    if (type !== "regular file" && type !== "regular empty file")
+      throw new Error("That is not a file.");
+    if (size > BOT_DESKTOP_FILE_MAX_BYTES) throw new Error("That file is larger than 25 MB.");
+    // Read at most one byte past the limit, so a file swapped after the check stays bounded.
+    const result = await session.exec(
+      ["head", "--bytes", String(BOT_DESKTOP_FILE_MAX_BYTES + 1), "--", `${WORK_DIR}/${rel}`],
+      { timeoutMs: 120_000 },
+    );
+    if (result.stdout.length > BOT_DESKTOP_FILE_MAX_BYTES)
+      throw new Error("That file is larger than 25 MB.");
+    return { path: rel, data: result.stdout };
+  }
+
+  /**
+   * Teach a task: starts recording what the person does on the desktop (keys, clicks, pointer
+   * moves). The recording stays on the desktop only until finishRecording takes it.
+   */
+  async startRecording(botId: string): Promise<void> {
+    botId = this.desktopKey(botId);
+    await this.ensureRunning(botId);
+    const session = this.session(botId);
+    const status = async () =>
+      (await session.exec(["cowork-teach", "status"], { timeoutMs: 15_000 })).stdout
+        .toString("utf8")
+        .trim();
+    if ((await status()) === "recording") throw new Error("A recording is already running.");
+    await session.exec(["cowork-teach", "record"], { detach: true, timeoutMs: 15_000 });
+    // Detached, the recorder's own errors don't come back: check that it is running.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if ((await status()) === "recording") {
+        const record = this.records.get(botId);
+        if (record) record.lastUsedAt = this.now();
+        this.recording.add(botId);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error("Recording didn't start on the bot's desktop.");
+  }
+
+  /**
+   * Stops recording. With keep, returns the recording (JSON lines) and deletes it from the
+   * desktop; without, just deletes it.
+   */
+  async finishRecording(botId: string, keep: boolean): Promise<string> {
+    botId = this.desktopKey(botId);
+    if (!this.runtime || !this.records.has(botId)) {
+      throw new Error("The bot's desktop isn't running, so there is no recording.");
+    }
+    try {
+      const result = await this.session(botId).exec(["cowork-teach", keep ? "stop" : "cancel"], {
+        timeoutMs: 30_000,
+      });
+      return keep ? result.stdout.toString("utf8") : "";
+    } finally {
+      this.recording.delete(botId);
+    }
+  }
+
+  /** Whether the person is recording a task on this bot's desktop (the bot must not act). */
+  isRecording(botId: string): boolean {
+    return this.recording.has(this.desktopKey(botId));
   }
 
   /** A still of the bot's desktop for its panel, only if it is already running. */
   async captureIfRunning(botId: string): Promise<Buffer | null> {
+    botId = this.desktopKey(botId);
     // A task holding the turn publishes its own frames; capturing alongside it would race.
     if (!this.runtime || !this.records.has(botId) || this.busy.has(botId)) return null;
     try {
@@ -359,14 +757,14 @@ export class BotDesktopManager {
   }
 
   private session(botId: string): BotDesktopSession {
-    const runtime = this.runtime!;
     const name = this.containerName(botId);
+    const host = this.records.get(botId)?.host;
     const exec = (
       args: string[],
       options: { timeoutMs?: number; detach?: boolean; input?: string } = {},
     ) =>
-      this.run(
-        runtime.binary,
+      this.container(
+        host,
         [
           "exec",
           ...(options.detach ? ["--detach"] : []),
@@ -442,7 +840,7 @@ export class BotDesktopManager {
     const runtime = await this.detectRuntime();
     if (!runtime) return false;
     try {
-      const result = await this.run(runtime.binary, [
+      const result = await this.container(this.records.get(botId)?.host, [
         "inspect",
         "--format",
         "{{.State.Running}}",
@@ -456,7 +854,10 @@ export class BotDesktopManager {
 
   private async ensureRunning(botId: string, onStarting?: () => void): Promise<void> {
     const record = this.records.get(botId);
-    if (record) {
+    // Moved to another place (this computer or a server): stop it where it was.
+    if (record && record.host !== this.desktopHost(botId)) {
+      await this.stop(botId);
+    } else if (record) {
       if (this.now() - (record.checkedAt ?? 0) < RUNNING_CHECK_MS) return;
       if (await this.isRunning(botId)) {
         record.checkedAt = this.now();
@@ -479,27 +880,23 @@ export class BotDesktopManager {
         "Install and open Docker Desktop or Podman to give this bot its own desktop.",
       );
     }
-    const image = await this.ensureImage();
+    const host = this.desktopHost(botId);
+    const image = await this.ensureImage(host);
     const name = this.containerName(botId);
     const password = randomBytes(6).toString("base64url").slice(0, 8);
     const viewPassword = randomBytes(6).toString("base64url").slice(0, 8);
     // A stopped container keeps its old passwords, so it is recreated; its files live in the
-    // bot's home folder, which is kept.
-    await this.run(runtime.binary, ["rm", "--force", name]).catch(() => undefined);
-    // The container runs as uid 1000. Docker Desktop maps file ownership, but on a Linux host
-    // with another uid a bind-mounted folder would be unwritable, so a named volume holds the
-    // bot's files there instead.
-    const hostUid = this.deps.hostUid ?? process.getuid?.() ?? CONTAINER_UID;
-    const bindHome = process.platform !== "linux" || hostUid === CONTAINER_UID;
+    // bot's home folder (a volume on a server), which is kept.
+    await this.container(host, ["rm", "--force", name]).catch(() => undefined);
     let home: string;
-    if (bindHome) {
+    if (this.bindsHome(host)) {
       home = this.homeFolder(botId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
     } else {
       home = `${name}-home`;
     }
-    await this.run(
-      runtime.binary,
+    await this.container(
+      host,
       [
         "run",
         "--detach",
@@ -529,7 +926,7 @@ export class BotDesktopManager {
       ],
       { timeoutMs: 2 * 60 * 1000 },
     );
-    this.records.set(botId, { password, viewPassword, lastUsedAt: this.now() });
+    this.records.set(botId, { password, viewPassword, host, lastUsedAt: this.now() });
     // The viewer passwords go in over stdin after start, so they are in no environment and
     // not in the container's config (docker inspect); start-desktop waits for the file.
     const writePasswords = [
@@ -563,9 +960,23 @@ export class BotDesktopManager {
     );
   }
 
+  /** Forwards a local port to the viewer on the server's loopback, over SSH. */
+  private async openViewerTunnel(record: DesktopRecord, remotePort: number): Promise<number> {
+    record.tunnel?.kill();
+    const localPort = await freeLocalPort();
+    const tunnel = (this.deps.openTunnel ?? defaultOpenTunnel)(record.host!, localPort, remotePort);
+    record.tunnel = tunnel;
+    if (!(await waitForLocalPort(localPort, 15_000))) {
+      tunnel.kill();
+      throw new Error(
+        `CoWork couldn't open a secure connection to the desktop on ${record.host}. Check that "ssh ${record.host}" works without a prompt.`,
+      );
+    }
+    return localPort;
+  }
+
   private async readViewerPort(botId: string): Promise<number> {
-    const runtime = this.runtime!;
-    const result = await this.run(runtime.binary, [
+    const result = await this.container(this.records.get(botId)?.host, [
       "port",
       this.containerName(botId),
       `${VIEWER_PORT}/tcp`,
@@ -575,35 +986,42 @@ export class BotDesktopManager {
     return Number(match[1]);
   }
 
-  /** The image tag follows the Dockerfile's contents, so an app update rebuilds it. */
-  private ensureImage(): Promise<string> {
-    if (!this.imagePromise) {
-      this.imagePromise = this.buildImage().catch((error) => {
-        this.imagePromise = null;
+  /**
+   * The image tag follows the Dockerfile's contents, so an app update rebuilds it. Each place
+   * (this computer or a server) builds it once; a server gets the build files over SSH.
+   */
+  private ensureImage(host?: string): Promise<string> {
+    const key = host ?? "";
+    let pending = this.imagePromises.get(key);
+    if (!pending) {
+      pending = this.buildImage(host).catch((error) => {
+        this.imagePromises.delete(key);
         throw error;
       });
+      this.imagePromises.set(key, pending);
     }
-    return this.imagePromise;
+    return pending;
   }
 
-  private async buildImage(): Promise<string> {
-    const runtime = this.runtime!;
+  private async buildImage(host?: string): Promise<string> {
     const dir = this.deps.resourcesDir();
     if (!dir || !existsSync(path.join(dir, "Dockerfile"))) {
       throw new Error("The bot desktop files are missing from this CoWork installation.");
     }
     const hash = createHash("sha256");
-    for (const file of ["Dockerfile", "start-desktop.sh"]) {
+    for (const file of BOT_DESKTOP_IMAGE_FILES) {
+      const filePath = path.join(dir, file);
+      if (!existsSync(filePath)) continue;
       hash.update(file);
-      hash.update(readFileSync(path.join(dir, file)));
+      hash.update(readFileSync(filePath));
     }
     const tag = `${IMAGE_NAME}:${hash.digest("hex").slice(0, 12)}`;
-    const exists = await this.run(runtime.binary, ["image", "inspect", tag]).then(
+    const exists = await this.container(host, ["image", "inspect", tag]).then(
       () => true,
       () => false,
     );
     if (!exists) {
-      await this.run(runtime.binary, ["build", "--tag", tag, dir], { timeoutMs: BUILD_TIMEOUT_MS });
+      await this.container(host, ["build", "--tag", tag, dir], { timeoutMs: BUILD_TIMEOUT_MS });
     }
     return tag;
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computerToolKind,
   isComputerToolBlocked,
+  isValidDesktopHost,
   narrowestBotWorksOn,
   normalizeBotWorksOn,
 } from "../bot-computer";
@@ -56,5 +57,15 @@ describe("the bot's own desktop", () => {
     expect(isComputerToolBlocked("own_desktop", "host")).toBe(true);
     expect(isComputerToolBlocked("own_desktop", "browser")).toBe(true);
     expect(isComputerToolBlocked("own_desktop", "handoff")).toBe(false);
+  });
+});
+
+describe("desktop servers", () => {
+  it("accepts SSH host aliases and user@host only", () => {
+    expect(isValidDesktopHost("my-server")).toBe(true);
+    expect(isValidDesktopHost("me@example.com")).toBe(true);
+    expect(isValidDesktopHost("-oProxyCommand=evil")).toBe(false);
+    expect(isValidDesktopHost("host name")).toBe(false);
+    expect(isValidDesktopHost(undefined)).toBe(false);
   });
 });

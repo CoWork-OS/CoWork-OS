@@ -306,6 +306,19 @@ describe("access profile resolver", () => {
     expect(applied.permissions.sandboxType).toBe("none");
   });
 
+  it("preserves explicit remote SPACE selection under full access", () => {
+    const remote = {
+      ...workspace,
+      permissions: { ...workspace.permissions, sandboxType: "space" as const },
+    };
+    const profile = resolveEffectiveAccessProfile({
+      task: { agentConfig: { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.fullAccess } },
+      workspace: remote,
+      settings,
+    });
+    expect(applyAccessProfileToWorkspace(remote, profile).permissions.sandboxType).toBe("space");
+  });
+
   it("overlays a read-only verifier boundary onto broad custom profiles", () => {
     const broad: AccessProfileDefinition = {
       id: "broad_custom",

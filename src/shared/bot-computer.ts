@@ -44,6 +44,20 @@ export const BOT_WORKS_ON_OPTIONS: ReadonlyArray<{
 
 const WORKS_ON_SET = new Set<string>(BOT_WORKS_ON_VALUES);
 
+/** An SSH host alias or user@host from your SSH config: no spaces, no leading dash, no options. */
+export const DESKTOP_HOST_PATTERN = /^(?!-)[A-Za-z0-9._@-]{1,100}$/;
+
+export function isValidDesktopHost(host: unknown): host is string {
+  return typeof host === "string" && DESKTOP_HOST_PATTERN.test(host);
+}
+
+/** A shared desktop's name: lowercase letters, digits and dashes, like research-team. */
+export const DESKTOP_GROUP_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+export function isValidDesktopGroup(group: unknown): group is string {
+  return typeof group === "string" && DESKTOP_GROUP_PATTERN.test(group);
+}
+
 export function isBotWorksOn(value: unknown): value is BotWorksOn {
   return typeof value === "string" && WORKS_ON_SET.has(value);
 }
@@ -138,3 +152,14 @@ export function isComputerToolBlocked(
 export function isComputerTool(toolName: string): boolean {
   return computerToolKind(toolName) !== null;
 }
+
+/** A task the person taught a bot by doing it once on its own desktop (Teach a task). */
+export interface TaughtTask {
+  id: string;
+  name: string;
+  createdAt: number;
+  durationMs: number;
+  eventCount: number;
+}
+
+export const TAUGHT_TASK_NAME_MAX_LENGTH = 60;

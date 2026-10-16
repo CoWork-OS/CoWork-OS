@@ -10,6 +10,22 @@
  */
 
 import { parseVerificationProtocolOutcome } from "./executor-completion-utils";
+import {
+  GENERATED_HANDOFF_STEP_DESCRIPTION,
+  MATCHING_OUTPUTS_VERIFICATION_STEP_DESCRIPTION,
+  SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
+  VERIFICATION_RECHECK_STEP_DESCRIPTION,
+  VERIFICATION_REPAIR_STEP_DESCRIPTION,
+} from "../../shared/generated-plan-steps";
+
+// The step texts live in shared code so the UI can label these steps.
+export {
+  GENERATED_HANDOFF_STEP_DESCRIPTION,
+  MATCHING_OUTPUTS_VERIFICATION_STEP_DESCRIPTION,
+  SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION,
+  VERIFICATION_RECHECK_STEP_DESCRIPTION,
+  VERIFICATION_REPAIR_STEP_DESCRIPTION,
+};
 
 /** Repair passes allowed per task. */
 export const MAX_VERIFICATION_REPAIR_PASSES = 1;
@@ -19,22 +35,9 @@ export const MIN_TURNS_FOR_VERIFICATION_REPAIR = 6;
 
 const MAX_FINDINGS_CHARS = 1500;
 
-// Starts with "Repair", which marks the step as remediation rather than a
-// verification checkpoint, and names no file so the step contract does not
-// demand a particular write tool: the deliverable may be a file or the answer.
-export const VERIFICATION_REPAIR_STEP_DESCRIPTION =
-  "Repair the delivered work so it resolves the blocking issues found by the final check.";
-
-/** The user-facing summary step appended after a plan's final verification. */
-export const GENERATED_HANDOFF_STEP_DESCRIPTION =
-  "Summarize completed work for the user. Link every requested deliverable that actually exists. Use the completed checks and actual artifact metadata to report the final outcome, page or sheet counts, and remaining limitations. Replace stale intermediate statements about pending checks. Do not modify files or repeat completed work.";
-
 export function isGeneratedHandoffStep(step: { description?: unknown }): boolean {
   return String(step?.description || "").startsWith("Summarize completed work for the user.");
 }
-
-export const VERIFICATION_RECHECK_STEP_DESCRIPTION =
-  "Verify the repaired deliverable against the task requirements and the issues the final check reported.";
 
 export function isVerificationRepairStepDescription(description: unknown): boolean {
   return String(description || "").trim() === VERIFICATION_REPAIR_STEP_DESCRIPTION;
@@ -260,10 +263,6 @@ export function requestsLinksToSeveralNamedFiles(prompt: string): boolean {
 export function requestsFinalOutputsCheck(prompt: string): boolean {
   return requestsMatchingOutputs(prompt) || requestsLinksToSeveralNamedFiles(prompt);
 }
-
-/** Final check added to matching-output and multi-file plans that have none. */
-export const MATCHING_OUTPUTS_VERIFICATION_STEP_DESCRIPTION =
-  "Verify that every requested file exists, that files meant to match carry the same content (facts, figures, names, dates and sections), and that the final answer links each requested file.";
 
 const SOURCE_LINKS_REQUEST_PATTERN = new RegExp(
   [
@@ -568,10 +567,6 @@ export function isLocalizedCheckStepDescription(description: unknown): boolean {
   if (!desc || !LOCALIZED_CHECK_START_PATTERN.test(desc)) return false;
   return !LOCALIZED_WORK_AFTER_CONNECTOR_PATTERN.test(desc);
 }
-
-/** Final check added to sourced research plans that have none. */
-export const SOURCED_ANSWER_VERIFICATION_STEP_DESCRIPTION =
-  "Verify the final answer covers every requested item and that each sourced fact in it carries a direct link to an official source fetched in this task.";
 
 const GENERATED_IMAGE_FILE_PATTERN = /\.(?:png|jpe?g|webp|gif)$/i;
 

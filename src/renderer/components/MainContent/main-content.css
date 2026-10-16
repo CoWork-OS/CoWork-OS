@@ -3369,8 +3369,7 @@
   mask-image: linear-gradient(180deg, #000 0%, #000 88%, transparent 100%);
 }
 
-.agent-reasoning-stream-text,
-.agent-reasoning-update {
+.agent-reasoning-stream-text {
   white-space: normal;
   word-break: break-word;
   font-size: 13px;
@@ -3378,42 +3377,30 @@
   color: var(--color-text);
 }
 
-.agent-reasoning-stream-text.markdown-content > :first-child,
-.agent-reasoning-update.markdown-content > :first-child {
+.agent-reasoning-stream-text.markdown-content > :first-child {
   margin-top: 0;
 }
 
-.agent-reasoning-stream-text.markdown-content > :last-child,
-.agent-reasoning-update.markdown-content > :last-child {
+.agent-reasoning-stream-text.markdown-content > :last-child {
   margin-bottom: 0;
 }
 
 .agent-reasoning-stream-text.markdown-content
-  :where(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre),
-.agent-reasoning-update.markdown-content
   :where(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote, pre) {
   margin-top: 0;
   margin-bottom: 6px;
 }
 
-.agent-reasoning-stream-text.markdown-content :where(ul, ol),
-.agent-reasoning-update.markdown-content :where(ul, ol) {
+.agent-reasoning-stream-text.markdown-content :where(ul, ol) {
   padding-left: 20px;
 }
 
-.agent-reasoning-stream-text.markdown-content li,
-.agent-reasoning-update.markdown-content li {
+.agent-reasoning-stream-text.markdown-content li {
   margin: 0;
 }
 
 .agent-reasoning-stream-text {
   padding-bottom: 2px;
-}
-
-.agent-reasoning-update {
-  padding-left: 10px;
-  border-left: 2px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
-  color: var(--color-text-secondary);
 }
 
 .streaming-separator {
@@ -13737,6 +13724,279 @@ button.collab-timeline-thought-agent:hover {
 
   .task-status-plan-list [aria-current="step"] .task-status-step-index {
     border-color: Highlight;
+    color: Highlight;
+  }
+}
+
+/* Live plan: the running task's checklist, listed at the top of the status shell
+   so the plan, the strip, and the composer read as one stacked card. It unfolds
+   when a plan appears and folds away a beat after the task ends. Glyphs sit on
+   the strip's status-icon column; a hairline separates the list from the strip. */
+.live-plan {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 280ms ease;
+  animation: live-plan-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hold the finished list long enough to see the last check land, then fold. */
+.live-plan.is-leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 420ms cubic-bezier(0.16, 1, 0.3, 1) 420ms,
+    opacity 280ms ease 420ms;
+}
+
+@keyframes live-plan-in {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.live-plan-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.live-plan-inner::after {
+  content: "";
+  display: block;
+  height: 1px;
+  margin: 0 12px 0 11px;
+  background: var(--color-border-subtle);
+}
+
+.live-plan-list {
+  display: grid;
+  margin: 0;
+  padding: 9px 12px 7px 11px;
+  list-style: none;
+}
+
+.live-plan-list.is-expanded {
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.live-plan-item-body,
+.live-plan-fold button {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: 400 13px/20px var(--font-ui);
+  text-align: left;
+  transition: color 240ms ease;
+}
+
+button.live-plan-item-body,
+.live-plan-fold button {
+  cursor: pointer;
+}
+
+button.live-plan-item-body:hover,
+.live-plan-fold button:hover {
+  color: var(--color-text);
+}
+
+.live-plan-item-body:focus-visible,
+.live-plan-fold button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+
+/* Planner steps can run long; two lines keep the list scannable (full text on hover). */
+.live-plan-item .task-status-plan-step-description {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.live-plan-glyph-slot {
+  width: 15px;
+  height: 20px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-text-muted);
+  transition: color 240ms ease;
+}
+
+.live-plan-glyph {
+  width: 14px;
+  height: 14px;
+  overflow: visible;
+}
+
+.live-plan-glyph-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+}
+
+.live-plan-glyph-ring.is-dashed {
+  stroke-dasharray: 2 2.3;
+}
+
+/* Twelve short dashes that turn slowly: present, not busy. */
+.live-plan-glyph-ring.is-turning {
+  stroke-dasharray: 1 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: live-plan-turn 4s linear infinite;
+}
+
+@keyframes live-plan-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.live-plan-glyph-fill {
+  fill: currentColor;
+}
+
+/* Drawn into the done disc's mask, so its stroke is the mask's black. */
+.live-plan-glyph-check {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.live-plan-glyph-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.live-plan-item.is-done .live-plan-item-body,
+.live-plan-item.is-skipped .live-plan-item-body {
+  color: var(--color-text-muted);
+}
+
+.live-plan-item.is-done .live-plan-glyph-slot {
+  color: var(--color-text-secondary);
+}
+
+.live-plan-item.is-skipped .task-status-plan-step-description {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.live-plan-item.is-active .live-plan-item-body,
+.live-plan-item.is-active .live-plan-glyph-slot {
+  color: var(--color-text);
+}
+
+.live-plan-item.is-active .task-status-plan-step-description {
+  font-weight: 500;
+}
+
+.live-plan-item.is-blocked .live-plan-glyph-slot {
+  color: var(--color-warning);
+}
+
+.live-plan-item.is-failed .live-plan-glyph-slot {
+  color: var(--color-error);
+}
+
+/* A status change re-mounts the glyph; only real transitions carry `just-changed`. */
+.live-plan-item.just-changed .live-plan-glyph {
+  animation: live-plan-glyph-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.live-plan-item.just-changed.is-done .live-plan-glyph {
+  animation: live-plan-check-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.live-plan-item.just-changed.is-done .live-plan-glyph-check {
+  stroke-dasharray: 10;
+  stroke-dashoffset: 10;
+  animation: live-plan-check-draw 300ms ease-out 120ms forwards;
+}
+
+@keyframes live-plan-glyph-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@keyframes live-plan-check-pop {
+  from {
+    transform: scale(0.55);
+  }
+}
+
+@keyframes live-plan-check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.live-plan-fold button {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* Three small dots on the glyph column stand in for the folded rows. */
+.live-plan-fold-dots {
+  width: 15px;
+  height: 20px;
+  flex: 0 0 auto;
+  background: radial-gradient(circle, currentColor 0.9px, transparent 1.3px) center / 5px 20px
+    repeat-x;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-plan,
+  .live-plan-glyph-ring.is-turning,
+  .live-plan-item.just-changed .live-plan-glyph,
+  .live-plan-item.just-changed.is-done .live-plan-glyph-check {
+    animation: none;
+  }
+
+  .live-plan-item.just-changed.is-done .live-plan-glyph-check {
+    stroke-dashoffset: 0;
+  }
+
+  .live-plan,
+  .live-plan-item-body,
+  .live-plan-glyph-slot {
+    transition: none;
+  }
+
+  .live-plan.is-leaving {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .live-plan-inner::after {
+    background: CanvasText;
+  }
+
+  .live-plan-glyph-fill {
+    fill: CanvasText;
+  }
+
+  .live-plan-item[aria-current="step"] .live-plan-glyph-slot {
     color: Highlight;
   }
 }

@@ -397,6 +397,7 @@ import {
   CronListOptionsSchema,
   CronRunModeSchema,
   WorkspaceCreateSchema,
+  WorkspacePermissionsUpdateSchema,
   TaskCreateSchema,
   TaskRenameSchema,
   TaskWorkspaceUpdateSchema,
@@ -4656,7 +4657,10 @@ export async function setupIpcHandlers(
       if (!workspace) {
         throw new Error(`Workspace not found: ${id}`);
       }
-      return agentDaemon.updateWorkspacePermissions(id, permissions);
+      return agentDaemon.updateWorkspacePermissions(
+        id,
+        validateInput(WorkspacePermissionsUpdateSchema, permissions, "workspace permissions"),
+      );
     },
   );
 

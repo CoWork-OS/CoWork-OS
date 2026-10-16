@@ -58,6 +58,8 @@ import { ShellSessionManager } from "../shell-session-manager";
 import { ShellTools, _testUtils } from "../shell-tools";
 import type { AgentDaemon } from "../../daemon";
 import type { Workspace } from "../../../../shared/types";
+import { loadPolicies } from "../../../admin/policies";
+import { createSandbox } from "../../sandbox/sandbox-factory";
 
 const workspacePath = path.join(testUserDataDir, "workspace");
 
@@ -164,6 +166,41 @@ describe.skipIf(process.platform === "win32")("ShellTools execution with real sh
     expect(runs.trim().split("\n")).toEqual(["run"]);
     expect(spawnCalls.some(({ args }) => args.includes("sh record-run.sh"))).toBe(false);
   }, 15_000);
+
+  it("keeps an explicit SPACE selection remote even under full access and enabled local networking", async () => {
+    const previous = loadPolicies();
+    vi.mocked(loadPolicies).mockReturnValue({
+      ...previous,
+      runtime: { ...previous.runtime, allowedSandboxTypes: ["space"] },
+    });
+    const execute = vi
+      .fn()
+      .mockResolvedValue({ stdout: "remote", stderr: "", exitCode: 0, timedOut: false });
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(createSandbox).mockResolvedValueOnce({ type: "space", execute, cleanup } as never);
+    const workspace = createWorkspace();
+    workspace.permissions.sandboxType = "space";
+    try {
+      const tools = new ShellTools(
+        workspace,
+        createDaemon() as unknown as AgentDaemon,
+        `task-${randomUUID()}`,
+      );
+      expect(await tools.runCommand("printf remote", { cwd: workspacePath })).toMatchObject({
+        success: true,
+        stdout: "remote",
+      });
+      expect(execute).toHaveBeenCalledWith(
+        "printf remote",
+        [],
+        expect.objectContaining({ allowNetwork: false, signal: expect.any(AbortSignal) }),
+      );
+      expect(spawnCalls).toEqual([]);
+      expect(cleanup).toHaveBeenCalled();
+    } finally {
+      vi.mocked(loadPolicies).mockReturnValue(previous);
+    }
+  });
 
   it("signals a shell before its children so it cannot go on to the next command", () => {
     // A shell whose child dies before the shell is signalled runs the next

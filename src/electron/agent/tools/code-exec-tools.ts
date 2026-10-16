@@ -11,9 +11,11 @@
 
 import { ISandbox, SandboxOptions, createSandbox } from "../sandbox/sandbox-factory";
 import { createSecureTempFile } from "../sandbox/security-utils";
-import type { Workspace } from "../../../shared/types";
+import type { Workspace, SpaceSandboxConfig } from "../../../shared/types";
+import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import type { LLMTool } from "../llm/types";
 import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
+import { loadPolicies } from "../../admin/policies";
 
 export interface CodeExecInput {
   language: "python" | "javascript" | "shell";
@@ -31,6 +33,8 @@ export interface CodeExecResult {
   timed_out: boolean;
   output_truncated: boolean;
   language: string;
+  error?: string;
+  outcome_unknown?: boolean;
 }
 
 const MAX_OUTPUT_BYTES = 100 * 1024; // 100 KB
@@ -52,17 +56,27 @@ export function resolveCodeExecTimeoutSeconds(requested: unknown): number {
 
 export class CodeExecTools {
   private sandbox: ISandbox | null = null;
+  private initializing?: Promise<ISandbox>;
+  private readonly lifecycle = new AbortController();
+  private closing?: Promise<void>;
 
   constructor(private workspace: Workspace) {}
 
   private async getSandbox(): Promise<ISandbox> {
-    if (!this.sandbox) {
-      this.sandbox = await createSandbox(
-        this.workspace,
-        this.workspace.permissions?.sandboxType || "auto",
-      );
+    this.lifecycle.signal.throwIfAborted();
+    if (this.sandbox) return this.sandbox;
+    this.initializing ??= createSandbox(
+      this.workspace,
+      this.workspace.permissions?.sandboxType || "auto",
+    );
+    try {
+      const sandbox = await this.initializing;
+      this.sandbox = sandbox;
+      this.lifecycle.signal.throwIfAborted();
+      return sandbox;
+    } finally {
+      this.initializing = undefined;
     }
-    return this.sandbox;
   }
 
   private assertNetworkExecutionAllowed(input: CodeExecInput): void {
@@ -93,7 +107,9 @@ export class CodeExecTools {
     }
   }
 
-  async executeCode(input: CodeExecInput): Promise<CodeExecResult> {
+  async executeCode(input: CodeExecInput, signal?: AbortSignal): Promise<CodeExecResult> {
+    signal = AbortSignal.any([this.lifecycle.signal, ...(signal ? [signal] : [])]);
+    signal.throwIfAborted();
     if (input.allow_network !== undefined && typeof input.allow_network !== "boolean") {
       throw new Error("execute_code allow_network must be a boolean.");
     }
@@ -102,6 +118,10 @@ export class CodeExecTools {
     }
     this.assertNetworkExecutionAllowed(input);
     const sandbox = await this.getSandbox();
+    signal.throwIfAborted();
+    if (sandbox.type === "space" && !loadPolicies().runtime.allowedSandboxTypes.includes("space")) {
+      throw new Error("SPACE sandbox is blocked by administrator policy");
+    }
     const permissions = this.workspace.permissions || ({} as Workspace["permissions"]);
     const unrestrictedProfile =
       permissions.accessSandboxMode === "danger-full-access" &&
@@ -123,6 +143,7 @@ export class CodeExecTools {
 
     const timeoutSec = resolveCodeExecTimeoutSeconds(input.timeout_seconds);
     const options: SandboxOptions = {
+      signal,
       timeout: timeoutSec * 1000,
       maxOutputSize: MAX_OUTPUT_BYTES,
       allowNetwork: input.allow_network === true,
@@ -130,9 +151,11 @@ export class CodeExecTools {
     };
 
     const result =
-      input.language === "shell"
-        ? await sandbox.execute(input.code, [], options)
-        : await this.executeScriptInSandbox(sandbox, input.language, input.code, options);
+      sandbox.type === "space" && input.language !== "shell"
+        ? await sandbox.executeCode(input.code, input.language, options)
+        : input.language === "shell"
+          ? await sandbox.execute(input.code, [], options)
+          : await this.executeScriptInSandbox(sandbox, input.language, input.code, options);
 
     return {
       stdout: result.stdout,
@@ -143,6 +166,8 @@ export class CodeExecTools {
         result.stdout.includes("[Output truncated]") ||
         result.stderr.includes("[Output truncated]"),
       language: input.language,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.outcomeUnknown ? { outcome_unknown: true } : {}),
     };
   }
 
@@ -167,20 +192,26 @@ export class CodeExecTools {
     }
   }
 
-  cleanup(): void {
-    this.sandbox?.cleanup();
-    this.sandbox = null;
+  cleanup(): Promise<void> {
+    this.lifecycle.abort();
+    this.closing ??= (async () => {
+      const sandbox = this.sandbox || (await this.initializing?.catch(() => undefined));
+      await sandbox?.cleanup();
+      this.sandbox = null;
+    })();
+    return this.closing;
   }
 
-  static getToolDefinitions(): LLMTool[] {
+  static getToolDefinitions(spaceConfig?: SpaceSandboxConfig): LLMTool[] {
     return [
       {
         name: "execute_code",
-        description:
-          "Execute Python, JavaScript, or shell code in a sandboxed process with a configurable timeout. " +
-          "Output is capped at 100 KB per stream. Network access is disabled by default. " +
-          "Use for running scripts, data transformations, calculations, or verifying logic locally. " +
-          "Only available in code/operations domain.",
+        description: spaceConfig
+          ? describeSpaceExecution(spaceConfig)
+          : "Execute Python, JavaScript, or shell code in a sandboxed process with a configurable timeout. " +
+            "Output is capped at 100 KB per stream. Network access is disabled by default. " +
+            "Use for running scripts, data transformations, calculations, or verifying logic locally. " +
+            "Only available in code/operations domain.",
         input_schema: {
           type: "object" as const,
           properties: {

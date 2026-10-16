@@ -1,0 +1,28 @@
+.space-sandbox-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.space-sandbox-enable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.space-sandbox-settings > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.space-sandbox-settings .settings-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.space-sandbox-settings textarea {
+  resize: vertical;
+}

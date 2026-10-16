@@ -22,6 +22,11 @@ beforeEach(() => {
 });
 
 describe("validatePolicies", () => {
+  it("accepts explicit SPACE opt-in", () => {
+    expect(
+      validatePolicies({ runtime: { allowedSandboxTypes: ["macos", "docker", "space"] } }),
+    ).toBeNull();
+  });
   it("requires connectors.blocked to be an array of strings", () => {
     expect(validatePolicies({ connectors: { blocked: ["jira", "linear"] } })).toBeNull();
     expect(validatePolicies({ connectors: { blocked: "jira" } })).toBe(

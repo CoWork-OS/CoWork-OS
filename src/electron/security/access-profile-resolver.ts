@@ -485,11 +485,14 @@ export function applyAccessProfileToWorkspace(
     unrestrictedFileAccess: fullAccess && !profile.filesystemScoped,
     // A restricted profile must not inherit a legacy `none` setting. The
     // sandbox factory will fail closed if no restricted backend is available.
-    sandboxType: fullAccess
-      ? "none"
-      : current.sandboxType === "none"
-        ? "auto"
-        : current.sandboxType,
+    sandboxType:
+      current.sandboxType === "space"
+        ? "space"
+        : fullAccess
+          ? "none"
+          : current.sandboxType === "none"
+            ? "auto"
+            : current.sandboxType,
     // Named profiles own their filesystem boundary. Legacy allowedPaths are
     // retained only for unprofiled tasks; otherwise they would silently widen
     // a newly selected profile.

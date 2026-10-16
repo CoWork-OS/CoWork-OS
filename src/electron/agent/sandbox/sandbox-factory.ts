@@ -13,6 +13,7 @@
 import { Workspace } from "../../../shared/types";
 import { MacOSSandbox } from "./macos-sandbox";
 import { DockerSandbox } from "./docker-sandbox";
+import { SpaceSandbox } from "./space-sandbox";
 import { spawn, type ChildProcess } from "child_process";
 import { createSecureTempFile } from "./security-utils";
 import { BoundedOutputBuffer } from "./bounded-output";
@@ -20,7 +21,7 @@ import { BoundedOutputBuffer } from "./bounded-output";
 /**
  * Sandbox type enumeration
  */
-export type SandboxType = "macos" | "docker" | "none";
+export type SandboxType = "macos" | "docker" | "space" | "none";
 
 /**
  * Sandbox execution options
@@ -53,6 +54,8 @@ export interface SandboxOptions {
   envPassthrough?: string[];
   /** Called with the backing process once the sandbox starts it. */
   onProcess?: (process: ChildProcess) => void;
+  /** Remote execution cancellation, independent of local child-process handles. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -67,6 +70,8 @@ export interface SandboxResult {
   error?: string;
   /** True when stdout or stderr exceeded maxOutputSize and had its middle omitted. */
   truncated?: boolean;
+  /** Remote completion could not be established; never automatically replay. */
+  outcomeUnknown?: boolean;
 }
 
 /**
@@ -104,12 +109,16 @@ export interface ISandbox {
   /**
    * Execute code in the sandbox (Python or JavaScript)
    */
-  executeCode(code: string, language: "python" | "javascript"): Promise<SandboxResult>;
+  executeCode(
+    code: string,
+    language: "python" | "javascript",
+    options?: SandboxOptions,
+  ): Promise<SandboxResult>;
 
   /**
    * Cleanup sandbox resources
    */
-  cleanup(): void;
+  cleanup(): void | Promise<void>;
 }
 
 /**
@@ -423,6 +432,10 @@ export async function createSandbox(
   let sandbox: ISandbox;
 
   switch (sandboxType) {
+    case "space":
+      // Explicit selection only. A connection/policy failure must never run locally.
+      sandbox = new SpaceSandbox(workspace);
+      break;
     case "macos":
       sandbox = new MacOSSandbox(workspace);
       break;

@@ -6,6 +6,7 @@
 import * as path from "path";
 import { BOT_WORKS_ON_VALUES } from "../../shared/bot-computer";
 import { z } from "zod";
+import { isSpaceRelativePath, isSpaceTemplate } from "../../shared/space-sandbox";
 import {
   EXTERNAL_RUNTIME_AGENTS,
   CoreEvalCaseStatus,
@@ -161,6 +162,50 @@ const PermissionRuleSchema = z.object({
 
 // ============ Workspace Schemas ============
 
+export const SpaceSandboxConfigSchema = z
+  .object({
+    template: z.string().refine(isSpaceTemplate, "Invalid SPACE template"),
+    inputPaths: z
+      .array(
+        z
+          .string()
+          .refine(
+            isSpaceRelativePath,
+            "Use a workspace-relative regular file outside private configuration",
+          ),
+      )
+      .max(64)
+      .optional(),
+    outputPaths: z
+      .array(
+        z
+          .string()
+          .refine(
+            isSpaceRelativePath,
+            "Use a workspace-relative new file outside private configuration",
+          ),
+      )
+      .max(64)
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      [value.inputPaths, value.outputPaths].every(
+        (paths) => !paths || new Set(paths).size === paths.length,
+      ),
+    "Duplicate SPACE file selection",
+  );
+
+export const WorkspacePermissionsUpdateSchema = z.object({
+  network: z.boolean().optional(),
+  read: z.boolean().optional(),
+  write: z.boolean().optional(),
+  delete: z.boolean().optional(),
+  sandboxType: z.enum(["auto", "macos", "docker", "space", "none"]).optional(),
+  spaceConfig: SpaceSandboxConfigSchema.optional(),
+});
+
 export const WorkspaceCreateSchema = z.object({
   name: z.string().min(1).max(MAX_TITLE_LENGTH),
   path: z.string().min(1).max(MAX_PATH_LENGTH),
@@ -174,6 +219,8 @@ export const WorkspaceCreateSchema = z.object({
       // Broader filesystem access
       unrestrictedFileAccess: z.boolean().default(false),
       allowedPaths: z.array(z.string().max(MAX_PATH_LENGTH)).max(50).optional(),
+      sandboxType: z.enum(["auto", "macos", "docker", "space", "none"]).optional(),
+      spaceConfig: SpaceSandboxConfigSchema.optional(),
     })
     .optional(),
 });

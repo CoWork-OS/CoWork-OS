@@ -94,6 +94,10 @@ Specialization tool restrictions merge with context-policy restrictions using de
 
 ## Access Profiles and Workspace Permissions
 
+For opt-in remote Linux execution with selected file transfer, see
+[SPACE sandbox setup and recovery](../space-sandbox.md). SPACE is excluded from
+automatic selection and requires explicit administrator and workspace opt-in.
+
 [Access Profiles](../access-profiles.md) are the primary user-facing control for a task. Open
 **Settings > System & Security > Permissions** to choose the default profile or define a custom
 profile, then use the **Permission access mode** selector in the main composer for a particular

@@ -23,7 +23,7 @@ import {
   type AgentSecurityRuleProfile,
 } from "../../shared/agent-security";
 
-export type AdminSandboxType = "macos" | "docker" | "none";
+export type AdminSandboxType = "macos" | "docker" | "space" | "none";
 export type AdminNetworkDefault = "allow" | "deny";
 /** "user" leaves Settings > Browser > Developer mode to the user; "on"/"off" lock it. */
 export type AdminBrowserDeveloperMode = "user" | "on" | "off";
@@ -547,7 +547,7 @@ function normalizePermissionModes(value: unknown): PermissionMode[] {
   );
 }
 
-const VALID_SANDBOX_TYPES = new Set<AdminSandboxType>(["macos", "docker", "none"]);
+const VALID_SANDBOX_TYPES = new Set<AdminSandboxType>(["macos", "docker", "space", "none"]);
 
 function normalizeSandboxTypes(value: unknown): AdminSandboxType[] {
   const normalized = normalizeStringList(value).filter((mode): mode is AdminSandboxType =>

@@ -42,7 +42,7 @@ interface AdminPolicies {
   };
 }
 
-type SandboxBackend = "macos" | "docker" | "none";
+type SandboxBackend = "macos" | "docker" | "space" | "none";
 
 /** Shell sandbox and shell network fields of AdminPolicies.runtime. */
 export interface ShellRuntimePolicies {
@@ -55,6 +55,7 @@ export interface ShellRuntimePolicies {
 const SANDBOX_BACKEND_LABELS: Record<SandboxBackend, string> = {
   macos: "macOS sandbox",
   docker: "Docker",
+  space: "SPACE (remote Linux)",
   none: "none (unsandboxed)",
 };
 

@@ -10,7 +10,7 @@ import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
-import type { ApprovalRequest } from "../shared/types";
+import type { ApprovalRequest, SpaceSandboxConfig, SandboxType } from "../shared/types";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   ApprovalDraftPreview,
@@ -3435,6 +3435,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       read?: boolean;
       write?: boolean;
       delete?: boolean;
+      sandboxType?: SandboxType;
+      spaceConfig?: SpaceSandboxConfig;
     },
   ) => ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_UPDATE_PERMISSIONS, id, permissions),
 
@@ -7270,6 +7272,8 @@ export interface ElectronAPI {
       read?: boolean;
       write?: boolean;
       delete?: boolean;
+      sandboxType?: SandboxType;
+      spaceConfig?: SpaceSandboxConfig;
     },
   ) => Promise<Any>;
   getInputRequestDraftReview: (
@@ -9516,7 +9520,7 @@ export interface ElectronAPI {
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
     runtime: {
       allowedPermissionModes: PermissionMode[];
-      allowedSandboxTypes: Array<"macos" | "docker" | "none">;
+      allowedSandboxTypes: Array<"macos" | "docker" | "space" | "none">;
       requireSandboxForShell: boolean;
       allowUnsandboxedShell: boolean;
       network: {
@@ -9544,7 +9548,7 @@ export interface ElectronAPI {
     agents: { maxHeartbeatFrequencySec: number; maxConcurrentAgents: number };
     runtime: {
       allowedPermissionModes: PermissionMode[];
-      allowedSandboxTypes: Array<"macos" | "docker" | "none">;
+      allowedSandboxTypes: Array<"macos" | "docker" | "space" | "none">;
       requireSandboxForShell: boolean;
       allowUnsandboxedShell: boolean;
       network: {

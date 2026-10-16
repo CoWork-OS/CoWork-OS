@@ -83,7 +83,7 @@ const IMAGE_PULL_TIMEOUT_MS = 15 * 60 * 1000;
 /**
  * Default sandbox options
  */
-const DEFAULT_OPTIONS: Required<SandboxOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<SandboxOptions, "signal">> = {
   privateDocumentWorkspace: false,
   cwd: "/workspace",
   timeout: 5 * 60 * 1000, // 5 minutes

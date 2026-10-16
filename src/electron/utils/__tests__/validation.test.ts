@@ -5,6 +5,7 @@ import {
   validateInput,
   AgentConfigSchema,
   WorkspaceCreateSchema,
+  WorkspacePermissionsUpdateSchema,
   TaskCreateSchema,
   TaskWorkspaceUpdateSchema,
   TaskModelSelectionSchema,
@@ -25,6 +26,40 @@ import {
 } from "../validation";
 import { z } from "zod";
 import { DEFAULT_GUARDRAIL_SETTINGS } from "../../../shared/guardrail-defaults";
+
+describe("SPACE workspace configuration", () => {
+  it("preserves explicit file selection and strips legacy shell switches", () => {
+    const selection = {
+      sandboxType: "space",
+      spaceConfig: {
+        template: "offline:latest",
+        inputPaths: ["input.csv"],
+        outputPaths: ["result.csv"],
+      },
+    };
+    expect(WorkspacePermissionsUpdateSchema.parse({ ...selection, shell: true })).toEqual(
+      selection,
+    );
+    expect(
+      WorkspaceCreateSchema.parse({ name: "test", path: "/tmp/test", permissions: selection })
+        .permissions,
+    ).toMatchObject(selection);
+  });
+  it("refuses credentials, traversal, and oversized selections", () => {
+    for (const spaceConfig of [
+      { template: "test", token: "secret" },
+      { template: "bad@tag" },
+      { template: "test", inputPaths: ["input", "input"] },
+      { template: "test", outputPaths: [".git /config"] },
+      { template: "test", inputPaths: ["../secret"] },
+      { template: "test", outputPaths: [".cowork/policy/local.json"] },
+      { template: "test", inputPaths: Array(65).fill("a") },
+    ])
+      expect(
+        WorkspacePermissionsUpdateSchema.safeParse({ sandboxType: "space", spaceConfig }).success,
+      ).toBe(false);
+  });
+});
 
 describe("task checkout configuration", () => {
   it("preserves valid per-task worktree options", () => {

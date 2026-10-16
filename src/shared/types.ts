@@ -4881,7 +4881,18 @@ export function isTempWorkspaceId(id: string | null | undefined): boolean {
 /**
  * Sandbox type for command execution isolation
  */
-export type SandboxType = "auto" | "macos" | "docker" | "none";
+export type SandboxType = "auto" | "macos" | "docker" | "space" | "none";
+
+/** Explicit workspace file selection for the opt-in remote SPACE backend.
+ * Connection credentials live in the host environment, never in workspace JSON. */
+export interface SpaceSandboxConfig {
+  /** Published Linux template with python3, /bin/sh, and (for JavaScript) node. */
+  template: string;
+  /** Regular files relative to the workspace. No directories, links, or implicit sync. */
+  inputPaths?: string[];
+  /** Remote workspace-relative files to publish locally. Destinations must be new files. */
+  outputPaths?: string[];
+}
 
 /**
  * Docker sandbox configuration
@@ -4910,6 +4921,7 @@ export interface WorkspacePermissions {
   // Sandbox configuration
   sandboxType?: SandboxType; // Which sandbox to use (auto-detect if not specified)
   dockerConfig?: DockerSandboxConfig; // Docker-specific configuration
+  spaceConfig?: SpaceSandboxConfig;
   /** Effective access-profile metadata applied to an agent workspace view. */
   accessProfileId?: AccessProfileId;
   accessSandboxMode?: import("./access-profiles").AccessSandboxMode;

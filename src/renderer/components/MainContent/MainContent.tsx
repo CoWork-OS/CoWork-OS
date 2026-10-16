@@ -4710,7 +4710,7 @@ function MainContentComponent({
   const [permissionSettingsLoaded, setPermissionSettingsLoaded] = useState(false);
   const [adminRuntimePolicy, setAdminRuntimePolicy] = useState<{
     allowedPermissionModes?: PermissionMode[];
-    allowedSandboxTypes?: Array<"macos" | "docker" | "none">;
+    allowedSandboxTypes?: Array<"macos" | "docker" | "space" | "none">;
     requireSandboxForShell?: boolean;
     allowUnsandboxedShell?: boolean;
     network?: {

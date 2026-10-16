@@ -765,6 +765,7 @@ export class ShellTools {
   private bundleApproval: { approvedAt: number; count: number } | null = null;
   // Track the currently running child process for stdin support
   private activeProcess: ChildProcess | null = null;
+  private activeRemoteController: AbortController | null = null;
   // Set only for a direct child launched as leader of its own POSIX group.
   private activeProcessGroupPid: number | null = null;
   // Track escalation timeouts so we can cancel them when process exits
@@ -791,6 +792,7 @@ export class ShellTools {
     this.workspace = workspace;
     const nextScope = this.getShellAccessScopeFingerprint(workspace);
     if (previousScope !== nextScope) {
+      this.activeRemoteController?.abort();
       // Approval reuse is scoped to the effective policy.  A profile/root
       // change must not let a command approved under the old scope run under
       // the new one. Persistent shells carry cwd/env state, so close the old
@@ -996,7 +998,7 @@ export class ShellTools {
       acquired = true;
       return sandbox;
     } finally {
-      if (!acquired) sandbox.cleanup();
+      if (!acquired) await sandbox.cleanup();
     }
   }
 
@@ -1017,6 +1019,9 @@ export class ShellTools {
     sandboxType: string,
     networkApproved: boolean,
   ): boolean {
+    // SPACE's initial backend is deliberately offline, even when this profile
+    // permits local subprocess networking. There is no implicit cloud egress.
+    if (sandboxType === "space") return false;
     const allowShellNetwork = this.shouldAllowShellNetwork(policies, networkApproved);
     if (this.workspace.permissions?.network === true) {
       this.daemon.logEvent(this.taskId, "network_policy_decision", {
@@ -1087,7 +1092,14 @@ export class ShellTools {
       // listens anywhere else.
       const guardLoopback = sandbox.type === "macos" && !allowShellNetwork;
       const loopbackGuard: { violation?: LoopbackListenerViolation; unwatch?: () => void } = {};
+      if (sandbox.type === "space") this.activeRemoteController = new AbortController();
       const result = await sandbox.execute(command, [], {
+        signal: this.activeRemoteController
+          ? AbortSignal.any([
+              this.activeRemoteController.signal,
+              ...(options.signal ? [options.signal] : []),
+            ])
+          : options.signal,
         cwd: sandboxCwd,
         timeout: options.timeout,
         maxOutputSize: MAX_OUTPUT_SIZE,
@@ -1197,11 +1209,12 @@ export class ShellTools {
         terminationReason,
       };
     } finally {
+      this.activeRemoteController = null;
       this.activeProcess = null;
       this.activeProcessGroupPid = null;
       this.clearEscalationTimeouts();
       this.userKillRequested = false;
-      sandbox.cleanup();
+      await sandbox.cleanup();
     }
   }
 
@@ -1242,7 +1255,10 @@ export class ShellTools {
    * Check if a command is currently running
    */
   hasActiveProcess(): boolean {
-    return this.activeProcess !== null && !this.activeProcess.killed;
+    return (
+      this.activeRemoteController !== null ||
+      (this.activeProcess !== null && !this.activeProcess.killed)
+    );
   }
 
   /**
@@ -1252,6 +1268,11 @@ export class ShellTools {
    *   the caller reports why, and the command is not reported as stopped by the user.
    */
   killProcess(force: boolean = false, initiator: "user" | "system" = "user"): boolean {
+    if (this.activeRemoteController) {
+      if (initiator === "user") this.userKillRequested = true;
+      this.activeRemoteController.abort();
+      return true;
+    }
     if (!this.activeProcess || this.activeProcess.killed) {
       return false;
     }
@@ -1440,7 +1461,11 @@ export class ShellTools {
         .catch(() => undefined);
     };
     let launch: BackgroundProcessLaunch | null = null;
-    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies, networkApproved)) {
+    if (
+      this.workspace.permissions.sandboxType === "space" ||
+      shouldSandboxCommand ||
+      !this.shouldAllowShellNetwork(policies, networkApproved)
+    ) {
       const sandbox = await this.acquireCommandSandbox(command, {
         cwd,
         policies,
@@ -2080,7 +2105,11 @@ export class ShellTools {
         hasEffectiveFilesystemScope(this.workspace.path, this.workspace.permissions) ||
         (this.workspace.permissions.accessDomainRules?.length || 0) > 0,
     });
-    if (shouldSandboxCommand || !this.shouldAllowShellNetwork(policies, networkApproved)) {
+    if (
+      this.workspace.permissions.sandboxType === "space" ||
+      shouldSandboxCommand ||
+      !this.shouldAllowShellNetwork(policies, networkApproved)
+    ) {
       const sandboxResult = await this.runCommandInSandbox(command, {
         cwd,
         timeout,

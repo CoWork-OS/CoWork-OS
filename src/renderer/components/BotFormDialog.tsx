@@ -8,6 +8,7 @@ import {
 } from "../utils/bot-profile";
 import { BotMascot } from "./bot-mascot/BotMascot";
 import { BotIconPicker } from "./bot-mascot/BotIconPicker";
+import { BotModelField } from "./BotModelField";
 import { BOT_WORKS_ON_OPTIONS, type BotWorksOn } from "../../shared/bot-computer";
 import "./bot-form.css";
 
@@ -17,6 +18,9 @@ export interface BotFormValues {
   systemPrompt: string;
   /** `mascot:<id>`; older icon values show as the character they map to. */
   icon: string;
+  /** The bot's own model: provider and model key, both "" to follow the default model. */
+  providerType: string;
+  modelKey: string;
   /** Where the bot works: which computer its tasks may drive. */
   worksOn: BotWorksOn;
 }
@@ -202,6 +206,11 @@ export function BotFormDialog({
                   rows={4}
                 />
               </label>
+              <BotModelField
+                value={{ providerType: values.providerType, modelKey: values.modelKey }}
+                onChange={(model) => set(model)}
+                disabled={busy}
+              />
               <label className="bot-form-field">
                 <span>Works on</span>
                 <select

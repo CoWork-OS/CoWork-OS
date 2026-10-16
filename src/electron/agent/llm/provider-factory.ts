@@ -1772,7 +1772,7 @@ export class LLMProviderFactory {
     // A model the person picked for this thread wins over the global model while its
     // provider is still configured; a stale or unpinned task modelKey stays ignored.
     const pinnedProviderType = taskAgentConfig?.modelPinned
-      ? taskAgentConfig.providerType
+      ? taskAgentConfig.providerType || settings.providerType
       : undefined;
     const honorPinnedSelection = Boolean(
       pinnedProviderType &&

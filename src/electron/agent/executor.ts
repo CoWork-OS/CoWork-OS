@@ -23,12 +23,14 @@ import {
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
 import { buildModelHandoffNote, type ModelHandoff } from "./model-handoff-note";
+import { effectiveTaskModelConfig } from "./task-model-config";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
 import { resolveInteractionMode } from "./strategy/interaction-mode";
 import { QUALITY_PASS_SYSTEM_PROMPT, isQualityRewriteSafe } from "./quality-pass-output";
 import {
   AgentConfig,
+  AgentRole,
   Task,
   Workspace,
   Plan,
@@ -8644,7 +8646,7 @@ ${transcript}
       /^verify\s*:/i.test(task.title) ||
       /^verification\s*:/i.test(task.title);
     this.cachedLlmSettings = LLMProviderFactory.loadSettings();
-    const llmSelection = LLMProviderFactory.resolveTaskModelSelection(task.agentConfig, {
+    const llmSelection = LLMProviderFactory.resolveTaskModelSelection(this.modelSelectionConfig(), {
       isVerificationTask,
     });
     this.applyResolvedProviderSelection(llmSelection);
@@ -42436,6 +42438,21 @@ Return ONLY a JSON object:
     return buildModelHandoffNote(handoff, this.conversationHistory);
   }
 
+  /**
+   * The model config this task runs on: the conversation's own pick, then its bot's model
+   * (looked up each time, so a change to the bot applies on the next turn), then the global.
+   */
+  private modelSelectionConfig(): AgentConfig | undefined {
+    const roleId = this.task.assignedAgentRoleId;
+    let role: AgentRole | undefined;
+    try {
+      role = roleId ? this.daemon.getAgentRoleById(roleId) : undefined;
+    } catch {
+      role = undefined;
+    }
+    return effectiveTaskModelConfig(this.task.agentConfig, role);
+  }
+
   private hasExplicitTaskRouteOverride(): boolean {
     return Boolean(this.task.agentConfig?.providerType || this.task.agentConfig?.modelKey);
   }
@@ -42471,7 +42488,7 @@ Return ONLY a JSON object:
     this.providerFailoverRequiresImageInput = opts?.requiresImageInput === true;
     this.providerFailoverSelections = LLMProviderFactory.resolveProviderFailoverChain(
       primarySelection,
-      this.task.agentConfig,
+      this.modelSelectionConfig(),
       {
         forceProfile,
         isVerificationTask: this.isVerificationTaskRoute(),
@@ -42636,7 +42653,7 @@ Return ONLY a JSON object:
       task: {
         title: this.task.title,
         prompt: this.task.prompt,
-        agentConfig: this.task.agentConfig,
+        agentConfig: this.modelSelectionConfig(),
         source: this.task.source,
         status: this.task.status,
       },
@@ -42699,18 +42716,19 @@ Return ONLY a JSON object:
     const currentSettings = LLMProviderFactory.loadSettings();
     this.cachedLlmSettings = currentSettings;
     const currentSettingsProvider = String(currentSettings.providerType || "").trim();
+    const modelConfig = this.modelSelectionConfig();
     const providerChangedInSettings =
-      this.task.agentConfig?.modelPinned !== true &&
+      modelConfig?.modelPinned !== true &&
       currentSettingsProvider.length > 0 &&
       currentSettingsProvider !== this.provider.type;
 
     const selectionConfig = providerChangedInSettings
       ? {
-          ...this.task.agentConfig,
+          ...modelConfig,
           // A task-scoped model choice should not pin the task to the previous provider.
           modelKey: undefined,
         }
-      : this.task.agentConfig;
+      : modelConfig;
 
     const desiredProfile = forceProfile || this.llmProfileUsed;
     const newSelection = LLMProviderFactory.resolveTaskModelSelection(selectionConfig, {
@@ -42732,10 +42750,10 @@ Return ONLY a JSON object:
       const previousRoute = { providerType: this.provider.type, modelId: this.modelId };
       try {
         this.applyResolvedProviderSelection(newSelection);
-        // Only a model the person pinned to this thread gets a handoff note; a global
-        // provider switch (or a later switch back) clears any note still pending.
+        // Only a pinned model (the thread's own pick, or its bot's model) gets a handoff
+        // note; a global provider switch (or a later switch back) clears any pending note.
         this.pendingModelHandoff =
-          this.task.agentConfig?.modelPinned === true &&
+          modelConfig?.modelPinned === true &&
           previousRoute.providerType !== newSelection.providerType
             ? {
                 from: previousRoute,

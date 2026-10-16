@@ -437,6 +437,15 @@ export const TaskWorkspaceUpdateSchema = z.object({
   workspaceId: WorkspaceIdSchema,
 });
 
+/**
+ * A bot's own model on `agentRole:create` / `agentRole:update`: a known provider and a model
+ * key, or null / "" to follow the default model. Other role fields are checked elsewhere.
+ */
+export const AgentRoleModelFieldsSchema = z.object({
+  providerType: z.union([z.enum(LLM_PROVIDER_TYPES), z.literal(""), z.null()]).optional(),
+  modelKey: z.union([z.string().trim().max(200), z.null()]).optional(),
+});
+
 export const TaskModelSelectionSchema = z
   .object({
     taskId: z.string().uuid(),

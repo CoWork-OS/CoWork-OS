@@ -1747,11 +1747,15 @@ export function Settings({
 
   // Video generation state
   const [videoDefaultProvider, setVideoDefaultProvider] = useState<
-    "openai" | "azure" | "gemini" | "vertex" | "kling" | ""
+    "openai" | "azure" | "gemini" | "vertex" | "kling" | "local" | ""
   >("");
   const [videoFallbackProvider, setVideoFallbackProvider] = useState<
-    "openai" | "azure" | "gemini" | "vertex" | "kling" | ""
+    "openai" | "azure" | "gemini" | "vertex" | "kling" | "local" | ""
   >("");
+  // Local video model (runs on this computer)
+  const [videoLocalPythonPath, setVideoLocalPythonPath] = useState("");
+  const [videoLocalModelDir, setVideoLocalModelDir] = useState("");
+  const [videoLocalSteps, setVideoLocalSteps] = useState("");
   // OpenAI Sora video config
   const [videoOpenAIModel, setVideoOpenAIModel] = useState("sora-2");
   const [videoOpenAIDuration, setVideoOpenAIDuration] = useState("5");
@@ -3100,6 +3104,9 @@ export function Settings({
       if (vg?.kling?.model) setVideoKlingModel(vg.kling.model);
       if (vg?.kling?.defaultDuration) setVideoKlingDuration(String(vg.kling.defaultDuration));
       if (vg?.kling?.defaultAspectRatio) setVideoKlingAspectRatio(vg.kling.defaultAspectRatio);
+      if (vg?.local?.pythonPath) setVideoLocalPythonPath(vg.local.pythonPath);
+      if (vg?.local?.modelDir) setVideoLocalModelDir(vg.local.modelDir);
+      if (vg?.local?.steps) setVideoLocalSteps(String(vg.local.steps));
 
       // Set Bedrock form state (access key and secret key are set earlier)
       if (loadedSettings.bedrock?.accessKeyId) {
@@ -4348,6 +4355,14 @@ export function Settings({
             defaultDuration: videoKlingDuration ? Number(videoKlingDuration) : undefined,
             defaultAspectRatio: (videoKlingAspectRatio as "16:9" | "9:16" | "1:1") || undefined,
           },
+          local:
+            videoLocalPythonPath.trim() || videoLocalModelDir.trim()
+              ? {
+                  pythonPath: videoLocalPythonPath.trim() || undefined,
+                  modelDir: videoLocalModelDir.trim() || undefined,
+                  steps: videoLocalSteps ? Number(videoLocalSteps) : undefined,
+                }
+              : undefined,
         },
         customProviders:
           Object.keys(sanitizedCustomProviders).length > 0 ? sanitizedCustomProviders : undefined,
@@ -5151,6 +5166,7 @@ export function Settings({
       icon: <Hexagon {...S} />,
     },
     { type: "kling" as const, name: "Kling", icon: <Zap {...S} /> },
+    { type: "local" as const, name: "Local model", icon: <Monitor {...S} /> },
   ];
 
   const renderImagePanel = () => (
@@ -5773,6 +5789,48 @@ export function Settings({
           </div>
         )}
 
+        {activeVideoTab === "local" && (
+          <div className="settings-section">
+            <h3>Local model</h3>
+            <p className="settings-hint">
+              Runs an open video model on this computer (Wan 2.2 via mlx-video on Apple Silicon). No
+              API key and no per-clip cost; a short clip takes several minutes. Supports
+              text-to-video and image-to-video.
+            </p>
+            <label className="settings-label">Python interpreter</label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="/path/to/venv/bin/python"
+              value={videoLocalPythonPath}
+              onChange={(e) => setVideoLocalPythonPath(e.target.value)}
+            />
+            <p className="settings-hint">The environment where mlx-video is installed.</p>
+            <label className="settings-label settings-label--spaced">Model folder</label>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="/path/to/wan2.2-ti2v-5b-mlx"
+              value={videoLocalModelDir}
+              onChange={(e) => setVideoLocalModelDir(e.target.value)}
+            />
+            <p className="settings-hint">
+              The converted MLX model, with the google/umt5-xxl tokenizer folder copied inside it.
+            </p>
+            <label className="settings-label settings-label--spaced">Sampling steps</label>
+            <input
+              className="settings-input"
+              type="number"
+              min={1}
+              max={100}
+              placeholder="Model default"
+              value={videoLocalSteps}
+              onChange={(e) => setVideoLocalSteps(e.target.value)}
+            />
+            <p className="settings-hint">Fewer steps render faster with less detail.</p>
+          </div>
+        )}
+
         {/* Fallback provider */}
         <div className="settings-section" style={{ marginTop: "16px" }}>
           <label className="settings-label">Fallback provider</label>
@@ -5782,7 +5840,14 @@ export function Settings({
             value={videoFallbackProvider}
             onChange={(e) =>
               setVideoFallbackProvider(
-                (e.target.value || "") as "openai" | "azure" | "gemini" | "vertex" | "kling" | "",
+                (e.target.value || "") as
+                  | "openai"
+                  | "azure"
+                  | "gemini"
+                  | "vertex"
+                  | "kling"
+                  | "local"
+                  | "",
               )
             }
           >
@@ -5792,6 +5857,7 @@ export function Settings({
             <option value="gemini">Gemini Veo 3.1</option>
             <option value="vertex">Vertex AI Veo</option>
             <option value="kling">Kling</option>
+            <option value="local">Local model</option>
           </select>
         </div>
 

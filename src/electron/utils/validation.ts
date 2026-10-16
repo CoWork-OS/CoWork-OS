@@ -1005,8 +1005,8 @@ export const CustomProvidersSchema = z.record(z.string(), CustomProviderConfigSc
 
 export const VideoGenerationSettingsSchema = z
   .object({
-    defaultProvider: z.enum(["openai", "azure", "gemini", "vertex", "kling"]).optional(),
-    fallbackProvider: z.enum(["openai", "azure", "gemini", "vertex", "kling"]).optional(),
+    defaultProvider: z.enum(["openai", "azure", "gemini", "vertex", "kling", "local"]).optional(),
+    fallbackProvider: z.enum(["openai", "azure", "gemini", "vertex", "kling", "local"]).optional(),
     openai: z
       .object({
         defaultModel: z.string().max(200).optional(),
@@ -1051,6 +1051,23 @@ export const VideoGenerationSettingsSchema = z
         model: z.string().max(200).optional(),
         defaultDuration: z.number().int().min(1).max(60).optional(),
         defaultAspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional(),
+      })
+      .optional(),
+    local: z
+      .object({
+        // Absolute paths only: these name an interpreter the app will run.
+        pythonPath: z
+          .string()
+          .max(1000)
+          .refine((value) => value.startsWith("/"), "must be absolute")
+          .optional(),
+        modelDir: z
+          .string()
+          .max(1000)
+          .refine((value) => value.startsWith("/"), "must be absolute")
+          .optional(),
+        steps: z.number().int().min(1).max(100).optional(),
+        maxMinutes: z.number().min(1).max(240).optional(),
       })
       .optional(),
   })

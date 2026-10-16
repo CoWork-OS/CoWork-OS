@@ -788,6 +788,25 @@ describe("ToolRegistry tool catalog versioning", () => {
     },
   );
 
+  it("does not classify local video jobs as network access", () => {
+    const registry = new ToolRegistry(
+      createWorkspace(),
+      createDaemon(),
+      "task-local-video-approval",
+    );
+    for (const tool of [
+      "generate_video",
+      "get_video_generation_job",
+      "cancel_video_generation_job",
+    ]) {
+      expect((registry as Any).getApprovalTypeForTool(tool, { provider: "local" })).toBeNull();
+      expect((registry as Any).getApprovalTypeForTool(tool, { provider: "azure" })).toBe(
+        "network_access",
+      );
+      expect((registry as Any).getApprovalTypeForTool(tool, {})).toBe("network_access");
+    }
+  });
+
   it("does not pre-classify local reads as external services and keeps safe network reads scoped", () => {
     const registry = new ToolRegistry(createWorkspace(), createDaemon(), "task-safe-read-approval");
 

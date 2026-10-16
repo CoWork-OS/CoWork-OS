@@ -12266,6 +12266,20 @@ ${transcript}
         if (outputPath !== filename) this.fileOperationTracker.recordFileCreation(outputPath);
       }
     }
+    // canvas_export writes a page folder (index.html + assets/); each file is task output.
+    if (
+      toolSucceeded &&
+      toolName === "canvas_export" &&
+      typeof result?.targetDir === "string" &&
+      Array.isArray(result?.files)
+    ) {
+      for (const file of result.files) {
+        if (typeof file !== "string") continue;
+        const exported = path.join(result.targetDir, file);
+        if (this.canReadWorkspacePath(exported))
+          this.fileOperationTracker.recordFileCreation(exported);
+      }
+    }
 
     // A successful mutation invalidates stale read/list dedupe/cache state.
     const mutatingTools = new Set([
@@ -13839,10 +13853,10 @@ ${transcript}
     }
 
     const canvasIntent =
-      /\b(canvas_create|canvas_push|canvas_show|canvas_open_url|in-app canvas|app canvas)\b/.test(
+      /\b(canvas_create|canvas_push|canvas_show|canvas_open_url|canvas_add_asset|canvas_export|in-app canvas|app canvas)\b/.test(
         desc,
       ) ||
-      /\b(show|render|display|open|preview|present|push)\b[\s\S]{0,40}\b(?:in(?:-app)?\s+)?canvas\b/.test(
+      /\b(show|render|display|open|preview|present|push|create|build|make)\b[\s\S]{0,40}\b(?:in(?:-app)?\s+)?canvas\b/.test(
         desc,
       );
     if (canvasIntent) {
@@ -15301,7 +15315,13 @@ ${transcript}
       requestsCliAnythingApp(taskText) ||
       /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
         taskText,
-      )
+      ) ||
+      // Pictures as one part of a larger deliverable: a named skill, a source
+      // document, a canvas page, video clips or an export. These need a real plan.
+      /\b(?:skill|canvas|videos?|clips?|animat(?:e|ed|ion|ions)|export|storybook|chapters?)\b/.test(
+        taskText,
+      ) ||
+      /\.(?:pdf|docx?|pptx|xlsx|epub)\b/.test(taskText)
     );
   }
 
@@ -18313,8 +18333,11 @@ ${transcript}
   }
 
   private isVisualCanvasTask(): boolean {
+    // Plan steps count too: a skill can make the canvas part of the plan even
+    // when the user's own words never mention it.
+    const planText = (this.plan?.steps || []).map((step) => step.description || "").join(" ");
     const text =
-      `${this.task.title} ${this.getContractPrompt()} ${this.lastUserMessage || ""}`.toLowerCase();
+      `${this.task.title} ${this.getContractPrompt()} ${this.lastUserMessage || ""} ${planText}`.toLowerCase();
     return /\b(canvas|visual|chart|graph|diagram|dashboard|preview|ui|interface|interactive|html|website|webpage|browser|screenshot|layout|wireframe|prototype|design|render|inspect|mockup|map|timeline)\b/.test(
       text,
     );
@@ -20445,6 +20468,21 @@ ${transcript}
 
     for (const requiredTool of stepContract.requiredTools.values()) {
       base.add(requiredTool);
+    }
+    // Once this task has a canvas page, later steps that produce media must be
+    // able to add it to that page and export it, even when their wording does not
+    // name the canvas ("register each picture", "embed the clips").
+    const taskHasCanvas =
+      stepKind === "mutation_required" &&
+      typeof this.toolRegistry?.getLatestCanvasSessionId === "function" &&
+      Boolean(this.toolRegistry.getLatestCanvasSessionId());
+    if (base.has("canvas_push") || taskHasCanvas) {
+      // Allowed, not required: a canvas step may need to bring generated media
+      // into the page, check it, or export it, but most canvas steps do none of these.
+      base.add("canvas_push");
+      base.add("canvas_add_asset");
+      base.add("canvas_snapshot");
+      base.add("canvas_export");
     }
 
     for (const mentionedIntegrationTool of this.getIntegrationMentionToolAllowlist()) {

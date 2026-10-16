@@ -184,6 +184,26 @@ describe("CanvasTools asset and export boundaries", () => {
     expect(manager.addAsset).not.toHaveBeenCalled();
   });
 
+  it("enforces a project's ACCESS.md for the assigned agent role", async () => {
+    const fsSync = await vi.importActual<typeof import("fs")>("fs");
+    const projectDir = path.join(root, "ws", ".cowork", "projects", "secret");
+    fsSync.mkdirSync(projectDir, { recursive: true });
+    fsSync.writeFileSync(path.join(projectDir, "ACCESS.md"), "## Deny\n- role-1\n");
+    fsSync.writeFileSync(path.join(projectDir, "plan.png"), "png");
+    (daemon as Any).getTask = vi.fn(() => ({ assignedAgentRoleId: "role-1" }));
+    // This file mocks fs/promises.readFile; let the ACCESS.md read reach the disk.
+    const realFs = await vi.importActual<typeof import("fs/promises")>("fs/promises");
+    readFileMock.mockImplementation(realFs.readFile as Any);
+    try {
+      await expect(tools.addAsset("session-1", ".cowork/projects/secret/plan.png")).rejects.toThrow(
+        /Denied by ACCESS.md/,
+      );
+      expect(manager.addAsset).not.toHaveBeenCalled();
+    } finally {
+      delete (daemon as Any).getTask;
+    }
+  });
+
   it("refuses another task's canvas", async () => {
     manager.getSession.mockReturnValue({ ...manager.getSession(), taskId: "other-task" });
     await expect(tools.addAsset("session-1", "scene.png")).rejects.toThrow("another task");
@@ -194,6 +214,10 @@ describe("CanvasTools asset and export boundaries", () => {
     const result = await tools.exportCanvas("session-1");
     expect(result.targetDir).toBe(path.join(root, "ws", "evolution-of-primates"));
     expect(result.entry).toBe(path.join(root, "ws", "evolution-of-primates", "index.html"));
+    expect(daemon.logEvent).toHaveBeenCalledWith("task-1", "file_created", {
+      path: path.join("evolution-of-primates", "index.html"),
+      type: "canvas_export",
+    });
   });
 
   it("refuses export outside the workspace or without write permission", async () => {

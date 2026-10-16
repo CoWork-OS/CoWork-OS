@@ -41,13 +41,18 @@ Goal: turn a dense document (paper, textbook chapter, report) into an illustrate
 ## 4. Generate pictures with one consistent style
 
 - Generate chapter 1's picture first with `generate_image` (`aspectRatio: "16:9"`; prompt = scene + style sentence). Pass that file in `referenceImages` for every later picture so palette and rendering stay consistent.
-- After each picture: `canvas_add_asset` with the returned path, then update that chapter's `<img src="assets/...">` and `canvas_push` again.
+- Any picture tool works (`generate_image`, or an image tool from a connected MCP server). If the tool saves outside the workspace, `copy_file` the picture into the workspace first.
+- After each picture: `canvas_add_asset` with the workspace path, then replace that chapter's placeholder with `<img src="assets/...">` and `canvas_push` the updated page.
+- If no chapter will be animated, call `canvas_export` at the end of this step.
+- The canvas page is the only copy of the story. Do not write the story HTML to a workspace file or build an export folder by hand; `canvas_push` and `canvas_export` do that.
 
 ## 5. Animate a few chapters
 
-- Pick the 2-4 chapters that benefit most from motion. Call `generate_video` with `mode: "image_to_video"`, `referenceImagePath` set to that chapter's picture, and a short motion prompt (camera drift, weather, a figure walking). Keep clips short (`duration` 4-8 s), no on-screen text.
-- Video jobs run in the background: start them all, keep working, and check with `get_video_generation_job`.
-- When a clip finishes: `canvas_add_asset`, then swap the chapter's picture for `<video src="assets/..." poster="assets/<picture>" muted loop playsinline>`. Keep the picture as the poster.
+- Pick the 2-4 chapters that benefit most from motion. Call `generate_video` with `mode: "image_to_video"`, `referenceImagePath` set to that chapter's picture, and a short motion prompt (camera drift, weather, a figure walking). Keep clips short (`duration` 2-8 s), no on-screen text.
+- Clip length is approximate: models round to their own frame counts (a 2 s request can come back as 2.04 s). Use the clip as delivered; never re-encode, trim or convert it.
+- Video jobs run in the background; check them with `get_video_generation_job`. Cloud providers accept several jobs at once. The `local` provider renders on this computer one clip at a time and a clip takes about 5-15 minutes: start one clip, then call `get_video_generation_job` again and again (each call waits up to 4 minutes) until it reports `succeeded` or `failed`, and only then start the next clip. Do not use `sleep` commands, and do not finish the step while a clip is still rendering.
+- In the same step, as soon as each clip finishes: `canvas_add_asset` with the clip's workspace path, swap that chapter's picture for `<video src="assets/..." poster="assets/<picture>" muted loop playsinline>` (keep the picture as the poster), and `canvas_push` the page.
+- Still in the same step, once the last clip is in the page (or a clip failed and its chapter keeps the picture), call `canvas_export`. Do not leave the export for a later check or review step: those steps only inspect.
 - If no video provider is configured, skip this step and say so; the story still works with pictures plus subtle CSS motion (slow zoom or pan).
 
 ## 6. Page layout
@@ -61,5 +66,6 @@ Goal: turn a dense document (paper, textbook chapter, report) into an illustrate
 ## 7. Check and hand off
 
 - `canvas_snapshot` and look at it: no broken media, no overlapping text, timeline visible. Fix and push again if needed.
-- Offer `canvas_export` so the user gets a folder (index.html + assets/) they can open or share.
+- The export already happened at the end of step 5 (or at the end of step 4 when no chapter is animated). If it is missing, call `canvas_export` before this check, not during it.
+- This step only looks: no file edits, no new renders.
 - Finish with: chapters covered, which ones are animated, providers used, and any parts of the source that were skipped or only partly read.

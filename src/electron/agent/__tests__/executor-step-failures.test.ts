@@ -1995,6 +1995,20 @@ relationship_memory:
     expect((executor as Any).inferRequiredArtifactExtensions()).toContain(".docx");
   });
 
+  it("requires canvas tools when a step creates the Live Canvas page", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const step: Any = {
+      id: "create-live-canvas",
+      kind: "primary",
+      description:
+        "Create the Live Canvas story with all five chapter texts and media placeholders.",
+      status: "pending",
+    };
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+    expect(Array.from(contract.requiredTools)).toContain("canvas_create");
+    expect(Array.from(contract.requiredTools)).toContain("canvas_push");
+  });
+
   it("does not require in-app canvas tools for app-internal canvas gameplay wording", () => {
     executor = createExecutorWithStubs([textResponse("OK")], {});
     const step: Any = {

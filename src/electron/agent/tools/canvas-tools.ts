@@ -21,8 +21,14 @@ import {
   evaluateWorkspaceFilesystemAccess,
 } from "../../security/access-profile-paths";
 import { CanvasManager } from "../../canvas/canvas-manager";
+import {
+  checkProjectAccess,
+  getProjectIdFromWorkspaceRelPath,
+  getWorkspaceRelativePosixPath,
+} from "../../security/project-access";
 import { LLMTool } from "../llm/types";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as path from "path";
 import { createLogger } from "../../utils/logger";
 
@@ -658,6 +664,25 @@ export class CanvasTools {
     }
   }
 
+  /** Enforce a project's ACCESS.md for paths inside .cowork/projects/<id>/, as the file tools do. */
+  private async assertProjectAccess(resolvedPath: string): Promise<void> {
+    const workspaceRoot = fsSync.existsSync(this.workspace.path)
+      ? fsSync.realpathSync(this.workspace.path)
+      : path.resolve(this.workspace.path);
+    const relPosix = getWorkspaceRelativePosixPath(workspaceRoot, resolvedPath);
+    const projectId = relPosix === null ? null : getProjectIdFromWorkspaceRelPath(relPosix);
+    if (!projectId) return;
+    const task = this.daemon.getTask?.(this.taskId);
+    const access = await checkProjectAccess({
+      workspacePath: workspaceRoot,
+      projectId,
+      agentRoleId: task?.assignedAgentRoleId || null,
+    });
+    if (!access.allowed) {
+      throw new Error(access.reason || `Access denied for project "${projectId}"`);
+    }
+  }
+
   /**
    * Copy a workspace media file (generated image, video clip, audio) into the
    * canvas session so the page can load it by relative URL.
@@ -686,6 +711,7 @@ export class CanvasTools {
         "canvas asset",
         createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "canvas_add_asset"),
       );
+      await this.assertProjectAccess(resolvedSource);
       const asset = await this.manager.addAsset(sessionId, resolvedSource, name);
 
       this.daemon.logEvent(this.taskId, "tool_result", {
@@ -742,7 +768,18 @@ export class CanvasTools {
         "canvas export folder",
         createWorkspaceFilesystemApprovalHandlers(this.daemon, this.taskId, "canvas_export"),
       );
+      await this.assertProjectAccess(resolvedTarget);
       const result = await this.manager.exportToFolder(sessionId, resolvedTarget);
+      // Report every written file like the other file-producing tools, so the
+      // export counts as task output (artifact evidence, Files panel).
+      for (const file of result.files) {
+        const absolute = path.join(result.targetDir, file);
+        const relative = path.relative(path.resolve(this.workspace.path), absolute);
+        this.daemon.logEvent(this.taskId, "file_created", {
+          path: relative && !relative.startsWith("..") ? relative : absolute,
+          type: "canvas_export",
+        });
+      }
 
       this.daemon.logEvent(this.taskId, "tool_result", {
         tool: "canvas_export",

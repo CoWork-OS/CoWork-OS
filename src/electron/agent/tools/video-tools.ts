@@ -19,6 +19,7 @@ import { LLMTool } from "../llm/types";
  *   - Gemini API Veo 3.1 (text_to_video, image_to_video)
  *   - Vertex AI Veo 3 / 3.1 (text_to_video, image_to_video)
  *   - Kling (text_to_video, image_to_video)
+ *   - Local open model, Wan 2.2 via mlx-video (text_to_video, image_to_video)
  *
  * Long-running video generation is handled as two-phase:
  *   1. generate_video → returns a jobId if pending=true
@@ -205,7 +206,7 @@ Generated videos are saved to the workspace folder.`,
             },
             provider: {
               type: "string",
-              enum: ["auto", "openai", "azure", "gemini", "vertex", "kling"],
+              enum: ["auto", "openai", "azure", "gemini", "vertex", "kling", "local"],
               description:
                 'Provider override. "auto" uses the configured default with fallbacks (default: auto).',
             },
@@ -262,7 +263,7 @@ When succeeded, outputPaths contains the path(s) to the generated video(s).`,
             },
             provider: {
               type: "string",
-              enum: ["openai", "azure", "gemini", "vertex", "kling"],
+              enum: ["openai", "azure", "gemini", "vertex", "kling", "local"],
               description: "The provider that submitted the job.",
             },
             filename: {
@@ -285,7 +286,7 @@ When succeeded, outputPaths contains the path(s) to the generated video(s).`,
             },
             provider: {
               type: "string",
-              enum: ["openai", "azure", "gemini", "vertex", "kling"],
+              enum: ["openai", "azure", "gemini", "vertex", "kling", "local"],
               description: "The provider that owns the job.",
             },
           },

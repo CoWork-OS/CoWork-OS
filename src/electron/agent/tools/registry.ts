@@ -2200,6 +2200,16 @@ export class ToolRegistry {
     ) {
       return "computer_use";
     }
+    // The local video provider renders on this machine and calls no network
+    // service. Starting a render is still a workspace write the policy may ask about.
+    if (
+      ["generate_video", "get_video_generation_job", "cancel_video_generation_job"].includes(
+        canonicalToolName,
+      ) &&
+      input?.provider === "local"
+    ) {
+      return null;
+    }
     if (NETWORK_TOOL_NAMES.has(canonicalToolName)) return "network_access";
     return null;
   }

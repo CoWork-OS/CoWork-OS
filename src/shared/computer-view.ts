@@ -1,6 +1,6 @@
 /** What a task's computer shows in the bot's panel: a recent frame, its status and who has control. */
 
-export type ComputerViewSurface = "this_computer" | "browser";
+export type ComputerViewSurface = "this_computer" | "browser" | "own_desktop";
 
 export interface ComputerViewFrame {
   /** A downscaled JPEG data URL. Frames are never stored. */
@@ -47,7 +47,11 @@ export function describeComputerViewStatus(state: ComputerViewState | null | und
     case "waiting":
       return "Waiting for this computer";
     case "working":
-      return state.surface === "browser" ? "Using the browser" : "Using this computer";
+      return state.surface === "browser"
+        ? "Using the browser"
+        : state.surface === "own_desktop"
+          ? "Using its own desktop"
+          : "Using this computer";
     default:
       return "Not using a computer";
   }

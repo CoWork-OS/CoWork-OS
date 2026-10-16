@@ -4466,6 +4466,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, taskId),
   handBackComputer: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, taskId),
+  openBotDesktop: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_OPEN_DESKTOP, taskId),
+  stopBotDesktop: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP, taskId),
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
     const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
     const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
@@ -8610,6 +8614,9 @@ export interface ElectronAPI {
   /** The person takes over: the bot's computer and browser actions are refused until hand-back. */
   takeOverComputer: (taskId: string) => Promise<ComputerViewState>;
   handBackComputer: (taskId: string) => Promise<ComputerViewState>;
+  /** Opens the bot's own desktop in a window (full view; you can use it after taking over). */
+  openBotDesktop: (taskId: string) => Promise<{ opened: boolean }>;
+  stopBotDesktop: (taskId: string) => Promise<{ stopped: boolean }>;
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;

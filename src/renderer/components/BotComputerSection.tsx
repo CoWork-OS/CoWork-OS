@@ -12,11 +12,28 @@ export interface BotComputerSectionProps {
 /** Where the bot works, a live view of what it is doing there, and take-over. */
 export function BotComputerSection({ taskId, botName, worksOn }: BotComputerSectionProps) {
   const off = worksOn === "off";
-  const { state, busy, error, takeOver, handBack } = useComputerView(taskId, !off);
+  const ownDesktop = worksOn === "own_desktop";
+  const { state, busy, error, takeOver, handBack, openDesktop, stopDesktop } = useComputerView(
+    taskId,
+    !off,
+  );
   const worksOnLabel = BOT_WORKS_ON_OPTIONS.find((option) => option.value === worksOn)?.label;
   const held = state?.status === "held";
   const request = !held ? state?.takeoverRequest : undefined;
   const frame = state?.frame;
+  // It may still be running after the bot's turn ends (it stops after an hour without use).
+  const desktopRunning = state?.surface === "own_desktop";
+
+  // On its own desktop, taking over opens the desktop for you to use; handing back makes the
+  // open view read-only again.
+  const takeOverNow = async () => {
+    await takeOver();
+    if (ownDesktop) await openDesktop();
+  };
+  const handBackNow = async () => {
+    await handBack();
+    if (ownDesktop) await openDesktop();
+  };
 
   return (
     <section className="bot-details-section bot-computer" aria-label="Computer">
@@ -59,7 +76,7 @@ export function BotComputerSection({ taskId, botName, worksOn }: BotComputerSect
             <button
               type="button"
               className="bot-computer-button"
-              onClick={handBack}
+              onClick={() => void handBackNow()}
               disabled={busy}
             >
               Hand back
@@ -68,13 +85,33 @@ export function BotComputerSection({ taskId, botName, worksOn }: BotComputerSect
             <button
               type="button"
               className={`bot-computer-button${request ? " primary" : ""}`}
-              onClick={takeOver}
+              onClick={() => void takeOverNow()}
               disabled={busy}
             >
               <Hand size={13} />
               Take over
             </button>
           )}
+          {ownDesktop ? (
+            <button
+              type="button"
+              className="bot-computer-button"
+              onClick={() => void openDesktop()}
+              disabled={busy}
+            >
+              Open desktop
+            </button>
+          ) : null}
+          {ownDesktop && desktopRunning && !held ? (
+            <button
+              type="button"
+              className="bot-computer-button"
+              onClick={() => void stopDesktop()}
+              disabled={busy}
+            >
+              Stop desktop
+            </button>
+          ) : null}
         </div>
       ) : null}
       {error ? <p className="bot-computer-error">{error}</p> : null}

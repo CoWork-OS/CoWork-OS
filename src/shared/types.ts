@@ -1481,6 +1481,15 @@ export type ToolType =
   | "scratchpad_read"
   // Hand a computer step to the person (passwords, codes, payments)
   | "request_takeover"
+  // The bot's own desktop (Works on: Its own desktop)
+  | "desktop_screenshot"
+  | "desktop_open_url"
+  | "desktop_click"
+  | "desktop_type"
+  | "desktop_key"
+  | "desktop_scroll"
+  | "desktop_drag"
+  | "desktop_run"
   // Orchestration tools
   | "orchestrate_agents"
   // QA tools (Playwright visual QA)
@@ -1609,7 +1618,7 @@ export const TOOL_GROUPS = {
     "batch_image_process",
   ],
   // Destructive operations - high risk, requires approval
-  "group:destructive": ["delete_file", "run_command"],
+  "group:destructive": ["delete_file", "run_command", "desktop_run"],
   // System operations - requires explicit permission
   "group:system": [
     "android_phone_devices",
@@ -1642,6 +1651,7 @@ export const TOOL_GROUPS = {
   "group:network": [
     "manage_connector_events",
     "http_request",
+    "desktop_open_url",
     "generate_image",
     "generate_video",
     "get_video_generation_job",
@@ -1970,6 +1980,17 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   scratchpad_read: "read",
   // Only asks the person to take over; it changes nothing itself.
   request_takeover: "read",
+  // The bot's own desktop is a separate container: actions there don't touch this computer.
+  desktop_screenshot: "read",
+  desktop_open_url: "network",
+  desktop_click: "write",
+  desktop_type: "write",
+  desktop_key: "write",
+  desktop_scroll: "write",
+  desktop_drag: "write",
+  // A shell command, like run_command: approval and policy treat it as destructive even
+  // though it runs in the container, since it can reach the network with the bot's sign-ins.
+  desktop_run: "destructive",
   // Orchestration
   orchestrate_agents: "write",
   // Meta
@@ -8655,6 +8676,8 @@ export const IPC_CHANNELS = {
   COMPUTER_VIEW_TAKE_OVER: "computerView:takeOver",
   COMPUTER_VIEW_HAND_BACK: "computerView:handBack",
   COMPUTER_VIEW_EVENT: "computerView:event",
+  COMPUTER_VIEW_OPEN_DESKTOP: "computerView:openDesktop",
+  COMPUTER_VIEW_STOP_DESKTOP: "computerView:stopDesktop",
 
   // Tray (Menu Bar)
   TRAY_GET_SETTINGS: "tray:getSettings",

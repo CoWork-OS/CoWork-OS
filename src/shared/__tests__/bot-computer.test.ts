@@ -42,3 +42,19 @@ describe("bot computer settings", () => {
     expect(isComputerToolBlocked(undefined, "host")).toBe(false);
   });
 });
+
+describe("the bot's own desktop", () => {
+  it("offers desktop tools only to a bot set to work there", () => {
+    expect(computerToolKind("desktop_click")).toBe("desktop");
+    expect(isComputerToolBlocked("own_desktop", "desktop")).toBe(false);
+    for (const setting of ["auto", "this_computer", "browser", "off", undefined] as const) {
+      expect(isComputerToolBlocked(setting, "desktop")).toBe(true);
+    }
+  });
+
+  it("keeps a bot on its own desktop off this computer and the in-app browser", () => {
+    expect(isComputerToolBlocked("own_desktop", "host")).toBe(true);
+    expect(isComputerToolBlocked("own_desktop", "browser")).toBe(true);
+    expect(isComputerToolBlocked("own_desktop", "handoff")).toBe(false);
+  });
+});

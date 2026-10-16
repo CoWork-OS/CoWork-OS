@@ -30,13 +30,15 @@ export function useComputerView(taskId: string | undefined, enabled = true) {
   }, [taskId, enabled]);
 
   const run = useCallback(
-    async (action: (id: string) => Promise<ComputerViewState> | undefined) => {
+    async (action: (id: string) => Promise<unknown> | undefined) => {
       if (!taskId) return;
       setBusy(true);
       setError(null);
       try {
         const next = await action(taskId);
-        if (next) setState(next);
+        if (next && typeof next === "object" && "status" in next) {
+          setState(next as ComputerViewState);
+        }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Could not change who has control.");
       } finally {
@@ -55,5 +57,14 @@ export function useComputerView(taskId: string | undefined, enabled = true) {
     [run],
   );
 
-  return { state, busy, error, takeOver, handBack };
+  const openDesktop = useCallback(
+    () => run((id) => window.electronAPI?.openBotDesktop?.(id)),
+    [run],
+  );
+  const stopDesktop = useCallback(
+    () => run((id) => window.electronAPI?.stopBotDesktop?.(id)),
+    [run],
+  );
+
+  return { state, busy, error, takeOver, handBack, openDesktop, stopDesktop };
 }

@@ -28,6 +28,26 @@ function evaluate(input: Partial<Parameters<typeof PermissionEngine.evaluate>[0]
 }
 
 describe("PermissionEngine", () => {
+  describe("local video provider", () => {
+    const videoCall = (toolName: string, provider: string) =>
+      evaluate({ toolName, toolInput: { jobId: "job-1", provider, prompt: "p" } });
+
+    it("lets a local job poll run without a prompt", () => {
+      expect(videoCall("get_video_generation_job", "local").decision).toBe("allow");
+    });
+
+    it("still asks once to start a local render, without treating it as network", () => {
+      const result = videoCall("generate_video", "local");
+      expect(result.decision).toBe("ask");
+      expect(result.scope?.effectClass ?? "ordinary").not.toBe("network_read");
+    });
+
+    it("keeps cloud video calls as network access", () => {
+      expect(videoCall("get_video_generation_job", "openai").decision).toBe("ask");
+      expect(videoCall("generate_video", "azure").decision).toBe("ask");
+    });
+  });
+
   describe("configured MCP authority", () => {
     const fullWorkspace = {
       ...workspace,

@@ -128,6 +128,11 @@ const NETWORK_CAPABLE_TOOLS = new Set(["open_url", "canvas_open_url"]);
 // policy. A tool can be network-capable even when its implementation does not
 // expose a user-supplied URL (for example image generation or YouTube ingest).
 const NETWORK_TOOL_NAMES = new Set<string>(TOOL_GROUPS["group:network"]);
+const LOCAL_CAPABLE_VIDEO_TOOLS = new Set([
+  "generate_video",
+  "get_video_generation_job",
+  "cancel_video_generation_job",
+]);
 const READ_ONLY_BROWSER_TOOLS = new Set([
   "browser_get_content",
   "browser_get_text",
@@ -1303,7 +1308,17 @@ export class PermissionEngine {
       (!isMcp && toolName.endsWith("_action")) ||
       toolName === "voice_call" ||
       (isMcp && !request.mcpToolPolicy);
-    const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName);
+    // A video job on the local provider renders on this machine; it reads and
+    // writes only workspace files and makes no network request.
+    const isLocalVideoCall =
+      LOCAL_CAPABLE_VIDEO_TOOLS.has(toolName) &&
+      !!request.toolInput &&
+      typeof request.toolInput === "object" &&
+      (request.toolInput as Record<string, unknown>).provider === "local";
+    // Polling a local job only reads its state; the render itself was the
+    // write the user approved when generate_video started it.
+    const isLocalVideoPoll = isLocalVideoCall && toolName === "get_video_generation_job";
+    const isWorkspaceWriteLike = this.isWorkspaceWriteTool(toolName) && !isLocalVideoPoll;
     const isExternalSideEffect =
       (approvalType === "external_service" && !isWorkspaceWriteLike && !request.mcpToolPolicy) ||
       (request.mcpToolPolicy !== undefined && !request.mcpToolPolicy.readOnly) ||
@@ -1321,14 +1336,14 @@ export class PermissionEngine {
       approvalType === "network_access" ||
       NETWORK_READ_TOOLS.has(toolName) ||
       NETWORK_CAPABLE_TOOLS.has(toolName) ||
-      NETWORK_TOOL_NAMES.has(toolName) ||
+      (NETWORK_TOOL_NAMES.has(toolName) && !isLocalVideoCall) ||
       (toolName === "http_request" && isHttpRequestReadOnly) ||
       isCodeExecutionNetworkAccess ||
       // Classify the command as written, as ShellTools does: collapsing its
       // newlines merges heredoc bodies and separate commands into one line.
       (isShell && isLikelyNetworkShellCommand(rawCommand));
     const isNonWorkspaceInteraction = this.isNonWorkspaceInteractionTool(toolName, approvalType);
-    const isMutatingTool = this.isMutatingTool(toolName);
+    const isMutatingTool = this.isMutatingTool(toolName) && !isLocalVideoPoll;
     const isWriteLike =
       isDeleteLike ||
       isShell ||

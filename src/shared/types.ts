@@ -9600,8 +9600,8 @@ export interface LLMSettingsData {
   };
   /** Text-to-video generation settings. Provider-specific config + routing. */
   videoGeneration?: {
-    defaultProvider?: "openai" | "azure" | "gemini" | "vertex" | "kling";
-    fallbackProvider?: "openai" | "azure" | "gemini" | "vertex" | "kling";
+    defaultProvider?: "openai" | "azure" | "gemini" | "vertex" | "kling" | "local";
+    fallbackProvider?: "openai" | "azure" | "gemini" | "vertex" | "kling" | "local";
     openai?: {
       defaultModel?: string;
       defaultDuration?: number;
@@ -9639,6 +9639,13 @@ export interface LLMSettingsData {
       model?: string;
       defaultDuration?: number;
       defaultAspectRatio?: "16:9" | "9:16" | "1:1";
+    };
+    /** Open model run on this machine (Wan 2.2 via mlx-video). */
+    local?: {
+      pythonPath?: string;
+      modelDir?: string;
+      steps?: number;
+      maxMinutes?: number;
     };
   };
   // Cached models from API (populated when user refreshes)

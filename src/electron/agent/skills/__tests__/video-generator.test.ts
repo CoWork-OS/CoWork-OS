@@ -39,6 +39,55 @@ describe("VideoGenerator", () => {
     );
   });
 
+  it("sends Azure Sora 2 image-to-video as a multipart input_reference", async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-video-"));
+    fs.writeFileSync(path.join(tempDir, "scene.png"), Uint8Array.from([0x89, 0x50, 0x4e, 0x47]));
+
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "azure",
+      modelKey: "gpt-4o-mini",
+      openai: {},
+      gemini: {},
+      azure: { apiKey: "azure-key", endpoint: "https://example.openai.azure.com" },
+      videoGeneration: { defaultProvider: "azure", azure: { videoDeployment: "sora-2" } },
+    } as Any);
+
+    let form: FormData | undefined;
+    let headers: Record<string, string> = {};
+    fetchMock.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(url)).toContain("/openai/v1/videos?api-version=");
+      form = init?.body as FormData;
+      headers = (init?.headers ?? {}) as Record<string, string>;
+      return jsonResponse({ id: "job-i2v", status: "queued" });
+    });
+
+    const generator = new VideoGenerator({
+      path: tempDir,
+      permissions: { read: true, write: true },
+    } as Any);
+    const submitted = await generator.generate({
+      prompt: "Slow push in; mist drifts over the river.",
+      provider: "azure",
+      mode: "image_to_video",
+      referenceImagePath: "scene.png",
+      duration: 8,
+    });
+
+    expect(submitted.success).toBe(true);
+    expect(submitted.jobId).toBe("job-i2v");
+    expect(form).toBeInstanceOf(FormData);
+    expect(form!.get("model")).toBe("sora-2");
+    expect(form!.get("size")).toBe("1280x720");
+    expect(form!.get("seconds")).toBe("8");
+    expect(String(form!.get("prompt"))).toContain("mist");
+    const reference = form!.get("input_reference") as File;
+    expect(reference).toBeInstanceOf(Blob);
+    expect(reference.size).toBeGreaterThan(0);
+    expect(headers["api-key"]).toBe("azure-key");
+    // fetch must set the multipart boundary itself.
+    expect(headers["Content-Type"]).toBeUndefined();
+  });
+
   it("uses Azure Sora 2 videos API, ignores stray overrides, and writes the completed MP4 to the requested output path", async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-video-"));
 

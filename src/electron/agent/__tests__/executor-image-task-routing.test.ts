@@ -71,9 +71,73 @@ describe("text-to-image intent", () => {
     expect(executor.hasTextToImageGenerationIntent(prompt.toLowerCase())).toBe(false);
   });
 
+  it.each([
+    "Use the pdf-storybook skill on delta-field-guide.pdf. For every picture use the Qwen Image MCP tool to generate an image of each chapter, then animate 2 chapters.",
+    "Generate an image of a river delta and show it in Live Canvas",
+    "create a picture of a fox, then turn it into a short video clip",
+    "make an image of the chart from report.pdf",
+    "generate an image of each chapter and export the page",
+  ])("plans multi-part work that includes pictures: %s", (prompt) => {
+    const executor = createExecutor(prompt);
+    expect(executor.isSimpleImageGenerationTask()).toBe(false);
+  });
+
   it("routes the launch banner prompt to the simple image path", () => {
     const executor = createExecutor(BANNER_PROMPT, "Launch banner");
     expect(executor.isSimpleImageGenerationTask()).toBe(true);
+  });
+});
+
+describe("canvas availability", () => {
+  it("offers canvas tools when a plan step builds the canvas, even if the prompt does not say so", () => {
+    const executor = createExecutor("Use the pdf-storybook skill on delta-field-guide.pdf.");
+    executor.getContractPrompt = () => executor.task.prompt;
+    expect(executor.isVisualCanvasTask()).toBe(false);
+    executor.plan = {
+      description: "P",
+      steps: [
+        {
+          id: "3",
+          description: "Create the Live Canvas story with five chapters.",
+          status: "pending",
+        },
+      ],
+    };
+    expect(executor.isVisualCanvasTask()).toBe(true);
+  });
+});
+
+describe("canvas tools in later steps", () => {
+  const catalog = [
+    { name: "write_file" },
+    { name: "copy_file" },
+    { name: "canvas_push" },
+    { name: "canvas_add_asset" },
+    { name: "canvas_export" },
+    { name: "canvas_snapshot" },
+  ];
+  const step = {
+    id: "4",
+    kind: "primary",
+    description:
+      "Generate five chapter pictures, copy each one into the workspace and register it.",
+    status: "pending",
+  };
+
+  it("keeps canvas tools available once the task has a canvas page", () => {
+    const executor = createExecutor("Use the pdf-storybook skill on delta-field-guide.pdf.");
+    executor.toolRegistry = { getLatestCanvasSessionId: () => "canvas-1" };
+    const names = scopedToolNames(executor, step, catalog);
+    expect(names).toEqual(
+      expect.arrayContaining(["canvas_add_asset", "canvas_push", "canvas_export"]),
+    );
+  });
+
+  it("does not add canvas tools when the task has no canvas", () => {
+    const executor = createExecutor("Use the pdf-storybook skill on delta-field-guide.pdf.");
+    executor.toolRegistry = { getLatestCanvasSessionId: () => null };
+    const names = scopedToolNames(executor, step, catalog);
+    expect(names).not.toContain("canvas_add_asset");
   });
 });
 

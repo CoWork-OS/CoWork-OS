@@ -8,10 +8,19 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
+import { coverImageToSize } from "../tools/image-utils";
+import {
+  buildLocalVideoArgs,
+  cancelLocalVideoJob,
+  getLocalVideoJob,
+  resolveLocalVideoConfig,
+  waitForLocalVideoJob,
+  startLocalVideoJob,
+} from "./local-video-provider";
 
 // ── Provider & model types ────────────────────────────────────────────────────
 
-export type VideoProvider = "openai" | "azure" | "gemini" | "vertex" | "kling";
+export type VideoProvider = "openai" | "azure" | "gemini" | "vertex" | "kling" | "local";
 
 export type VideoGenerationMode =
   | "text_to_video"
@@ -84,6 +93,37 @@ interface AdapterResult {
   model?: string;
   error?: string;
   pending?: boolean;
+}
+
+// ── Local model (Wan 2.2 via mlx-video) ───────────────────────────────────────
+
+/** One local poll waits this long for the job to finish (under the 300 s tool timeout). */
+const LOCAL_VIDEO_POLL_WAIT_MS = 240_000;
+
+function generateWithLocal(args: AdapterArgs): AdapterResult {
+  const config = resolveLocalVideoConfig(args.settings.videoGeneration?.local);
+  if (!config) {
+    return { success: false, error: "The local video model is not installed or configured." };
+  }
+  const mode = args.request.mode ?? "text_to_video";
+  if (mode !== "text_to_video" && mode !== "image_to_video") {
+    return { success: false, error: `The local video model does not support mode "${mode}".` };
+  }
+  const outputPath = buildOutputPath(args.outputDir, args.request.filename);
+  args.outputPathGuard(outputPath);
+  const input = {
+    config,
+    prompt: args.request.prompt,
+    outputPath,
+    referenceImagePath: mode === "image_to_video" ? args.request.referenceImagePath : undefined,
+    aspectRatio: args.request.aspectRatio,
+    duration: args.request.duration,
+  };
+  console.log(
+    `[VideoGenerator][Local] ${config.pythonPath} ${buildLocalVideoArgs(input).slice(0, 2).join(" ")} (${mode})`,
+  );
+  const { jobId } = startLocalVideoJob(input);
+  return { success: true, jobId, pending: true, model: "wan2.2-ti2v-5b" };
 }
 
 // ── OpenAI Sora 2 ─────────────────────────────────────────────────────────────
@@ -296,6 +336,13 @@ function aspectRatioAndResolutionToAzureVideoSize(
   return "1280x720";
 }
 
+function imageMimeTypeForPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  return "image/jpeg";
+}
+
 function normalizeAzureVideoSeconds(seconds?: number): "4" | "8" | "12" {
   const value = Number.isFinite(seconds) ? Math.max(1, Math.round(seconds as number)) : 4;
   if (value <= 6) return "4";
@@ -347,22 +394,50 @@ async function generateWithAzure(args: AdapterArgs): Promise<AdapterResult> {
     seconds,
   };
 
+  let requestInit: RequestInit;
   if (mode === "image_to_video" && args.request.referenceImagePath) {
-    return {
-      success: false,
-      error:
-        "Azure Sora 2 image-to-video is not implemented in this build yet. Use text_to_video for now.",
+    // Sora takes the first frame as a multipart `input_reference` file whose
+    // dimensions must equal `size`, so the picture is center-cropped to fit.
+    const [width, height] = size.split("x").map(Number);
+    const fitted = coverImageToSize(args.request.referenceImagePath, width, height);
+    const referencePath = args.request.referenceImagePath;
+    const reference = fitted
+      ? { buffer: fitted.buffer, mimeType: fitted.mimeType, name: "reference.jpg" }
+      : {
+          buffer: fs.readFileSync(referencePath),
+          mimeType: imageMimeTypeForPath(referencePath),
+          name: path.basename(referencePath),
+        };
+    const form = new FormData();
+    form.append("model", model);
+    form.append("prompt", args.request.prompt);
+    form.append("size", size);
+    form.append("seconds", seconds);
+    form.append(
+      "input_reference",
+      new Blob([new Uint8Array(reference.buffer)], { type: reference.mimeType }),
+      reference.name,
+    );
+    console.log(
+      `[VideoGenerator][Azure] POST ${url}`,
+      JSON.stringify({
+        ...body,
+        input_reference: `${reference.name} (${reference.buffer.length} bytes)`,
+      }),
+    );
+    // fetch sets the multipart boundary itself.
+    requestInit = { method: "POST", headers: { "api-key": apiKey }, body: form };
+  } else {
+    console.log(`[VideoGenerator][Azure] POST ${url}`, JSON.stringify(body));
+    requestInit = {
+      method: "POST",
+      headers: { "api-key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     };
   }
 
-  console.log(`[VideoGenerator][Azure] POST ${url}`, JSON.stringify(body));
-
   args.networkPolicyGuard?.(url, "generate_video");
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "api-key": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const response = await fetch(url, requestInit);
 
   if (!response.ok) {
     const errText = await response.text().catch(() => String(response.status));
@@ -960,6 +1035,8 @@ function buildSetupHint(provider: VideoProvider): { type: string; label: string;
     return { type: "open_settings", label: "Set up Vertex AI project/access token", target: "llm" };
   if (provider === "kling")
     return { type: "open_settings", label: "Set up Kling API key", target: "llm" };
+  if (provider === "local")
+    return { type: "open_settings", label: "Set up the local video model", target: "llm" };
   return { type: "open_settings", label: "Set up OpenAI API key", target: "openai" };
 }
 
@@ -982,6 +1059,7 @@ function getConfiguredVideoProviders(
   )
     providers.push("vertex");
   if (settings.videoGeneration?.kling?.apiKey?.trim()) providers.push("kling");
+  if (resolveLocalVideoConfig(settings.videoGeneration?.local)) providers.push("local");
   return providers;
 }
 
@@ -1067,6 +1145,9 @@ export class VideoGenerator {
         return (
           settings.videoGeneration?.kling?.baseUrl?.trim() || "https://api.klingai.com"
         ).replace(/\/+$/, "");
+      case "local":
+        // Runs on this machine; no network endpoint to check.
+        return null;
     }
   }
 
@@ -1180,6 +1261,7 @@ export class VideoGenerator {
         else if (provider === "gemini") result = await generateWithGemini(args);
         else if (provider === "vertex") result = await generateWithVertex(args);
         else if (provider === "kling") result = await generateWithKling(args);
+        else if (provider === "local") result = generateWithLocal(args);
         else continue;
       } catch (err) {
         result = { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -1278,6 +1360,29 @@ export class VideoGenerator {
           this.assertNetworkAccess.bind(this),
         );
       }
+      if (provider === "local") {
+        const job = await waitForLocalVideoJob(normalizedJobId, LOCAL_VIDEO_POLL_WAIT_MS);
+        if (!job) {
+          return {
+            jobId: normalizedJobId,
+            provider,
+            status: "failed",
+            error: "Unknown local video job (the app may have restarted since it started).",
+          };
+        }
+        return {
+          jobId: normalizedJobId,
+          provider,
+          status: job.status,
+          ...(job.status === "succeeded" ? { outputPaths: [job.outputPath] } : {}),
+          ...(job.error ? { error: job.error } : {}),
+          ...(job.status === "running"
+            ? {
+                error: `Still rendering after ${job.elapsedSeconds}s (a local clip usually takes 5-15 minutes). Call get_video_generation_job again; do not start another clip or finish the step yet.`,
+              }
+            : {}),
+        };
+      }
       if (provider === "kling") {
         return await pollKlingJob(
           normalizedJobId,
@@ -1326,6 +1431,11 @@ export class VideoGenerator {
           },
         );
         return { success: response.ok, error: response.ok ? undefined : `HTTP ${response.status}` };
+      }
+      if (provider === "local") {
+        return cancelLocalVideoJob(jobId)
+          ? { success: true }
+          : { success: false, error: "No running local video job with that ID." };
       }
       // Other providers do not expose a cancel endpoint; return unsupported.
       return { success: false, error: `Cancel not supported for provider "${provider}".` };

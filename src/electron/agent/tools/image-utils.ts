@@ -140,3 +140,42 @@ async function downscaleWithNativeImage(
   await fs.writeFile(outputPath, resultBuffer);
   return { buffer: resultBuffer, mimeType: "image/jpeg" };
 }
+
+/**
+ * Center-crop an image to the target aspect ratio and resize it to exactly
+ * width x height (JPEG). Returns null when Electron's nativeImage is not
+ * available (headless daemon) or the file is not a decodable image.
+ */
+export function coverImageToSize(
+  inputPath: string,
+  width: number,
+  height: number,
+): { buffer: Buffer; mimeType: "image/jpeg" } | null {
+  let nativeImage: Any;
+  try {
+    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    nativeImage = require("electron").nativeImage;
+  } catch {
+    return null;
+  }
+  if (!nativeImage || typeof nativeImage.createFromPath !== "function") return null;
+  const img = nativeImage.createFromPath(inputPath);
+  if (!img || img.isEmpty()) return null;
+  const size = img.getSize();
+  if (!size.width || !size.height) return null;
+  const targetRatio = width / height;
+  let cropWidth = size.width;
+  let cropHeight = Math.round(size.width / targetRatio);
+  if (cropHeight > size.height) {
+    cropHeight = size.height;
+    cropWidth = Math.round(size.height * targetRatio);
+  }
+  const cropped = img.crop({
+    x: Math.floor((size.width - cropWidth) / 2),
+    y: Math.floor((size.height - cropHeight) / 2),
+    width: cropWidth,
+    height: cropHeight,
+  });
+  const resized = cropped.resize({ width, height, quality: "best" });
+  return { buffer: resized.toJPEG(90), mimeType: "image/jpeg" };
+}

@@ -4816,6 +4816,13 @@ if (isMacSafeStorageMigrationWorker) {
       });
     });
 
+    // A local video render is a separate process group; do not leave it running.
+    app.on("will-quit", () => {
+      void import("./agent/skills/local-video-provider")
+        .then(({ stopAllLocalVideoJobs }) => stopAllLocalVideoJobs())
+        .catch(() => {});
+    });
+
     app.on("window-all-closed", () => {
       if (HEADLESS) return;
       if (process.platform !== "darwin") {

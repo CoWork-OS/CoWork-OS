@@ -11725,6 +11725,12 @@ ${transcript}
    * command runs, so its outer deadline also covers the approval wait. Without
    * that, a command approved late is cut off shortly after it starts.
    */
+  private hasPendingUserDecisionForTask(): boolean {
+    const check = (this.daemon as { hasPendingUserDecisionForTask?: (taskId: string) => boolean })
+      .hasPendingUserDecisionForTask;
+    return typeof check === "function" && check.call(this.daemon, this.task.id) === true;
+  }
+
   private getOuterToolTimeoutMs(toolName: string, toolTimeoutMs: number): number {
     return toolName === "run_command"
       ? toolTimeoutMs + TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS
@@ -11818,6 +11824,13 @@ ${transcript}
         this.getOuterToolTimeoutMs(toolName, toolTimeoutMs),
         `Tool ${toolName}`,
         () => toolAbort.abort(),
+        {
+          // A tool can reach an approval prompt that its static approval type does
+          // not predict (the permission engine asks for canvas tools, for example).
+          // Time a person spends on that prompt does not count against the tool.
+          isPaused: () => this.hasPendingUserDecisionForTask(),
+          maxPauseMs: TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS,
+        },
       );
       if (coordinated.error) {
         throw coordinated.error;

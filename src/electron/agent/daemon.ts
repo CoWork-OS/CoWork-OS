@@ -856,6 +856,20 @@ export class AgentDaemon extends EventEmitter {
   private orchestrationGraphEngine: OrchestrationGraphEngine;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, PendingApprovalEntry> = new Map();
+
+  /**
+   * True while a person is being asked to decide something for this task: a queued
+   * approval or an input card (approvals in chat surfaces are input cards).
+   */
+  hasPendingUserDecisionForTask(taskId: string): boolean {
+    for (const entry of this.pendingApprovals.values()) {
+      if (entry.taskId === taskId && !entry.resolved) return true;
+    }
+    for (const entry of this.pendingInputRequests?.values() ?? []) {
+      if (entry.taskId === taskId && !entry.resolved) return true;
+    }
+    return false;
+  }
   /** One-shot approval decisions carried across executor reconstruction after a restart. */
   private pendingDurableApprovalGrants: Map<
     string,

@@ -1,5 +1,5 @@
 import { memo, useState, useRef, useCallback, Suspense, useLayoutEffect } from "react";
-import { GitFork } from "lucide-react";
+import { Check, Copy, GitFork, LoaderCircle, Quote, Square, Volume2 } from "lucide-react";
 import type {
   IntegrationMentionSelection,
   QuotedAssistantMessage,
@@ -218,7 +218,7 @@ export function isLastAssistantMessageEvent(
   return Boolean(event.id && lastAssistantMessage?.id === event.id);
 }
 
-// Copy button for user messages
+// Copy button for user and assistant messages
 export const MessageCopyButton = memo(function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -232,37 +232,20 @@ export const MessageCopyButton = memo(function MessageCopyButton({ text }: { tex
     }
   };
 
+  const label = copied ? "Copied" : "Copy message";
   return (
     <button
-      className={`message-copy-btn ${copied ? "copied" : ""}`}
+      type="button"
+      className={`message-action-btn message-copy-btn ${copied ? "copied" : ""}`}
       onClick={handleCopy}
-      title={copied ? "Copied!" : "Copy message"}
+      title={label}
+      aria-label={label}
     >
       {copied ? (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M20 6L9 17l-5-5" />
-        </svg>
+        <Check size={15} strokeWidth={2} aria-hidden="true" />
       ) : (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-        </svg>
+        <Copy size={15} strokeWidth={1.75} aria-hidden="true" />
       )}
-      <span>{copied ? "Copied" : "Copy"}</span>
     </button>
   );
 });
@@ -275,24 +258,12 @@ export const MessageQuoteButton = memo(function MessageQuoteButton({
   return (
     <button
       type="button"
-      className="message-quote-btn"
+      className="message-action-btn message-quote-btn"
       onClick={onQuote}
       title="Quote this message"
+      aria-label="Quote this message"
     >
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M10 8L6 12l4 4" />
-        <path d="M6 12h9a5 5 0 0 1 5 5v0" />
-      </svg>
-      <span>Quote</span>
+      <Quote size={15} strokeWidth={1.75} aria-hidden="true" />
     </button>
   );
 });
@@ -305,12 +276,12 @@ export const MessageForkButton = memo(function MessageForkButton({
   return (
     <button
       type="button"
-      className="message-fork-btn"
+      className="message-action-btn message-fork-btn"
       onClick={onFork}
       title="Fork from this message"
+      aria-label="Fork from this message"
     >
-      <GitFork size={12} strokeWidth={2} aria-hidden="true" />
-      <span>Fork</span>
+      <GitFork size={15} strokeWidth={1.75} aria-hidden="true" />
     </button>
   );
 });
@@ -484,51 +455,23 @@ export const MessageSpeakButton = memo(function MessageSpeakButton({
 
   if (!voiceEnabled) return null;
 
+  const label = speaking ? "Stop speaking" : loading ? "Loading…" : "Read aloud";
   return (
     <button
-      className={`message-speak-btn ${speaking ? "speaking" : ""}`}
+      type="button"
+      className={`message-action-btn message-speak-btn ${speaking ? "speaking" : ""}`}
       onClick={handleClick}
-      title={speaking ? "Stop speaking" : loading ? "Loading..." : "Speak message"}
+      title={label}
+      aria-label={label}
       disabled={loading}
     >
       {speaking ? (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <rect x="4" y="4" width="16" height="16" rx="2" />
-        </svg>
+        <Square size={13} strokeWidth={2} fill="currentColor" aria-hidden="true" />
       ) : loading ? (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className="spin"
-        >
-          <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
-        </svg>
+        <LoaderCircle size={15} strokeWidth={1.75} className="spin" aria-hidden="true" />
       ) : (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-        </svg>
+        <Volume2 size={15} strokeWidth={1.75} aria-hidden="true" />
       )}
-      <span>{speaking ? "Stop" : loading ? "Loading" : "Speak"}</span>
     </button>
   );
 });

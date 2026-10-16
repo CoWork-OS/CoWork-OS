@@ -222,6 +222,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   Clock,
+  ThumbsDown,
+  ThumbsUp,
   X,
 } from "lucide-react";
 import { InlineImagePreview } from "../InlineImagePreview";
@@ -3379,10 +3381,9 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                               )}
                             </div>
                           )}
-                          {/* Copy with ⌘C and reply by selecting text (SelectionReplyPopover). */}
+                          {/* Icon-only actions; reply to a passage by selecting it (SelectionReplyPopover). */}
                           <div className="message-actions">
-                            {/* Bot chats have no selection-reply popover, so offer an explicit copy. */}
-                            {isBotConversation && <MessageCopyButton text={cleanedMessageText} />}
+                            <MessageCopyButton text={cleanedMessageText} />
                             <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
                             {event.id &&
                               onForkTaskSessionFromEvent &&
@@ -3395,8 +3396,11 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             {isLastAssistant && event.id && !isTaskWorking && (
                               <>
                                 <button
-                                  className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
+                                  type="button"
+                                  className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
                                   title="Helpful"
+                                  aria-label="Helpful"
+                                  aria-pressed={messageFeedbackMap.get(event.id) === "accepted"}
                                   onClick={() =>
                                     void handleMessageFeedback({
                                       messageId: event.id!,
@@ -3404,25 +3408,29 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                     })
                                   }
                                 >
-                                  👍
+                                  <ThumbsUp size={15} strokeWidth={1.75} aria-hidden="true" />
                                 </button>
                                 <div
                                   ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
                                   className="message-feedback-thumbdown-wrap"
                                 >
                                   <button
-                                    className={`message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
+                                    type="button"
+                                    className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
                                     title="Not helpful"
+                                    aria-label="Not helpful"
+                                    aria-haspopup="menu"
+                                    aria-expanded={rejectMenuOpenFor === event.id}
                                     onClick={() =>
                                       setRejectMenuOpenFor((v) =>
                                         v === event.id ? null : (event.id ?? null),
                                       )
                                     }
                                   >
-                                    👎
+                                    <ThumbsDown size={15} strokeWidth={1.75} aria-hidden="true" />
                                   </button>
                                   {rejectMenuOpenFor === event.id && (
-                                    <div className="message-feedback-menu">
+                                    <div className="message-feedback-menu" role="menu">
                                       {(
                                         [
                                           ["incorrect", "Incorrect"],
@@ -3434,6 +3442,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                       ).map(([reason, label]) => (
                                         <button
                                           key={reason}
+                                          type="button"
+                                          role="menuitem"
                                           className="message-feedback-reason"
                                           onClick={() =>
                                             void handleMessageFeedback({
@@ -3453,24 +3463,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             )}
                             {isLastAssistant && isTaskWorking && !isBotConversation && (
                               <button
-                                className="bubble-feedback-toggle"
+                                type="button"
+                                className="message-action-btn bubble-feedback-toggle"
                                 onClick={() => setStepFeedbackOpen((o) => !o)}
                                 title="Give feedback"
+                                aria-label="Give feedback"
                               >
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <circle cx="12" cy="12" r="1" />
-                                  <circle cx="19" cy="12" r="1" />
-                                  <circle cx="5" cy="12" r="1" />
-                                </svg>
+                                <Ellipsis size={15} strokeWidth={1.75} aria-hidden="true" />
                               </button>
                             )}
                           </div>

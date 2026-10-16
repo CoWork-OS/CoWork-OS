@@ -1546,6 +1546,49 @@ html.visual-calm .calm-task .task-status-strip-phase {
   color: var(--calm-text-muted);
 }
 
+/* Live plan: the same 32px/33px inset as the strip, so each glyph sits over the
+   strip's status icon and the composer's "+". */
+html.visual-calm .calm-task .live-plan-list {
+  padding: 14px 33px 8px 32px;
+}
+
+html.visual-calm .calm-task .live-plan-inner::after {
+  margin: 0 33px 0 32px;
+  background: var(--calm-border);
+}
+
+html.visual-calm .calm-task .live-plan-item-body,
+html.visual-calm .calm-task .live-plan-fold button {
+  padding: 4px 0;
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-task button.live-plan-item-body:hover,
+html.visual-calm .calm-task .live-plan-fold button:hover,
+html.visual-calm .calm-task .live-plan-item.is-active .live-plan-item-body,
+html.visual-calm .calm-task .live-plan-item.is-active .live-plan-glyph-slot {
+  color: var(--calm-text);
+}
+
+html.visual-calm .calm-task .live-plan-glyph-slot,
+html.visual-calm .calm-task .live-plan-fold button,
+html.visual-calm .calm-task .live-plan-item.is-done .live-plan-item-body,
+html.visual-calm .calm-task .live-plan-item.is-skipped .live-plan-item-body {
+  color: var(--calm-text-muted);
+}
+
+html.visual-calm .calm-task .live-plan-item.is-done .live-plan-glyph-slot {
+  color: var(--calm-text-secondary);
+}
+
+html.visual-calm .calm-task .live-plan-item.is-blocked .live-plan-glyph-slot {
+  color: var(--color-warning);
+}
+
+html.visual-calm .calm-task .live-plan-item.is-failed .live-plan-glyph-slot {
+  color: var(--color-error);
+}
+
 /* ---------- Home Today stack ----------
    Each card is one prepared decision: source and state, a headline, why it's
    here, what will run, then one primary action. Acted-on cards fold away and

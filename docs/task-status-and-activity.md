@@ -16,6 +16,27 @@ setting its `localStorage` value to `false`. When renderer performance logging i
 open/close telemetry records categorical counters only. It never includes labels, paths, arguments,
 filenames, or task content.
 
+## Live plan
+
+While a task runs, the status strip's shell also lists the plan above the strip, so the plan, the
+strip, and the composer read as one stacked card. `deriveLivePlan` in
+`src/renderer/utils/live-plan.ts` builds it from the agent's session checklist (`task_list_*`) when
+that was written during the current turn, otherwise from the planner's steps. One-item plans are not
+shown. Steps the executor writes itself (the final summary, verification repairs, sub-agent dispatch)
+carry model instructions as their descriptions, so the plan shows the short labels from
+`src/shared/generated-plan-steps.ts` instead.
+
+Each row shows its state: a filled check for done, a slowly turning dashed ring for the current
+step, and an empty ring for what is next. Plans longer than six rows show a window around the
+current step with "N done" and "N more" rows that expand the full list. A row jumps to its activity
+group in the timeline when it has one. The list stays while the task is working, paused, blocked, or
+waiting for approval or input. When the task ends, the last check lands, the list holds briefly, and
+then folds away.
+
+The reasoning card in the timeline appears only while the model's reasoning is streaming. It no
+longer falls back to a list of recent progress lines, because the status strip, the live plan, and
+the transcript already show them.
+
 ## Trusted impact metrics
 
 The renderer formats the additive `TaskImpactMetric` contract in

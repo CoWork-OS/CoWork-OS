@@ -149,6 +149,7 @@ import {
   resolveTaskOutputSummaryFromTask,
 } from "../../utils/task-outputs";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
+import { deriveLivePlan } from "../../utils/live-plan";
 import {
   getAgentMessageReceipt,
   formatAgentMessageProtocolForDisplay,
@@ -777,8 +778,7 @@ export function AgentReasoningPanel(props: {
   const stepLabel = currentStep?.description?.trim() || "";
   // The answer renders its interactive blocks itself; the preview shows only the prose.
   const activeStreamText = withoutAnswerSurfaceBlocks(state.activeStreamText);
-  const hasStreamText = activeStreamText.trim().length > 0;
-  const streamSignature = hasStreamText ? activeStreamText : state.recentUpdates.join("\n");
+  const streamSignature = activeStreamText;
 
   const handleScroll = useCallback(() => {
     const element = scrollRef.current;
@@ -805,7 +805,7 @@ export function AgentReasoningPanel(props: {
       <div className="agent-reasoning-panel-header">
         <div className="agent-reasoning-panel-title">
           <Sparkles size={13} strokeWidth={1.8} />
-          <span>{state.isStreaming ? "Reasoning" : "Recent reasoning"}</span>
+          <span>Reasoning</span>
         </div>
         {stepLabel ? (
           <span className="agent-reasoning-step" title={stepLabel}>
@@ -832,20 +832,9 @@ export function AgentReasoningPanel(props: {
         className={`agent-reasoning-stream ${state.isStreaming ? "is-streaming" : ""}`}
         onScroll={handleScroll}
       >
-        {hasStreamText ? (
-          <div className="agent-reasoning-stream-text markdown-content">
-            <MarkdownRenderer withBreaks>{activeStreamText}</MarkdownRenderer>
-          </div>
-        ) : (
-          state.recentUpdates.map((message, index) => (
-            <div
-              key={`${index}:${message.slice(0, 48)}`}
-              className="agent-reasoning-update markdown-content"
-            >
-              <MarkdownRenderer withBreaks>{withoutAnswerSurfaceBlocks(message)}</MarkdownRenderer>
-            </div>
-          ))
-        )}
+        <div className="agent-reasoning-stream-text markdown-content">
+          <MarkdownRenderer withBreaks>{activeStreamText}</MarkdownRenderer>
+        </div>
       </div>
     </div>
   );
@@ -2240,7 +2229,6 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
         currentStep?.description || "",
         reasoningPanelState.isStreaming ? "1" : "0",
         reasoningPanelState.activeStreamText,
-        reasoningPanelState.recentUpdates.join("\n"),
       ].join("::")
     : "";
   const feedRowRenderCacheRef = useRef<Map<string, { signature: string; node: React.ReactNode }>>(
@@ -4212,6 +4200,21 @@ function MainContentComponent({
       latestActivityId: events.at(-1)?.id,
     }),
     [events, newActivityCount, statusTaskEventUi.taskStatusStrip],
+  );
+  const livePlan = useMemo(
+    () =>
+      deriveLivePlan({
+        state: statusTaskEventUi.taskStatusStrip.state,
+        planSteps: statusTaskEventUi.planSteps,
+        checklistState: statusTaskEventUi.checklistState,
+        events: statusTaskEventUi.normalizedEvents,
+      }),
+    [
+      statusTaskEventUi.checklistState,
+      statusTaskEventUi.normalizedEvents,
+      statusTaskEventUi.planSteps,
+      statusTaskEventUi.taskStatusStrip.state,
+    ],
   );
   const childEvents = useMemo(
     () =>
@@ -12638,6 +12641,8 @@ function MainContentComponent({
                 ) : undefined
               }
               replay={isReplayMode}
+              livePlan={livePlan}
+              livePlanScopeKey={task.id}
               telemetryEnabled={rendererPerfLoggingEnabled}
               // RightPanel only renders its Files section when it has file rows, and it
               // never shows Impact, so only defer Outputs when those rows exist.

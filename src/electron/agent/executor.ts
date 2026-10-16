@@ -1,6 +1,7 @@
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
+import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
 import { BotDesktopTools } from "./tools/bot-desktop-tools";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
@@ -13542,8 +13543,7 @@ ${transcript}
     ) {
       nextPlan.steps.unshift({
         id: this.nextPlanStepId(nextPlan.steps),
-        description:
-          "Use orchestrate_agents to dispatch the explicitly requested independent scopes to actual child agents and collect their results. Assign public official-source research to web_researcher. Do not replace agents with serial passes; preserve the original task scope and memory exclusions.",
+        description: AGENT_DISPATCH_STEP_DESCRIPTION,
         status: "pending",
       });
     }

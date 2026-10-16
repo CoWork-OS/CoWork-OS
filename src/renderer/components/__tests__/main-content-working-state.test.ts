@@ -32,6 +32,7 @@ import {
   TaskSessionLineageFooter,
 } from "../MainContent";
 import { AgentReasoningPanel } from "../MainContent/MainContent";
+import { hasAgentReasoningPanelContent } from "../MainContent/task-feed-logic";
 import { shouldShowCancelledTaskBanner } from "../../utils/bot-conversations";
 import { isTaskActivelyWorking } from "../../utils/task-working-state";
 import {
@@ -1120,28 +1121,7 @@ describe("isTaskActivelyWorking", () => {
 
     expect(state.activeStreamText).toBe("I'm checking the repo and runtime state first.");
     expect(state.isStreaming).toBe(true);
-    expect(state.recentUpdates).toEqual(["Inspecting repository"]);
-  });
-
-  it("renders Markdown in recent reasoning updates", () => {
-    const markup = renderToStaticMarkup(
-      React.createElement(AgentReasoningPanel, {
-        currentStep: null,
-        state: {
-          activeStreamText: "",
-          isStreaming: false,
-          recentUpdates: [
-            "**Task:** Inspect the repo.\n\n- Read the relevant component\n- Verify the fix",
-          ],
-        },
-      }),
-    );
-
-    expect(markup).toContain("<strong>Task:</strong> Inspect the repo.");
-    expect(markup).toContain("<ul>");
-    expect(markup).toContain("<li>Read the relevant component</li>");
-    expect(markup).not.toContain("**Task:**");
-    expect(markup).not.toContain("- Read the relevant component");
+    expect(hasAgentReasoningPanelContent(state)).toBe(true);
   });
 
   it("renders Markdown in the active reasoning stream", () => {
@@ -1151,7 +1131,6 @@ describe("isTaskActivelyWorking", () => {
         state: {
           activeStreamText: "Use `rg` to inspect the source.",
           isStreaming: true,
-          recentUpdates: [],
         },
       }),
     );
@@ -1160,36 +1139,10 @@ describe("isTaskActivelyWorking", () => {
     expect(markup).not.toContain("`rg`");
   });
 
-  it("falls back to recent user-facing progress updates when no reasoning stream is active", () => {
-    const state = deriveAgentReasoningPanelState({
-      events: [
-        makeEvent("progress-hidden", 100, "timeline_step_updated", {
-          legacyType: "progress_update",
-          message: "Thinking...",
-        }),
-        makeEvent("progress-1", 200, "timeline_step_updated", {
-          legacyType: "progress_update",
-          message: "Analyzing task requirements...",
-        }),
-        makeEvent("progress-2", 300, "timeline_step_updated", {
-          legacyType: "progress_update",
-          message: "Executing step 1/2: Inspect repository",
-        }),
-        makeEvent("step-1", 400, "timeline_step_started", {
-          step: { id: "step-1", description: "Inspect repository" },
-        }),
-      ],
-      taskId: "task-1",
-      isTaskWorking: true,
-    });
-
-    expect(state.activeStreamText).toBe("");
-    expect(state.isStreaming).toBe(false);
-    expect(state.recentUpdates).toEqual(["Understanding the request", "Inspecting repository"]);
-  });
-
-  it("includes assistant messages in the reasoning fallback window", () => {
-    const state = deriveAgentReasoningPanelState({
+  // Progress lines, step names and replies already show in the status strip, the live
+  // plan and the transcript, so the panel waits for reasoning that is streaming now.
+  it("stays hidden without a live reasoning stream", () => {
+    const progressOnly = deriveAgentReasoningPanelState({
       events: [
         makeEvent("progress-1", 100, "timeline_step_updated", {
           legacyType: "progress_update",
@@ -1199,22 +1152,26 @@ describe("isTaskActivelyWorking", () => {
           legacyType: "assistant_message",
           message: "I’m checking the scaffolded Kami slide project first.",
         }),
-        makeEvent("assistant-internal", 300, "timeline_step_updated", {
-          legacyType: "assistant_message",
-          internal: true,
-          message: "OK",
+      ],
+      taskId: "task-1",
+      isTaskWorking: true,
+    });
+    expect(progressOnly).toEqual({ activeStreamText: "", isStreaming: false });
+    expect(hasAgentReasoningPanelContent(progressOnly)).toBe(false);
+
+    const finishedStream = deriveAgentReasoningPanelState({
+      events: [
+        makeEvent("stream-1", 100, "timeline_step_updated", {
+          legacyType: "llm_streaming",
+          text: "Checked the repo; moving on.",
+          streaming: false,
         }),
       ],
       taskId: "task-1",
       isTaskWorking: true,
     });
-
-    expect(state.activeStreamText).toBe("");
-    expect(state.isStreaming).toBe(false);
-    expect(state.recentUpdates).toEqual([
-      "Inspecting repository",
-      "I’m checking the scaffolded Kami slide project first.",
-    ]);
+    expect(finishedStream.activeStreamText).toBe("Checked the repo; moving on.");
+    expect(hasAgentReasoningPanelContent(finishedStream)).toBe(false);
   });
 
   it("detects when action block state contains stale ids", () => {

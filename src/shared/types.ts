@@ -1618,7 +1618,7 @@ export const TOOL_GROUPS = {
     "batch_image_process",
   ],
   // Destructive operations - high risk, requires approval
-  "group:destructive": ["delete_file", "run_command"],
+  "group:destructive": ["delete_file", "run_command", "desktop_run"],
   // System operations - requires explicit permission
   "group:system": [
     "android_phone_devices",
@@ -1651,6 +1651,7 @@ export const TOOL_GROUPS = {
   "group:network": [
     "manage_connector_events",
     "http_request",
+    "desktop_open_url",
     "generate_image",
     "generate_video",
     "get_video_generation_job",
@@ -1987,7 +1988,9 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   desktop_key: "write",
   desktop_scroll: "write",
   desktop_drag: "write",
-  desktop_run: "write",
+  // A shell command, like run_command: approval and policy treat it as destructive even
+  // though it runs in the container, since it can reach the network with the bot's sign-ins.
+  desktop_run: "destructive",
   // Orchestration
   orchestrate_agents: "write",
   // Meta

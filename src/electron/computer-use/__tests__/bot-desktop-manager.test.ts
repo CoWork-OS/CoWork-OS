@@ -40,7 +40,7 @@ describe("BotDesktopManager", () => {
       case "inspect":
         return out(running.has(args[args.length - 1]) ? "true" : "false");
       case "exec":
-        if (args.includes("scrot --overwrite /tmp/cowork-shot.png && cat /tmp/cowork-shot.png")) {
+        if (args.some((arg) => arg.includes("scrot"))) {
           return { stdout: fakePng(), stderr: "" };
         }
         return out("1280 800");
@@ -71,6 +71,7 @@ describe("BotDesktopManager", () => {
       run: runner,
       runtimeCandidates: ["podman", "docker"],
       waitMs: 1000,
+      hostUid: 1000,
     });
   });
 
@@ -102,6 +103,13 @@ describe("BotDesktopManager", () => {
     const volumes = run.filter((_, index) => run[index - 1] === "--volume");
     expect(volumes).toEqual([`${manager.homeFolder("bot-1")}:/home/bot/work`]);
     expect(fs.statSync(manager.homeFolder("bot-1")).isDirectory()).toBe(true);
+    // The viewer passwords never ride in the environment: they go in over stdin after start.
+    expect(run.join(" ")).not.toContain("VNC_PASSWORD");
+    const passwd = calls.find((call) => call.join(" ").includes(".vnc/passwd"))!;
+    expect(passwd.slice(0, 4)).toEqual(["docker", "exec", "--interactive", "--user"]);
+    expect(runner.mock.calls.find((call) => call[1].includes("--interactive"))?.[2]?.input).toMatch(
+      /^.{8}\n__BEGIN_VIEWONLY__\n.{8}\n$/,
+    );
 
     await manager.withDesktop("bot-1", async () => undefined);
     expect(calls.filter((call) => call[1] === "run")).toHaveLength(1);
@@ -155,6 +163,56 @@ describe("BotDesktopManager", () => {
     expect(watching.searchParams.get("password")).toMatch(/^.{8}$/);
     const using = new URL(await manager.viewerUrl("bot-1", { viewOnly: false }));
     expect(using.searchParams.get("view_only")).toBe("0");
+    // Watching gets the view-only password; only take-over gets the one that can drive it.
+    expect(using.searchParams.get("password")).not.toBe(watching.searchParams.get("password"));
+  });
+
+  it("skips idle stop while the person is using the desktop, and the poller while a task is", async () => {
+    let inUse = true;
+    let now = 0;
+    BotDesktopManager.configure({
+      dataDir: () => dataDir,
+      resourcesDir: () => resourcesDir,
+      run: runner,
+      runtimeCandidates: ["docker"],
+      hostUid: 1000,
+      idleStopMs: 1000,
+      now: () => now,
+      inUse: () => inUse,
+    });
+    const manager = BotDesktopManager.getInstance();
+    let release!: () => void;
+    const turn = manager.withDesktop("bot-1", async () => {
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    expect(await manager.captureIfRunning("bot-1")).toBeNull();
+    release();
+    await turn;
+    expect(await manager.captureIfRunning("bot-1")).not.toBeNull();
+    now = 5000;
+    await (manager as Any).stopIdleDesktops();
+    expect(calls.find((call) => call[1] === "stop")).toBeUndefined();
+    inUse = false;
+    await (manager as Any).stopIdleDesktops();
+    expect(calls.find((call) => call[1] === "stop")).toBeDefined();
+  });
+
+  it("remembers that no runtime was found instead of probing on every call", async () => {
+    const probes: string[] = [];
+    BotDesktopManager.configure({
+      dataDir: () => dataDir,
+      resourcesDir: () => resourcesDir,
+      runtimeCandidates: ["docker", "podman"],
+      run: async (command) => {
+        probes.push(command);
+        throw new Error("not found");
+      },
+    });
+    const manager = BotDesktopManager.getInstance();
+    expect((await manager.getStatus("bot-1")).state).toBe("unavailable");
+    expect((await manager.getStatus("bot-1")).state).toBe("unavailable");
+    expect(probes).toEqual(["docker", "podman"]);
   });
 
   it("stops desktops an earlier session left running, and only those", async () => {

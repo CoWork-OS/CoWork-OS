@@ -116,7 +116,10 @@ Local output publication still requires the active profile's write grant.
 Private records under `<profile userData>/space-runs/<endpoint-workspace hash>/`
 retain creation/deletion keys, sandbox/operation/process IDs, bounded user-command
 output, and publication receipts. Intent is saved before mutations. Output is
-checkpointed as it arrives because SPACE streams do not replay.
+checkpointed as it arrives (at most once a second; completion saves the rest)
+because SPACE streams do not replay. A run that finishes with its VM deleted and
+no unknown outcome removes its record; records kept only for inspection (unknown
+outcomes, abandoned cleanup) are removed after seven days.
 
 A valid terminal event completes attachment immediately, even if the stream stays
 open. A stream closed before that event, sequence gap, `resync_required`, invalid exit identity/status,
@@ -127,8 +130,9 @@ requests are never replayed, including during restart recovery.
 Stop and runtime cancellation abort attachment and request VM deletion using a
 separate cleanup deadline. Permission or workspace changes cancel active remote
 work as well. Deletion is complete only after its operation succeeds. A failed
-delete leaves the journal pending, returns a failure with its recovery record
-ID, and blocks further invocations on that adapter.
+delete leaves the journal pending and returns a failure with its recovery record
+ID. The next invocation on that adapter first retries the deletion with the same
+delete key, and starts new work only once it succeeds.
 
 On the next initialization for the same workspace and endpoints, CoWork reconciles
 stale records. It resumes deletion polling or reuses the original delete key
@@ -137,8 +141,10 @@ attempt can still be cleaned up; an expired ambiguous deletion requires inspecti
 If creation lost its reply, it recovers the ID with the exact original create
 body/key only inside the 24-hour upstream deduplication window, then deletes the
 VM without executing anything. Expired unknown creates, endpoint mismatches, and
-failed cleanup require operator inspection. Records owned by a live process are
-left alone. Recovery is not a cross-host fencing mechanism.
+expired ambiguous deletions are marked `abandoned` for operator inspection and
+no longer retried; unreadable records are skipped. Neither blocks new work, and a
+transient cleanup failure is retried on the next initialization. Records owned by
+a live process are left alone. Recovery is not a cross-host fencing mechanism.
 
 An idle-delete policy of ten minutes is also requested as a server-side backstop;
 it does not replace confirmed cleanup. Recovery runs when SPACE is next used,

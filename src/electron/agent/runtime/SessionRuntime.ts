@@ -4484,8 +4484,7 @@ export class SessionRuntime {
                   receipt.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
               }
             : {}),
-          ...(followUp.surfaceOrigin === undefined &&
-          isMessageSurfaceOrigin(receipt.surfaceOrigin)
+          ...(followUp.surfaceOrigin === undefined && isMessageSurfaceOrigin(receipt.surfaceOrigin)
             ? { surfaceOrigin: receipt.surfaceOrigin as TaskFollowUpInput["surfaceOrigin"] }
             : {}),
           ...(followUp.integrationMentions === undefined &&

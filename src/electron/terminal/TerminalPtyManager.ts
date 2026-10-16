@@ -128,7 +128,7 @@ function buildZshPromptSetup(): string {
     "}",
     "function __cowork_terminal_mark_done() {",
     "  local exit_status=$?",
-    "  printf '\\e]133;D;%s;%s\\a' \"$__cowork_mark_nonce\" \"$exit_status\"",
+    '  printf \'\\e]133;D;%s;%s\\a\' "$__cowork_mark_nonce" "$exit_status"',
     "}",
     "autoload -Uz add-zsh-hook 2>/dev/null",
     "if (( $+functions[add-zsh-hook] )); then",

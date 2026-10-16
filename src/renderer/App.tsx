@@ -1,8 +1,5 @@
 import { PrivateBrowserPrompts } from "./components/BrowserWorkbench/PrivateBrowserPrompt";
-import {
-  OPEN_TERMINAL_TAB_EVENT,
-  type OpenTerminalTabRequest,
-} from "./utils/code-block-runs";
+import { OPEN_TERMINAL_TAB_EVENT, type OpenTerminalTabRequest } from "./utils/code-block-runs";
 import type { TerminalTabFocusRequest } from "./components/TerminalTabsDock";
 import { requestBotMemoryContext } from "./components/memory/memory-hub-focus";
 import {

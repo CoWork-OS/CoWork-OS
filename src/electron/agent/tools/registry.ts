@@ -3596,6 +3596,18 @@ export class ToolRegistry {
       async ({ request }) => this.canvasTools.takeSnapshot(request.input.session_id),
       serialSchedulerSpec,
     );
+    register(
+      "canvas_add_asset",
+      async ({ request }) =>
+        this.canvasTools.addAsset(request.input.session_id, request.input.path, request.input.name),
+      serialSchedulerSpec,
+    );
+    register(
+      "canvas_export",
+      async ({ request }) =>
+        this.canvasTools.exportCanvas(request.input.session_id, request.input.target_dir),
+      serialSchedulerSpec,
+    );
     register("canvas_list", async () => this.canvasTools.listSessions(), serialSchedulerSpec);
     register(
       "canvas_checkpoint",
@@ -4808,6 +4820,8 @@ Live Canvas (Visual Workspace):
 - canvas_hide: Hide the canvas window
 - canvas_close: Close a canvas session
 - canvas_eval: Execute JavaScript in the canvas context
+- canvas_add_asset: Copy a workspace image/video/audio file into the canvas assets/ folder; use the returned relative url in canvas_push HTML instead of base64.
+- canvas_export: Export the canvas page and its assets to a workspace folder.
 - canvas_snapshot: Take a screenshot of the canvas
 - canvas_list: List all active canvas sessions
 IMPORTANT: When using canvas_push for visual output, provide content when available.
@@ -5431,6 +5445,10 @@ ${skillDescriptions}`;
     if (name === "canvas_eval")
       return await this.canvasTools.evalScript(input.session_id, input.script);
     if (name === "canvas_snapshot") return await this.canvasTools.takeSnapshot(input.session_id);
+    if (name === "canvas_add_asset")
+      return await this.canvasTools.addAsset(input.session_id, input.path, input.name);
+    if (name === "canvas_export")
+      return await this.canvasTools.exportCanvas(input.session_id, input.target_dir);
     if (name === "canvas_list") return this.canvasTools.listSessions();
     if (name === "canvas_checkpoint")
       return await this.canvasTools.saveCheckpoint(input.session_id, input.label);

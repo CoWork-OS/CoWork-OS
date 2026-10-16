@@ -16,6 +16,7 @@ import {
   initialTopicFile,
   insertEntryLine,
   isSafeRepoPath,
+  isBotRepoPath,
   isSwarmRepoPath,
   isoDay,
   parseMemoryRepoEntries,
@@ -122,8 +123,8 @@ export function buildDreamInput(params: {
     MEMORY_REPO_ENTRY_FILE,
     ...[...params.files.keys()].sort(),
   ]
-    // Dreams never read swarm folders (agents' shared notes; phase 5 §2).
-    .filter((file) => !isSwarmRepoPath(file))
+    // Dreams never read swarm folders (agents' shared notes; phase 5 §2) or bots' own files.
+    .filter((file) => !isSwarmRepoPath(file) && !isBotRepoPath(file))
     .filter((file, index, all) => params.files.has(file) && all.indexOf(file) === index);
   const sections: string[] = [];
   let used = 0;
@@ -349,7 +350,12 @@ function isWorkspacePath(path: string): boolean {
 }
 
 function validTarget(path: string): boolean {
-  return isSafeRepoPath(path) && path !== MEMORY_REPO_INBOX_FILE && !isSwarmRepoPath(path);
+  return (
+    isSafeRepoPath(path) &&
+    path !== MEMORY_REPO_INBOX_FILE &&
+    !isSwarmRepoPath(path) &&
+    !isBotRepoPath(path)
+  );
 }
 
 /**

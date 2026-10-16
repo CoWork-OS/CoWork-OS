@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { AlertCircle, ClipboardList, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react";
 import { BotGlyph } from "./BotGlyph";
 import { UseCasesGallery } from "./UseCasesGallery";
-import type { Task } from "../../shared/types";
+import type { LLMProviderType, Task } from "../../shared/types";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { stripAllEmojis } from "../utils/emoji-replacer";
 import { DEFAULT_BOT_COLOR } from "../utils/bot-colors";
@@ -56,7 +56,7 @@ interface BotsPaneProps {
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onReopenBot?: (task: Task) => void | Promise<void>;
   onOpenAgents?: () => void;
-  onOpenBotMemory?: (workspaceId: string, botName: string) => void;
+  onOpenBotMemory?: (workspaceId: string, botName: string, botId?: string) => void;
   selectedConversationProjection?: BotConversationRosterProjection | null;
   conversationProjections?: Readonly<Record<string, BotConversationRosterProjection>>;
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
@@ -522,6 +522,8 @@ export function CreateBotDialog({
     description: prefill?.description ?? "",
     systemPrompt: prefill?.systemPrompt ?? "",
     icon: botMascotIcon(prefill?.mascot ?? pickDefaultBotMascot(existingBots)),
+    providerType: "",
+    modelKey: "",
     worksOn: "auto",
     desktopHost: "",
     desktopGroup: "",
@@ -536,6 +538,10 @@ export function CreateBotDialog({
       return;
     }
 
+    if (values.providerType && !values.modelKey) {
+      setError("Choose a model, or switch back to the default model.");
+      return;
+    }
     const api = window.electronAPI;
     if (!api?.createAgentRole) {
       setError("Bot creation is unavailable in this session.");
@@ -567,6 +573,12 @@ export function CreateBotDialog({
             : {}),
           color: DEFAULT_BOT_COLOR,
           capabilities: ["code"],
+          ...(values.modelKey
+            ? {
+                providerType: values.providerType as LLMProviderType,
+                modelKey: values.modelKey,
+              }
+            : {}),
         });
       // The handle is internal and stays taken by deleted bots (deletion keeps the row), so
       // a name used before, or one with no latin letters ("bot"), gets a numbered handle.
@@ -787,7 +799,7 @@ export function BotsPane({
           onOpenContext={
             onOpenBotMemory
               ? (memoryWorkspaceId) => {
-                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName);
+                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName, workBot.id);
                   setWorkBotId(null);
                 }
               : undefined

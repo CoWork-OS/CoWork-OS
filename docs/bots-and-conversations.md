@@ -260,6 +260,25 @@ The effective provider, model, access profile, approvals, network policy,
 filesystem policy, and tool restrictions still come from CoWork's normal task
 runtime.
 
+To change the model for one conversation, pick it in the composer's model
+picker while the conversation is open. The conversation stays open and keeps
+its history: the next message goes to the new model with the full transcript.
+When the provider changes (for example from Anthropic to Ollama), that message
+starts with a short handoff note naming the previous model and the tools used
+in earlier turns. The choice applies to that conversation only; the global
+default model and the bot's other conversations are unchanged. If the chosen
+provider is later disconnected, the conversation falls back to the global
+model. An effort level picked there is saved as that provider's effort setting.
+With no conversation open, the picker still changes the global default.
+
+A bot can also have its own model: choose it under **Model** when you create or edit the bot.
+Every conversation of that bot (and the work it runs for responsibilities) uses it, unless the
+conversation picked its own model in the picker. The order is: the conversation's pick, then
+the bot's model, then the global default. The bot's model is read on every turn, so changing it
+applies to its conversations on their next message; choosing **Default model** sends them back
+to the global default. A bot model on a provider that is no longer connected falls back to the
+global default.
+
 ### 5. Start a separate conversation
 
 Open the bot's header menu and select **New conversation**, or choose **New**
@@ -403,6 +422,47 @@ This is different from ephemeral child-agent delegation. Child-agent messages
 remain queue-oriented and are addressed by task ID; bot-team conversations are
 persistent named peers. See [Agent messaging](agent-messaging.md) for delivery
 receipts, retry identity, and worker-task semantics.
+
+## A bot's own memory
+
+Each bot keeps its own memory as a file in the memory folder: `bots/<name>.md`, mapped to the
+bot by a first line `- CoWork bot [bot: <role id>; by: user]` (like workspace files). It uses
+the same format, writer, screening and git history as the rest of the folder
+([memory-engine.md](memory-engine.md), [memory-repo-phase1-design.md](memory-repo-phase1-design.md)).
+
+- **Writing.** In a bot's tasks, `memory_remember` saves to the bot's file by default (scope
+  `bot`): its job, what the user wants from it, decisions made together. Facts about the user
+  (identity, preferences, corrections) stay global unless the bot passes `scope: "bot"`, and
+  `scope: "workspace"` still writes the workspace file. An optional `until` day
+  (`YYYY-MM-DD`) marks a fact that stops applying; after that day it leaves the prompt but
+  stays in the file. A task that read untrusted content still writes to `inbox.md`.
+- **Reading.** The bot's file joins the `<cowork_memory_repo>` block (300 tokens) in every
+  task assigned to that bot, in any conversation and in any workspace (the file belongs to the
+  bot, not to a workspace; workspace memory settings apply when a fact is written). Other bots'
+  tasks and ordinary tasks never load it: `memory_recall` searches only the task's own bot
+  file, file tools (`read_file`, `grep`, `glob`) refuse every other bot's file, and
+  `memory_forget` refuses another bot's entries. The line that names the bot cannot be
+  removed. Bot files are not linked from `MEMORY.md`, not shown in the Memory Hub folder view,
+  and not read by dreams.
+- **Earlier conversations.** `memory_recall` with `scopes: ["bot"]` searches the bot's other
+  conversations in the workspace (up to its 25 most recent), or with `since` (`"24h"`, `"3d"`,
+  `"2w"`, `YYYY-MM-DD`) and no query lists their latest messages. It follows the conversation
+  recall setting in Memory settings.
+- **Reviewing.** The bot's details panel has a **Memory** section: the saved entries with
+  **Forget**, and **Recent changes** (the file's last 20 commits) with **Undo**, which removes
+  what a change added and restores what it removed in a new commit.
+- **In the Memory Hub.** Settings > Memory > What CoWork knows lists every bot's file under
+  **Bots** (in every workspace, since a bot's memory is not tied to one), with Edit and Delete
+  but no Pin: pinning would put a bot's fact into every conversation. **What this bot knows**
+  in a bot's work view opens the Hub on that bot's section. A deleted bot's file is marked
+  "Bot deleted" until you remove it.
+- **Deleting a bot.** When the bot saved anything, deleting it asks a second question: also
+  delete what it remembers? Yes removes its file in one commit; Cancel keeps the file in the
+  memory folder. Like Forget, removed lines stay in the folder's git history until you
+  compact it in Memory settings.
+
+CoWork does not log every turn into the bot's file (each line would be a commit); the
+conversation index already holds that history and `memory_recall` scope `bot` reads it.
 
 ## Conversation lifecycle
 

@@ -15,7 +15,7 @@
 import type { BrowserWindow } from "electron";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { existsSync, readdirSync, statSync } from "fs";
+import { constants as fsConstants, existsSync, readdirSync, statSync } from "fs";
 import { randomUUID } from "crypto";
 import chokidar, { type FSWatcher } from "chokidar";
 import type {
@@ -34,6 +34,43 @@ import { readBoundedResponse } from "../security/bounded-response";
 import type { Workspace } from "../../shared/types";
 import { registerCanvasProtocol } from "./canvas-protocol";
 import { installCanvasNetworkGuards, isCanvasRequestAllowed } from "./canvas-network-policy";
+
+/** Session subfolder that holds media copied in with canvas_add_asset. */
+export const CANVAS_ASSETS_DIR = "assets";
+/** Per-file cap: large enough for a short generated video clip. */
+export const CANVAS_ASSET_MAX_BYTES = 200 * 1024 * 1024;
+/** Per-session cap across all assets, so one page cannot fill the user's disk. */
+export const CANVAS_SESSION_ASSET_MAX_BYTES = 1024 * 1024 * 1024;
+/**
+ * Media-only allowlist. Scripts, HTML and SVG are excluded on purpose: assets are
+ * copied from the workspace verbatim, and executable content must go through
+ * canvas_push where it is visible in the tool input.
+ */
+export const CANVAS_ASSET_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".m4a": "audio/mp4",
+};
+
+/** Flatten a requested asset name to a single safe path segment. */
+export function sanitizeCanvasAssetName(name: string): string {
+  const base = path.basename(String(name || "").replace(/\\/g, "/"));
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^[.-]+/, "");
+  if (!cleaned || !path.extname(cleaned)) {
+    throw new Error(`Invalid canvas asset name: "${name}"`);
+  }
+  return cleaned.slice(-120);
+}
 
 function getElectronRuntime(): {
   BrowserWindow: Any;
@@ -888,7 +925,99 @@ export class CanvasManager {
   }
 
   /**
-   * Export all canvas files to a target directory
+   * Copy an already-authorized local media file into the session's assets/
+   * folder so the canvas page can reference it as a relative URL. The caller
+   * owns the workspace access check; this only enforces the canvas-side rules.
+   */
+  async addAsset(
+    sessionId: string,
+    sourcePath: string,
+    requestedName?: string,
+  ): Promise<{ relativePath: string; bytes: number; mimeType: string }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Canvas session not found: ${sessionId}`);
+    }
+
+    // The type comes from the source file; a requested name may rename it but
+    // never change its extension (no relabelling arbitrary files as media).
+    const sourceExtension = path.extname(sourcePath).toLowerCase();
+    const mimeType = CANVAS_ASSET_TYPES[sourceExtension];
+    if (!mimeType) {
+      throw new Error(
+        `Unsupported canvas asset type "${sourceExtension || "(none)"}". Allowed: ${Object.keys(CANVAS_ASSET_TYPES).join(", ")}`,
+      );
+    }
+    const name = sanitizeCanvasAssetName(requestedName || path.basename(sourcePath));
+    if (path.extname(name).toLowerCase() !== sourceExtension) {
+      throw new Error(`Canvas asset name must keep the source extension "${sourceExtension}"`);
+    }
+
+    const assetsDir = path.join(session.sessionDir, CANVAS_ASSETS_DIR);
+    await fs.mkdir(assetsDir, { recursive: true });
+
+    // Open once without following symlinks and copy from that descriptor, so a
+    // path swapped after the caller's access check cannot change what is read,
+    // and the size cap holds even if the file grows mid-copy.
+    const source = await fs.open(sourcePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    let bytes = 0;
+    try {
+      const stats = await source.stat();
+      if (!stats.isFile()) throw new Error(`Canvas asset is not a file: ${sourcePath}`);
+      if (stats.size > CANVAS_ASSET_MAX_BYTES) {
+        throw new Error(
+          `Canvas asset is too large (${stats.size} bytes; limit ${CANVAS_ASSET_MAX_BYTES} bytes)`,
+        );
+      }
+      const assetBytes = await this.sumDirectoryBytes(assetsDir, name);
+      if (assetBytes + stats.size > CANVAS_SESSION_ASSET_MAX_BYTES) {
+        throw new Error(
+          `Canvas session asset budget exceeded (limit ${CANVAS_SESSION_ASSET_MAX_BYTES} bytes)`,
+        );
+      }
+
+      const tempPath = path.join(assetsDir, `.incoming-${randomUUID()}`);
+      const dest = await fs.open(tempPath, "wx");
+      try {
+        const chunk = Buffer.alloc(1024 * 1024);
+        for (;;) {
+          const { bytesRead } = await source.read(chunk, 0, chunk.length, bytes);
+          if (bytesRead === 0) break;
+          bytes += bytesRead;
+          if (bytes > stats.size) throw new Error("Canvas asset changed while copying");
+          await dest.write(chunk, 0, bytesRead);
+        }
+      } catch (error) {
+        await dest.close();
+        await fs.rm(tempPath, { force: true });
+        throw error;
+      }
+      await dest.close();
+      await fs.rename(tempPath, path.join(assetsDir, name));
+    } finally {
+      await source.close();
+    }
+
+    session.lastUpdatedAt = Date.now();
+    this.persistSessions().catch((err) =>
+      console.error("[CanvasManager] Failed to persist after asset add:", err),
+    );
+
+    return { relativePath: `${CANVAS_ASSETS_DIR}/${name}`, bytes, mimeType };
+  }
+
+  /** Total bytes of the files in a flat directory, skipping one name that is about to be replaced. */
+  private async sumDirectoryBytes(dir: string, skipName?: string): Promise<number> {
+    let total = 0;
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.name === skipName) continue;
+      total += (await fs.stat(path.join(dir, entry.name))).size;
+    }
+    return total;
+  }
+
+  /**
+   * Export all canvas files (including nested folders such as assets/) to a target directory
    */
   async exportToFolder(
     sessionId: string,
@@ -906,16 +1035,32 @@ export class CanvasManager {
     // Create target directory if it doesn't exist
     await fs.mkdir(targetDir, { recursive: true });
 
-    // Get all files in the session directory
-    const files = readdirSync(session.sessionDir);
     const copiedFiles: string[] = [];
-
-    for (const file of files) {
-      const srcPath = path.join(session.sessionDir, file);
-      const destPath = path.join(targetDir, file);
-      await fs.copyFile(srcPath, destPath);
-      copiedFiles.push(file);
-    }
+    const copyTree = async (relativeDir: string): Promise<void> => {
+      const srcDir = path.join(session.sessionDir, relativeDir);
+      for (const entry of await fs.readdir(srcDir, { withFileTypes: true })) {
+        // Checkpoints and other internal state stay with the session.
+        if (entry.name.startsWith(".")) continue;
+        const relativePath = relativeDir ? path.join(relativeDir, entry.name) : entry.name;
+        // Never write through a symlink already sitting in the destination folder.
+        const existing = await fs.lstat(path.join(targetDir, relativePath)).catch(() => null);
+        if (existing?.isSymbolicLink()) {
+          throw new Error(`Export destination contains a symlink: ${relativePath}`);
+        }
+        if (entry.isDirectory()) {
+          await fs.mkdir(path.join(targetDir, relativePath), { recursive: true });
+          await copyTree(relativePath);
+        } else if (entry.isFile()) {
+          await fs.copyFile(
+            path.join(session.sessionDir, relativePath),
+            path.join(targetDir, relativePath),
+          );
+          copiedFiles.push(relativePath.split(path.sep).join("/"));
+        }
+        // Symlinks are skipped: only files the canvas itself wrote are exported.
+      }
+    };
+    await copyTree("");
 
     console.log(
       `[CanvasManager] Exported ${copiedFiles.length} files for session ${sessionId} to ${targetDir}`,

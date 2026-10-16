@@ -1751,6 +1751,7 @@ export class LLMProviderFactory {
       AgentConfig,
       | "providerType"
       | "modelKey"
+      | "modelPinned"
       | "llmProfile"
       | "llmProfileHint"
       | "llmProfileForced"
@@ -1767,13 +1768,30 @@ export class LLMProviderFactory {
     },
   ): ResolvedTaskModelSelection {
     const settings = this.loadSettings();
+    const warnings: string[] = [];
+    // A model the person picked for this thread wins over the global model while its
+    // provider is still configured; a stale or unpinned task modelKey stays ignored.
+    const pinnedProviderType = taskAgentConfig?.modelPinned
+      ? taskAgentConfig.providerType || settings.providerType
+      : undefined;
+    const honorPinnedSelection = Boolean(
+      pinnedProviderType &&
+      normalizeModelKey(taskAgentConfig?.modelKey) &&
+      this.isProviderConfigured(settings, pinnedProviderType),
+    );
+    if (taskAgentConfig?.modelPinned && !honorPinnedSelection) {
+      warnings.push(
+        `[LLMProviderFactory] Thread model ${pinnedProviderType || "?"}/${taskAgentConfig.modelKey || "?"} is not available. Using the global model.`,
+      );
+    }
+    const allowProviderOverride = options?.allowProviderOverride || honorPinnedSelection;
+    const allowModelOverride = options?.allowModelOverride || honorPinnedSelection;
     const providerType = (
-      options?.allowProviderOverride
+      allowProviderOverride
         ? taskAgentConfig?.providerType || settings.providerType
         : settings.providerType
     ) as LLMProviderType;
     const routing = this.getProviderRoutingSettings(settings, providerType);
-    const warnings: string[] = [];
 
     let llmProfileUsed: LlmProfile =
       options?.forceProfile ||
@@ -1791,7 +1809,7 @@ export class LLMProviderFactory {
       llmProfileUsed = "strong";
     }
 
-    const explicitModelOverride = options?.allowModelOverride
+    const explicitModelOverride = allowModelOverride
       ? this.normalizeProviderModelKey(providerType, taskAgentConfig?.modelKey)
       : undefined;
     const profileForced =
@@ -2789,6 +2807,7 @@ export class LLMProviderFactory {
       type: LLMProviderType;
       name: string;
       configured: boolean;
+      reasoningEffort?: LLMReasoningEffort;
     }>;
     models: Array<{
       key: string;
@@ -2833,7 +2852,11 @@ export class LLMProviderFactory {
       currentProvider: settings.providerType,
       currentModel,
       currentReasoningEffort: routingSettings.reasoningEffort,
-      providers: this.getAvailableProviders(),
+      // Each provider's saved effort, so a conversation pinned to another provider shows it.
+      providers: this.getAvailableProviders().map((provider) => {
+        const effort = this.getProviderRoutingSettings(settings, provider.type).reasoningEffort;
+        return effort ? { ...provider, reasoningEffort: effort } : provider;
+      }),
       models: modelStatus.models,
       routing: {
         currentProvider: settings.providerType,

@@ -5,7 +5,7 @@
  * These handlers bridge the renderer process with the CanvasManager.
  */
 
-import { ipcMain, BrowserWindow } from "electron";
+import { ipcMain, BrowserWindow, dialog } from "electron";
 import {
   IPC_CHANNELS,
   CanvasSession,
@@ -158,17 +158,25 @@ export function setupCanvasHandlers(mainWindow: BrowserWindow, agentDaemon: Agen
     },
   );
 
-  // Export canvas to folder
+  // Export canvas (page + assets/) to a folder the user picks in a native dialog.
+  // The destination is chosen here in the main process; a renderer-supplied
+  // path is never trusted for the write.
   ipcMain.handle(
     IPC_CHANNELS.CANVAS_EXPORT_TO_FOLDER,
-    async (
-      _,
-      data: {
-        sessionId: string;
-        targetDir: string;
-      },
-    ): Promise<{ files: string[]; targetDir: string }> => {
-      return manager.exportToFolder(data.sessionId, data.targetDir);
+    async (event, data: unknown): Promise<{ files: string[]; targetDir: string } | null> => {
+      const sessionId =
+        data && typeof data === "object" ? (data as { sessionId?: unknown }).sessionId : undefined;
+      if (typeof sessionId !== "string" || !sessionId.trim() || !manager.getSession(sessionId)) {
+        throw new Error("Invalid canvas session");
+      }
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+      const picked = await dialog.showOpenDialog(owner, {
+        title: "Export canvas to folder",
+        buttonLabel: "Export",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (picked.canceled || picked.filePaths.length === 0) return null;
+      return manager.exportToFolder(sessionId, picked.filePaths[0]);
     },
   );
 

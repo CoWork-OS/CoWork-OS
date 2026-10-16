@@ -113,6 +113,40 @@ describe("memory repo filesystem boundary", () => {
     );
   });
 
+  it("lets a bot's task read its own bot file and no other bot's", async () => {
+    fs.mkdirSync(path.join(repo, "bots"));
+    fs.writeFileSync(path.join(repo, "bots", "ember.md"), "# Ember\n\n- Posts the digest\n");
+    fs.writeFileSync(path.join(repo, "bots", "scout.md"), "# Scout\n\n- Tracks pricing\n");
+    const asEmber = <T>(fn: () => T): T =>
+      runWithMemoryRepoAccess({ readAllowed: true, botFile: "bots/ember.md" }, fn);
+    const read = (target: string) => evaluateWorkspaceFilesystemAccess(workspace, target, "read");
+    expect(asEmber(() => read(path.join(repo, "bots", "ember.md")))).toMatchObject({
+      decision: "allow",
+    });
+    // The folder lists (search tools walk into it); other bots' files stay closed.
+    expect(asEmber(() => read(path.join(repo, "bots"))).decision).toBe("allow");
+    for (const target of [
+      path.join(repo, "bots", "scout.md"),
+      path.join(repo, "bots", "..", "bots", "scout.md"),
+    ]) {
+      expect(asEmber(() => read(target))).toMatchObject({
+        decision: "deny",
+        reason: "memory_repo_unavailable",
+      });
+    }
+    // A task with no bot reads no bot file; the rest of the repo is unchanged.
+    expect(allowed(() => read(path.join(repo, "bots", "ember.md"))).decision).toBe("deny");
+    expect(allowed(() => read(path.join(repo, "MEMORY.md"))).decision).toBe("allow");
+    // grep over the whole repo skips the other bot's file.
+    const grep = new GrepTools(workspace, { logEvent: vi.fn() } as Any, "task-1");
+    const result = (await asEmber(() =>
+      grep.grep({ pattern: "Tracks pricing|Posts the digest", path: repo }),
+    )) as Any;
+    const text = JSON.stringify(result);
+    expect(text).toContain("ember.md");
+    expect(text).not.toContain("scout.md");
+  });
+
   it("lets a swarm-only scope read its own swarm folder and nothing else (phase 5 §2)", () => {
     const swarm = path.join(repo, "swarms", "goal-a1b2c3d4");
     fs.mkdirSync(swarm, { recursive: true });

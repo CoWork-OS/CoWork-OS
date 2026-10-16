@@ -2234,6 +2234,11 @@ export interface AgentConfig {
   /** Override the model key (e.g., 'opus-4-5', 'sonnet-4-5', 'haiku-4-5') */
   modelKey?: string;
   /**
+   * Set when the person picked this task's model in the thread model picker. Only then are
+   * providerType/modelKey authoritative; otherwise tasks follow the global model.
+   */
+  modelPinned?: boolean;
+  /**
    * Optional LLM profile override:
    * - strong: high-capability planning/critical profile
    * - cheap: lower-cost execution profile
@@ -7853,6 +7858,7 @@ export const IPC_CHANNELS = {
   TASK_LIST: "task:list",
   TASK_LIST_SIDEBAR: "task:listSidebar",
   BOT_WORK_LIST: "bot:work:list",
+  BOT_METRICS_SUMMARY: "bot:metrics:summary",
   BOT_NOTIFICATION_ROUTE_GET: "bot:notification:route:get",
   BOT_NOTIFICATION_ROUTE_UPDATE: "bot:notification:route:update",
   BOT_NOTIFICATION_RETRY: "bot:notification:retry",
@@ -8315,6 +8321,7 @@ export const IPC_CHANNELS = {
   TASK_SEND_STDIN: "task:sendStdin", // Send stdin input to running command
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)
   TASK_UPDATE_WORKSPACE: "task:updateWorkspace",
+  TASK_SET_MODEL: "task:setModel",
   SHELL_SESSION_EVENT: "shell:sessionEvent",
   SHELL_SESSION_GET: "shell:sessionGet",
   SHELL_SESSION_LIST: "shell:sessionList",
@@ -8543,6 +8550,10 @@ export const IPC_CHANNELS = {
   APP_UPDATE_PROGRESS: "app:updateProgress",
   APP_UPDATE_DOWNLOADED: "app:updateDownloaded",
   APP_UPDATE_ERROR: "app:updateError",
+  APP_CANCEL_UPDATE: "app:cancelUpdate",
+  APP_OPEN_UPDATE_WINDOW: "app:openUpdateWindow",
+  APP_GET_UPDATE_PREFERENCES: "app:getUpdatePreferences",
+  APP_SET_UPDATE_PREFERENCES: "app:setUpdatePreferences",
   SYSTEM_OPEN_SETTINGS: "system:openSettings",
 
   // CoWork Pulse (explicit opt-in, content-free daily usage aggregates)
@@ -8969,6 +8980,11 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_KEEP_ENTRY: "memoryRepo:keepEntry",
   // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
   MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
+  // A bot's own memory (bots/<slug>.md): list with history, forget an entry, undo a change
+  MEMORY_REPO_BOT_MEMORY: "memoryRepo:botMemory",
+  MEMORY_REPO_BOT_FORGET: "memoryRepo:botForget",
+  MEMORY_REPO_BOT_UNDO: "memoryRepo:botUndo",
+  MEMORY_REPO_BOT_DELETE_MEMORY: "memoryRepo:botDeleteMemory",
   // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
   // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
   PACT_STATUS: "pact:status",
@@ -9667,6 +9683,8 @@ export interface LLMProviderInfo {
   type: LLMProviderType;
   name: string;
   configured: boolean;
+  /** The provider's saved reasoning effort (shown when a conversation is pinned to it). */
+  reasoningEffort?: LLMReasoningEffort;
 }
 
 export interface LLMModelInfo {
@@ -10878,12 +10896,30 @@ export interface UpdateInfo {
 }
 
 export interface UpdateProgress {
-  phase: "checking" | "downloading" | "extracting" | "installing" | "complete" | "error";
+  phase:
+    | "checking"
+    | "downloading"
+    | "verifying"
+    | "extracting"
+    | "installing"
+    | "complete"
+    | "cancelled"
+    | "error";
   percent?: number;
   message: string;
   bytesDownloaded?: number;
   bytesTotal?: number;
 }
+
+/** How the app treats new releases it finds on its own (Settings > Updates and the update window). */
+export interface UpdatePreferences {
+  /** Download packaged updates in the background as soon as they are found. */
+  autoDownload: boolean;
+  /** A version the user chose to skip; background checks stay quiet about it. */
+  skippedVersion?: string;
+}
+
+export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = { autoDownload: false };
 
 export interface AppVersionInfo {
   version: string;

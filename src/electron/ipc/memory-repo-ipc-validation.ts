@@ -55,6 +55,31 @@ export const MemoryRepoEntryHashSchema = z.string().regex(/^[a-f0-9]{64}$/, {
   message: "Invalid memory hash",
 });
 
+/** A bot (`AgentRole`) id: the bot's own memory file is found by it in main. */
+export const MemoryRepoBotIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, {
+  message: "Invalid bot id",
+});
+
+/** `memoryRepo:botMemory`. */
+export const MemoryRepoBotMemoryRequestSchema = z.object({ botId: MemoryRepoBotIdSchema }).strict();
+
+/** `memoryRepo:botForget`: an entry of that bot's file, with the hash it was listed with. */
+export const MemoryRepoBotForgetRequestSchema = z
+  .object({
+    botId: MemoryRepoBotIdSchema,
+    ref: MemoryRepoRefSchema,
+    hash: MemoryRepoEntryHashSchema,
+  })
+  .strict();
+
+/** `memoryRepo:botUndo`: a commit from that bot's history. */
+export const MemoryRepoBotUndoRequestSchema = z
+  .object({
+    botId: MemoryRepoBotIdSchema,
+    commit: z.string().regex(/^[0-9a-f]{7,64}$/, { message: "Invalid change id" }),
+  })
+  .strict();
+
 /** `memoryRepo:entries`: the workspace the Hub shows. */
 export const MemoryRepoEntriesRequestSchema = z.object({ workspaceId: WorkspaceIdSchema }).strict();
 

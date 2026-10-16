@@ -17,6 +17,17 @@ export interface BotProfileDialogProps {
   onDeleted?: (botId: string) => void | Promise<void>;
 }
 
+/** How many facts the bot saved in its own memory (0 when unknown or the folder is off). */
+async function botMemoryEntryCount(botId: string): Promise<number> {
+  try {
+    const report = await window.electronAPI?.getBotMemory?.({ botId });
+    if (!report?.available || !report.path) return 0;
+    return report.entries.length + report.expired.length;
+  } catch {
+    return 0;
+  }
+}
+
 export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProfileDialogProps) {
   const [role, setRole] = useState<AgentRoleData | null>(null);
   const [values, setValues] = useState<BotFormValues>({
@@ -24,6 +35,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     description: "",
     systemPrompt: "",
     icon: "",
+    providerType: "",
+    modelKey: "",
     worksOn: "auto",
     desktopHost: "",
     desktopGroup: "",
@@ -49,6 +62,8 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           systemPrompt: loaded.systemPrompt || "",
           // Edit the character the bot is drawn as, so saving keeps what it shows.
           icon: botMascotIcon(resolveBotMascot(loaded.icon)),
+          providerType: loaded.modelKey ? loaded.providerType || "" : "",
+          modelKey: loaded.modelKey || "",
           worksOn: normalizeBotWorksOn(loaded.worksOn),
           desktopHost: loaded.desktopHost || "",
           desktopGroup: loaded.desktopGroup || "",
@@ -83,6 +98,10 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       setError(desktopHostError);
       return;
     }
+    if (values.providerType && !values.modelKey) {
+      setError("Choose a model, or switch back to the default model.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -92,6 +111,9 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         description: normalizeBotProfileText(values.description),
         systemPrompt: normalizeBotProfileText(values.systemPrompt),
         icon: values.icon,
+        // "" clears both: the bot follows the default model again.
+        providerType: values.modelKey ? values.providerType : "",
+        modelKey: values.modelKey,
         worksOn: values.worksOn,
         desktopHost: values.worksOn === "own_desktop" ? values.desktopHost.trim() || null : null,
         desktopGroup:
@@ -116,19 +138,29 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       setError("Bot deletion is unavailable in this session.");
       return;
     }
-    if (
-      !window.confirm(
-        `Delete ${values.displayName.trim() || "this bot"}? Existing conversations and history will be kept.`,
-      )
-    ) {
+    const name = values.displayName.trim() || "this bot";
+    if (!window.confirm(`Delete ${name}? Existing conversations and history will be kept.`)) {
       return;
     }
+    // Its own memory (a file in the memory folder) is kept unless the user drops it too.
+    const savedFacts = await botMemoryEntryCount(role.id);
+    const dropMemory =
+      savedFacts > 0 &&
+      window.confirm(
+        `Also delete what ${name} remembers (${savedFacts} saved ${savedFacts === 1 ? "fact" : "facts"})? Cancel keeps it in your memory folder.`,
+      );
 
     setSaving(true);
     setError(null);
     try {
       const deleted = await window.electronAPI.deleteAgentRole(role.id);
       if (!deleted) throw new Error("Could not delete this bot.");
+      if (dropMemory) {
+        const removed = await window.electronAPI.deleteBotMemory?.({ botId: role.id });
+        if (removed && !removed.ok) {
+          throw new Error(`The bot was deleted, but its memory was not: ${removed.error ?? ""}`);
+        }
+      }
       await onDeleted?.(role.id);
       window.dispatchEvent(new CustomEvent(BOT_PROFILE_DELETED_EVENT, { detail: role.id }));
       onClose();

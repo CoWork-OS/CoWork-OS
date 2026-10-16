@@ -202,3 +202,20 @@
   flex-direction: column;
   gap: 12px;
 }
+
+/* ---- Bots' own memory ---- */
+
+.memory-knowledge-bots-heading {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.memory-knowledge-bot {
+  scroll-margin-top: 16px;
+}
+
+.memory-knowledge-bot.focused {
+  border-left: 2px solid var(--color-accent, var(--bot-accent, currentColor));
+  padding-left: 10px;
+}

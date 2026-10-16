@@ -69,4 +69,3 @@ describe("desktop servers", () => {
     expect(isValidDesktopHost(undefined)).toBe(false);
   });
 });
-

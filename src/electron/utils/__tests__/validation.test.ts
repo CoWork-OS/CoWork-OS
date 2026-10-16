@@ -8,6 +8,8 @@ import {
   WorkspaceCreateSchema,
   TaskCreateSchema,
   TaskWorkspaceUpdateSchema,
+  TaskModelSelectionSchema,
+  AgentRoleModelFieldsSchema,
   TaskMessageSchema,
   ApprovalResponseSchema,
   GuardrailSettingsSchema,
@@ -818,6 +820,59 @@ describe("bot Works on setting", () => {
     expect(AgentRoleWorksOnSchema.parse(null)).toBeNull();
     expect(() => AgentRoleWorksOnSchema.parse("cloud")).toThrow();
     expect(() => AgentRoleWorksOnSchema.parse(1)).toThrow();
+  });
+});
+
+describe("TaskModelSelectionSchema", () => {
+  const taskId = "123e4567-e89b-42d3-a456-426614174000";
+
+  it("accepts a provider, model and optional effort for a task", () => {
+    expect(
+      TaskModelSelectionSchema.parse({
+        taskId,
+        providerType: "anthropic",
+        modelKey: " opus-4-5 ",
+        reasoningEffort: "high",
+      }),
+    ).toEqual({ taskId, providerType: "anthropic", modelKey: "opus-4-5", reasoningEffort: "high" });
+  });
+
+  it("rejects unknown providers, empty models, bad ids and extra fields", () => {
+    const base = { taskId, providerType: "anthropic", modelKey: "opus-4-5" };
+    expect(() => TaskModelSelectionSchema.parse({ ...base, providerType: "nope" })).toThrow();
+    expect(() => TaskModelSelectionSchema.parse({ ...base, modelKey: "   " })).toThrow();
+    expect(() => TaskModelSelectionSchema.parse({ ...base, taskId: "x" })).toThrow();
+    expect(() => TaskModelSelectionSchema.parse({ ...base, modelPinned: false })).toThrow();
+    expect(() => TaskModelSelectionSchema.parse({ ...base, reasoningEffort: "huge" })).toThrow();
+  });
+
+  it("lets task agent configs carry the pin", () => {
+    expect(AgentConfigSchema.parse({ modelKey: "opus-4-5", modelPinned: true })).toMatchObject({
+      modelPinned: true,
+    });
+  });
+});
+
+describe("AgentRoleModelFieldsSchema", () => {
+  it("accepts a known provider and model, or a cleared choice", () => {
+    expect(
+      AgentRoleModelFieldsSchema.parse({ providerType: "anthropic", modelKey: " opus-4-5 " }),
+    ).toEqual({ providerType: "anthropic", modelKey: "opus-4-5" });
+    expect(AgentRoleModelFieldsSchema.parse({ providerType: "", modelKey: "" })).toEqual({
+      providerType: "",
+      modelKey: "",
+    });
+    expect(AgentRoleModelFieldsSchema.parse({ providerType: null, modelKey: null })).toEqual({
+      providerType: null,
+      modelKey: null,
+    });
+    expect(AgentRoleModelFieldsSchema.parse({})).toEqual({});
+  });
+
+  it("rejects unknown providers and oversized model keys", () => {
+    expect(() => AgentRoleModelFieldsSchema.parse({ providerType: "nope" })).toThrow();
+    expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: "x".repeat(201) })).toThrow();
+    expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: 42 })).toThrow();
   });
 });
 

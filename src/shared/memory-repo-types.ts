@@ -192,9 +192,18 @@ export interface MemoryRepoHubEntry {
   hash: string;
   /** Other source (`import`), when the line names one that is not a task. */
   source: string | null;
+  /** `until` day (`YYYY-MM-DD`): the entry leaves the prompt after it. */
+  until?: string | null;
 }
 
-export type MemoryRepoHubFileRole = "entry" | "me" | "lessons" | "workspace" | "topic" | "inbox";
+export type MemoryRepoHubFileRole =
+  | "entry"
+  | "me"
+  | "lessons"
+  | "workspace"
+  | "topic"
+  | "inbox"
+  | "bot";
 
 export interface MemoryRepoHubFile {
   path: string;
@@ -204,6 +213,10 @@ export interface MemoryRepoHubFile {
   entries: MemoryRepoHubEntry[];
   /** More entries than the Hub lists. */
   truncated?: boolean;
+  /** A bot's own file: the bot (`AgentRole` id) it belongs to. */
+  botId?: string;
+  /** The bot was deleted (its file is kept until the user removes it). */
+  botDeleted?: boolean;
 }
 
 /** `memoryRepo:entries`: the folder as seen from one workspace. */
@@ -215,6 +228,8 @@ export interface MemoryRepoEntriesReport {
   files: MemoryRepoHubFile[];
   /** `inbox.md`: saved after reading untrusted content, not used until reviewed. */
   inbox: MemoryRepoHubFile | null;
+  /** Bots' own files (`bots/<name>.md`), by bot name; the same in every workspace. */
+  bots?: MemoryRepoHubFile[];
 }
 
 /** Result of Edit, Delete and Pin on a memory folder entry. */
@@ -224,6 +239,40 @@ export interface MemoryRepoEntryActionResult {
   /** The entry's ref after the change (Edit, Pin). */
   ref?: string;
 }
+
+// ---------------------------------------------------------------------------
+// A bot's own memory: `bots/<slug>.md` in the memory folder
+// ---------------------------------------------------------------------------
+
+/** One change to a bot's memory file (a commit), newest first. */
+export interface MemoryRepoBotChange {
+  /** The commit id, sent back to undo it. */
+  commit: string;
+  at: number;
+  /** `Remember preference: …`, `Forget: …`, `Undo: …`, `Hand edits`. */
+  message: string;
+  /** `agent_tool`, `memory_hub`, `hand_edit`, … */
+  origin: string | null;
+  taskId: string | null;
+  added: string[];
+  removed: string[];
+}
+
+/** `memoryRepo:botMemory`: what one bot remembers, and its recent changes. */
+export interface MemoryRepoBotMemoryReport {
+  /** The memory folder is on and ready. */
+  available: boolean;
+  writable: boolean;
+  /** `bots/<slug>.md`, or null before the bot saved anything. */
+  path: string | null;
+  entries: MemoryRepoHubEntry[];
+  /** Entries past their `until` day (kept in the file, left out of prompts). */
+  expired: MemoryRepoHubEntry[];
+  history: MemoryRepoBotChange[];
+}
+
+/** Changes listed by `memoryRepo:botMemory`. */
+export const MEMORY_REPO_BOT_HISTORY_LIMIT = 20;
 
 /** Entries listed per file by `memoryRepo:entries`. */
 export const MEMORY_REPO_HUB_ENTRIES_PER_FILE = 500;

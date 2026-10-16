@@ -26,6 +26,12 @@ export const MEMORY_REPO_WORKSPACES_DIR = "workspaces";
  * never read by dreams.
  */
 export const MEMORY_REPO_SWARMS_DIR = "swarms";
+/**
+ * One file per bot (`AgentRole`): `bots/<slug>.md`, mapped to the bot by a `[bot: <id>]`
+ * marker line like workspace files. A bot's own memory: loaded into that bot's tasks only,
+ * never linked from MEMORY.md, never in the Hub's folder view, never read by dreams.
+ */
+export const MEMORY_REPO_BOTS_DIR = "bots";
 export const MEMORY_REPO_INDEX_HEADING = "## Index";
 
 /** Size limits (§3). */
@@ -45,6 +51,10 @@ export interface MemoryRepoMetadata {
   kind?: string;
   subject?: string;
   workspace?: string;
+  /** The bot (`AgentRole` id) a `bots/` file belongs to, on its marker line. */
+  bot?: string;
+  /** `YYYY-MM-DD`: the entry stops applying after this day and leaves the prompt. */
+  until?: string;
   [key: string]: string | undefined;
 }
 
@@ -286,6 +296,27 @@ export function isSafeRepoPath(relPath: string): boolean {
   return normalized
     .split("/")
     .every((segment) => segment && segment !== "." && segment !== ".." && !segment.startsWith("."));
+}
+
+/** A line that maps its file to a workspace or a bot; it is structure, not a memory. */
+export function isMemoryRepoMarker(entry: Pick<MemoryRepoEntry, "metadata">): boolean {
+  return Boolean(entry.metadata.workspace || entry.metadata.bot);
+}
+
+/** Whether a repo-relative path is inside `bots/`. */
+export function isBotRepoPath(relPath: string): boolean {
+  return String(relPath || "")
+    .replace(/\\/g, "/")
+    .startsWith(`${MEMORY_REPO_BOTS_DIR}/`);
+}
+
+/** Whether an entry's `until` day is before `today` (`YYYY-MM-DD`); bad dates never expire. */
+export function isExpiredMemoryRepoEntry(
+  entry: Pick<MemoryRepoEntry, "metadata">,
+  today: string,
+): boolean {
+  const until = entry.metadata.until;
+  return typeof until === "string" && /^\d{4}-\d{2}-\d{2}$/.test(until) && until < today;
 }
 
 /** Whether a repo-relative path is inside `swarms/`. */

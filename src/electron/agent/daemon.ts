@@ -190,6 +190,7 @@ import {
   OrchestrationNodeNotification,
   WorkerRoleKind,
   VerificationVerdict,
+  LLMProviderType,
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
@@ -855,6 +856,20 @@ export class AgentDaemon extends EventEmitter {
   private orchestrationGraphEngine: OrchestrationGraphEngine;
   private activeTasks: Map<string, CachedExecutor> = new Map();
   private pendingApprovals: Map<string, PendingApprovalEntry> = new Map();
+
+  /**
+   * True while a person is being asked to decide something for this task: a queued
+   * approval or an input card (approvals in chat surfaces are input cards).
+   */
+  hasPendingUserDecisionForTask(taskId: string): boolean {
+    for (const entry of this.pendingApprovals.values()) {
+      if (entry.taskId === taskId && !entry.resolved) return true;
+    }
+    for (const entry of this.pendingInputRequests?.values() ?? []) {
+      if (entry.taskId === taskId && !entry.resolved) return true;
+    }
+    return false;
+  }
   /** One-shot approval decisions carried across executor reconstruction after a restart. */
   private pendingDurableApprovalGrants: Map<
     string,
@@ -12786,6 +12801,18 @@ export class AgentDaemon extends EventEmitter {
     return this.agentRoleRepo.findById(agentRoleId);
   }
 
+  /** A bot's conversations in a workspace (most recently active first): ids and titles. */
+  listBotConversationRefs(
+    workspaceId: string,
+    agentRoleId: string,
+    limit = 25,
+  ): Array<{ id: string; title: string }> {
+    if (!workspaceId || !agentRoleId) return [];
+    return this.taskRepo
+      .findBotConversations(workspaceId, { agentRoleId, limit })
+      .map((task) => ({ id: task.id, title: task.title }));
+  }
+
   getActiveAgentRoles(): AgentRole[] {
     return this.agentRoleRepo.findActive();
   }
@@ -13703,6 +13730,41 @@ export class AgentDaemon extends EventEmitter {
       workspacePath: workspace.path,
     });
 
+    return updatedTask;
+  }
+
+  /**
+   * Pins the model the person picked for one conversation. The next turn switches to it and
+   * keeps the conversation; the global default and the bot's own model stay unchanged.
+   */
+  setTaskModelSelection(
+    taskId: string,
+    selection: { providerType: LLMProviderType; modelKey: string },
+  ): Task {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+    const { llmProfileForced: _forced, ...agentConfig } = task.agentConfig || {};
+    this.taskRepo.update(taskId, {
+      agentConfig: {
+        ...agentConfig,
+        providerType: selection.providerType,
+        modelKey: selection.modelKey,
+        modelPinned: true,
+      },
+    });
+    const updatedTask = this.taskRepo.findById(taskId);
+    if (!updatedTask) {
+      throw new Error(`Task ${taskId} not found after model update`);
+    }
+    const cached = this.activeTasks.get(taskId);
+    if (cached) cached.lastAccessed = Date.now();
+    this.logEvent(taskId, "log", {
+      message: `Model for this conversation set to ${selection.providerType}/${selection.modelKey}.`,
+      providerType: selection.providerType,
+      modelKey: selection.modelKey,
+    });
     return updatedTask;
   }
 

@@ -70,7 +70,18 @@ import {
   AppNotification,
   IntegrationMentionOption,
   IntegrationMentionSelection,
+  type MessageSurfaceOrigin,
+  type TerminalBlockRunResult,
 } from "../../../shared/types";
+import {
+  buildCodeBlockRunMessage,
+  parseCodeBlockRunMessage,
+} from "../../../shared/terminal-output-text";
+import {
+  OPEN_TERMINAL_TAB_EVENT,
+  type CodeBlockRunTarget,
+  type OpenTerminalTabRequest,
+} from "../../utils/code-block-runs";
 import type { ComposerDraft, DraftAttachmentRef } from "../../../shared/composer-drafts";
 import type { ChatInlineFrame } from "../../../shared/mailbox";
 import {
@@ -650,7 +661,7 @@ interface MainContentProps {
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
       verbatim?: boolean;
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => void | boolean | Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -1685,6 +1696,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     React.SetStateAction<number>
   >;
   const isReplayMode = props.isReplayMode as boolean;
+  const codeBlockRunTarget = props.codeBlockRunTarget as CodeBlockRunTarget | undefined;
   const defaultTranscriptMode = props.defaultTranscriptMode as TranscriptMode;
   const transcriptMode = props.transcriptMode as TranscriptMode;
   const lastAssistantMessage = props.lastAssistantMessage as TaskEvent | null;
@@ -3156,6 +3168,29 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   attachmentNames,
                   attachmentMetadata,
                 );
+                // Output of a code block the user ran: it already shows under the block, so the
+                // message is one quiet line; the full text the agent got opens on demand.
+                const codeBlockRun =
+                  surfaceOrigin === "code_block" && typeof rawMessage === "string"
+                    ? parseCodeBlockRunMessage(rawMessage)
+                    : null;
+                if (codeBlockRun) {
+                  return (
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
+                      <details className="code-block-run-sent">
+                        <summary>
+                          <span>Sent the output of</span>
+                          <code>{codeBlockRun.command.split("\n")[0]}</code>
+                          {codeBlockRun.exitCode !== null && codeBlockRun.exitCode !== 0 && (
+                            <span>· exit code {codeBlockRun.exitCode}</span>
+                          )}
+                        </summary>
+                        <pre className="code-block-run-sent-text">{rawMessage}</pre>
+                      </details>
+                      {renderCommandOutputs(commandOutputsAfterEvent)}
+                    </Fragment>
+                  );
+                }
                 return (
                   <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="chat-message user-message">
@@ -3347,6 +3382,8 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                                 surfacesSuperseded={
                                   Boolean(event.id) && supersededSurfaceEventIds.has(event.id)
                                 }
+                                codeBlockRunTarget={isReplayMode ? undefined : codeBlockRunTarget}
+                                messageKey={event.id || undefined}
                               />
                             </div>
                           </div>
@@ -3831,6 +3868,7 @@ function areTaskConversationFlowPropsEqual(prev: any, next: any): boolean {
     prev.task?.agentConfig?.botConversation === next.task?.agentConfig?.botConversation &&
     prev.isTaskWorking === next.isTaskWorking &&
     prev.isReplayMode === next.isReplayMode &&
+    prev.codeBlockRunTarget === next.codeBlockRunTarget &&
     prev.defaultTranscriptMode === next.defaultTranscriptMode &&
     prev.transcriptMode === next.transcriptMode &&
     prev.lastAssistantMessage?.id === next.lastAssistantMessage?.id &&
@@ -7356,6 +7394,47 @@ function MainContentComponent({
     (url: string) => window.electronAPI.openExternal(url),
     [],
   );
+  // A shell code block the user ran from an answer: its output goes back as the next message.
+  const handleCodeBlockRunOutput = useCallback(
+    async (command: string, result: TerminalBlockRunResult) => {
+      if (!permissionSettingsLoaded) return;
+      const messageId =
+        globalThis.crypto?.randomUUID?.() ||
+        `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      await onSendMessage(
+        buildCodeBlockRunMessage({
+          command,
+          output: result.output,
+          exitCode: result.exitCode,
+          outputTruncated: result.truncated,
+        }),
+        undefined,
+        undefined,
+        {
+          interactionMode: selectedInteractionMode,
+          returnOnAccepted: true,
+          messageId,
+          verbatim: true,
+          surfaceOrigin: "code_block",
+          ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
+        },
+      );
+    },
+    [onSendMessage, permissionSettingsLoaded, selectedInteractionMode, taskAccessProfileId],
+  );
+  const codeBlockRunTarget = useMemo<CodeBlockRunTarget | undefined>(() => {
+    if (!task?.id || !workspace?.id) return undefined;
+    return {
+      taskId: task.id,
+      workspaceId: workspace.id,
+      sendOutput: handleCodeBlockRunOutput,
+      openTerminalTab: (tabId: string) => {
+        window.dispatchEvent(
+          new CustomEvent<OpenTerminalTabRequest>(OPEN_TERMINAL_TAB_EVENT, { detail: { tabId } }),
+        );
+      },
+    };
+  }, [handleCodeBlockRunOutput, task?.id, workspace?.id]);
 
   // Programmatic input updates still need a resize pass.
   useEffect(() => {
@@ -11648,6 +11727,7 @@ function MainContentComponent({
   const conversationFlow = (
     <TaskConversationFlow
       agentContext={agentContext}
+      codeBlockRunTarget={codeBlockRunTarget}
       onOpenSettings={onOpenSettings}
       activityGroupsById={statusActivityGroupsById}
       childEvents={childEvents}

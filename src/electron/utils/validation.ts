@@ -547,7 +547,7 @@ export const TaskMessageSchema = z
         truncated: z.boolean().optional(),
       })
       .optional(),
-    surfaceOrigin: z.enum(["answer", "page"]).optional(),
+    surfaceOrigin: z.enum(["answer", "page", "code_block"]).optional(),
     permissionMode: PermissionModeSchema.optional(),
     shellAccess: z.boolean().optional(),
     accessProfileId: AccessProfileIdSchema.optional(),
@@ -3239,6 +3239,36 @@ export const CronRunModeSchema = z.enum(["due", "force"]).optional();
 /**
  * Validate input against a schema and throw a user-friendly error if invalid
  */
+/**
+ * Characters a code block command may not contain: control characters other than tab and
+ * newlines (the line editor would treat them as keys) and invisible or direction-changing
+ * characters (the shell would run something other than what the block shows).
+ */
+const UNSAFE_COMMAND_CHARACTERS = new RegExp(
+  "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]",
+);
+
+/** A shell code block the user runs from an answer (see TerminalBlockRunner). */
+export const TerminalBlockRunRequestSchema = z.object({
+  runId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,80}$/, "Run id must be 1-80 letters, digits, '-' or '_'."),
+  workspaceId: WorkspaceIdSchema,
+  taskId: UUIDSchema,
+  command: z
+    .string()
+    .trim()
+    .min(1)
+    .max(16_000)
+    .refine((command) => !UNSAFE_COMMAND_CHARACTERS.test(command), {
+      message: "The command contains control or invisible characters.",
+    }),
+});
+
+export const TerminalBlockStopRequestSchema = z.object({
+  runId: TerminalBlockRunRequestSchema.shape.runId,
+});
+
 export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown, context?: string): T {
   const result = schema.safeParse(input);
   if (!result.success) {

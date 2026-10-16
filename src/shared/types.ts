@@ -3256,6 +3256,13 @@ export interface QuotedAssistantMessage {
 }
 
 /** Follow-up payload sent to an existing task. */
+/** Where a user message came from when the desktop app sent it on the user's behalf. */
+export type MessageSurfaceOrigin = "answer" | "page" | "code_block";
+
+export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceOrigin {
+  return value === "answer" || value === "page" || value === "code_block";
+}
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3293,9 +3300,10 @@ export interface TaskFollowUpInput {
   /**
    * The user sent this exact text by approving an action in an interactive answer: a
    * button the model wrote ("answer") or a request from page code in an HTML frame
-   * ("page"). Set only by the desktop app's own send path.
+   * ("page"), or the output of a shell code block the user ran from an answer
+   * ("code_block"). Set only by the desktop app's own send path.
    */
-  surfaceOrigin?: "answer" | "page";
+  surfaceOrigin?: MessageSurfaceOrigin;
 }
 
 export type AgentMessageDeliveryStatus =
@@ -4383,6 +4391,32 @@ export interface TerminalTabOutputEvent {
   cwd?: string;
   status?: ShellSessionStatus;
   timestamp: number;
+}
+
+/** Run a shell code block from an assistant answer in the task's terminal tab. */
+export interface TerminalBlockRunRequest {
+  /** Renderer-chosen id that tags the streamed output events for this run. */
+  runId: string;
+  workspaceId: string;
+  taskId: string;
+  command: string;
+}
+
+export interface TerminalBlockRunResult {
+  runId: string;
+  tabId: string;
+  /** Output between the command start and its finish, with terminal escapes kept. */
+  output: string;
+  /** The output was longer than the capture limit; only its tail is kept. */
+  truncated: boolean;
+  exitCode: number | null;
+  terminationReason: CommandTerminationReason;
+}
+
+export interface TerminalBlockOutputEvent {
+  runId: string;
+  tabId: string;
+  output: string;
 }
 
 export type GithubReviewThreadState = "open" | "resolved" | "outdated" | "unknown";
@@ -7950,6 +7984,9 @@ export const IPC_CHANNELS = {
   TERMINAL_TAB_STOP: "terminalTab:stop",
   TERMINAL_TAB_CLOSE: "terminalTab:close",
   TERMINAL_TAB_OUTPUT: "terminalTab:output",
+  TERMINAL_BLOCK_RUN: "terminalBlock:run",
+  TERMINAL_BLOCK_STOP: "terminalBlock:stop",
+  TERMINAL_BLOCK_OUTPUT: "terminalBlock:output",
   SPREADSHEET_OPEN_WORKBOOK: "spreadsheet:openWorkbook",
   SPREADSHEET_GET_VIEWPORT: "spreadsheet:getViewport",
   SPREADSHEET_APPLY_PATCHES: "spreadsheet:applyPatches",

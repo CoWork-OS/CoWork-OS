@@ -37,7 +37,7 @@ import type {
   WebSearchMode,
   Workspace,
 } from "../../../shared/types";
-import { TASK_ERROR_CODES } from "../../../shared/types";
+import { TASK_ERROR_CODES, isMessageSurfaceOrigin } from "../../../shared/types";
 import { planHasVerificationStep } from "../../../shared/plan-utils";
 import type {
   LLMContent,
@@ -4484,8 +4484,7 @@ export class SessionRuntime {
                   receipt.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
               }
             : {}),
-          ...(followUp.surfaceOrigin === undefined &&
-          (receipt.surfaceOrigin === "answer" || receipt.surfaceOrigin === "page")
+          ...(followUp.surfaceOrigin === undefined && isMessageSurfaceOrigin(receipt.surfaceOrigin)
             ? { surfaceOrigin: receipt.surfaceOrigin as TaskFollowUpInput["surfaceOrigin"] }
             : {}),
           ...(followUp.integrationMentions === undefined &&
@@ -4621,7 +4620,7 @@ export class SessionRuntime {
                 payload.quotedAssistantMessage as TaskFollowUpInput["quotedAssistantMessage"],
             }
           : {}),
-        ...(payload.surfaceOrigin === "answer" || payload.surfaceOrigin === "page"
+        ...(isMessageSurfaceOrigin(payload.surfaceOrigin)
           ? { surfaceOrigin: payload.surfaceOrigin as TaskFollowUpInput["surfaceOrigin"] }
           : {}),
       });

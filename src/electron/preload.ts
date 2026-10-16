@@ -274,6 +274,10 @@ import type {
   ShellSessionLifecycleEvent,
   TerminalTabRunResult,
   TerminalTabOutputEvent,
+  TerminalBlockRunRequest,
+  TerminalBlockRunResult,
+  TerminalBlockOutputEvent,
+  MessageSurfaceOrigin,
   LLMRoutingRuntimeState,
   AgentMailApiKeySummary,
   AgentMailConnectionTestResult,
@@ -2288,6 +2292,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_TAB_OUTPUT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_TAB_OUTPUT, handler);
   },
+  runTerminalBlock: (data: TerminalBlockRunRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_BLOCK_RUN, data) as Promise<TerminalBlockRunResult>,
+  stopTerminalBlock: (data: { runId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_BLOCK_STOP, data) as Promise<{ stopped: boolean }>,
+  onTerminalBlockOutput: (callback: (event: TerminalBlockOutputEvent) => void) => {
+    const handler = (_: Any, event: TerminalBlockOutputEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.TERMINAL_BLOCK_OUTPUT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_BLOCK_OUTPUT, handler);
+  },
   listLocalPreviewTemplates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.LOCAL_PREVIEW_TEMPLATES) as Promise<
       LocalPreviewCommandTemplate[]
@@ -3383,7 +3396,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => {
     const validatedImages = validateSendMessageAttachments(images);
@@ -7185,7 +7198,7 @@ export interface ElectronAPI {
       shellAccess?: boolean;
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
-      surfaceOrigin?: "answer" | "page";
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => Promise<{
     queued: boolean;
@@ -7262,6 +7275,10 @@ export interface ElectronAPI {
     taskId?: string;
   }) => Promise<{ success: boolean }>;
   onTerminalTabOutput: (callback: (event: TerminalTabOutputEvent) => void) => () => void;
+  /** Run a shell code block from an answer in the task's terminal tab and wait for it to finish. */
+  runTerminalBlock: (data: TerminalBlockRunRequest) => Promise<TerminalBlockRunResult>;
+  stopTerminalBlock: (data: { runId: string }) => Promise<{ stopped: boolean }>;
+  onTerminalBlockOutput: (callback: (event: TerminalBlockOutputEvent) => void) => () => void;
   createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;

@@ -347,12 +347,39 @@ export function promptIsMultiFileWebAppCreation(prompt: string): boolean {
   return directCreation || frameworkCreation || scaffoldCreation;
 }
 
+// A file the prompt names as source material: "from scene-1.png and clip-1.mp4",
+// "using notes.md", "turn report.pdf into ...". "in"/"to"/"as" are left out on
+// purpose: "save it in report.md" and "export to deck.pptx" name outputs.
+const INPUT_FILE_NAME = String.raw`[\w./~-]+\.[a-z0-9]{1,5}\b`;
+const INPUT_FILE_REFERENCE_REGEX = new RegExp(
+  String.raw`\b(?:from|using|use|based\s+on|read|reading|open|load|parse|analy[sz]e|summari[sz]e|review|turn|convert|transform|attached|given|provided)\s+` +
+    String.raw`(?:(?:the|my|this|these|those|attached|existing|uploaded)\s+)*` +
+    String.raw`(?:files?\s+)?${INPUT_FILE_NAME}` +
+    String.raw`(?:\s*(?:,|and|&|or)\s*(?:the\s+)?${INPUT_FILE_NAME})*`,
+  "gi",
+);
+
+/** Removes the file names a prompt cites as inputs, so they are not read as requested outputs. */
+export function stripInputFileReferences(prompt: string): string {
+  return prompt.replace(INPUT_FILE_REFERENCE_REGEX, (span) => {
+    const verb = span.match(/^\S+(?:\s+on)?/)?.[0] ?? "";
+    return `${verb} `;
+  });
+}
+
 export function inferRequiredArtifactExtensions(taskTitle: string, taskPrompt: string): string[] {
   const prompt = promptForArtifactIntent(taskTitle, taskPrompt);
   const hasCreateIntent = ARTIFACT_CREATION_VERB_REGEX.test(prompt);
   if (!hasCreateIntent) return [];
 
-  const extensions = new Set<string>(extractArtifactExtensionsFromText(prompt));
+  const extensions = new Set<string>(
+    extractArtifactExtensionsFromText(stripInputFileReferences(prompt)),
+  );
+  // An explicit output request wins even when the same format is also an input
+  // ("convert notes.md and save as summary.md").
+  for (const extension of extractExplicitOutputExtensions(taskTitle, taskPrompt)) {
+    extensions.add(extension);
+  }
   if (promptRequestsPresentationArtifactOutput(taskTitle, taskPrompt)) {
     extensions.add(".pptx");
   }
@@ -448,7 +475,9 @@ export function extractExplicitOutputExtensions(taskTitle: string, taskPrompt: s
       );
       if (
         namesDestination ||
-        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including|of|about|for)\b[^.!?\n]{0,60}$/i.test(
+        // Extension dots may sit in between: "from scene-1.png and clip-1.mp4"
+        // cites both files as sources.
+        !/\b(?:read|from|based\s+on|using|input|source|original|prior|previous|include|including|of|about|for)\b(?:[^.!?\n]|\.(?=[A-Za-z0-9])){0,60}$/i.test(
           prefix,
         )
       ) {

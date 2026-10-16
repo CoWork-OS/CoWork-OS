@@ -737,6 +737,90 @@ describe("SkillRegistry", () => {
       expect(mockFiles.has(managedPath("imported-bundle/SKILL.md"))).toBe(true);
     });
 
+    describe("SKILL.md frontmatter parsing", () => {
+      const installMarkdown = async (frontmatter: string) => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          headers: {
+            get: () => "text/markdown",
+          },
+          arrayBuffer: () => {
+            const bytes = Buffer.from(`---\n${frontmatter}\n---\n# Body\n`, "utf8");
+            return Promise.resolve(
+              bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+            );
+          },
+        });
+        return registry.installFromUrl("https://example.com/skills/SKILL.md");
+      };
+
+      it.each([
+        [
+          "folded block scalar",
+          "name: yaml-skill\ndescription: >\n  First line of the\n  description.\n",
+          "First line of the description.",
+        ],
+        [
+          "folded block scalar with strip chomping",
+          "name: yaml-skill\ndescription: >-\n  Folded and\n  stripped",
+          "Folded and stripped",
+        ],
+        [
+          "literal block scalar",
+          "name: yaml-skill\ndescription: |\n  Line one\n  Line two\n",
+          "Line one\nLine two",
+        ],
+        [
+          "single-quoted scalar with escaped quote",
+          "name: yaml-skill\ndescription: 'Port a composition''s source: one-way.'",
+          "Port a composition's source: one-way.",
+        ],
+        [
+          "double-quoted scalar with escapes",
+          'name: yaml-skill\ndescription: "Use for \\"quoted\\" input: PRs, URLs."',
+          'Use for "quoted" input: PRs, URLs.',
+        ],
+        [
+          "single-quoted scalar wrapping double quotes",
+          "name: yaml-skill\ndescription: '\"Quoted on purpose\"'",
+          '"Quoted on purpose"',
+        ],
+        ["plain scalar", "name: yaml-skill\ndescription: Plain description", "Plain description"],
+        [
+          "invalid YAML (falls back to the line parser)",
+          "name: yaml-skill\ndescription: Use when: (1) a command fails",
+          "Use when: (1) a command fails",
+        ],
+      ])("reads the description from a %s", async (_label, frontmatter, expected) => {
+        const result = await installMarkdown(frontmatter);
+
+        expect(result.success).toBe(true);
+        expect(result.skill?.id).toBe("yaml-skill");
+        expect(result.skill?.description).toBe(expected);
+      });
+
+      it.each([
+        ["block list", "tags:\n  - video\n  - 'motion'"],
+        ["flow list", "tags: [video, motion]"],
+      ])("reads tags from a %s", async (_label, tags) => {
+        const result = await installMarkdown(`name: yaml-skill\ndescription: Tagged\n${tags}`);
+
+        expect(result.success).toBe(true);
+        expect(result.skill?.metadata?.tags).toEqual(["video", "motion", "external"]);
+      });
+
+      it("keeps scalars as strings and maps null to the default", async () => {
+        const result = await installMarkdown(
+          "name: 2048\ndescription: Numeric name\nauthor: 1.10\nicon: null",
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.skill?.id).toBe("2048");
+        expect(result.skill?.metadata?.author).toBe("1.10");
+        expect(result.skill?.icon).not.toBe("null");
+      });
+    });
+
     it.each(["SKILL.md", "metadata.json", "support", "skills", "manifest.json"])(
       "rejects Git symlink %s before reading or copying imported data",
       async (linkPath) => {

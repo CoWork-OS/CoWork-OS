@@ -15,6 +15,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import JSZip from "jszip";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { parseFrontmatterBlock } from "../utils/skill-frontmatter";
 import {
   CapabilitySecurityReport,
   CustomSkill,
@@ -113,25 +114,6 @@ function normalizeSkillSlug(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function parseScalar(value: string): unknown {
-  const normalized = stripQuotes(value);
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  if (normalized === "null") return null;
-  return normalized;
-}
-
 function parseFrontmatter(raw: string): ParsedFrontmatterResult {
   const normalized = raw.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) {
@@ -144,38 +126,7 @@ function parseFrontmatter(raw: string): ParsedFrontmatterResult {
 
   const block = normalized.slice(4, end);
   const body = normalized.slice(end + 5);
-  const lines = block.split("\n");
-  const frontmatter: Record<string, unknown> = {};
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s*(.*))?$/);
-    if (!match) continue;
-
-    const [, key, rawValue = ""] = match;
-    if (rawValue.trim().length > 0) {
-      frontmatter[key] = parseScalar(rawValue);
-      continue;
-    }
-
-    const items: string[] = [];
-    let nextIndex = index + 1;
-    while (nextIndex < lines.length) {
-      const itemMatch = lines[nextIndex]?.match(/^\s*-\s+(.+)$/);
-      if (!itemMatch) break;
-      items.push(stripQuotes(itemMatch[1] || ""));
-      nextIndex += 1;
-    }
-
-    if (items.length > 0) {
-      frontmatter[key] = items;
-      index = nextIndex - 1;
-    } else {
-      frontmatter[key] = "";
-    }
-  }
-
-  return { frontmatter, body };
+  return { frontmatter: parseFrontmatterBlock(block), body };
 }
 
 function stringValue(value: unknown): string | undefined {

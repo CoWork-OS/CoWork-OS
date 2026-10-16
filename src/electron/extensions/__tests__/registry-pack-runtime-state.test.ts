@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   isPackRequired: vi.fn(),
   register: vi.fn(),
   unregister: vi.fn(),
+  registerPluginSkill: vi.fn(),
   unregisterPluginSkills: vi.fn(),
   setPluginSkillEnabled: vi.fn(),
   secureInitialized: false,
@@ -45,7 +46,7 @@ vi.mock("../../admin/policies", () => ({
 
 vi.mock("../../agent/custom-skill-loader", () => ({
   getCustomSkillLoader: () => ({
-    registerPluginSkill: vi.fn(),
+    registerPluginSkill: mocks.registerPluginSkill,
     unregisterPluginSkills: mocks.unregisterPluginSkills,
     setPluginSkillEnabled: mocks.setPluginSkillEnabled,
   }),
@@ -361,5 +362,40 @@ describe("PluginRegistry pack runtime state", () => {
       "Failed to reload plugin smb-complete",
     );
     expect(registry.getPlugin("smb-complete")?.state).toBe("disabled");
+  });
+
+  it("reads YAML block scalars from directory-backed SKILL.md frontmatter", async () => {
+    const pluginPath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-dir-skill-"));
+    try {
+      fs.mkdirSync(path.join(pluginPath, "skills", "demo"), { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginPath, "skills", "demo", "SKILL.md"),
+        "---\nname: Demo Skill\ndescription: >\n  Folded description\n  across lines.\n---\n# Demo\n",
+      );
+      const manifest = makeManifest({
+        skills: [],
+        skillDirectories: [{ id: "demo-skill", path: "skills/demo" }],
+      });
+      mocks.discoverPlugins.mockResolvedValue([
+        { path: pluginPath, manifest, securityReport: undefined },
+      ]);
+      mocks.loadPlugin.mockResolvedValue({
+        success: true,
+        plugin: { ...makeLoadedPlugin(manifest), path: pluginPath },
+      });
+      const registry = await loadRegistry();
+
+      await registry.initialize();
+
+      expect(mocks.registerPluginSkill).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "demo-skill",
+          name: "Demo Skill",
+          description: "Folded description across lines.",
+        }),
+      );
+    } finally {
+      fs.rmSync(pluginPath, { recursive: true, force: true });
+    }
   });
 });

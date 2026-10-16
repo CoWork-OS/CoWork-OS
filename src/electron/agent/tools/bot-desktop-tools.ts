@@ -331,9 +331,12 @@ export class BotDesktopTools {
     view.noteWorking(this.taskId, "own_desktop");
     return BotDesktopManager.getInstance().withDesktop(botId, async (desktop) => {
       try {
-        const result = await desktop.exec(["bash", "-lc", `cd ~/work && ${command}`], {
-          timeoutMs: seconds * 1000,
-        });
+        // `timeout` inside the desktop ends the command itself: killing only the host-side
+        // docker client would leave it running against the container's pid limit.
+        const result = await desktop.exec(
+          ["timeout", "--kill-after=5", `${seconds}s`, "bash", "-lc", `cd ~/work && ${command}`],
+          { timeoutMs: (seconds + 15) * 1000 },
+        );
         return {
           success: true,
           output: result.stdout.toString("utf8").slice(-MAX_COMMAND_OUTPUT),

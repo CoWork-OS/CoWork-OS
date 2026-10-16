@@ -1,6 +1,7 @@
 # The desktop a CoWork bot works on when its "Works on" setting is "Its own desktop".
 # Built locally on first use; CoWork runs one container per bot, as user "bot", with no
-# capabilities, resource limits, and only the viewer port published on 127.0.0.1.
+# capabilities, resource limits, and only the viewer port published on 127.0.0.1. The viewer
+# passwords are written in after start (see start-desktop.sh), never set as environment.
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \

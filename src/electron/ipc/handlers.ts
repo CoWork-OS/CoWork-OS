@@ -1589,10 +1589,22 @@ export async function setupIpcHandlers(
   ComputerUseSessionManager.getInstance().setMainWindowGetter(computerUseMainWindow);
   registerAndroidPhoneHandlers(computerUseMainWindow);
   // Each bot's own desktop (Works on: Its own desktop), in containers on this computer.
+  const desktopViewers = new Map<string, BrowserWindow>();
   const botDesktops = BotDesktopManager.configure({
     dataDir: () => _app.getPath("userData"),
     resourcesDir: findBotDesktopResources,
     desktopHostFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopHost,
+    desktopHosts: () =>
+      agentDaemon
+        .getActiveAgentRoles()
+        .map((role) => role.desktopHost)
+        .filter((host): host is string => typeof host === "string" && host.length > 0),
+    hostUid: process.getuid?.(),
+    // An open viewer window (after take-over) is use: the desktop is not stopped as idle.
+    inUse: (botId) => {
+      const viewer = desktopViewers.get(botId);
+      return Boolean(viewer && !viewer.isDestroyed());
+    },
   });
   void botDesktops.stopLeftovers();
   _app.on("will-quit", () => botDesktops.stopAllOnQuit());
@@ -1662,7 +1674,6 @@ export async function setupIpcHandlers(
     return computerView.handBack(readComputerViewTaskId(taskId));
   });
   // The bot's own desktop in a window of its own: the full, interactive view for take-over.
-  const desktopViewers = new Map<string, BrowserWindow>();
   const desktopBotForTask = async (taskId: unknown): Promise<{ botId: string; name: string }> => {
     const task = await agentDaemon.getTaskById(readComputerViewTaskId(taskId));
     const botId = task?.assignedAgentRoleId;

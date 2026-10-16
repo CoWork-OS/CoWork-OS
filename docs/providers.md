@@ -13,6 +13,18 @@ agents, approvals, artifacts, automations, and task context belong to the CoWork
 Individual models still differ in tool use, vision, reasoning, streaming, caching, and context
 limits.
 
+## Rent the model, own everything else
+
+| You rent                                                           | You own                                                                                     |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| The model that answers, from a supported provider or a local model | Your workspace folders and the files CoWork generates                                       |
+| The provider account, API key, gateway, or cloud credential        | The memory folder: plain markdown notes in a local git repo                                 |
+| Usage, billed directly by the provider                             | Skills, agents, automations, approval rules, and conversation history, kept on your machine |
+
+Switch the model for one conversation from the model picker; the conversation keeps its history.
+[What You Own](what-you-own.md) lists where each item is stored, how to back it up or move it, and
+what a task sends to your provider.
+
 Provider or subscription access answers **which model can respond**; the task
 [access profile](access-profiles.md) answers **what that task may do**. A
 provider account, API key, or local model does not grant command tools,

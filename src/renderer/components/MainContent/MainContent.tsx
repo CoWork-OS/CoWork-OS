@@ -10553,7 +10553,7 @@ function MainContentComponent({
 
             {!isCalm && (
               <p className="welcome-positioning modern-only">
-                An open desktop for getting work done with the AI you choose.
+                Rent the model. Own everything else.
               </p>
             )}
 

@@ -4500,6 +4500,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES, taskId),
   revealBotDesktopFile: (taskId: string, filePath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_REVEAL_DESKTOP_FILE, taskId, filePath),
+  startTeachingTask: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_START_RECORDING, taskId),
+  finishTeachingTask: (taskId: string, name: string | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_FINISH_RECORDING, taskId, name),
+  listTaughtTasks: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_TAUGHT_TASKS, taskId),
+  deleteTaughtTask: (taskId: string, taughtTaskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_DELETE_TAUGHT_TASK, taskId, taughtTaskId),
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
     const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
     const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
@@ -8662,6 +8670,15 @@ export interface ElectronAPI {
     taskId: string,
   ) => Promise<Array<{ path: string; size: number; modifiedAt: number }>>;
   revealBotDesktopFile: (taskId: string, filePath: string) => Promise<{ revealed: boolean }>;
+  /** Teach a task: starts recording what you do on the bot's desktop (after taking over). */
+  startTeachingTask: (taskId: string) => Promise<{ recording: boolean }>;
+  /** Stops recording; saves it under the name, or discards it when the name is null. */
+  finishTeachingTask: (
+    taskId: string,
+    name: string | null,
+  ) => Promise<import("../shared/bot-computer").TaughtTask | null>;
+  listTaughtTasks: (taskId: string) => Promise<import("../shared/bot-computer").TaughtTask[]>;
+  deleteTaughtTask: (taskId: string, taughtTaskId: string) => Promise<{ deleted: boolean }>;
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;

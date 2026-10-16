@@ -3244,6 +3244,12 @@ export class ToolRegistry {
     register("desktop_save_file", async ({ request }) =>
       this.botDesktopTools.execute("desktop_save_file", request.input),
     );
+    register("desktop_taught_tasks", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_taught_tasks", request.input),
+    );
+    register("desktop_replay_task", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_replay_task", request.input),
+    );
     register("desktop_run", async ({ request }) =>
       this.botDesktopTools.execute("desktop_run", request.input),
     );

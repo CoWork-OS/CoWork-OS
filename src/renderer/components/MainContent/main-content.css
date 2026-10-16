@@ -2320,10 +2320,6 @@
   border-color: rgba(0, 0, 0, 0.1);
 }
 
-.theme-light .bubble-feedback-toggle:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
 .main-body {
   flex: 1;
   min-height: 0;
@@ -2789,122 +2785,74 @@
   margin: 4px 0;
 }
 
-/* Message copy button for user messages */
-.message-copy-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  margin-top: 6px;
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.message-copy-btn:hover {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-hover);
-}
-
-.message-copy-btn.copied {
-  color: var(--color-success);
-}
-
-.message-copy-btn svg {
-  flex-shrink: 0;
-}
-
-/* Copy button alignment for assistant messages - left aligned */
-.chat-message.assistant-message .message-copy-btn {
-  margin-left: 0;
-}
-
-/* Message actions container */
+/* Message actions: one row of quiet, icon-only buttons (copy, read aloud,
+   fork, feedback). Labels live in title/aria-label. */
 .message-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.message-actions .message-copy-btn,
-.message-actions .message-speak-btn,
-.message-actions .message-quote-btn,
-.message-actions .message-fork-btn,
-.message-actions .message-feedback-btn {
-  margin-top: 0;
-  line-height: 1;
+  gap: 2px;
+  margin-top: 4px;
 }
 
 .chat-message.user-message .message-actions {
   justify-content: flex-end;
 }
 
+/* Pull the first icon back so its glyph lines up with the reply's text. */
 .chat-message.assistant-message .message-actions {
   justify-content: flex-start;
+  margin-left: -6px;
 }
 
-/* Speak button for assistant messages */
-.message-speak-btn {
-  display: flex;
+.message-action-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 500;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
   color: var(--color-text-muted);
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   cursor: pointer;
+  line-height: 1;
   transition:
     color 0.15s ease,
     background 0.15s ease;
 }
 
-.message-speak-btn:hover {
-  color: var(--color-accent);
+.message-action-btn svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.message-action-btn:hover {
+  color: var(--color-text);
   background: var(--color-bg-hover);
 }
 
-.message-speak-btn:disabled {
+.message-action-btn:disabled {
   cursor: default;
+  opacity: 0.6;
 }
 
-.message-quote-btn,
-.message-fork-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.message-quote-btn:hover,
-.message-fork-btn:hover {
-  color: var(--color-accent);
-  background: var(--color-bg-hover);
-}
-
+.message-action-btn.active,
 .message-speak-btn.speaking {
-  color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.message-copy-btn.copied,
+.message-copy-btn.copied:hover {
+  color: var(--color-success);
+}
+
+/* User turns: the copy button sits under the bubble, right-aligned. */
+.chat-message.user-message > .message-copy-btn {
+  margin-top: 2px;
+  margin-left: auto;
 }
 
 .message-speak-btn.speaking svg {
@@ -3061,31 +3009,9 @@
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
 }
 
-/* Message-level thumbs feedback */
-.message-feedback-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 5px;
-  font-size: 13px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  opacity: 0.45;
-  transition:
-    opacity 0.15s ease,
-    background 0.15s ease;
-  line-height: 1;
-}
-
-.message-feedback-btn:hover {
-  opacity: 1;
-  background: var(--color-bg-hover);
-}
-
-.message-feedback-btn.active {
-  opacity: 1;
+/* Message-level thumbs feedback: a chosen thumb fills in. */
+.message-feedback-btn.active svg {
+  fill: currentColor;
 }
 
 .message-feedback-thumbdown-wrap {
@@ -3095,38 +3021,43 @@
 
 .message-feedback-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   z-index: 200;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 4px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  min-width: 160px;
+  gap: 1px;
+  min-width: 188px;
+  padding: 6px;
+  background: var(--dp-dropdown-bg, var(--color-bg-primary));
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .message-feedback-reason {
-  padding: 6px 10px;
-  font-size: 12px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  height: 30px;
+  padding: 0 8px;
+  font: inherit;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--color-text);
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 7px;
   cursor: pointer;
-  color: var(--color-text-secondary);
-  transition:
-    background 0.1s ease,
-    color 0.1s ease;
+  transition: background 0.1s ease;
 }
 
 .message-feedback-reason:hover {
   background: var(--color-bg-hover);
-  color: var(--color-text-primary);
 }
 
 @keyframes pulse {
@@ -3174,26 +3105,7 @@
   animation: spin 1s linear infinite;
 }
 
-/* Bubble-level step feedback (next to copy/speak buttons) */
-.bubble-feedback-toggle {
-  display: flex;
-  align-items: center;
-  padding: 4px 8px;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease;
-}
-
-.bubble-feedback-toggle:hover {
-  color: var(--color-accent);
-  background: var(--color-bg-hover);
-}
-
+/* Bubble-level step feedback (.message-action-btn next to copy/speak) */
 .bubble-feedback-panel {
   margin-top: 6px;
   padding: 8px 10px;
@@ -5824,11 +5736,7 @@ button.collab-timeline-thought-agent:hover {
 .event-details.assistant-message .message-actions {
   align-self: flex-start;
   margin-top: 4px;
-}
-
-.event-details.assistant-message .message-copy-btn,
-.event-details.assistant-message .message-speak-btn {
-  margin-top: 0;
+  margin-left: -6px;
 }
 
 .completion-output-card {
@@ -12885,11 +12793,6 @@ button.collab-timeline-thought-agent:hover {
   transition: opacity 0.15s ease;
 }
 
-.chat-message.assistant-message .message-actions .message-speak-btn,
-.chat-message.assistant-message .message-actions .message-fork-btn {
-  padding: 2px 6px;
-}
-
 .chat-message.assistant-message:hover .message-actions,
 .chat-message.assistant-message:focus-within .message-actions {
   opacity: 1;
@@ -13962,8 +13865,6 @@ button.collab-timeline-thought-agent:hover {
 /* Copy stays out of the conversation until the turn is hovered; its row keeps
    its space so revealing it never shifts the stream. */
 .bot-conversation .chat-message.user-message > .message-copy-btn {
-  margin-top: 2px;
-  padding: 2px 6px;
   opacity: 0;
   visibility: hidden;
   transition:

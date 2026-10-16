@@ -541,6 +541,31 @@
   cursor: default;
 }
 
+.bot-computer-recording {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.bot-computer-recording strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.bot-computer-recording input {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
 .bot-computer-files {
   display: grid;
   gap: 4px;

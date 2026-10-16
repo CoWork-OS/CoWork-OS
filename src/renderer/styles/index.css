@@ -20408,20 +20408,10 @@ a,
   visibility: visible;
 }
 
-/* The reserved copy row already spaces the user turn, so tuck it under the
-   bubble and drop the turn's bottom margin by about the row's height. */
-.density-focused .chat-message.user-message > .message-copy-btn {
-  margin-top: 2px;
-  padding: 2px 6px;
-}
-
+/* The reserved copy row already spaces the user turn, so drop the turn's
+   bottom margin by about the row's height. */
 .density-focused .chat-message.user-message {
   margin-bottom: 8px;
-}
-
-.density-focused .message-copy-btn {
-  font-family: var(--font-ui);
-  font-size: 11px;
 }
 
 /* ---- MAIN HEADER: minimal ---- */

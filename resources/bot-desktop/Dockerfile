@@ -18,6 +18,8 @@ RUN apt-get update \
       novnc \
       openbox \
       procps \
+      python3 \
+      python3-xlib \
       scrot \
       tini \
       websockify \
@@ -28,8 +30,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1000 --shell /bin/bash bot
 
+# The bot's files. Owned by the bot in the image, so a new Docker volume mounted here (on a
+# server, or on Linux) starts out writable by the bot instead of owned by root.
+RUN install -d -o bot -g bot -m 0755 /home/bot/work
+
 COPY start-desktop.sh /usr/local/bin/start-desktop
-RUN chmod 0755 /usr/local/bin/start-desktop
+# Teach a task: records what the person does on this desktop and plays it back.
+COPY cowork-teach.py /usr/local/bin/cowork-teach
+RUN chmod 0755 /usr/local/bin/start-desktop /usr/local/bin/cowork-teach
 
 USER bot
 WORKDIR /home/bot

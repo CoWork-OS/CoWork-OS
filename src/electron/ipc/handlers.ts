@@ -67,6 +67,7 @@ import {
   dialog,
   app as _app,
   nativeTheme,
+  safeStorage,
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
@@ -530,6 +531,11 @@ import {
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
 import { ComputerViewService } from "../computer-use/computer-view-service";
 import { BotDesktopManager, findBotDesktopResources } from "../computer-use/bot-desktop-manager";
+import {
+  BotTaskRecordings,
+  normalizeTaughtTaskName,
+  parseRecording,
+} from "../computer-use/bot-task-recordings";
 import { registerAndroidPhoneHandlers } from "./android-phone-handlers";
 import { ComputerUseHelperRuntime } from "../computer-use/helper-runtime";
 import {
@@ -1766,6 +1772,59 @@ export async function setupIpcHandlers(
       // Resolved inside the bot's own work folder only (no "..", no links out of it).
       shell.showItemInFolder(botDesktops.localFilePath(botId, filePath));
       return { revealed: true };
+    },
+  );
+  // Teach a task: after taking over, the person records doing a task once on the bot's own
+  // desktop, and the bot can replay it. Recordings live in CoWork's app data, never on the
+  // desktop, encrypted with the OS keychain when it is available.
+  const taughtTasks = BotTaskRecordings.configure({
+    dataDir: () => _app.getPath("userData"),
+    cipher: () =>
+      safeStorage.isEncryptionAvailable()
+        ? {
+            encrypt: (plain) => safeStorage.encryptString(plain.toString("utf8")),
+            decrypt: (sealed) => Buffer.from(safeStorage.decryptString(sealed), "utf8"),
+          }
+        : null,
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_START_RECORDING, async (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_START_RECORDING);
+    const { botId } = await desktopBotForTask(taskId);
+    // You teach by doing the task yourself, so the bot must be handed off first.
+    if (!computerView.isHeldByPerson(readComputerViewTaskId(taskId))) {
+      throw new Error("Take over first, then record the task on the bot's desktop.");
+    }
+    await botDesktops.startRecording(botId);
+    return { recording: true };
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.COMPUTER_VIEW_FINISH_RECORDING,
+    async (_event, taskId: unknown, name: unknown) => {
+      checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_FINISH_RECORDING);
+      const { botId } = await desktopBotForTask(taskId);
+      if (name === null) {
+        await botDesktops.finishRecording(botId, false);
+        return null;
+      }
+      // Checked before stopping, so a bad name doesn't lose the recording.
+      const taskName = normalizeTaughtTaskName(name);
+      const events = parseRecording(await botDesktops.finishRecording(botId, true));
+      return taughtTasks.save(botId, taskName, events);
+    },
+  );
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_TAUGHT_TASKS, async (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_TAUGHT_TASKS);
+    const { botId } = await desktopBotForTask(taskId);
+    return taughtTasks.list(botId);
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.COMPUTER_VIEW_DELETE_TAUGHT_TASK,
+    async (_event, taskId: unknown, taughtTaskId: unknown) => {
+      checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_DELETE_TAUGHT_TASK);
+      const { botId } = await desktopBotForTask(taskId);
+      return {
+        deleted: taughtTasks.delete(botId, validateInput(UUIDSchema, taughtTaskId, "taught task")),
+      };
     },
   );
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP, async (_event, taskId: unknown) => {

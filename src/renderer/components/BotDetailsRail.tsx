@@ -420,6 +420,7 @@ export function BotDetailsRail({
           taskId={task.id}
           botName={botName}
           worksOn={normalizeBotWorksOn(role.worksOn)}
+          desktopHost={role.desktopHost}
         />
       ) : null}
 

@@ -44,6 +44,13 @@ export const BOT_WORKS_ON_OPTIONS: ReadonlyArray<{
 
 const WORKS_ON_SET = new Set<string>(BOT_WORKS_ON_VALUES);
 
+/** An SSH host alias or user@host from your SSH config: no spaces, no leading dash, no options. */
+export const DESKTOP_HOST_PATTERN = /^(?!-)[A-Za-z0-9._@-]{1,100}$/;
+
+export function isValidDesktopHost(host: unknown): host is string {
+  return typeof host === "string" && DESKTOP_HOST_PATTERN.test(host);
+}
+
 export function isBotWorksOn(value: unknown): value is BotWorksOn {
   return typeof value === "string" && WORKS_ON_SET.has(value);
 }

@@ -3,6 +3,7 @@ import type { AgentRoleData } from "../../electron/preload";
 import { normalizeBotDisplayName, normalizeBotProfileText } from "../utils/bot-profile";
 import { botMascotIcon, resolveBotMascot } from "../../shared/bot-mascots";
 import { normalizeBotWorksOn } from "../../shared/bot-computer";
+import { describeDesktopHostError } from "./BotFormDialog";
 import { BotFormDialog, type BotFormValues } from "./BotFormDialog";
 import { AgentRoleEditorDialog } from "./AgentRoleEditorDialog";
 
@@ -37,6 +38,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     providerType: "",
     modelKey: "",
     worksOn: "auto",
+    desktopHost: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,6 +64,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           providerType: loaded.modelKey ? loaded.providerType || "" : "",
           modelKey: loaded.modelKey || "",
           worksOn: normalizeBotWorksOn(loaded.worksOn),
+          desktopHost: loaded.desktopHost || "",
         });
       } catch (cause) {
         if (!cancelled) {
@@ -88,6 +91,11 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       setError("Bot editing is unavailable in this session.");
       return;
     }
+    const desktopHostError = describeDesktopHostError(values);
+    if (desktopHostError) {
+      setError(desktopHostError);
+      return;
+    }
     if (values.providerType && !values.modelKey) {
       setError("Choose a model, or switch back to the default model.");
       return;
@@ -105,6 +113,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         providerType: values.modelKey ? values.providerType : "",
         modelKey: values.modelKey,
         worksOn: values.worksOn,
+        desktopHost: values.worksOn === "own_desktop" ? values.desktopHost.trim() || null : null,
       });
       if (!updated) throw new Error("Could not save this bot.");
       await onSaved?.(updated);

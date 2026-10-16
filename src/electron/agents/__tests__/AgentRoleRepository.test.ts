@@ -161,6 +161,20 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
     expect(agentRoleRepo.update({ id: created.id, worksOn: null })?.worksOn).toBeUndefined();
   });
 
+  it("stores the server a bot's own desktop runs on", () => {
+    const created = agentRoleRepo.create({
+      name: "server-bot",
+      displayName: "Server bot",
+      capabilities: ["code"],
+      worksOn: "own_desktop",
+      desktopHost: "my-server",
+    });
+    expect(agentRoleRepo.findById(created.id)?.desktopHost).toBe("my-server");
+    expect(
+      agentRoleRepo.update({ id: created.id, desktopHost: null })?.desktopHost,
+    ).toBeUndefined();
+  });
+
   it("deactivates custom roles without breaking historical task references", () => {
     const db = manager.getDatabase();
     const workspaceId = "workspace-for-role-delete";

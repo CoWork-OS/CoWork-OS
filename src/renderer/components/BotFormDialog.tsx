@@ -9,7 +9,11 @@ import {
 import { BotMascot } from "./bot-mascot/BotMascot";
 import { BotIconPicker } from "./bot-mascot/BotIconPicker";
 import { BotModelField } from "./BotModelField";
-import { BOT_WORKS_ON_OPTIONS, type BotWorksOn } from "../../shared/bot-computer";
+import {
+  BOT_WORKS_ON_OPTIONS,
+  isValidDesktopHost,
+  type BotWorksOn,
+} from "../../shared/bot-computer";
 import "./bot-form.css";
 
 export interface BotFormValues {
@@ -23,6 +27,15 @@ export interface BotFormValues {
   modelKey: string;
   /** Where the bot works: which computer its tasks may drive. */
   worksOn: BotWorksOn;
+  /** For its own desktop: an SSH host to run it on; empty means this computer. */
+  desktopHost: string;
+}
+
+/** Why the Runs on value can't be saved, or null when it can. */
+export function describeDesktopHostError(values: BotFormValues): string | null {
+  const host = values.desktopHost.trim();
+  if (values.worksOn !== "own_desktop" || !host || isValidDesktopHost(host)) return null;
+  return "Runs on needs an SSH host from your SSH config, like my-server or me@example.com.";
 }
 
 export interface BotFormDialogProps {
@@ -229,6 +242,27 @@ export function BotFormDialog({
                     ?.description ?? ""}
                 </small>
               </label>
+              {values.worksOn === "own_desktop" ? (
+                <label className="bot-form-field">
+                  <span>
+                    Runs on <small>optional</small>
+                  </span>
+                  <input
+                    className="bot-form-desktop-host"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={values.desktopHost}
+                    onChange={(event) => set({ desktopHost: event.target.value })}
+                    placeholder="This computer"
+                    maxLength={100}
+                  />
+                  <small className="bot-form-hint">
+                    Leave empty for this computer, or enter an SSH host from your SSH config (like
+                    my-server) to run the desktop on your own server with Docker. Run "ssh
+                    my-server" once first so CoWork can trust it.
+                  </small>
+                </label>
+              ) : null}
             </>
           )}
           {error ? (

@@ -554,6 +554,17 @@ CoWork quits. Tasks of the same bot take turns on it. **Open desktop** shows
 it in a window: read-only while the bot works, and yours to use after **Take
 over**.
 
+**Its own desktop on your server.** In the bot's dialog, **Runs on** takes an
+SSH host from your SSH config (like `my-server` or `me@example.com`). The
+desktop then runs on that server with Docker, driven from this computer over
+SSH (`docker --host ssh://<host>`), and the bot's files and sign-ins live in a
+volume there. The viewer reaches the server's loopback through an SSH tunnel.
+CoWork never accepts an unknown host key and never stores SSH keys: run
+`ssh <host>` once in Terminal to trust the server and make sure your key signs
+in without a prompt. The server needs Docker; this computer needs the Docker
+command-line tool. CoWork itself still runs on this computer, so the bot works
+while CoWork is open (or run the headless CoWork daemon on the server).
+
 **One task at a time on this computer.** This computer has one cursor and one
 focus, so one task drives it at a time. Another task waits its turn, first come
 first served, for up to two minutes, and then gets a "this computer is busy"

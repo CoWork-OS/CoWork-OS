@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,8 +22,10 @@ describe("BotDesktopManager", () => {
   let running: Set<string>;
   let imageBuilt: boolean;
 
-  const runner = vi.fn(async (command: string, args: string[]) => {
-    calls.push([command, ...args]);
+  const runner = vi.fn(async (command: string, fullArgs: string[]) => {
+    calls.push([command, ...fullArgs]);
+    // A command for a server carries --host ssh://...; it behaves the same here.
+    const args = fullArgs[0] === "--host" ? fullArgs.slice(2) : fullArgs;
     const out = (text: string) => ({ stdout: Buffer.from(text), stderr: "" });
     switch (args[0]) {
       case "version":
@@ -215,14 +218,20 @@ describe("BotDesktopManager", () => {
     expect(probes).toEqual(["docker", "podman"]);
   });
 
-  it("stops desktops an earlier session left running, and only those", async () => {
+  it("stops desktops an earlier session left running, here and on bots' servers", async () => {
+    BotDesktopManager.configure({
+      dataDir: () => dataDir,
+      resourcesDir: () => resourcesDir,
+      run: runner,
+      runtimeCandidates: ["docker"],
+      hostUid: 1000,
+      desktopHosts: () => ["my-server", "my-server", "bad host"],
+    });
     await BotDesktopManager.getInstance().stopLeftovers();
-    expect(calls.find((call) => call[1] === "stop")).toEqual([
-      "docker",
-      "stop",
-      "--time",
-      "5",
-      "cowork-desktop-abc",
+    const stops = calls.filter((call) => call.includes("stop"));
+    expect(stops).toEqual([
+      ["docker", "stop", "--time", "5", "cowork-desktop-abc"],
+      ["docker", "--host", "ssh://my-server", "stop", "--time", "5", "cowork-desktop-abc"],
     ]);
   });
 
@@ -240,5 +249,70 @@ describe("BotDesktopManager", () => {
     await expect(
       BotDesktopManager.getInstance().withDesktop("bot-1", async () => undefined),
     ).rejects.toThrow(/Docker Desktop or Podman/);
+  });
+
+  describe("on your own server", () => {
+    const servers: net.Server[] = [];
+    afterEach(() => {
+      for (const server of servers.splice(0)) server.close();
+    });
+
+    const configureRemote = (run = runner) => {
+      const tunnels: Array<{ host: string; localPort: number; remotePort: number }> = [];
+      BotDesktopManager.configure({
+        dataDir: () => dataDir,
+        resourcesDir: () => resourcesDir,
+        run,
+        runtimeCandidates: ["docker"],
+        waitMs: 1000,
+        desktopHostFor: () => "my-server",
+        openTunnel: (host, localPort, remotePort) => {
+          tunnels.push({ host, localPort, remotePort });
+          // Stands in for ssh -L: something now listens on the local port.
+          const server = net.createServer((socket) => socket.end());
+          server.listen(localPort, "127.0.0.1");
+          servers.push(server);
+          return { kill: vi.fn(), exitCode: null } as Any;
+        },
+      });
+      return tunnels;
+    };
+
+    it("runs Docker on the server over SSH, with the bot's files in a volume there", async () => {
+      configureRemote();
+      const manager = BotDesktopManager.getInstance();
+      await manager.withDesktop("bot-1", (desktop) => desktop.exec(["true"]));
+      const run = calls.find((call) => call.includes("run"))!;
+      expect(run.slice(0, 4)).toEqual(["docker", "--host", "ssh://my-server", "run"]);
+      const volumes = run.filter((_, index) => run[index - 1] === "--volume");
+      expect(volumes).toEqual([`cowork-desktop-${botDesktopKey("bot-1")}-home:/home/bot/work`]);
+      expect(fs.existsSync(manager.homeFolder("bot-1"))).toBe(false);
+      const exec = calls.filter((call) => call.includes("exec")).pop()!;
+      expect(exec.slice(0, 4)).toEqual(["docker", "--host", "ssh://my-server", "exec"]);
+      expect(calls.find((call) => call.includes("build"))?.slice(0, 3)).toEqual([
+        "docker",
+        "--host",
+        "ssh://my-server",
+      ]);
+    });
+
+    it("shows the viewer through an SSH tunnel to the server's loopback", async () => {
+      const tunnels = configureRemote();
+      const url = new URL(await BotDesktopManager.getInstance().viewerUrl("bot-1"));
+      expect(tunnels).toHaveLength(1);
+      expect(tunnels[0]).toMatchObject({ host: "my-server", remotePort: 55123 });
+      expect(url.hostname).toBe("127.0.0.1");
+      expect(Number(url.port)).toBe(tunnels[0].localPort);
+    });
+
+    it("explains an untrusted host key instead of accepting it", async () => {
+      configureRemote(async (command, args) => {
+        if (args[0] === "--host") throw new Error("Host key verification failed.");
+        return runner(command, args);
+      });
+      await expect(
+        BotDesktopManager.getInstance().withDesktop("bot-1", async () => undefined),
+      ).rejects.toThrow(/doesn't trust my-server yet.*ssh my-server/);
+    });
   });
 });

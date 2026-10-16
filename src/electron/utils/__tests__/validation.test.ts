@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentRoleDesktopHostSchema,
   AgentRoleWorksOnSchema,
   validateInput,
   AgentConfigSchema,
@@ -871,5 +872,20 @@ describe("AgentRoleModelFieldsSchema", () => {
     expect(() => AgentRoleModelFieldsSchema.parse({ providerType: "nope" })).toThrow();
     expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: "x".repeat(201) })).toThrow();
     expect(() => AgentRoleModelFieldsSchema.parse({ modelKey: 42 })).toThrow();
+  });
+});
+
+describe("bot desktop server", () => {
+  it("accepts SSH hosts from your config and clears on empty", () => {
+    expect(AgentRoleDesktopHostSchema.parse("my-server")).toBe("my-server");
+    expect(AgentRoleDesktopHostSchema.parse(" me@example.com ")).toBe("me@example.com");
+    expect(AgentRoleDesktopHostSchema.parse("")).toBeNull();
+    expect(AgentRoleDesktopHostSchema.parse(null)).toBeNull();
+  });
+
+  it("refuses anything that could become an SSH option or a command", () => {
+    for (const bad of ["-oProxyCommand=evil", "a b", "host;rm -rf ~", "host:22", "x".repeat(101)]) {
+      expect(() => AgentRoleDesktopHostSchema.parse(bad)).toThrow();
+    }
   });
 });

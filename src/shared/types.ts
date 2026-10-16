@@ -5737,6 +5737,11 @@ export interface AgentRole {
   accessProfileId?: AccessProfileId;
   /** Where this bot works: which computer its tasks may drive. Unset means Auto. */
   worksOn?: BotWorksOn;
+  /**
+   * For "Its own desktop": the SSH host (from your SSH config) its desktop runs on. Unset means
+   * this computer.
+   */
+  desktopHost?: string;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5787,6 +5792,8 @@ export interface CreateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** Where this bot works; unset means Auto. */
   worksOn?: BotWorksOn;
+  /** The SSH host its own desktop runs on; unset means this computer. */
+  desktopHost?: string;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -5834,6 +5841,8 @@ export interface UpdateAgentRoleRequest {
   accessProfileId?: AccessProfileId | null;
   /** Where this bot works; null resets it to Auto. */
   worksOn?: BotWorksOn | null;
+  /** The SSH host its own desktop runs on; null means this computer. */
+  desktopHost?: string | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;

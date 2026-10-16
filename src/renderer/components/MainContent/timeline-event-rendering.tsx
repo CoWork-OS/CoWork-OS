@@ -41,6 +41,7 @@ import { getAgentMessageReceipt } from "../../utils/agent-message-receipt";
 import {
   DeferredMarkdown,
   HighlightedCodePreview,
+  MessageCopyButton,
   MessageForkButton,
   MessageSpeakButton,
 } from "./message-ui";
@@ -1494,6 +1495,7 @@ export function renderEventDetails(
             />
           </div>
           <div className="message-actions">
+            <MessageCopyButton text={linkedMessage} />
             <MessageSpeakButton text={event.payload.message} voiceEnabled={voiceEnabled} />
             {event.id && onForkTaskSession && options?.isLastAssistantMessage && (
               <MessageForkButton onFork={() => onForkTaskSession(event)} />

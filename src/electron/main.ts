@@ -151,7 +151,7 @@ import { ModelMetadataRefresher } from "./agent/llm/model-metadata-refresh";
 import { SearchProviderFactory } from "./agent/search";
 import { ChannelGateway } from "./gateway";
 import { formatChatTranscriptForPrompt, prefetchTranscriptUsers } from "./gateway/chat-transcript";
-import { updateManager } from "./updater";
+import { getUpdatePrompt, setUpdatePromptAnchor, updateManager } from "./updater";
 import { importProcessEnvToSettings, migrateEnvToSettings } from "./utils/env-migration";
 import {
   TEMP_WORKSPACE_ID,
@@ -1299,6 +1299,10 @@ function installNativeApplicationMenu(): void {
       label: APP_DISPLAY_NAME,
       submenu: [
         { role: "about" },
+        {
+          label: "Check for Updates...",
+          click: () => void getUpdatePrompt().checkNow(),
+        },
         { type: "separator" },
         {
           label: "Settings...",
@@ -3943,6 +3947,9 @@ if (isMacSafeStorageMigrationWorker) {
         }
         // Initialize update manager with main window reference
         updateManager.setMainWindow(mainWindow);
+        setUpdatePromptAnchor(mainWindow);
+        // Background checks open the update window when a release is out.
+        if (!startupQuietMode) getUpdatePrompt().start();
 
         // Restore persisted canvas sessions after the first window is ready.
         if (!startupQuietMode) {

@@ -8530,6 +8530,10 @@ export const IPC_CHANNELS = {
   APP_UPDATE_PROGRESS: "app:updateProgress",
   APP_UPDATE_DOWNLOADED: "app:updateDownloaded",
   APP_UPDATE_ERROR: "app:updateError",
+  APP_CANCEL_UPDATE: "app:cancelUpdate",
+  APP_OPEN_UPDATE_WINDOW: "app:openUpdateWindow",
+  APP_GET_UPDATE_PREFERENCES: "app:getUpdatePreferences",
+  APP_SET_UPDATE_PREFERENCES: "app:setUpdatePreferences",
   SYSTEM_OPEN_SETTINGS: "system:openSettings",
 
   // CoWork Pulse (explicit opt-in, content-free daily usage aggregates)
@@ -10870,12 +10874,30 @@ export interface UpdateInfo {
 }
 
 export interface UpdateProgress {
-  phase: "checking" | "downloading" | "extracting" | "installing" | "complete" | "error";
+  phase:
+    | "checking"
+    | "downloading"
+    | "verifying"
+    | "extracting"
+    | "installing"
+    | "complete"
+    | "cancelled"
+    | "error";
   percent?: number;
   message: string;
   bytesDownloaded?: number;
   bytesTotal?: number;
 }
+
+/** How the app treats new releases it finds on its own (Settings > Updates and the update window). */
+export interface UpdatePreferences {
+  /** Download packaged updates in the background as soon as they are found. */
+  autoDownload: boolean;
+  /** A version the user chose to skip; background checks stay quiet about it. */
+  skippedVersion?: string;
+}
+
+export const DEFAULT_UPDATE_PREFERENCES: UpdatePreferences = { autoDownload: false };
 
 export interface AppVersionInfo {
   version: string;

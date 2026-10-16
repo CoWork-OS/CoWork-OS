@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Download, CheckCircle, XCircle } from "lucide-react";
 import { transformReleaseNotesUrl } from "../utils/release-notes-markdown";
-import type { UpdateInfo } from "../../shared/types";
+import type { UpdateInfo, UpdatePreferences, UpdateProgress } from "../../shared/types";
 
 interface VersionInfo {
   version: string;
@@ -12,12 +12,6 @@ interface VersionInfo {
   isNpmGlobal: boolean;
   gitBranch?: string;
   gitCommit?: string;
-}
-
-interface UpdateProgress {
-  phase: "checking" | "downloading" | "extracting" | "installing" | "complete" | "error";
-  percent?: number;
-  message: string;
 }
 
 function ReleaseNotesLink({ href, children, ...props }: React.ComponentPropsWithoutRef<"a">) {
@@ -54,12 +48,24 @@ export function UpdateSettings() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updateReady, setUpdateReady] = useState(false);
+  const [preferences, setPreferences] = useState<UpdatePreferences | null>(null);
 
   useEffect(() => {
     loadVersionInfo();
+    window.electronAPI
+      .getUpdatePreferences?.()
+      .then(setPreferences)
+      .catch(() => setPreferences(null));
 
     // Subscribe to update events
     const unsubProgress = window.electronAPI.onUpdateProgress((prog) => {
+      if (prog.phase === "cancelled") {
+        setProgress(null);
+        setUpdating(false);
+        return;
+      }
+      // The update window can start a download too; reflect it here.
+      if (prog.phase === "downloading" || prog.phase === "verifying") setUpdating(true);
       setProgress(prog);
       if (prog.phase === "error") {
         setError(prog.message);
@@ -118,10 +124,32 @@ export function UpdateSettings() {
       setError(null);
       await window.electronAPI.downloadUpdate(updateInfo);
     } catch (err: Any) {
-      setError(err.message);
+      // A cancelled download is not an error; the progress event already reset the view.
+      if (!/cancelled/i.test(err?.message ?? "")) setError(err.message);
       setUpdating(false);
     }
   };
+
+  const handleCancelDownload = async () => {
+    try {
+      await window.electronAPI.cancelUpdate();
+    } catch (err: Any) {
+      setError(err.message);
+    }
+  };
+
+  const savePreferences = async (patch: {
+    autoDownload?: boolean;
+    skippedVersion?: string | null;
+  }) => {
+    try {
+      setPreferences(await window.electronAPI.setUpdatePreferences(patch));
+    } catch (err: Any) {
+      setError(err.message);
+    }
+  };
+
+  const packagedBuild = Boolean(versionInfo && !versionInfo.isGitRepo && !versionInfo.isNpmGlobal);
 
   const handleInstallUpdate = async () => {
     try {
@@ -311,6 +339,11 @@ export function UpdateSettings() {
                 <div className="progress-fill" style={{ width: `${progress.percent}%` }} />
               </div>
             )}
+            {updating && packagedBuild && progress.phase === "downloading" && (
+              <button className="button-secondary" onClick={handleCancelDownload}>
+                Cancel
+              </button>
+            )}
           </div>
         )}
 
@@ -341,6 +374,41 @@ export function UpdateSettings() {
           </button>
         )}
       </div>
+
+      {packagedBuild && preferences && (
+        <div className="settings-section">
+          <h3>Automatic Updates</h3>
+          <div className="settings-field">
+            <div className="settings-checkbox-label">
+              <span>Automatically download updates</span>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={preferences.autoDownload}
+                  onChange={(e) => void savePreferences({ autoDownload: e.target.checked })}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+            <p className="settings-hint">
+              New versions download and are verified in the background. You choose when to relaunch.
+            </p>
+          </div>
+          {preferences.skippedVersion && (
+            <div className="settings-field">
+              <div className="settings-checkbox-label">
+                <span>Skipping version {preferences.skippedVersion}</span>
+                <button
+                  className="button-secondary"
+                  onClick={() => void savePreferences({ skippedVersion: null })}
+                >
+                  Stop skipping
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="settings-section">
         <h3>Manual Update</h3>

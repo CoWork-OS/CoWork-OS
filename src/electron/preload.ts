@@ -4145,6 +4145,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   downloadUpdate: (updateInfo: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_DOWNLOAD_UPDATE, updateInfo),
   installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
+  cancelUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CANCEL_UPDATE),
+  openUpdateWindow: () => ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_UPDATE_WINDOW),
+  getUpdatePreferences: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_UPDATE_PREFERENCES),
+  setUpdatePreferences: (patch: { autoDownload?: boolean; skippedVersion?: string | null }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.APP_SET_UPDATE_PREFERENCES, patch),
 
   // CoWork Pulse APIs
   getPulseSettings: () => ipcRenderer.invoke(IPC_CHANNELS.PULSE_GET_SETTINGS),
@@ -8053,14 +8058,18 @@ export interface ElectronAPI {
   ) => Promise<import("../shared/types").UpdateInfo>;
   downloadUpdate: (updateInfo: Any) => Promise<{ success: boolean }>;
   installUpdate: () => Promise<{ success: boolean }>;
+  /** Stop a packaged download in flight; false when nothing could be cancelled. */
+  cancelUpdate: () => Promise<{ cancelled: boolean }>;
+  /** "Check for Updates…": opens the update window with the answer. */
+  openUpdateWindow: () => Promise<{ success: boolean }>;
+  getUpdatePreferences: () => Promise<import("../shared/types").UpdatePreferences>;
+  /** `skippedVersion: null` clears a skipped version. */
+  setUpdatePreferences: (patch: {
+    autoDownload?: boolean;
+    skippedVersion?: string | null;
+  }) => Promise<import("../shared/types").UpdatePreferences>;
   onUpdateProgress: (
-    callback: (progress: {
-      phase: "checking" | "downloading" | "extracting" | "installing" | "complete" | "error";
-      percent?: number;
-      message: string;
-      bytesDownloaded?: number;
-      bytesTotal?: number;
-    }) => void,
+    callback: (progress: import("../shared/types").UpdateProgress) => void,
   ) => () => void;
   onUpdateDownloaded: (
     callback: (info: { requiresRestart: boolean; message: string }) => void,

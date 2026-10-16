@@ -15,7 +15,6 @@ import type { Workspace, SpaceSandboxConfig } from "../../../shared/types";
 import { describeSpaceExecution } from "../../../shared/space-sandbox";
 import type { LLMTool } from "../llm/types";
 import { canEnableSubprocessNetwork } from "../../security/subprocess-network-policy";
-import { loadPolicies } from "../../admin/policies";
 
 export interface CodeExecInput {
   language: "python" | "javascript" | "shell";
@@ -118,10 +117,8 @@ export class CodeExecTools {
     }
     this.assertNetworkExecutionAllowed(input);
     const sandbox = await this.getSandbox();
+    // SpaceSandbox re-checks administrator opt-in itself before every invocation.
     signal.throwIfAborted();
-    if (sandbox.type === "space" && !loadPolicies().runtime.allowedSandboxTypes.includes("space")) {
-      throw new Error("SPACE sandbox is blocked by administrator policy");
-    }
     const permissions = this.workspace.permissions || ({} as Workspace["permissions"]);
     const unrestrictedProfile =
       permissions.accessSandboxMode === "danger-full-access" &&

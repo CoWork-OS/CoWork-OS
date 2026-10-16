@@ -173,6 +173,49 @@ describe("Application execution conformance", () => {
     });
   }
 
+  it("does not spend the adapter deadline while waiting for approval", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const authorize = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const a = adapter({ authorize });
+    const s = service(a);
+    const operation = await s.create(request());
+    const pending = s.execute(operation.id);
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect((await s.get(operation.id)).execution).toBe("submitting");
+    expect(a.execute).not.toHaveBeenCalled();
+    release();
+    expect((await pending).verification).toBe("verified");
+  });
+
+  it("releases the device resource when canceled before approval, without dispatch", async () => {
+    const authorize = vi.fn(
+      (context: Parameters<NonNullable<ApplicationAdapter["authorize"]>>[0]) =>
+        new Promise<void>((_resolve, reject) => {
+          context.signal.addEventListener(
+            "abort",
+            () => reject(new Error("Approval review canceled")),
+            { once: true },
+          );
+        }),
+    );
+    const a = adapter({ authorize });
+    const s = service(a);
+    const operation = await s.create(request());
+    const pending = s.execute(operation.id);
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    await s.cancelForTask("task");
+    expect((await pending).execution).toBe("failed");
+    expect(a.execute).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT count(*) n FROM application_resource_locks").get()).toEqual({ n: 0 });
+  });
+
   it("completes clear authorized work without a decision and preserves ordered attempts/events", async () => {
     const a = adapter();
     const s = service(a);
@@ -825,6 +868,99 @@ describe("Application execution conformance", () => {
     await expect(
       s.create(request({ idempotencyKey: "erase", planRevision: 3, supersedes: next.id })),
     ).rejects.toThrow("unsubmitted proposal");
+  });
+  it("supersedes a proven stale no-dispatch phone attempt with a freshly approved revision", async () => {
+    let stale = true;
+    const a = adapter({
+      route: route({ id: "phone.android.v1", capability: "phone.android.action" }),
+      execute: async () => {
+        if (stale)
+          throw new ApplicationNotDispatchedError("stale_snapshot: phone changed; observe again");
+        return { status: "completed", result: result() };
+      },
+    });
+    const s = service(a);
+    const input = {
+      deviceId: "selected",
+      snapshotId: "before",
+      action: { kind: "type_text", text: "QA" },
+      expected: { text: "QA" },
+    };
+    const old = await s.create(request({ capability: a.route.capability, input }));
+    const failed = await s.execute(old.id);
+    expect(failed).toMatchObject({ execution: "failed", notDispatched: true });
+    stale = false;
+    const next = await s.create(
+      request({
+        capability: a.route.capability,
+        idempotencyKey: "fresh",
+        planRevision: 2,
+        supersedes: old.id,
+        input: { ...input, snapshotId: "fresh" },
+      }),
+    );
+    expect(s.projection(await s.get(old.id)).status).toBe("superseded");
+    expect((await s.get(old.id)).error).toContain("stale_snapshot");
+    expect(next.execution).toBe("planned");
+    expect(s.projection(await s.execute(next.id)).status).toBe("complete");
+  });
+  it.each([
+    "unknown",
+    "completed",
+    "not_stale",
+    "legacy_no_proof",
+    "other_device",
+    "other_action",
+    "other_criteria",
+    "same_snapshot",
+    "same_revision",
+  ])("never supersedes unsafe or mismatched phone recovery: %s", async (caseName) => {
+    const a = adapter({
+      route: route({ id: "phone.android.v1", capability: "phone.android.action" }),
+      execute: async () => {
+        if (caseName === "unknown") throw new Error("Lost reply");
+        if (caseName === "completed") return { status: "completed", result: result() };
+        throw new ApplicationNotDispatchedError(
+          caseName === "not_stale" ? "Approval denied" : "stale_snapshot: phone changed",
+        );
+      },
+    });
+    const s = service(a);
+    const input = {
+      deviceId: "selected",
+      snapshotId: "before",
+      action: { kind: "type_text", text: "QA" },
+      expected: { text: "QA" },
+    };
+    const old = await s.create(request({ capability: a.route.capability, input }));
+    await s.execute(old.id);
+    if (caseName === "legacy_no_proof") {
+      const stored = await s.get(old.id);
+      delete stored.notDispatched;
+      db.prepare("UPDATE application_operations SET data = ? WHERE id = ?").run(
+        JSON.stringify(stored),
+        old.id,
+      );
+    }
+    const nextInput = {
+      ...input,
+      snapshotId: caseName === "same_snapshot" ? "before" : "fresh",
+      ...(caseName === "other_device" ? { deviceId: "other" } : {}),
+      ...(caseName === "other_action" ? { action: { kind: "type_text", text: "different" } } : {}),
+      ...(caseName === "other_criteria" ? { expected: { text: "different" } } : {}),
+    };
+    await expect(
+      s.create(
+        request({
+          capability: a.route.capability,
+          idempotencyKey: "fresh",
+          planRevision: caseName === "same_revision" ? 1 : 2,
+          supersedes: old.id,
+          input: nextInput,
+        }),
+      ),
+    ).rejects.toThrow("superseded");
+    expect((await s.get(old.id)).supersededBy).toBeUndefined();
   });
   it("requires an operator's exact unknown revision for manual recovery and retains unavailable verification", async () => {
     const s = service(

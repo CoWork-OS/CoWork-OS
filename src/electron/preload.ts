@@ -1,3 +1,4 @@
+import type { ComputerViewState } from "../shared/computer-view";
 import {
   BROWSER_VAULT_IPC,
   type BrowserVaultItem,
@@ -10,6 +11,7 @@ import {
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
 } from "../shared/composer-predictions";
 import type { ApprovalRequest } from "../shared/types";
+import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
   ApprovalDraftPreview,
   InlineApprovalDraftReview,
@@ -50,6 +52,7 @@ import * as fs from "fs";
 import * as os from "os";
 import { randomBytes } from "crypto";
 import { IPC_CHANNELS as SHARED_IPC_CHANNELS, isTempWorkspaceId } from "../shared/types";
+import type { BotOutcomeMetrics, BotOutcomeMetricsRequest } from "../shared/bot-outcome-metrics";
 import type {
   ChannelHealthResponse,
   MeetingArtifactProvider,
@@ -92,6 +95,7 @@ import type { AnswerImageRequest, AnswerImageResult } from "../shared/answer-sur
 import type {
   MemoryRepoCompactResult,
   MemoryRepoSyncNowResult,
+  MemoryRepoBotMemoryReport,
   MemoryRepoDreamActionResult,
   MemoryRepoDreamNowResult,
   MemoryRepoDreamPart,
@@ -1693,6 +1697,8 @@ interface AgentRoleData {
   autonomyLevel?: AgentAutonomyLevel;
   /** "May do alone": the most access this agent's work gets. */
   accessProfileId?: string;
+  /** Where this bot works; unset means Auto. */
+  worksOn?: import("../shared/bot-computer").BotWorksOn;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1734,6 +1740,7 @@ interface CreateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  worksOn?: import("../shared/bot-computer").BotWorksOn;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1766,6 +1773,7 @@ interface UpdateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** The agent's access limit; null clears it. */
   accessProfileId?: string | null;
+  worksOn?: import("../shared/bot-computer").BotWorksOn | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -3249,6 +3257,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     >,
   listBotWork: (query: BotWorkQuery) =>
     ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_LIST, query) as Promise<BotWorkPage>,
+  getBotMetricsSummary: (request: BotOutcomeMetricsRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_METRICS_SUMMARY, request) as Promise<BotOutcomeMetrics>,
   listBotConversations: (query: BotConversationListQuery) =>
     invokeTaskIpcWithRendererTiming(IPC_CHANNELS.BOT_CONVERSATIONS_LIST, query),
   listBotMessages: (request: import("../shared/bot-messages").BotMessagePageRequest) =>
@@ -4432,6 +4442,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, input),
 
   getComputerUseStatus: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_STATUS),
+  getAndroidPhoneStatus: () => ipcRenderer.invoke("androidPhone:status"),
+  saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) =>
+    ipcRenderer.invoke("androidPhone:settings", settings),
+  installAndroidPhoneRuntime: () => ipcRenderer.invoke("androidPhone:install"),
+  stopAndroidPhone: () => ipcRenderer.invoke("androidPhone:stop"),
   endComputerUseSession: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_END_SESSION),
   openComputerUseAccessibilitySettings: () =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_OPEN_ACCESSIBILITY),
@@ -4440,6 +4455,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onComputerUseEvent: (callback: (event: Any) => void) => {
     const channel = IPC_CHANNELS.COMPUTER_USE_EVENT;
     const listener = (_e: Any, payload: Any) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  watchComputerView: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_WATCH, taskId),
+  unwatchComputerView: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, taskId),
+  takeOverComputer: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, taskId),
+  handBackComputer: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, taskId),
+  onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
+    const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
+    const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
@@ -4644,7 +4673,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_SNAPSHOT, sessionId),
   canvasExportHTML: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EXPORT_HTML, sessionId),
-  canvasExportToFolder: (data: { sessionId: string; targetDir: string }) =>
+  canvasExportToFolder: (data: { sessionId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_EXPORT_TO_FOLDER, data),
   canvasOpenInBrowser: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_OPEN_IN_BROWSER, sessionId),
@@ -4839,6 +4868,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
   compactMemoryRepoHistory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_COMPACT_HISTORY),
   syncMemoryRepoNow: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_SYNC_NOW),
+  getBotMemory: (data: { botId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_MEMORY, data),
+  forgetBotMemoryEntry: (data: { botId: string; ref: string; hash: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_FORGET, data),
+  undoBotMemoryChange: (data: { botId: string; commit: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_BOT_UNDO, data),
 
   // PACT business agents (docs/pact.md)
   getPactStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PACT_STATUS),
@@ -6997,6 +7032,7 @@ export interface ElectronAPI {
     request: import("../shared/bot-work-result").BotWorkResultRequest,
   ) => Promise<import("../shared/bot-work-result").BotWorkResult>;
   listBotWork: (query: BotWorkQuery) => Promise<BotWorkPage>;
+  getBotMetricsSummary: (request: BotOutcomeMetricsRequest) => Promise<BotOutcomeMetrics>;
   activateBotResponsibility: (
     request: import("../shared/bot-responsibility").BotResponsibilityControl,
   ) => Promise<BotResponsibility>;
@@ -8558,10 +8594,21 @@ export interface ElectronAPI {
     screenCaptureStatus: string;
     error: string | null;
   }>;
+  getAndroidPhoneStatus: () => Promise<AndroidPhoneStatus>;
+  saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) => Promise<AndroidPhoneSettings>;
+  installAndroidPhoneRuntime: () => Promise<void>;
+  stopAndroidPhone: () => Promise<void>;
   endComputerUseSession: () => Promise<{ success: boolean }>;
   openComputerUseAccessibilitySettings: () => Promise<{ success: boolean }>;
   openComputerUseScreenRecordingSettings: () => Promise<{ success: boolean }>;
   onComputerUseEvent: (callback: (event: Any) => void) => () => void;
+  /** Starts showing a task's computer in the bot's panel; returns its current state. */
+  watchComputerView: (taskId: string) => Promise<ComputerViewState>;
+  unwatchComputerView: (taskId: string) => Promise<void>;
+  /** The person takes over: the bot's computer and browser actions are refused until hand-back. */
+  takeOverComputer: (taskId: string) => Promise<ComputerViewState>;
+  handBackComputer: (taskId: string) => Promise<ComputerViewState>;
+  onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;
   saveTraySettings: (
@@ -8765,8 +8812,7 @@ export interface ElectronAPI {
   canvasExportHTML: (sessionId: string) => Promise<{ content: string; filename: string }>;
   canvasExportToFolder: (data: {
     sessionId: string;
-    targetDir: string;
-  }) => Promise<{ files: string[]; targetDir: string }>;
+  }) => Promise<{ files: string[]; targetDir: string } | null>;
   canvasOpenInBrowser: (sessionId: string) => Promise<{ success: boolean; path: string }>;
   canvasOpenUrl: (data: {
     sessionId: string;
@@ -8989,6 +9035,16 @@ export interface ElectronAPI {
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;
   syncMemoryRepoNow: () => Promise<MemoryRepoSyncNowResult>;
+  getBotMemory: (data: { botId: string }) => Promise<MemoryRepoBotMemoryReport>;
+  forgetBotMemoryEntry: (data: {
+    botId: string;
+    ref: string;
+    hash: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
+  undoBotMemoryChange: (data: {
+    botId: string;
+    commit: string;
+  }) => Promise<MemoryRepoEntryActionResult>;
 
   // PACT business agents. Sign-in links never reach the desktop renderer; openPactSignIn
   // opens the business's own login in the system browser from main.

@@ -7,6 +7,25 @@ import {
   hasNativeDesktopGuiIntent,
 } from "../tool-policy-engine";
 
+describe("Android phone tool exposure", () => {
+  it("blocks phone input in plan/analyze modes while retaining approved observation", () => {
+    for (const executionMode of ["plan", "analyze"] as const) {
+      expect(evaluateToolPolicy("android_phone_dispatch", { executionMode }).decision).toBe("deny");
+      expect(evaluateToolPolicy("android_phone_authorize", { executionMode }).decision).toBe(
+        "deny",
+      );
+      expect(evaluateToolPolicy("android_phone_observe", { executionMode }).decision).toBe("allow");
+    }
+  });
+  it("keeps the durable application gateway reachable for phone tasks", () => {
+    expect(
+      evaluateToolAvailability("application_operation", {
+        taskText: "Open Settings on my Android phone",
+      }).decision,
+    ).toBe("allow");
+  });
+});
+
 describe("tool-policy-engine background process tools", () => {
   it("lets plan mode read background output but not stop processes", () => {
     const plan = { executionMode: "plan" as const, taskDomain: "code" as const };
@@ -604,5 +623,30 @@ describe("Codex desktop MCP exposure", () => {
         { ...runtime, capabilityTags: [...runtime.capabilityTags] },
       ).decision,
     ).toBe("defer");
+  });
+});
+
+describe("request_takeover exposure", () => {
+  it("is offered with browser or desktop work, or after the agent used a computer tool", () => {
+    expect(
+      evaluateToolAvailability("request_takeover", { taskText: "Log in to the website and pay" })
+        .decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability("request_takeover", {
+        taskText: "continue",
+        recentlyUsedTools: ["browser_navigate"],
+      }).decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability("request_takeover", { taskText: "Summarize this CSV file" })
+        .decision,
+    ).toBe("defer");
+  });
+
+  it("is allowed in plan mode, since it changes nothing", () => {
+    expect(evaluateToolPolicy("request_takeover", { executionMode: "plan" }).decision).toBe(
+      "allow",
+    );
   });
 });

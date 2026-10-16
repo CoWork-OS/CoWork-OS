@@ -93,7 +93,7 @@ export interface RuntimeSkillDescriptor {
   name: string;
   description: string;
   whenToUse: string;
-  allowedTools?: string[];
+  requiredTools?: string[];
   disableModelInvocation: boolean;
   userInvocable: boolean;
   skill: CustomSkill;
@@ -1068,7 +1068,7 @@ export class CustomSkillLoader {
   }
 
   getRuntimeSkillDescriptor(skill: CustomSkill): RuntimeSkillDescriptor {
-    const allowedTools = Array.isArray((skill.requires as Any)?.tools)
+    const requiredTools = Array.isArray((skill.requires as Any)?.tools)
       ? ((skill.requires as Any).tools as unknown[]).filter(
           (tool): tool is string => typeof tool === "string" && tool.trim().length > 0,
         )
@@ -1080,7 +1080,7 @@ export class CustomSkillLoader {
         String(skill.metadata?.routing?.useWhen || "").trim() ||
         String(skill.description || "").trim() ||
         `Use when the ${skill.name || skill.id} skill clearly matches the task.`,
-      allowedTools,
+      requiredTools,
       disableModelInvocation: skill.invocation?.disableModelInvocation === true,
       userInvocable: skill.invocation?.userInvocable !== false,
       skill,

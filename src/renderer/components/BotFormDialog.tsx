@@ -9,6 +9,7 @@ import {
 import { BotMascot } from "./bot-mascot/BotMascot";
 import { BotIconPicker } from "./bot-mascot/BotIconPicker";
 import { BotModelField } from "./BotModelField";
+import { BOT_WORKS_ON_OPTIONS, type BotWorksOn } from "../../shared/bot-computer";
 import "./bot-form.css";
 
 export interface BotFormValues {
@@ -20,6 +21,8 @@ export interface BotFormValues {
   /** The bot's own model: provider and model key, both "" to follow the default model. */
   providerType: string;
   modelKey: string;
+  /** Where the bot works: which computer its tasks may drive. */
+  worksOn: BotWorksOn;
 }
 
 export interface BotFormDialogProps {
@@ -208,6 +211,24 @@ export function BotFormDialog({
                 onChange={(model) => set(model)}
                 disabled={busy}
               />
+              <label className="bot-form-field">
+                <span>Works on</span>
+                <select
+                  className="bot-form-works-on"
+                  value={values.worksOn}
+                  onChange={(event) => set({ worksOn: event.target.value as BotWorksOn })}
+                >
+                  {BOT_WORKS_ON_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <small className="bot-form-hint">
+                  {BOT_WORKS_ON_OPTIONS.find((option) => option.value === values.worksOn)
+                    ?.description ?? ""}
+                </small>
+              </label>
             </>
           )}
           {error ? (

@@ -1,3 +1,8 @@
+import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
+import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
+import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
+import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
+import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
 import {
   buildNativeActionLedger,
@@ -13,6 +18,7 @@ import {
   isNativeApplicationReadbackStep,
   isNativeApplicationPresentationStep,
   isNativeUiOperationStep,
+  requestsCliAnythingApp,
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
@@ -689,6 +695,9 @@ const DEFAULT_PROMPT_SECTION_BUDGETS = {
 // (was capped at 1,200), and design-system context, project guidance and the
 // external profile have their own sections instead of sharing that cap.
 // Overflow still drops/shrinks optional sections by drop priority.
+/** A bot's own memory (memory folder `bots/<slug>.md`) and its earlier conversations. */
+const BOT_MEMORY_GUIDANCE =
+  'You have your own memory as this bot: what you save with memory_remember scope bot (your job, what the user wants from you, decisions you made together) is shown to you in every conversation you have with the user. Before asking the user to repeat something or redoing earlier work, search your earlier conversations with memory_recall scopes ["bot"] (add since, e.g. "3d", for recent ones).';
 const EXECUTION_SYSTEM_PROMPT_TOTAL_BUDGET = 7600;
 type BasePromptRoutingBlock = "cloud_storage" | "messaging" | "maps" | "pdf" | "rich_surfaces";
 // Same provider list the IntentRouter uses for its cloud-storage signals.
@@ -7132,7 +7141,7 @@ ${transcript}
       ...(this.task.agentConfig?.chronicleMode === "disabled" ? ["screen_context_resolve"] : []),
       ...(isReadOnlyReview
         ? [
-            "group:system",
+            ...readOnlyReviewSystemRestrictions(this.task.rawPrompt || this.task.prompt || ""),
             "take_screenshot",
             "type_text",
             "screenshot",
@@ -7153,6 +7162,7 @@ ${transcript}
       toolRestrictions,
     );
     registry.setWorkspacePathAliasPolicy(this.getEffectiveWorkspacePathAliasPolicy());
+    registry.setBotWorksOnSource(() => this.resolveBotWorksOn());
     registry.setWebSearchDomainPolicy({
       allowedDomains: this.webSearchAllowedDomains,
       blockedDomains: this.webSearchBlockedDomains,
@@ -7649,6 +7659,7 @@ ${transcript}
           self.discoveredDeferredToolNames instanceof Set
             ? self.discoveredDeferredToolNames
             : new Set<string>(),
+        exposedToolNames: new Set<string>(),
         availableToolsCacheKey:
           typeof self.availableToolsCacheKey === "string" ? self.availableToolsCacheKey : null,
         availableToolsCache: Array.isArray(self.availableToolsCache)
@@ -8890,6 +8901,12 @@ ${transcript}
         if (rolePersona) {
           lines.push(rolePersona);
         }
+        if (
+          this.task.agentConfig?.botConversation === true &&
+          MemoryRepoService.get()?.isWritable()
+        ) {
+          lines.push(BOT_MEMORY_GUIDANCE);
+        }
       }
     }
 
@@ -9082,7 +9099,10 @@ ${transcript}
   ): Promise<MemoryRepoContextBlock | null> {
     if (!decision.layers.memoryRepo) return null;
     try {
-      return await getMemoryRepoContext().build({ workspaceId: this.workspace?.id ?? null });
+      return await getMemoryRepoContext().build({
+        workspaceId: this.workspace?.id ?? null,
+        botId: this.task.assignedAgentRoleId ?? null,
+      });
     } catch (error) {
       logger.warn("[Executor] Memory repo block build failed:", (error as Error)?.message ?? error);
       return null;
@@ -11393,6 +11413,10 @@ ${transcript}
           cachedTokens: safeCached,
           ...(safeCacheWrite > 0 ? { cacheWriteTokens: safeCacheWrite } : {}),
           ...(cacheWriteTtl ? { cacheWriteTtl } : {}),
+          // Why this request could not reuse the previous prompt cache, if known.
+          ...(this.promptCacheInvalidationReason
+            ? { cacheInvalidation: this.promptCacheInvalidationReason }
+            : {}),
           totalTokens: safeInput + safeOutput,
           cost: deltaCost,
           costKnown,
@@ -11423,6 +11447,12 @@ ${transcript}
   }
 
   private getToolTimeoutMs(toolName: string, input: unknown): number {
+    const timeoutMs = this.getToolTimeoutMsBeforeComputerWait(toolName, input);
+    // A computer-use call may first wait its turn while another task has the computer.
+    return isComputerUseToolName(toolName) ? timeoutMs + COMPUTER_USE_WAIT_MS : timeoutMs;
+  }
+
+  private getToolTimeoutMsBeforeComputerWait(toolName: string, input: unknown): number {
     const settingsTimeout = BuiltinToolsSettingsManager.getToolTimeoutMs(toolName);
     const normalizedSettingsTimeout =
       settingsTimeout && settingsTimeout > 0 ? settingsTimeout : null;
@@ -11435,6 +11465,18 @@ ${transcript}
       if (!Number.isFinite(ms) || ms <= 0) return TOOL_TIMEOUT_MS;
       return Math.min(Math.round(ms), maxMs);
     };
+
+    if (
+      toolName === "application_operation" &&
+      ["execute", "reconcile"].includes(toolInput.action)
+    ) {
+      // A durable call can prepare, ask for input approval, dispatch, then verify.
+      // Its individual adapter phases retain their own deadlines and cancellation.
+      return (
+        normalizedSettingsTimeout ??
+        clampToStepTimeout(TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS + 3 * 120_000)
+      );
+    }
 
     if (toolName === "run_command") {
       const inputTimeoutRaw =
@@ -11733,10 +11775,17 @@ ${transcript}
             swarm ? swarmFolderPath(swarm.slug) : null,
           )
         : null;
+    // A bot's task recalls from its own bot file and no other bot's.
+    const botFile =
+      memoryRepoReadAllowed && this.task.assignedAgentRoleId
+        ? await MemoryRepoService.get()
+            ?.botFile(this.task.assignedAgentRoleId)
+            .catch(() => null)
+        : null;
 
     try {
       const coordinated = await withTimeout(
-        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix }, () =>
+        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
           this.toolExecutionCoordinator.executeTool(
             toolName,
             input as Any,
@@ -12137,6 +12186,19 @@ ${transcript}
         files = result.files;
       }
       this.fileOperationTracker.recordDirectoryListing(input.path, files);
+    }
+
+    // Approved phone captures are real workspace artifacts, not evidence of app-side success.
+    if (toolSucceeded && result?.screenshot) {
+      const screenshotPath = verifiedPhoneScreenshotPath(
+        toolName,
+        input,
+        result,
+        this.task?.id,
+        this.workspace.path,
+      );
+      if (screenshotPath && this.canReadWorkspacePath(screenshotPath))
+        this.fileOperationTracker.recordFileCreation(screenshotPath);
     }
 
     // Record file creations
@@ -15219,6 +15281,7 @@ ${transcript}
   private hasNonImageGenerationWorkIntent(taskText: string): boolean {
     return (
       hasNativeApplicationOutputIntent(taskText) ||
+      requestsCliAnythingApp(taskText) ||
       /\b(edit|modify|change|update|retouch|inpaint|remove|replace|analy[sz]e|describe|review|compare|inspect|website|webapp|code|component|page|ui|screenshot)\b/.test(
         taskText,
       )
@@ -18275,6 +18338,26 @@ ${transcript}
     return configuredDefault || "default";
   }
 
+  private botWorksOnCache: { at: number; value: BotWorksOn | undefined } | null = null;
+
+  /**
+   * The bot's "Works on" setting for this task: read from the assigned bot each time (so an edit
+   * applies on the next tool call and no task config can widen it), then narrowed by any limit
+   * inherited from the bot that delegated this task. Cached briefly, since the tool registry
+   * checks it for every tool it lists.
+   */
+  private resolveBotWorksOn(): BotWorksOn | undefined {
+    const now = Date.now();
+    if (this.botWorksOnCache && now - this.botWorksOnCache.at < 1000) {
+      return this.botWorksOnCache.value;
+    }
+    const roleId = this.task.assignedAgentRoleId;
+    const role = roleId ? this.daemon.getAgentRoleById?.(roleId) : undefined;
+    const value = narrowestBotWorksOn(role?.worksOn, this.task.agentConfig?.inheritedBotWorksOn);
+    this.botWorksOnCache = { at: now, value };
+    return value;
+  }
+
   private getTaskToolRestrictions(): Set<string> {
     const raw = this.task.agentConfig?.toolRestrictions ?? [];
     const restrictions = new Set<string>();
@@ -18984,6 +19067,18 @@ ${transcript}
       "",
       ...(this.shouldOfferAnswerSurfaces() ? [ANSWER_SURFACE_PROMPT, ""] : []),
     ].join("\n");
+  }
+
+  private buildExecutionApplicationWorkerPrompt(): string {
+    const forbidsScripting = taskForbidsScripting(
+      `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
+    );
+    return (
+      applicationWorkerPrompt({ forbidsScripting }) +
+      (forbidsScripting
+        ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused, and CLI-Anything harnesses must not be used. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
+        : "")
+    );
   }
 
   private buildExecutionBaseInstructionPrompt(): string {
@@ -19863,13 +19958,7 @@ ${transcript}
       identityPrompt: params.identityPrompt,
       safetyCorePrompt: SHARED_PROMPT_POLICY_CORE,
       baseInstructionPrompt: this.buildExecutionBaseInstructionPrompt(),
-      applicationWorkerPrompt:
-        applicationWorkerPrompt() +
-        (taskForbidsScripting(
-          `${this.task.title || ""}\n${this.task.rawPrompt || this.task.prompt || ""}`,
-        )
-          ? "\n\nThis task forbids application scripting: application_operation, local_photoshop_create/edit, native_application_create and run_applescript are unavailable and refused. Make the change through native_app; read-only readbacks such as local_photoshop_read remain available for verification. If the UI cannot apply the change, report that limit."
-          : ""),
+      applicationWorkerPrompt: this.buildExecutionApplicationWorkerPrompt(),
       answerSurfacePrompt: richSurfacesPrompt,
       inputPolicyPrompt: this.buildExecutionInputPolicyPrompt(),
       workspaceContextPrompt: this.buildExecutionWorkspaceContextPrompt(),
@@ -20211,6 +20300,16 @@ ${transcript}
     ]);
 
     const isBotConversation = this.task.agentConfig?.botConversation === true;
+    if (/\bandroid\b|phone-harness|phone\.android\.|android_phone_/i.test(nativeGuiText || "")) {
+      for (const name of [
+        "android_phone_devices",
+        "android_phone_observe",
+        "android_phone_authorize",
+        "android_phone_dispatch",
+        "android_phone_readback",
+      ])
+        always.add(name);
+    }
     const botTeamDelegationRequested = this.hasExplicitBotTeamDelegationRequest(stepText);
 
     if (this.swarmForTools) {
@@ -21149,6 +21248,11 @@ You are continuing a previous conversation. The context from the previous conver
     }
     // Queued overrides must not grant the orchestrator-only team lane marker.
     agentConfigOverride = stripTeamWorkItemLaneOverride(agentConfigOverride);
+    // Nor drop the "Works on" limit inherited from a delegating bot.
+    if (Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn")) {
+      const { inheritedBotWorksOn: _inherited, ...rest } = agentConfigOverride;
+      agentConfigOverride = rest;
+    }
     const persistedAgentConfig =
       this.daemon.getTask(this.task.id)?.agentConfig || this.task.agentConfig;
     const boundedTask = normalizeWorkerRoleTaskConfig({
@@ -28113,28 +28217,7 @@ You are continuing a previous conversation. The context from the previous conver
     // file exploration), not web research — skip the web evidence requirement.
     if (this.task.parentTaskId && this.task.agentType === "sub") return false;
 
-    const prompt = `${this.task.title}\n${this.getContractPrompt()}`.toLowerCase();
-    // Use word-boundary regex to avoid false positives (e.g. "Researcher" matching "search")
-    const researchSignalPattern =
-      /\b(?:news|latest|today|trending|breaking|reddit|search|headline|current events)\b/;
-    if (!researchSignalPattern.test(prompt)) return false;
-    // Build/creation tasks mentioning news-related keywords don't need web evidence —
-    // they are building a tool about news, not fetching news itself.
-    const buildSignals = [
-      "create an app",
-      "build an app",
-      "make an app",
-      "write an app",
-      "create a tool",
-      "build a tool",
-      "create a website",
-      "build a website",
-      "implement",
-      "develop an app",
-      "develop a tool",
-    ];
-    if (buildSignals.some((signal) => prompt.includes(signal))) return false;
-    return true;
+    return needsTaskWebEvidence(this.task.title, this.getContractPrompt());
   }
 
   private taskRequiresTodayContext(): boolean {

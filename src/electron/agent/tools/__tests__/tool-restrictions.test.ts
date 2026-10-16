@@ -85,4 +85,39 @@ describe("ToolRegistry tool restrictions", () => {
     expect(registry.isToolAllowed("web_search")).toBe(false);
     expect(registry.isToolAllowed("spawn_agent")).toBe(false);
   });
+
+  it("takes computer tools away according to the bot's Works on setting", () => {
+    const workspace: Any = {
+      id: "test-workspace",
+      name: "Test Workspace",
+      path: "/mock/workspace",
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+      createdAt: Date.now(),
+    };
+    const daemon: Any = { logEvent: vi.fn(), registerArtifact: vi.fn() };
+    const registry = new ToolRegistry(workspace, daemon, "test-task", "private", []);
+    let worksOn: Any = "browser";
+    registry.setBotWorksOnSource(() => worksOn);
+
+    expect(registry.isToolAllowed("click")).toBe(false);
+    expect(registry.isToolAllowed("open_application")).toBe(false);
+    expect(registry.isToolAllowed("browser_navigate")).toBe(true);
+    expect(registry.isToolAllowed("read_file")).toBe(true);
+    expect((registry as Any).isDeniedByTaskRestrictions("native_app")).toBe(true);
+
+    // A change applies on the next check.
+    worksOn = "off";
+    expect(registry.isToolAllowed("browser_navigate")).toBe(false);
+    expect(registry.isToolAllowed("read_file")).toBe(true);
+
+    worksOn = "this_computer";
+    expect(registry.isToolAllowed("browser_navigate")).toBe(true);
+    expect((registry as Any).isDeniedByTaskRestrictions("click")).toBe(false);
+
+    // A setting that cannot be read takes the computer away.
+    registry.setBotWorksOnSource(() => {
+      throw new Error("role store unavailable");
+    });
+    expect(registry.isToolAllowed("browser_navigate")).toBe(false);
+  });
 });

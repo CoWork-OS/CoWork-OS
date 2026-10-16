@@ -283,7 +283,10 @@ export function MCPRegistryBrowser({
 
               <div className="registry-server-meta">
                 <span className="registry-author">by {normalizeAuthor(entry.author)}</span>
-                <span className="registry-tools-count">{entry.tools.length} tools</span>
+                {/* Hosted servers list their tools only after sign-in. */}
+                {entry.tools.length > 0 && (
+                  <span className="registry-tools-count">{entry.tools.length} tools</span>
+                )}
                 {entry.category && <span className="registry-category">{entry.category}</span>}
               </div>
 
@@ -435,17 +438,19 @@ export function MCPRegistryBrowser({
                 )}
               </div>
 
-              <div className="registry-details-section">
-                <h4>Available Tools ({viewingDetails.tools.length})</h4>
-                <div className="registry-tools-list">
-                  {viewingDetails.tools.map((tool) => (
-                    <div key={tool.name} className="registry-tool-item">
-                      <span className="registry-tool-name">{tool.name}</span>
-                      <span className="registry-tool-desc">{tool.description}</span>
-                    </div>
-                  ))}
+              {viewingDetails.tools.length > 0 && (
+                <div className="registry-details-section">
+                  <h4>Available Tools ({viewingDetails.tools.length})</h4>
+                  <div className="registry-tools-list">
+                    {viewingDetails.tools.map((tool) => (
+                      <div key={tool.name} className="registry-tool-item">
+                        <span className="registry-tool-name">{tool.name}</span>
+                        <span className="registry-tool-desc">{tool.description}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="registry-details-section">
                 <div className="registry-server-tags">

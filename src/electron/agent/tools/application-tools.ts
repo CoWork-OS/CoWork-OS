@@ -1,10 +1,14 @@
 import fs from "node:fs/promises";
+import { publishPhoneScreenshot } from "../../phone/phone-screenshot-artifact";
 import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { NativeCreateSchema } from "../../applications/native-application-scripts";
 import { nativePilotResources } from "../../applications/native-application-pilots";
 import { PhotoshopEditSchema } from "../../applications/photoshop-document-edit";
 import { photoshopEditResources } from "../../applications/photoshop-edit-adapter";
+import { androidPhoneResources } from "../../applications/android-phone-adapter";
+import { AndroidPhoneInputSchema } from "../../../shared/android-phone";
+import { AndroidPhoneService } from "../../phone/AndroidPhoneService";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 import type { InputRequest, InputRequestResponse } from "../../../shared/types";
@@ -54,7 +58,7 @@ export async function resolveApplicationInput(
 export const APPLICATION_OPERATION_TOOL: LLMTool = {
   name: "application_operation",
   description:
-    "Execute application work with a durable operation and verified result. Discover routes first. Photoshop banner creation, existing PSD layer editing and Excel operating plans have domain verifiers. Prefer local.photoshop.v1 for creation and local.photoshop.edit.v1 for existing PSD edits; read the source layer tree and hash using local_photoshop_read first. Create/prepare/execute, inspect results, reconcile unknown effects, or cancel. Use review only for a requested draft, material ambiguity, or expensive commitment. Feedback does not grant permissions. Never recreate an unknown write to retry it. Legacy cowork.tool supports journalling but no domain verification; qualified adapters provide stronger guarantees.",
+    "Execute application work with a durable operation and verified result. Discover routes first. Photoshop banner creation, existing PSD layer editing and Excel operating plans have domain verifiers. Prefer local.photoshop.v1 for creation and local.photoshop.edit.v1 for existing PSD edits; read the source layer tree and hash using local_photoshop_read first. Create records intent only: it neither runs input nor requests input approval. To perform an authorized action, call execute on the returned operationId and inspect verification; do not end an execution step after create. Inspect results, reconcile unknown effects, or cancel. Use review only for a requested draft, material ambiguity, or expensive commitment. Feedback does not grant permissions. For a failed Android input explicitly marked notDispatched with a stale_snapshot error, obtain a new observation and create the same action/expected criteria using supersedes: failed operationId and a greater planRevision, then execute with fresh approval. This preserves recovery history without counting the replaced no-op as unfinished work. Never supersede an unknown or dispatched effect. Never recreate an unknown write to retry it. Legacy cowork.tool supports journalling but no domain verification; qualified adapters provide stronger guarantees.",
   input_schema: {
     type: "object",
     properties: {
@@ -76,7 +80,7 @@ export const APPLICATION_OPERATION_TOOL: LLMTool = {
       request: {
         type: "object",
         description:
-          "Create request: idempotencyKey, capability, objective, input, resources; optional routeId, dependsOn, planRevision, decision {reason,question}, constraints. Task/session/workspace are supplied by CoWork. For Photoshop creation, existing PSD editing and Excel operating plans, omit resources to derive exact source/output file references from input.",
+          "Create request: idempotencyKey, capability, objective, input, resources; optional routeId, dependsOn, planRevision, supersedes, decision {reason,question}, constraints. Task/session/workspace are supplied by CoWork. For Android phone actions, omit resources to derive the exact selected-device reference from input.deviceId. For Photoshop creation, existing PSD editing and Excel operating plans, omit resources to derive exact source/output file references from input.",
       },
     },
     required: ["action"],
@@ -121,13 +125,15 @@ export async function runApplicationTool(
       throw new Error("Application request is required");
     const bounded = request as Record<string, unknown>;
     const inferredResources =
-      bounded.capability === "photoshop.document.edit" && bounded.resources === undefined
-        ? photoshopEditResources(PhotoshopEditSchema.parse(bounded.input))
-        : ["photoshop.banner.create", "excel.operating-plan.create"].includes(
-              String(bounded.capability),
-            ) && bounded.resources === undefined
-          ? nativePilotResources(NativeCreateSchema.parse(bounded.input))
-          : bounded.resources;
+      bounded.capability === "phone.android.action" && bounded.resources === undefined
+        ? androidPhoneResources(AndroidPhoneInputSchema.parse(bounded.input))
+        : bounded.capability === "photoshop.document.edit" && bounded.resources === undefined
+          ? photoshopEditResources(PhotoshopEditSchema.parse(bounded.input))
+          : ["photoshop.banner.create", "excel.operating-plan.create"].includes(
+                String(bounded.capability),
+              ) && bounded.resources === undefined
+            ? nativePilotResources(NativeCreateSchema.parse(bounded.input))
+            : bounded.resources;
     const parsed = ApplicationOperationRequestSchema.parse({
       ...request,
       resources: inferredResources,
@@ -200,6 +206,37 @@ export async function runApplicationTool(
             source: "local-photoshop",
             operationId: finished.id,
           });
+        }
+      }
+      if (finished.route.id === "phone.android.v1") {
+        const observation = finished.result?.data?.observation as
+          | { captureId?: string }
+          | undefined;
+        if (observation?.captureId) {
+          const screen = await AndroidPhoneService.getInstance().savedObservation(
+            taskId,
+            observation.captureId,
+          );
+          await daemon.registerArtifact(
+            taskId,
+            AndroidPhoneService.getInstance().capturePath(screen.captureId),
+            "image/png",
+          );
+          return {
+            ...present(finished),
+            ...(await publishPhoneScreenshot(
+              daemon,
+              taskId,
+              AndroidPhoneService.getInstance(),
+              screen,
+            )),
+            phoneOperation: {
+              operationId: finished.id,
+              execution: finished.execution,
+              verification: finished.verification,
+              unmetCriteria: finished.result?.unmetCriteria,
+            },
+          };
         }
       }
       return present(finished);

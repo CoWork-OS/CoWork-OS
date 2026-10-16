@@ -470,7 +470,7 @@ async function listenForCallback(
   loopbackListeners.set(port, entry);
   const onAbort = () => fail(cancelledBy(signal!));
   signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => fail(new Error("Authorization timed out")), timeoutMs);
+  const timer = setTimeout(() => fail(new Error("Sign-in timed out. Try again.")), timeoutMs);
   const listening = new Promise<void>((resolve, reject) => {
     server.once("error", (error: NodeJS.ErrnoException) =>
       reject(
@@ -653,6 +653,10 @@ export interface DiscoveredOAuth {
   scopes?: string[];
   resource?: string;
   issuer?: string;
+  /** RFC 7591 dynamic client registration endpoint, when the server offers one. */
+  registrationUrl?: string;
+  /** token_endpoint_auth_methods_supported, when the server lists them. */
+  tokenAuthMethods?: string[];
 }
 
 function parseResourceMetadataUrl(wwwAuthenticate: string | null | undefined): string | undefined {
@@ -660,19 +664,86 @@ function parseResourceMetadataUrl(wwwAuthenticate: string | null | undefined): s
   return match?.[1];
 }
 
-async function getJson(url: string, fetchImpl: FetchLike): Promise<Record<string, unknown> | null> {
+const METADATA_TIMEOUT_MS = 10_000;
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+async function getJson(
+  url: string,
+  fetchImpl: FetchLike,
+  options: { allowLoopbackHttp: boolean; signal?: AbortSignal },
+): Promise<Record<string, unknown> | null> {
   const parsed = new URL(url);
-  if (parsed.protocol !== "https:" && !["127.0.0.1", "localhost"].includes(parsed.hostname))
+  // Plain http only on this machine, and only while discovering a server on this machine.
+  if (
+    parsed.protocol !== "https:" &&
+    !(options.allowLoopbackHttp && ["127.0.0.1", "localhost"].includes(parsed.hostname))
+  )
     return null;
+  const signals = [AbortSignal.timeout(METADATA_TIMEOUT_MS)];
+  if (options.signal) signals.push(options.signal);
   try {
     const response = await fetchImpl(url, {
       method: "GET",
       headers: { Accept: "application/json" },
       redirect: "manual",
+      signal: AbortSignal.any(signals),
     });
     if (!response.ok) return null;
     return (await response.json()) as Record<string, unknown>;
   } catch {
+    if (options.signal?.aborted) throw cancelledBy(options.signal);
+    return null;
+  }
+}
+
+function isLoopbackUrl(url: URL): boolean {
+  return LOOPBACK_HOSTNAMES.has(url.hostname);
+}
+
+/** The scopes a WWW-Authenticate Bearer challenge asks for, if it names any. */
+export function parseChallengeScopes(wwwAuthenticate: string | null | undefined): string[] {
+  const match = /\bscope="([^"]*)"/i.exec(wwwAuthenticate || "");
+  return match ? match[1].split(/\s+/).filter(Boolean) : [];
+}
+
+/**
+ * The WWW-Authenticate challenge of an unauthenticated MCP initialize request:
+ * it can name the scopes this server needs and where its resource metadata
+ * lives. Null when the server does not answer 401 with a challenge.
+ */
+export async function fetchAuthChallenge(
+  mcpUrl: string,
+  options: { fetchImpl?: FetchLike; signal?: AbortSignal } = {},
+): Promise<string | null> {
+  const url = new URL(mcpUrl);
+  if (url.protocol !== "https:" && !isLoopbackUrl(url)) return null;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const signals = [AbortSignal.timeout(METADATA_TIMEOUT_MS)];
+  if (options.signal) signals.push(options.signal);
+  try {
+    const response = await fetchImpl(mcpUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "CoWork OS", version: "1" },
+        },
+      }),
+      redirect: "manual",
+      signal: AbortSignal.any(signals),
+    });
+    await response.body?.cancel().catch(() => {});
+    return response.status === 401 ? response.headers.get("www-authenticate") : null;
+  } catch {
+    if (options.signal?.aborted) throw cancelledBy(options.signal);
     return null;
   }
 }
@@ -685,10 +756,11 @@ async function getJson(url: string, fetchImpl: FetchLike): Promise<Record<string
  */
 export async function discoverOAuthMetadata(
   mcpUrl: string,
-  options: { wwwAuthenticate?: string | null; fetchImpl?: FetchLike } = {},
+  options: { wwwAuthenticate?: string | null; fetchImpl?: FetchLike; signal?: AbortSignal } = {},
 ): Promise<DiscoveredOAuth> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const resourceUrl = new URL(mcpUrl);
+  const fetchOptions = { allowLoopbackHttp: isLoopbackUrl(resourceUrl), signal: options.signal };
   const candidates = [
     parseResourceMetadataUrl(options.wwwAuthenticate),
     `${resourceUrl.origin}/.well-known/oauth-protected-resource${resourceUrl.pathname.replace(/\/$/, "")}`,
@@ -696,7 +768,7 @@ export async function discoverOAuthMetadata(
   ].filter((value): value is string => Boolean(value));
   let resourceMetadata: Record<string, unknown> | null = null;
   for (const candidate of candidates) {
-    resourceMetadata = await getJson(candidate, fetchImpl);
+    resourceMetadata = await getJson(candidate, fetchImpl, fetchOptions);
     if (resourceMetadata) break;
   }
   const servers = Array.isArray(resourceMetadata?.authorization_servers)
@@ -713,7 +785,7 @@ export async function discoverOAuthMetadata(
     `${issuerUrl.origin}/.well-known/openid-configuration${issuerPath}`,
     `${issuerUrl.origin}${issuerPath}/.well-known/openid-configuration`,
   ]) {
-    serverMetadata = await getJson(candidate, fetchImpl);
+    serverMetadata = await getJson(candidate, fetchImpl, fetchOptions);
     if (serverMetadata) break;
   }
   const str = (value: unknown) => (typeof value === "string" && value ? value : undefined);
@@ -727,6 +799,192 @@ export async function discoverOAuthMetadata(
     tokenUrl: str(serverMetadata?.token_endpoint),
     issuer: str(serverMetadata?.issuer),
     resource: str(resourceMetadata?.resource),
+    registrationUrl: str(serverMetadata?.registration_endpoint),
+    ...(Array.isArray(serverMetadata?.token_endpoint_auth_methods_supported)
+      ? {
+          tokenAuthMethods: (
+            serverMetadata!.token_endpoint_auth_methods_supported as unknown[]
+          ).filter((value): value is string => typeof value === "string"),
+        }
+      : {}),
     ...(scopes?.length ? { scopes } : {}),
+  };
+}
+
+const REGISTRATION_TIMEOUT_MS = 20_000;
+/** A registration answer is a small JSON object; anything larger is refused. */
+const MAX_REGISTRATION_RESPONSE_CHARS = 64 * 1024;
+
+/** Endpoints taken from provider metadata must be https (http only on loopback). */
+function requireSecureEndpoint(
+  value: string | undefined,
+  label: string,
+  allowLoopbackHttp: boolean,
+): string {
+  if (!value) throw new Error(`The MCP server's OAuth metadata has no ${label}`);
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && allowLoopbackHttp && isLoopbackUrl(url))
+  )
+    throw new Error(`The MCP server's ${label} must use https`);
+  return value;
+}
+
+/** A public client when the server allows one, else the confidential method it lists. */
+function requestedAuthMethod(supported: string[] | undefined): string {
+  if (!supported?.length || supported.includes("none")) return "none";
+  if (supported.includes("client_secret_basic")) return "client_secret_basic";
+  if (supported.includes("client_secret_post")) return "client_secret_post";
+  return "none";
+}
+
+/**
+ * RFC 7591 dynamic client registration: registers this app as a public client
+ * with the loopback redirect. Servers that only issue confidential clients
+ * answer with a secret and the token endpoint auth method to use with it.
+ */
+export async function registerOAuthClient(
+  registrationUrl: string,
+  redirectUri: string,
+  options: {
+    fetchImpl?: FetchLike;
+    signal?: AbortSignal;
+    /** The server's supported methods; a public client ("none") is asked for when allowed. */
+    supportedAuthMethods?: string[];
+  } = {},
+): Promise<{
+  clientId: string;
+  clientSecret?: string;
+  tokenAuthMethod?: MCPOAuthSettings["tokenAuthMethod"];
+}> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REGISTRATION_TIMEOUT_MS);
+  const onCancel = () => controller.abort();
+  options.signal?.addEventListener("abort", onCancel, { once: true });
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetchImpl(registrationUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        client_name: "CoWork OS",
+        redirect_uris: [redirectUri],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: requestedAuthMethod(options.supportedAuthMethods),
+      }),
+      redirect: "manual",
+      signal: controller.signal,
+    });
+    // Read the answer under the same timeout, so a stalled body cannot hang sign-in.
+    text = await response.text();
+  } catch (error) {
+    if (options.signal?.aborted) throw cancelledBy(options.signal);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onCancel);
+  }
+  if (text.length > MAX_REGISTRATION_RESPONSE_CHARS)
+    throw new Error("OAuth client registration answer is too large");
+  if (!response.ok)
+    throw new Error(`OAuth client registration failed (${response.status}): ${sanitize(text)}`);
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("OAuth client registration returned invalid JSON");
+  }
+  const clientId = typeof data.client_id === "string" ? data.client_id.trim() : "";
+  if (!clientId) throw new Error("OAuth client registration did not return a client_id");
+  const clientSecret =
+    typeof data.client_secret === "string" && data.client_secret ? data.client_secret : undefined;
+  const method = data.token_endpoint_auth_method;
+  const tokenAuthMethod =
+    method === "none" || method === "client_secret_post" || method === "client_secret_basic"
+      ? method
+      : clientSecret
+        ? "client_secret_basic"
+        : "none";
+  return { clientId, ...(clientSecret ? { clientSecret } : {}), tokenAuthMethod };
+}
+
+/** True when `resource` is the MCP URL itself or a path prefix of it on the same origin. */
+function resourceCovers(resource: string, mcpUrl: string): boolean {
+  try {
+    const target = new URL(resource);
+    const server = new URL(mcpUrl);
+    if (target.origin !== server.origin) return false;
+    const prefix = target.pathname.replace(/\/$/, "");
+    const path = server.pathname.replace(/\/$/, "");
+    return path === prefix || path.startsWith(`${prefix}/`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fills in the endpoints and client of a server set up for dynamic client
+ * registration: discovers the authorization server from the MCP URL and
+ * registers a client the first time. A server already registered is returned
+ * unchanged, so signing in again reuses its client.
+ */
+export async function prepareDynamicClient(
+  auth: MCPAuthConfig,
+  mcpUrl: string,
+  options: { fetchImpl?: FetchLike; signal?: AbortSignal } = {},
+): Promise<MCPAuthConfig> {
+  const oauth = auth.oauth;
+  if (auth.type !== "bearer" || !oauth?.dynamicClientRegistration) return auth;
+  if (auth.clientId && oauth.authorizationUrl && auth.tokenUrl) return auth;
+  if (!oauth.redirectUri) throw new Error("OAuth redirect URI is required");
+  const challenge = await fetchAuthChallenge(mcpUrl, options);
+  const discovered = await discoverOAuthMetadata(mcpUrl, {
+    fetchImpl: options.fetchImpl,
+    signal: options.signal,
+    wwwAuthenticate: challenge,
+  });
+  // MCP scope selection: scopes the person typed, else the scopes the server's
+  // challenge asks for, else everything its resource metadata lists, else none (the
+  // server's default). Scopes a previous sign-in discovered are asked for again, so a
+  // server that now names different scopes gets them.
+  const challengeScopes = parseChallengeScopes(challenge);
+  const userScopes = oauth.scopes?.length && !oauth.scopesDiscovered ? oauth.scopes : undefined;
+  const scopes = userScopes ?? (challengeScopes.length ? challengeScopes : discovered.scopes);
+  const local = isLoopbackUrl(new URL(mcpUrl));
+  const authorizationUrl = requireSecureEndpoint(
+    discovered.authorizationUrl,
+    "authorization endpoint",
+    local,
+  );
+  const tokenUrl = requireSecureEndpoint(discovered.tokenUrl, "token endpoint", local);
+  const registrationUrl = requireSecureEndpoint(
+    discovered.registrationUrl,
+    "client registration endpoint",
+    local,
+  );
+  // RFC 9728 section 3.3: the metadata must describe this server, or a token
+  // could be minted for some other resource.
+  if (discovered.resource && !resourceCovers(discovered.resource, mcpUrl))
+    throw new Error("The MCP server's OAuth metadata names a different resource");
+  const client = await registerOAuthClient(registrationUrl, oauth.redirectUri, {
+    ...options,
+    supportedAuthMethods: discovered.tokenAuthMethods,
+  });
+  return {
+    ...auth,
+    clientId: client.clientId,
+    ...(client.clientSecret ? { clientSecret: client.clientSecret } : {}),
+    tokenUrl,
+    oauth: {
+      ...oauth,
+      authorizationUrl,
+      tokenAuthMethod: client.tokenAuthMethod,
+      ...(discovered.resource ? { resource: discovered.resource } : {}),
+      ...(scopes?.length ? { scopes, scopesDiscovered: !userScopes } : {}),
+    },
   };
 }

@@ -1145,7 +1145,20 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
       terms: ["mcp", "mcp servers", "model context protocol", "server registry"],
     },
   ],
-  tools: [{ terms: ["built-in tools", "tools", "computer use", "builtin tools"] }],
+  tools: [
+    {
+      terms: [
+        "built-in tools",
+        "tools",
+        "computer use",
+        "builtin tools",
+        "android",
+        "phone",
+        "phone-harness",
+        "adb",
+      ],
+    },
+  ],
   briefing: [{ terms: ["daily briefing", "briefing", "morning summary", "digest"] }],
   access: [
     {

@@ -1,3 +1,4 @@
+import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
@@ -237,6 +238,7 @@ import type { TerminalKind } from "./runtime/TerminalState";
 import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { loadPolicies } from "../admin/policies";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
+import { ComputerViewService } from "../computer-use/computer-view-service";
 import { getNumbatService } from "../security/numbat";
 import {
   decideTaskOutcome,
@@ -5870,6 +5872,17 @@ export class AgentDaemon extends EventEmitter {
       // the parent's stored ones count; the child's own role adds its limit when it starts.
       delete next.accessCeilingProfileId;
       delete next.inheritedAccessCeilingProfileIds;
+      // A child works on no more computer than the bot it was delegated from: its own bot's
+      // setting and any limit it inherited. A caller cannot set this.
+      delete next.inheritedBotWorksOn;
+      const parentRoleWorksOn = parent?.assignedAgentRoleId
+        ? this.getAgentRoleById(parent.assignedAgentRoleId)?.worksOn
+        : undefined;
+      const parentWorksOn = narrowestBotWorksOn(
+        parentRoleWorksOn,
+        parent?.agentConfig?.inheritedBotWorksOn,
+      );
+      if (parentWorksOn && parentWorksOn !== "auto") next.inheritedBotWorksOn = parentWorksOn;
       const inheritedCeilings = inheritableAccessCeilings(parent?.agentConfig);
       if (inheritedCeilings.length > 0) next.inheritedAccessCeilingProfileIds = inheritedCeilings;
       // ACP has its own execution and consent boundary. A native CoWork
@@ -7065,7 +7078,10 @@ export class AgentDaemon extends EventEmitter {
    * Tear down an active computer-use session when a task leaves the queue slot.
    */
   private releaseComputerUseSession(taskId: string): void {
-    ComputerUseSessionManager.getInstance().endSessionIfOwner(taskId);
+    const sessions = ComputerUseSessionManager.getInstance();
+    sessions.cancelWaiting(taskId);
+    sessions.endSessionIfOwner(taskId);
+    ComputerViewService.getInstance().noteTaskEnded(taskId);
   }
 
   private finishQueueSlot(taskId: string): void {
@@ -12771,6 +12787,18 @@ export class AgentDaemon extends EventEmitter {
     return this.agentRoleRepo.findById(agentRoleId);
   }
 
+  /** A bot's conversations in a workspace (most recently active first): ids and titles. */
+  listBotConversationRefs(
+    workspaceId: string,
+    agentRoleId: string,
+    limit = 25,
+  ): Array<{ id: string; title: string }> {
+    if (!workspaceId || !agentRoleId) return [];
+    return this.taskRepo
+      .findBotConversations(workspaceId, { agentRoleId, limit })
+      .map((task) => ({ id: task.id, title: task.title }));
+  }
+
   getActiveAgentRoles(): AgentRole[] {
     return this.agentRoleRepo.findActive();
   }
@@ -16534,6 +16562,8 @@ export class AgentDaemon extends EventEmitter {
             // A follow-up override never lifts the agent's access limit.
             accessCeilingProfileId:
               persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
+            // Nor the "Works on" limit inherited from a delegating bot.
+            inheritedBotWorksOn: persistentWorkerRoleBoundary.task.agentConfig?.inheritedBotWorksOn,
           },
         }
       : persistentWorkerRoleBoundary.task;

@@ -15,6 +15,7 @@ import {
 } from "./approval-draft-preview";
 import { BotNotificationService } from "../notifications/BotNotificationService";
 import { BotWorkResultService } from "../agents/BotWorkResultService";
+import { BotOutcomeMetricsService } from "../agents/BotOutcomeMetricsService";
 import { getAutomationRuntime } from "../automation/AutomationRuntime";
 import { BotWorkControlService } from "../automation/BotWorkControlService";
 import { BotResponsibilityService } from "../automation/BotResponsibilityService";
@@ -436,6 +437,7 @@ import {
   WorkspaceIdSchema,
   StringIdSchema,
   AgentRoleAccessProfileIdSchema,
+  AgentRoleWorksOnSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -521,6 +523,8 @@ import {
   ChronicleSettingsManager,
 } from "../chronicle";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
+import { ComputerViewService } from "../computer-use/computer-view-service";
+import { registerAndroidPhoneHandlers } from "./android-phone-handlers";
 import { ComputerUseHelperRuntime } from "../computer-use/helper-runtime";
 import {
   MCPServerConfigSchema,
@@ -1180,6 +1184,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_FORK_SESSION, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_UPDATE_WORKSPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
@@ -1607,11 +1612,66 @@ export async function setupIpcHandlers(
   const computerUseMainWindow = (): BrowserWindow | null =>
     options?.getMainWindow?.() ?? getMainWindow();
   ComputerUseSessionManager.getInstance().setMainWindowGetter(computerUseMainWindow);
+  registerAndroidPhoneHandlers(computerUseMainWindow);
+  const computerView = ComputerViewService.getInstance();
+  computerView.configure({
+    notify: (state) => {
+      const win = computerUseMainWindow();
+      if (win && !win.isDestroyed()) win.webContents.send(IPC_CHANNELS.COMPUTER_VIEW_EVENT, state);
+    },
+    logEvent: (taskId, type, payload) => agentDaemon.logEvent(taskId, type as Any, payload),
+    captureBrowser: (taskId) => getBrowserWorkbenchService().capturePreview(taskId),
+    setBrowserPaused: (taskId, paused) =>
+      getBrowserWorkbenchService().setPausedByUserForTask(taskId, paused),
+  });
   ComputerUseSessionManager.getInstance().setNotifyHandler((event) => {
+    if (event.type === "session_waiting") computerView.noteWaiting(event.taskId);
+    else if (event.type === "session_started")
+      computerView.noteWorking(event.taskId, "this_computer");
+    else if (event.type === "session_ended")
+      computerView.noteReleased(event.taskId, "this_computer");
     const win = computerUseMainWindow();
     if (win && !win.isDestroyed()) {
       win.webContents.send(IPC_CHANNELS.COMPUTER_USE_EVENT, event);
     }
+  });
+  // Which tasks each app window watches, so a closed or reloaded window stops its captures.
+  const computerViewWatches = new Map<number, Set<string>>();
+  const readComputerViewTaskId = (value: unknown): string =>
+    validateInput(StringIdSchema, value, "task ID");
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_WATCH, (event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_WATCH);
+    const id = readComputerViewTaskId(taskId);
+    const senderId = event.sender.id;
+    let watched = computerViewWatches.get(senderId);
+    if (!watched) {
+      watched = new Set();
+      computerViewWatches.set(senderId, watched);
+      event.sender.once("destroyed", () => {
+        for (const watchedTaskId of computerViewWatches.get(senderId) ?? []) {
+          computerView.unwatch(watchedTaskId);
+        }
+        computerViewWatches.delete(senderId);
+      });
+    }
+    if (watched.has(id)) return computerView.getState(id);
+    watched.add(id);
+    return computerView.watch(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, (event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH);
+    const id = readComputerViewTaskId(taskId);
+    if (computerViewWatches.get(event.sender.id)?.delete(id)) computerView.unwatch(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, async (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER);
+    const id = readComputerViewTaskId(taskId);
+    if (!(await agentDaemon.getTaskById(id))) throw new Error("Task not found");
+    return computerView.takeOver(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK);
+    return computerView.handBack(readComputerViewTaskId(taskId));
   });
 
   const db = dbManager.getDatabase();
@@ -5541,6 +5601,13 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.BOT_WORK_LIST, async (_, query: unknown) =>
     botWorkQueryService.list(query),
   );
+  // A bot's recent outcomes and model usage (cost, tokens, cache reads) for its details panel.
+  // The request is validated by the service's zod schema.
+  const botOutcomeMetricsService = new BotOutcomeMetricsService(db);
+  ipcMain.handle(IPC_CHANNELS.BOT_METRICS_SUMMARY, async (_, request: unknown) => {
+    checkRateLimit(IPC_CHANNELS.BOT_METRICS_SUMMARY);
+    return botOutcomeMetricsService.summary(request);
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.BOT_CONVERSATIONS_LIST,
@@ -9718,6 +9785,10 @@ export async function setupIpcHandlers(
       request.companyId = validateInput(UUIDSchema, request.companyId, "company ID");
     }
     Object.assign(request, normalizeAgentRoleModelFields(request));
+    if (request.worksOn !== undefined) {
+      request.worksOn =
+        validateInput(AgentRoleWorksOnSchema, request.worksOn, "works on") ?? undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -9753,6 +9824,15 @@ export async function setupIpcHandlers(
         throw new Error("That access profile does not exist.");
       }
       normalizedRequest.accessProfileId = profileId;
+    }
+    // "Works on": which computer the bot's tasks may drive. Running sessions pick up a change
+    // on their next tool call, because the executor reads it from the role.
+    if (normalizedRequest.worksOn !== undefined) {
+      normalizedRequest.worksOn = validateInput(
+        AgentRoleWorksOnSchema,
+        normalizedRequest.worksOn,
+        "works on",
+      );
     }
     const result = await agentRoleRepo.update(normalizedRequest);
     if (!result) {
@@ -11541,6 +11621,9 @@ export async function setupIpcHandlers(
     // Memory Hub "What CoWork knows" over the folder: entries, edit, delete, pin, open file.
     getHubService: () => MemoryRepoService.get(),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+    // A bot's own memory file, shown in the bot's details panel.
+    getBotService: () => MemoryRepoService.get(),
+    botExists: async (botId) => Boolean(await agentRoleRepo.findById(botId)),
     workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
     // "Import notes from a folder": the folder is chosen here, never sent by the renderer.
     pickFolder: async () => {

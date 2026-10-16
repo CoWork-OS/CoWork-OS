@@ -177,47 +177,86 @@ describe.skipIf(process.platform === "win32")("ShellTools execution with real sh
     expect(signalled).toEqual([4242, 4343]);
   });
 
-  it("kills the one-shot process tree when the tool call is aborted", async () => {
-    const workspace = createWorkspace();
-    const daemon = createDaemon();
-    const shellTools = new ShellTools(
-      workspace,
-      daemon as unknown as AgentDaemon,
-      `task-${randomUUID()}`,
-    );
-    const controller = new AbortController();
+  it.each([
+    { label: "when the tool call is aborted", discoveryFails: false, userStop: false },
+    {
+      label: "when the tool call is aborted and process discovery fails",
+      discoveryFails: true,
+      userStop: false,
+    },
+    {
+      label: "when the user stops it and process discovery fails",
+      discoveryFails: true,
+      userStop: true,
+    },
+  ])(
+    "stops the one-shot process tree $label",
+    async ({ discoveryFails, userStop }) => {
+      const workspace = createWorkspace();
+      const daemon = createDaemon();
+      const shellTools = new ShellTools(
+        workspace,
+        daemon as unknown as AgentDaemon,
+        `task-${randomUUID()}`,
+      );
+      const controller = new AbortController();
 
-    // Shell operators route the command to the one-shot spawn path.
-    const pending = shellTools.runCommand('sleep 30 & echo "child:$!"; wait; echo finished', {
-      cwd: workspacePath,
-      timeout: 60_000,
-      signal: controller.signal,
-    });
-    let childPid = 0;
-    await waitUntil(
-      () => {
-        for (const [, eventType, payload] of daemon.logEvent.mock.calls) {
-          const match =
-            eventType === "command_output" && typeof payload?.output === "string"
-              ? payload.output.match(/child:(\d+)/)
-              : null;
-          if (match) childPid = Number(match[1]);
+      // Shell operators route the command to the one-shot spawn path.
+      const pending = shellTools.runCommand('sleep 30 & echo "child:$!"; wait; echo finished', {
+        cwd: workspacePath,
+        timeout: 60_000,
+        signal: controller.signal,
+      });
+      let childPid = 0;
+      try {
+        await waitUntil(
+          () => {
+            for (const [, eventType, payload] of daemon.logEvent.mock.calls) {
+              const match =
+                eventType === "command_output" && typeof payload?.output === "string"
+                  ? payload.output.match(/child:(\d+)/)
+                  : null;
+              if (match) childPid = Number(match[1]);
+            }
+            return childPid > 0;
+          },
+          5_000,
+          "the background child PID",
+        );
+        expect(isRunning(childPid)).toBe(true);
+
+        if (discoveryFails) {
+          // Simulate pgrep timing out under CI load. Cancellation must not leave
+          // the child holding stdout/stderr open when discovery is unavailable.
+          execSyncOverride.current = () => {
+            throw new Error("Process discovery unavailable");
+          };
         }
-        return childPid > 0;
-      },
-      5_000,
-      "the background child PID",
-    );
-    expect(isRunning(childPid)).toBe(true);
 
-    controller.abort();
-    const result = await waitFor(pending, 8_000, "the aborted command");
+        if (userStop) shellTools.killProcess();
+        else controller.abort();
+        const result = await waitFor(pending, 8_000, "the aborted command");
 
-    expect(result.success).toBe(false);
-    expect(result.terminationReason).toBe("timeout");
-    expect(result.stdout).not.toContain("finished");
-    await waitUntil(() => !isRunning(childPid), 5_000, "the child process to exit");
-  }, 20_000);
+        expect(result.success).toBe(false);
+        expect(result.terminationReason).toBe(userStop ? "user_stopped" : "timeout");
+        expect(result.stdout).not.toContain("finished");
+        await waitUntil(() => !isRunning(childPid), 5_000, "the child process to exit");
+      } finally {
+        // Keep a failing regression from leaking its real fixture process.
+        execSyncOverride.current = null;
+        shellTools.killProcess(true, "system");
+        if (childPid > 0 && isRunning(childPid)) {
+          try {
+            process.kill(childPid, "SIGKILL");
+          } catch {
+            /* Already exited. */
+          }
+        }
+        await waitFor(pending, 2_000, "fixture cleanup").catch(() => {});
+      }
+    },
+    20_000,
+  );
 
   it("reports an aborted persistent-shell command as a timeout, not a user stop", async () => {
     const workspace = createWorkspace();

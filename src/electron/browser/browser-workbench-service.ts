@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
-import { forgetFilledPasswords } from "./credentials/autofill";
+import { forgetFilledPasswords, passwordRecentlyFilled } from "./credentials/autofill";
+import { privateCaptureGuard } from "./credentials/private-capture-guard";
 import * as path from "path";
 import type { AccessDomainRule } from "../../shared/access-profiles";
 import type { WorkspacePermissions } from "../../shared/types";
@@ -631,6 +632,33 @@ export class BrowserWorkbenchService {
     if (this.driving.has(key)) return true;
     const last = this.lastDrivenAt.get(key);
     return typeof last === "number" && Date.now() - last <= withinMs;
+  }
+
+  /** Pauses or resumes CoWork on every in-app browser tab of a task (the person took over). */
+  setPausedByUserForTask(taskId: string, paused: boolean): void {
+    for (const session of this.sessions.values()) {
+      if (session.taskId === taskId) this.setPausedByUser(taskId, session.sessionId, paused);
+    }
+  }
+
+  /**
+   * A still of the task's in-app browser tab for the bot's panel: the most recently registered
+   * session's page, captured in memory. Null when the task has no tab or a private input
+   * (a password or one-time code) is on screen or was just filled.
+   */
+  async capturePreview(taskId: string): Promise<{ png: Buffer; label?: string } | null> {
+    let latest: BrowserWorkbenchSession | null = null;
+    for (const session of this.sessions.values()) {
+      if (session.taskId !== taskId) continue;
+      if (!latest || session.registeredAt > latest.registeredAt) latest = session;
+    }
+    if (!latest || passwordRecentlyFilled(taskId, latest.sessionId)) return null;
+    const assertCaptureAllowed = privateCaptureGuard();
+    const contents = await this.getWebContents(latest);
+    if (!contents) return null;
+    const image = await contents.capturePage();
+    assertCaptureAllowed();
+    return { png: image.toPNG(), label: latest.title || latest.url };
   }
 
   /** The user took over the tab: CoWork's next workbench tool calls report paused_by_user. */

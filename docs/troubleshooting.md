@@ -487,6 +487,26 @@ If the sidebar opens but browser actions are hard to follow:
 5. If screenshots or annotation fail, check that the task has an active workspace folder; captures are saved into the workspace before they can be attached back to the agent.
 6. If responsive screenshots do not match the expected breakpoint, confirm the task called `browser_emulate` against the visible workbench and that the toolbar shows the active viewport size before `browser_screenshot` runs.
 
+### Private login or autofill is unavailable
+
+Use **Passwords & autofill** (the key button) in the local Browser Workbench, or ask CoWork to
+sign in and complete its private dialog. Keep passwords, setup keys, codes, and card details out
+of chat. For 1Password/Bitwarden, install and sign in to `op`/`bw`, then explicitly unlock it in
+the menu; unlock sessions expire after 30 minutes idle. Manager adapters support logins and OTPs;
+save checkout items in the local vault.
+
+Items match the exact saved origin. Frames, hidden/disabled inputs, new-password fields, and
+cross-origin form actions are excluded. Passkeys and device approvals require you to finish the
+site's flow. If saving is disabled because OS encryption is unavailable, use one-use entry.
+Headless, external, cloud, and no-human-input routes cannot open this private flow.
+
+If capture or page scripts report private input or a protected credential page, finish or cancel
+the private dialog. A filled document remains protected until full navigation or closing the tab;
+closing the menu alone does not remove that protection. Use masked text snapshots for readback.
+After `fill_outcome_unknown`, inspect the current page before retrying. After a decline, agent
+retries wait five minutes; an explicit toolbar action can retry sooner. See
+[the full setup and approval rules](browser-workbench.md#private-login-password-managers-2fa-and-checkout).
+
 For a fresh repro log:
 
 ```bash

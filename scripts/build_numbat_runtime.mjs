@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { fetchWithRetry } from "./release/fetch-with-retry.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(scriptDir, "..");
@@ -168,8 +169,12 @@ async function download(url, outputPath, expectedSha256, label) {
     fail(`${label} is not cached and COWORK_NUMBAT_OFFLINE=1`);
   }
   console.log(`[numbat-runtime] Downloading ${label}`);
-  const response = await fetch(url, { redirect: "follow" });
-  if (!response.ok) fail(`${label} download failed with HTTP ${response.status}`);
+  let response;
+  try {
+    response = await fetchWithRetry(url, { label });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   const temporaryPath = `${outputPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, Buffer.from(await response.arrayBuffer()), {
     mode: 0o600,

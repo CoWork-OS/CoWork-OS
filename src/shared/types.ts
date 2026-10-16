@@ -1,6 +1,7 @@
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
+import type { BotWorksOn } from "./bot-computer";
 
 // Core types shared between main and renderer processes
 
@@ -1478,6 +1479,8 @@ export type ToolType =
   // Scratchpad tools (session-scoped agent notes)
   | "scratchpad_write"
   | "scratchpad_read"
+  // Hand a computer step to the person (passwords, codes, payments)
+  | "request_takeover"
   // Orchestration tools
   | "orchestrate_agents"
   // QA tools (Playwright visual QA)
@@ -1541,6 +1544,9 @@ export type ToolRiskLevel = "read" | "write" | "destructive" | "system" | "netwo
 export const TOOL_GROUPS = {
   // Read-only operations - lowest risk
   "group:read": [
+    "android_phone_devices",
+    "android_phone_observe",
+    "android_phone_readback",
     "local_photoshop_inspect",
     "local_photoshop_read",
     "native_application_inspect",
@@ -1606,6 +1612,11 @@ export const TOOL_GROUPS = {
   "group:destructive": ["delete_file", "run_command"],
   // System operations - requires explicit permission
   "group:system": [
+    "android_phone_devices",
+    "android_phone_observe",
+    "android_phone_authorize",
+    "android_phone_dispatch",
+    "android_phone_readback",
     "get_current_location",
     "read_clipboard",
     "write_clipboard",
@@ -1957,6 +1968,8 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Scratchpad
   scratchpad_write: "write",
   scratchpad_read: "read",
+  // Only asks the person to take over; it changes nothing itself.
+  request_takeover: "read",
   // Orchestration
   orchestrate_agents: "write",
   // Meta
@@ -2372,6 +2385,11 @@ export interface AgentConfig {
    * narrows the task's profile to it and never widens anything.
    */
   accessCeilingProfileId?: AccessProfileId;
+  /**
+   * The narrowest "Works on" setting of the bots this task was delegated from. Set only by the
+   * daemon when it creates a child task; it can only take computer tools away.
+   */
+  inheritedBotWorksOn?: BotWorksOn;
   /**
    * Access limits inherited from the sessions that started this one (sub-agents, scheduled
    * runs an agent created). Set when the task is created and never removed by its own role;
@@ -5696,6 +5714,8 @@ export interface AgentRole {
    * runs and Heartbeat dispatches). A ceiling only: a task can still be stricter.
    */
   accessProfileId?: AccessProfileId;
+  /** Where this bot works: which computer its tasks may drive. Unset means Auto. */
+  worksOn?: BotWorksOn;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5744,6 +5764,8 @@ export interface CreateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  /** Where this bot works; unset means Auto. */
+  worksOn?: BotWorksOn;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -5789,6 +5811,8 @@ export interface UpdateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** The agent's access limit; null clears it. */
   accessProfileId?: AccessProfileId | null;
+  /** Where this bot works; null resets it to Auto. */
+  worksOn?: BotWorksOn | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;
@@ -7793,6 +7817,7 @@ export const IPC_CHANNELS = {
   TASK_LIST: "task:list",
   TASK_LIST_SIDEBAR: "task:listSidebar",
   BOT_WORK_LIST: "bot:work:list",
+  BOT_METRICS_SUMMARY: "bot:metrics:summary",
   BOT_NOTIFICATION_ROUTE_GET: "bot:notification:route:get",
   BOT_NOTIFICATION_ROUTE_UPDATE: "bot:notification:route:update",
   BOT_NOTIFICATION_RETRY: "bot:notification:retry",
@@ -8624,6 +8649,12 @@ export const IPC_CHANNELS = {
   COMPUTER_USE_OPEN_ACCESSIBILITY: "computerUse:openAccessibility",
   COMPUTER_USE_OPEN_SCREEN_RECORDING: "computerUse:openScreenRecording",
   COMPUTER_USE_EVENT: "computerUse:event",
+  // Live view of a task's computer in the bot's panel, and take-over by the person
+  COMPUTER_VIEW_WATCH: "computerView:watch",
+  COMPUTER_VIEW_UNWATCH: "computerView:unwatch",
+  COMPUTER_VIEW_TAKE_OVER: "computerView:takeOver",
+  COMPUTER_VIEW_HAND_BACK: "computerView:handBack",
+  COMPUTER_VIEW_EVENT: "computerView:event",
 
   // Tray (Menu Bar)
   TRAY_GET_SETTINGS: "tray:getSettings",
@@ -8900,6 +8931,10 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_KEEP_ENTRY: "memoryRepo:keepEntry",
   // Sync with the user's private remote (docs/memory-repo-phase4-design.md §1)
   MEMORY_REPO_SYNC_NOW: "memoryRepo:syncNow",
+  // A bot's own memory (bots/<slug>.md): list with history, forget an entry, undo a change
+  MEMORY_REPO_BOT_MEMORY: "memoryRepo:botMemory",
+  MEMORY_REPO_BOT_FORGET: "memoryRepo:botForget",
+  MEMORY_REPO_BOT_UNDO: "memoryRepo:botUndo",
   // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
   // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
   PACT_STATUS: "pact:status",

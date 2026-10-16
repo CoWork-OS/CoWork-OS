@@ -1,17 +1,20 @@
 /**
  * Single active computer-use session with minimal guards:
- * - one task owns computer use at a time
+ * - one task owns computer use at a time (macOS has one cursor and one focus)
+ * - other tasks wait their turn in order, for a bounded time, instead of failing
  * - Esc aborts the active session
  * - no per-app approval, overlay, or isolation layer
  */
 
 import type { BrowserWindow } from "electron";
 import { ShortcutGuard } from "./shortcut-guard";
+import { COMPUTER_USE_WAIT_MS } from "../../shared/computer-use-contract";
 
 export type ComputerUseSessionEndReason = "completed" | "aborted" | "manual";
 
 export type ComputerUseSessionEvent =
   | { type: "session_started"; taskId: string }
+  | { type: "session_waiting"; taskId: string; holderTaskId: string }
   | {
       type: "session_ended";
       taskId: string;
@@ -50,6 +53,15 @@ export class ComputerUseSessionManager {
   private aborted = false;
   private mainWindowGetter: (() => BrowserWindow | null) | null = null;
   private notifyHandler: ((e: ComputerUseSessionEvent) => void) | null = null;
+  /** Tasks waiting for the computer, first come first served. */
+  private waiters: Array<{
+    taskId: string;
+    daemon: ComputerUseDaemonLike;
+    options: { background?: boolean };
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
 
   private constructor() {}
 
@@ -100,6 +112,74 @@ export class ComputerUseSessionManager {
 
     daemon.logEvent(taskId, "computer_use_session_started", { mode: "helper_runtime" });
     this.emitNotify({ type: "session_started", taskId });
+  }
+
+  /**
+   * Takes the computer for this task, waiting in line while another task has it. Rejects when
+   * the wait runs out or the task ends while waiting.
+   */
+  async acquireOrWait(
+    taskId: string,
+    daemon: ComputerUseDaemonLike,
+    options: { background?: boolean; waitMs?: number } = {},
+  ): Promise<void> {
+    if (!this.activeTaskId || this.activeTaskId === taskId) {
+      this.acquire(taskId, daemon, options);
+      return;
+    }
+    const holderTaskId = this.activeTaskId;
+    const waitMs = Math.max(0, options.waitMs ?? COMPUTER_USE_WAIT_MS);
+    daemon.logEvent(taskId, "computer_use_waiting", {
+      holderTaskId,
+      position: this.waiters.length + 1,
+      waitMs,
+    });
+    this.emitNotify({ type: "session_waiting", taskId, holderTaskId });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.removeWaiter(taskId, timer);
+        reject(
+          new Error(
+            `This computer is busy with another task. Waited ${Math.round(waitMs / 1000)} seconds; ` +
+              "try again later, or work without the computer.",
+          ),
+        );
+      }, waitMs);
+      this.waiters.push({ taskId, daemon, options, resolve, reject, timer });
+    });
+  }
+
+  /** Stops a task from waiting for the computer (it ended or was cancelled). */
+  cancelWaiting(taskId: string): void {
+    for (const waiter of this.waiters.filter((entry) => entry.taskId === taskId)) {
+      this.removeWaiter(taskId, waiter.timer);
+      waiter.reject(new Error("The task ended while waiting for the computer."));
+    }
+  }
+
+  getWaitingTaskIds(): string[] {
+    return this.waiters.map((waiter) => waiter.taskId);
+  }
+
+  private removeWaiter(taskId: string, timer: ReturnType<typeof setTimeout>): void {
+    clearTimeout(timer);
+    this.waiters = this.waiters.filter(
+      (waiter) => !(waiter.taskId === taskId && waiter.timer === timer),
+    );
+  }
+
+  /** Hands the computer to the next waiting task, so no other caller can take it in between. */
+  private wakeNextWaiter(): void {
+    while (!this.activeTaskId && this.waiters.length > 0) {
+      const next = this.waiters.shift()!;
+      clearTimeout(next.timer);
+      try {
+        this.acquire(next.taskId, next.daemon, next.options);
+        next.resolve();
+      } catch (error) {
+        next.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   }
 
   updateActionStatus(_label: string): void {}
@@ -159,5 +239,6 @@ export class ComputerUseSessionManager {
 
     this.emitNotify({ type: "session_ended", taskId, reason });
     this.aborted = false;
+    this.wakeNextWaiter();
   }
 }

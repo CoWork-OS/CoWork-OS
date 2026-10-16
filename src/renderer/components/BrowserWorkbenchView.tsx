@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { browserPartitionForTask } from "../../shared/browser-profile";
 import type {
   ApprovalRequest,
   ApprovalResponseAction,
@@ -126,6 +127,8 @@ type BrowserWorkbenchViewProps = {
   /** Changes with each open request (agent, link, title bar), so the same URL can reopen. */
   openRequestId?: string;
   workspaceId?: string;
+  /** The bot doing this task, whose own browser profile it uses. */
+  botId?: string;
   workspacePath?: string;
   mode: BrowserWorkbenchMode;
   onClose: () => void;
@@ -235,11 +238,6 @@ function formatYouTubeTimestamp(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function getPartition(workspaceId?: string): string {
-  const safe = (workspaceId || "default").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-  return `persist:cowork-browser-${safe || "default"}`;
-}
-
 const VIEWPORT_PRESETS = [
   { label: "Desktop", width: 1440, height: 900, mobile: false, icon: Monitor },
   { label: "Tablet", width: 768, height: 1024, mobile: true, icon: Tablet },
@@ -252,6 +250,7 @@ export function BrowserWorkbenchView({
   initialUrl,
   openRequestId,
   workspaceId,
+  botId,
   workspacePath,
   mode,
   onClose,
@@ -406,7 +405,10 @@ export function BrowserWorkbenchView({
   const [youtubeQuestion, setYoutubeQuestion] = useState("");
   const [youtubeAskBusy, setYoutubeAskBusy] = useState(false);
   const [youtubeAskResult, setYoutubeAskResult] = useState<YouTubeAskState>(null);
-  const partition = useMemo(() => getPartition(workspaceId), [workspaceId]);
+  const partition = useMemo(
+    () => browserPartitionForTask(workspaceId, botId),
+    [workspaceId, botId],
+  );
   const viewportSize = useMemo(
     () =>
       controlledViewport

@@ -179,6 +179,7 @@ Computer use is **high trust**: a mistaken or malicious task could operate any U
 - Helper-targeted permissions with inline bootstrap on macOS; visible-window constraints on Windows
 - Policy that keeps the computer-use lane off the default path unless GUI intent is clear
 - Blocklisted key combinations that could disrupt the session or OS
+- Private Browser Workbench prompts and filled documents block native computer control, including captures that overlap the private flow. Wait for prompt clearance or full navigation/closing the protected tab; do not route around the guard. See [private browser safeguards](security-guide.md#private-browser-credentials-and-checkout).
 
 For how this fits the wider tool-risk model, see [Security guide → Computer use](security-guide.md#computer-use-security).
 

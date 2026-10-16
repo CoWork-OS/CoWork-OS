@@ -113,6 +113,57 @@ describe("MCPRegistryManager install defaults", () => {
     expect(mockState.addServerMock).toHaveBeenCalledTimes(1);
   });
 
+  it("installs a hosted OAuth server to register its own client on first sign-in", async () => {
+    const config = await MCPRegistryManager.installServer("sentry");
+
+    expect(config).toMatchObject({
+      name: "Sentry",
+      enabled: false,
+      transport: "streamable-http",
+      url: "https://mcp.sentry.dev/mcp",
+      registryId: "sentry",
+      defaultToolsApprovalMode: "writes",
+      auth: {
+        type: "bearer",
+        oauth: {
+          grant: "authorization_code",
+          redirectUri: "http://127.0.0.1:18768/oauth/callback",
+          dynamicClientRegistration: true,
+        },
+      },
+    });
+    expect(config.auth?.clientId).toBeUndefined();
+    expect(config.command).toBeUndefined();
+  });
+
+  it("installs a hosted server that needs no sign-in without auth", async () => {
+    const config = await MCPRegistryManager.installServer("deepwiki");
+
+    expect(config).toMatchObject({
+      transport: "streamable-http",
+      url: "https://mcp.deepwiki.com/mcp",
+    });
+    expect(config.auth).toBeUndefined();
+    expect(config.defaultToolsApprovalMode).toBeUndefined();
+  });
+
+  it("lists the hosted MCP servers as bundled https entries", async () => {
+    const registry = await MCPRegistryManager.fetchRegistry();
+    const hosted = registry.servers.filter((server) => server.remoteAuth);
+
+    expect(hosted).toHaveLength(43);
+    expect(new Set(hosted.map((server) => server.id)).size).toBe(43);
+    for (const server of hosted) {
+      expect(server.transport).toBe("streamable-http");
+      expect(server[REGISTRY_ENTRY_PROVENANCE as keyof typeof server]).toBe("bundled");
+      const url = new URL(server.defaultUrl!);
+      // The Unreal editor serves its MCP endpoint on this machine only.
+      if (server.id === "unreal-engine") expect(url.hostname).toBe("127.0.0.1");
+      else expect(url.protocol).toBe("https:");
+    }
+    expect(hosted.filter((server) => server.remoteAuth === "oauth")).toHaveLength(33);
+  });
+
   it("curates overlapping official MCP servers out of the built-in registry", async () => {
     const registry = await MCPRegistryManager.fetchRegistry();
     const ids = registry.servers.map((server) => server.id);

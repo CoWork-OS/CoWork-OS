@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentRoleWorksOnSchema,
   validateInput,
   AgentConfigSchema,
   WorkspaceCreateSchema,
@@ -808,6 +809,15 @@ describe("ChannelConfigSchema ownerUserIds", () => {
       validateInput(ChannelConfigSchema, { ownerUserIds: ["two words"] }, "test"),
     ).toThrow();
     expect(() => validateInput(ChannelConfigSchema, { ownerUserIds: "42" }, "test")).toThrow();
+  });
+});
+
+describe("bot Works on setting", () => {
+  it("accepts the known places and null, and refuses anything else", () => {
+    expect(AgentRoleWorksOnSchema.parse("browser")).toBe("browser");
+    expect(AgentRoleWorksOnSchema.parse(null)).toBeNull();
+    expect(() => AgentRoleWorksOnSchema.parse("cloud")).toThrow();
+    expect(() => AgentRoleWorksOnSchema.parse(1)).toThrow();
   });
 });
 

@@ -4,6 +4,7 @@ import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { LLMTool } from "../llm/types";
 import { ComputerUseSessionManager } from "../../computer-use/session-manager";
+import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { getComputerUseProvider, type ComputerUseProvider } from "../../computer-use/provider";
 import {
   type ComputerUseHelperApp,
@@ -436,9 +437,12 @@ export class ComputerUseTools {
     if (process.platform !== "darwin" && process.platform !== "win32") {
       throw new Error("Computer use is only supported on macOS and Windows desktop builds.");
     }
-    this.session().acquire(this.taskId, this.daemon, {
+    // While the person has taken over, the bot's computer actions are refused, not queued.
+    ComputerViewService.getInstance().assertNotHeld(this.taskId);
+    await this.session().acquireOrWait(this.taskId, this.daemon, {
       background: this.resolveNativeControlMode() === "background",
     });
+    ComputerViewService.getInstance().assertNotHeld(this.taskId);
     this.session().checkNotAborted();
     await this.helper().ensureReadyWithInteractivePermissions();
     assertPrivateCaptureAllowed();
@@ -621,6 +625,13 @@ export class ComputerUseTools {
     assertPrivateCaptureAllowed();
     this.currentCapture = this.makeCaptureState(this.currentTarget, payload);
     this.persistState();
+    // The same screenshot becomes the bot panel's live view (downscaled, never stored).
+    ComputerViewService.getInstance().publishFrame(
+      this.taskId,
+      "this_computer",
+      payload.pngBase64,
+      [this.currentTarget.appName, this.currentTarget.windowTitle].filter(Boolean).join(" — "),
+    );
     this.daemon.logEvent(this.taskId, "tool_result", {
       tool: toolName,
       success: true,

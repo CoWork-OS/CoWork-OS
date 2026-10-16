@@ -7,6 +7,7 @@ import {
   type RuntimeToolMetadata,
 } from "../../shared/types";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
+import { isComputerTool } from "../../shared/bot-computer";
 import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
@@ -471,8 +472,26 @@ export function evaluateToolAvailability(
   }
 
   const taskText = normalizeTaskText(ctx.taskText);
+  if (
+    normalizedToolName === "application_operation" &&
+    /\bandroid\b|phone-harness|phone\.android\.|android_phone_/.test(taskText)
+  ) {
+    return { decision: "allow", metadata };
+  }
   if (!taskText) {
     return { decision: "defer", reason: `hidden_without_task_signal:${metadata.lane}`, metadata };
+  }
+
+  // Asking the person to take over belongs wherever the agent drives a browser or this computer.
+  if (normalizedToolName === "request_takeover") {
+    const usedComputer = Array.from(ctx.recentlyUsedTools ?? []).some(
+      (name) => name !== "request_takeover" && isComputerTool(name),
+    );
+    return usedComputer ||
+      BROWSER_INTENT_PATTERN.test(taskText) ||
+      hasNativeDesktopGuiIntent(taskText)
+      ? { decision: "allow", metadata }
+      : { decision: "defer", reason: "computer_intent_missing", metadata };
   }
 
   if (normalizedToolName === "read_pdf_visual") {
@@ -595,6 +614,8 @@ const READONLY_GIT_TOOLS = new Set([
 ]);
 
 const ALWAYS_MUTATING = new Set([
+  "android_phone_authorize",
+  "android_phone_dispatch",
   // Writes a note to the memory folder; plan mode allows it only for swarm members.
   "swarm_note",
   "run_command",

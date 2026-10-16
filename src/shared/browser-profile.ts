@@ -1,7 +1,8 @@
 /**
  * The in-app browser keeps one profile (cookies, storage, history, site
- * permissions) per workspace. The profile key is the sanitized workspace id;
- * the Electron partition is derived from it.
+ * permissions) per workspace, and a separate one per bot in that workspace, so
+ * bots don't share sign-ins with each other or with you. The profile key is the
+ * sanitized workspace id (plus the bot); the Electron partition is derived from it.
  */
 
 export const BROWSER_PARTITION_PREFIX = "persist:cowork-browser-";
@@ -13,6 +14,42 @@ export function browserProfileKey(workspaceId?: string | null): string {
 
 export function browserPartitionFor(workspaceId?: string | null): string {
   return `${BROWSER_PARTITION_PREFIX}${browserProfileKey(workspaceId)}`;
+}
+
+/** Marks a bot's own profile key: `<workspace>--bot-<bot>`. */
+const BOT_PROFILE_MARKER = "--bot-";
+
+function botProfileSuffix(botId: string): string {
+  return `${BOT_PROFILE_MARKER}${browserProfileKey(botId).slice(0, 40)}`;
+}
+
+/** The profile a task's browser uses: the bot's own when a bot does the work. */
+export function browserProfileKeyForTask(
+  workspaceId?: string | null,
+  botId?: string | null,
+): string {
+  if (!botId) return browserProfileKey(workspaceId);
+  return `${browserProfileKey(workspaceId).slice(0, 80 - 46)}${botProfileSuffix(botId)}`;
+}
+
+export function browserPartitionForTask(
+  workspaceId?: string | null,
+  botId?: string | null,
+): string {
+  return `${BROWSER_PARTITION_PREFIX}${browserProfileKeyForTask(workspaceId, botId)}`;
+}
+
+/**
+ * Whether a task may show pages on this partition: a bot's task only on that bot's profile,
+ * any other task only on a workspace profile.
+ */
+export function isBrowserPartitionAllowedForTask(
+  partition: string,
+  botId?: string | null,
+): boolean {
+  const key = browserProfileKeyFromPartition(partition);
+  if (!key) return false;
+  return botId ? key.endsWith(botProfileSuffix(botId)) : !key.includes(BOT_PROFILE_MARKER);
 }
 
 export function browserProfileKeyFromPartition(partition: string): string | null {

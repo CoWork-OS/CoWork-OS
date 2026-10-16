@@ -20747,16 +20747,32 @@ a,
   scrollbar-gutter: stable;
 }
 
+/* Files list shows a six-row window; the rest scroll. A half row peeks out
+   below the window so it reads as scrollable. */
+.right-panel .cli-file-list {
+  --right-panel-file-row-height: 34px;
+  --right-panel-file-row-gap: 6px;
+  gap: var(--right-panel-file-row-gap);
+  max-height: calc(
+    (var(--right-panel-file-row-height) * 6.5) + (var(--right-panel-file-row-gap) * 6)
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.right-panel .cli-file-list::-webkit-scrollbar,
 .right-panel .cli-context-tool-usage-list::-webkit-scrollbar,
 .right-panel .cli-context-file-list::-webkit-scrollbar {
   width: 6px;
 }
 
+.right-panel .cli-file-list::-webkit-scrollbar-track,
 .right-panel .cli-context-tool-usage-list::-webkit-scrollbar-track,
 .right-panel .cli-context-file-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
+.right-panel .cli-file-list::-webkit-scrollbar-thumb,
 .right-panel .cli-context-tool-usage-list::-webkit-scrollbar-thumb,
 .right-panel .cli-context-file-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
@@ -20765,6 +20781,7 @@ a,
 
 /* Thumb only shows while the list is hovered; the stable gutter keeps rows
    from shifting when it appears. */
+.right-panel .cli-file-list:hover::-webkit-scrollbar-thumb,
 .right-panel .cli-context-tool-usage-list:hover::-webkit-scrollbar-thumb,
 .right-panel .cli-context-file-list:hover::-webkit-scrollbar-thumb {
   background: var(--right-panel-row-border);

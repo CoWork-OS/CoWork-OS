@@ -25,6 +25,8 @@ import {
   MEMORY_REPO_LESSONS_FILE,
   MEMORY_REPO_ME_FILE,
   MEMORY_REPO_WORKSPACES_DIR,
+  isBotRepoPath,
+  isMemoryRepoMarker,
   isSwarmRepoPath,
   memoryRepoRef,
   parseMemoryRepoEntries,
@@ -67,8 +69,9 @@ export function memoryRepoFileRole(relPath: string): MemoryRepoHubFileRole {
 
 /** Whether a workspace's Hub may see a file: global files and the inbox, or its own file. */
 function visibleIn(relPath: string, ownWorkspaceFile: string | null): boolean {
-  // Swarm folders are agents' shared notes, not the user's memory (phase 5 §2).
-  if (isSwarmRepoPath(relPath)) return false;
+  // Swarm folders are agents' shared notes, not the user's memory (phase 5 §2); a bot's
+  // file is shown with that bot.
+  if (isSwarmRepoPath(relPath) || isBotRepoPath(relPath)) return false;
   if (!relPath.startsWith(`${MEMORY_REPO_WORKSPACES_DIR}/`)) return true;
   return relPath === ownWorkspaceFile;
 }
@@ -100,6 +103,9 @@ export function toMemoryRepoHubEntry(relPath: string, entry: MemoryRepoEntry): M
     taskId: task ? task[1] : null,
     hash: entry.hash,
     source: source && !task ? source.slice(0, 200) : null,
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(entry.metadata.until ?? "")
+      ? { until: entry.metadata.until! }
+      : {}),
   };
 }
 
@@ -109,7 +115,7 @@ async function hubFile(
 ): Promise<MemoryRepoHubFile | null> {
   const markdown = await service.readFile(relPath);
   if (markdown === null) return null;
-  const entries = parseMemoryRepoEntries(markdown).filter((entry) => !entry.metadata.workspace);
+  const entries = parseMemoryRepoEntries(markdown).filter((entry) => !isMemoryRepoMarker(entry));
   return {
     path: relPath,
     title: fileTitle(relPath, markdown),

@@ -10,6 +10,7 @@ import { BuiltinToolsSettingsManager } from "../builtin-settings";
 import { BrowserUseCloudClient } from "../../browser/browser-use-cloud-client";
 import { BrowserSettingsManager } from "../../../settings/browser-settings-manager";
 import { DEFAULT_BROWSER_SETTINGS } from "../../../../shared/browser-settings";
+import { ComputerViewService } from "../../../computer-use/computer-view-service";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1670,5 +1671,70 @@ describe("BrowserTools current effect authority", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("BrowserTools saved profiles", () => {
+  const workspace = {
+    id: "workspace-1",
+    path: "/tmp/ws",
+    permissions: { read: true, write: true, delete: true, network: true, shell: true },
+  } as Any;
+  const toolsFor = (assignedAgentRoleId?: string) =>
+    new BrowserTools(
+      workspace,
+      {
+        logEvent: vi.fn(),
+        registerArtifact: vi.fn(),
+        getTask: vi.fn(() => ({ id: "task-1", assignedAgentRoleId })),
+      } as Any,
+      "task-1",
+    ) as Any;
+
+  it("keeps a bot's saved profiles apart from the workspace's", () => {
+    const bot = toolsFor("7d2c1e9a-3b4f-4c5d-8e6f-7a8b9c0d1e2f");
+    expect(bot.getPersistentUserDataDir("workspace")).toBe(
+      path.join(
+        "/tmp/ws",
+        ".cowork",
+        "browser-profiles",
+        "bot-7d2c1e9a-3b4f-4c5d-8e6f-7a8b9c0d1e2f-default",
+      ),
+    );
+    expect(bot.getPersistentUserDataDir("shopping")).toBe(
+      path.join(
+        "/tmp/ws",
+        ".cowork",
+        "browser-profiles",
+        "bot-7d2c1e9a-3b4f-4c5d-8e6f-7a8b9c0d1e2f-shopping",
+      ),
+    );
+  });
+
+  it("keeps ordinary tasks on the workspace profile", () => {
+    expect(toolsFor().getPersistentUserDataDir("workspace")).toBe(
+      path.join("/tmp/ws", ".cowork", "browser-profiles", "default"),
+    );
+  });
+});
+
+describe("BrowserTools while the person has taken over", () => {
+  afterEach(() => {
+    ComputerViewService.resetForTesting();
+  });
+
+  it("refuses browser actions until the person hands back", async () => {
+    const view = ComputerViewService.resetForTesting({
+      encodeFrame: vi.fn(() => null),
+      logEvent: vi.fn(),
+    });
+    view.takeOver("task-1");
+    const tools = new BrowserTools(
+      { id: "workspace-1", path: "/tmp", permissions: { read: true, network: true } } as Any,
+      { logEvent: vi.fn(), registerArtifact: vi.fn() } as Any,
+      "task-1",
+    );
+    const result = await tools.executeTool("browser_navigate", { url: "https://example.com" });
+    expect(result).toMatchObject({ success: false, error: "paused_by_user" });
   });
 });

@@ -10,7 +10,11 @@ import path from "node:path";
 import type { MemoryRepoImportResult } from "../../../shared/memory-repo-types";
 import { containsNoMemoryDirective } from "../no-memory-directive";
 import type { MemoryRepoImportEntry, MemoryRepoImportOutcome } from "./MemoryRepoService";
-import { MEMORY_REPO_INBOX_FILE, parseMemoryRepoEntries } from "./memory-repo-format";
+import {
+  MEMORY_REPO_INBOX_FILE,
+  isMemoryRepoMarker,
+  parseMemoryRepoEntries,
+} from "./memory-repo-format";
 import { memoryRepoPathProblem } from "./memory-repo-paths";
 
 export const MEMORY_REPO_IMPORT_LIMITS = {
@@ -152,7 +156,7 @@ export function memoryRepoImportEntries(files: MemoryRepoImportFile[]): {
     }
     for (const entry of parseMemoryRepoEntries(file.text)) {
       // The workspace marker of another CoWork folder is not a note.
-      if (entry.metadata.workspace) continue;
+      if (isMemoryRepoMarker(entry)) continue;
       const text = entry.text.replace(CHECKBOX, "").trim();
       if (!text) continue;
       entries.push({

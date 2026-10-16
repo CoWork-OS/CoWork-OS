@@ -524,6 +524,7 @@ export function CreateBotDialog({
     icon: botMascotIcon(prefill?.mascot ?? pickDefaultBotMascot(existingBots)),
     providerType: "",
     modelKey: "",
+    worksOn: "auto",
   }));
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -556,6 +557,7 @@ export function CreateBotDialog({
           description: normalizeBotProfileText(values.description) || undefined,
           systemPrompt: normalizeBotProfileText(values.systemPrompt) || undefined,
           icon: values.icon,
+          ...(values.worksOn !== "auto" ? { worksOn: values.worksOn } : {}),
           color: DEFAULT_BOT_COLOR,
           capabilities: ["code"],
           ...(values.modelKey

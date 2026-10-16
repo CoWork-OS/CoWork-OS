@@ -42,6 +42,9 @@ export interface ApplicationAdapter {
   validateInput(input: Record<string, unknown>, resources: ApplicationResource[]): void;
   readiness(context: ApplicationAdapterContext): Promise<{ ready: boolean; reason?: string }>;
   prepare?(context: ApplicationAdapterContext): Promise<ApplicationPreparedChange>;
+  /** Trusted approval-only hook. Must not dispatch application input or external effects.
+   * Runs before the execute deadline; abort here is definitively not dispatched. */
+  authorize?(context: ApplicationAdapterContext): Promise<void>;
   execute(context: ApplicationAdapterContext): Promise<ApplicationAdapterOutcome>;
   observe?(context: ApplicationAdapterContext): Promise<ApplicationAdapterOutcome>;
   cancel?(context: ApplicationAdapterContext): Promise<{ confirmed: boolean; summary: string }>;
@@ -67,6 +70,7 @@ export class ApplicationAdapterCatalog {
       readiness: adapter.readiness.bind(adapter),
       execute: adapter.execute.bind(adapter),
       ...(adapter.prepare ? { prepare: adapter.prepare.bind(adapter) } : {}),
+      ...(adapter.authorize ? { authorize: adapter.authorize.bind(adapter) } : {}),
       ...(adapter.observe ? { observe: adapter.observe.bind(adapter) } : {}),
       ...(adapter.cancel ? { cancel: adapter.cancel.bind(adapter) } : {}),
       ...(adapter.verify ? { verify: adapter.verify.bind(adapter) } : {}),

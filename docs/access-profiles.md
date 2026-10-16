@@ -24,7 +24,7 @@ The main composer exposes these built-in profiles:
 | **Full access**      | `danger-full-access` | `never` / `none`             | `enabled`     | Trusted local work that needs high autonomy                                                        |
 | **Custom**           | Named profile        | Named profile                | Named profile | A repeatable policy for a workspace, team, automation, or integration                              |
 
-The local runtime runs without popup approvals by default. An `allow` decision
+The local runtime keeps the legacy tool-approval popup queue disabled by default. An `allow` decision
 executes silently. A decision that remains `ask` is presented as an assistant
 message with a durable inline **Deny** / **Allow once** input card, including for
 network access, credentials, exports, MCP or external side effects, eligible
@@ -37,6 +37,10 @@ protected operating-system paths, and `approval: "never"` remain fail-closed.
 Runs with nobody to answer the card (headless mode, `cowork run`, sub-agents,
 bot and channel conversations, scheduled or no-human-input tasks) deny the
 request instead.
+
+Private Browser Workbench dialogs and native credential confirmations are separate from the
+tool-approval queue. Automatic review cannot suppress them, and agent card fills require fresh
+approval without a standing grant. See [Private browser credentials and checkout](security-guide.md#private-browser-credentials-and-checkout).
 
 Full access is still subject to hard guardrails, protected operating-system
 paths, administrator policy, and explicit export/location/credential consent.

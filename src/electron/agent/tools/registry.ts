@@ -5,6 +5,11 @@ import { snapshotToolInput } from "./tool-input-snapshot";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { isFullAccessProfile } from "../../../shared/access-profiles";
 import { isCodexComputerUseServer } from "../../mcp/codex-computer-use";
+import {
+  computerToolKind,
+  isComputerToolBlocked,
+  type BotWorksOn,
+} from "../../../shared/bot-computer";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -171,8 +176,10 @@ import { ScrapingTools } from "./scraping-tools";
 import { DocumentTools } from "./document-tools";
 import { ComputerUseTools } from "./computer-use-tools";
 import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
+import { AndroidPhoneTools, ANDROID_PHONE_TOOLS } from "./android-phone-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
+import { ComputerHandoffTools } from "./computer-handoff-tools";
 import { QATools } from "./qa-tools";
 import { WebPreviewTools } from "./web-preview-tools";
 import {
@@ -660,6 +667,7 @@ export class ToolRegistry {
   private swarmToolsAvailable = false;
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
+  private computerHandoffTools: ComputerHandoffTools;
   private qaTools: QATools;
   private webPreviewTools: WebPreviewTools;
   private citationTracker?: CitationTracker;
@@ -753,6 +761,7 @@ export class ToolRegistry {
       (tid, filePath, operation) => daemon.consumeExternalFileApproval(tid, filePath, operation),
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
+    this.computerHandoffTools = new ComputerHandoffTools(taskId);
     this.qaTools = new QATools(workspace, daemon, taskId);
     this.webPreviewTools = new WebPreviewTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
@@ -865,6 +874,7 @@ export class ToolRegistry {
         deniedTools: Array.from(this.deniedTools.values()).sort(),
         deniedGroups: Array.from(this.deniedGroups.values()).sort(),
         denyAllTools: this.denyAllTools,
+        botWorksOn: this.currentBotWorksOn() ?? null,
         headless: isHeadlessMode(),
         deepWorkMode: this._deepWorkMode,
         builtinSettings,
@@ -905,6 +915,7 @@ export class ToolRegistry {
       deniedTools: Array.from(this.deniedTools.values()).sort(),
       deniedGroups: Array.from(this.deniedGroups.values()).sort(),
       denyAllTools: this.denyAllTools,
+      botWorksOn: this.currentBotWorksOn() ?? null,
       headless: isHeadlessMode(),
       deepWorkMode: this._deepWorkMode,
     });
@@ -1334,9 +1345,40 @@ export class ToolRegistry {
   /**
    * Check if a tool is allowed based on security policy
    */
+  /**
+   * The bot's "Works on" setting for this task, read live so a change applies on the next
+   * tool call. Unset outside bot work.
+   */
+  private botWorksOnSource: (() => BotWorksOn | undefined) | null = null;
+
+  setBotWorksOnSource(source: (() => BotWorksOn | undefined) | null): void {
+    this.botWorksOnSource = source;
+    this.invalidateToolCaches();
+  }
+
+  private currentBotWorksOn(): BotWorksOn | undefined {
+    try {
+      return this.botWorksOnSource?.() ?? undefined;
+    } catch {
+      // Fail closed: if the setting cannot be read, the bot gets no computer.
+      return "off";
+    }
+  }
+
+  /** Whether the bot's "Works on" setting takes this tool away. */
+  private isBlockedByBotWorksOn(toolName: string): boolean {
+    const worksOn = this.currentBotWorksOn();
+    if (!worksOn || worksOn === "auto" || worksOn === "this_computer") return false;
+    const kind = computerToolKind(toolName, {
+      hostDesktopMcp: this.getCodexConsentServer(toolName) !== null,
+    });
+    return isComputerToolBlocked(worksOn, kind);
+  }
+
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
+    if (this.isBlockedByBotWorksOn(toolName)) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
       if (tools && tools.includes(toolName)) return true;
@@ -1345,6 +1387,11 @@ export class ToolRegistry {
   }
 
   isToolAllowed(toolName: string): boolean {
+    if (
+      toolName.startsWith("android_phone_") &&
+      isThirdPartyGatewayTask(this.daemon.getTask?.(this.taskId))
+    )
+      return false;
     if (this.denyAllTools) {
       return false;
     }
@@ -1356,6 +1403,9 @@ export class ToolRegistry {
       if (tools && tools.includes(toolName)) {
         return false;
       }
+    }
+    if (this.isBlockedByBotWorksOn(toolName)) {
+      return false;
     }
     return isToolAllowedQuick(toolName, this.workspace, this.gatewayContext);
   }
@@ -1373,6 +1423,7 @@ export class ToolRegistry {
 
     const headless = isHeadlessMode();
     const allTools: LLMTool[] = [
+      ...ANDROID_PHONE_TOOLS,
       ...this.getFileToolDefinitions(),
       ...this.getSkillToolDefinitions(),
       ...GlobTools.getToolDefinitions(),
@@ -1620,6 +1671,9 @@ export class ToolRegistry {
 
     // Session scratchpad tools (agent self-notes during long runs)
     allTools.push(...ScratchpadTools.getToolDefinitions());
+
+    // Hand a step to the person (passwords, codes, payments) instead of doing it
+    allTools.push(...ComputerHandoffTools.getToolDefinitions());
 
     // Playwright QA tools (automated visual testing for web apps)
     allTools.push(...QATools.getToolDefinitions());
@@ -2122,7 +2176,11 @@ export class ToolRegistry {
     // PACT conversation is local.
     if (canonicalToolName === "pact_send_message") return "external_service";
     if (canonicalToolName === "pact_get_conversation") return null;
-    if (canonicalToolName === "open_application" || isComputerUseToolName(canonicalToolName)) {
+    if (
+      canonicalToolName.startsWith("android_phone_") ||
+      canonicalToolName === "open_application" ||
+      isComputerUseToolName(canonicalToolName)
+    ) {
       return "computer_use";
     }
     if (NETWORK_TOOL_NAMES.has(canonicalToolName)) return "network_access";
@@ -2233,6 +2291,7 @@ export class ToolRegistry {
       toolName === "local_photoshop_create" ||
       toolName === "local_photoshop_edit" ||
       toolName === "native_application_create" ||
+      toolName.startsWith("android_phone_") ||
       toolName === "take_screenshot" ||
       toolName === "open_path" ||
       toolName === "show_in_folder" ||
@@ -3141,6 +3200,9 @@ export class ToolRegistry {
     );
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
+    register("request_takeover", async ({ request }) =>
+      this.computerHandoffTools.requestTakeover(request.input),
+    );
     register("read_clipboard", async () => this.systemTools.readClipboard());
     register("write_clipboard", async ({ request }) =>
       this.systemTools.writeClipboard(request.input.text),
@@ -3341,6 +3403,18 @@ export class ToolRegistry {
       async ({ request }) => this.nativeAppTools.run(request.input),
       serialSchedulerSpec,
     );
+    for (const tool of ANDROID_PHONE_TOOLS) {
+      register(
+        tool.name,
+        async ({ request }) =>
+          new AndroidPhoneTools(this.daemon, this.taskId).run(
+            tool.name,
+            request.input,
+            request.runtime,
+          ),
+        serialSchedulerSpec,
+      );
+    }
     register(
       "screenshot",
       async ({ request }) =>
@@ -3486,6 +3560,18 @@ export class ToolRegistry {
     register(
       "canvas_snapshot",
       async ({ request }) => this.canvasTools.takeSnapshot(request.input.session_id),
+      serialSchedulerSpec,
+    );
+    register(
+      "canvas_add_asset",
+      async ({ request }) =>
+        this.canvasTools.addAsset(request.input.session_id, request.input.path, request.input.name),
+      serialSchedulerSpec,
+    );
+    register(
+      "canvas_export",
+      async ({ request }) =>
+        this.canvasTools.exportCanvas(request.input.session_id, request.input.target_dir),
       serialSchedulerSpec,
     );
     register("canvas_list", async () => this.canvasTools.listSessions(), serialSchedulerSpec);
@@ -4700,6 +4786,8 @@ Live Canvas (Visual Workspace):
 - canvas_hide: Hide the canvas window
 - canvas_close: Close a canvas session
 - canvas_eval: Execute JavaScript in the canvas context
+- canvas_add_asset: Copy a workspace image/video/audio file into the canvas assets/ folder; use the returned relative url in canvas_push HTML instead of base64.
+- canvas_export: Export the canvas page and its assets to a workspace folder.
 - canvas_snapshot: Take a screenshot of the canvas
 - canvas_list: List all active canvas sessions
 IMPORTANT: When using canvas_push for visual output, provide content when available.
@@ -5219,6 +5307,7 @@ ${skillDescriptions}`;
     if (name === "swarm_note") return await this.swarmTools.note(input);
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
+    if (name === "request_takeover") return this.computerHandoffTools.requestTakeover(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
     if (name === "write_clipboard") return await this.systemTools.writeClipboard(input.text);
     if (name === "take_screenshot") return await this.systemTools.takeScreenshot(input);
@@ -5242,6 +5331,8 @@ ${skillDescriptions}`;
 
     // Computer use tools (CUA)
     if (name === "native_app") return await this.nativeAppTools.run(input);
+    if (ANDROID_PHONE_TOOLS.some((tool) => tool.name === name))
+      return new AndroidPhoneTools(this.daemon, this.taskId).run(name, input);
     if (name === "screenshot")
       return await this.computerUseTools.screenshot({
         app: input.app,
@@ -5319,6 +5410,10 @@ ${skillDescriptions}`;
     if (name === "canvas_eval")
       return await this.canvasTools.evalScript(input.session_id, input.script);
     if (name === "canvas_snapshot") return await this.canvasTools.takeSnapshot(input.session_id);
+    if (name === "canvas_add_asset")
+      return await this.canvasTools.addAsset(input.session_id, input.path, input.name);
+    if (name === "canvas_export")
+      return await this.canvasTools.exportCanvas(input.session_id, input.target_dir);
     if (name === "canvas_list") return this.canvasTools.listSessions();
     if (name === "canvas_checkpoint")
       return await this.canvasTools.saveCheckpoint(input.session_id, input.label);
@@ -6580,19 +6675,15 @@ ${skillDescriptions}`;
       artifactDir,
       workspaceArtifactDir,
     });
+    // Tool prerequisites determine eligibility; they are not an exhaustive
+    // task allowlist. Promoting them to allowedTools would hide unrelated
+    // capabilities needed by later steps (for example, saving a summary).
     const contextDirectives: SkillContextDirectives = {
-      ...(Array.isArray((skill.requires as Any)?.tools) &&
-      ((skill.requires as Any)?.tools as unknown[]).some((tool) => typeof tool === "string")
-        ? {
-            allowedTools: ((skill.requires as Any).tools as unknown[]).filter(
-              (tool): tool is string => typeof tool === "string" && tool.trim().length > 0,
-            ),
-          }
-        : {}),
       artifactDirectories: [artifactDir, workspaceArtifactDir],
       metadata: {
         source: skill.source || "unknown",
         category: skill.category || "General",
+        requiredTools,
       },
     };
     const skillApplication: SkillApplication = {

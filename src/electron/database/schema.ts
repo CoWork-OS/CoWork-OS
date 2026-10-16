@@ -4435,6 +4435,8 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN operator_health_score REAL",
       // "May do alone": the most access this agent's work may get (a ceiling, never a grant).
       "ALTER TABLE agent_roles ADD COLUMN access_profile_id TEXT",
+      // "Works on": which computer a bot's tasks may drive (auto, this_computer, browser, off).
+      "ALTER TABLE agent_roles ADD COLUMN works_on TEXT",
     ];
 
     for (const sql of missionControlColumns) {

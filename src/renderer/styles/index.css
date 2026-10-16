@@ -11913,11 +11913,6 @@ a,
   max-height: 90vh;
 }
 
-.file-viewer-modal[data-format="video"] {
-  width: min(94vw, 1280px);
-  max-height: 90vh;
-}
-
 .file-viewer-modal[data-format="audio"] {
   width: min(90vw, 560px);
   max-height: none;
@@ -12043,7 +12038,6 @@ a,
 
 /* Per-format content padding */
 .file-viewer-modal[data-format="html"] .file-viewer-content,
-.file-viewer-modal[data-format="video"] .file-viewer-content,
 .file-viewer-modal[data-format="pptx"] .file-viewer-content {
   padding: 0;
   overflow: hidden;
@@ -12235,21 +12229,6 @@ a,
   max-width: 100%;
   border-radius: 14px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
-}
-
-.file-viewer-video-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 240px;
-}
-
-.file-viewer-video {
-  width: 100%;
-  max-height: 72vh;
-  background: #000;
-  border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 /* Presentation viewer */

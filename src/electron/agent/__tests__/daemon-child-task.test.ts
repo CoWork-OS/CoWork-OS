@@ -75,6 +75,35 @@ describe("AgentDaemon.createChildTask", () => {
     ]);
   });
 
+  it("keeps a child on no more computer than the bot that delegated it", async () => {
+    const taskRepo = {
+      findById: vi.fn(() => ({
+        id: "parent",
+        status: "executing",
+        assignedAgentRoleId: "bot-1",
+        agentConfig: { inheritedBotWorksOn: "this_computer" },
+      })),
+      update: vi.fn(),
+      create: vi.fn((task: Any) => ({ id: "child", ...task })),
+    };
+    const daemonLike = {
+      taskRepo,
+      startTask: vi.fn(),
+      ensureCollaborativeRunForParentTask: vi.fn(),
+      getAgentRoleById: vi.fn(() => ({ id: "bot-1", worksOn: "browser" })),
+    } as Any;
+    const child = await AgentDaemon.prototype.createChildTask.call(daemonLike, {
+      title: "Helper",
+      prompt: "Help",
+      workspaceId: "ws",
+      parentTaskId: "parent",
+      agentType: "sub",
+      // A caller can't widen it by passing its own.
+      agentConfig: { inheritedBotWorksOn: "auto" } as Any,
+    });
+    expect(child.agentConfig.inheritedBotWorksOn).toBe("browser");
+  });
+
   it.each([false, undefined, true])(
     "inherits parent channel sender evidence without child override (%s)",
     async (owner) => {

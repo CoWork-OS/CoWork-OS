@@ -11,6 +11,7 @@ import {
   HelperTransportError,
 } from "../../computer-use/helper-runtime";
 import { ComputerUseSessionManager } from "../../computer-use/session-manager";
+import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { getDefaultRuntimeToolMetadata } from "./runtime-tool-definition";
 import { requireNativeDesktopSession } from "../../applications/native-desktop-session";
 
@@ -209,7 +210,12 @@ export class NativeAppTools {
       throw new Error(
         "outcome_unknown: a previous native action is unresolved. Read-only observation remains available; no mutation or replay is allowed.",
       );
-    ComputerUseSessionManager.getInstance().acquire(this.taskId, this.daemon, { background: true });
+    // While the person has taken over, the bot's computer actions are refused, not queued.
+    ComputerViewService.getInstance().assertNotHeld(this.taskId);
+    await ComputerUseSessionManager.getInstance().acquireOrWait(this.taskId, this.daemon, {
+      background: true,
+    });
+    ComputerViewService.getInstance().assertNotHeld(this.taskId);
     ComputerUseSessionManager.getInstance().checkNotAborted();
     await this.runtime.ensureReadyWithInteractivePermissions();
     assertPrivateCaptureAllowed();

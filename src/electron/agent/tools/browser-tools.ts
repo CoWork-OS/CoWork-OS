@@ -1,6 +1,7 @@
 import { getBrowserCredentialService } from "../../browser/credentials/browser-credential-service";
 import type { BrowserVaultCommand } from "../../../shared/browser-vault";
 import { privateCaptureGuard } from "../../browser/credentials/private-capture-guard";
+import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { maskFilledPasswords, passwordRecentlyFilled } from "../../browser/credentials/autofill";
 import * as os from "os";
@@ -985,6 +986,32 @@ export class BrowserTools {
     }
   }
 
+  /**
+   * Shows the browser in the bot's panel after a browser action: the visible tab is captured by
+   * the view service; the agent's own background browser is captured here. Nothing is captured
+   * while a private input (password, one-time code) is on screen or was just filled.
+   */
+  private updateComputerView(drives: boolean, sessionId: string | undefined): void {
+    const view = ComputerViewService.getInstance();
+    view.noteWorking(this.taskId, "browser");
+    if (!view.isWatched(this.taskId)) return;
+    if (drives || this.browserWorkbenchService.getSession(this.taskId, sessionId)) {
+      void view.captureBrowserFrame(this.taskId);
+      return;
+    }
+    if (passwordRecentlyFilled(this.taskId, sessionId || "default")) return;
+    void (async () => {
+      try {
+        const assertCaptureAllowed = privateCaptureGuard();
+        const captured = await this.browserService.capturePreview();
+        assertCaptureAllowed();
+        if (captured) view.publishFrame(this.taskId, "browser", captured.png, captured.label);
+      } catch {
+        // A private input or a closed page skips this frame.
+      }
+    })();
+  }
+
   private drivesVisibleWorkbench(toolName: string, input: unknown): boolean {
     if (!toolName.startsWith("browser_") || NON_DRIVING_BROWSER_TOOLS.has(toolName)) return false;
     if (!this.hasVisibleWorkbenchSession(input)) return false;
@@ -1004,15 +1031,31 @@ export class BrowserTools {
     if (trimmed === "chrome-relay") {
       return path.join(this.workspace.path, ".cowork", "browser-profiles", "chrome-relay");
     }
+    // A bot keeps its own saved profiles, so it never signs in as you or as another bot.
+    const botPrefix = this.getBotProfilePrefix();
     if (trimmed === "workspace") {
-      return path.join(this.workspace.path, ".cowork", "browser-profiles", "default");
+      return path.join(this.workspace.path, ".cowork", "browser-profiles", `${botPrefix}default`);
     }
     const safe =
       path
         .basename(profile.trim())
         .replace(/[^a-zA-Z0-9._-]+/g, "_")
         .slice(0, 64) || "default";
-    return path.join(this.workspace.path, ".cowork", "browser-profiles", safe);
+    return path.join(this.workspace.path, ".cowork", "browser-profiles", `${botPrefix}${safe}`);
+  }
+
+  /** `bot-<id>-` when a bot does this task, else empty. */
+  private getBotProfilePrefix(): string {
+    let botId: string | undefined;
+    try {
+      botId = this.daemon.getTask?.(this.taskId)?.assignedAgentRoleId;
+    } catch {
+      botId = undefined;
+    }
+    const safe = String(botId || "")
+      .replace(/[^a-zA-Z0-9-]+/g, "")
+      .slice(0, 40);
+    return safe ? `bot-${safe}-` : "";
   }
 
   private getSystemChromeUserDataDir(): string {
@@ -2050,6 +2093,19 @@ export class BrowserTools {
           "Continue with other tools, or wait.",
       };
     }
+    // The person took over this task's computer from the bot's panel: no browser actions either.
+    if (
+      toolName.startsWith("browser_") &&
+      ComputerViewService.getInstance().isHeldByPerson(this.taskId)
+    ) {
+      return {
+        success: false,
+        error: "paused_by_user",
+        message:
+          "The person has taken over. Do not use browser tools until they hand control back " +
+          "(they will tell you in the conversation).",
+      };
+    }
     if (drives && this.browserWorkbenchService.isPausedByUser?.(this.taskId, sessionId)) {
       return {
         success: false,
@@ -2058,6 +2114,10 @@ export class BrowserTools {
           "The user took over the in-app browser tab. Do not use browser tools on it until the " +
           "user resumes CoWork (they will press Resume or reply in the conversation).",
       };
+    }
+    // Show "Using the browser" in the bot's panel from the start of the action.
+    if (toolName.startsWith("browser_")) {
+      ComputerViewService.getInstance().noteWorking(this.taskId, "browser");
     }
     if (drives) this.browserWorkbenchService.beginDriving?.(this.taskId, sessionId, toolName);
     const tabsBefore = drives ? this.workbenchTabState(sessionId) : null;
@@ -2076,6 +2136,7 @@ export class BrowserTools {
     } finally {
       if (drives) this.browserWorkbenchService.endDriving?.(this.taskId, sessionId);
     }
+    if (toolName.startsWith("browser_")) this.updateComputerView(drives, sessionId);
     // A password the user filled from their saved logins never reaches the model.
     result = maskFilledPasswords(this.taskId, sessionId || "default", result);
     if (BROWSER_PAGE_READ_TOOLS.has(toolName) && result && result.success !== false) {

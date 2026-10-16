@@ -4,6 +4,7 @@
  */
 
 import * as path from "path";
+import { BOT_WORKS_ON_VALUES } from "../../shared/bot-computer";
 import { z } from "zod";
 import {
   EXTERNAL_RUNTIME_AGENTS,
@@ -87,6 +88,8 @@ const PermissionModeSchema = z.enum([
 const AccessProfileIdSchema = z.string().trim().min(1).max(120);
 /** An agent role's "May do alone" access limit. */
 export const AgentRoleAccessProfileIdSchema = AccessProfileIdSchema;
+/** A bot's "Works on" setting; null resets it to Auto. */
+export const AgentRoleWorksOnSchema = z.enum(BOT_WORKS_ON_VALUES).nullable();
 const AccessFilesystemRuleSchema = z
   .object({
     path: z.string().trim().min(1).max(MAX_PATH_LENGTH),

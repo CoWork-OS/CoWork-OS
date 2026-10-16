@@ -9,6 +9,9 @@ import {
   Settings2,
 } from "lucide-react";
 import { BotWorkDialog, type BotWorkDialogTab } from "./BotWorkDialog";
+import { BotComputerSection } from "./BotComputerSection";
+import { BOT_PROFILE_UPDATED_EVENT } from "./BotProfileDialog";
+import { normalizeBotWorksOn } from "../../shared/bot-computer";
 import { BotMemorySection } from "./BotMemorySection";
 import { BOT_NOTIFICATION_POLICY_UPDATED_EVENT } from "./BotNotificationPanel";
 import { hasHostMethods } from "../host/browser-capabilities";
@@ -199,6 +202,16 @@ export function BotDetailsRail({
 
   useEffect(() => {
     setDescriptionExpanded(false);
+  }, [roleId]);
+
+  // An edit in the bot dialog (such as Works on) shows here right away.
+  useEffect(() => {
+    const onUpdated = (event: Event) => {
+      const updated = (event as CustomEvent<AgentRoleData>).detail;
+      if (updated?.id === roleId) setRole(updated);
+    };
+    window.addEventListener(BOT_PROFILE_UPDATED_EVENT, onUpdated);
+    return () => window.removeEventListener(BOT_PROFILE_UPDATED_EVENT, onUpdated);
   }, [roleId]);
 
   // The bot's work at a glance; the full view opens in the work dialog.
@@ -400,6 +413,14 @@ export function BotDetailsRail({
             Responsibilities and setup
           </button>
         </section>
+      ) : null}
+
+      {roleId && role ? (
+        <BotComputerSection
+          taskId={task.id}
+          botName={botName}
+          worksOn={normalizeBotWorksOn(role.worksOn)}
+        />
       ) : null}
 
       <section className="bot-details-section">

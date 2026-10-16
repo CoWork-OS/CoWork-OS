@@ -5,6 +5,11 @@ import { snapshotToolInput } from "./tool-input-snapshot";
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
 import { isFullAccessProfile } from "../../../shared/access-profiles";
 import { isCodexComputerUseServer } from "../../mcp/codex-computer-use";
+import {
+  computerToolKind,
+  isComputerToolBlocked,
+  type BotWorksOn,
+} from "../../../shared/bot-computer";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -174,6 +179,7 @@ import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
 import { AndroidPhoneTools, ANDROID_PHONE_TOOLS } from "./android-phone-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
+import { ComputerHandoffTools } from "./computer-handoff-tools";
 import { QATools } from "./qa-tools";
 import { WebPreviewTools } from "./web-preview-tools";
 import {
@@ -661,6 +667,7 @@ export class ToolRegistry {
   private swarmToolsAvailable = false;
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
+  private computerHandoffTools: ComputerHandoffTools;
   private qaTools: QATools;
   private webPreviewTools: WebPreviewTools;
   private citationTracker?: CitationTracker;
@@ -754,6 +761,7 @@ export class ToolRegistry {
       (tid, filePath, operation) => daemon.consumeExternalFileApproval(tid, filePath, operation),
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
+    this.computerHandoffTools = new ComputerHandoffTools(taskId);
     this.qaTools = new QATools(workspace, daemon, taskId);
     this.webPreviewTools = new WebPreviewTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
@@ -866,6 +874,7 @@ export class ToolRegistry {
         deniedTools: Array.from(this.deniedTools.values()).sort(),
         deniedGroups: Array.from(this.deniedGroups.values()).sort(),
         denyAllTools: this.denyAllTools,
+        botWorksOn: this.currentBotWorksOn() ?? null,
         headless: isHeadlessMode(),
         deepWorkMode: this._deepWorkMode,
         builtinSettings,
@@ -906,6 +915,7 @@ export class ToolRegistry {
       deniedTools: Array.from(this.deniedTools.values()).sort(),
       deniedGroups: Array.from(this.deniedGroups.values()).sort(),
       denyAllTools: this.denyAllTools,
+      botWorksOn: this.currentBotWorksOn() ?? null,
       headless: isHeadlessMode(),
       deepWorkMode: this._deepWorkMode,
     });
@@ -1335,9 +1345,40 @@ export class ToolRegistry {
   /**
    * Check if a tool is allowed based on security policy
    */
+  /**
+   * The bot's "Works on" setting for this task, read live so a change applies on the next
+   * tool call. Unset outside bot work.
+   */
+  private botWorksOnSource: (() => BotWorksOn | undefined) | null = null;
+
+  setBotWorksOnSource(source: (() => BotWorksOn | undefined) | null): void {
+    this.botWorksOnSource = source;
+    this.invalidateToolCaches();
+  }
+
+  private currentBotWorksOn(): BotWorksOn | undefined {
+    try {
+      return this.botWorksOnSource?.() ?? undefined;
+    } catch {
+      // Fail closed: if the setting cannot be read, the bot gets no computer.
+      return "off";
+    }
+  }
+
+  /** Whether the bot's "Works on" setting takes this tool away. */
+  private isBlockedByBotWorksOn(toolName: string): boolean {
+    const worksOn = this.currentBotWorksOn();
+    if (!worksOn || worksOn === "auto" || worksOn === "this_computer") return false;
+    const kind = computerToolKind(toolName, {
+      hostDesktopMcp: this.getCodexConsentServer(toolName) !== null,
+    });
+    return isComputerToolBlocked(worksOn, kind);
+  }
+
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
+    if (this.isBlockedByBotWorksOn(toolName)) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
       if (tools && tools.includes(toolName)) return true;
@@ -1362,6 +1403,9 @@ export class ToolRegistry {
       if (tools && tools.includes(toolName)) {
         return false;
       }
+    }
+    if (this.isBlockedByBotWorksOn(toolName)) {
+      return false;
     }
     return isToolAllowedQuick(toolName, this.workspace, this.gatewayContext);
   }
@@ -1627,6 +1671,9 @@ export class ToolRegistry {
 
     // Session scratchpad tools (agent self-notes during long runs)
     allTools.push(...ScratchpadTools.getToolDefinitions());
+
+    // Hand a step to the person (passwords, codes, payments) instead of doing it
+    allTools.push(...ComputerHandoffTools.getToolDefinitions());
 
     // Playwright QA tools (automated visual testing for web apps)
     allTools.push(...QATools.getToolDefinitions());
@@ -3153,6 +3200,9 @@ export class ToolRegistry {
     );
     register("scratchpad_write", async ({ request }) => this.scratchpadTools.write(request.input));
     register("scratchpad_read", async ({ request }) => this.scratchpadTools.read(request.input));
+    register("request_takeover", async ({ request }) =>
+      this.computerHandoffTools.requestTakeover(request.input),
+    );
     register("read_clipboard", async () => this.systemTools.readClipboard());
     register("write_clipboard", async ({ request }) =>
       this.systemTools.writeClipboard(request.input.text),
@@ -5257,6 +5307,7 @@ ${skillDescriptions}`;
     if (name === "swarm_note") return await this.swarmTools.note(input);
     if (name === "scratchpad_write") return this.scratchpadTools.write(input);
     if (name === "scratchpad_read") return this.scratchpadTools.read(input);
+    if (name === "request_takeover") return this.computerHandoffTools.requestTakeover(input);
     if (name === "read_clipboard") return await this.systemTools.readClipboard();
     if (name === "write_clipboard") return await this.systemTools.writeClipboard(input.text);
     if (name === "take_screenshot") return await this.systemTools.takeScreenshot(input);

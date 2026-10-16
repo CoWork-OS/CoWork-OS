@@ -1,4 +1,6 @@
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
+import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
+import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
@@ -7158,6 +7160,7 @@ ${transcript}
       toolRestrictions,
     );
     registry.setWorkspacePathAliasPolicy(this.getEffectiveWorkspacePathAliasPolicy());
+    registry.setBotWorksOnSource(() => this.resolveBotWorksOn());
     registry.setWebSearchDomainPolicy({
       allowedDomains: this.webSearchAllowedDomains,
       blockedDomains: this.webSearchBlockedDomains,
@@ -11442,6 +11445,12 @@ ${transcript}
   }
 
   private getToolTimeoutMs(toolName: string, input: unknown): number {
+    const timeoutMs = this.getToolTimeoutMsBeforeComputerWait(toolName, input);
+    // A computer-use call may first wait its turn while another task has the computer.
+    return isComputerUseToolName(toolName) ? timeoutMs + COMPUTER_USE_WAIT_MS : timeoutMs;
+  }
+
+  private getToolTimeoutMsBeforeComputerWait(toolName: string, input: unknown): number {
     const settingsTimeout = BuiltinToolsSettingsManager.getToolTimeoutMs(toolName);
     const normalizedSettingsTimeout =
       settingsTimeout && settingsTimeout > 0 ? settingsTimeout : null;
@@ -18327,6 +18336,26 @@ ${transcript}
     return configuredDefault || "default";
   }
 
+  private botWorksOnCache: { at: number; value: BotWorksOn | undefined } | null = null;
+
+  /**
+   * The bot's "Works on" setting for this task: read from the assigned bot each time (so an edit
+   * applies on the next tool call and no task config can widen it), then narrowed by any limit
+   * inherited from the bot that delegated this task. Cached briefly, since the tool registry
+   * checks it for every tool it lists.
+   */
+  private resolveBotWorksOn(): BotWorksOn | undefined {
+    const now = Date.now();
+    if (this.botWorksOnCache && now - this.botWorksOnCache.at < 1000) {
+      return this.botWorksOnCache.value;
+    }
+    const roleId = this.task.assignedAgentRoleId;
+    const role = roleId ? this.daemon.getAgentRoleById?.(roleId) : undefined;
+    const value = narrowestBotWorksOn(role?.worksOn, this.task.agentConfig?.inheritedBotWorksOn);
+    this.botWorksOnCache = { at: now, value };
+    return value;
+  }
+
   private getTaskToolRestrictions(): Set<string> {
     const raw = this.task.agentConfig?.toolRestrictions ?? [];
     const restrictions = new Set<string>();
@@ -21217,6 +21246,11 @@ You are continuing a previous conversation. The context from the previous conver
     }
     // Queued overrides must not grant the orchestrator-only team lane marker.
     agentConfigOverride = stripTeamWorkItemLaneOverride(agentConfigOverride);
+    // Nor drop the "Works on" limit inherited from a delegating bot.
+    if (Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn")) {
+      const { inheritedBotWorksOn: _inherited, ...rest } = agentConfigOverride;
+      agentConfigOverride = rest;
+    }
     const persistedAgentConfig =
       this.daemon.getTask(this.task.id)?.agentConfig || this.task.agentConfig;
     const boundedTask = normalizeWorkerRoleTaskConfig({

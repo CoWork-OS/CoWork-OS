@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { isBotWorksOn } from "../../shared/bot-computer";
 import { v4 as uuidv4 } from "uuid";
 import {
   AgentRole,
@@ -293,6 +294,7 @@ export class AgentRoleStore {
       maxAutonomousOutputsPerCycle: request.maxAutonomousOutputsPerCycle ?? 1,
       lastUsefulOutputAt: request.lastUsefulOutputAt,
       operatorHealthScore: request.operatorHealthScore,
+      worksOn: isBotWorksOn(request.worksOn) ? request.worksOn : undefined,
     };
 
     const stmt = this.db.prepare(`
@@ -306,8 +308,8 @@ export class AgentRoleStore {
         heartbeat_dispatch_cooldown_minutes, heartbeat_max_dispatches_per_day,
         heartbeat_profile, heartbeat_active_hours, heartbeat_status, operator_mandate, allowed_loop_types,
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
-        last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at
-      ) VALUES (${new Array(41).fill("?").join(", ")})
+        last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at, works_on
+      ) VALUES (${new Array(42).fill("?").join(", ")})
     `);
 
     stmt.run(
@@ -352,6 +354,7 @@ export class AgentRoleStore {
       role.operatorHealthScore ?? null,
       role.monthlyBudgetCost ?? null,
       role.autoPausedAt ?? null,
+      role.worksOn ?? null,
     );
 
     const shouldPersistAutomationProfile =
@@ -605,6 +608,10 @@ export class AgentRoleStore {
     if (request.accessProfileId !== undefined) {
       fields.push("access_profile_id = ?");
       values.push(request.accessProfileId || null);
+    }
+    if (request.worksOn !== undefined) {
+      fields.push("works_on = ?");
+      values.push(isBotWorksOn(request.worksOn) ? request.worksOn : null);
     }
     if (request.soul !== undefined) {
       fields.push("soul = ?");
@@ -949,6 +956,7 @@ export class AgentRoleStore {
         typeof row.access_profile_id === "string" && row.access_profile_id.trim()
           ? row.access_profile_id.trim()
           : undefined,
+      worksOn: isBotWorksOn(row.works_on) ? row.works_on : undefined,
       soul: row.soul || undefined,
       heartbeatEnabled: row.heartbeat_enabled === 1,
       heartbeatIntervalMinutes: row.heartbeat_interval_minutes || 15,

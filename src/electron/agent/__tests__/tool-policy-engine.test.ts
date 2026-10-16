@@ -625,3 +625,28 @@ describe("Codex desktop MCP exposure", () => {
     ).toBe("defer");
   });
 });
+
+describe("request_takeover exposure", () => {
+  it("is offered with browser or desktop work, or after the agent used a computer tool", () => {
+    expect(
+      evaluateToolAvailability("request_takeover", { taskText: "Log in to the website and pay" })
+        .decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability("request_takeover", {
+        taskText: "continue",
+        recentlyUsedTools: ["browser_navigate"],
+      }).decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability("request_takeover", { taskText: "Summarize this CSV file" })
+        .decision,
+    ).toBe("defer");
+  });
+
+  it("is allowed in plan mode, since it changes nothing", () => {
+    expect(evaluateToolPolicy("request_takeover", { executionMode: "plan" }).decision).toBe(
+      "allow",
+    );
+  });
+});

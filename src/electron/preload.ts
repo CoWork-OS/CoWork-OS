@@ -1,3 +1,4 @@
+import type { ComputerViewState } from "../shared/computer-view";
 import {
   BROWSER_VAULT_IPC,
   type BrowserVaultItem,
@@ -1696,6 +1697,8 @@ interface AgentRoleData {
   autonomyLevel?: AgentAutonomyLevel;
   /** "May do alone": the most access this agent's work gets. */
   accessProfileId?: string;
+  /** Where this bot works; unset means Auto. */
+  worksOn?: import("../shared/bot-computer").BotWorksOn;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1737,6 +1740,7 @@ interface CreateAgentRoleRequest {
   toolRestrictions?: AgentToolRestrictions;
   // Automation fields
   autonomyLevel?: AgentAutonomyLevel;
+  worksOn?: import("../shared/bot-computer").BotWorksOn;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1769,6 +1773,7 @@ interface UpdateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   /** The agent's access limit; null clears it. */
   accessProfileId?: string | null;
+  worksOn?: import("../shared/bot-computer").BotWorksOn | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -4450,6 +4455,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onComputerUseEvent: (callback: (event: Any) => void) => {
     const channel = IPC_CHANNELS.COMPUTER_USE_EVENT;
     const listener = (_e: Any, payload: Any) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  watchComputerView: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_WATCH, taskId),
+  unwatchComputerView: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_UNWATCH, taskId),
+  takeOverComputer: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_TAKE_OVER, taskId),
+  handBackComputer: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_HAND_BACK, taskId),
+  onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
+    const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
+    const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
@@ -8583,6 +8602,13 @@ export interface ElectronAPI {
   openComputerUseAccessibilitySettings: () => Promise<{ success: boolean }>;
   openComputerUseScreenRecordingSettings: () => Promise<{ success: boolean }>;
   onComputerUseEvent: (callback: (event: Any) => void) => () => void;
+  /** Starts showing a task's computer in the bot's panel; returns its current state. */
+  watchComputerView: (taskId: string) => Promise<ComputerViewState>;
+  unwatchComputerView: (taskId: string) => Promise<void>;
+  /** The person takes over: the bot's computer and browser actions are refused until hand-back. */
+  takeOverComputer: (taskId: string) => Promise<ComputerViewState>;
+  handBackComputer: (taskId: string) => Promise<ComputerViewState>;
+  onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;
   saveTraySettings: (

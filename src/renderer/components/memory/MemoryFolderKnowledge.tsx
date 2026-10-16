@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type {
   MemoryRepoHubEntry,
   MemoryRepoHubFile,
@@ -12,6 +13,10 @@ export interface MemoryFolderKnowledgeProps {
   files: MemoryRepoHubFile[];
   /** `inbox.md` (filtered), shown apart as "Unreviewed". */
   inbox: MemoryRepoHubFile | null;
+  /** Bots' own files (filtered), shown together under "Bots". */
+  bots?: MemoryRepoHubFile[];
+  /** The bot whose section to bring into view (opened from that bot). */
+  focusBotId?: string;
   editing: { ref: string; draft: string } | null;
   busyRef: string | null;
   canWrite: boolean;
@@ -132,7 +137,7 @@ function FolderEntryRow({
                 {action.label}
               </button>
             ))}
-          {file.role !== "entry" && (
+          {file.role !== "entry" && file.role !== "bot" && (
             <button
               type="button"
               className="memory-inline-btn"
@@ -176,6 +181,9 @@ function FolderFileSection({
     <>
       <h4>
         {file.title} <span className="memory-knowledge-count">{file.entries.length}</span>
+        {file.botDeleted && (
+          <span className="settings-badge settings-badge--outline">Bot deleted</span>
+        )}
         <span className="memory-knowledge-file-path">
           {file.path} · {folderFileHint(file)}
         </span>
@@ -203,6 +211,18 @@ function FolderFileSection({
 
 /** The memory folder part of "What CoWork knows": one section per file, the inbox apart. */
 export function MemoryFolderKnowledge(props: MemoryFolderKnowledgeProps) {
+  const botsRef = useRef<HTMLElement | null>(null);
+  const bots = props.bots ?? [];
+  const focusVisible = Boolean(
+    props.focusBotId && bots.some((file) => file.botId === props.focusBotId),
+  );
+  useEffect(() => {
+    if (!focusVisible || !props.focusBotId) return;
+    const section = botsRef.current?.querySelector<HTMLElement>(
+      `[data-bot-id="${CSS.escape(props.focusBotId)}"]`,
+    );
+    section?.scrollIntoView?.({ block: "start" });
+  }, [focusVisible, props.focusBotId]);
   return (
     <div className="memory-folder-knowledge" data-section="memory-folder">
       {props.files.map((file) => (
@@ -215,6 +235,30 @@ export function MemoryFolderKnowledge(props: MemoryFolderKnowledgeProps) {
           <FolderFileSection file={file} props={props} />
         </section>
       ))}
+      {bots.length > 0 && (
+        <section
+          ref={botsRef}
+          className="memory-knowledge-group"
+          aria-label="Bots"
+          data-group="bots"
+        >
+          <h3 className="memory-knowledge-bots-heading">Bots</h3>
+          <p className="settings-form-hint">
+            What each bot saved about its job and what you want from it. A bot uses only its own
+            memory, in its own conversations.
+          </p>
+          {bots.map((file) => (
+            <div
+              key={file.path}
+              className={`memory-knowledge-bot${file.botId && file.botId === props.focusBotId ? " focused" : ""}`}
+              data-file={file.path}
+              data-bot-id={file.botId}
+            >
+              <FolderFileSection file={file} props={props} />
+            </div>
+          ))}
+        </section>
+      )}
       {props.inbox && props.inbox.entries.length > 0 && (
         <details
           className="memory-knowledge-group memory-knowledge-others"

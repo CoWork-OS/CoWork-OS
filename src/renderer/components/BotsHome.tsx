@@ -28,7 +28,7 @@ export interface BotsHomeProps {
   templates: AgentTemplate[];
   onOpenBot: (bot: BotRole) => void | Promise<void>;
   onSelectTask: (taskId: string | null) => void;
-  onOpenBotMemory?: (workspaceId: string, botName: string) => void;
+  onOpenBotMemory?: (workspaceId: string, botName: string, botId?: string) => void;
 }
 
 interface BotSummary {
@@ -498,7 +498,7 @@ export function BotsHome({
           onOpenContext={
             onOpenBotMemory
               ? (memoryWorkspaceId) => {
-                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName);
+                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName, workBot.id);
                   setWorkBot(null);
                 }
               : undefined

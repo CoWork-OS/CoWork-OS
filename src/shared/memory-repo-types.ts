@@ -196,7 +196,14 @@ export interface MemoryRepoHubEntry {
   until?: string | null;
 }
 
-export type MemoryRepoHubFileRole = "entry" | "me" | "lessons" | "workspace" | "topic" | "inbox";
+export type MemoryRepoHubFileRole =
+  | "entry"
+  | "me"
+  | "lessons"
+  | "workspace"
+  | "topic"
+  | "inbox"
+  | "bot";
 
 export interface MemoryRepoHubFile {
   path: string;
@@ -206,6 +213,10 @@ export interface MemoryRepoHubFile {
   entries: MemoryRepoHubEntry[];
   /** More entries than the Hub lists. */
   truncated?: boolean;
+  /** A bot's own file: the bot (`AgentRole` id) it belongs to. */
+  botId?: string;
+  /** The bot was deleted (its file is kept until the user removes it). */
+  botDeleted?: boolean;
 }
 
 /** `memoryRepo:entries`: the folder as seen from one workspace. */
@@ -217,6 +228,8 @@ export interface MemoryRepoEntriesReport {
   files: MemoryRepoHubFile[];
   /** `inbox.md`: saved after reading untrusted content, not used until reviewed. */
   inbox: MemoryRepoHubFile | null;
+  /** Bots' own files (`bots/<name>.md`), by bot name; the same in every workspace. */
+  bots?: MemoryRepoHubFile[];
 }
 
 /** Result of Edit, Delete and Pin on a memory folder entry. */

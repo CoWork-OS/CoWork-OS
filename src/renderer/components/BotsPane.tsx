@@ -56,7 +56,7 @@ interface BotsPaneProps {
   onOpenBot?: (bot: BotRole) => void | Promise<void>;
   onReopenBot?: (task: Task) => void | Promise<void>;
   onOpenAgents?: () => void;
-  onOpenBotMemory?: (workspaceId: string, botName: string) => void;
+  onOpenBotMemory?: (workspaceId: string, botName: string, botId?: string) => void;
   selectedConversationProjection?: BotConversationRosterProjection | null;
   conversationProjections?: Readonly<Record<string, BotConversationRosterProjection>>;
   onBotCreated?: (bot: BotRole) => void | Promise<void>;
@@ -786,7 +786,7 @@ export function BotsPane({
           onOpenContext={
             onOpenBotMemory
               ? (memoryWorkspaceId) => {
-                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName);
+                  onOpenBotMemory(memoryWorkspaceId, workBot.displayName, workBot.id);
                   setWorkBotId(null);
                 }
               : undefined

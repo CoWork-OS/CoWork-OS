@@ -117,7 +117,7 @@ describe("memory folder IPC", () => {
       channel.startsWith("memoryRepo:"),
     );
     expect(Object.keys(handlers).sort()).toEqual([...channels].sort());
-    expect(channels).toHaveLength(21);
+    expect(channels).toHaveLength(22);
   });
 
   it("returns the status and rate-limits every channel", async () => {
@@ -153,6 +153,7 @@ describe("memory folder IPC", () => {
       hash: "a".repeat(64),
     });
     await handlers[IPC_CHANNELS.MEMORY_REPO_BOT_UNDO]({ botId: "bot-1", commit: "abcdef1" });
+    await handlers[IPC_CHANNELS.MEMORY_REPO_BOT_DELETE_MEMORY]({ botId: "bot-1" });
     await expect(
       handlers[IPC_CHANNELS.MEMORY_REPO_OPEN_FILE]({ workspaceId, path: "me.md" }),
     ).rejects.toThrow(/not available/);

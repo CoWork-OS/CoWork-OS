@@ -16,6 +16,17 @@ export interface BotProfileDialogProps {
   onDeleted?: (botId: string) => void | Promise<void>;
 }
 
+/** How many facts the bot saved in its own memory (0 when unknown or the folder is off). */
+async function botMemoryEntryCount(botId: string): Promise<number> {
+  try {
+    const report = await window.electronAPI?.getBotMemory?.({ botId });
+    if (!report?.available || !report.path) return 0;
+    return report.entries.length + report.expired.length;
+  } catch {
+    return 0;
+  }
+}
+
 export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProfileDialogProps) {
   const [role, setRole] = useState<AgentRoleData | null>(null);
   const [values, setValues] = useState<BotFormValues>({
@@ -112,19 +123,29 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
       setError("Bot deletion is unavailable in this session.");
       return;
     }
-    if (
-      !window.confirm(
-        `Delete ${values.displayName.trim() || "this bot"}? Existing conversations and history will be kept.`,
-      )
-    ) {
+    const name = values.displayName.trim() || "this bot";
+    if (!window.confirm(`Delete ${name}? Existing conversations and history will be kept.`)) {
       return;
     }
+    // Its own memory (a file in the memory folder) is kept unless the user drops it too.
+    const savedFacts = await botMemoryEntryCount(role.id);
+    const dropMemory =
+      savedFacts > 0 &&
+      window.confirm(
+        `Also delete what ${name} remembers (${savedFacts} saved ${savedFacts === 1 ? "fact" : "facts"})? Cancel keeps it in your memory folder.`,
+      );
 
     setSaving(true);
     setError(null);
     try {
       const deleted = await window.electronAPI.deleteAgentRole(role.id);
       if (!deleted) throw new Error("Could not delete this bot.");
+      if (dropMemory) {
+        const removed = await window.electronAPI.deleteBotMemory?.({ botId: role.id });
+        if (removed && !removed.ok) {
+          throw new Error(`The bot was deleted, but its memory was not: ${removed.error ?? ""}`);
+        }
+      }
       await onDeleted?.(role.id);
       window.dispatchEvent(new CustomEvent(BOT_PROFILE_DELETED_EVENT, { detail: role.id }));
       onClose();

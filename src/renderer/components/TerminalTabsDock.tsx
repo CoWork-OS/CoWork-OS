@@ -40,13 +40,18 @@ function buildTerminalTheme() {
   };
 }
 
+/** Asks the dock to show a tab; a new requestId repeats the ask for the same tab. */
+export type TerminalTabFocusRequest = { tabId: string; requestId: number };
+
 export const TerminalTabsDock = memo(function TerminalTabsDock({
   workspace,
   taskId,
+  focusRequest,
   onClose,
 }: {
   workspace: Workspace | null;
   taskId?: string | null;
+  focusRequest?: TerminalTabFocusRequest | null;
   onClose: () => void;
 }) {
   const [tabs, setTabs] = useState<ShellSessionInfo[]>([]);
@@ -307,6 +312,15 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     }
     void refresh();
   }, [disposeTerminal, refresh, workspace?.id]);
+
+  // A code block ran in a tab the dock may not list yet: reload, then show that tab.
+  const handledFocusRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!focusRequest || !workspace?.id) return;
+    if (handledFocusRequestRef.current === focusRequest.requestId) return;
+    handledFocusRequestRef.current = focusRequest.requestId;
+    void refresh().then(() => setActiveTabId(focusRequest.tabId));
+  }, [focusRequest, refresh, workspace?.id]);
 
   useEffect(() => {
     if (

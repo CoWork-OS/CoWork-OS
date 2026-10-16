@@ -12,6 +12,7 @@ import {
   isAnswerSurfaceFenceStart,
 } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceBlock } from "./AnswerSurface/AnswerSurface";
+import { CodeBlockRunScopeContext, type CodeBlockRunTarget } from "../utils/code-block-runs";
 
 type AssistantMessageContentProps = {
   message: string;
@@ -24,6 +25,10 @@ type AssistantMessageContentProps = {
   streaming?: boolean;
   /** A later message in this turn repeats its interactive answer; show a note instead. */
   surfacesSuperseded?: boolean;
+  /** Lets shell code blocks run in the terminal; needs messageKey to keep each block's output. */
+  codeBlockRunTarget?: CodeBlockRunTarget;
+  /** Stable id of the message (its event id), so code block runs stay with their block. */
+  messageKey?: string;
 };
 
 type VideoDirective = {
@@ -589,6 +594,8 @@ export function AssistantMessageContent({
   taskId,
   streaming = false,
   surfacesSuperseded = false,
+  codeBlockRunTarget,
+  messageKey,
 }: AssistantMessageContentProps) {
   const segments = parseAssistantMessageSegments(message);
 
@@ -598,10 +605,19 @@ export function AssistantMessageContent({
         if (segment.type === "markdown") {
           if (!segment.content.trim()) return null;
           const normalizedContent = normalizeInlineLists(unwrapMarkdownCodeBlocks(segment.content));
-          return (
+          const markdown = (
             <DeferredMarkdown key={`md-${index}`} components={markdownComponents}>
               {normalizedContent}
             </DeferredMarkdown>
+          );
+          if (!codeBlockRunTarget || !messageKey || streaming) return markdown;
+          return (
+            <CodeBlockRunScopeContext.Provider
+              key={`md-${index}`}
+              value={{ target: codeBlockRunTarget, keyPrefix: `${messageKey}#${index}` }}
+            >
+              {markdown}
+            </CodeBlockRunScopeContext.Provider>
           );
         }
 

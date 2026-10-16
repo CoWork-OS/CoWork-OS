@@ -373,6 +373,7 @@ import { ShellSessionManager } from "../agent/tools/shell-session-manager";
 import { GitHubReviewService } from "../git/GitHubReviewService";
 import { TerminalPtyManager } from "../terminal/TerminalPtyManager";
 import { assertTerminalShellAllowed } from "../terminal/terminal-shell-policy";
+import { setupTerminalBlockRunHandlers } from "./terminal-block-run-handlers";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
 import { ChannelGateway } from "../gateway";
 import { CHANNEL_TYPES } from "../gateway/channels/types";
@@ -4829,6 +4830,22 @@ export async function setupIpcHandlers(
       }
     },
   );
+
+  // Run buttons on shell code blocks in answers: authorized and audited per conversation.
+  setupTerminalBlockRunHandlers({
+    agentDaemon,
+    authorizeAndRecordRun: async (event, taskId, metadata) => {
+      const authorization = await authorizeTaskForEvent(event, taskId, "manage");
+      await sessionMembershipService.recordTaskAction(
+        taskId,
+        "manage",
+        "code_block_run",
+        metadata.runId,
+        { command: metadata.command },
+        authorization.actor.principalId,
+      );
+    },
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.TERMINAL_TAB_LIST,

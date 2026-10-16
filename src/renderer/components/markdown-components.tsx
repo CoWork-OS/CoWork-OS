@@ -30,6 +30,12 @@ import { CitationBadge } from "./CitationPanel";
 import { MarkdownImagePreview } from "./MarkdownImagePreview";
 import { useFileActionMenu } from "./FileActionMenu";
 import { LazyHighlightedCodeBlock } from "./lazy-renderers";
+import { RunnableCodeBlock } from "./RunnableCodeBlock";
+import {
+  canRunCodeBlocks,
+  isRunnableShellLanguage,
+  useCodeBlockRunScope,
+} from "../utils/code-block-runs";
 
 type CodeBlockProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode;
@@ -246,13 +252,22 @@ export function normalizeCodeBlockTextForDisplay(codeText: string, language?: st
   return codeText.replace(/(?:\r?\n[ \t]*)+$/g, "");
 }
 
-function CodeBlock({ children, className, ...props }: CodeBlockProps) {
+/** Where a fenced block starts in its markdown source, which keys its run state. */
+function getNodeStartOffset(node: unknown): number | null {
+  const offset = (node as { position?: { start?: { offset?: unknown } } } | undefined)?.position
+    ?.start?.offset;
+  return typeof offset === "number" ? offset : null;
+}
+
+function CodeBlock({ children, className, node, ...props }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
+  const runScope = useCodeBlockRunScope();
   const languageMatch = /(?:^|\s)language-([^\s]+)/.exec(className || "");
   const isCodeBlock = Boolean(languageMatch);
   const language = languageMatch?.[1] || "";
   const rawCodeText = isCodeBlock ? getTextContent(children) : "";
   const displayCodeText = normalizeCodeBlockTextForDisplay(rawCodeText, language);
+  const nodeOffset = getNodeStartOffset(node);
 
   const handleCopy = async () => {
     try {
@@ -274,6 +289,25 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
 
   if (language === "mermaid") {
     return <MermaidDiagram chart={rawCodeText} />;
+  }
+
+  if (
+    runScope &&
+    nodeOffset !== null &&
+    isRunnableShellLanguage(language) &&
+    displayCodeText.trim() &&
+    canRunCodeBlocks()
+  ) {
+    return (
+      <RunnableCodeBlock
+        scope={runScope}
+        blockKey={`${runScope.keyPrefix}@${nodeOffset}`}
+        code={displayCodeText.replace(/\n+$/, "")}
+        language={language}
+        className={className}
+        codeProps={props}
+      />
+    );
   }
 
   return (

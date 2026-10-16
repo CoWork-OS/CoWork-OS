@@ -1,0 +1,384 @@
+/* Shell code blocks in an answer that the user can run (RunnableCodeBlock). */
+
+.markdown-content pre:has(> .code-block-runnable),
+.theme-light .markdown-content pre:has(> .code-block-runnable) {
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+}
+
+.code-block-runnable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  max-width: 100%;
+}
+
+.code-block-runnable.has-run {
+  align-items: stretch;
+}
+
+.code-block-wrapper.code-block-runnable-command {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  margin: 0;
+  padding-right: 8px;
+  overflow: visible;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+/* Beats the assistant-prose inline code chip, which matches any code not directly in a pre. */
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  .code-block-runnable
+  .code-block-runnable-command
+  code,
+.code-block-wrapper.code-block-runnable-command code {
+  border-radius: 0;
+  background: transparent;
+  /* Wrap rather than scroll sideways, so every part of the command is in view before Run. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 0 9px 14px;
+  max-height: min(240px, 40vh);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.theme-light .code-block-wrapper.code-block-runnable-command {
+  background: var(--color-bg-primary);
+}
+
+.code-block-runnable-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  margin-top: 5px;
+}
+
+.code-block-run-button,
+.code-block-run-copy,
+.code-block-run-terminal {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  /* Shared button styles clip overflow, which would hide the tooltip pill. */
+  overflow: visible;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.code-block-run-button:hover,
+.code-block-run-copy:hover,
+.code-block-run-terminal:hover,
+.code-block-run-button:focus-visible,
+.code-block-run-copy:focus-visible,
+.code-block-run-terminal:focus-visible {
+  background: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+  color: var(--color-text-primary);
+}
+
+.code-block-run-copy.copied {
+  color: var(--color-success);
+}
+
+/* Dark pill under the button naming what it does. */
+.code-block-run-button::after,
+.code-block-run-copy::after,
+.code-block-run-terminal::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  max-width: 220px;
+  width: max-content;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: #1f2024;
+  color: #ffffff;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.code-block-run-button:hover::after,
+.code-block-run-copy:hover::after,
+.code-block-run-terminal:hover::after,
+.code-block-run-button:focus-visible::after,
+.code-block-run-copy:focus-visible::after,
+.code-block-run-terminal:focus-visible::after,
+.code-block-run-copy.copied::after {
+  opacity: 1;
+  transition-delay: 0.35s;
+}
+
+.code-block-run-copy.copied::after {
+  transition-delay: 0s;
+}
+
+/* Running: a spinner that turns into Stop on hover. */
+.code-block-run-spinner {
+  width: 13px;
+  height: 13px;
+  border: 1.6px solid color-mix(in srgb, var(--color-text-secondary) 30%, transparent);
+  border-top-color: var(--color-text-secondary);
+  border-radius: 50%;
+  animation: code-block-run-spin 0.8s linear infinite;
+}
+
+.code-block-run-stop-icon {
+  display: none;
+}
+
+.code-block-run-button.running:hover .code-block-run-spinner,
+.code-block-run-button.running:focus-visible .code-block-run-spinner {
+  display: none;
+}
+
+.code-block-run-button.running:hover .code-block-run-stop-icon,
+.code-block-run-button.running:focus-visible .code-block-run-stop-icon {
+  display: block;
+}
+
+@keyframes code-block-run-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-block-run-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* Output under the block. */
+.code-block-run-output {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-text-primary) 3%, var(--color-bg-primary));
+}
+
+.code-block-run-terminal {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 1;
+}
+
+.code-block-run-output-scroll {
+  max-height: min(320px, 46vh);
+  overflow: auto;
+  padding: 10px 40px 10px 14px;
+}
+
+.markdown-content .code-block-runnable .code-block-run-output pre,
+.theme-light .markdown-content .code-block-runnable .code-block-run-output pre {
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-block-run-output-line {
+  min-height: 1.55em;
+}
+
+.code-block-run-output-empty {
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+
+.code-block-run-output-footer {
+  padding: 0 14px 9px;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.code-block-run-output-footer .error {
+  color: var(--color-error);
+}
+
+/* 16-colour terminal palette, tuned for the dark theme, then the light one. */
+.code-block-run-output .ansi-bold {
+  font-weight: 700;
+}
+.code-block-run-output .ansi-dim {
+  opacity: 0.65;
+}
+.code-block-run-output .ansi-italic {
+  font-style: italic;
+}
+.code-block-run-output .ansi-underline {
+  text-decoration: underline;
+}
+.code-block-run-output .ansi-fg-0 {
+  color: #6c7086;
+}
+.code-block-run-output .ansi-fg-1 {
+  color: #f38ba8;
+}
+.code-block-run-output .ansi-fg-2 {
+  color: #a6e3a1;
+}
+.code-block-run-output .ansi-fg-3 {
+  color: #f9e2af;
+}
+.code-block-run-output .ansi-fg-4 {
+  color: #89b4fa;
+}
+.code-block-run-output .ansi-fg-5 {
+  color: #cba6f7;
+}
+.code-block-run-output .ansi-fg-6 {
+  color: #94e2d5;
+}
+.code-block-run-output .ansi-fg-7 {
+  color: #bac2de;
+}
+.code-block-run-output .ansi-fg-8 {
+  color: #7f849c;
+}
+.code-block-run-output .ansi-fg-9 {
+  color: #f38ba8;
+}
+.code-block-run-output .ansi-fg-10 {
+  color: #a6e3a1;
+}
+.code-block-run-output .ansi-fg-11 {
+  color: #f9e2af;
+}
+.code-block-run-output .ansi-fg-12 {
+  color: #89b4fa;
+}
+.code-block-run-output .ansi-fg-13 {
+  color: #f5c2e7;
+}
+.code-block-run-output .ansi-fg-14 {
+  color: #94e2d5;
+}
+.code-block-run-output .ansi-fg-15 {
+  color: #cdd6f4;
+}
+
+.theme-light .code-block-run-output .ansi-fg-0,
+.theme-light .code-block-run-output .ansi-fg-8 {
+  color: #6b6f76;
+}
+.theme-light .code-block-run-output .ansi-fg-1,
+.theme-light .code-block-run-output .ansi-fg-9 {
+  color: #c4302b;
+}
+.theme-light .code-block-run-output .ansi-fg-2,
+.theme-light .code-block-run-output .ansi-fg-10 {
+  color: #2f7d32;
+}
+.theme-light .code-block-run-output .ansi-fg-3,
+.theme-light .code-block-run-output .ansi-fg-11 {
+  color: #a86b00;
+}
+.theme-light .code-block-run-output .ansi-fg-4,
+.theme-light .code-block-run-output .ansi-fg-12 {
+  color: #1f5fbf;
+}
+.theme-light .code-block-run-output .ansi-fg-5,
+.theme-light .code-block-run-output .ansi-fg-13 {
+  color: #8e3ab0;
+}
+.theme-light .code-block-run-output .ansi-fg-6,
+.theme-light .code-block-run-output .ansi-fg-14 {
+  color: #13808a;
+}
+.theme-light .code-block-run-output .ansi-fg-7,
+.theme-light .code-block-run-output .ansi-fg-15 {
+  color: #3a3d42;
+}
+
+/* The message that carried a run's output to the agent: one quiet line. */
+.code-block-run-sent {
+  align-self: flex-end;
+  max-width: var(--cw-transcript-measure, 100%);
+  margin: 4px 0 8px;
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+
+.code-block-run-sent summary {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.code-block-run-sent summary::-webkit-details-marker {
+  display: none;
+}
+
+.code-block-run-sent summary code {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.code-block-run-sent-text {
+  max-height: 260px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-text-primary) 3%, var(--color-bg-primary));
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -31,6 +31,7 @@ import { DatabaseManager } from "../database/schema";
 import { type Channel } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { QuickInputWindow } from "./QuickInputWindow";
+import { getUpdatePrompt } from "../updater";
 import {
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
@@ -921,10 +922,7 @@ export class TrayManager {
       },
       {
         label: "Check for Updates...",
-        click: () => {
-          this.showMainWindow();
-          this.mainWindow?.webContents.send("tray:check-updates");
-        },
+        click: () => void getUpdatePrompt().checkNow(),
       },
       { type: "separator" },
       {

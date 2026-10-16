@@ -47,6 +47,14 @@ export const BACKGROUND_ENDPOINT_DEADLINE_MS = 2_000;
 /** Whole source-check budget, including local Git probes and the remote fetch. */
 export const SOURCE_CHECK_DEADLINE_MS = 15_000;
 
+/** Thrown when the user cancels a packaged download. Not a failure: nothing was changed. */
+export class UpdateCancelledError extends Error {
+  constructor() {
+    super("Update cancelled");
+    this.name = "UpdateCancelledError";
+  }
+}
+
 export class UpdateManager {
   private mainWindow: BrowserWindow | null = null;
   private repoOwner = "CoWork-OS";
@@ -62,6 +70,10 @@ export class UpdateManager {
   private updateReadyToInstall = false;
   /** In-flight checks, coalesced per intent. */
   private readonly inflightChecks = new Map<UpdateCheckIntent, Promise<UpdateInfo>>();
+  /** In-process listeners (the update window) that see the same progress as the renderer. */
+  private readonly progressListeners = new Set<(progress: UpdateProgress) => void>();
+  /** Cancels the packaged download in flight; null when nothing can be cancelled. */
+  private downloadCancellation: { cancel(): void; readonly cancelled: boolean } | null = null;
 
   constructor(
     private readonly runtimePlatform: NodeJS.Platform | string = process.platform,
@@ -72,7 +84,46 @@ export class UpdateManager {
     this.mainWindow = window;
   }
 
+  /** Observe update progress from the main process. Returns an unsubscribe function. */
+  onProgress(listener: (progress: UpdateProgress) => void): () => void {
+    this.progressListeners.add(listener);
+    return () => this.progressListeners.delete(listener);
+  }
+
+  isUpdateInProgress(): boolean {
+    return this.isUpdating;
+  }
+
+  /** True once a verified update is waiting for Install and Relaunch. */
+  isUpdateReadyToInstall(): boolean {
+    return this.updateReadyToInstall && this.pendingUpdateInfo !== null;
+  }
+
+  /** The update being downloaded or waiting to install. */
+  getPendingUpdateInfo(): UpdateInfo | null {
+    return this.pendingUpdateInfo;
+  }
+
+  /**
+   * Stop a packaged download that is still transferring. Git and npm updates rebuild
+   * the app in place and cannot be stopped halfway, so they return false.
+   */
+  cancelDownload(): boolean {
+    if (!this.isUpdating || !this.downloadCancellation || this.downloadCancellation.cancelled) {
+      return false;
+    }
+    this.downloadCancellation.cancel();
+    return true;
+  }
+
   private sendProgress(progress: UpdateProgress): void {
+    for (const listener of this.progressListeners) {
+      try {
+        listener(progress);
+      } catch (error) {
+        log.warn("Update progress listener failed", error);
+      }
+    }
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_PROGRESS, progress);
     }
@@ -816,6 +867,12 @@ export class UpdateManager {
           // verification is still running. A rejection here must be able to
           // reach downloadUpdate()'s catch, which is what clears
           // pendingUpdateInfo.
+          this.downloadCancellation = null;
+          this.sendProgress({
+            phase: "verifying",
+            percent: 100,
+            message: "Verifying update...",
+          });
           const verification = this.verifyDownloadedArtifact(event).then((result) => {
             if (result.status === "failed") {
               this.updateReadyToInstall = false;
@@ -870,7 +927,16 @@ export class UpdateManager {
         );
       }
       this.pendingVerification = null;
-      await autoUpdater.downloadUpdate();
+      const cancellation = new electronUpdater.CancellationToken();
+      this.downloadCancellation = cancellation;
+      try {
+        await autoUpdater.downloadUpdate(cancellation);
+      } catch (error) {
+        if (cancellation.cancelled) throw new UpdateCancelledError();
+        throw error;
+      } finally {
+        if (this.downloadCancellation === cancellation) this.downloadCancellation = null;
+      }
       // downloadUpdate() resolves as soon as the bytes land; the signature
       // check runs in the update-downloaded handler. Await it here so a
       // verification failure surfaces as a rejection from this method rather
@@ -881,6 +947,10 @@ export class UpdateManager {
         await verification;
       }
     } catch (error: Any) {
+      if (error instanceof UpdateCancelledError) {
+        this.sendProgress({ phase: "cancelled", message: "Update cancelled." });
+        throw error;
+      }
       this.sendProgress({
         phase: "error",
         message: `Automatic update failed: ${error.message}`,

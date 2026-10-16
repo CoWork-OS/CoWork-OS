@@ -28,10 +28,16 @@ vi.mock("electron-updater", () => ({
     downloadUpdate: mocks.downloadUpdate,
     quitAndInstall: vi.fn(),
   },
+  CancellationToken: class {
+    cancelled = false;
+    cancel() {
+      this.cancelled = true;
+    }
+  },
 }));
 
 import { autoUpdater } from "electron-updater";
-import { UpdateManager } from "../update-manager";
+import { UpdateCancelledError, UpdateManager } from "../update-manager";
 
 function updateInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
   return {
@@ -121,6 +127,27 @@ describe("UpdateManager platform compatibility", () => {
     expect(mocks.checkForUpdates.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.downloadUpdate.mock.invocationCallOrder[0],
     );
+  });
+
+  it("cancels a packaged download without reporting a failure", async () => {
+    const manager = new UpdateManager("darwin", () => "22.0.0");
+    const phases: string[] = [];
+    manager.onProgress((progress) => phases.push(progress.phase));
+    const checked = await manager.checkForUpdates();
+    mocks.downloadUpdate.mockImplementationOnce(async (token: { cancelled: boolean }) => {
+      expect(manager.cancelDownload()).toBe(true);
+      expect(token.cancelled).toBe(true);
+      throw new Error("cancelled");
+    });
+
+    await expect(manager.downloadAndInstallUpdate(checked)).rejects.toBeInstanceOf(
+      UpdateCancelledError,
+    );
+    expect(phases).toContain("cancelled");
+    expect(phases).not.toContain("error");
+    expect(manager.isUpdateInProgress()).toBe(false);
+    expect(manager.isUpdateReadyToInstall()).toBe(false);
+    expect(manager.cancelDownload()).toBe(false);
   });
 
   it("does not trust a renderer-supplied update that was not checked", async () => {

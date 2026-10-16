@@ -7852,6 +7852,14 @@ export function App() {
   }, [notifySidebarDestinationUnavailable]);
 
   const handleViewUpdate = useCallback(() => {
+    // The update window carries the whole flow; Settings is the fallback.
+    if (window.electronAPI?.openUpdateWindow) {
+      void window.electronAPI.openUpdateWindow().catch(() => {
+        setSettingsTab("updates");
+        setCurrentView("settings");
+      });
+      return;
+    }
     setSettingsTab("updates");
     setCurrentView("settings");
   }, []);

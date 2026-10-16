@@ -283,6 +283,7 @@ import {
   UpdateChannelRequest as _UpdateChannelRequest,
   SecurityMode as _SecurityMode,
   UpdateInfo,
+  UpdatePreferences,
   TEMP_WORKSPACE_NAME,
   TEMP_WORKSPACE_ROOT_DIR_NAME,
   Workspace,
@@ -375,7 +376,7 @@ import { assertTerminalShellAllowed } from "../terminal/terminal-shell-policy";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
 import { ChannelGateway } from "../gateway";
 import { CHANNEL_TYPES } from "../gateway/channels/types";
-import { updateManager } from "../updater";
+import { getUpdatePrompt, UpdatePreferencesStore, updateManager } from "../updater";
 import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
 import { toPublicChannel } from "./channel-config-sanitizer";
 import { buildSavedLLMSettings } from "./llm-settings-save";
@@ -9612,6 +9613,37 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.APP_INSTALL_UPDATE, async () => {
     await updateManager.installUpdateAndRestart();
     return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_CANCEL_UPDATE, async () => {
+    return { cancelled: updateManager.cancelDownload() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_OPEN_UPDATE_WINDOW, async () => {
+    await getUpdatePrompt().checkNow();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_GET_UPDATE_PREFERENCES, async () => {
+    return UpdatePreferencesStore.load();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_SET_UPDATE_PREFERENCES, async (_, patch: unknown) => {
+    // Renderer input: only the two known fields, each type-checked; null clears the skip.
+    if (!patch || typeof patch !== "object") throw new Error("Invalid update preferences");
+    const input = patch as Record<string, unknown>;
+    const next: Partial<UpdatePreferences> = {};
+    if ("autoDownload" in input) {
+      if (typeof input.autoDownload !== "boolean") throw new Error("Invalid autoDownload");
+      next.autoDownload = input.autoDownload;
+    }
+    if ("skippedVersion" in input) {
+      if (input.skippedVersion !== null && typeof input.skippedVersion !== "string") {
+        throw new Error("Invalid skippedVersion");
+      }
+      next.skippedVersion = input.skippedVersion ?? undefined;
+    }
+    return UpdatePreferencesStore.save(next);
   });
 
   // Guardrail Settings handlers

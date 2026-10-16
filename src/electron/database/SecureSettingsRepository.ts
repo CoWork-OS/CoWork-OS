@@ -164,6 +164,8 @@ export type SettingsCategory =
   | "plugin-packs"
   | "meeting-artifacts"
   | "checkpoint-signing"
+  // Software updates: automatic download, and the version the user chose to skip.
+  | "updates"
   // PACT business-agent protocol: settings, and secrets that never enter the pact_* tables.
   | "pact"
   | "pact:grants"

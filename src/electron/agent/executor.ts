@@ -12215,6 +12215,20 @@ ${transcript}
         if (outputPath !== filename) this.fileOperationTracker.recordFileCreation(outputPath);
       }
     }
+    // canvas_export writes a page folder (index.html + assets/); each file is task output.
+    if (
+      toolSucceeded &&
+      toolName === "canvas_export" &&
+      typeof result?.targetDir === "string" &&
+      Array.isArray(result?.files)
+    ) {
+      for (const file of result.files) {
+        if (typeof file !== "string") continue;
+        const exported = path.join(result.targetDir, file);
+        if (this.canReadWorkspacePath(exported))
+          this.fileOperationTracker.recordFileCreation(exported);
+      }
+    }
 
     // A successful mutation invalidates stale read/list dedupe/cache state.
     const mutatingTools = new Set([
@@ -13789,7 +13803,7 @@ ${transcript}
     }
 
     const canvasIntent =
-      /\b(canvas_create|canvas_push|canvas_show|canvas_open_url|in-app canvas|app canvas)\b/.test(
+      /\b(canvas_create|canvas_push|canvas_show|canvas_open_url|canvas_add_asset|canvas_export|in-app canvas|app canvas)\b/.test(
         desc,
       ) ||
       /\b(show|render|display|open|preview|present|push)\b[\s\S]{0,40}\b(?:in(?:-app)?\s+)?canvas\b/.test(
@@ -20370,6 +20384,13 @@ ${transcript}
 
     for (const requiredTool of stepContract.requiredTools.values()) {
       base.add(requiredTool);
+    }
+    if (base.has("canvas_push")) {
+      // Allowed, not required: a canvas step may need to bring generated media
+      // into the page, check it, or export it, but most canvas steps do none of these.
+      base.add("canvas_add_asset");
+      base.add("canvas_snapshot");
+      base.add("canvas_export");
     }
 
     for (const mentionedIntegrationTool of this.getIntegrationMentionToolAllowlist()) {

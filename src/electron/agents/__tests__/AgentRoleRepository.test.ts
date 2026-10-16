@@ -173,6 +173,12 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
     expect(
       agentRoleRepo.update({ id: created.id, desktopHost: null })?.desktopHost,
     ).toBeUndefined();
+    expect(
+      agentRoleRepo.update({ id: created.id, desktopGroup: "research-team" })?.desktopGroup,
+    ).toBe("research-team");
+    expect(
+      agentRoleRepo.update({ id: created.id, desktopGroup: null })?.desktopGroup,
+    ).toBeUndefined();
   });
 
   it("deactivates custom roles without breaking historical task references", () => {

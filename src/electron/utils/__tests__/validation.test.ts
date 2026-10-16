@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentRoleDesktopGroupSchema,
   AgentRoleDesktopHostSchema,
   AgentRoleWorksOnSchema,
   validateInput,
@@ -831,6 +832,20 @@ describe("bot desktop server", () => {
   it("refuses anything that could become an SSH option or a command", () => {
     for (const bad of ["-oProxyCommand=evil", "a b", "host;rm -rf ~", "host:22", "x".repeat(101)]) {
       expect(() => AgentRoleDesktopHostSchema.parse(bad)).toThrow();
+    }
+  });
+});
+
+describe("bot shared desktop name", () => {
+  it("accepts simple names, lowercased, and clears on empty", () => {
+    expect(AgentRoleDesktopGroupSchema.parse("Research-Team")).toBe("research-team");
+    expect(AgentRoleDesktopGroupSchema.parse("")).toBeNull();
+    expect(AgentRoleDesktopGroupSchema.parse(null)).toBeNull();
+  });
+
+  it("refuses anything else", () => {
+    for (const bad of ["-team", "a b", "team/../x", "x".repeat(41)]) {
+      expect(() => AgentRoleDesktopGroupSchema.parse(bad)).toThrow();
     }
   });
 });

@@ -494,6 +494,17 @@ CoWork quits. Tasks of the same bot take turns on it. **Open desktop** shows
 it in a window: read-only while the bot works, and yours to use after **Take
 over**.
 
+**Files on its desktop.** The rail lists the newest files in the bot's work
+folder (`~/work`), with **Show** to reveal one in Finder when the desktop runs on
+this computer. The bot hands a file to you with `desktop_save_file`, which
+copies it (up to 25 MB) into the conversation's workspace under
+`artifacts/bot-desktop/`, following the workspace's write rules.
+
+**A shared desktop.** Leave **Shared desktop** empty and the bot gets a
+desktop of its own. Give bots the same name there and they share one desktop:
+its files, browser and sign-ins, so any of them can act as the others there.
+They take turns on it. This is never the default.
+
 **Its own desktop on your server.** In the bot's dialog, **Runs on** takes an
 SSH host from your SSH config (like `my-server` or `me@example.com`). The
 desktop then runs on that server with Docker, driven from this computer over
@@ -519,7 +530,11 @@ one-time code is on screen. **Take over** stops the bot's computer and browser
 actions (they are refused, not queued) until you press **Hand back**. A bot
 asks you to take over with the `request_takeover` tool when a step needs you:
 passwords, passkeys, one-time codes, CAPTCHAs, payments or identity checks. The
-request shows in the rail.
+request shows in the rail and arrives as a question (**Done** or **Skip**)
+wherever your questions do: in the app, the notification inbox, and your phone
+through a connected messaging channel. The bot waits for your answer, gets the
+computer back when you choose **Done**, and doesn't try the step itself if you
+choose **Skip**.
 
 ### Markdown and message rendering
 

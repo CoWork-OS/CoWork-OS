@@ -3,7 +3,12 @@ import * as net from "net";
 import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BotDesktopManager, botDesktopKey, pngSize } from "../bot-desktop-manager";
+import {
+  BotDesktopManager,
+  botDesktopKey,
+  normalizeDesktopFilePath,
+  pngSize,
+} from "../bot-desktop-manager";
 
 function fakePng(width = 1280, height = 800): Buffer {
   const header = Buffer.alloc(24);
@@ -249,6 +254,84 @@ describe("BotDesktopManager", () => {
       await expect(
         BotDesktopManager.getInstance().withDesktop("bot-1", async () => undefined),
       ).rejects.toThrow(/doesn't trust my-server yet.*ssh my-server/);
+    });
+  });
+
+  describe("files in its work folder", () => {
+    it("accepts paths inside ~/work only", () => {
+      expect(normalizeDesktopFilePath("Downloads/report.pdf")).toBe("Downloads/report.pdf");
+      expect(normalizeDesktopFilePath("~/work/a.txt")).toBe("a.txt");
+      expect(normalizeDesktopFilePath("/home/bot/work/./b.txt")).toBe("b.txt");
+      for (const bad of ["", "/etc/passwd", "../secret", "a/../../b", ".browser/Cookies"]) {
+        expect(() => normalizeDesktopFilePath(bad)).toThrow(/inside ~\/work/);
+      }
+    });
+
+    it("lists the newest files, without the browser profile", async () => {
+      const manager = BotDesktopManager.getInstance();
+      const home = manager.homeFolder("bot-1");
+      fs.mkdirSync(path.join(home, "Downloads"), { recursive: true });
+      fs.mkdirSync(path.join(home, ".browser"), { recursive: true });
+      fs.writeFileSync(path.join(home, "old.txt"), "old");
+      fs.utimesSync(path.join(home, "old.txt"), new Date(1000), new Date(1000));
+      fs.writeFileSync(path.join(home, "Downloads", "report.pdf"), "pdf-bytes");
+      fs.writeFileSync(path.join(home, ".browser", "Cookies"), "secret");
+      const files = await manager.listFiles("bot-1");
+      expect(files.map((file) => file.path)).toEqual(["Downloads/report.pdf", "old.txt"]);
+      expect(files[0].size).toBe(9);
+    });
+
+    it("never leads outside the work folder, even through a link", async () => {
+      const manager = BotDesktopManager.getInstance();
+      const home = manager.homeFolder("bot-1");
+      fs.mkdirSync(home, { recursive: true });
+      const outside = path.join(dataDir, "outside.txt");
+      fs.writeFileSync(outside, "private");
+      fs.symlinkSync(outside, path.join(home, "link.txt"));
+      expect(() => manager.localFilePath("bot-1", "link.txt")).toThrow(/outside/);
+      await expect(manager.readFile("bot-1", "link.txt")).rejects.toThrow(/outside/);
+      fs.writeFileSync(path.join(home, "ok.txt"), "fine");
+      expect((await manager.readFile("bot-1", "ok.txt")).data.toString()).toBe("fine");
+    });
+  });
+
+  describe("a shared desktop", () => {
+    const configureShared = (groups: Record<string, string>) =>
+      BotDesktopManager.configure({
+        dataDir: () => dataDir,
+        resourcesDir: () => resourcesDir,
+        run: runner,
+        runtimeCandidates: ["docker"],
+        waitMs: 1000,
+        desktopGroupFor: (botId) => groups[botId],
+      });
+
+    it("gives bots with the same name one desktop and one home folder", async () => {
+      const manager = configureShared({ "bot-1": "research-team", "bot-2": "research-team" });
+      await manager.withDesktop("bot-1", async () => undefined);
+      await manager.withDesktop("bot-2", async () => undefined);
+      expect(calls.filter((call) => call[1] === "run")).toHaveLength(1);
+      expect(manager.desktopKey("bot-1")).toBe(manager.desktopKey("bot-2"));
+      expect(manager.homeFolder(manager.desktopKey("bot-1"))).not.toBe(manager.homeFolder("bot-1"));
+    });
+
+    it("makes bots on a shared desktop take turns", async () => {
+      const manager = configureShared({ "bot-1": "research-team", "bot-2": "research-team" });
+      let release!: () => void;
+      const first = manager.withDesktop(
+        "bot-1",
+        () => new Promise<void>((resolve) => (release = resolve)),
+      );
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      await expect(manager.withDesktop("bot-2", async () => undefined)).rejects.toThrow(/busy/);
+      release();
+      await first;
+    });
+
+    it("keeps bots without a shared name on desktops of their own", () => {
+      const manager = configureShared({ "bot-1": "research-team" });
+      expect(manager.desktopKey("bot-2")).toBe("bot-2");
+      expect(manager.desktopKey("bot-1")).not.toBe(manager.desktopKey("bot-2"));
     });
   });
 });

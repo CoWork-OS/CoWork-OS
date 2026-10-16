@@ -17,10 +17,10 @@
 
 import { execFile, spawn, type ChildProcess } from "child_process";
 import { createHash, randomBytes } from "crypto";
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import * as net from "net";
 import * as path from "path";
-import { isValidDesktopHost } from "../../shared/bot-computer";
+import { isValidDesktopGroup, isValidDesktopHost } from "../../shared/bot-computer";
 
 export type ContainerRuntimeName = "docker" | "podman";
 
@@ -48,6 +48,8 @@ export interface BotDesktopDeps {
   waitMs?: number;
   /** The SSH host a bot's desktop runs on, or undefined for this computer. */
   desktopHostFor?: (botId: string) => string | undefined;
+  /** The shared desktop a bot uses with other bots, or undefined for a desktop of its own. */
+  desktopGroupFor?: (botId: string) => string | undefined;
   /** Opens an SSH tunnel from a local port to a port on the server's loopback. */
   openTunnel?: (host: string, localPort: number, remotePort: number) => ChildProcess;
 }
@@ -185,6 +187,41 @@ export function pngSize(png: Buffer): { width: number; height: number } {
   return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 }
 
+/** A file in the bot's work folder on its desktop. */
+export interface BotDesktopFile {
+  /** Relative to the work folder, with forward slashes. */
+  path: string;
+  size: number;
+  modifiedAt: number;
+}
+
+/** The largest file a bot can hand from its desktop to a conversation. */
+export const BOT_DESKTOP_FILE_MAX_BYTES = 25 * 1024 * 1024;
+const WORK_DIR = "/home/bot/work";
+/** The desktop browser's profile lives in the work folder; it is not the bot's files. */
+const HIDDEN_WORK_ENTRIES = new Set([".browser"]);
+
+/**
+ * A path inside the bot's work folder, normalized, or an error: no absolute paths, no "..",
+ * nothing in the browser profile.
+ */
+export function normalizeDesktopFilePath(raw: unknown): string {
+  const value = typeof raw === "string" ? raw.trim().replace(/\\/g, "/") : "";
+  const relative = value.replace(/^~\/work\//, "").replace(/^\/home\/bot\/work\//, "");
+  const parts = relative.split("/").filter((part) => part && part !== ".");
+  if (
+    !relative ||
+    relative.startsWith("/") ||
+    parts.length === 0 ||
+    parts.some((part) => part === "..") ||
+    HIDDEN_WORK_ENTRIES.has(parts[0]) ||
+    relative.length > 1024
+  ) {
+    throw new Error("Use a file path inside ~/work on the bot's desktop, like report.pdf");
+  }
+  return parts.join("/");
+}
+
 interface DesktopRecord {
   password: string;
   /** The SSH host it runs on, or undefined for this computer. */
@@ -248,8 +285,26 @@ export class BotDesktopManager {
 
   /** Where the bot's desktop runs: an SSH host, or undefined for this computer. */
   desktopHost(botId: string): string | undefined {
+    if (this.keyHosts.has(botId)) return this.keyHosts.get(botId);
     const host = this.deps.desktopHostFor?.(botId);
     return isValidDesktopHost(host) ? host : undefined;
+  }
+
+  /** The SSH host of each desktop key (a bot, or a shared desktop on a host). */
+  private readonly keyHosts = new Map<string, string | undefined>();
+
+  /**
+   * Which desktop a bot uses: its own (keyed by the bot), or a shared one that bots with the
+   * same shared-desktop name use on the same host. Everything about a desktop (container, home
+   * folder, turns) is keyed by this.
+   */
+  desktopKey(botId: string): string {
+    const host = this.desktopHost(botId);
+    const group = this.deps.desktopGroupFor?.(botId);
+    if (!isValidDesktopGroup(group)) return botId;
+    const key = `shared:${group}${host ? `@${host}` : ""}`;
+    this.keyHosts.set(key, host);
+    return key;
   }
 
   /** Runs a container command for the bot's desktop, on its server when it has one. */
@@ -295,6 +350,7 @@ export class BotDesktopManager {
   }
 
   async getStatus(botId: string): Promise<BotDesktopStatus> {
+    botId = this.desktopKey(botId);
     const runtime = await this.detectRuntime();
     if (!runtime) {
       return {
@@ -326,6 +382,7 @@ export class BotDesktopManager {
     work: (session: BotDesktopSession) => Promise<T>,
     options: { onStarting?: () => void } = {},
   ): Promise<T> {
+    botId = this.desktopKey(botId);
     await this.takeTurn(botId);
     try {
       await this.ensureRunning(botId, options.onStarting);
@@ -344,6 +401,7 @@ export class BotDesktopManager {
    * view-only unless the person has taken over.
    */
   async viewerUrl(botId: string, options: { viewOnly?: boolean } = {}): Promise<string> {
+    botId = this.desktopKey(botId);
     await this.ensureRunning(botId);
     const record = this.records.get(botId)!;
     if (
@@ -368,6 +426,7 @@ export class BotDesktopManager {
   }
 
   async stop(botId: string): Promise<void> {
+    botId = this.desktopKey(botId);
     const runtime = await this.detectRuntime();
     if (!runtime) return;
     const record = this.records.get(botId);
@@ -383,6 +442,7 @@ export class BotDesktopManager {
 
   /** Rebuilds the desktop from the image; the bot's home folder (files, sign-ins) is kept. */
   async reset(botId: string): Promise<void> {
+    botId = this.desktopKey(botId);
     const runtime = await this.detectRuntime();
     if (!runtime) return;
     const record = this.records.get(botId);
@@ -446,8 +506,103 @@ export class BotDesktopManager {
     }
   }
 
+  /**
+   * The newest files in the bot's work folder. On this computer they are read from its home
+   * folder (also while the desktop is stopped); on a server, only while the desktop runs.
+   */
+  async listFiles(botId: string, limit = 20): Promise<BotDesktopFile[]> {
+    botId = this.desktopKey(botId);
+    const host = this.records.get(botId)?.host ?? this.desktopHost(botId);
+    const files: BotDesktopFile[] = [];
+    if (!host) {
+      const home = this.homeFolder(botId);
+      if (!existsSync(home)) return [];
+      const walk = (dir: string, prefix: string, depth: number) => {
+        if (depth > 6 || files.length > 2000) return;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (!prefix && HIDDEN_WORK_ENTRIES.has(entry.name)) continue;
+          const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full, rel, depth + 1);
+          else if (entry.isFile()) {
+            const stat = statSync(full);
+            files.push({ path: rel, size: stat.size, modifiedAt: stat.mtimeMs });
+          }
+        }
+      };
+      walk(home, "", 0);
+    } else {
+      if (!this.runtime || !this.records.has(botId)) return [];
+      const result = await this.session(botId)
+        .exec([
+          "find",
+          WORK_DIR,
+          "-path",
+          `${WORK_DIR}/.browser`,
+          "-prune",
+          "-o",
+          "-type",
+          "f",
+          "-printf",
+          "%T@\\t%s\\t%P\\n",
+        ])
+        .catch(() => null);
+      for (const line of (result?.stdout.toString("utf8") ?? "").split("\n")) {
+        const [time, size, rel] = line.split("\t");
+        if (rel)
+          files.push({ path: rel, size: Number(size) || 0, modifiedAt: Number(time) * 1000 });
+      }
+    }
+    return files.sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, Math.max(1, limit));
+  }
+
+  /** Where a work-folder file of a bot on this computer is, for Show in Finder. */
+  localFilePath(botId: string, rawPath: unknown): string {
+    botId = this.desktopKey(botId);
+    if (this.desktopHost(botId)) throw new Error("This bot's desktop runs on a server.");
+    const rel = normalizeDesktopFilePath(rawPath);
+    let home: string;
+    let full: string;
+    try {
+      home = realpathSync(this.homeFolder(botId));
+      full = realpathSync(path.join(home, rel));
+    } catch {
+      throw new Error(`~/work/${rel} was not found on the bot's desktop.`);
+    }
+    // A link inside the work folder must not lead outside it.
+    if (!full.startsWith(`${home}${path.sep}`))
+      throw new Error("That file is outside the bot's work folder.");
+    return full;
+  }
+
+  /** A file from the bot's work folder, to hand to a conversation. */
+  async readFile(botId: string, rawPath: unknown): Promise<{ path: string; data: Buffer }> {
+    botId = this.desktopKey(botId);
+    const rel = normalizeDesktopFilePath(rawPath);
+    if (!this.desktopHost(botId) && !this.records.get(botId)?.host) {
+      const full = this.localFilePath(botId, rel);
+      const stat = statSync(full);
+      if (!stat.isFile()) throw new Error("That is not a file.");
+      if (stat.size > BOT_DESKTOP_FILE_MAX_BYTES)
+        throw new Error("That file is larger than 25 MB.");
+      return { path: rel, data: readFileSync(full) };
+    }
+    await this.ensureRunning(botId);
+    const session = this.session(botId);
+    const size = Number(
+      (await session.exec(["stat", "--format", "%s", "--", `${WORK_DIR}/${rel}`])).stdout
+        .toString("utf8")
+        .trim(),
+    );
+    if (!Number.isFinite(size)) throw new Error("That file was not found on the bot's desktop.");
+    if (size > BOT_DESKTOP_FILE_MAX_BYTES) throw new Error("That file is larger than 25 MB.");
+    const result = await session.exec(["cat", "--", `${WORK_DIR}/${rel}`], { timeoutMs: 120_000 });
+    return { path: rel, data: result.stdout };
+  }
+
   /** A still of the bot's desktop for its panel, only if it is already running. */
   async captureIfRunning(botId: string): Promise<Buffer | null> {
+    botId = this.desktopKey(botId);
     if (!this.runtime || !this.records.has(botId)) return null;
     try {
       return await this.session(botId).screenshot();

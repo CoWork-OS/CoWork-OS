@@ -524,6 +524,7 @@ export function CreateBotDialog({
     icon: botMascotIcon(prefill?.mascot ?? pickDefaultBotMascot(existingBots)),
     worksOn: "auto",
     desktopHost: "",
+    desktopGroup: "",
   }));
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -560,6 +561,9 @@ export function CreateBotDialog({
           ...(values.worksOn !== "auto" ? { worksOn: values.worksOn } : {}),
           ...(values.worksOn === "own_desktop" && values.desktopHost.trim()
             ? { desktopHost: values.desktopHost.trim() }
+            : {}),
+          ...(values.worksOn === "own_desktop" && values.desktopGroup.trim()
+            ? { desktopGroup: values.desktopGroup.trim().toLowerCase() }
             : {}),
           color: DEFAULT_BOT_COLOR,
           capabilities: ["code"],

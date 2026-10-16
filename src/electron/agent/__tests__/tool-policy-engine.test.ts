@@ -644,6 +644,16 @@ describe("request_takeover exposure", () => {
     ).toBe("defer");
   });
 
+  it("is always offered to a bot that works on a computer, and never with Off", () => {
+    expect(
+      evaluateToolAvailability("request_takeover", { taskText: "hi", botWorksOn: "own_desktop" })
+        .decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability("request_takeover", { taskText: "hi", botWorksOn: "off" }).decision,
+    ).toBe("defer");
+  });
+
   it("is allowed in plan mode, since it changes nothing", () => {
     expect(evaluateToolPolicy("request_takeover", { executionMode: "plan" }).decision).toBe(
       "allow",

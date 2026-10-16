@@ -434,6 +434,7 @@ import {
   AgentRoleAccessProfileIdSchema,
   AgentRoleWorksOnSchema,
   AgentRoleDesktopHostSchema,
+  AgentRoleDesktopGroupSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -1593,6 +1594,7 @@ export async function setupIpcHandlers(
     dataDir: () => _app.getPath("userData"),
     resourcesDir: findBotDesktopResources,
     desktopHostFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopHost,
+    desktopGroupFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopGroup,
   });
   void botDesktops.stopLeftovers();
   _app.on("will-quit", () => botDesktops.stopAllOnQuit());
@@ -1709,6 +1711,21 @@ export async function setupIpcHandlers(
     await viewer.loadURL(url);
     return { opened: true };
   });
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES, async (_event, taskId: unknown) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES);
+    const { botId } = await desktopBotForTask(taskId);
+    return botDesktops.listFiles(botId, 20);
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.COMPUTER_VIEW_REVEAL_DESKTOP_FILE,
+    async (_event, taskId: unknown, filePath: unknown) => {
+      checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_REVEAL_DESKTOP_FILE);
+      const { botId } = await desktopBotForTask(taskId);
+      // Resolved inside the bot's own work folder only (no "..", no links out of it).
+      shell.showItemInFolder(botDesktops.localFilePath(botId, filePath));
+      return { revealed: true };
+    },
+  );
   ipcMain.handle(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP, async (_event, taskId: unknown) => {
     checkRateLimit(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP);
     const { botId } = await desktopBotForTask(taskId);
@@ -9794,6 +9811,11 @@ export async function setupIpcHandlers(
         validateInput(AgentRoleDesktopHostSchema, request.desktopHost, "desktop server") ??
         undefined;
     }
+    if (request.desktopGroup !== undefined) {
+      request.desktopGroup =
+        validateInput(AgentRoleDesktopGroupSchema, request.desktopGroup, "shared desktop") ??
+        undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -9840,6 +9862,13 @@ export async function setupIpcHandlers(
         AgentRoleDesktopHostSchema,
         normalizedRequest.desktopHost,
         "desktop server",
+      );
+    }
+    if (normalizedRequest.desktopGroup !== undefined) {
+      normalizedRequest.desktopGroup = validateInput(
+        AgentRoleDesktopGroupSchema,
+        normalizedRequest.desktopGroup,
+        "shared desktop",
       );
     }
     const result = await agentRoleRepo.update(normalizedRequest);

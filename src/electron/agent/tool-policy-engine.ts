@@ -7,7 +7,7 @@ import {
   type RuntimeToolMetadata,
 } from "../../shared/types";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
-import { isComputerTool } from "../../shared/bot-computer";
+import { isComputerTool, type BotWorksOn } from "../../shared/bot-computer";
 import {
   allowsStructuredHumanInput,
   resolveHumanInputPolicy,
@@ -56,6 +56,8 @@ export interface ToolPolicyContext {
   humanInputPolicy?: HumanInputPolicy;
   /** True only for a persistent bot conversation, never a generic task. */
   botConversation?: boolean;
+  /** The bot's "Works on" setting for this task; unset outside bot work. */
+  botWorksOn?: BotWorksOn;
   /** Verified workspace-scoped persistent team identifier. */
   botTeamId?: string;
   /** Set only after the daemon verifies the sender's active team membership. */
@@ -489,6 +491,8 @@ export function evaluateToolAvailability(
 
   // Asking the person to take over belongs wherever the agent drives a browser or this computer.
   if (normalizedToolName === "request_takeover") {
+    // A bot that works on a computer can always hand a step to the person.
+    if (ctx.botWorksOn && ctx.botWorksOn !== "off") return { decision: "allow", metadata };
     const usedComputer = Array.from(ctx.recentlyUsedTools ?? []).some(
       (name) => name !== "request_takeover" && isComputerTool(name),
     );

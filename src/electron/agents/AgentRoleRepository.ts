@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { isBotWorksOn, isValidDesktopHost } from "../../shared/bot-computer";
+import { isBotWorksOn, isValidDesktopGroup, isValidDesktopHost } from "../../shared/bot-computer";
 import { v4 as uuidv4 } from "uuid";
 import {
   AgentRole,
@@ -296,6 +296,7 @@ export class AgentRoleStore {
       operatorHealthScore: request.operatorHealthScore,
       worksOn: isBotWorksOn(request.worksOn) ? request.worksOn : undefined,
       desktopHost: isValidDesktopHost(request.desktopHost) ? request.desktopHost : undefined,
+      desktopGroup: isValidDesktopGroup(request.desktopGroup) ? request.desktopGroup : undefined,
     };
 
     const stmt = this.db.prepare(`
@@ -310,8 +311,8 @@ export class AgentRoleStore {
         heartbeat_profile, heartbeat_active_hours, heartbeat_status, operator_mandate, allowed_loop_types,
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
         last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at, works_on,
-        desktop_host
-      ) VALUES (${new Array(43).fill("?").join(", ")})
+        desktop_host, desktop_group
+      ) VALUES (${new Array(44).fill("?").join(", ")})
     `);
 
     stmt.run(
@@ -358,6 +359,7 @@ export class AgentRoleStore {
       role.autoPausedAt ?? null,
       role.worksOn ?? null,
       role.desktopHost ?? null,
+      role.desktopGroup ?? null,
     );
 
     const shouldPersistAutomationProfile =
@@ -619,6 +621,10 @@ export class AgentRoleStore {
     if (request.desktopHost !== undefined) {
       fields.push("desktop_host = ?");
       values.push(isValidDesktopHost(request.desktopHost) ? request.desktopHost : null);
+    }
+    if (request.desktopGroup !== undefined) {
+      fields.push("desktop_group = ?");
+      values.push(isValidDesktopGroup(request.desktopGroup) ? request.desktopGroup : null);
     }
     if (request.soul !== undefined) {
       fields.push("soul = ?");
@@ -965,6 +971,7 @@ export class AgentRoleStore {
           : undefined,
       worksOn: isBotWorksOn(row.works_on) ? row.works_on : undefined,
       desktopHost: isValidDesktopHost(row.desktop_host) ? row.desktop_host : undefined,
+      desktopGroup: isValidDesktopGroup(row.desktop_group) ? row.desktop_group : undefined,
       soul: row.soul || undefined,
       heartbeatEnabled: row.heartbeat_enabled === 1,
       heartbeatIntervalMinutes: row.heartbeat_interval_minutes || 15,

@@ -2,6 +2,7 @@ import { Hand, Monitor } from "lucide-react";
 import { BOT_WORKS_ON_OPTIONS, type BotWorksOn } from "../../shared/bot-computer";
 import { describeComputerViewStatus } from "../../shared/computer-view";
 import { useComputerView } from "../hooks/useComputerView";
+import { formatFileSize, useBotDesktopFiles } from "../hooks/useBotDesktopFiles";
 
 export interface BotComputerSectionProps {
   taskId: string;
@@ -9,6 +10,8 @@ export interface BotComputerSectionProps {
   worksOn: BotWorksOn;
   /** The SSH host its own desktop runs on, if not this computer. */
   desktopHost?: string;
+  /** The shared desktop it uses with other bots, if any. */
+  desktopGroup?: string;
 }
 
 /** Where the bot works, a live view of what it is doing there, and take-over. */
@@ -17,6 +20,7 @@ export function BotComputerSection({
   botName,
   worksOn,
   desktopHost,
+  desktopGroup,
 }: BotComputerSectionProps) {
   const off = worksOn === "off";
   const ownDesktop = worksOn === "own_desktop";
@@ -28,6 +32,8 @@ export function BotComputerSection({
   const held = state?.status === "held";
   const request = !held ? state?.takeoverRequest : undefined;
   const frame = state?.frame;
+  // Its work folder: refreshed with each new still, since that is when it may have changed.
+  const { files, reveal } = useBotDesktopFiles(taskId, ownDesktop, frame?.capturedAt);
   // It may still be running after the bot's turn ends (it stops after an hour without use).
   const desktopRunning = state?.surface === "own_desktop";
 
@@ -51,6 +57,7 @@ export function BotComputerSection({
       <div className="bot-computer-summary">
         <span>
           Works on {worksOnLabel ?? "Auto"}
+          {worksOn === "own_desktop" && desktopGroup ? ` (shared: ${desktopGroup})` : ""}
           {worksOn === "own_desktop" && desktopHost ? ` on ${desktopHost}` : ""}
         </span>
         {!off ? (
@@ -122,6 +129,30 @@ export function BotComputerSection({
               Stop desktop
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {ownDesktop && files.length > 0 ? (
+        <div className="bot-computer-files">
+          <span className="bot-computer-files-heading">Files on its desktop</span>
+          <ul>
+            {files.slice(0, 6).map((file) => (
+              <li key={file.path}>
+                <span className="bot-computer-file-name" title={`~/work/${file.path}`}>
+                  {file.path}
+                </span>
+                <span className="bot-computer-file-size">{formatFileSize(file.size)}</span>
+                {!desktopHost ? (
+                  <button
+                    type="button"
+                    className="bot-details-link"
+                    onClick={() => reveal(file.path)}
+                  >
+                    Show
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
       {error ? <p className="bot-computer-error">{error}</p> : null}

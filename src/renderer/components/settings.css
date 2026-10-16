@@ -2723,6 +2723,16 @@
   color: var(--color-error);
 }
 
+/* Field label stacked above its control. Without a block display the label sat
+   inline and the next field wrapped beside it (AI & Models provider forms). */
+label.settings-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 /* Field label that follows another field in the same section. */
 .settings-label--spaced {
   margin-top: 10px;

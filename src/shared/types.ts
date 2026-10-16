@@ -7817,6 +7817,7 @@ export const IPC_CHANNELS = {
   TASK_LIST: "task:list",
   TASK_LIST_SIDEBAR: "task:listSidebar",
   BOT_WORK_LIST: "bot:work:list",
+  BOT_METRICS_SUMMARY: "bot:metrics:summary",
   BOT_NOTIFICATION_ROUTE_GET: "bot:notification:route:get",
   BOT_NOTIFICATION_ROUTE_UPDATE: "bot:notification:route:update",
   BOT_NOTIFICATION_RETRY: "bot:notification:retry",

@@ -136,17 +136,28 @@ export class BotOutcomeMetricsStore {
         ? taskScoped
           ? this.db
               .prepare(
-                `${owned.sql} SELECT COUNT(*) calls, COALESCE(SUM(e.input_tokens+e.output_tokens),0) tokens
+                `${owned.sql} SELECT COUNT(*) calls, COALESCE(SUM(e.input_tokens+e.output_tokens),0) tokens,
+                   COALESCE(SUM(e.input_tokens),0) input, COALESCE(SUM(e.output_tokens),0) output,
+                   COALESCE(SUM(e.cached_tokens),0) cached, COALESCE(SUM(e.cost),0) cost
                  FROM llm_call_events e JOIN owned o ON o.id=e.task_id WHERE e.timestamp>=?`,
               )
               .get(...owned.args, since)
           : this.db
               .prepare(
-                `SELECT COUNT(*) calls, COALESCE(SUM(input_tokens+output_tokens),0) tokens
+                `SELECT COUNT(*) calls, COALESCE(SUM(input_tokens+output_tokens),0) tokens,
+                   COALESCE(SUM(input_tokens),0) input, COALESCE(SUM(output_tokens),0) output,
+                   COALESCE(SUM(cached_tokens),0) cached, COALESCE(SUM(cost),0) cost
                  FROM llm_call_events WHERE workspace_id=? AND task_id IS NULL AND timestamp>=?`,
               )
               .get(request.workspaceId, since)
-        : { calls: 0, tokens: 0 }) as { calls: number; tokens: number };
+        : { calls: 0, tokens: 0, input: 0, output: 0, cached: 0, cost: 0 }) as {
+        calls: number;
+        tokens: number;
+        input: number;
+        output: number;
+        cached: number;
+        cost: number;
+      };
     const taskUsage = usage(true);
     const unattached = usage(false);
     const reservationState = (state: string) =>
@@ -193,6 +204,10 @@ export class BotOutcomeMetricsStore {
       modelUsage: {
         taskCalls: Number(taskUsage.calls),
         taskTokens: Number(taskUsage.tokens),
+        taskInputTokens: Number(taskUsage.input),
+        taskOutputTokens: Number(taskUsage.output),
+        taskCachedTokens: Number(taskUsage.cached),
+        taskCost: Number(taskUsage.cost),
         unattachedCalls: Number(unattached.calls),
         unattachedTokens: Number(unattached.tokens),
       },

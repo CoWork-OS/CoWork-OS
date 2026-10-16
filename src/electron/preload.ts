@@ -52,6 +52,7 @@ import * as fs from "fs";
 import * as os from "os";
 import { randomBytes } from "crypto";
 import { IPC_CHANNELS as SHARED_IPC_CHANNELS, isTempWorkspaceId } from "../shared/types";
+import type { BotOutcomeMetrics, BotOutcomeMetricsRequest } from "../shared/bot-outcome-metrics";
 import type {
   ChannelHealthResponse,
   MeetingArtifactProvider,
@@ -3256,6 +3257,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     >,
   listBotWork: (query: BotWorkQuery) =>
     ipcRenderer.invoke(IPC_CHANNELS.BOT_WORK_LIST, query) as Promise<BotWorkPage>,
+  getBotMetricsSummary: (request: BotOutcomeMetricsRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BOT_METRICS_SUMMARY, request) as Promise<BotOutcomeMetrics>,
   listBotConversations: (query: BotConversationListQuery) =>
     invokeTaskIpcWithRendererTiming(IPC_CHANNELS.BOT_CONVERSATIONS_LIST, query),
   listBotMessages: (request: import("../shared/bot-messages").BotMessagePageRequest) =>
@@ -7029,6 +7032,7 @@ export interface ElectronAPI {
     request: import("../shared/bot-work-result").BotWorkResultRequest,
   ) => Promise<import("../shared/bot-work-result").BotWorkResult>;
   listBotWork: (query: BotWorkQuery) => Promise<BotWorkPage>;
+  getBotMetricsSummary: (request: BotOutcomeMetricsRequest) => Promise<BotOutcomeMetrics>;
   activateBotResponsibility: (
     request: import("../shared/bot-responsibility").BotResponsibilityControl,
   ) => Promise<BotResponsibility>;

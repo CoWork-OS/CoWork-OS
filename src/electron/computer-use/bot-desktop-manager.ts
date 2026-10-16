@@ -152,6 +152,8 @@ export interface BotDesktopStatus {
 
 const CONTAINER_PREFIX = "cowork-desktop-";
 const IMAGE_NAME = "cowork-bot-desktop";
+/** The files the desktop image is built from; its tag follows their contents. */
+const BOT_DESKTOP_IMAGE_FILES = ["Dockerfile", "start-desktop.sh", "cowork-teach.py"];
 const VIEWER_PORT = 6080;
 const DEFAULT_IDLE_STOP_MS = 60 * 60 * 1000;
 const DEFAULT_WAIT_MS = 2 * 60 * 1000;
@@ -303,6 +305,8 @@ export class BotDesktopManager {
   private readonly imagePromises = new Map<string, Promise<string>>();
   private readonly queues = new Map<string, Array<() => void>>();
   private readonly busy = new Set<string>();
+  /** Desktops where the person is recording a task right now. */
+  private readonly recording = new Set<string>();
   private idleTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly deps: BotDesktopDeps) {
@@ -495,6 +499,7 @@ export class BotDesktopManager {
       this.containerName(botId),
     ]).catch(() => undefined);
     this.records.delete(botId);
+    this.recording.delete(botId);
   }
 
   /** Rebuilds the desktop from the image; the bot's home folder (files, sign-ins) is kept. */
@@ -678,6 +683,57 @@ export class BotDesktopManager {
     if (result.stdout.length > BOT_DESKTOP_FILE_MAX_BYTES)
       throw new Error("That file is larger than 25 MB.");
     return { path: rel, data: result.stdout };
+  }
+
+  /**
+   * Teach a task: starts recording what the person does on the desktop (keys, clicks, pointer
+   * moves). The recording stays on the desktop only until finishRecording takes it.
+   */
+  async startRecording(botId: string): Promise<void> {
+    botId = this.desktopKey(botId);
+    await this.ensureRunning(botId);
+    const session = this.session(botId);
+    const status = async () =>
+      (await session.exec(["cowork-teach", "status"], { timeoutMs: 15_000 })).stdout
+        .toString("utf8")
+        .trim();
+    if ((await status()) === "recording") throw new Error("A recording is already running.");
+    await session.exec(["cowork-teach", "record"], { detach: true, timeoutMs: 15_000 });
+    // Detached, the recorder's own errors don't come back: check that it is running.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if ((await status()) === "recording") {
+        const record = this.records.get(botId);
+        if (record) record.lastUsedAt = this.now();
+        this.recording.add(botId);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw new Error("Recording didn't start on the bot's desktop.");
+  }
+
+  /**
+   * Stops recording. With keep, returns the recording (JSON lines) and deletes it from the
+   * desktop; without, just deletes it.
+   */
+  async finishRecording(botId: string, keep: boolean): Promise<string> {
+    botId = this.desktopKey(botId);
+    if (!this.runtime || !this.records.has(botId)) {
+      throw new Error("The bot's desktop isn't running, so there is no recording.");
+    }
+    try {
+      const result = await this.session(botId).exec(["cowork-teach", keep ? "stop" : "cancel"], {
+        timeoutMs: 30_000,
+      });
+      return keep ? result.stdout.toString("utf8") : "";
+    } finally {
+      this.recording.delete(botId);
+    }
+  }
+
+  /** Whether the person is recording a task on this bot's desktop (the bot must not act). */
+  isRecording(botId: string): boolean {
+    return this.recording.has(this.desktopKey(botId));
   }
 
   /** A still of the bot's desktop for its panel, only if it is already running. */
@@ -953,9 +1009,11 @@ export class BotDesktopManager {
       throw new Error("The bot desktop files are missing from this CoWork installation.");
     }
     const hash = createHash("sha256");
-    for (const file of ["Dockerfile", "start-desktop.sh"]) {
+    for (const file of BOT_DESKTOP_IMAGE_FILES) {
+      const filePath = path.join(dir, file);
+      if (!existsSync(filePath)) continue;
       hash.update(file);
-      hash.update(readFileSync(path.join(dir, file)));
+      hash.update(readFileSync(filePath));
     }
     const tag = `${IMAGE_NAME}:${hash.digest("hex").slice(0, 12)}`;
     const exists = await this.container(host, ["image", "inspect", tag]).then(

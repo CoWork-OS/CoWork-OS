@@ -1,8 +1,11 @@
-import { Hand, Monitor } from "lucide-react";
+import { useState } from "react";
+import { Circle, Hand, Monitor } from "lucide-react";
 import { BOT_WORKS_ON_OPTIONS, type BotWorksOn } from "../../shared/bot-computer";
 import { describeComputerViewStatus } from "../../shared/computer-view";
 import { useComputerView } from "../hooks/useComputerView";
 import { formatFileSize, useBotDesktopFiles } from "../hooks/useBotDesktopFiles";
+import { formatTaughtTaskLength, useTaughtTasks } from "../hooks/useTaughtTasks";
+import { TAUGHT_TASK_NAME_MAX_LENGTH } from "../../shared/bot-computer";
 
 export interface BotComputerSectionProps {
   taskId: string;
@@ -34,6 +37,9 @@ export function BotComputerSection({
   const frame = state?.frame;
   // Its work folder: refreshed with each new still, since that is when it may have changed.
   const { files, reveal } = useBotDesktopFiles(taskId, ownDesktop, frame?.capturedAt);
+  // Teach a task: you record doing it once on its desktop; the bot can replay it later.
+  const teaching = useTaughtTasks(taskId, ownDesktop);
+  const [taskName, setTaskName] = useState("");
   // It may still be running after the bot's turn ends (it stops after an hour without use).
   const desktopRunning = state?.surface === "own_desktop";
 
@@ -94,7 +100,8 @@ export function BotComputerSection({
               type="button"
               className="bot-computer-button"
               onClick={() => void handBackNow()}
-              disabled={busy}
+              disabled={busy || teaching.recording}
+              title={teaching.recording ? "Save or discard the recording first" : undefined}
             >
               Hand back
             </button>
@@ -119,6 +126,17 @@ export function BotComputerSection({
               Open desktop
             </button>
           ) : null}
+          {ownDesktop && held && !teaching.recording ? (
+            <button
+              type="button"
+              className="bot-computer-button"
+              onClick={() => void teaching.startRecording()}
+              disabled={busy || teaching.busy}
+            >
+              <Circle size={11} />
+              Record a task
+            </button>
+          ) : null}
           {ownDesktop && desktopRunning && !held ? (
             <button
               type="button"
@@ -129,6 +147,73 @@ export function BotComputerSection({
               Stop desktop
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {teaching.recording ? (
+        <form
+          className="bot-computer-recording"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (taskName.trim()) {
+              void teaching.finishRecording(taskName.trim()).then(() => setTaskName(""));
+            }
+          }}
+        >
+          <strong>Recording</strong>
+          <span>
+            Do the task once on {botName}'s desktop. Everything you type is recorded, so don't type
+            passwords.
+          </span>
+          <input
+            type="text"
+            value={taskName}
+            maxLength={TAUGHT_TASK_NAME_MAX_LENGTH}
+            placeholder="Name this task, like Download the invoice"
+            aria-label="Task name"
+            onChange={(event) => setTaskName(event.target.value)}
+          />
+          <div className="bot-computer-actions">
+            <button
+              type="submit"
+              className="bot-computer-button primary"
+              disabled={teaching.busy || !taskName.trim()}
+            >
+              Stop and save
+            </button>
+            <button
+              type="button"
+              className="bot-computer-button"
+              disabled={teaching.busy}
+              onClick={() => void teaching.finishRecording(null).then(() => setTaskName(""))}
+            >
+              Discard
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {ownDesktop && teaching.tasks.length > 0 ? (
+        <div className="bot-computer-files">
+          <span className="bot-computer-files-heading">Taught tasks</span>
+          <ul>
+            {teaching.tasks.map((task) => (
+              <li key={task.id}>
+                <span className="bot-computer-file-name" title={task.name}>
+                  {task.name}
+                </span>
+                <span className="bot-computer-file-size">
+                  {formatTaughtTaskLength(task.durationMs)}
+                </span>
+                <button
+                  type="button"
+                  className="bot-details-link"
+                  disabled={teaching.busy}
+                  onClick={() => void teaching.deleteTask(task.id)}
+                >
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
       {ownDesktop && files.length > 0 ? (
@@ -155,7 +240,9 @@ export function BotComputerSection({
           </ul>
         </div>
       ) : null}
-      {error ? <p className="bot-computer-error">{error}</p> : null}
+      {error || teaching.error ? (
+        <p className="bot-computer-error">{error ?? teaching.error}</p>
+      ) : null}
     </section>
   );
 }

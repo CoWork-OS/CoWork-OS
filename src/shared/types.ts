@@ -1491,6 +1491,8 @@ export type ToolType =
   | "desktop_drag"
   | "desktop_run"
   | "desktop_save_file"
+  | "desktop_taught_tasks"
+  | "desktop_replay_task"
   // Orchestration tools
   | "orchestrate_agents"
   // QA tools (Playwright visual QA)
@@ -1993,6 +1995,9 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // though it runs in the container, since it can reach the network with the bot's sign-ins.
   desktop_run: "destructive",
   desktop_save_file: "write",
+  desktop_taught_tasks: "read",
+  // Replays the person's own recorded clicks and typing on the bot's desktop, like desktop_click.
+  desktop_replay_task: "write",
   // Orchestration
   orchestrate_agents: "write",
   // Meta
@@ -8716,6 +8721,10 @@ export const IPC_CHANNELS = {
   COMPUTER_VIEW_STOP_DESKTOP: "computerView:stopDesktop",
   COMPUTER_VIEW_DESKTOP_FILES: "computerView:desktopFiles",
   COMPUTER_VIEW_REVEAL_DESKTOP_FILE: "computerView:revealDesktopFile",
+  COMPUTER_VIEW_START_RECORDING: "computerView:startRecording",
+  COMPUTER_VIEW_FINISH_RECORDING: "computerView:finishRecording",
+  COMPUTER_VIEW_TAUGHT_TASKS: "computerView:taughtTasks",
+  COMPUTER_VIEW_DELETE_TAUGHT_TASK: "computerView:deleteTaughtTask",
 
   // Tray (Menu Bar)
   TRAY_GET_SETTINGS: "tray:getSettings",

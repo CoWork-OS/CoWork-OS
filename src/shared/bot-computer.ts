@@ -152,3 +152,14 @@ export function isComputerToolBlocked(
 export function isComputerTool(toolName: string): boolean {
   return computerToolKind(toolName) !== null;
 }
+
+/** A task the person taught a bot by doing it once on its own desktop (Teach a task). */
+export interface TaughtTask {
+  id: string;
+  name: string;
+  createdAt: number;
+  durationMs: number;
+  eventCount: number;
+}
+
+export const TAUGHT_TASK_NAME_MAX_LENGTH = 60;

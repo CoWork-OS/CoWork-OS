@@ -2092,24 +2092,73 @@ export function withTimeout<T>(
   timeoutMs: number,
   operation: string,
   onTimeout?: () => void,
+  options?: {
+    /** While this returns true the clock is stopped (e.g. a person is reviewing an approval). */
+    isPaused?: () => boolean;
+    /** Most paused time that may be added to the deadline. */
+    maxPauseMs?: number;
+    pollMs?: number;
+  },
 ): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    let settled = false;
+    let deadline = Date.now() + timeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let poller: ReturnType<typeof setInterval> | undefined;
+    const cleanup = () => {
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (poller) clearInterval(poller);
+    };
+    const fire = () => {
+      if (settled) return;
+      const remaining = deadline - Date.now();
+      if (remaining > 0) {
+        timer = setTimeout(fire, remaining);
+        return;
+      }
+      cleanup();
       try {
         onTimeout?.();
       } catch {
         // Best-effort timeout hook; preserve timeout error semantics.
       }
       reject(new Error(`${operation} timed out after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
+    };
+    timer = setTimeout(fire, timeoutMs);
+
+    const isPaused = options?.isPaused;
+    const maxPauseMs = Math.max(0, options?.maxPauseMs ?? 0);
+    if (isPaused && maxPauseMs > 0) {
+      const pollMs = Math.max(10, options?.pollMs ?? 500);
+      let credited = 0;
+      let lastTick = Date.now();
+      poller = setInterval(() => {
+        const now = Date.now();
+        const elapsed = now - lastTick;
+        lastTick = now;
+        let paused = false;
+        try {
+          paused = isPaused();
+        } catch {
+          paused = false;
+        }
+        if (!paused || credited >= maxPauseMs) return;
+        const credit = Math.min(elapsed, maxPauseMs - credited);
+        credited += credit;
+        deadline += credit;
+      }, pollMs);
+    }
 
     promise
       .then((result) => {
-        clearTimeout(timer);
+        if (settled) return;
+        cleanup();
         resolve(result);
       })
       .catch((error) => {
-        clearTimeout(timer);
+        if (settled) return;
+        cleanup();
         reject(error);
       });
   });

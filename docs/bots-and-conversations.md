@@ -565,6 +565,22 @@ desktop of its own. Give bots the same name there and they share one desktop:
 its files, browser and sign-ins, so any of them can act as the others there.
 They take turns on it. This is never the default.
 
+**Teach a task.** Show the bot a task once on its own desktop, and it can do
+it again exactly the same way. Take over, choose **Record a task**, do the task
+in the desktop window, then name it and choose **Stop and save** (or
+**Discard**). Recording captures your keys, clicks and pointer moves and stops
+on its own after ten minutes. The bot lists what it was taught with
+`desktop_taught_tasks` and plays one back with `desktop_replay_task`, which
+replays your input with its original timing (long pauses shortened to ten
+seconds) and then returns a screenshot so the bot can check the result. Replay
+is exact: it doesn't adapt if a page moved, so the bot brings the desktop to
+where the task starts first. Recordings are kept in CoWork's app data,
+encrypted with the system keychain when it's available, and never on the
+desktop itself, so the bot's own commands can't read what you typed. Even so,
+don't type passwords while recording; take over for those instead. The bot
+can't act on its desktop while you record. The rail's **Taught tasks** list
+shows each task's length, with **Delete**.
+
 **Its own desktop on your server.** In the bot's dialog, **Runs on** takes an
 SSH host from your SSH config (like `my-server` or `me@example.com`). The
 desktop then runs on that server with Docker, driven from this computer over

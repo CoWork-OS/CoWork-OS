@@ -72,6 +72,7 @@ describe("BotDesktopTools", () => {
       "desktop_key",
       "desktop_scroll",
       "desktop_drag",
+      "desktop_save_file",
       "desktop_run",
     ]);
   });
@@ -150,5 +151,45 @@ describe("BotDesktopTools", () => {
       "-lc",
       "cd ~/work && ls",
     ]);
+  });
+
+  it("hands a file from its work folder to the conversation's workspace", async () => {
+    const workspacePath = path.join(dataDir, "workspace");
+    fs.mkdirSync(workspacePath);
+    const home = BotDesktopManager.getInstance().homeFolder("bot-1");
+    fs.mkdirSync(path.join(home, "Downloads"), { recursive: true });
+    fs.writeFileSync(path.join(home, "Downloads", "report.pdf"), "pdf-bytes");
+    const tools = new BotDesktopTools(daemon, "task-1", () => ({
+      path: workspacePath,
+      permissions: { read: true, write: true, delete: false, network: true, shell: false },
+    }));
+    const first = (await tools.execute("desktop_save_file", {
+      path: "Downloads/report.pdf",
+    })) as Any;
+    const second = (await tools.execute("desktop_save_file", {
+      path: "Downloads/report.pdf",
+    })) as Any;
+    expect(first).toMatchObject({
+      success: true,
+      path: path.join("artifacts", "bot-desktop", "report.pdf"),
+    });
+    expect(second.path).toBe(path.join("artifacts", "bot-desktop", "report (2).pdf"));
+    expect(fs.readFileSync(path.join(workspacePath, first.path), "utf8")).toBe("pdf-bytes");
+    // A name taken by the person's own file is skipped, never replaced.
+    const own = path.join(workspacePath, "artifacts", "bot-desktop", "report (3).pdf");
+    fs.writeFileSync(own, "mine");
+    const third = (await tools.execute("desktop_save_file", {
+      path: "Downloads/report.pdf",
+    })) as Any;
+    expect(third.path).toBe(path.join("artifacts", "bot-desktop", "report (4).pdf"));
+    expect(fs.readFileSync(own, "utf8")).toBe("mine");
+    expect(daemon.logEvent).toHaveBeenCalledWith(
+      "task-1",
+      "artifact_created",
+      expect.objectContaining({ source: "bot_desktop" }),
+    );
+    await expect(tools.execute("desktop_save_file", { path: "../../etc/passwd" })).rejects.toThrow(
+      /inside ~\/work/,
+    );
   });
 });

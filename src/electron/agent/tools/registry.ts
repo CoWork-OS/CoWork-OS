@@ -764,8 +764,8 @@ export class ToolRegistry {
       (tid, filePath, operation) => daemon.consumeExternalFileApproval(tid, filePath, operation),
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
-    this.computerHandoffTools = new ComputerHandoffTools(taskId);
-    this.botDesktopTools = new BotDesktopTools(daemon as Any, taskId);
+    this.computerHandoffTools = new ComputerHandoffTools(taskId, daemon as Any);
+    this.botDesktopTools = new BotDesktopTools(daemon as Any, taskId, () => this.workspace);
     this.qaTools = new QATools(workspace, daemon, taskId);
     this.webPreviewTools = new WebPreviewTools(workspace, daemon, taskId);
     // Some unit tests stub daemon as a plain object. Make database-backed tools optional.
@@ -3240,6 +3240,9 @@ export class ToolRegistry {
     );
     register("desktop_drag", async ({ request }) =>
       this.botDesktopTools.execute("desktop_drag", request.input),
+    );
+    register("desktop_save_file", async ({ request }) =>
+      this.botDesktopTools.execute("desktop_save_file", request.input),
     );
     register("desktop_run", async ({ request }) =>
       this.botDesktopTools.execute("desktop_run", request.input),

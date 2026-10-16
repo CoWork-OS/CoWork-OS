@@ -1,4 +1,8 @@
 import { createHash } from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+import type { Workspace } from "../../../shared/types";
+import { assertWorkspaceFilesystemAccess } from "../../security/access-profile-paths";
 import type { LLMTool } from "../llm/types";
 import {
   BotDesktopManager,
@@ -36,6 +40,8 @@ export class BotDesktopTools {
   constructor(
     private daemon: DaemonLike,
     private taskId: string,
+    /** The task's workspace, where files from the desktop are saved. */
+    private getWorkspace?: () => Pick<Workspace, "path" | "permissions">,
   ) {}
 
   static getToolDefinitions(): LLMTool[] {
@@ -113,6 +119,18 @@ export class BotDesktopTools {
             to_y: { type: "number" },
           },
           required: ["from_x", "from_y", "to_x", "to_y"],
+        },
+      },
+      {
+        name: "desktop_save_file",
+        description:
+          "Use to hand a file from your own desktop to the person: copies it from ~/work on your desktop (for example a downloaded report) into this conversation's workspace, under artifacts/bot-desktop/. Up to 25 MB.",
+        input_schema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Path inside ~/work, e.g. Downloads/report.pdf" },
+          },
+          required: ["path"],
         },
       },
       {
@@ -243,6 +261,8 @@ export class BotDesktopTools {
       }
       case "desktop_run":
         return this.runCommand(input);
+      case "desktop_save_file":
+        return this.saveFile(input);
       default:
         throw new Error(`Unknown desktop tool: ${toolName}`);
     }
@@ -319,6 +339,46 @@ export class BotDesktopTools {
       },
       { onStarting: () => view.noteWorking(this.taskId, "own_desktop") },
     );
+  }
+
+  /** Copies a file from the bot's work folder into the workspace's artifacts. */
+  private async saveFile(input: Record<string, unknown>) {
+    ComputerViewService.getInstance().assertNotHeld(this.taskId);
+    const workspace = this.getWorkspace?.();
+    if (!workspace) throw new Error("This conversation has no workspace to save files to.");
+    const { path: source, data } = await BotDesktopManager.getInstance().readFile(
+      this.botId(),
+      input.path,
+    );
+    const base = path.posix.basename(source).replace(/[^A-Za-z0-9._ -]+/g, "_") || "file";
+    const ext = path.extname(base);
+    const stem = ext ? base.slice(0, -ext.length) : base;
+    // Create-only ("wx"): an existing file, or one another save just took, is never replaced.
+    let relative = "";
+    let destination = "";
+    for (let n = 1; ; n += 1) {
+      if (n >= 1000) throw new Error(`Too many copies of ${base} in artifacts/bot-desktop.`);
+      relative = path.join("artifacts", "bot-desktop", n === 1 ? base : `${stem} (${n})${ext}`);
+      // The workspace's own write rules decide whether the copy may land there.
+      destination = assertWorkspaceFilesystemAccess(
+        workspace,
+        relative,
+        "write",
+        "file from the bot's desktop",
+      );
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      try {
+        fs.writeFileSync(destination, data, { flag: "wx" });
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+    this.daemon.logEvent(this.taskId, "artifact_created", {
+      path: destination,
+      source: "bot_desktop",
+    });
+    return { success: true, path: relative, bytes: data.length, from: `~/work/${source}` };
   }
 
   private async runCommand(input: Record<string, unknown>) {

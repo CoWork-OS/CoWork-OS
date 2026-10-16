@@ -11,6 +11,7 @@ import { BotIconPicker } from "./bot-mascot/BotIconPicker";
 import { BotModelField } from "./BotModelField";
 import {
   BOT_WORKS_ON_OPTIONS,
+  isValidDesktopGroup,
   isValidDesktopHost,
   type BotWorksOn,
 } from "../../shared/bot-computer";
@@ -29,13 +30,22 @@ export interface BotFormValues {
   worksOn: BotWorksOn;
   /** For its own desktop: an SSH host to run it on; empty means this computer. */
   desktopHost: string;
+  /** For its own desktop: a shared desktop's name; empty means a desktop of its own. */
+  desktopGroup: string;
 }
 
 /** Why the Runs on value can't be saved, or null when it can. */
 export function describeDesktopHostError(values: BotFormValues): string | null {
+  if (values.worksOn !== "own_desktop") return null;
   const host = values.desktopHost.trim();
-  if (values.worksOn !== "own_desktop" || !host || isValidDesktopHost(host)) return null;
-  return "Runs on needs an SSH host from your SSH config, like my-server or me@example.com.";
+  if (host && !isValidDesktopHost(host)) {
+    return "Runs on needs an SSH host from your SSH config, like my-server or me@example.com.";
+  }
+  const group = values.desktopGroup.trim().toLowerCase();
+  if (group && !isValidDesktopGroup(group)) {
+    return "A shared desktop's name uses lowercase letters, digits and dashes, like research-team.";
+  }
+  return null;
 }
 
 export interface BotFormDialogProps {
@@ -260,6 +270,27 @@ export function BotFormDialog({
                     Leave empty for this computer, or enter an SSH host from your SSH config (like
                     my-server) to run the desktop on your own server with Docker. Run "ssh
                     my-server" once first so CoWork can trust it.
+                  </small>
+                </label>
+              ) : null}
+              {values.worksOn === "own_desktop" ? (
+                <label className="bot-form-field">
+                  <span>
+                    Shared desktop <small>optional</small>
+                  </span>
+                  <input
+                    className="bot-form-desktop-group"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={values.desktopGroup}
+                    onChange={(event) => set({ desktopGroup: event.target.value })}
+                    placeholder="Its own desktop"
+                    maxLength={40}
+                  />
+                  <small className="bot-form-hint">
+                    Leave empty for a desktop only this bot uses. Bots with the same name here share
+                    one desktop: its files, browser and sign-ins, so any of them can act as the
+                    others there.
                   </small>
                 </label>
               ) : null}

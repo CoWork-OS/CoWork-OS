@@ -1700,6 +1700,7 @@ interface AgentRoleData {
   /** Where this bot works; unset means Auto. */
   worksOn?: import("../shared/bot-computer").BotWorksOn;
   desktopHost?: string;
+  desktopGroup?: string;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1743,6 +1744,7 @@ interface CreateAgentRoleRequest {
   autonomyLevel?: AgentAutonomyLevel;
   worksOn?: import("../shared/bot-computer").BotWorksOn;
   desktopHost?: string;
+  desktopGroup?: string;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1777,6 +1779,7 @@ interface UpdateAgentRoleRequest {
   accessProfileId?: string | null;
   worksOn?: import("../shared/bot-computer").BotWorksOn | null;
   desktopHost?: string | null;
+  desktopGroup?: string | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -4480,6 +4483,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_OPEN_DESKTOP, taskId),
   stopBotDesktop: (taskId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_STOP_DESKTOP, taskId),
+  listBotDesktopFiles: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_DESKTOP_FILES, taskId),
+  revealBotDesktopFile: (taskId: string, filePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_VIEW_REVEAL_DESKTOP_FILE, taskId, filePath),
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => {
     const channel = IPC_CHANNELS.COMPUTER_VIEW_EVENT;
     const listener = (_e: Any, payload: ComputerViewState) => callback(payload);
@@ -8633,6 +8640,11 @@ export interface ElectronAPI {
   /** Opens the bot's own desktop in a window (full view; you can use it after taking over). */
   openBotDesktop: (taskId: string) => Promise<{ opened: boolean }>;
   stopBotDesktop: (taskId: string) => Promise<{ stopped: boolean }>;
+  /** The newest files in the bot's work folder on its own desktop. */
+  listBotDesktopFiles: (
+    taskId: string,
+  ) => Promise<Array<{ path: string; size: number; modifiedAt: number }>>;
+  revealBotDesktopFile: (taskId: string, filePath: string) => Promise<{ revealed: boolean }>;
   onComputerViewEvent: (callback: (state: ComputerViewState) => void) => () => void;
   // Tray (Menu Bar)
   getTraySettings: () => Promise<TraySettings>;

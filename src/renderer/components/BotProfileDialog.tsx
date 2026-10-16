@@ -39,6 +39,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
     modelKey: "",
     worksOn: "auto",
     desktopHost: "",
+    desktopGroup: "",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,6 +66,7 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
           modelKey: loaded.modelKey || "",
           worksOn: normalizeBotWorksOn(loaded.worksOn),
           desktopHost: loaded.desktopHost || "",
+          desktopGroup: loaded.desktopGroup || "",
         });
       } catch (cause) {
         if (!cancelled) {
@@ -114,6 +116,10 @@ export function BotProfileDialog({ botId, onClose, onSaved, onDeleted }: BotProf
         modelKey: values.modelKey,
         worksOn: values.worksOn,
         desktopHost: values.worksOn === "own_desktop" ? values.desktopHost.trim() || null : null,
+        desktopGroup:
+          values.worksOn === "own_desktop"
+            ? values.desktopGroup.trim().toLowerCase() || null
+            : null,
       });
       if (!updated) throw new Error("Could not save this bot.");
       await onSaved?.(updated);

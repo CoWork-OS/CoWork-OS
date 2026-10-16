@@ -1490,6 +1490,7 @@ export type ToolType =
   | "desktop_scroll"
   | "desktop_drag"
   | "desktop_run"
+  | "desktop_save_file"
   // Orchestration tools
   | "orchestrate_agents"
   // QA tools (Playwright visual QA)
@@ -1991,6 +1992,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // A shell command, like run_command: approval and policy treat it as destructive even
   // though it runs in the container, since it can reach the network with the bot's sign-ins.
   desktop_run: "destructive",
+  desktop_save_file: "write",
   // Orchestration
   orchestrate_agents: "write",
   // Meta
@@ -5754,6 +5756,11 @@ export interface AgentRole {
    * this computer.
    */
   desktopHost?: string;
+  /**
+   * For "Its own desktop": a shared desktop's name. Bots with the same name share one desktop,
+   * with its files, browser and sign-ins. Unset means a desktop of its own.
+   */
+  desktopGroup?: string;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -5806,6 +5813,8 @@ export interface CreateAgentRoleRequest {
   worksOn?: BotWorksOn;
   /** The SSH host its own desktop runs on; unset means this computer. */
   desktopHost?: string;
+  /** A shared desktop's name; unset means a desktop of its own. */
+  desktopGroup?: string;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -5855,6 +5864,8 @@ export interface UpdateAgentRoleRequest {
   worksOn?: BotWorksOn | null;
   /** The SSH host its own desktop runs on; null means this computer. */
   desktopHost?: string | null;
+  /** A shared desktop's name; null means a desktop of its own. */
+  desktopGroup?: string | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;
@@ -8703,6 +8714,8 @@ export const IPC_CHANNELS = {
   COMPUTER_VIEW_EVENT: "computerView:event",
   COMPUTER_VIEW_OPEN_DESKTOP: "computerView:openDesktop",
   COMPUTER_VIEW_STOP_DESKTOP: "computerView:stopDesktop",
+  COMPUTER_VIEW_DESKTOP_FILES: "computerView:desktopFiles",
+  COMPUTER_VIEW_REVEAL_DESKTOP_FILE: "computerView:revealDesktopFile",
 
   // Tray (Menu Bar)
   TRAY_GET_SETTINGS: "tray:getSettings",

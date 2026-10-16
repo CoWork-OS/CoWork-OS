@@ -4,7 +4,11 @@
  */
 
 import * as path from "path";
-import { BOT_WORKS_ON_VALUES, DESKTOP_HOST_PATTERN } from "../../shared/bot-computer";
+import {
+  BOT_WORKS_ON_VALUES,
+  DESKTOP_GROUP_PATTERN,
+  DESKTOP_HOST_PATTERN,
+} from "../../shared/bot-computer";
 import { z } from "zod";
 import { isSpaceRelativePath, isSpaceTemplate } from "../../shared/space-sandbox";
 import {
@@ -98,6 +102,17 @@ export const AgentRoleDesktopHostSchema = z
   .max(100)
   .refine((value) => value === "" || DESKTOP_HOST_PATTERN.test(value), {
     message: "Use an SSH host from your SSH config, like my-server or me@example.com",
+  })
+  .transform((value) => value || null)
+  .nullable();
+/** A shared desktop's name; null or empty means a desktop of its own. */
+export const AgentRoleDesktopGroupSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(40)
+  .refine((value) => value === "" || DESKTOP_GROUP_PATTERN.test(value), {
+    message: "Use lowercase letters, digits and dashes, like research-team",
   })
   .transform((value) => value || null)
   .nullable();

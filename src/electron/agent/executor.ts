@@ -1,6 +1,7 @@
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
+import { BotDesktopTools } from "./tools/bot-desktop-tools";
 import { readOnlyReviewSystemRestrictions } from "../phone/phone-tool-visibility";
 import { needsTaskWebEvidence } from "./task-web-evidence-policy";
 import { applicationWorkerPrompt } from "../applications/application-worker-prompt";
@@ -11538,7 +11539,10 @@ ${transcript}
     // Private input and approvals wait for a human; cancellation is forwarded to the credential service.
     if (toolName === "browser_vault") return normalizedSettingsTimeout ?? 20 * 60 * 1000;
 
-    if (toolName === "request_user_input") {
+    // A bot's own desktop is built and started on first use, which can take a few minutes once.
+    if (toolName.startsWith("desktop_")) return normalizedSettingsTimeout ?? 20 * 60 * 1000;
+
+    if (toolName === "request_user_input" || toolName === "request_takeover") {
       // Structured user input waits on a real human response and can legitimately
       // exceed a single step window. Avoid timing this out at the step deadline.
       // Use an explicit long default and still allow settings override.
@@ -18532,6 +18536,7 @@ ${transcript}
       botTeamId: botMessagingContext?.botTeamId || this.task.agentConfig?.botTeamId,
       botMessagingAuthorized,
       swarmMember: this.swarmForTools !== null,
+      botWorksOn: this.resolveBotWorksOn(),
     };
   }
 
@@ -20292,6 +20297,10 @@ ${transcript}
     const always = new Set<string>([
       "revise_plan",
       "request_user_input",
+      // Handing a step to the person, and a bot's own desktop (offered only to a bot set to
+      // work there), stay available in every step.
+      "request_takeover",
+      ...BotDesktopTools.getToolDefinitions().map((tool) => tool.name),
       "tool_search",
       "screen_context_resolve",
       "scratchpad_write",

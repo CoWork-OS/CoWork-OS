@@ -37,6 +37,7 @@ describe("BotDesktopTools", () => {
       dataDir: () => dataDir,
       resourcesDir: () => resourcesDir,
       runtimeCandidates: ["docker"],
+      hostUid: 1000,
       run: async (_command, args) => {
         const out = (text: string) => ({ stdout: Buffer.from(text), stderr: "" });
         if (args[0] === "run") running.add(args[args.indexOf("--name") + 1]);
@@ -142,7 +143,14 @@ describe("BotDesktopTools", () => {
       command: "ls",
     })) as Any;
     expect(result.success).toBe(true);
-    expect(execs).toContainEqual(["bash", "-lc", "cd ~/work && ls"]);
+    expect(execs).toContainEqual([
+      "timeout",
+      "--kill-after=5",
+      "60s",
+      "bash",
+      "-lc",
+      "cd ~/work && ls",
+    ]);
   });
 
   it("hands a file from its work folder to the conversation's workspace", async () => {

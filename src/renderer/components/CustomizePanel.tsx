@@ -853,7 +853,7 @@ export function CustomizePanel({
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.15s;
+          transition: color 0.15s var(--ease-out), background-color 0.15s var(--ease-out), border-color 0.15s var(--ease-out), transform 0.15s var(--ease-out);
         }
 
         .cp-store-btn:hover {
@@ -907,7 +907,7 @@ export function CustomizePanel({
           text-align: left;
           margin: 2px 12px;
           width: calc(100% - 24px);
-          transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, color 0.18s ease;
+          transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out), transform 0.18s var(--ease-out), color 0.18s var(--ease-out);
         }
 
         .cp-sidebar-item > span:nth-child(2) {
@@ -969,7 +969,7 @@ export function CustomizePanel({
           min-width: 0;
           max-width: 1100px;
           scrollbar-width: none;
-          animation: dp-fade-in 0.6s ease-out;
+          animation: dp-fade-in 0.24s var(--ease-out);
         }
 
         .cp-detail::-webkit-scrollbar {
@@ -1140,7 +1140,7 @@ export function CustomizePanel({
           color: var(--color-text-secondary);
           font-size: 12px;
           cursor: pointer;
-          transition: all 0.15s;
+          transition: color 0.15s, background-color 0.15s, border-color 0.15s;
         }
 
         .cp-rc-chip:hover {
@@ -1215,7 +1215,7 @@ export function CustomizePanel({
           top: 2px;
           background: white;
           border-radius: 50%;
-          transition: transform 0.2s;
+          transition: transform 0.2s var(--ease-out);
         }
 
         .cp-toggle input:checked + .cp-toggle-slider {
@@ -1249,7 +1249,7 @@ export function CustomizePanel({
           font-size: 13px;
           font-weight: 600;
           cursor: pointer;
-          transition: all 0.15s;
+          transition: color 0.15s, background-color 0.15s, border-color 0.15s;
         }
 
         .cp-tab:hover {
@@ -1301,7 +1301,7 @@ export function CustomizePanel({
           gap: 18px;
           position: relative;
           overflow: hidden;
-          transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out), transform 200ms var(--ease-out);
         }
 
         .cp-command-card::before {
@@ -1349,7 +1349,7 @@ export function CustomizePanel({
           border: 1px solid var(--color-border-subtle);
           border-radius: var(--radius-lg);
           background: linear-gradient(135deg, var(--color-bg-elevated) 0%, var(--color-bg-glass) 100%);
-          transition: all 0.25s ease;
+          transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out), transform 200ms var(--ease-out);
         }
 
         .cp-skill-row:hover {
@@ -1418,7 +1418,7 @@ export function CustomizePanel({
           border: 1px solid var(--color-border-subtle);
           border-radius: var(--radius-lg);
           background: linear-gradient(135deg, var(--color-bg-elevated) 0%, var(--color-bg-glass) 100%);
-          transition: all 0.25s ease;
+          transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out), transform 200ms var(--ease-out);
         }
 
         .cp-agent-row:hover {

@@ -26,6 +26,7 @@ import {
   type SidebarDestination,
   type SidebarDestinationId,
 } from "./sidebar-destinations";
+import { suppressMotionBriefly } from "../../utils/motion";
 import "./sidebar-rail.css";
 
 export interface SidebarRailProps {
@@ -220,6 +221,7 @@ function SidebarRailComponent({
       const target = digit ? shortcutTargets[Number(digit) - 1] : undefined;
       if (!target) return;
       event.preventDefault();
+      suppressMotionBriefly();
       onNavigate(target.id);
     };
     window.addEventListener("keydown", handleKeyDown);

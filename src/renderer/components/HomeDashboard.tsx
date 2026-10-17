@@ -34,6 +34,7 @@ import {
   isAutomatedSession,
   shouldShowTaskInSidebarSessions,
 } from "./Sidebar";
+import { scrollBehavior } from "../utils/motion";
 import "./MainContent/main-content.css";
 
 interface RecentHubFile {
@@ -586,7 +587,7 @@ export function HomeDashboard({
 
   useEffect(() => {
     if (!automationInboxFocusTick) return;
-    automationInboxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    automationInboxRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
   }, [automationInboxFocusTick]);
 
   const handleDismissCompanionSuggestion = async (id: string) => {
@@ -925,7 +926,7 @@ export function HomeDashboard({
                 onClick={() => {
                   if (automationInboxRef.current) {
                     automationInboxRef.current.scrollIntoView({
-                      behavior: "smooth",
+                      behavior: scrollBehavior(),
                       block: "start",
                     });
                   }

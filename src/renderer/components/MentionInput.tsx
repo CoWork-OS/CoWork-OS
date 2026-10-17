@@ -374,7 +374,7 @@ export function MentionInput({
           border-radius: 6px;
           font-size: 13px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: background-color 0.15s ease, opacity 0.15s ease;
         }
 
         .btn-cancel {

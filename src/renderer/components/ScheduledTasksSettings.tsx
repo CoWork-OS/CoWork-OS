@@ -638,7 +638,7 @@ const styles = {
     borderRadius: "var(--radius-md)",
     marginBottom: "12px",
     overflow: "hidden",
-    transition: "all 0.2s ease",
+    transition: "color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease",
   } as React.CSSProperties,
   jobHeader: {
     display: "flex",
@@ -709,7 +709,7 @@ const styles = {
     borderRadius: "6px",
     color: "var(--color-text-secondary)",
     cursor: "pointer",
-    transition: "all 0.15s ease",
+    transition: "color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease",
   } as React.CSSProperties,
   expandedContent: {
     borderTop: "1px solid var(--color-border-subtle)",
@@ -1451,7 +1451,7 @@ export function ScheduledTasksSettings({ onOpenTask, focusJobId }: ScheduledTask
                     style={{
                       color: "var(--color-text-muted)",
                       transform: isExpanded ? "rotate(180deg)" : "rotate(0)",
-                      transition: "transform 0.2s ease",
+                      transition: "transform 200ms var(--ease-out)",
                     }}
                   >
                     {Icons.chevronDown}
@@ -2201,7 +2201,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
       fontSize: "13px",
       fontWeight: 500,
       cursor: "pointer",
-      transition: "all 0.15s ease",
+      transition: "color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease",
     }),
     checkbox: {
       display: "flex",
@@ -2532,7 +2532,7 @@ function JobModal({ job, workspaces, onClose, onSave }: JobModalProps) {
               style={{
                 color: "var(--color-text-muted)",
                 transform: deliveryExpanded ? "rotate(180deg)" : "rotate(0)",
-                transition: "transform 0.2s ease",
+                transition: "transform 200ms var(--ease-out)",
               }}
             >
               {Icons.chevronDown}

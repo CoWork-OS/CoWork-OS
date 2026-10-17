@@ -177,7 +177,7 @@ export function ActivityFeedItem({
           border-radius: 8px;
           background: var(--color-bg-secondary);
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: background-color 0.15s ease, opacity 0.15s ease;
           position: relative;
         }
 
@@ -289,7 +289,7 @@ export function ActivityFeedItem({
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.15s ease;
+          transition: color 0.15s ease, background-color 0.15s ease;
         }
 
         .activity-action-btn.resolve {

@@ -757,7 +757,7 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
   margin: 0;
   color: var(--color-text-muted);
   opacity: 1;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .sidebar-panel .automated-folder-header[aria-expanded="true"] .automated-folder-chevron {
@@ -896,7 +896,7 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 }
 
 .cli-subagent-toggle-chevron {
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .cli-subagent-toggle[aria-expanded="true"] .cli-subagent-toggle-chevron {
@@ -924,7 +924,7 @@ html.visual-calm .sidebar-panel .sidebar-panel-segments > button {
 }
 
 .sidebar-panel .cli-collapse-btn > svg {
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .sidebar-panel .cli-collapse-btn[aria-expanded="true"] > svg {

@@ -20,7 +20,8 @@ describe("Model dropdown styles", () => {
     expect(source).toMatch(
       /\.model-quick-panel\s*\{[^}]*border-radius:\s*18px;[^}]*animation:\s*quickPickerReveal/s,
     );
-    expect(source).toMatch(/@keyframes\s+quickPickerSheen/);
+    // Opened many times a day: no decorative sheen pass on open.
+    expect(source).not.toMatch(/quickPickerSheen/);
     expect(source).toMatch(
       /\.model-quick-custom\s*\{[^}]*border-top:\s*1px\s+solid\s+var\(--color-border-subtle\);/s,
     );

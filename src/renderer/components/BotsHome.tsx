@@ -20,6 +20,7 @@ import {
 import { formatNextRun } from "../utils/next-run";
 import { useAttentionSnapshot } from "../hooks/useAttentionSnapshot";
 import { botAttentionItems, botsAttentionCount, withQueueNeedsYou } from "../utils/bot-attention";
+import { scrollBehavior } from "../utils/motion";
 import "./bots-home.css";
 
 export interface BotsHomeProps {
@@ -364,7 +365,7 @@ export function BotsHome({
             <button
               type="button"
               className="agents-secondary-btn"
-              onClick={() => templatesRef.current?.scrollIntoView({ behavior: "smooth" })}
+              onClick={() => templatesRef.current?.scrollIntoView({ behavior: scrollBehavior() })}
             >
               Templates
             </button>

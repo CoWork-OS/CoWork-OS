@@ -11,8 +11,8 @@
 .video-lightbox .image-lightbox-topbar,
 .video-lightbox-controls {
   transition:
-    opacity 220ms ease,
-    transform 220ms ease;
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
 }
 
 .video-lightbox[data-idle="true"] .image-lightbox-topbar {
@@ -58,7 +58,7 @@
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.06),
     0 30px 80px rgba(0, 0, 0, 0.55);
-  animation: image-lightbox-pop 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: image-lightbox-pop 200ms var(--ease-out);
   cursor: pointer;
 }
 
@@ -85,7 +85,7 @@
   color: #fff;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   pointer-events: none;
-  animation: video-lightbox-center-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: video-lightbox-center-in 180ms var(--ease-out);
 }
 
 .video-lightbox-center .is-play {
@@ -96,11 +96,19 @@
 @keyframes video-lightbox-center-in {
   from {
     opacity: 0;
-    transform: scale(0.88);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes video-lightbox-center-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -168,7 +176,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   overflow: hidden;
-  transition: height 120ms ease;
+  transition: height 120ms var(--ease-drawer);
 }
 
 .video-lightbox-track:hover .video-lightbox-rail,
@@ -209,8 +217,8 @@
   opacity: 0;
   transform: scale(0.6);
   transition:
-    opacity 120ms ease,
-    transform 120ms ease;
+    opacity 120ms var(--ease-out),
+    transform 120ms var(--ease-out);
   pointer-events: none;
 }
 
@@ -285,8 +293,8 @@
   opacity: 0;
   cursor: pointer;
   transition:
-    width 160ms ease,
-    margin 160ms ease,
+    width 160ms var(--ease-drawer),
+    margin 160ms var(--ease-drawer),
     opacity 160ms ease;
 }
 

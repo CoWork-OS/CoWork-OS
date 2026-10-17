@@ -496,7 +496,7 @@ export function BuiltinToolsSettings() {
                       strokeWidth={2}
                       style={{
                         transform: expandedCategory === category ? "rotate(180deg)" : "none",
-                        transition: "transform 0.2s",
+                        transition: "transform 200ms var(--ease-out)",
                       }}
                     />
                   </button>

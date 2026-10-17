@@ -7970,6 +7970,7 @@ export function Settings({
                   >
                     {serverLog.state !== "error" && (
                       <span
+                        className="settings-server-log-dot"
                         style={{
                           display: "inline-block",
                           width: "8px",

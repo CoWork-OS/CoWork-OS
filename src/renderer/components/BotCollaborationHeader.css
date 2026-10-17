@@ -183,7 +183,7 @@
 }
 
 .bot-collaboration-details-toggle svg:last-child {
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .bot-collaboration-chevron-open {
@@ -330,7 +330,7 @@
 }
 
 .bot-collaboration-spin {
-  animation: bot-collaboration-spin 1.2s linear infinite;
+  animation: bot-collaboration-spin 0.8s linear infinite;
 }
 
 @keyframes bot-collaboration-spin {

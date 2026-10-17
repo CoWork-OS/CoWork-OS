@@ -59,6 +59,7 @@ import { getPlatformVisualIcon } from "./DeviceIcons";
 import { RemoteFilePicker } from "./RemoteFilePicker";
 import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
 import { hasHostMethod } from "../host/browser-capabilities";
+import { scrollBehavior } from "../utils/motion";
 
 export interface DeviceTaskOptions {
   interactionMode?: InteractionModeSelection;
@@ -561,7 +562,7 @@ export function DevicesPanel({
         alerts: alertsRef,
       };
       const targetRef = section ? refMap[section] : null;
-      targetRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      targetRef?.current?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
     };
 
     window.addEventListener("devices:navigate", handleNavigate as EventListener);

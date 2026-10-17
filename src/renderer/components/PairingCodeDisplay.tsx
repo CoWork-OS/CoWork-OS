@@ -148,7 +148,7 @@ export function PairingCodeDisplay({
           background: var(--color-bg-tertiary, #0f0f1a);
           border-radius: 6px;
           border: 2px solid var(--color-accent, #6366f1);
-          transition: all 0.3s ease;
+          transition: color 200ms ease, background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease, opacity 200ms ease;
         }
 
         .code-container.expired {
@@ -192,7 +192,7 @@ export function PairingCodeDisplay({
           border-radius: 6px;
           color: var(--color-text-secondary, #a0a0b0);
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
         }
 
         .copy-button:hover:not(:disabled) {
@@ -239,7 +239,7 @@ export function PairingCodeDisplay({
           font-size: 14px;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: background-color 0.2s ease, opacity 0.2s ease;
         }
 
         .regenerate-button:hover:not(:disabled) {
@@ -332,7 +332,7 @@ function SpinnerIcon() {
       <path d="M21 12a9 9 0 11-6.219-8.56" />
       <style>{`
         .spin {
-          animation: spin 1s linear infinite;
+          animation: spin 0.8s linear infinite;
         }
         @keyframes spin {
           from { transform: rotate(0deg); }

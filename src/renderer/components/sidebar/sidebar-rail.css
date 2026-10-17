@@ -2,8 +2,19 @@
   --sidebar-rail-width: 48px;
 }
 
+/* Rail tooltips: the first one waits, then neighbours open instantly while the
+   pointer stays on the rail. The delay flips to 0 once the rail has been hovered
+   for 300ms and snaps back the moment the pointer leaves. */
+@property --rail-tooltip-delay {
+  syntax: "<time>";
+  inherits: true;
+  initial-value: 0.25s;
+}
+
 .sidebar-rail {
   --rail-accent: var(--color-accent);
+  --rail-tooltip-delay: 0.25s;
+  transition: --rail-tooltip-delay 0s;
   width: var(--sidebar-rail-width);
   flex-shrink: 0;
   height: 100%;
@@ -123,15 +134,25 @@
   pointer-events: none;
   transform: translate(-2px, -50%);
   transition:
-    opacity 0.1s ease,
-    transform 0.1s ease;
+    opacity 0.1s var(--ease-out),
+    transform 0.1s var(--ease-out);
+}
+
+.sidebar-rail:hover {
+  --rail-tooltip-delay: 0s;
+  transition: --rail-tooltip-delay 0s 0.3s;
 }
 
 .sidebar-rail-btn[data-tooltip]:hover::before,
 .sidebar-rail-btn[data-tooltip]:focus-visible::before {
   opacity: 1;
   transform: translate(0, -50%);
-  transition-delay: 0.25s;
+  transition-delay: var(--rail-tooltip-delay);
+}
+
+/* Once warm, the next tooltip appears with no animation at all. */
+.sidebar-rail:hover .sidebar-rail-btn[data-tooltip]::before {
+  transition-duration: calc(var(--rail-tooltip-delay) * 0.4);
 }
 
 /* No tooltip while reordering. */

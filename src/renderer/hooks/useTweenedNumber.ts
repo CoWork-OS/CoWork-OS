@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { prefersReducedMotion } from "../utils/motion";
 
-const DURATION_MS = 420;
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
+const DURATION_MS = 300;
 
 /**
  * Follows `target`, easing from the previous value over a short animation whenever it

@@ -963,9 +963,9 @@
 .answer-surface button.as-tile {
   cursor: pointer;
   transition:
-    transform 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    transform 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out);
 }
 
 .answer-surface button.as-tile:hover {
@@ -1587,8 +1587,8 @@
   line-height: 1;
   cursor: pointer;
   transition:
-    background 0.12s ease,
-    transform 0.12s ease;
+    background 0.12s var(--ease-out),
+    transform 0.12s var(--ease-out);
 }
 
 .answer-surface .as-stepper-button:hover:not(:disabled) {
@@ -1888,9 +1888,9 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    transform 0.15s;
+    background 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
 }
 
 .answer-surface .as-action-button-primary {
@@ -2259,7 +2259,7 @@
 .answer-surface.as-enter > *,
 .answer-surface.as-enter .as-stack > * {
   /* Backwards fill only: a finished entrance must not pin transforms (hover lifts). */
-  animation: as-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  animation: as-rise 0.3s var(--ease-out) backwards;
 }
 
 .answer-surface.as-enter .as-stack > :nth-child(2) {
@@ -2334,6 +2334,14 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes as-rise {
+    from {
+      opacity: 0;
+    }
   }
 }
 

@@ -463,7 +463,7 @@ export function AgentRoleEditor({
           font-size: 14px;
           border-bottom: 2px solid transparent;
           margin-bottom: -1px;
-          transition: all 0.15s ease;
+          transition: color 0.15s ease, border-color 0.15s ease;
         }
 
         .editor-tab:hover {
@@ -641,7 +641,7 @@ export function AgentRoleEditor({
           border: 2px solid var(--color-border);
           border-radius: 8px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: background-color 0.15s ease, border-color 0.15s ease;
         }
 
         .capability-option:hover {
@@ -701,7 +701,7 @@ export function AgentRoleEditor({
           border: 2px solid var(--color-border);
           border-radius: 8px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: background-color 0.15s ease, border-color 0.15s ease;
         }
 
         .autonomy-option:hover {
@@ -778,7 +778,7 @@ export function AgentRoleEditor({
           bottom: 0;
           background-color: var(--color-bg-tertiary);
           border-radius: 24px;
-          transition: 0.2s;
+          transition: background-color 0.2s var(--ease-out), transform 0.2s var(--ease-out);
         }
 
         .toggle-slider:before {
@@ -790,7 +790,7 @@ export function AgentRoleEditor({
           bottom: 3px;
           background-color: var(--color-text-secondary);
           border-radius: 50%;
-          transition: 0.2s;
+          transition: background-color 0.2s var(--ease-out), transform 0.2s var(--ease-out);
         }
 
         .toggle-switch input:checked + .toggle-slider {

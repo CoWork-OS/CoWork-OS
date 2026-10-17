@@ -10,6 +10,20 @@
   --layer-onboarding: 2400;
   --layer-toast: 2500;
   --layer-system-notice: 2600;
+
+  /* Motion. Enter/exit and default: ease-out. On-screen movement: ease-in-out.
+     Hover/color: plain `ease`. Keep UI motion under 300ms. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Reduced motion keeps fades but drops movement; entrances that slide or
+   scale opt in to this opacity-only keyframe under the media query. */
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
 * {
@@ -348,7 +362,13 @@ button:focus-visible,
 .visual-warm .quick-start-card,
 .visual-oblivion .quick-start-card {
   border-radius: var(--radius-md);
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s var(--ease-out),
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
 }
 
 .visual-warm .quick-start-card:hover,
@@ -1590,7 +1610,7 @@ a,
 }
 
 .spawned-agent-sidebar .spinning {
-  animation: spin 1s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 
 .spawned-agent-sidebar-close {
@@ -1725,9 +1745,9 @@ a,
   container-type: inline-size;
   padding-top: var(--title-bar-height);
   transition:
-    width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-    max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.3s var(--ease-drawer),
+    min-width 0.3s var(--ease-drawer),
+    max-width 0.3s var(--ease-drawer),
     opacity 0.3s ease;
 }
 
@@ -1753,7 +1773,9 @@ a,
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
   -webkit-app-region: no-drag;
 }
 
@@ -1780,7 +1802,12 @@ a,
   color: var(--color-text-secondary);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s var(--ease-out),
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1835,7 +1862,9 @@ a,
   padding: 7px 12px;
   cursor: pointer;
   border-radius: var(--radius-md);
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
   margin-bottom: 1px;
   display: flex;
   align-items: center;
@@ -2140,7 +2169,10 @@ a,
   background: var(--color-bg-glass);
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .modal-close:hover {
@@ -2171,7 +2203,7 @@ a,
   padding-top: var(--title-bar-height);
   background: var(--color-bg-primary);
   container-type: inline-size;
-  transition: margin 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: margin 0.3s var(--ease-drawer);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
@@ -2470,9 +2502,9 @@ a,
   color: var(--color-text-secondary);
   font-family: var(--font-ui);
   transition:
-    background 0.18s ease,
-    border-color 0.18s ease,
-    transform 0.18s ease;
+    background 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out),
+    transform 0.18s var(--ease-out);
 }
 
 .devices-sidebar-home-btn {
@@ -2606,7 +2638,9 @@ a,
   border-radius: 0 !important;
   background: transparent !important;
   border-left: none;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
   position: relative;
 }
 
@@ -3131,7 +3165,7 @@ a,
   border-radius: 999px;
   background: var(--color-border);
   transition:
-    width 0.2s ease,
+    width 0.2s var(--ease-drawer),
     background 0.2s ease;
 }
 
@@ -3995,7 +4029,7 @@ a,
   opacity: 0;
   pointer-events: none;
   transition:
-    width 0.15s ease,
+    width 0.15s var(--ease-drawer),
     opacity 0.15s ease;
 }
 
@@ -4590,7 +4624,9 @@ a,
   border-radius: 50%;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .settings-sidebar-search-clear:hover {
@@ -4661,7 +4697,12 @@ a,
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease,
+    outline-color 0.15s ease;
   white-space: nowrap;
 }
 
@@ -4990,7 +5031,12 @@ a,
   color: var(--color-text);
   font-size: 13px;
   outline: none;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
@@ -5091,7 +5137,12 @@ a,
   font-size: 13px;
   cursor: pointer;
   outline: none;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
@@ -5115,7 +5166,12 @@ a,
   font-size: 13px;
   resize: vertical;
   outline: none;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .settings-page :where(textarea):focus {
@@ -5177,7 +5233,7 @@ a,
 }
 
 .settings-page .btn-primary:active:not(:disabled) {
-  transform: translateY(0);
+  transform: scale(0.97);
 }
 
 .settings-page .btn-secondary {
@@ -5209,7 +5265,7 @@ a,
 }
 
 .settings-page .btn-secondary:active:not(:disabled) {
-  transform: translateY(0);
+  transform: scale(0.97);
 }
 
 .settings-page .btn-danger {
@@ -5732,17 +5788,25 @@ a,
   overflow-y: auto;
   scrollbar-width: none;
   gap: 0;
-  animation: dp-fade-in 0.6s ease-out;
+  animation: dp-fade-in 0.24s var(--ease-out);
 }
 
 @keyframes dp-fade-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes dp-fade-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -5794,9 +5858,9 @@ a,
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   box-shadow: var(--shadow-lg), var(--shadow-glow);
   transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease,
-    border-color 0.3s ease;
+    transform 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    border-color 200ms var(--ease-out);
 }
 
 .dp-input-box:focus-within {
@@ -6093,7 +6157,11 @@ a,
   gap: 24px;
   text-align: left;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    background-color 200ms var(--ease-out),
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
   min-height: 140px;
   position: relative;
   overflow: hidden;
@@ -6229,7 +6297,11 @@ a,
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-xl);
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    background-color 200ms var(--ease-out),
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
   text-align: left;
   color: var(--color-text);
   position: relative;
@@ -6263,7 +6335,7 @@ a,
   color: var(--color-accent);
   border: 1px solid var(--color-border-subtle);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.3s ease;
+  transition: transform 200ms var(--ease-out);
 }
 
 .dp-device-card:hover .dp-device-icon {
@@ -6850,7 +6922,7 @@ a,
 }
 
 .dp-spin {
-  animation: dp-spin 1s linear infinite;
+  animation: dp-spin 0.8s linear infinite;
 }
 
 @keyframes dp-spin {
@@ -6959,7 +7031,12 @@ a,
   background: var(--color-bg-glass);
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    color 0.2s var(--ease-out),
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   padding: 8px 16px;
   font-weight: 500;
 }
@@ -7077,7 +7154,9 @@ a,
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--color-bg-glass) 90%, white 10%);
   border: 1px solid var(--color-border-subtle);
-  transition: all 0.3s ease;
+  transition:
+    background-color 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
 }
 
 .dp-device-card:hover .dp-device-stat {
@@ -7227,7 +7306,10 @@ a,
   display: flex;
   flex-direction: column;
   gap: 20px;
-  transition: all 0.3s ease;
+  transition:
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(var(--glass-blur));
@@ -7290,7 +7372,7 @@ a,
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: transform 0.2s ease;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .dp-support-card:hover .dp-support-stats div {
@@ -7886,7 +7968,10 @@ a,
   background-color: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: 24px;
-  transition: 0.2s;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
 }
 
 .toggle-slider::before {
@@ -7898,7 +7983,10 @@ a,
   bottom: 2px;
   background-color: var(--color-text-muted);
   border-radius: 50%;
-  transition: 0.2s;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
 }
 
 .settings-toggle input:checked + .toggle-slider {
@@ -7986,7 +8074,9 @@ a,
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  transition: all 0.12s;
+  transition:
+    background-color 0.12s,
+    opacity 0.12s;
 }
 
 .pattern-remove:hover {
@@ -8065,7 +8155,7 @@ a,
   height: 12px;
   border-radius: 50%;
   background: var(--color-text-primary, #e5e7eb);
-  transition: left 0.18s ease;
+  transition: left 0.18s var(--ease-drawer);
 }
 
 .goal-mode-switch-track.on .goal-mode-switch-thumb {
@@ -8103,10 +8193,10 @@ a,
   border-radius: var(--radius-md);
   cursor: pointer;
   transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.15s ease,
-    box-shadow 0.15s ease;
+    background 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out);
 }
 
 .theme-option:hover {
@@ -8123,7 +8213,7 @@ a,
 }
 
 .theme-option:active {
-  transform: translateY(0);
+  transform: scale(0.97);
 }
 
 .theme-option-preview {
@@ -8323,8 +8413,8 @@ a,
   border-radius: 50%;
   cursor: pointer;
   transition:
-    transform 0.15s ease,
-    border-color 0.15s ease;
+    transform 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out);
 }
 
 .color-swatch-btn:hover {
@@ -8501,7 +8591,7 @@ a,
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   min-width: 280px;
   max-width: 400px;
-  animation: slideInRight 0.3s ease;
+  animation: slideInRight 0.3s var(--ease-out);
   pointer-events: auto;
 }
 
@@ -8514,6 +8604,14 @@ a,
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -8628,8 +8726,8 @@ a,
   font-weight: 500;
   cursor: pointer;
   transition:
-    background 0.15s ease,
-    transform 0.1s ease;
+    background 0.15s var(--ease-out),
+    transform 0.1s var(--ease-out);
 }
 
 .toast-action-btn:active {
@@ -8678,7 +8776,7 @@ a,
   border: 1px solid var(--color-border);
   border-radius: 24px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  animation: fadeInUp 0.2s ease;
+  animation: fadeInUp 0.2s var(--ease-out);
 }
 
 @keyframes fadeInUp {
@@ -8690,6 +8788,14 @@ a,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -8725,7 +8831,10 @@ a,
   font-size: 18px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    opacity 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out),
+    filter 0.15s var(--ease-out);
 }
 
 .quick-task-submit:hover:not(:disabled) {
@@ -8749,7 +8858,13 @@ a,
   border: none;
   border-radius: 50%;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s var(--ease-out),
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
@@ -8773,7 +8888,7 @@ a,
   font-size: 24px;
   font-weight: 300;
   line-height: 1;
-  transition: transform 0.2s ease;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .quick-task-fab.open .fab-icon {
@@ -8829,7 +8944,9 @@ a,
   background: var(--color-accent);
   border-radius: 50%;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    box-shadow 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
@@ -8845,7 +8962,9 @@ a,
   border: none;
   border-radius: 50%;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    box-shadow 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
@@ -8962,7 +9081,9 @@ a,
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  transition: all 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .skill-card:hover {
@@ -9066,7 +9187,11 @@ a,
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: 11px;
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
 }
 
 .skill-toggle-slider:before {
@@ -9078,7 +9203,11 @@ a,
   bottom: 2px;
   background: var(--color-text-secondary);
   border-radius: 50%;
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
 }
 
 .skill-toggle input:checked + .skill-toggle-slider {
@@ -9153,7 +9282,12 @@ a,
   color: var(--color-text);
   font-size: 14px;
   font-family: inherit;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .form-group input[type="text"]:focus,
@@ -9256,7 +9390,12 @@ a,
   border-radius: var(--radius-md);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out),
+    opacity 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out),
+    filter 0.15s var(--ease-out);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -9278,7 +9417,11 @@ a,
   border-radius: var(--radius-md);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -9296,7 +9439,11 @@ a,
   border-radius: var(--radius-md);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s var(--ease-out);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -9305,6 +9452,13 @@ a,
 .btn-danger:hover:not(:disabled) {
   background: var(--color-error);
   color: white;
+}
+
+/* Press feedback: buttons give slightly under the pointer. */
+.btn-primary:active:not(:disabled),
+.btn-secondary:active:not(:disabled),
+.btn-danger:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .settings-error {
@@ -9340,7 +9494,9 @@ a,
   font-weight: 500;
   cursor: pointer;
   border-radius: var(--radius-md);
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .mcp-nav-button:hover {
@@ -9486,7 +9642,10 @@ a,
   bottom: 0;
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  transition: 0.2s;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   border-radius: 22px;
 }
 
@@ -9498,7 +9657,10 @@ a,
   left: 2px;
   bottom: 2px;
   background-color: var(--color-text-secondary);
-  transition: 0.2s;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   border-radius: 50%;
 }
 
@@ -9924,10 +10086,10 @@ a,
   cursor: pointer;
   text-align: left;
   transition:
-    border-color 0.15s,
-    background 0.15s,
-    transform 0.1s,
-    box-shadow 0.15s;
+    border-color 0.15s var(--ease-out),
+    background 0.15s var(--ease-out),
+    transform 0.1s var(--ease-out),
+    box-shadow 0.15s var(--ease-out);
   font-family: inherit;
   color: inherit;
   width: 100%;
@@ -10951,7 +11113,9 @@ a,
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .mcp-path-remove:hover {
@@ -10992,7 +11156,10 @@ a,
   font-weight: 500;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .button-danger:hover:not(:disabled) {
@@ -11127,7 +11294,7 @@ a,
   top: 2px;
   background-color: var(--color-text-secondary);
   border-radius: 50%;
-  transition: transform 0.2s;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .builtin-tool-toggle input:checked + .builtin-tool-toggle-slider {
@@ -11455,7 +11622,10 @@ a,
   border-radius: 12px;
   font-size: 11px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    outline-color 0.15s ease;
 }
 
 .registry-tag:hover {
@@ -11485,7 +11655,9 @@ a,
   padding: 6px;
   color: var(--color-text-secondary);
   border-radius: var(--radius-md);
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .registry-link:hover {
@@ -11663,7 +11835,7 @@ a,
   flex-direction: column;
   margin: auto 0;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  animation: slideUp 0.2s ease;
+  animation: slideUp 0.2s var(--ease-out);
 }
 
 .skill-param-modal form {
@@ -11683,6 +11855,14 @@ a,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -12866,7 +13046,9 @@ a,
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .command-session-action:hover {
@@ -13054,9 +13236,9 @@ a,
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.2s,
-    color 0.2s,
-    transform 0.12s;
+    background 0.2s var(--ease-out),
+    color 0.2s var(--ease-out),
+    transform 0.12s var(--ease-out);
 }
 
 .command-stop-btn:hover {
@@ -13105,8 +13287,8 @@ a,
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.2s,
-    transform 0.1s;
+    background 0.2s var(--ease-out),
+    transform 0.1s var(--ease-out);
 }
 
 .command-force-kill-btn:hover {
@@ -13135,7 +13317,10 @@ a,
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .command-close-btn:hover {
@@ -13813,7 +13998,7 @@ a,
   box-shadow:
     0 16px 40px rgba(0, 0, 0, 0.22),
     0 2px 6px rgba(0, 0, 0, 0.08);
-  animation: canvas-menu-in 0.14s cubic-bezier(0.2, 0.7, 0.2, 1);
+  animation: canvas-menu-in 0.14s var(--ease-out);
   transform-origin: top right;
 }
 
@@ -13826,6 +14011,14 @@ a,
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes canvas-menu-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -14014,7 +14207,7 @@ a,
 
 .canvas-preview-loading .spinner,
 .canvas-preview-updating .spinner {
-  animation: spin 0.9s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 
 .canvas-preview-error svg {
@@ -14071,7 +14264,7 @@ a,
   box-shadow:
     0 0 0 1px var(--color-border-subtle),
     0 4px 16px -8px rgba(0, 0, 0, 0.25);
-  transition: transform 0.2s ease;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .canvas-preview-dimensions {
@@ -14318,7 +14511,7 @@ a,
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .history-slider::-webkit-slider-thumb:hover {
@@ -14624,7 +14817,10 @@ a,
   color: var(--color-text-secondary);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .personality-nav-btn:hover {
@@ -14831,7 +15027,9 @@ a,
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
   position: relative;
 }
 
@@ -14902,7 +15100,10 @@ a,
   color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .preset-btn:hover {
@@ -15103,7 +15304,7 @@ a,
   border-radius: var(--radius-md);
   font-size: 13px;
   z-index: var(--layer-popover);
-  animation: fadeIn 0.2s ease;
+  animation: fadeIn 0.2s var(--ease-out);
 }
 
 @keyframes fadeIn {
@@ -15135,7 +15336,7 @@ a,
   background: transparent;
   color: var(--color-accent);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease;
 }
 
 .button-small:hover {
@@ -15181,7 +15382,10 @@ a,
   color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .style-option:hover {
@@ -15215,7 +15419,9 @@ a,
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
   text-align: left;
   display: flex;
   flex-direction: column;
@@ -15317,6 +15523,14 @@ a,
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
 .onboarding-section {
   margin-bottom: 28px;
 }
@@ -15397,7 +15611,12 @@ a,
   font-weight: 500;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease,
+    transform 0.2s ease;
   border: none;
 }
 
@@ -15501,7 +15720,9 @@ a,
   border: 2px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .provider-option:hover {
@@ -15553,7 +15774,9 @@ a,
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
   text-align: center;
 }
 
@@ -15591,7 +15814,7 @@ a,
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   cursor: pointer;
   z-index: var(--layer-popover);
-  transition: all 0.2s ease;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .voice-indicator.bottom-right {
@@ -15688,7 +15911,9 @@ a,
   border-radius: 6px;
   cursor: pointer;
   color: var(--color-text-secondary);
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .voice-indicator-mini:hover {
@@ -15744,7 +15969,7 @@ a,
   border-radius: 50%;
   background: var(--color-accent);
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 .settings-slider::-webkit-slider-thumb:hover {
@@ -15782,7 +16007,10 @@ a,
   right: 0;
   bottom: 0;
   background-color: var(--color-bg-tertiary);
-  transition: 0.2s;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   border-radius: 24px;
 }
 
@@ -15794,7 +16022,10 @@ a,
   left: 3px;
   bottom: 3px;
   background-color: white;
-  transition: 0.2s;
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   border-radius: 50%;
 }
 
@@ -15942,7 +16173,12 @@ a,
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
   white-space: nowrap;
 }
 
@@ -16124,7 +16360,11 @@ a,
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    background-color 200ms var(--ease-out),
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
   position: relative;
   overflow: hidden;
 }
@@ -16197,7 +16437,9 @@ a,
   font-weight: 600;
   font-family: var(--font-ui);
   cursor: pointer;
-  transition: all 0.2s;
+  transition:
+    box-shadow 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   box-shadow: var(--shadow-md);
 }
 
@@ -16344,7 +16586,7 @@ a,
   bottom: 3px;
   background: var(--color-text-primary);
   border-radius: 50%;
-  transition: transform 0.2s;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .dispatch-toggle input:checked + .dispatch-toggle-slider {
@@ -16462,7 +16704,10 @@ a,
   border-radius: 999px;
   padding: 0;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
   z-index: 3;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   backdrop-filter: blur(6px);
@@ -16511,7 +16756,10 @@ a,
   color: rgba(255, 248, 245, 0.92);
   border-radius: 999px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   backdrop-filter: blur(6px);
 }
@@ -16837,7 +17085,9 @@ a,
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s ease;
+  transition:
+    background-color 0.3s ease,
+    transform 0.3s ease;
 }
 
 .onboarding-voice-btn:hover {
@@ -16905,7 +17155,12 @@ a,
 .onboarding-setup-section {
   opacity: 0;
   transform: translateY(20px);
-  transition: all 0.5s ease;
+  transition:
+    color 0.5s ease,
+    background-color 0.5s ease,
+    border-color 0.5s ease,
+    box-shadow 0.5s ease,
+    opacity 0.5s ease;
   width: 100%;
 }
 
@@ -17003,7 +17258,10 @@ a,
   font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition:
+    color 0.3s ease,
+    background-color 0.3s ease,
+    border-color 0.3s ease;
   text-align: left;
   display: inline-flex;
   align-items: flex-start;
@@ -17056,7 +17314,12 @@ a,
   max-width: 400px;
   opacity: 0;
   transform: translateY(10px);
-  transition: all 0.4s ease;
+  transition:
+    color 0.4s ease,
+    background-color 0.4s ease,
+    border-color 0.4s ease,
+    box-shadow 0.4s ease,
+    opacity 0.4s ease;
 }
 
 .onboarding-api-input-section.visible {
@@ -17095,7 +17358,12 @@ a,
   font-size: 1rem;
   font-weight: 400;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition:
+    color 0.3s ease,
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    opacity 0.3s ease;
 }
 
 .onboarding-btn-primary {
@@ -17314,7 +17582,7 @@ a,
   border-radius: 999px;
   padding: 9px 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease;
 }
 
 .onboarding-memory-toggle:hover {
@@ -17634,7 +17902,10 @@ a,
   font-size: 0.78rem;
   line-height: 1;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .cinematic-onboarding.onboarding-state-recap .onboarding-recap-edit-btn {
@@ -17708,7 +17979,9 @@ a,
   padding: 7px 11px;
   font-size: 0.82rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .onboarding-final-try-suggestion:hover {
@@ -17740,7 +18013,7 @@ a,
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease;
 }
 
 .onboarding-final-try-voice-btn:hover {
@@ -17786,6 +18059,14 @@ a,
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes onboarding-fade-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -17876,7 +18157,7 @@ a,
 }
 
 .onboarding-spinner {
-  animation: onboarding-spin 1s linear infinite;
+  animation: onboarding-spin 0.8s linear infinite;
 }
 
 /* Light theme compatibility for cinematic onboarding */
@@ -18995,7 +19276,9 @@ a,
   display: flex;
   align-items: center;
   gap: 4px;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .overflow-menu-btn:hover,
@@ -19106,7 +19389,7 @@ a,
   height: 12px;
   border-radius: 50%;
   background: var(--color-text-primary, #e5e7eb);
-  transition: left 0.18s ease;
+  transition: left 0.18s var(--ease-drawer);
 }
 
 .overflow-menu-item .goal-mode-switch-track.on .goal-mode-switch-thumb {
@@ -19126,8 +19409,8 @@ a,
   color: var(--color-text-muted, #6b7280);
   margin-top: 2px;
   transition:
-    transform 0.15s ease,
-    color 0.15s ease;
+    transform 0.15s var(--ease-out),
+    color 0.15s var(--ease-out);
 }
 
 .overflow-menu-item .overflow-submenu-trigger.active .overflow-submenu-chevron {
@@ -19201,8 +19484,8 @@ a,
   opacity: 0;
   pointer-events: none;
   transition:
-    opacity 0.12s ease,
-    transform 0.12s ease;
+    opacity 0.12s var(--ease-out),
+    transform 0.12s var(--ease-out);
 }
 
 .menu-tooltip-target::after {
@@ -19278,7 +19561,9 @@ a,
   border-radius: var(--radius-sm, 6px);
   border: none;
   background: transparent;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
   white-space: nowrap;
 }
 
@@ -20040,7 +20325,13 @@ a,
   padding: 16px 18px;
   gap: 6px;
   border-color: var(--color-border-subtle, rgba(255, 255, 255, 0.06));
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    color 200ms var(--ease-out),
+    background-color 200ms var(--ease-out),
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
   position: relative;
   overflow: hidden;
 }
@@ -20054,7 +20345,7 @@ a,
   bottom: 0;
   background: linear-gradient(135deg, var(--color-accent-subtle) 0%, transparent 60%);
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: opacity 200ms ease;
   pointer-events: none;
 }
 
@@ -20079,8 +20370,8 @@ a,
   font-size: 22px;
   margin-bottom: 4px;
   transition:
-    color 0.2s ease,
-    transform 0.2s ease;
+    color 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
 }
 
 .focused-cards .quick-start-title {
@@ -20167,7 +20458,11 @@ a,
   border-color: var(--color-border-subtle, rgba(255, 255, 255, 0.08));
   background: transparent;
   opacity: 0.7;
-  transition: all 0.25s ease;
+  transition:
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
 }
 
 .focused-cards .card-shuffle:hover {
@@ -20202,12 +20497,20 @@ a,
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  @keyframes focusedFadeInUp {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
 .welcome-header-focused {
-  animation: focusedFadeInUp 0.5s ease both;
+  animation: focusedFadeInUp 0.3s var(--ease-out) both;
 }
 
 .focused-cards .quick-start-card {
-  animation: focusedFadeInUp 0.4s ease both;
+  animation: focusedFadeInUp 0.3s var(--ease-out) both;
 }
 
 .focused-cards .quick-start-card:nth-child(1) {
@@ -20239,7 +20542,7 @@ a,
 }
 
 .welcome-hint {
-  animation: focusedFadeInUp 0.5s ease 0.4s both;
+  animation: focusedFadeInUp 0.3s var(--ease-out) 0.25s both;
 }
 
 /* ==================== FOCUSED MODE: ACTIVE TASK VIEW ==================== */
@@ -20970,8 +21273,16 @@ a,
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  @keyframes focusedMessageFadeIn {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
 .density-focused .conversation-flow > *:last-child {
-  animation: focusedMessageFadeIn 0.3s ease both;
+  animation: focusedMessageFadeIn 0.22s var(--ease-out) both;
 }
 
 /* ---- Light theme ---- */
@@ -22456,17 +22767,25 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   margin: 0 auto;
   width: 100%;
   gap: 24px;
-  animation: sc-fade-in 0.6s ease-out;
+  animation: sc-fade-in 0.24s var(--ease-out);
 }
 
 @keyframes sc-fade-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes sc-fade-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -22518,7 +22837,10 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   box-shadow: var(--shadow-sm);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
 }
 
 .sc-status-card:hover {
@@ -22589,7 +22911,9 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-subtle);
   background: var(--color-bg-glass);
-  transition: all 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .sc-checkbox:hover {
@@ -22609,7 +22933,10 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-subtle);
   background: var(--color-bg-glass);
-  transition: all 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .sc-input-group:hover,
@@ -22672,7 +22999,10 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   font-size: 12px;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .sc-kind-chip:hover {
@@ -22709,7 +23039,13 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   font-weight: 500;
   color: var(--color-text);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    color 0.2s var(--ease-out),
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    opacity 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
 }
@@ -22723,7 +23059,7 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
 }
 
 .sc-btn:active {
-  transform: translateY(0);
+  transform: scale(0.97);
 }
 
 .sc-btn:disabled {
@@ -22784,7 +23120,11 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   border: 1px solid var(--color-border-subtle);
   background: var(--color-bg-glass);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    background-color 200ms var(--ease-out),
+    border-color 200ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
   color: var(--color-text);
   font-family: var(--font-ui);
 }
@@ -23011,7 +23351,7 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   color: var(--color-text-muted);
   font-size: 14px;
   font-family: var(--font-ui);
-  animation: sc-fade-in 0.6s ease-out;
+  animation: sc-fade-in 0.24s var(--ease-out);
 }
 
 /* ==================== CRITICAL TASK COMPOSER STARTUP STYLES ==================== */
@@ -23112,7 +23452,7 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   cursor: pointer;
   transition: background 0.12s ease;
   white-space: nowrap;
-  animation: dropdownFadeIn 0.15s ease;
+  animation: dropdownFadeIn 0.15s var(--ease-out);
 }
 
 .active-mode-badge:hover {
@@ -23120,13 +23460,13 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
 }
 
 /* ── Mode Suggestion Bar ── */
+/* Opened by typing (@, /, mode keywords): appears instantly, no entrance. */
 .mode-suggestion-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
   margin-bottom: 4px;
-  animation: dropdownFadeIn 0.15s ease;
 }
 
 .mode-suggestion-pill {
@@ -23170,6 +23510,7 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   color: var(--color-text);
 }
 
+/* Opened by typing (@, /, mode keywords): appears instantly, no entrance. */
 .mention-autocomplete-dropdown {
   --mention-option-row-height: 58px;
   position: absolute;
@@ -23188,7 +23529,6 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   overflow-x: hidden;
   scrollbar-gutter: stable;
   z-index: var(--layer-popover);
-  animation: dropdownFadeIn 0.15s ease;
 }
 
 .mention-autocomplete-section + .mention-autocomplete-section {
@@ -23412,8 +23752,8 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   border-radius: 20px;
   padding: 5px 6px;
   transition:
-    border-color 0.25s ease,
-    box-shadow 0.25s ease;
+    border-color 200ms ease,
+    box-shadow 200ms ease;
 }
 
 .welcome-input-container:focus-within {
@@ -23655,7 +23995,10 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .folder-selector:hover {
@@ -24256,4 +24599,53 @@ button.chatgpt-import-dropzone:focus-visible,
 .scheduled-job-expand:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 3px;
+}
+
+/* Reduced motion: status pulses, pings, skeleton shimmers and decorative loops
+   hold still (the dot, bar or skeleton stays visible). Spinners keep turning:
+   they are the only cue that work is still in progress. !important because
+   several of these rules live in later-loaded component sheets or inline styles. */
+@media (prefers-reduced-motion: reduce) {
+  .home-task-card.tone-live .home-task-status svg,
+  .home-file-thumb-preview-skeleton,
+  .message-speak-btn.speaking svg,
+  .thinking-title .thinking-ellipsis span,
+  .voice-input-btn.recording,
+  .sidebar-session-skeleton-line,
+  .browser-workbench-driving-dot,
+  .command-stopping,
+  .command-shell-status-dot,
+  .canvas-status.live .canvas-status-dot::after,
+  .skeleton-title,
+  .skeleton-btn,
+  .skeleton-image,
+  .voice-status .status-dot,
+  .voice-indicator-pulse,
+  .onboarding-orb.breathing,
+  .onboarding-orb.listening,
+  .onboarding-waveform.active .onboarding-waveform-ring,
+  .onboarding-typewriter-cursor,
+  .dp-pulse,
+  .dp-status-dot.online,
+  .status-dot.connecting,
+  .code-container.expiring-soon,
+  .settings-server-log-dot {
+    animation: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .semantic-timeline-window.windowed {
+    scroll-behavior: auto;
+  }
+}
+
+/* Keyboard navigation (see suppressMotionBriefly): the new view appears at once. */
+html.motion-instant *,
+html.motion-instant *::before,
+html.motion-instant *::after {
+  animation-delay: 0s !important;
+  animation-duration: 0s !important;
+  transition-delay: 0s !important;
+  transition-duration: 0s !important;
 }

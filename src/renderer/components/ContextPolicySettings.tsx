@@ -270,7 +270,7 @@ export function ContextPolicySettings({
           color: var(--color-text-secondary, #a0a0b0);
           font-size: 14px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: color 0.2s ease, background-color 0.2s ease;
         }
 
         .context-policy-settings .tab:hover {
@@ -317,7 +317,7 @@ export function ContextPolicySettings({
           border: 2px solid transparent;
           border-radius: 8px;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: background-color 0.2s ease, border-color 0.2s ease;
         }
 
         .mode-option:hover {
@@ -399,7 +399,7 @@ export function ContextPolicySettings({
           right: 0;
           bottom: 0;
           background-color: var(--color-error, #ef4444);
-          transition: 0.3s;
+          transition: background-color 200ms var(--ease-out), transform 200ms var(--ease-out);
           border-radius: 24px;
         }
 
@@ -411,7 +411,7 @@ export function ContextPolicySettings({
           left: 3px;
           bottom: 3px;
           background-color: white;
-          transition: 0.3s;
+          transition: background-color 200ms var(--ease-out), transform 200ms var(--ease-out);
           border-radius: 50%;
         }
 

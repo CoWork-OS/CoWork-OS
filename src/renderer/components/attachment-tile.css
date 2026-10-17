@@ -9,7 +9,7 @@
   border-radius: 12px;
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  animation: attachment-tile-in 160ms ease-out;
+  animation: attachment-tile-in 160ms var(--ease-out);
 }
 
 @keyframes attachment-tile-in {
@@ -20,6 +20,14 @@
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes attachment-tile-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -161,8 +169,8 @@
   opacity: 0;
   transform: scale(0.85);
   transition:
-    opacity 120ms ease,
-    transform 120ms ease;
+    opacity 120ms var(--ease-out),
+    transform 120ms var(--ease-out);
 }
 
 .attachment-tile-image .attachment-tile-remove {

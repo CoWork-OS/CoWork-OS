@@ -1,12 +1,14 @@
 name: Bug Report
 description: Report a bug or unexpected behavior
 title: "[Bug]: "
-labels: ["bug", "triage"]
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for taking the time to report a bug! Please fill out the sections below.
+
+        **Security vulnerabilities must not be reported here.** This issue is public. Report them privately through a [security advisory](https://github.com/CoWork-OS/CoWork-OS/security/advisories/new) instead (see SECURITY.md).
 
   - type: textarea
     id: description
@@ -57,13 +59,23 @@ body:
     attributes:
       label: Logs
       description: Paste relevant logs after removing API keys, tokens, credentials, and other secrets.
-      render: shell
+      render: text
 
-  - type: textarea
-    id: security-impact
+  - type: dropdown
+    id: area
     attributes:
-      label: Security Impact
-      description: If this may be a vulnerability, do not share sensitive details here; use the private security advisory link on the issue chooser instead.
+      label: Affected Area
+      options:
+        - Security / Access Control
+        - Messaging Channels
+        - LLM Provider Integration
+        - Agent Execution / Tools
+        - UI / Desktop App
+        - MCP Integration
+        - Remote Access (Tailscale, SSH, API)
+        - Other
+    validations:
+      required: true
 
   - type: dropdown
     id: os
@@ -113,10 +125,29 @@ body:
     id: version
     attributes:
       label: App Version
-      description: "You can find this in the app or package.json"
-      placeholder: "0.1.0"
+      description: "Settings → About & Updates in the app, or `cowork --version` for npm installs"
+      placeholder: "0.5.60"
     validations:
       required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      description: For npm global installs and source checkouts (`node --version`).
+      placeholder: "22.12.0"
+
+  - type: textarea
+    id: integrations
+    attributes:
+      label: Messaging Channels / MCP Servers
+      description: Connected messaging channels (WhatsApp, Telegram, Discord, Slack, iMessage, ...) and MCP servers involved, if any.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Anything else that helps explain the problem.
 
   - type: checkboxes
     id: checklist
@@ -125,5 +156,7 @@ body:
       options:
         - label: I have searched existing issues to ensure this bug hasn't been reported
           required: true
-        - label: I am using the latest version of CoWork-OSS
+        - label: I am using the latest version of CoWork OS
           required: false
+        - label: This is NOT a security vulnerability (those go to a private security advisory, see SECURITY.md)
+          required: true

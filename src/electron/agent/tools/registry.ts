@@ -8322,7 +8322,7 @@ ${skillDescriptions}`;
       {
         name: "organize_folder",
         description:
-          'Organize files in a folder. Use "by_type" to group files into category subfolders (Images, Documents, Spreadsheets, Videos, Audio, Other) by extension; use "by_date" to group them into "YYYY-MM" subfolders by modified date. Files already inside a subfolder are left in place.',
+          'Organize files in a folder. Use "by_type" to group files into category subfolders (Images, Documents, Spreadsheets, Videos, Audio, Other) by extension; use "by_date" to group them into "YYYY-MM" subfolders by modified date. Only top-level files move: files already inside a subfolder, hidden dotfiles, and files whose name is already taken in the target subfolder stay where they are. Every other top-level file is moved, so do not run it on a project or repository root.',
         input_schema: {
           type: "object",
           properties: {

@@ -8321,19 +8321,17 @@ ${skillDescriptions}`;
       },
       {
         name: "organize_folder",
-        description: "Organize files in a folder by type, date, or custom rules",
+        description:
+          'Organize files in a folder. Use "by_type" to group files into category subfolders (Images, Documents, Spreadsheets, Videos, Audio, Other) by extension; use "by_date" to group them into "YYYY-MM" subfolders by modified date. Only top-level files move: files already inside a subfolder, hidden dotfiles, and files whose name is already taken in the target subfolder stay where they are. Every other top-level file is moved, so do not run it on a project or repository root.',
         input_schema: {
           type: "object",
           properties: {
             path: { type: "string", description: "Folder path to organize" },
             strategy: {
               type: "string",
-              enum: ["by_type", "by_date", "custom"],
-              description: "Organization strategy",
-            },
-            rules: {
-              type: "object",
-              description: "Custom organization rules (if strategy is custom)",
+              enum: ["by_type", "by_date"],
+              description:
+                'Organization strategy: "by_type" groups by file extension, "by_date" groups by modification month.',
             },
           },
           required: ["path", "strategy"],

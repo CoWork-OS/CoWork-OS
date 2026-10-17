@@ -167,6 +167,8 @@ import {
   parseAgentMessageProtocolResult,
 } from "../../utils/agent-message-receipt";
 import {
+  clearAcceptedComposerDraft,
+  clearAcceptedComposerDraftFence,
   isSameAcceptedComposerDraftFence,
   isSameComposerDraftSubmission,
   isTaskCreationAccepted,
@@ -8319,30 +8321,35 @@ function MainContentComponent({
       return false;
     };
     const clearAcceptedComposer = async (): Promise<boolean> => {
-      if (!isSubmittedDraftCurrent()) return false;
-      acceptedDraftClearRef.current = {
-        draftKey: submittedDraftKey,
-        taskId: submittedTaskId,
-        revision: submittedDraftRevision,
-        text: submittedInputValue,
-      };
-      // Clear the visible editor at the durable execution-acceptance boundary
-      // instead of making the user wait for the SQLite draft deletion round
-      // trip. The hydration fence above prevents the old persisted snapshot
-      // from immediately putting the accepted prompt back.
-      clearComposer(false);
-      try {
-        const accepted = await onDraftAccepted?.(submittedDraftRevision, submittedDraft);
-        if (accepted === false) {
-          restoreAcceptedComposer();
-          return false;
-        }
-      } catch {
-        restoreAcceptedComposer();
-        return false;
+      const accepted = await clearAcceptedComposerDraft({
+        isCurrentSubmission: isSubmittedDraftCurrent,
+        clearVisible: () => {
+          acceptedDraftClearRef.current = {
+            draftKey: submittedDraftKey,
+            taskId: submittedTaskId,
+            revision: submittedDraftRevision,
+            text: submittedInputValue,
+          };
+          // Hide the accepted text while the durable clear is in flight. The
+          // hydration fence prevents an old snapshot from restoring it.
+          clearComposer(false);
+        },
+        // Creating a task selects it before returning. Always retire the
+        // original Home draft even if a different editor is now visible.
+        clearPersisted: () => onDraftAccepted?.(submittedDraftRevision, submittedDraft),
+        restoreVisible: restoreAcceptedComposer,
+      });
+      if (accepted) {
+        acceptedDraftClearRef.current = clearAcceptedComposerDraftFence(
+          acceptedDraftClearRef.current,
+          {
+            draftKey: submittedDraftKey,
+            taskId: submittedTaskId,
+            revision: submittedDraftRevision,
+          },
+        );
       }
-      acceptedDraftClearRef.current = null;
-      return true;
+      return accepted;
     };
     let shouldDeferComposerClear = false;
     let submissionResult: void | boolean | Promise<void | boolean> = undefined;
@@ -8703,7 +8710,7 @@ function MainContentComponent({
       if (shouldDeferComposerClear) {
         void Promise.resolve(submissionResult)
           .then(async (sent) => {
-            if (!isTaskCreationAccepted(sent) || !isSubmittedDraftCurrent()) {
+            if (!isTaskCreationAccepted(sent)) {
               if (
                 submittedFollowUpMessageId &&
                 pendingFollowUpSubmissionRef.current?.messageId === submittedFollowUpMessageId
@@ -8712,10 +8719,8 @@ function MainContentComponent({
               }
               return;
             }
-            // Clear the durable draft before clearing the local input. Task
-            // progress events can re-render this component while the IPC
-            // clear is in flight; clearing local state first lets the still
-            // persisted draft hydrate the just-sent text back into the box.
+            // Acceptance clears the submitted owner even if the user has
+            // moved to another task while its send was pending.
             await clearAcceptedComposer();
             if (
               submittedFollowUpMessageId &&

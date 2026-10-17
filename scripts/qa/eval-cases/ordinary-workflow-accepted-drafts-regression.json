@@ -1,0 +1,20 @@
+{
+  "id": "ordinary-workflow-accepted-drafts-2026-10-17",
+  "title": "Accepted messages return as unsent drafts after navigation",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 644,
+    "pullRequest": 664
+  },
+  "prompt": "Submit a Home draft, navigate while acceptance is pending, then return to Home or restart the app.",
+  "assertions": {
+    "requiredBehavior": "Clear the accepted draft under its original owner while preserving newer edits and recoverable failed submissions."
+  },
+  "executableTests": [
+    "src/renderer/state/__tests__/composer-draft-store.test.ts",
+    "src/renderer/utils/__tests__/composer-draft-fencing.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/state/__tests__/composer-draft-store.test.ts src/renderer/utils/__tests__/composer-draft-fencing.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

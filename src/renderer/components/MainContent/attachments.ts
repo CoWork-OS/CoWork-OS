@@ -8,6 +8,7 @@ import {
   truncateTextForTaskPrompt,
 } from "../utils/attachment-content";
 import type { ImageAttachment } from "../../../shared/types";
+import type { ComposerDraft, DraftAttachmentRef } from "../../../shared/composer-drafts";
 
 export type SelectedFileInfo = {
   path?: string;
@@ -24,6 +25,80 @@ export type PendingAttachment = SelectedFileInfo & {
   draftRefId?: string;
   draftSha256?: string;
   status?: "available" | "unavailable";
+};
+
+type ResolvedDraftAttachment = {
+  attachment: PendingAttachment;
+  resolved: { ref: DraftAttachmentRef; path: string } | null;
+};
+
+/** Merge a late lookup into the live owner without undoing attachment edits. */
+export const reconcileResolvedDraftAttachments = ({
+  draftKeyAtRestore,
+  currentDraftKey,
+  currentDraft,
+  pendingAttachments,
+  resolvedAttachments,
+}: {
+  draftKeyAtRestore: string;
+  currentDraftKey: string | undefined;
+  currentDraft: ComposerDraft | null;
+  pendingAttachments: PendingAttachment[];
+  resolvedAttachments: ResolvedDraftAttachment[];
+}): { pendingAttachments: PendingAttachment[]; draftAttachments: DraftAttachmentRef[] } | null => {
+  if (currentDraftKey !== draftKeyAtRestore || currentDraft?.draftKey !== draftKeyAtRestore) {
+    return null;
+  }
+
+  // A text edit advances the draft revision too. Match the actual attachment
+  // identity instead, so typing does not leave a restored file unavailable.
+  const updates = new Map<string, ResolvedDraftAttachment>();
+  for (const entry of resolvedAttachments) {
+    const original = entry.attachment;
+    if (
+      pendingAttachments.some(
+        (candidate) =>
+          candidate.id === original.id &&
+          candidate.draftRefId === original.draftRefId &&
+          candidate.draftSha256 === original.draftSha256,
+      ) &&
+      currentDraft.attachments.some(
+        (ref) => ref.refId === original.draftRefId && ref.sha256 === original.draftSha256,
+      )
+    ) {
+      updates.set(original.id, entry);
+    }
+  }
+  if (updates.size === 0) {
+    return { pendingAttachments, draftAttachments: currentDraft.attachments };
+  }
+
+  const statuses = new Map<string, "available" | "unavailable">();
+  const nextPending = pendingAttachments.map((candidate): PendingAttachment => {
+    const entry = updates.get(candidate.id);
+    if (!entry) return candidate;
+    const status = entry.resolved ? "available" : "unavailable";
+    statuses.set(candidate.draftRefId as string, status);
+    return entry.resolved
+      ? {
+          ...candidate,
+          path: entry.resolved.path,
+          size: entry.resolved.ref.size,
+          ...(entry.resolved.ref.mimeType ? { mimeType: entry.resolved.ref.mimeType } : {}),
+          status,
+        }
+      : { ...candidate, status };
+  });
+  const nextRefs = currentDraft.attachments.map((ref) => {
+    const status = statuses.get(ref.refId);
+    return status && status !== ref.status ? { ...ref, status } : ref;
+  });
+  return {
+    pendingAttachments: nextPending,
+    draftAttachments: nextRefs.some((ref, index) => ref !== currentDraft.attachments[index])
+      ? nextRefs
+      : currentDraft.attachments,
+  };
 };
 
 export type ImportedAttachment = {

@@ -9,6 +9,7 @@ import {
 } from "./types";
 import { createHash } from "node:crypto";
 import { imageToTextFallback } from "./image-utils";
+import { chatReasoningContentReplay } from "./reasoning-replay";
 import { splitReasoningFromText } from "./reasoning-text";
 import { createLogger } from "../../utils/logger";
 import { assertNormalizedTurnTranscript } from "../runtime/turn-transcript-normalizer";
@@ -98,6 +99,11 @@ export interface OpenAICompatibleMessageOptions {
   systemBlocks?: LLMSystemBlock[];
   /** Provider-specific maximum for tool call IDs. Matching tool results are rewritten consistently. */
   maxToolCallIdLength?: number;
+  /**
+   * Send each assistant message's saved `reasoning_content` back when it was
+   * produced by this model (Kimi K3 requires it; see reasoning-replay.ts).
+   */
+  replayReasoningContentForModel?: string;
 }
 
 function hashToolCallId(id: string): string {
@@ -181,9 +187,17 @@ export function toOpenAICompatibleMessages(
     result.push(...buildOpenAICompatibleSystemMessages(system, options?.systemBlocks));
   }
 
+  const replayModel = options?.replayReasoningContentForModel;
+
   for (const msg of sanitizedMessages) {
+    const reasoningContent =
+      replayModel && msg.role === "assistant"
+        ? chatReasoningContentReplay(msg, replayModel)
+        : undefined;
+    const reasoningField = reasoningContent ? { reasoning_content: reasoningContent } : {};
+
     if (typeof msg.content === "string") {
-      result.push({ role: msg.role, content: msg.content });
+      result.push({ role: msg.role, content: msg.content, ...reasoningField });
       continue;
     }
 
@@ -240,6 +254,7 @@ export function toOpenAICompatibleMessages(
         role: msg.role,
         content: assistantContent,
         tool_calls: toolCalls,
+        ...reasoningField,
       });
       continue;
     }
@@ -260,7 +275,10 @@ export function toOpenAICompatibleMessages(
     }
 
     if (textParts.length > 0) {
-      result.push({ role: msg.role, content: textParts.join("\n") });
+      result.push({ role: msg.role, content: textParts.join("\n"), ...reasoningField });
+    } else if (reasoningContent) {
+      // A thinking-only reply still has to be replayed as returned.
+      result.push({ role: msg.role, content: "", ...reasoningField });
     }
   }
 

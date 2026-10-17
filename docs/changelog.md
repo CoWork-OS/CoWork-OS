@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Kimi (Moonshot) models**: the Kimi provider and the Moonshot preset default to Kimi K3 and list only models Moonshot still serves (K3, K2.7 Code, K2.7 Code HighSpeed, K2.6). Saved, pinned and fallback choices of discontinued models (K2.5 and the K2 series) move to K3 or K2.6. K3 and K2.7 Code tool calls resend each assistant message's `reasoning_content`, as Moonshot requires, and these models plus K2.6 accept images. The Kimi Code preset lists `k3`, `k3-256k`, `kimi-for-coding` and `kimi-for-coding-highspeed` and defaults to the overseas endpoint; existing keys stay on the endpoint they were saved for.
+
 - **Android workflow continuity**: pending operation IDs/status and the latest approved observation now remain available across task steps. Loop wrap-up guidance distinguishes planned input from executed work and keeps unknown-effect reconciliation explicit.
 
 - **Restored Android sessions**: a generated title containing “Search” no longer hides an explicitly requested Android workflow behind the read-only review heuristic. Host desktop tools and explicit tool restrictions retain their existing limits.

@@ -93,6 +93,7 @@ import {
   GEMINI_DEFAULT_MODEL,
   OPENROUTER_DEFAULT_MODEL_ID,
 } from "../../shared/llm-provider-catalog";
+import { KIMI_DEFAULT_MODEL } from "../../shared/kimi-models";
 import {
   getModelAccessDescriptor,
   isFeaturedProvider,
@@ -1849,7 +1850,7 @@ export function Settings({
   // Kimi state
   const [kimiApiKey, setKimiApiKey] = useState("");
   const [kimiBaseUrl, setKimiBaseUrl] = useState("");
-  const [kimiModel, setKimiModel] = useState("kimi-k2.5");
+  const [kimiModel, setKimiModel] = useState(KIMI_DEFAULT_MODEL);
   const [kimiModels, setKimiModels] = useState<Array<{ id: string; name: string }>>([]);
   const [loadingKimiModels, setLoadingKimiModels] = useState(false);
 
@@ -3948,7 +3949,7 @@ export function Settings({
       case "kimi":
         setKimiApiKey("");
         setKimiBaseUrl("");
-        setKimiModel("kimi-k2.5");
+        setKimiModel(KIMI_DEFAULT_MODEL);
         setKimiModels([]);
         break;
       case "pi":
@@ -7322,7 +7323,7 @@ export function Settings({
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder="kimi-k2.5"
+                  placeholder={KIMI_DEFAULT_MODEL}
                   value={kimiModel}
                   onChange={(e) => setKimiModel(e.target.value)}
                 />

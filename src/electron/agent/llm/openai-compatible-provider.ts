@@ -1,5 +1,13 @@
 import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse, LLMProviderError } from "./types";
 import { getProviderImageCaps } from "./image-utils";
+import { reasoningFromChatCompletionMessage } from "./reasoning-replay";
+import {
+  getDiscontinuedKimiModel,
+  kimiBareModelId,
+  normalizeKimiModelId,
+  requiresKimiReasoningReplay,
+} from "../../../shared/kimi-models";
+import { createLogger } from "../../utils/logger";
 import {
   toOpenAICompatibleMessages,
   toOpenAICompatibleTools,
@@ -22,6 +30,8 @@ import {
 } from "./text-tool-protocol";
 
 const OPENCODE_GO_KIMI_MAX_COMPLETION_TOKENS = 32_768;
+const logger = createLogger("openai-compatible-provider");
+const warnedDiscontinuedKimiModels = new Set<string>();
 
 export type AtomicChatErrorCode =
   | "cancelled"
@@ -312,17 +322,39 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (lowerBase.includes("opencode.ai/zen/") && trimmed.startsWith("opencode/")) {
       return trimmed.slice("opencode/".length);
     }
+    if (this.isMoonshotEndpoint()) {
+      return this.replaceDiscontinuedKimiModel(trimmed);
+    }
     return trimmed;
   }
 
+  private isMoonshotEndpoint(): boolean {
+    try {
+      const host = new URL(this.normalizedBaseUrl).hostname.toLowerCase();
+      return host === "api.moonshot.ai" || host === "api.moonshot.cn";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Moonshot answers discontinued model ids with an error, so a saved, pinned
+   * or bot-specific choice of one is sent as its replacement instead.
+   */
+  private replaceDiscontinuedKimiModel(model: string): string {
+    const discontinued = getDiscontinuedKimiModel(model);
+    if (!discontinued) return model;
+    if (!warnedDiscontinuedKimiModels.has(model)) {
+      warnedDiscontinuedKimiModels.add(model);
+      logger.warn(
+        `${this.providerName} model "${model}" was discontinued by Moonshot on ${discontinued.discontinuedOn}; using "${discontinued.replacement}". Pick a current model in Settings.`,
+      );
+    }
+    return normalizeKimiModelId(model);
+  }
+
   private isKimiK2Model(model: string): boolean {
-    const normalized = model.toLowerCase().trim();
-    const bareModel = normalized.includes("/")
-      ? normalized.slice(normalized.lastIndexOf("/") + 1)
-      : normalized;
-    const withoutVariant = bareModel.includes(":")
-      ? bareModel.slice(0, bareModel.indexOf(":"))
-      : bareModel;
+    const withoutVariant = kimiBareModelId(model);
     return (
       withoutVariant === "kimi-k2.6" ||
       withoutVariant === "kimi-k2.5" ||
@@ -332,12 +364,19 @@ export class OpenAICompatibleProvider implements LLMProvider {
     );
   }
 
+  private isKimiK3Model(model: string): boolean {
+    const bare = kimiBareModelId(model);
+    return bare === "kimi-k3" || bare.startsWith("kimi-k3-") || bare.startsWith("kimi-k3.");
+  }
+
   private isOpenCodeGoEndpoint(): boolean {
     return this.normalizedBaseUrl.toLowerCase().includes("opencode.ai/zen/go/");
   }
 
   private getOutputTokenField(model: string): "max_tokens" | "max_completion_tokens" {
-    return this.isKimiK2Model(model) ? "max_completion_tokens" : "max_tokens";
+    return this.isKimiK2Model(model) || this.isKimiK3Model(model)
+      ? "max_completion_tokens"
+      : "max_tokens";
   }
 
   private getMaxOutputTokens(model: string, requestedMaxTokens: number): number {
@@ -354,17 +393,27 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   private getToolOptions(model: string): OpenAICompatibleToolOptions | undefined {
-    if (!this.isKimiK2Model(model)) return undefined;
+    if (!this.isKimiK2Model(model) && !this.isKimiK3Model(model)) return undefined;
     return { functionStrict: false };
   }
 
   private getToolRequestExtras(model: string, tools?: Any[]): Record<string, Any> {
     if (!tools?.length || !this.isKimiK2Model(model)) return {};
+    // K2.7 Code (like K3) cannot turn thinking off and rejects `disabled`; its
+    // reasoning_content is replayed instead (see replaysReasoningContent).
+    if (requiresKimiReasoningReplay(model)) return {};
 
-    // Kimi K2.5/K2.6 thinking-mode tool turns require provider-specific
-    // reasoning_content replay. CoWork's provider-agnostic transcript does not
-    // retain that field, so disable thinking only for tool calls.
+    // K2.5/K2.6 thinking-mode tool turns would also need reasoning_content
+    // replay; those models allow thinking off, so disable it for tool calls.
     return { thinking: { type: "disabled" } };
+  }
+
+  /**
+   * Kimi K3 and K2.7 Code always think and require every assistant message to
+   * be resent with its reasoning_content, so this route keeps that field.
+   */
+  private replaysReasoningContent(model: string): boolean {
+    return requiresKimiReasoningReplay(model);
   }
 
   /**
@@ -426,6 +475,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         deadline.signal,
       );
       const supportsImages = getProviderImageCaps(this.type, model).supportsImages;
+      const replaysReasoningContent = this.replaysReasoningContent(model);
       const toolSupportKey = nativeToolSupportKey(this.type, this.normalizedBaseUrl, model);
       const useTextProtocol =
         this.textToolCallFallback && areNativeToolsUnsupported(toolSupportKey);
@@ -434,6 +484,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         : toOpenAICompatibleMessages(request.messages, request.system, {
             supportsImages,
             systemBlocks: request.systemBlocks,
+            ...(replaysReasoningContent ? { replayReasoningContentForModel: model } : {}),
           });
       const tools =
         request.tools && !useTextProtocol
@@ -544,6 +595,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
 
       const result = fromOpenAICompatibleResponse(data);
+      if (replaysReasoningContent) {
+        const reasoning = reasoningFromChatCompletionMessage(data?.choices?.[0]?.message, model);
+        if (reasoning.length > 0) result.reasoning = reasoning;
+      }
       if (!this.textToolCallFallback || !offeredTools) return result;
       return applyTextToolCallFallback(result, request, {
         providerType: this.type,

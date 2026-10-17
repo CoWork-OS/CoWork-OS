@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import type { LLMProviderType, LLMSettingsData, PersonaId } from "../../shared/types";
 import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
 import { GEMINI_DEFAULT_MODEL, OPENROUTER_FREE_MODEL_ID } from "../../shared/llm-provider-catalog";
+import { KIMI_DEFAULT_MODEL } from "../../shared/kimi-models";
 import {
   deriveOnboardingPersonalityPreset,
   deriveOnboardingPersona,
@@ -362,7 +363,7 @@ export function getOnboardingDefaultModel(provider: LLMProviderType): string {
     case "deepseek":
       return "deepseek-chat";
     case "kimi":
-      return "kimi-k2.5";
+      return KIMI_DEFAULT_MODEL;
     default:
       return "sonnet-4";
   }

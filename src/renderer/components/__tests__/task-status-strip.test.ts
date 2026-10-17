@@ -31,6 +31,31 @@ function model(overrides: Partial<TaskStatusStripViewModel> = {}): TaskStatusStr
 }
 
 describe("TaskStatusStrip", () => {
+  it("shows the failure reason without opening the activity drawer", () => {
+    const markup = renderToStaticMarkup(
+      createElement(TaskStatusStrip, {
+        model: model({
+          state: "failed",
+          primaryLabel: "Failed",
+          failureLabel: "ChatGPT usage limit reached",
+        }),
+        activityGroups: [],
+        outcomeMetrics: [],
+      }),
+    );
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("ChatGPT usage limit reached");
+    const recovered = renderToStaticMarkup(
+      createElement(TaskStatusStrip, {
+        model: model({ state: "working", failureLabel: "Old failure" }),
+        activityGroups: [],
+        outcomeMetrics: [],
+      }),
+    );
+    expect(recovered).not.toContain("Old failure");
+  });
+
   it("renders an accessible compact control without a prose-derived metric", () => {
     const markup = renderToStaticMarkup(
       createElement(TaskStatusStrip, {

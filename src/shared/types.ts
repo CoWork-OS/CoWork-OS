@@ -4176,6 +4176,7 @@ export interface TaskStatusStripViewModel {
   tone: "neutral" | "active" | "success" | "warning" | "danger";
   primaryLabel: string;
   phaseLabel?: string;
+  failureLabel?: string;
   compactMetricSlots: TaskStatusMetricSlot[];
   planSteps: PlanStep[];
   activeStepId?: string;

@@ -13544,6 +13544,21 @@ button.collab-timeline-thought-agent:hover {
   font-size: 12px;
 }
 
+.task-status-failure {
+  align-items: flex-start;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--color-error) 9%, transparent);
+}
+
+.task-status-failure svg {
+  flex-shrink: 0;
+}
+
+.task-status-failure span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .task-status-drawer-section {
   gap: 6px;
   margin-top: 12px;

@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-stage-labels-2026-10-17",
+  "title": "Internal execution stage identifiers leak into user status labels",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 648,
+    "pullRequest": 668
+  },
+  "prompt": "Complete an ordinary task and inspect stage boundary labels in its activity/status surfaces.",
+  "assertions": {
+    "requiredBehavior": "Render readable stage labels such as Response ready, preserving unknown or ordinary text."
+  },
+  "executableTests": [
+    "src/shared/__tests__/timeline-v2.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/shared/__tests__/timeline-v2.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

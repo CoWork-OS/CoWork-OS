@@ -6,6 +6,25 @@ import type {
   ResponseStylePreferences,
 } from "./types";
 
+import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "./access-profiles";
+import type { InteractionModeSelection } from "./interaction-mode";
+
+/** The concrete task a new user can run without typing (docs/getting-started.md). */
+export const ONBOARDING_FIRST_TASK_PROMPT =
+  "Create a small spreadsheet with six columns and four example rows for a project tracker. Save it in this workspace.";
+
+/**
+ * How the task started from onboarding runs: Do, on Ask for approval. Onboarding sets both
+ * instead of asking, so the first task needs no decision before it starts.
+ */
+export const ONBOARDING_FIRST_TASK_OPTIONS: {
+  accessProfileId: AccessProfileId;
+  agentConfig: { interactionMode: InteractionModeSelection };
+} = {
+  accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
+  agentConfig: { interactionMode: { mode: "smart" } },
+};
+
 export type OnboardingAssistantTraitId = "sharp" | "friendly" | "witty" | "adaptive";
 export type OnboardingTimeDrainId =
   | "planning"

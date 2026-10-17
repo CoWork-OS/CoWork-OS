@@ -16981,6 +16981,85 @@ a,
   color: rgba(255, 248, 245, 0.68);
 }
 
+/* Provider step routes: one no-key primary, quiet secondary sign-ins, text links. */
+.onboarding-route-primary {
+  width: 100%;
+  max-width: 720px;
+  min-height: 0;
+  margin-top: 24px;
+  border-color: rgba(255, 248, 245, 0.42);
+  background: rgba(255, 248, 245, 0.12);
+}
+
+.onboarding-route-primary:hover:not(:disabled) {
+  border-color: rgba(255, 248, 245, 0.7);
+  background: rgba(255, 248, 245, 0.16);
+}
+
+.onboarding-route-note {
+  width: 100%;
+  max-width: 720px;
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: rgba(255, 248, 245, 0.56);
+}
+
+.onboarding-route-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  max-width: 720px;
+  margin-top: 18px;
+}
+
+.onboarding-route-secondary {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 248, 245, 0.18);
+  background: transparent;
+  color: var(--onboarding-warm-white);
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.onboarding-route-secondary:hover:not(:disabled) {
+  border-color: rgba(255, 248, 245, 0.42);
+  background: rgba(255, 248, 245, 0.06);
+}
+
+.onboarding-route-secondary:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.onboarding-route-links {
+  display: flex;
+  gap: 18px;
+  width: 100%;
+  max-width: 720px;
+  margin-top: 18px;
+}
+
+.onboarding-route-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(255, 248, 245, 0.62);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow: visible;
+  cursor: pointer;
+}
+
+.onboarding-route-link:hover {
+  color: var(--onboarding-warm-white);
+}
+
 .onboarding-provider-heading {
   width: 100%;
   max-width: 720px;
@@ -17006,9 +17085,10 @@ a,
   transition: all 0.3s ease;
   text-align: left;
   display: inline-flex;
+  flex-direction: column;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .onboarding-provider-name {
@@ -17947,6 +18027,35 @@ a,
 .theme-light .onboarding-ai-primary-copy,
 .theme-light .onboarding-provider-heading {
   color: rgba(26, 24, 23, 0.62);
+}
+
+.theme-light .onboarding-route-primary {
+  border-color: rgba(26, 24, 23, 0.4);
+  background: rgba(26, 24, 23, 0.07);
+}
+
+.theme-light .onboarding-route-primary:hover:not(:disabled) {
+  border-color: rgba(26, 24, 23, 0.62);
+  background: rgba(26, 24, 23, 0.1);
+}
+
+.theme-light .onboarding-route-secondary {
+  color: #1a1817;
+  border-color: rgba(26, 24, 23, 0.18);
+}
+
+.theme-light .onboarding-route-secondary:hover:not(:disabled) {
+  border-color: rgba(26, 24, 23, 0.4);
+  background: rgba(26, 24, 23, 0.04);
+}
+
+.theme-light .onboarding-route-note,
+.theme-light .onboarding-route-link {
+  color: rgba(26, 24, 23, 0.6);
+}
+
+.theme-light .onboarding-route-link:hover {
+  color: #1a1817;
 }
 
 .theme-light .onboarding-back-btn {

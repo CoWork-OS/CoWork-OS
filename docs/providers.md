@@ -64,7 +64,7 @@ integration.
 | Claude                 | Claude API key or supported account token in Settings          | API or provider-controlled extra usage; verify current Anthropic terms                                             |
 | Azure Anthropic        | API key + endpoint + deployment in Settings                    | Pay-per-token via Azure                                                                                            |
 | Google Gemini          | API key in Settings                                            | Free usage available through Google AI Studio subject to Google's current limits; pay-per-token beyond free limits |
-| OpenRouter             | API key in Settings (default provider)                         | Free model options available; pay-per-token for premium models                                                     |
+| OpenRouter             | Sign in during onboarding (no key), or API key in Settings     | Free model options available; pay-per-token for premium models                                                     |
 | DeepSeek               | API key in Settings                                            | Provider billing                                                                                                   |
 | OpenAI (API Key)       | API key in Settings                                            | Pay-per-token                                                                                                      |
 | OpenAI (ChatGPT)       | Sign in with ChatGPT (official flow; legacy Codex sign-in kept as an unofficial fallback) | Provider-controlled plan eligibility and usage limits apply                                                        |
@@ -469,6 +469,33 @@ Models: `gemini-2.5-flash` (default, fast), `gemini-2.5-pro` (most capable)
 ## OpenRouter
 
 Access multiple AI providers through one API.
+
+### Sign in with OpenRouter (no key)
+
+Onboarding's first option is **Continue with OpenRouter (free models, no key)**. It uses
+OpenRouter's [OAuth PKCE flow](https://openrouter.ai/docs/use-cases/oauth-pkce):
+
+1. CoWork opens `https://openrouter.ai/auth` in your browser with a one-time S256 code
+   challenge and a callback to a short-lived server on your computer's loopback address
+   (`127.0.0.1`, random port, path `/callback`).
+2. Sign in to OpenRouter or create an account, then approve the request. OpenRouter redirects
+   back with an authorization code.
+3. CoWork exchanges the code and its verifier at `POST https://openrouter.ai/api/v1/auth/keys`
+   for an API key scoped to your OpenRouter account, labelled "CoWork OS". The key is stored in
+   the encrypted settings store (Electron `safeStorage`) like any other credential and is never
+   sent to the app window.
+
+The sign-in itself proves the key, so onboarding skips the connection test. A first sign-in
+selects `openrouter/free`, OpenRouter's free-models router: it picks a free model that supports
+the request's needs (tools, images, structured output), so a new account with no credits can run
+a task. Free models are slower and less capable than paid ones and have their own rate limits.
+Pick another model at any time in the model picker or in **Settings > AI & Models**. Signing in
+again with an existing key keeps the model you chose.
+
+You can manage or revoke the key at [openrouter.ai/keys](https://openrouter.ai/keys). The
+sign-in waits five minutes for the browser; start it again if it times out.
+
+### OpenRouter API key
 
 1. Get API key from [OpenRouter](https://openrouter.ai/keys)
 2. Configure in **Settings > AI & Models > Model Access > OpenRouter**

@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-restored-import-2026-10-17",
+  "title": "Sending a restored attachment fails native-picker approval after restart",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 646,
+    "pullRequest": 666
+  },
+  "prompt": "Attach a local text file to an unsent draft, quit and restart, restore the draft and send it.",
+  "assertions": {
+    "requiredBehavior": "Import only integrity-checked staged bytes for the same workspace, preserving original filename and MIME type. Ordinary external files must still require picker approval."
+  },
+  "executableTests": [
+    "src/electron/agent/runtime/__tests__/composer-draft-attachment-store.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/runtime/__tests__/composer-draft-attachment-store.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

@@ -183,7 +183,10 @@ export default defineConfig({
       },
     ],
 
-    socialLinks: [{ icon: "github", link: "https://github.com/CoWork-OS/CoWork-OS" }],
+    socialLinks: [
+      { icon: "github", link: "https://github.com/CoWork-OS/CoWork-OS" },
+      { icon: "discord", link: "https://discord.gg/UjykKwjhRC" },
+    ],
 
     search: {
       provider: "local",

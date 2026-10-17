@@ -19,7 +19,7 @@ Good starting points are labeled [`good first issue`](https://github.com/CoWork-
 Before you open an issue or start coding:
 
 - Search [open and closed issues](https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue) and [pull requests](https://github.com/CoWork-OS/CoWork-OS/pulls?q=is%3Apr).
-- Search [Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions) for questions and design ideas.
+- Search [Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions) for questions and design ideas, or ask in #contributors on [Discord](https://discord.gg/UjykKwjhRC).
 - For anything larger than a bug fix, open an issue or Discussion describing the change before writing it, so we can agree on the approach. We reply to new issues within a day.
 
 ## Skill or tool?
@@ -85,4 +85,4 @@ Use the [issue templates](https://github.com/CoWork-OS/CoWork-OS/issues/new/choo
 
 ## Questions
 
-Ask in [Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions). Maintainer release steps are in the [Development Guide](development.md#releasing-maintainers).
+Ask in [Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions), or chat in #contributors on [Discord](https://discord.gg/UjykKwjhRC). Maintainer release steps are in the [Development Guide](development.md#releasing-maintainers).

@@ -15,6 +15,7 @@
   <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://github.com/CoWork-OS/CoWork-OS/discussions"><img src="https://img.shields.io/github/discussions/CoWork-OS/CoWork-OS" alt="Discussions"></a>
+  <a href="https://discord.gg/UjykKwjhRC"><img src="https://img.shields.io/discord/1561115815695097986?label=Discord&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/github/issues/CoWork-OS/CoWork-OS/good%20first%20issue" alt="Good first issues"></a>
 </p>
 
@@ -98,6 +99,7 @@ From the terminal: `cowork` opens the terminal UI and `cowork run "who are you?"
 
 ## Community
 
+- **Chat:** [Discord](https://discord.gg/UjykKwjhRC): #help for questions, #show-and-tell for what you built, #contributors for working on CoWork OS
 - **Questions and ideas:** [GitHub Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions)
 - **Bugs and requests:** [Issues](https://github.com/CoWork-OS/CoWork-OS/issues). We reply within a day.
 - **Contribute:** start with a [good first issue](https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read [CONTRIBUTING.md](CONTRIBUTING.md).

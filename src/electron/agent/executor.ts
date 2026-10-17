@@ -41771,7 +41771,7 @@ Return ONLY a JSON object:
     }
 
     const providerType = this.provider.type;
-    const providerCaps = getProviderImageCaps(providerType);
+    const providerCaps = getProviderImageCaps(providerType, this.modelId);
     if (!providerCaps.supportsImages) {
       const hasVideo = images.some((attachment) => this.isVideoAttachment(attachment));
       const hasImage = images.some((attachment) => !this.isVideoAttachment(attachment));
@@ -41834,7 +41834,7 @@ Return ONLY a JSON object:
       }
 
       for (const imageContent of imageContents) {
-        const error = validateImageForProvider(imageContent, providerType);
+        const error = validateImageForProvider(imageContent, providerType, this.modelId);
         if (error) {
           logger.warn(`[TaskExecutor] Skipping image: ${error}`);
           this.emitEvent("log", { message: `Image skipped: ${error}` });

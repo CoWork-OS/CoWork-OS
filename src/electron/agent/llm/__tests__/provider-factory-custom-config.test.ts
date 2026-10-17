@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { LLMProviderFactory } from "../provider-factory";
+import { CUSTOM_PROVIDER_CATALOG } from "../../../../shared/llm-provider-catalog";
 import type { CustomProviderConfig } from "../../../../shared/types";
 
 const dummyModelKey = "sonnet";
@@ -680,10 +681,63 @@ describe("LLMProviderFactory custom provider config resolution", () => {
     expect(models.map((model) => model.key)).toEqual([
       "glm-4.7",
       "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.3-flashx",
+      "glm-5.2",
       "glm-5.1",
-      "GLM-5-Turbo",
-      "GLM-5V-Turbo",
       "glm-4.5-air",
     ]);
+  });
+
+  it.each([
+    ["zai", "https://api.z.ai/api/paas/v4"],
+    ["glm", "https://open.bigmodel.cn/api/paas/v4"],
+  ])("defaults %s to GLM-5.3 on the pay-as-you-go endpoint", (id, baseUrl) => {
+    const entry = CUSTOM_PROVIDER_CATALOG.find((candidate) => candidate.id === id);
+    expect(entry).toMatchObject({ baseUrl, defaultModel: "glm-5.3" });
+    expect(entry?.baseUrl).not.toContain("/coding/");
+    expect(entry?.knownModels).toContain("glm-5.3-flash");
+  });
+
+  it("keeps a saved Z.AI model that is no longer in the documented list", async () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "zai",
+      modelKey: "sonnet-3-5",
+      customProviders: {
+        zai: {
+          apiKey: "zai-test",
+          baseUrl: "https://api.z.ai/api/paas/v4",
+          model: "GLM-5-Turbo",
+        },
+      },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+
+    const models = await LLMProviderFactory.getCustomProviderModels("zai");
+
+    expect(models.map((model) => model.key)).toContain("GLM-5-Turbo");
+    expect(models.map((model) => model.key)).toContain("glm-5.3");
+  });
+
+  it("identifies CoWork to Z.AI with a User-Agent", async () => {
+    vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue({
+      providerType: "zai",
+      modelKey: "sonnet-3-5",
+      customProviders: {
+        zai: { apiKey: "zai-test", baseUrl: "https://api.z.ai/api/paas/v4" },
+      },
+    } as Any);
+    vi.spyOn(LLMProviderFactory, "saveSettings").mockImplementation(() => {});
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "glm-5.3" }] }),
+    } as Response);
+
+    await LLMProviderFactory.getCustomProviderModels("zai");
+
+    const headers = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["User-Agent"]).toMatch(/^CoWork-OS(\/\S+)?$/);
+    expect(headers.Authorization).toBe("Bearer zai-test");
   });
 });

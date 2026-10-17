@@ -89,8 +89,8 @@ integration.
 | OpenCode Zen                  | API key + base URL in Settings                 | Provider billing                                                        |
 | OpenCode Go                   | API key or supported account token in Settings | Provider-controlled plan eligibility and usage limits apply             |
 | Google Vertex                 | Access token + base URL in Settings            | Provider billing                                                        |
-| Z.AI                          | API key + base URL in Settings                 | Provider billing                                                        |
-| GLM                           | API key + base URL in Settings                 | Provider billing                                                        |
+| Z.AI                          | API key in Settings                            | Pay-as-you-go API billing; GLM Coding Plan keys are not supported       |
+| GLM (BigModel China)          | API key in Settings                            | Pay-as-you-go API billing; GLM Coding Plan keys are not supported       |
 | Vercel AI Gateway             | API key in Settings                            | Provider billing                                                        |
 | Cerebras                      | API key in Settings                            | Provider billing                                                        |
 | Mistral                       | API key in Settings                            | Provider billing                                                        |
@@ -682,8 +682,8 @@ Configure these in **Settings** > **AI & Models** > **Model Access** by entering
 | ----------------------------- | ----------------------------------- |
 | OpenCode Zen                  | API key + base URL in Settings      |
 | Google Vertex                 | Access token + base URL in Settings |
-| Z.AI                          | API key + base URL in Settings      |
-| GLM                           | API key + base URL in Settings      |
+| Z.AI                          | API key in Settings                 |
+| GLM (BigModel China)          | API key in Settings                 |
 | Vercel AI Gateway             | API key in Settings                 |
 | Cerebras                      | API key in Settings                 |
 | Mistral                       | API key in Settings                 |

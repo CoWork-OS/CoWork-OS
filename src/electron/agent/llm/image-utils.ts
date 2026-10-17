@@ -10,6 +10,7 @@ import {
   LLMImageMimeType,
   LLMMessage,
   LLMProviderImageCaps,
+  MODEL_IMAGE_CAPS,
   PROVIDER_IMAGE_CAPS,
 } from "./types";
 import type { LLMProviderType } from "../../../shared/types";
@@ -37,9 +38,19 @@ export function isSupportedImageFile(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-/** Get the image capability limits for a given provider type. */
-export function getProviderImageCaps(providerType: LLMProviderType): LLMProviderImageCaps {
+/**
+ * Get the image capability limits for a provider type, or for one of its models when
+ * the provider's models differ in image input.
+ */
+export function getProviderImageCaps(
+  providerType: LLMProviderType,
+  model?: string,
+): LLMProviderImageCaps {
+  const modelCaps = model
+    ? MODEL_IMAGE_CAPS[providerType]?.[model.trim().toLowerCase()]
+    : undefined;
   return (
+    modelCaps ??
     PROVIDER_IMAGE_CAPS[providerType] ?? {
       supportsImages: false,
       maxImageBytes: 0,
@@ -55,8 +66,9 @@ export function getProviderImageCaps(providerType: LLMProviderType): LLMProvider
 export function validateImageForProvider(
   image: LLMImageContent,
   providerType: LLMProviderType,
+  model?: string,
 ): string | null {
-  const caps = getProviderImageCaps(providerType);
+  const caps = getProviderImageCaps(providerType, model);
   if (!caps.supportsImages) {
     return `Provider "${providerType}" does not support inline images.`;
   }
@@ -139,8 +151,9 @@ export function imageToTextFallback(image: LLMImageContent): string {
 export function stripImagesForUnsupportedProvider(
   messages: LLMMessage[],
   providerType: LLMProviderType,
+  model?: string,
 ): LLMMessage[] {
-  const caps = getProviderImageCaps(providerType);
+  const caps = getProviderImageCaps(providerType, model);
   if (caps.supportsImages) return messages;
 
   return messages.map((msg) => {

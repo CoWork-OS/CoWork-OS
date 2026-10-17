@@ -31,7 +31,6 @@ const KNOWN_UNPRICED: Record<string, string> = {
   "kimi-k2-turbo-preview": "retired preview id, not in the catalogue",
   "kimi-k2-thinking": "retired id, not in the catalogue",
   "kimi-k2-thinking-turbo": "retired id, not in the catalogue",
-  "glm::glm-4-plus": "legacy Zhipu model, not in the catalogue",
   "cerebras::llama3.1-8b": "not listed for Cerebras in the catalogue",
   "venice::llama-3.3-70b": "Venice route, not in the catalogue",
   "xiaomi::mimo-v2-flash": "not in the catalogue",

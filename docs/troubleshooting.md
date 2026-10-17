@@ -30,6 +30,14 @@ Use `npm run dev`, not `npm run dev:react`, so the renderer receives the Electro
 
 This is a best-effort WSL/WSLg compatibility path, not a claim of general Linux desktop support. Title-bar appearance and control placement depend on the Windows host, WSLg, desktop theme, and window manager, so release validation still requires a real WSL visual check.
 
+## Windows says "Windows protected your PC"
+
+SmartScreen shows this for unsigned installers downloaded in a browser. Click **More info**, check the app name, then **Run anyway**. To skip the prompt, install from PowerShell instead; the script verifies the installer's checksum first (details in [Windows Installation](windows-installation.md)):
+
+```powershell
+irm https://coworkosapp.com/install.ps1 | iex
+```
+
 ## macOS app won't launch with "Apple could not verify"
 
 On a supported macOS version, an unsigned CoWork OS DMG may show **"Apple could not verify CoWork OS is free of malware"** or **`"CoWork OS" was blocked to protect your Mac`** on first launch.
@@ -37,7 +45,7 @@ On a supported macOS version, an unsigned CoWork OS DMG may show **"Apple could 
 To avoid the dialog entirely, install from the terminal instead of the DMG. Browsers add the quarantine attribute that triggers Gatekeeper; `curl` does not, and the installer verifies the release checksum and the app signature before copying it into Applications (details in [macOS Installation](macos-installation.md)):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+curl -fsSL https://coworkosapp.com/install.sh | bash
 ```
 
 If you already copied the app from the DMG, use the macOS Gatekeeper override:

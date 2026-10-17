@@ -19,10 +19,10 @@ The app itself is identical in every method. Your settings and data live outside
 ## Terminal installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+curl -fsSL https://coworkosapp.com/install.sh | bash
 ```
 
-The script ([`scripts/install-macos.sh`](../scripts/install-macos.sh)) does the following and stops at the first failed check without installing anything:
+`coworkosapp.com/install.sh` serves [`scripts/install-macos.sh`](../scripts/install-macos.sh) from the `main` branch; `https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh` is the same file. The script does the following and stops at the first failed check without installing anything:
 
 1. Confirms it is running on macOS 13 or later on an Apple Silicon Mac and that `curl`, `ditto`, `codesign` and `plutil` are available (all ship with macOS).
 2. Downloads the release's updater metadata (`latest-mac.yml`) from GitHub Releases and picks the ZIP for this architecture.
@@ -35,7 +35,7 @@ Re-run the same command to update. If CoWork OS is running from the install loca
 Options go after `bash -s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash -s -- --version 0.5.60 --no-launch
+curl -fsSL https://coworkosapp.com/install.sh | bash -s -- --version 0.5.60 --no-launch
 ```
 
 | Option              | Effect                                                                  |
@@ -86,7 +86,7 @@ npm install -g cowork-os
 cowork-os
 ```
 
-npm downloads through Node.js, which does not attach the quarantine attribute, and the Electron runtime it fetches is likewise unquarantined, so there is no Gatekeeper dialog. This path compiles native modules on your machine, needs Node.js, and also works on Intel Macs. See the [README](../README.md#or-install-via-npm) for details.
+npm downloads through Node.js, which does not attach the quarantine attribute, and the Electron runtime it fetches is likewise unquarantined, so there is no Gatekeeper dialog. This path compiles native modules on your machine, needs Node.js, and also works on Intel Macs. See the [README](../README.md#install) for details.
 
 ## First start
 

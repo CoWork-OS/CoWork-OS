@@ -621,3 +621,68 @@ Multi-provider web search for research tasks with automatic retry and fallback. 
 DuckDuckGo is always available as the last-resort fallback. When paid providers are configured, they are tried first in the configured order, with DuckDuckGo only used if all others fail. Search settings also support explicit primary/fallback ordering and provider cooldown behavior after repeated failures.
 
 Configure paid providers in **Settings** > **Web Search**.
+
+## Setup in Settings
+
+Where each route is configured in the app. Route details are in the sections above.
+
+### Model Providers
+
+Open **Settings > AI & Models > Model Access**:
+
+| Provider            | Setup                                                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude              | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or, where supported and permitted for your account, use the **Claude Subscription** UI route with a token from `claude setup-token` |
+| Google Gemini       | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey); Google AI Studio free usage may be available subject to current limits                                                                           |
+| OpenRouter          | Enter API key from [openrouter.ai](https://openrouter.ai/keys); free model options are available, and `openrouter/pareto-code` / `openrouter/pareto-code:nitro` support coding-score-based routing                             |
+| OpenAI (API Key)    | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys)                                                                                                                                                 |
+| OpenAI (ChatGPT)    | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan                                                                                     |
+| AWS Bedrock         | Enter AWS Access Key, Secret Key, and Region                                                                                                                                                                                   |
+| Ollama              | Install Ollama, pull a model, select it                                                                                                                                                                                        |
+| MLX (Apple Silicon) | Install `mlx-lm`, select a compatible quantized model, start the MLX server                                                                                                                                                    |
+| Groq                | Enter API key in Settings; free usage may be available subject to current limits                                                                                                                                               |
+| xAI (Grok API)      | Enter API key in Settings                                                                                                                                                                                                      |
+| xAI Grok OAuth      | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account                                                                                                                  |
+| Kimi (Moonshot)     | Enter API key in Settings                                                                                                                                                                                                      |
+
+Prompt caching is enabled by default on supported Anthropic and GPT-style routes. CoWork automatically keeps stable session prompt sections cacheable and dynamic turn context uncached, so follow-ups can reuse the provider-side prefix without caching the clock, recall, or one-off guidance.
+
+### Compatible / Gateway Providers
+
+Configure these in **Settings** > **AI & Models** > **Model Access** by entering API keys or tokens, model IDs, and base URLs when required.
+
+| Provider                      | Setup                               |
+| ----------------------------- | ----------------------------------- |
+| OpenCode Zen                  | API key + base URL in Settings      |
+| Google Vertex                 | Access token + base URL in Settings |
+| Z.AI                          | API key + base URL in Settings      |
+| GLM                           | API key + base URL in Settings      |
+| Vercel AI Gateway             | API key in Settings                 |
+| Cerebras                      | API key in Settings                 |
+| Mistral                       | API key in Settings                 |
+| GitHub Copilot                | GitHub token in Settings            |
+| Moonshot (Kimi)               | API key in Settings                 |
+| Qwen Portal                   | API key in Settings                 |
+| MiniMax                       | API key in Settings                 |
+| MiniMax Portal                | API key in Settings                 |
+| Xiaomi MiMo                   | API key in Settings                 |
+| Venice AI                     | API key in Settings                 |
+| Synthetic                     | API key in Settings                 |
+| Kimi Code                     | API key in Settings                 |
+| OpenAI-Compatible (Custom)    | API key + base URL in Settings      |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings      |
+
+Advanced override: prompt caching can be disabled manually with `promptCaching.mode: "off"` in the saved LLM settings payload or by launching the app with `COWORK_PROMPT_CACHE_MODE=off`.
+
+### Search Providers (Optional — DuckDuckGo works out of the box)
+
+Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **AI & Models** > **Web Search**:
+
+| Provider   | Setup                                                                   |
+| ---------- | ----------------------------------------------------------------------- |
+| DuckDuckGo | Built-in — no setup needed (automatic fallback)                         |
+| Tavily     | Enter API key from [tavily.com](https://tavily.com)                     |
+| Exa        | Enter API key from [exa.ai](https://exa.ai/)                            |
+| Brave      | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
+| SerpAPI    | Enter API key from [serpapi.com](https://serpapi.com)                   |
+| Google     | Enter API key and Search Engine ID from Google Cloud Console            |

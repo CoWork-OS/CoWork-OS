@@ -19,6 +19,7 @@ import type { LLMTool } from "../llm/types";
 import { formatSpreadsheetValue } from "../../../shared/spreadsheet-number-format";
 import { isDateNumberFormat } from "../../utils/document-generators/spreadsheet-cells";
 import { extractPdfText } from "../../utils/pdf-text";
+import { loadSpreadsheetCells } from "../../utils/exceljs-loader";
 import {
   buildSensitiveSourceRefForPath,
   buildUntrustedContentBanner,
@@ -697,10 +698,8 @@ export class DocumentParserTools {
   }
 
   private async parseXlsx(filePath: string, format: "text" | "structured"): Promise<string> {
-    const ExcelJS = await import("exceljs");
-    const workbook = new ExcelJS.default.Workbook();
     const buffer = await readDocumentArchiveBuffer(filePath);
-    await workbook.xlsx.load(buffer as unknown as import("exceljs").Buffer);
+    const { workbook, chartCount } = await loadSpreadsheetCells(buffer);
     let fallbackFormats = new Map<string, Map<string, string>>();
     try {
       fallbackFormats = await collectUnresolvedBuiltInFormats(buffer);
@@ -708,7 +707,9 @@ export class DocumentParserTools {
       // The cell grid and the formats ExcelJS resolved are still reported.
     }
 
-    const lines: string[] = [];
+    const lines: string[] = chartCount
+      ? [`Charts in workbook: ${chartCount}. This text reader extracts cells, not chart graphics.`]
+      : [];
     const date1904 = Boolean(workbook.properties?.date1904);
     workbook.eachSheet((sheet) => {
       if (format === "structured") {

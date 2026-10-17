@@ -191,6 +191,14 @@ function createWarnings(
     },
   ];
 
+  if (preview.readOnlyReason) {
+    warnings.push({
+      code: "compat-chart-read-only",
+      severity: "warning",
+      message: preview.readOnlyReason,
+    });
+  }
+
   if (format === "xlsm") {
     warnings.push({
       code: "compat-macro-read-only",
@@ -313,8 +321,11 @@ export class SpreadsheetWorkbookSessionService {
       activeSheetId: sheets[0]?.id || "sheet-1",
       capabilities: {
         ...BASE_CAPABILITIES,
-        canEditCells: format !== "xlsm",
-        canEditStructure: format !== "xlsm" && !preview.sheets.some((sheet) => sheet.truncated),
+        canEditCells: format !== "xlsm" && !preview.readOnlyReason,
+        canEditStructure:
+          format !== "xlsm" &&
+          !preview.readOnlyReason &&
+          !preview.sheets.some((sheet) => sheet.truncated),
         preservesUnsupportedWorkbookParts: format === "csv" || format === "tsv",
       },
       warnings: createWarnings(preview, format),
@@ -360,7 +371,7 @@ export class SpreadsheetWorkbookSessionService {
     try {
       const record = this.getRecord(sessionId);
       if (!record.session.capabilities.canEditCells) {
-        throw new Error("This spreadsheet is read-only in CoWork");
+        throw new Error(record.preview.readOnlyReason || "This spreadsheet is read-only in CoWork");
       }
       if (patches.length > MAX_PATCHES_PER_APPLY) {
         throw new Error("Too many spreadsheet changes in one save");
@@ -411,7 +422,7 @@ export class SpreadsheetWorkbookSessionService {
     try {
       const record = this.getRecord(sessionId);
       if (!record.session.capabilities.canEditCells) {
-        throw new Error("This spreadsheet is read-only in CoWork");
+        throw new Error(record.preview.readOnlyReason || "This spreadsheet is read-only in CoWork");
       }
       const safePath = await resolveWorkbookPathWithinWorkspace(
         record.filePath,

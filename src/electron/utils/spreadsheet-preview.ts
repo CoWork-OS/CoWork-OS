@@ -1,6 +1,10 @@
 import { readDocumentArchiveBuffer } from "../security/document-archive";
 import type ExcelJS from "exceljs";
-import { loadExcelJS } from "./exceljs-loader";
+import {
+  CHART_WORKBOOK_READ_ONLY_REASON,
+  loadExcelJS,
+  loadSpreadsheetCells,
+} from "./exceljs-loader";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {
@@ -109,9 +113,8 @@ function isStyled(cell: ExcelJS.Cell): boolean {
 export async function buildSpreadsheetPreviewFromFile(
   filePath: string,
 ): Promise<SpreadsheetPreview> {
-  const workbook = new (await loadExcelJS()).Workbook();
-  await workbook.xlsx.load(
-    (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,
+  const { workbook, chartCount } = await loadSpreadsheetCells(
+    await readDocumentArchiveBuffer(filePath),
   );
 
   // Files saved by tools that drop cached formula results (openpyxl, for one) would show every
@@ -173,6 +176,7 @@ export async function buildSpreadsheetPreviewFromFile(
 
   return {
     activeSheetName: sheets[0]?.name,
+    ...(chartCount ? { readOnlyReason: CHART_WORKBOOK_READ_ONLY_REASON } : {}),
     sheetCount: sheets.length,
     sheets,
   };
@@ -450,9 +454,10 @@ export async function writeSpreadsheetPreviewToFile(
 ): Promise<SpreadsheetPreview> {
   const workbook = new (await loadExcelJS()).Workbook();
   try {
-    await workbook.xlsx.load(
-      (await readDocumentArchiveBuffer(filePath)) as unknown as ExcelJS.Buffer,
-    );
+    const buffer = await readDocumentArchiveBuffer(filePath);
+    const { chartCount } = await loadSpreadsheetCells(buffer);
+    if (chartCount) throw new Error(CHART_WORKBOOK_READ_ONLY_REASON);
+    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     // If the file was removed between preview and save, recreate a workbook.

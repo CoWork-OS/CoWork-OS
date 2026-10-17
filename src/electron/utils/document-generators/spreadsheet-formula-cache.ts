@@ -8,8 +8,7 @@
  * other part of the file stay exactly as the program saved them. Results that are already cached
  * are never changed, and formulas the evaluator does not cover are reported, not replaced.
  */
-import type ExcelJS from "exceljs";
-import { loadExcelJS } from "../exceljs-loader";
+import { loadSpreadsheetCells } from "../exceljs-loader";
 import JSZip from "jszip";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -199,20 +198,8 @@ export async function restoreXlsxFormulaCaches(
     if (missing.size > 0) missingByPart.set(part, missing);
   }
 
-  const workbook = new (await loadExcelJS()).Workbook();
-  // ExcelJS cannot reconcile some valid openpyxl chart drawings. Cell computation
-  // needs no charts, drawings, or media. Use a stripped in-memory input, while
-  // retaining every original non-cell part in the output archive below.
-  const calculationZip = new JSZip();
-  for (const [name, entry] of Object.entries(zip.files)) {
-    if (!entry.dir && !/^xl\/(?:drawings|charts|media)\//.test(name)) {
-      calculationZip.file(name, await entry.async("nodebuffer"), { createFolders: false });
-    }
-  }
-  const calculationBuffer = await calculationZip.generateAsync({ type: "nodebuffer" });
-  await workbook.xlsx.load(calculationBuffer as unknown as ExcelJS.Buffer, {
-    ignoreNodes: ["drawing"],
-  });
+  // Only cell values are loaded for calculation; the original package is patched below.
+  const { workbook } = await loadSpreadsheetCells(buffer);
   const dateFormattedText = workbook.worksheets.flatMap((sheet) =>
     findDateFormattedTextCells(sheet).map((address) => `${sheet.name}!${address}`),
   );

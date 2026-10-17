@@ -26,6 +26,7 @@ import {
   DocumentParserTools,
 } from "../document-parser-tools";
 import { SkillTools } from "../skill-tools";
+import { buildOpenpyxlChartWorkbook } from "../../../utils/document-generators/__tests__/openpyxl-style-workbook";
 
 describe("DocumentParserTools", () => {
   let tmpDir: string;
@@ -42,6 +43,31 @@ describe("DocumentParserTools", () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("reads cells and chart count from a workbook with an openpyxl drawing", async () => {
+    const original = await buildOpenpyxlChartWorkbook();
+    const file = path.join(tmpDir, "chart.xlsx");
+    fs.writeFileSync(file, original);
+    const tools = new DocumentParserTools({
+      id: "ws-1",
+      name: "Workspace",
+      path: tmpDir,
+      createdAt: Date.now(),
+      permissions: {
+        read: true,
+        write: true,
+        delete: true,
+        network: false,
+        shell: false,
+        allowedPaths: [],
+      },
+    } as Any);
+    const result = await tools.parseDocument({ path: "chart.xlsx", format: "structured" });
+    expect(result.content).toContain("Charts in workbook: 1");
+    expect(result.content).toContain("Audio kit rental");
+    expect(result.content).toContain("=SUM(Expenses!G2:G5)");
+    expect(fs.readFileSync(file)).toEqual(original);
   });
 
   it("uses the plain PDF text extractor for parse_document", async () => {

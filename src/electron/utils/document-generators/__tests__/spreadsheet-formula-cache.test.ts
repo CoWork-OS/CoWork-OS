@@ -11,6 +11,7 @@ import {
 import {
   EXPENSES_SHEET_XML,
   SUMMARY_SHEET_XML,
+  buildOpenpyxlChartWorkbook,
   buildOpenpyxlStyleWorkbook,
 } from "./openpyxl-style-workbook";
 
@@ -51,20 +52,7 @@ const withoutValues = (xml: string) => xml.replace(/<v>[^<]*<\/v>/g, "<v></v>");
 
 describe("restoreXlsxFormulaCaches", () => {
   it("repairs caches in a workbook with an openpyxl chart without changing its drawing or chart parts", async () => {
-    const zip = await JSZip.loadAsync(await buildOpenpyxlStyleWorkbook());
-    zip.file(
-      "xl/drawings/drawing1.xml",
-      '<wsDr xmlns="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"><oneCellAnchor><graphicFrame><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/></a:graphicData></a:graphic></graphicFrame><clientData/></oneCellAnchor></wsDr>',
-    );
-    zip.file(
-      "xl/drawings/_rels/drawing1.xml.rels",
-      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="/xl/charts/chart1.xml" Id="rId1"/></Relationships>',
-    );
-    zip.file(
-      "xl/charts/chart1.xml",
-      '<chartSpace xmlns="http://schemas.openxmlformats.org/drawingml/2006/chart"><chart/></chartSpace>',
-    );
-    const file = await writeFixture(await zip.generateAsync({ type: "nodebuffer" }));
+    const file = await writeFixture(await buildOpenpyxlChartWorkbook());
     const before = await readParts(file);
     const result = await restoreXlsxFormulaCaches(file);
     expect(result).toMatchObject({ restored: 11, rewritten: true, uncached: [] });

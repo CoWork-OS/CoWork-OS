@@ -108,6 +108,9 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Test regression policy classification
+        run: node --test scripts/qa/enforce_eval_regression_policy.test.cjs
+
       - name: Enforce production-failure eval regression policy
         run: npm run qa:eval:enforce-regressions
 

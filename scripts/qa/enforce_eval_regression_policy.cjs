@@ -56,7 +56,15 @@ function isProductionFailureFix(title, body) {
   if (explicitChecked) return true;
 
   // Fallback keyword detection
-  const lowered = text.toLowerCase();
+  // The standard template includes an unchecked incident declaration. Its
+  // wording alone is not an affirmative incident report; keep checking prose
+  // outside that known marker so a real incident still requires an eval case.
+  const lowered = text
+    .replace(
+      /^\s*-\s*\[\s\]\s*(?:This PR fixes a production failure\/incident\.?|Production failure fix\.?)\s*$/gim,
+      "",
+    )
+    .toLowerCase();
   const keywords = [
     "production incident",
     "production failure",

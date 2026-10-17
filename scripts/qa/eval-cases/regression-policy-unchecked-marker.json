@@ -1,0 +1,17 @@
+{
+  "id": "regression-policy-unchecked-marker-2026-10-17",
+  "title": "Unchecked incident template marker is not affirmative incident evidence",
+  "source": {
+    "issue": 681,
+    "audit": "ordinary-workflow-delivery-ci"
+  },
+  "assertions": {
+    "uncheckedMarkerAloneMustPass": true,
+    "checkedMarkerWithoutEvalMustFail": true,
+    "incidentProseWithoutEvalMustFail": true,
+    "changedEvalCaseMustAllowIncidentFix": true,
+    "nonPrExecutionMustSkip": true
+  },
+  "executableCommand": "node --test scripts/qa/enforce_eval_regression_policy.test.cjs",
+  "notes": "Traceability metadata; the executable isolated CLI tests supply measured coverage and run in the CI Regression Policy Gate."
+}

@@ -25,6 +25,7 @@ import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
 import { WebArtifactCard } from "./WebArtifactCard";
+import { FileTypeIcon } from "./FileTypeIcon";
 import "./artifact-viewers.css";
 import { AttachmentTile } from "./AttachmentTile";
 
@@ -336,7 +337,9 @@ export function WebArtifactViewer({
     <section className={`web-artifact-viewer web-artifact-viewer-${mode}`}>
       <div className="web-artifact-viewer-tabbar">
         <div className="web-artifact-viewer-tab">
-          <span className="web-viewer-file-icon">W</span>
+          <span className="web-viewer-file-icon" aria-hidden="true">
+            <FileTypeIcon kind="web" />
+          </span>
           <span className="web-artifact-viewer-tab-title">{fileName}</span>
         </div>
         <button

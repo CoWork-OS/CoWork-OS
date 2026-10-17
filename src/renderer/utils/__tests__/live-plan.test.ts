@@ -7,7 +7,12 @@ import type {
   TaskStatusStripState,
 } from "../../../shared/types";
 import { GENERATED_HANDOFF_STEP_DESCRIPTION } from "../../../shared/generated-plan-steps";
-import { deriveLivePlan, windowLivePlanRows, type LivePlanModel } from "../live-plan";
+import {
+  collapsedLivePlanRow,
+  deriveLivePlan,
+  windowLivePlanRows,
+  type LivePlanModel,
+} from "../live-plan";
 
 function event(type: string, timestamp: number): TaskEvent {
   return {
@@ -234,5 +239,37 @@ describe("windowLivePlanRows", () => {
 
   it("lists everything once expanded", () => {
     expect(describeRows(planOf(10, 5), true)).toHaveLength(10);
+  });
+});
+
+describe("collapsedLivePlanRow", () => {
+  const items = (statuses: LivePlanModel["items"][number]["status"][]) =>
+    statuses.map((status, index) => ({ id: `i${index}`, label: `Item ${index}`, status }));
+  const keptId = (plan: LivePlanModel) => {
+    const row = collapsedLivePlanRow(plan);
+    return row?.kind === "item" ? row.item.id : null;
+  };
+
+  it("keeps the current item", () => {
+    expect(
+      keptId({
+        source: "plan",
+        items: items(["done", "active", "pending"]),
+        doneCount: 1,
+        activeId: "i1",
+      }),
+    ).toBe("i1");
+  });
+
+  it("falls back to the next open item, then the last one", () => {
+    expect(
+      keptId({
+        source: "plan",
+        items: items(["done", "skipped", "blocked", "pending"]),
+        doneCount: 1,
+      }),
+    ).toBe("i2");
+    expect(keptId({ source: "plan", items: items(["done", "done"]), doneCount: 2 })).toBe("i1");
+    expect(keptId({ source: "plan", items: [], doneCount: 0 })).toBeNull();
   });
 });

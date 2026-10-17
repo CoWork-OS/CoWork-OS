@@ -6739,6 +6739,24 @@ button.collab-timeline-thought-agent:hover {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
+/* Markdown is plain text, not a Word file: a slate tile with the Markdown mark. */
+.document-artifact-icon.is-markdown,
+.document-viewer-file-icon.is-markdown {
+  background: linear-gradient(180deg, #64748b 0%, #334155 100%);
+}
+
+/* The glyph inside every artifact tile (FileTypeIcon). */
+.file-type-icon {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+
+.file-type-icon.file-type-icon-markdown {
+  width: 22px;
+  height: 14px;
+}
+
 .document-artifact-file {
   display: flex;
   min-width: 0;
@@ -7277,6 +7295,19 @@ button.collab-timeline-thought-agent:hover {
   .web-artifact-icon {
     width: 32px;
     height: 32px;
+  }
+
+  .spreadsheet-artifact-icon .file-type-icon,
+  .document-artifact-icon .file-type-icon,
+  .presentation-artifact-icon .file-type-icon,
+  .web-artifact-icon .file-type-icon {
+    width: 17px;
+    height: 17px;
+  }
+
+  .document-artifact-icon .file-type-icon.file-type-icon-markdown {
+    width: 20px;
+    height: 12px;
   }
 
   .spreadsheet-artifact-file,
@@ -13708,8 +13739,54 @@ button.collab-timeline-thought-agent:hover {
 }
 
 .live-plan-inner {
+  position: relative;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Folds the list down to the current step and back; sits on the strip chevron's column. */
+.live-plan-toggle {
+  position: absolute;
+  top: 10px;
+  right: 7px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.live-plan-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.live-plan-toggle:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.live-plan-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.live-plan-toggle + .live-plan-list {
+  padding-right: 40px;
+}
+
+/* One line is enough for the current step while folded; full text stays on hover. */
+.live-plan.is-collapsed .live-plan-item .task-status-plan-step-description {
+  -webkit-line-clamp: 1;
 }
 
 .live-plan-inner::after {

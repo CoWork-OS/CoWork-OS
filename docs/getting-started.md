@@ -11,17 +11,23 @@ Rent the model. Own everything else. CoWork OS is the free, open-source AI app f
 
 The desktop app requires **macOS 13 Ventura or later** or Windows 10/11. CoWork OS `0.5.51` is the final release compatible with macOS 12 Monterey.
 
-### Step 1: Download and open the desktop app
+### Step 1: Install and open the desktop app
 
-Choose the macOS or Windows installer from the [latest release](https://github.com/CoWork-OS/CoWork-OS/releases/latest). On macOS, open the DMG and drag CoWork OS into Applications. On Windows, run the published installer. Match your computer's architecture to the available release asset. If no matching installer is listed, do not use an asset for another architecture.
-
-On macOS, the terminal installer avoids the Gatekeeper "Apple could not verify" dialog that the DMG triggers on first launch. It fetches the same release, verifies its checksum and signature, and installs it without the quarantine attribute browsers add to downloads:
+**macOS** (Apple Silicon), in Terminal. No Gatekeeper dialog:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+curl -fsSL https://coworkosapp.com/install.sh | bash
 ```
 
-No Git checkout, compiler, or Node.js installation is needed for the desktop installer. For macOS first-launch security prompts and the DMG's **Open Anyway** steps, see [macOS Installation](macos-installation.md). If you want the terminal interface, use the [released CLI guide](cli.md). To clone, build, or contribute, use the [development guide](development.md).
+**Windows** (64-bit), in PowerShell. No SmartScreen prompt:
+
+```powershell
+irm https://coworkosapp.com/install.ps1 | iex
+```
+
+**With Node.js 24** on any supported system, including Intel Macs: `npm install -g cowork-os`, then `cowork-os`.
+
+The installers fetch the latest release from GitHub, verify its checksum, and open the app. No Git checkout or compiler is needed. If you would rather download the DMG or EXE in a browser, follow [macOS Installation](macos-installation.md) or [Windows Installation](windows-installation.md) for the one-time security prompt. For the terminal interface see the [CLI guide](cli.md); to build from source see the [development guide](development.md).
 
 First launch opens **What would you like to get done?** Choose a suggestion or
 write your own request, then choose **Start task**. CoWork reuses configured model
@@ -402,70 +408,11 @@ When an action falls outside what the selected access profile allows without ask
 
 A card that gets no answer times out after 5 minutes. Unattended runs (schedules, triggers) deny instead of waiting. See [Access Profiles](access-profiles.md).
 
-## Configuring Providers
+## Connect Channels and Apps (Optional)
 
-### Model Providers
+Model routes are covered in [Models & Access](providers.md#setup-in-settings).
 
-Open **Settings > AI & Models > Model Access**:
-
-| Provider            | Setup                                                                                                                                                                                                                          |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Claude              | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or, where supported and permitted for your account, use the **Claude Subscription** UI route with a token from `claude setup-token` |
-| Google Gemini       | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey); Google AI Studio free usage may be available subject to current limits                                                                           |
-| OpenRouter          | Enter API key from [openrouter.ai](https://openrouter.ai/keys); free model options are available, and `openrouter/pareto-code` / `openrouter/pareto-code:nitro` support coding-score-based routing                             |
-| OpenAI (API Key)    | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys)                                                                                                                                                 |
-| OpenAI (ChatGPT)    | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan                                                                                     |
-| AWS Bedrock         | Enter AWS Access Key, Secret Key, and Region                                                                                                                                                                                   |
-| Ollama              | Install Ollama, pull a model, select it                                                                                                                                                                                        |
-| MLX (Apple Silicon) | Install `mlx-lm`, select a compatible quantized model, start the MLX server                                                                                                                                                    |
-| Groq                | Enter API key in Settings; free usage may be available subject to current limits                                                                                                                                               |
-| xAI (Grok API)      | Enter API key in Settings                                                                                                                                                                                                      |
-| xAI Grok OAuth      | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account                                                                                                                  |
-| Kimi (Moonshot)     | Enter API key in Settings                                                                                                                                                                                                      |
-
-Prompt caching is enabled by default on supported Anthropic and GPT-style routes. CoWork automatically keeps stable session prompt sections cacheable and dynamic turn context uncached, so follow-ups can reuse the provider-side prefix without caching the clock, recall, or one-off guidance.
-
-### Compatible / Gateway Providers
-
-Configure these in **Settings** > **AI & Models** > **Model Access** by entering API keys or tokens, model IDs, and base URLs when required.
-
-| Provider                      | Setup                               |
-| ----------------------------- | ----------------------------------- |
-| OpenCode Zen                  | API key + base URL in Settings      |
-| Google Vertex                 | Access token + base URL in Settings |
-| Z.AI                          | API key + base URL in Settings      |
-| GLM                           | API key + base URL in Settings      |
-| Vercel AI Gateway             | API key in Settings                 |
-| Cerebras                      | API key in Settings                 |
-| Mistral                       | API key in Settings                 |
-| GitHub Copilot                | GitHub token in Settings            |
-| Moonshot (Kimi)               | API key in Settings                 |
-| Qwen Portal                   | API key in Settings                 |
-| MiniMax                       | API key in Settings                 |
-| MiniMax Portal                | API key in Settings                 |
-| Xiaomi MiMo                   | API key in Settings                 |
-| Venice AI                     | API key in Settings                 |
-| Synthetic                     | API key in Settings                 |
-| Kimi Code                     | API key in Settings                 |
-| OpenAI-Compatible (Custom)    | API key + base URL in Settings      |
-| Anthropic-Compatible (Custom) | API key + base URL in Settings      |
-
-Advanced override: prompt caching can be disabled manually with `promptCaching.mode: "off"` in the saved LLM settings payload or by launching the app with `COWORK_PROMPT_CACHE_MODE=off`.
-
-### Search Providers (Optional — DuckDuckGo works out of the box)
-
-Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **AI & Models** > **Web Search**:
-
-| Provider   | Setup                                                                   |
-| ---------- | ----------------------------------------------------------------------- |
-| DuckDuckGo | Built-in — no setup needed (automatic fallback)                         |
-| Tavily     | Enter API key from [tavily.com](https://tavily.com)                     |
-| Exa        | Enter API key from [exa.ai](https://exa.ai/)                            |
-| Brave      | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
-| SerpAPI    | Enter API key from [serpapi.com](https://serpapi.com)                   |
-| Google     | Enter API key and Search Engine ID from Google Cloud Console            |
-
-### Channel Integrations (Optional)
+### Channel Integrations
 
 #### WhatsApp Bot
 
@@ -525,7 +472,7 @@ For shared groups or dedicated operational channels, use **Channel Specializatio
 3. Open **Settings** > **More Channels** > **WeCom**
 4. Enter credentials, configure the callback URL shown by CoWork in WeCom, then enable and test
 
-### App Integrations (Optional)
+### App Integrations
 
 Open **Settings** > **Integrations** and click any card to configure productivity and storage tools:
 
@@ -542,7 +489,7 @@ Google Workspace uses one shared OAuth connection for built-in tools and the Goo
 
 For slash-searchable app commands and workflow shortcuts, type `/` in the same message box. The `/` picker is separate from `@` mentions and uses the skills/plugin-pack system for workflow aliases. Selecting a skill-backed workflow inserts the command into the composer so you can add more text before sending. Legal practice workflows can also ask for structured matter details in the main task view. See [Message Box Shortcuts](message-box-shortcuts.md) and [Claude-for-Legal Workflows](claude-for-legal.md).
 
-### Enterprise MCP Connectors (Optional)
+### Enterprise MCP Connectors
 
 Install enterprise connectors from **Settings** > **Integrations** > **Connectors** (or browse connectors, MCP servers, plugins and skills together in **Settings** > **Add tools**):
 
@@ -563,86 +510,6 @@ Install enterprise connectors from **Settings** > **Integrations** > **Connector
 | **ComfyUI**          | Image Generation | Local ComfyUI API + `COWORK_ARCH_PROJECT_ROOT`                             |
 
 Most service connectors provide tools like `search`, `get`, `create`, and `update` for their respective APIs. Local creative connectors provide app-specific tools for Rhino, Blender, and ComfyUI; their file arguments must stay inside `COWORK_ARCH_PROJECT_ROOT` or `COWORK_WORKSPACE_ROOT`. Available connectors include Stripe, Tavily, Grafana, Metabase, Socket, Home Assistant, Rhino, Blender, ComfyUI, and more. See the generated [Connector Inventory](connector-inventory.md) for the full list and [Enterprise Connectors](enterprise-connectors.md) for setup.
-
-## Development Workflow
-
-### Making Changes
-
-The app supports hot reload:
-
-1. **React UI Changes**: Edit files in `src/renderer/` - auto-refreshes
-2. **Electron Main Changes**: Edit files in `src/electron/` - auto-restarts
-3. **Shared Types**: Edit `src/shared/types.ts` - both reload
-
-### Project Structure
-
-```
-src/
-├── electron/          # Backend (Node.js)
-│   ├── main.ts       # App entry point
-│   ├── agent/        # AI agent logic
-│   │   ├── llm/      # LLM providers
-│   │   ├── search/   # Search providers
-│   │   ├── browser/  # Browser V2 session manager and workbench bridge
-│   │   ├── tools/    # Tool implementations
-│   │   └── skills/   # Document skills
-│   ├── gateway/      # WhatsApp, Telegram, Discord & Slack
-│   └── database/     # SQLite storage
-├── renderer/         # Frontend (React)
-│   ├── App.tsx       # Main component
-│   └── components/   # UI components
-└── shared/           # Shared between both
-    └── types.ts      # TypeScript types
-```
-
-### Debugging
-
-**Renderer Process (UI)**:
-
-- DevTools open automatically in dev mode
-- Use `console.log()` - shows in DevTools Console
-
-**Main Process (Backend)**:
-
-- Use `console.log()` - shows in terminal
-- Check logs:
-  - macOS: `~/Library/Application Support/cowork-os/`
-  - Windows: `%APPDATA%\\cowork-os\\`
-
-### Database
-
-SQLite database location:
-
-- macOS: `~/Library/Application Support/cowork-os/cowork-os.db`
-- Windows: `%APPDATA%\\cowork-os\\cowork-os.db`
-
-View it with any SQLite browser or:
-
-```bash
-# macOS
-sqlite3 ~/Library/Application\ Support/cowork-os/cowork-os.db
-.tables
-SELECT * FROM tasks;
-```
-
-```powershell
-# Windows (PowerShell)
-sqlite3 "$env:APPDATA\cowork-os\cowork-os.db"
-.tables
-SELECT * FROM tasks;
-```
-
-## Building for Production
-
-```bash
-# Build both renderer and electron
-npm run build
-
-# Package desktop app
-npm run package
-```
-
-Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
 
 ## Common Issues
 

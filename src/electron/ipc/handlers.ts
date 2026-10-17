@@ -356,6 +356,7 @@ import {
   recommendChatGPTModelForPlan,
   XAIOAuth,
 } from "../agent/llm";
+import { applyOpenRouterOAuthKey, OpenRouterOAuth } from "../agent/llm/openrouter-oauth";
 import {
   clearOpenAIOAuthSession,
   createSiwcHostId,
@@ -1223,6 +1224,7 @@ rateLimiter.configure(IPC_CHANNELS.LLM_GET_GROQ_MODELS, RATE_LIMIT_CONFIGS.stand
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_XAI_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_XAI_OAUTH_START, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_XAI_OAUTH_LOGOUT, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.LLM_OPENROUTER_OAUTH_START, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_KIMI_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_PI_MODELS, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.LLM_GET_PI_PROVIDERS, RATE_LIMIT_CONFIGS.standard);
@@ -8428,6 +8430,24 @@ export async function setupIpcHandlers(
       LLMProviderFactory.clearCache();
     }
     return { success: true };
+  });
+
+  // OpenRouter PKCE sign-in. Takes no renderer input; the key stays in main and is
+  // persisted through the encrypted settings store.
+  ipcMain.handle(IPC_CHANNELS.LLM_OPENROUTER_OAUTH_START, async () => {
+    checkRateLimit(IPC_CHANNELS.LLM_OPENROUTER_OAUTH_START);
+    logger.info("[IPC] Starting OpenRouter sign-in...");
+
+    try {
+      const { key } = await new OpenRouterOAuth().authenticate();
+      const settings = applyOpenRouterOAuthKey(LLMProviderFactory.loadSettings(), key);
+      LLMProviderFactory.saveSettings(settings);
+      LLMProviderFactory.clearCache();
+      return { success: true, model: settings.openrouter?.model };
+    } catch (error: Any) {
+      logger.error("[IPC] OpenRouter sign-in failed:", error?.message);
+      return { success: false, error: error?.message || "OpenRouter sign-in failed" };
+    }
   });
 
   ipcMain.handle(

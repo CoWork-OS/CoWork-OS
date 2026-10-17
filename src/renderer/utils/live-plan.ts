@@ -184,3 +184,17 @@ export function windowLivePlanRows(
   if (end < total) rows.push({ kind: "more-after", count: total - end });
   return rows;
 }
+
+/**
+ * The one row a collapsed plan keeps: the current item, else the next one still open
+ * (pending, blocked or failed), else the last item once everything is finished.
+ */
+export function collapsedLivePlanRow(plan: LivePlanModel): LivePlanRow | null {
+  const { items } = plan;
+  if (items.length === 0) return null;
+  let index = plan.activeId ? items.findIndex((item) => item.id === plan.activeId) : -1;
+  if (index < 0)
+    index = items.findIndex((item) => item.status !== "done" && item.status !== "skipped");
+  if (index < 0) index = items.length - 1;
+  return { kind: "item", item: items[index], index };
+}

@@ -13,6 +13,7 @@ import {
   getResolvedResponseStyleLabel,
   getTimeDrainTitles,
   ONBOARDING_ASSISTANT_TRAITS,
+  ONBOARDING_FIRST_TASK_PROMPT,
   ONBOARDING_PRIORITIES,
   ONBOARDING_RESPONSE_STYLES,
   ONBOARDING_TIME_DRAINS,
@@ -181,6 +182,7 @@ const clearOnboardingUiDraft = (): void => {
 
 // Use shared starter missions — pick a subset for the onboarding final step
 const FINAL_TRY_SUGGESTIONS = [
+  { title: "Make a project tracker", prompt: ONBOARDING_FIRST_TASK_PROMPT },
   {
     title: "Create a project update",
     prompt:
@@ -207,7 +209,7 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
   );
   const uiDraftRef = useRef<OnboardingUiDraft | null>(null);
   const [inputValue, setInputValue] = useState(
-    initialPrompt ?? uiDraftRef.current?.inputValue ?? "",
+    initialPrompt ?? uiDraftRef.current?.inputValue ?? ONBOARDING_FIRST_TASK_PROMPT,
   );
   const [inputMode, setInputMode] = useState<"voice" | "keyboard">(
     uiDraftRef.current?.inputMode ?? "keyboard",
@@ -220,6 +222,7 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
   const [themeMode, setThemeMode] = useState<"light" | "dark">(() =>
     document.documentElement.classList.contains("theme-light") ? "light" : "dark",
   );
+  const [showKeyRoutes, setShowKeyRoutes] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState("");
   const [profileContextDraft, setProfileContextDraft] = useState("");
   const [timeDrainsOtherDraft, setTimeDrainsOtherDraft] = useState("");
@@ -279,6 +282,12 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
       setInputValue("");
     }
   }, [isSensitiveInputState]);
+
+  // Coming back to the first-task step shows the queued prompt, or the starter task.
+  useEffect(() => {
+    if (onboarding.state !== "first_result" && onboarding.state !== "final_try") return;
+    setInputValue((current) => current || firstPromptRef.current || ONBOARDING_FIRST_TASK_PROMPT);
+  }, [onboarding.state]);
 
   useEffect(() => {
     if (onboarding.state === "ask_user_profile") {
@@ -1606,7 +1615,10 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
         {onboarding.firstResultMode && (
           <button
             className="onboarding-btn onboarding-btn-secondary"
-            onClick={onboarding.personalizeFirst}
+            onClick={() => {
+              setInputValue("");
+              onboarding.personalizeFirst();
+            }}
             disabled={onboarding.preparingFirstResult}
           >
             Personalize first
@@ -1660,83 +1672,102 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
     );
   };
 
-  // Render provider selection
-  const renderProviders = () => (
-    <div className={`onboarding-setup-section ${onboarding.showProviders ? "visible" : ""}`}>
-      <div className="onboarding-provider-heading">Subscriptions and sign-ins</div>
-      <div className="onboarding-ai-primary-grid">
+  // Render provider selection: one no-key primary route, other sign-ins, then every key route.
+  const renderProviders = () => {
+    const signingIn = onboarding.accountSignInLoading;
+    return (
+      <div className={`onboarding-setup-section ${onboarding.showProviders ? "visible" : ""}`}>
         <button
           type="button"
-          className="onboarding-ai-primary-card"
-          onClick={onboarding.signInWithChatGPT}
-          disabled={onboarding.chatGptSignInLoading}
+          className="onboarding-ai-primary-card onboarding-route-primary"
+          onClick={() => void onboarding.signInWithAccount("openrouter")}
+          disabled={signingIn !== null}
         >
           <span className="onboarding-ai-primary-title">
-            {onboarding.chatGptSignInLoading ? "Opening ChatGPT..." : "Sign in with ChatGPT"}
+            {signingIn === "openrouter"
+              ? "Waiting for OpenRouter..."
+              : "Continue with OpenRouter (free models, no key)"}
           </span>
           <span className="onboarding-ai-primary-copy">
-            Use an eligible ChatGPT account. Provider plan limits and usage terms apply.
-          </span>
-          <span className="onboarding-ai-primary-copy">
-            Unofficial: OpenAI does not support ChatGPT sign-in in third-party apps, so it may stop
-            working at any time. An API key is the supported route.
+            Sign in or create an account in your browser. No key to copy.
           </span>
         </button>
-      </div>
-      <div className="onboarding-provider-heading">Local models</div>
-      <div className="onboarding-ai-primary-grid">
-        {onboarding.data.detectedOllamaModel ? (
+        <p className="onboarding-route-note">Free to start, switch models any time.</p>
+
+        <div className="onboarding-route-row" role="group" aria-label="Other sign-ins">
           <button
             type="button"
-            className="onboarding-ai-primary-card"
-            onClick={() => onboarding.acceptOllamaDetection()}
+            className="onboarding-route-secondary"
+            onClick={() => void onboarding.signInWithAccount("chatgpt")}
+            disabled={signingIn !== null}
           >
-            <span className="onboarding-ai-primary-title">Use local Ollama</span>
-            <span className="onboarding-ai-primary-copy">
-              Found {onboarding.data.detectedOllamaModel} on this computer. Inference runs locally.
-            </span>
+            {signingIn === "chatgpt" ? "Waiting for ChatGPT..." : "ChatGPT"}
           </button>
-        ) : (
-          <button type="button" className="onboarding-ai-primary-card muted" disabled>
-            <span className="onboarding-ai-primary-title">Use local Ollama</span>
-            <span className="onboarding-ai-primary-copy">
-              No local model detected. Install Ollama and pull a model, then run setup again.
-            </span>
+          <button
+            type="button"
+            className="onboarding-route-secondary"
+            onClick={() => void onboarding.signInWithAccount("grok")}
+            disabled={signingIn !== null}
+          >
+            {signingIn === "grok" ? "Waiting for Grok..." : "Grok"}
           </button>
+          {onboarding.data.detectedOllamaModel && (
+            <button
+              type="button"
+              className="onboarding-route-secondary"
+              onClick={() => onboarding.acceptOllamaDetection()}
+              disabled={signingIn !== null}
+              title={`Use ${onboarding.data.detectedOllamaModel} on this computer`}
+            >
+              Local Ollama
+            </button>
+          )}
+        </div>
+
+        {onboarding.accountSignInError && (
+          <div className="onboarding-test-result error" role="alert">
+            <span>{onboarding.accountSignInError}</span>
+          </div>
+        )}
+
+        <div className="onboarding-route-links">
+          <button
+            type="button"
+            className="onboarding-route-link"
+            aria-expanded={showKeyRoutes}
+            onClick={() => setShowKeyRoutes((open) => !open)}
+          >
+            Use an API key
+          </button>
+          <button type="button" className="onboarding-route-link" onClick={onboarding.skipLLMSetup}>
+            Explore without AI
+          </button>
+        </div>
+
+        {showKeyRoutes && (
+          <>
+            <div className="onboarding-provider-heading">Provider APIs and gateways</div>
+            <div className="onboarding-provider-pills">
+              {PROVIDERS.map((provider) => (
+                <button
+                  key={provider.id}
+                  className={`onboarding-provider-pill ${
+                    onboarding.data.selectedProvider === provider.id ? "selected" : ""
+                  }`}
+                  onClick={() => onboarding.selectProvider(provider.id)}
+                >
+                  <span className="onboarding-provider-name">{provider.name}</span>
+                  <span className="onboarding-provider-badge">
+                    {getModelAccessDescriptor(provider.id).label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
-      {onboarding.chatGptSignInError && (
-        <div className="onboarding-test-result error">
-          <span>{onboarding.chatGptSignInError}</span>
-        </div>
-      )}
-      <div className="onboarding-provider-heading">Provider APIs and gateways</div>
-      <div className="onboarding-provider-pills">
-        {PROVIDERS.map((provider) => (
-          <button
-            key={provider.id}
-            className={`onboarding-provider-pill ${
-              onboarding.data.selectedProvider === provider.id ? "selected" : ""
-            }`}
-            onClick={() => onboarding.selectProvider(provider.id)}
-          >
-            <span className="onboarding-provider-name">{provider.name}</span>
-            <span className="onboarding-provider-badge">
-              {getModelAccessDescriptor(provider.id).label}
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="onboarding-actions" style={{ marginTop: 24 }}>
-        <button
-          className="onboarding-btn onboarding-btn-secondary"
-          onClick={onboarding.skipLLMSetup}
-        >
-          Explore without AI
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   // Render API key input
   const renderApiKeyInput = () => {

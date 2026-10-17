@@ -64,7 +64,7 @@ integration.
 | Claude                 | Claude API key or supported account token in Settings          | API or provider-controlled extra usage; verify current Anthropic terms                                             |
 | Azure Anthropic        | API key + endpoint + deployment in Settings                    | Pay-per-token via Azure                                                                                            |
 | Google Gemini          | API key in Settings                                            | Free usage available through Google AI Studio subject to Google's current limits; pay-per-token beyond free limits |
-| OpenRouter             | API key in Settings (default provider)                         | Free model options available; pay-per-token for premium models                                                     |
+| OpenRouter             | Sign in during onboarding (no key), or API key in Settings     | Free model options available; pay-per-token for premium models                                                     |
 | DeepSeek               | API key in Settings                                            | Provider billing                                                                                                   |
 | OpenAI (API Key)       | API key in Settings                                            | Pay-per-token                                                                                                      |
 | OpenAI (ChatGPT)       | Sign in with ChatGPT (official flow; legacy Codex sign-in kept as an unofficial fallback) | Provider-controlled plan eligibility and usage limits apply                                                        |
@@ -470,6 +470,33 @@ Models: `gemini-2.5-flash` (default, fast), `gemini-2.5-pro` (most capable)
 
 Access multiple AI providers through one API.
 
+### Sign in with OpenRouter (no key)
+
+Onboarding's first option is **Continue with OpenRouter (free models, no key)**. It uses
+OpenRouter's [OAuth PKCE flow](https://openrouter.ai/docs/use-cases/oauth-pkce):
+
+1. CoWork opens `https://openrouter.ai/auth` in your browser with a one-time S256 code
+   challenge and a callback to a short-lived server on your computer's loopback address
+   (`127.0.0.1`, random port, path `/callback`).
+2. Sign in to OpenRouter or create an account, then approve the request. OpenRouter redirects
+   back with an authorization code.
+3. CoWork exchanges the code and its verifier at `POST https://openrouter.ai/api/v1/auth/keys`
+   for an API key scoped to your OpenRouter account, labelled "CoWork OS". The key is stored in
+   the encrypted settings store (Electron `safeStorage`) like any other credential and is never
+   sent to the app window.
+
+The sign-in itself proves the key, so onboarding skips the connection test. A first sign-in
+selects `openrouter/free`, OpenRouter's free-models router: it picks a free model that supports
+the request's needs (tools, images, structured output), so a new account with no credits can run
+a task. Free models are slower and less capable than paid ones and have their own rate limits.
+Pick another model at any time in the model picker or in **Settings > AI & Models**. Signing in
+again with an existing key keeps the model you chose.
+
+You can manage or revoke the key at [openrouter.ai/keys](https://openrouter.ai/keys). The
+sign-in waits five minutes for the browser; start it again if it times out.
+
+### OpenRouter API key
+
 1. Get API key from [OpenRouter](https://openrouter.ai/keys)
 2. Configure in **Settings > AI & Models > Model Access > OpenRouter**
 
@@ -621,3 +648,68 @@ Multi-provider web search for research tasks with automatic retry and fallback. 
 DuckDuckGo is always available as the last-resort fallback. When paid providers are configured, they are tried first in the configured order, with DuckDuckGo only used if all others fail. Search settings also support explicit primary/fallback ordering and provider cooldown behavior after repeated failures.
 
 Configure paid providers in **Settings** > **Web Search**.
+
+## Setup in Settings
+
+Where each route is configured in the app. Route details are in the sections above.
+
+### Model Providers
+
+Open **Settings > AI & Models > Model Access**:
+
+| Provider            | Setup                                                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Claude              | Use **Claude API** with a key from [console.anthropic.com](https://console.anthropic.com), or, where supported and permitted for your account, use the **Claude Subscription** UI route with a token from `claude setup-token` |
+| Google Gemini       | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey); Google AI Studio free usage may be available subject to current limits                                                                           |
+| OpenRouter          | Enter API key from [openrouter.ai](https://openrouter.ai/keys); free model options are available, and `openrouter/pareto-code` / `openrouter/pareto-code:nitro` support coding-score-based routing                             |
+| OpenAI (API Key)    | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys)                                                                                                                                                 |
+| OpenAI (ChatGPT)    | Click **Sign in with ChatGPT** to connect an eligible account; available models, limits, and charges depend on OpenAI and the account plan                                                                                     |
+| AWS Bedrock         | Enter AWS Access Key, Secret Key, and Region                                                                                                                                                                                   |
+| Ollama              | Install Ollama, pull a model, select it                                                                                                                                                                                        |
+| MLX (Apple Silicon) | Install `mlx-lm`, select a compatible quantized model, start the MLX server                                                                                                                                                    |
+| Groq                | Enter API key in Settings; free usage may be available subject to current limits                                                                                                                                               |
+| xAI (Grok API)      | Enter API key in Settings                                                                                                                                                                                                      |
+| xAI Grok OAuth      | Sign in with an eligible xAI account, refresh the available models, and select one supported for that account                                                                                                                  |
+| Kimi (Moonshot)     | Enter API key in Settings                                                                                                                                                                                                      |
+
+Prompt caching is enabled by default on supported Anthropic and GPT-style routes. CoWork automatically keeps stable session prompt sections cacheable and dynamic turn context uncached, so follow-ups can reuse the provider-side prefix without caching the clock, recall, or one-off guidance.
+
+### Compatible / Gateway Providers
+
+Configure these in **Settings** > **AI & Models** > **Model Access** by entering API keys or tokens, model IDs, and base URLs when required.
+
+| Provider                      | Setup                               |
+| ----------------------------- | ----------------------------------- |
+| OpenCode Zen                  | API key + base URL in Settings      |
+| Google Vertex                 | Access token + base URL in Settings |
+| Z.AI                          | API key + base URL in Settings      |
+| GLM                           | API key + base URL in Settings      |
+| Vercel AI Gateway             | API key in Settings                 |
+| Cerebras                      | API key in Settings                 |
+| Mistral                       | API key in Settings                 |
+| GitHub Copilot                | GitHub token in Settings            |
+| Moonshot (Kimi)               | API key in Settings                 |
+| Qwen Portal                   | API key in Settings                 |
+| MiniMax                       | API key in Settings                 |
+| MiniMax Portal                | API key in Settings                 |
+| Xiaomi MiMo                   | API key in Settings                 |
+| Venice AI                     | API key in Settings                 |
+| Synthetic                     | API key in Settings                 |
+| Kimi Code                     | API key in Settings                 |
+| OpenAI-Compatible (Custom)    | API key + base URL in Settings      |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings      |
+
+Advanced override: prompt caching can be disabled manually with `promptCaching.mode: "off"` in the saved LLM settings payload or by launching the app with `COWORK_PROMPT_CACHE_MODE=off`.
+
+### Search Providers (Optional — DuckDuckGo works out of the box)
+
+Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **AI & Models** > **Web Search**:
+
+| Provider   | Setup                                                                   |
+| ---------- | ----------------------------------------------------------------------- |
+| DuckDuckGo | Built-in — no setup needed (automatic fallback)                         |
+| Tavily     | Enter API key from [tavily.com](https://tavily.com)                     |
+| Exa        | Enter API key from [exa.ai](https://exa.ai/)                            |
+| Brave      | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
+| SerpAPI    | Enter API key from [serpapi.com](https://serpapi.com)                   |
+| Google     | Enter API key and Search Engine ID from Google Cloud Console            |

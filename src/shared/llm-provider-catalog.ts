@@ -6,6 +6,11 @@ export type ProviderCompatibility = "openai" | "anthropic";
 export const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash";
 /** Default OpenRouter model. Listed in OPENROUTER_MODELS and src/shared/model-metadata.json. */
 export const OPENROUTER_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
+/**
+ * OpenRouter's free-models router. It picks a free model that supports what the request
+ * needs (tools, images, structured output), so a new account works without credits.
+ */
+export const OPENROUTER_FREE_MODEL_ID = "openrouter/free";
 
 export interface ProviderCatalogEntry {
   id: LLMProviderType;

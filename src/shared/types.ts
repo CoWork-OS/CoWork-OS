@@ -8471,6 +8471,7 @@ export const IPC_CHANNELS = {
   LLM_GET_XAI_MODELS: "llm:getXAIModels",
   LLM_XAI_OAUTH_START: "llm:xaiOAuthStart",
   LLM_XAI_OAUTH_LOGOUT: "llm:xaiOAuthLogout",
+  LLM_OPENROUTER_OAUTH_START: "llm:openrouterOAuthStart",
   LLM_GET_KIMI_MODELS: "llm:getKimiModels",
   LLM_GET_PI_MODELS: "llm:getPiModels",
   LLM_GET_PI_PROVIDERS: "llm:getPiProviders",

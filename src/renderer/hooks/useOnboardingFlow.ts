@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { LLMProviderType, LLMSettingsData, PersonaId } from "../../shared/types";
 import { recommendChatGPTModelForPlan } from "../../shared/chatgpt-plan";
-import { GEMINI_DEFAULT_MODEL } from "../../shared/llm-provider-catalog";
+import { GEMINI_DEFAULT_MODEL, OPENROUTER_FREE_MODEL_ID } from "../../shared/llm-provider-catalog";
 import {
   deriveOnboardingPersonalityPreset,
   deriveOnboardingPersona,
@@ -114,8 +114,7 @@ const SCRIPT = {
     `I found ${names} on this Mac. Want to bring its persona, memory and skills along?`,
   ollama_detected: (modelName: string) =>
     `I found ${modelName} running locally on your machine via Ollama. Want to use it?`,
-  llm_intro:
-    "Accounts, APIs, gateways, cloud routes, and local models can power the same CoWork harness. Pick what fits you best.",
+  llm_intro: "Connect AI access to run your task.",
   llm_selected: (provider: string) => {
     const responses: Record<string, string> = {
       anthropic: "Claude. That's a good match for us.",
@@ -137,6 +136,7 @@ const SCRIPT = {
   },
   llm_need_key: "Enter the credential required by this model route.",
   chatgpt_signin: "Opening ChatGPT sign-in...",
+  account_signin: (label: string) => `Finish signing in to ${label} in your browser...`,
   llm_testing: "Connecting...",
   llm_success: "Connection confirmed. Your workspace is ready with this model route.",
   llm_error: "That didn't connect. Want to try another key?",
@@ -327,6 +327,18 @@ export const ONBOARDING_CUSTOM_PROVIDERS: Partial<
   minimax: { baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
 };
 
+export type OnboardingAccountRoute = "openrouter" | "chatgpt" | "grok";
+
+/** Account sign-ins offered in onboarding that need no key. */
+export const ONBOARDING_ACCOUNT_ROUTES: Record<
+  OnboardingAccountRoute,
+  { label: string; provider: LLMProviderType }
+> = {
+  openrouter: { label: "OpenRouter", provider: "openrouter" },
+  chatgpt: { label: "ChatGPT", provider: "openai" },
+  grok: { label: "Grok", provider: "xai-oauth" },
+};
+
 export function getOnboardingDefaultModel(provider: LLMProviderType): string {
   const custom = ONBOARDING_CUSTOM_PROVIDERS[provider];
   if (custom) return custom.model;
@@ -340,7 +352,7 @@ export function getOnboardingDefaultModel(provider: LLMProviderType): string {
     case "ollama":
       return "llama3.2";
     case "openrouter":
-      return "openrouter/free";
+      return OPENROUTER_FREE_MODEL_ID;
     case "bedrock":
       return "sonnet-4-6";
     case "groq":
@@ -429,8 +441,10 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     success: boolean;
     error?: string;
   } | null>(null);
-  const [chatGptSignInLoading, setChatGptSignInLoading] = useState(false);
-  const [chatGptSignInError, setChatGptSignInError] = useState<string | null>(null);
+  const [accountSignInError, setAccountSignInError] = useState<string | null>(null);
+  const [accountSignInLoading, setAccountSignInLoading] = useState<OnboardingAccountRoute | null>(
+    null,
+  );
 
   const [data, setData] = useState<OnboardingData>(INITIAL_ONBOARDING_DATA);
 
@@ -517,8 +531,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setShowIntroContinue(false);
     setStyleCountdown(0);
     setTestResult(null);
-    setChatGptSignInLoading(false);
-    setChatGptSignInError(null);
+    setAccountSignInError(null);
+    setAccountSignInLoading(null);
   }, [clearStyleCountdownInterval]);
 
   const stageLlmSettings = useCallback((settings: Record<string, unknown>) => {
@@ -687,15 +701,11 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
                 );
                 const recommended = sorted[0].name;
                 setData((d) => ({ ...d, detectedOllamaModel: recommended }));
-                setState("ollama_detected");
-                setCurrentText(SCRIPT.ollama_detected(recommended));
-                setShowOllamaDetection(true);
-              } else {
-                // No Ollama or no models — fall through to normal provider picker
-                setState("llm_setup");
-                setCurrentText(SCRIPT.llm_intro);
-                setShowProviders(true);
               }
+              // A detected local model is offered beside the other sign-ins, not as its own step.
+              setState("llm_setup");
+              setCurrentText(SCRIPT.llm_intro);
+              setShowProviders(true);
             };
 
             window.electronAPI
@@ -1611,88 +1621,91 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     ],
   );
 
-  const signInWithChatGPT = useCallback(async () => {
-    clearPendingTransition();
-    const mutationToken = beginAsyncMutation();
-    setShowProviders(false);
-    setShowApiInput(false);
-    setTestResult(null);
-    setChatGptSignInError(null);
-    setChatGptSignInLoading(true);
-    setState("llm_testing");
-    setCurrentText(SCRIPT.chatgpt_signin);
+  /**
+   * Browser sign-ins whose credential main stores itself (OpenRouter, ChatGPT, Grok). A completed
+   * sign-in already proved the credential, so there is no separate connection test.
+   */
+  const signInWithAccount = useCallback(
+    async (route: OnboardingAccountRoute) => {
+      const { label, provider } = ONBOARDING_ACCOUNT_ROUTES[route];
+      clearPendingTransition();
+      const mutationToken = beginAsyncMutation();
+      setShowProviders(false);
+      setShowApiInput(false);
+      setTestResult(null);
+      setAccountSignInError(null);
+      setAccountSignInLoading(route);
+      setState("llm_testing");
+      setCurrentText(route === "chatgpt" ? SCRIPT.chatgpt_signin : SCRIPT.account_signin(label));
 
-    try {
-      const result = await window.electronAPI.openaiOAuthStart({ persist: false });
-      if (!isActiveAsyncMutation(mutationToken)) return;
-
-      if (!result?.success) {
-        const error = result?.error || "ChatGPT sign-in failed";
-        setChatGptSignInError(error);
-        setTestResult({ success: false, error });
+      const fail = (error: string) => {
+        setAccountSignInError(error);
         setState("llm_setup");
         setCurrentText(SCRIPT.llm_intro);
         setShowProviders(true);
-        return;
-      }
+      };
 
-      const existingSettings = await loadExistingLlmSettings();
-      if (!isActiveAsyncMutation(mutationToken)) return;
-      if (!result.tokens) {
-        throw new Error("ChatGPT sign-in completed without onboarding credentials");
+      try {
+        const result =
+          route === "openrouter"
+            ? await window.electronAPI.openrouterOAuthStart()
+            : route === "chatgpt"
+              ? await window.electronAPI.openaiSiwcStart()
+              : await window.electronAPI.xaiOAuthStart();
+        if (!isActiveAsyncMutation(mutationToken)) return;
+        if (!result?.success) {
+          fail(result?.error || `${label} sign-in failed`);
+          return;
+        }
+        pendingLlmSettingsRef.current = null;
+        if (route === "chatgpt") {
+          // Sign in with ChatGPT stores the session but leaves the active route alone.
+          const existingSettings = await loadExistingLlmSettings();
+          if (!isActiveAsyncMutation(mutationToken)) return;
+          const recommendedModel =
+            "recommendedModel" in result ? result.recommendedModel : undefined;
+          const modelKey =
+            existingSettings?.openai?.model ||
+            recommendedModel ||
+            getOnboardingDefaultModel("openai");
+          stageLlmSettings(
+            buildSaveSettings("openai", "", {
+              ...existingSettings,
+              providerType: "openai",
+              modelKey,
+              openai: { ...existingSettings?.openai, model: modelKey },
+            } as LLMSettingsData),
+          );
+        }
+        setData((d) => ({ ...d, apiKey: "", selectedProvider: provider }));
+        setTestResult({ success: true });
+        setState("llm_confirmed");
+        setCurrentText(SCRIPT.llm_success);
+      } catch (error) {
+        if (!isActiveAsyncMutation(mutationToken)) return;
+        fail(error instanceof Error ? error.message : `${label} sign-in failed`);
+      } finally {
+        if (isActiveAsyncMutation(mutationToken)) {
+          setAccountSignInLoading(null);
+        }
       }
-
-      const modelKey = existingSettings?.openai?.model || result.recommendedModel || "gpt-6-astra";
-      const settings = buildSaveSettings("openai", "", {
-        ...existingSettings,
-        providerType: "openai",
-        modelKey,
-        openai: {
-          ...existingSettings?.openai,
-          accessToken: result.tokens?.accessToken,
-          refreshToken: result.tokens?.refreshToken,
-          tokenExpiresAt: result.tokens?.tokenExpiresAt,
-          accountId: result.tokens?.accountId,
-          email: result.tokens?.email,
-          chatgptPlanType: result.tokens?.planType,
-          authMethod: "oauth",
-          apiKey: undefined,
-          model: modelKey,
-        },
-      });
-      stageLlmSettings(settings);
-
-      setData((d) => ({ ...d, selectedProvider: "openai" }));
-      setTestResult({ success: true });
-      setState("llm_confirmed");
-      setCurrentText(SCRIPT.llm_success);
-    } catch (error) {
-      if (!isActiveAsyncMutation(mutationToken)) return;
-      const message = error instanceof Error ? error.message : "ChatGPT sign-in failed";
-      setChatGptSignInError(message);
-      setTestResult({ success: false, error: message });
-      setState("llm_setup");
-      setCurrentText(SCRIPT.llm_intro);
-      setShowProviders(true);
-    } finally {
-      if (isActiveAsyncMutation(mutationToken)) {
-        setChatGptSignInLoading(false);
-      }
-    }
-  }, [
-    beginAsyncMutation,
-    buildSaveSettings,
-    clearPendingTransition,
-    isActiveAsyncMutation,
-    loadExistingLlmSettings,
-    stageLlmSettings,
-  ]);
+    },
+    [
+      beginAsyncMutation,
+      buildSaveSettings,
+      clearPendingTransition,
+      isActiveAsyncMutation,
+      loadExistingLlmSettings,
+      stageLlmSettings,
+    ],
+  );
 
   // Accept auto-detected Ollama provider
   const acceptOllamaDetection = useCallback(async () => {
     clearPendingTransition();
     const mutationToken = beginAsyncMutation();
     setShowOllamaDetection(false);
+    setShowProviders(false);
     const modelName = data.detectedOllamaModel || "llama3.2";
     setData((d) => ({ ...d, selectedProvider: "ollama" }));
     setCurrentText(SCRIPT.llm_selected("ollama"));
@@ -2024,8 +2037,8 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     showIntroContinue,
     styleCountdown,
     testResult,
-    chatGptSignInLoading,
-    chatGptSignInError,
+    accountSignInError,
+    accountSignInLoading,
     data,
 
     // Actions
@@ -2057,7 +2070,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     goBack,
     selectProvider,
     submitApiKey,
-    signInWithChatGPT,
+    signInWithAccount,
     skipLLMSetup,
     acceptOllamaDetection,
     declineOllamaDetection,

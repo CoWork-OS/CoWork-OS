@@ -26,6 +26,7 @@ import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
 import { PresentationArtifactCard } from "./PresentationArtifactCard";
 import { PresentationViewer, type PresentationPreview } from "./PresentationViewer";
+import { FileTypeIcon } from "./FileTypeIcon";
 import "./artifact-viewers.css";
 import { AttachmentTile } from "./AttachmentTile";
 
@@ -379,7 +380,9 @@ export function PresentationArtifactViewer({
     <section className={`presentation-artifact-viewer presentation-artifact-viewer-${mode}`}>
       <div className="presentation-artifact-viewer-tabbar">
         <div className="presentation-artifact-viewer-tab">
-          <span className="presentation-viewer-file-icon">P</span>
+          <span className="presentation-viewer-file-icon" aria-hidden="true">
+            <FileTypeIcon kind="presentation" />
+          </span>
           <span className="presentation-artifact-viewer-tab-title">{fileName}</span>
         </div>
         <button

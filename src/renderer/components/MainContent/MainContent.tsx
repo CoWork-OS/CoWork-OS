@@ -304,6 +304,7 @@ import {
   shouldRevealInternalAssistantMessageInVerbose,
   getCompletionSummaryText,
   getAssistantBubbleStatusLabel,
+  isAssistantMessageInLatestTurn,
   getAssistantOrCompletionText,
   getBotTranscriptSpeaker,
   getUserEventDisplayMessage,
@@ -2354,6 +2355,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 currentStep?.description ?? "none",
                 task.status,
                 task.terminalStatus ?? "none",
+                lastAssistantMessage?.id === event.id &&
+                isAssistantMessageInLatestTurn(event, events)
+                  ? 1
+                  : 0,
                 isTaskWorking ? 1 : 0,
                 verboseSteps ? 1 : 0,
                 effectiveType,
@@ -3326,6 +3331,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                     ? getAssistantBubbleStatusLabel(
                         task,
                         agentContext.getMessage("taskBlocked") || "Needs approval",
+                        { event, events },
                       )
                     : "";
                 const botMessageSender =

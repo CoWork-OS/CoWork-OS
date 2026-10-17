@@ -31,6 +31,16 @@ function sortKeysDeep(value: unknown, seen: WeakSet<object>): unknown {
   return value;
 }
 
+/**
+ * JSON.stringify that always returns a string.
+ *
+ * `JSON.stringify` returns `undefined` for `undefined`, functions and symbols,
+ * so reading `out.length` crashed on those. It also throws for circular
+ * structures and `BigInt`; that branch used to fall back to `String(value)`,
+ * which returned non-JSON text such as `"[object Object]"`. Both paths now
+ * produce `"null"`, matching what `JSON.stringify` emits for these values
+ * inside arrays (issue #608).
+ */
 export function stableJsonStringify(value: unknown, options?: JsonStringifyOptions): string {
   const indent = typeof options?.indent === "number" ? Math.max(0, Math.min(8, options.indent)) : 0;
   const maxOutputChars =
@@ -41,11 +51,16 @@ export function stableJsonStringify(value: unknown, options?: JsonStringifyOptio
   const sortKeys = !!options?.sortKeys;
   const prepared = sortKeys ? sortKeysDeep(value, new WeakSet()) : value;
 
-  let out = "";
+  let out: string;
   try {
-    out = JSON.stringify(prepared, null, indent);
+    // Typed explicitly because the lib.d.ts overload claims `string`, while the
+    // runtime returns undefined for undefined, functions and symbols.
+    const serialized: string | undefined = JSON.stringify(prepared, null, indent);
+    out = serialized ?? "null";
   } catch {
-    out = String(prepared);
+    // Circular structures and BigInt throw here; String() would leak text
+    // like "[object Object]" into something callers treat as JSON.
+    out = "null";
   }
 
   if (maxOutputChars > 0 && out.length > maxOutputChars) {

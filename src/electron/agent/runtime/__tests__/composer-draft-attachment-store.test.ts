@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -6,7 +6,10 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ComposerDraftAttachmentStore } from "../composer-draft-attachment-store";
-import { rememberApprovedImportFiles } from "../../../security/file-import-approvals";
+import {
+  isApprovedImportFile,
+  rememberApprovedImportFiles,
+} from "../../../security/file-import-approvals";
 
 const temporaryDirectories: string[] = [];
 
@@ -19,6 +22,80 @@ afterEach(async () => {
 });
 
 describe("ComposerDraftAttachmentStore", () => {
+  it("imports restored staged bytes with their original name and MIME after restart", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "cowork-draft-attachments-"));
+    temporaryDirectories.push(directory);
+    const store = new ComposerDraftAttachmentStore(directory);
+    const ref = await store.put({
+      draftKey: "local:workspace:new:main",
+      workspaceId: "workspace",
+      name: "dinner-notes.txt",
+      mimeType: "text/plain",
+      dataBase64: Buffer.from("Dinner for four").toString("base64"),
+    });
+    const resolved = await store.resolve("local:workspace:new:main", "workspace", ref.refId);
+    expect(resolved).not.toBeNull();
+    const restoredStore = new ComposerDraftAttachmentStore(directory);
+    const imported = await restoredStore.readForWorkspaceImport(resolved!.path, "workspace");
+    expect(imported?.ref).toMatchObject({ name: "dinner-notes.txt", mimeType: "text/plain" });
+    expect(imported?.bytes.toString()).toBe("Dinner for four");
+    expect(isApprovedImportFile(resolved!.path)).toBe(false);
+    expect(
+      await restoredStore.readForWorkspaceImport(resolved!.path, "another-workspace"),
+    ).toBeNull();
+    await store.release("local:workspace:new:main", "workspace", ref.refId);
+    expect(await restoredStore.readForWorkspaceImport(resolved!.path, "workspace")).toBeNull();
+  });
+
+  it("rejects tampered cache bytes, invalid metadata, and unregistered cache neighbors", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "cowork-draft-attachments-"));
+    temporaryDirectories.push(directory);
+    const store = new ComposerDraftAttachmentStore(directory);
+    const ref = await store.put({
+      draftKey: "local:workspace:new:main",
+      workspaceId: "workspace",
+      name: "notes.txt",
+      dataBase64: Buffer.from("original").toString("base64"),
+    });
+    const resolved = (await store.resolve("local:workspace:new:main", "workspace", ref.refId))!;
+    await writeFile(resolved.path, "modified");
+    expect(await store.readForWorkspaceImport(resolved.path, "workspace")).toBeNull();
+    await writeFile(resolved.path, "original");
+    const metadataPath = resolved.path.replace(/\.bin$/, ".json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    await writeFile(
+      metadataPath,
+      JSON.stringify({ ...metadata, workspaceId: "another-workspace" }),
+    );
+    expect(await store.readForWorkspaceImport(resolved.path, "workspace")).toBeNull();
+    await writeFile(metadataPath, JSON.stringify({ ...metadata, refId: "a".repeat(32) }));
+    expect(await store.readForWorkspaceImport(resolved.path, "workspace")).toBeNull();
+    const neighbor = path.join(path.dirname(resolved.path), `${"b".repeat(32)}.bin`);
+    await writeFile(neighbor, "original");
+    expect(await store.readForWorkspaceImport(neighbor, "workspace")).toBeNull();
+    expect(
+      await store.readForWorkspaceImport(path.join(directory, "outside.txt"), "workspace"),
+    ).toBeNull();
+  });
+
+  it("rejects a staged file replaced by a symbolic link even when the bytes match", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "cowork-draft-attachments-"));
+    temporaryDirectories.push(directory);
+    const store = new ComposerDraftAttachmentStore(directory);
+    const ref = await store.put({
+      draftKey: "local:workspace:new:main",
+      workspaceId: "workspace",
+      name: "notes.txt",
+      dataBase64: Buffer.from("original").toString("base64"),
+    });
+    const resolved = (await store.resolve("local:workspace:new:main", "workspace", ref.refId))!;
+    const outside = path.join(directory, "outside.txt");
+    await writeFile(outside, "original");
+    await unlink(resolved.path);
+    await symlink(outside, resolved.path);
+    expect(await store.readForWorkspaceImport(resolved.path, "workspace")).toBeNull();
+  });
+
   it("rekeys staged bytes with their draft owner", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "cowork-draft-attachments-"));
     temporaryDirectories.push(directory);

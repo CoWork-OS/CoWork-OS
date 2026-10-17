@@ -250,15 +250,8 @@ describe("SPACE backend HTTP integration", () => {
     expect(requests.find((r) => r.url === "/v1/sandboxes")?.body.network_policy).toEqual(policy);
     expect(requests.some((r) => r.method === "DELETE")).toBe(true);
     expect(states()).toEqual([]);
-    expect(
-      fs.readFileSync(
-        path.join(
-          new SpaceJournal(workspace.path, origin).directory,
-          fs.readdirSync(new SpaceJournal(workspace.path, origin).directory)[0],
-        ),
-        "utf8",
-      ),
-    ).not.toContain("secret");
+    // A cleanly finished run leaves no record behind.
+    expect(fs.readdirSync(new SpaceJournal(workspace.path, origin).directory)).toEqual([]);
     await sandbox.cleanup();
   });
 
@@ -330,7 +323,7 @@ describe("SPACE backend HTTP integration", () => {
     const sandbox = new SpaceSandbox(workspace);
     await sandbox.initialize();
     expect((await sandbox.execute("echo once")).error).toContain("cleanup is pending");
-    expect(() => sandbox.execute("echo twice")).toThrow("cleanup is pending");
+    await expect(sandbox.execute("echo twice")).rejects.toThrow("cleanup is pending");
     const deleteKey = requests.find((r) => r.method === "DELETE")!.key;
     expect(states()).toHaveLength(1);
     failDelete = false;
@@ -340,7 +333,46 @@ describe("SPACE backend HTTP integration", () => {
     expect(requests.filter((r) => r.method === "DELETE").map((r) => r.key)).toEqual([
       deleteKey,
       deleteKey,
+      deleteKey,
     ]);
+  });
+
+  it("retries a failed cleanup on the same adapter once the server recovers", async () => {
+    failDelete = true;
+    const sandbox = new SpaceSandbox(workspace);
+    await sandbox.initialize();
+    expect((await sandbox.execute("echo once")).error).toContain("cleanup is pending");
+    const deleteKey = requests.find((r) => r.method === "DELETE")!.key;
+    failDelete = false;
+    expect(await sandbox.execute("echo twice")).toMatchObject({ exitCode: 0, stdout: "twice\n" });
+    expect(requests.filter((r) => r.method === "DELETE")[1].key).toBe(deleteKey);
+    expect(requests.filter((r) => r.body?.command?.[0] === "/bin/sh")).toHaveLength(2);
+    expect(states()).toEqual([]);
+  });
+
+  it("uploads a multi-command input intact", async () => {
+    const bytes = Buffer.alloc(24 * 1024 * 8 * 2 + 7, 0);
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 31) % 256;
+    fs.writeFileSync(path.join(workspace.path, "big.bin"), bytes);
+    workspace.permissions.spaceConfig = {
+      template: "test:latest",
+      inputPaths: ["big.bin"],
+      outputPaths: ["copy.bin"],
+    };
+    const sandbox = new SpaceSandbox(workspace);
+    await sandbox.initialize();
+    expect((await sandbox.execute("cp big.bin copy.bin")).exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(workspace.path, "copy.bin"))).toEqual(bytes);
+    const uploads = requests.filter((r) => r.body?.command?.[3] === "/workspace/big.bin");
+    expect(uploads.map((r) => (r.body.command as string[])[4])).toEqual(["x", "a", "a"]);
+  });
+
+  it("does not let an unreadable record block new work", async () => {
+    const journal = new SpaceJournal(workspace.path, origin);
+    fs.writeFileSync(path.join(journal.directory, `${randomUUID()}.json`), "{not json");
+    const sandbox = new SpaceSandbox(workspace);
+    await sandbox.initialize();
+    expect((await sandbox.execute("echo ok")).exitCode).toBe(0);
   });
 
   it("revalidates local write authority after remote work completes", async () => {
@@ -492,12 +524,13 @@ describe("SPACE backend HTTP integration", () => {
         published: [],
         ...(attempted ? { deleteRequestedAt: old } : {}),
       });
-      const initialization = new SpaceSandbox(workspace).initialize();
+      await new SpaceSandbox(workspace).initialize();
       if (attempted) {
-        await expect(initialization).rejects.toThrow("inspection");
+        // Set aside for inspection without a new delete, and no longer blocks new work.
         expect(requests).toEqual([]);
+        expect(states()).toEqual([]);
+        expect(fs.readdirSync(journal.directory)).toHaveLength(1);
       } else {
-        await initialization;
         expect(requests.filter((r) => r.method === "DELETE")).toHaveLength(1);
         expect(states()).toEqual([]);
       }
@@ -519,8 +552,11 @@ describe("SPACE backend HTTP integration", () => {
       phase: "creating",
       published: [],
     });
-    await expect(new SpaceSandbox(workspace).initialize()).rejects.toThrow("window expired");
+    const sandbox = new SpaceSandbox(workspace);
+    await sandbox.initialize();
     expect(requests).toEqual([]);
+    expect(states()).toEqual([]);
+    expect((await sandbox.execute("echo after")).exitCode).toBe(0);
   });
 
   it("retains confirmed partial publication across recovery without deleting or republishing it", async () => {

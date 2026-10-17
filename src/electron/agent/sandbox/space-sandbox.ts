@@ -22,9 +22,21 @@ import {
   spaceScriptPath,
   SPACE_TRANSFER_LIMIT,
   type SpaceInput,
+  validateSpaceOutputs,
 } from "./space-files";
+import { createLogger } from "../../utils/logger";
 
+const log = createLogger("SpaceSandbox");
 const activeRuns = new Set<string>();
+/** Each base64 argument stays below SPACE's per-string command bound. */
+const UPLOAD_CHUNK_BYTES = 24 * 1024;
+/** Several chunks per transfer command, so an 8 MiB selection needs ~43 commands, not ~350. */
+const UPLOAD_CHUNKS_PER_COMMAND = 8;
+/** Streamed output is checkpointed at most this often; completion saves the rest. */
+const OUTPUT_CHECKPOINT_MS = 1000;
+
+/** A stale run that can never be reconciled automatically; kept for operator inspection. */
+class SpaceReconcileError extends Error {}
 const DENY_NETWORK = { version: "v1", egress: { default_action: "deny", allow: [], deny: [] } };
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -40,7 +52,8 @@ export class SpaceSandbox implements ISandbox {
   private disposed = false;
   private controller?: AbortController;
   private active?: Promise<SandboxResult>;
-  private recoveryPending = false;
+  /** A run whose VM cleanup failed; retried (same delete key) before the next invocation. */
+  private pendingCleanup?: SpaceRun;
 
   constructor(private readonly workspace: Workspace) {}
 
@@ -62,16 +75,23 @@ export class SpaceSandbox implements ISandbox {
     // Only reconcile stale runs from this workspace/endpoint. Live owners keep
     // their VMs. Recovery deletes VMs and never reattaches/replays commands or
     // republishes partially committed artifacts.
+    // A stale run never blocks new work: one that can't be reconciled is set aside
+    // for inspection, and a transient failure is retried on the next initialization
+    // (an orphaned VM also deletes itself after its idle timeout).
     for (const run of this.journal.pending()) {
-      if (run.apiUrl !== this.client.apiUrl || run.dataPlaneUrl !== this.client.dataPlaneUrl) {
-        throw new Error("SPACE recovery endpoint mismatch; inspect the host-private journal");
-      }
       if (activeRuns.has(run.id) || (run.pid !== process.pid && processAlive(run.pid))) continue;
-      if (["command", "publishing"].includes(run.phase)) {
-        run.outcomeUnknown = true;
-        this.journal.save(run);
+      try {
+        if (run.apiUrl !== this.client.apiUrl || run.dataPlaneUrl !== this.client.dataPlaneUrl) {
+          throw new SpaceReconcileError("SPACE recovery endpoint mismatch");
+        }
+        if (["command", "publishing"].includes(run.phase)) {
+          run.outcomeUnknown = true;
+          this.journal.save(run);
+        }
+        await this.reconcile(run);
+      } catch (error) {
+        log.warn(`SPACE recovery record ${run.id} not reconciled: ${safeError(error)}`);
       }
-      await this.deleteRun(run);
     }
     this.assertAuthority();
     this.initialized = true;
@@ -130,8 +150,6 @@ export class SpaceSandbox implements ISandbox {
   ): Promise<SandboxResult> {
     if (!this.initialized) throw new Error("SPACE sandbox is not initialized");
     options.signal?.throwIfAborted();
-    if (this.recoveryPending)
-      throw new Error("SPACE cleanup is pending; reconnect to reconcile before new work");
     if (this.active) throw new Error("SPACE invocation already running");
     this.assertAuthority();
     if (
@@ -159,7 +177,7 @@ export class SpaceSandbox implements ISandbox {
     if (inputs.reduce((size, input) => size + input.data.length, 0) > SPACE_TRANSFER_LIMIT) {
       throw new Error("SPACE inputs exceed transfer budget");
     }
-    const outputBindings = validateOutputs(this.workspace, this.config.outputPaths || []);
+    const outputBindings = validateSpaceOutputs(this.workspace, this.config.outputPaths || []);
     this.controller = new AbortController();
     const signal = AbortSignal.any([
       this.controller.signal,
@@ -199,8 +217,21 @@ export class SpaceSandbox implements ISandbox {
     inputs: SpaceInput[],
     options: SandboxOptions,
     signal: AbortSignal,
-    outputBindings: ReturnType<typeof validateOutputs>,
+    outputBindings: ReturnType<typeof validateSpaceOutputs>,
   ): Promise<SandboxResult> {
+    if (this.pendingCleanup) {
+      // Retry the earlier VM's cleanup with its saved delete key before any new VM.
+      const previous = this.pendingCleanup;
+      try {
+        await this.reconcile(previous);
+      } catch {
+        throw new Error(
+          `SPACE cleanup is pending; recovery record ${previous.id}. No command was replayed.`,
+        );
+      }
+      this.pendingCleanup = undefined;
+      signal.throwIfAborted();
+    }
     const timeout = Math.min(300_000, Math.max(1000, options.timeout ?? 30_000));
     const cap = Math.min(1024 * 1024, Math.max(0, options.maxOutputSize ?? 100 * 1024));
     const run: SpaceRun = {
@@ -287,38 +318,32 @@ export class SpaceSandbox implements ISandbox {
         ) {
           throw new Error("SPACE input read permission was revoked before upload");
         }
-        // Each argument stays below SPACE's per-string command bound. Copies
+        // The first command creates the file exclusively, later ones append. Copies
         // are private to this invocation and are never retried on uncertainty.
         const target = `/workspace/${input.path}`;
-        await this.command(
-          run,
-          [
-            "python3",
-            "-c",
-            "import os,sys; os.makedirs(os.path.dirname(sys.argv[1]),exist_ok=True); open(sys.argv[1],'xb').close()",
-            target,
-          ],
-          "/workspace",
-          30_000,
-          1024,
-          signal,
-        );
-        for (let offset = 0; offset < input.data.length; offset += 24 * 1024) {
+        let offset = 0;
+        let mode = "x";
+        do {
+          const chunks: string[] = [];
+          for (
+            let i = 0;
+            i < UPLOAD_CHUNKS_PER_COMMAND && offset < input.data.length;
+            i += 1, offset += UPLOAD_CHUNK_BYTES
+          ) {
+            chunks.push(
+              input.data.subarray(offset, offset + UPLOAD_CHUNK_BYTES).toString("base64"),
+            );
+          }
           await this.command(
             run,
-            [
-              "python3",
-              "-c",
-              "import base64,sys; open(sys.argv[1],'ab').write(base64.b64decode(sys.argv[2],validate=True))",
-              target,
-              input.data.subarray(offset, offset + 24 * 1024).toString("base64"),
-            ],
+            ["python3", "-c", UPLOAD_SCRIPT, target, mode, ...chunks],
             "/workspace",
             30_000,
             1024,
             signal,
           );
-        }
+          mode = "a";
+        } while (offset < input.data.length);
       }
       this.assertAuthority();
       await this.checkNetwork(run, signal);
@@ -383,8 +408,9 @@ export class SpaceSandbox implements ISandbox {
     } finally {
       try {
         if (creationAttempted) await this.deleteRun(run);
+        else this.journal.remove(run.id);
       } catch {
-        this.recoveryPending = true;
+        this.pendingCleanup = run;
         result.exitCode = 1;
         result.error = `SPACE cleanup is pending; recovery record ${run.id}. No command was replayed.`;
         result.stderr += `\n${result.error}`;
@@ -456,12 +482,15 @@ export class SpaceSandbox implements ISandbox {
     );
     run.processId = spaceId(created.process_id, "proc");
     this.journal.save(run);
+    let checkpointedAt = 0;
     const result = await this.client.stream(created, timeout, cap, signal, (stdout, stderr) => {
-      if (userCommand) {
-        run.stdout = stdout;
-        run.stderr = stderr;
-        this.journal.save(run);
-      }
+      if (!userCommand) return;
+      run.stdout = stdout;
+      run.stderr = stderr;
+      // Bounded fsync rate; the completion (or failure) save records the latest output.
+      if (Date.now() - checkpointedAt < OUTPUT_CHECKPOINT_MS) return;
+      checkpointedAt = Date.now();
+      this.journal.save(run);
     });
     run.phase = "command_completed";
     this.journal.save(run);
@@ -470,13 +499,28 @@ export class SpaceSandbox implements ISandbox {
     return result;
   }
 
+  /** Deletes a run's VM; a run that can never be reconciled is set aside, not retried. */
+  private async reconcile(run: SpaceRun): Promise<void> {
+    try {
+      await this.deleteRun(run);
+    } catch (error) {
+      if (!(error instanceof SpaceReconcileError)) throw error;
+      run.phase = "abandoned";
+      this.journal.save(run);
+      log.warn(`SPACE recovery record ${run.id} needs operator inspection: ${error.message}`);
+    }
+  }
+
   private async deleteRun(run: SpaceRun): Promise<void> {
-    if (run.phase === "create_rejected") return;
+    if (run.phase === "create_rejected") {
+      this.journal.remove(run.id);
+      return;
+    }
     if (!run.sandboxId) {
       // Creation is the only POST recovered by replay, with its exact saved
       // body/key, within SPACE's 24-hour deduplication contract.
       if (Date.now() - run.createdAt >= DAY)
-        throw new Error("SPACE create reconciliation window expired");
+        throw new SpaceReconcileError("SPACE create reconciliation window expired");
       this.rememberCreated(
         run,
         await this.client.request("POST", "/v1/sandboxes", run.createBody, run.createKey),
@@ -488,7 +532,7 @@ export class SpaceSandbox implements ISandbox {
       const previousAttempt =
         run.deleteRequestedAt ?? (run.phase === "deleting" ? run.createdAt : undefined);
       if (previousAttempt !== undefined && Date.now() - previousAttempt >= DAY)
-        throw new Error("SPACE cleanup reconciliation requires operator inspection");
+        throw new SpaceReconcileError("SPACE cleanup reconciliation requires operator inspection");
       run.deleteRequestedAt = previousAttempt ?? Date.now();
       run.phase = "deleting";
       this.journal.save(run);
@@ -503,7 +547,10 @@ export class SpaceSandbox implements ISandbox {
     }
     await this.client.wait(`/v1/operations/${spaceId(run.deleteOperationId, "op")}`, "succeeded");
     run.phase = "deleted";
-    this.journal.save(run);
+    // A cleanly finished run needs no record; an unknown outcome stays for inspection
+    // (the journal prunes those after a week).
+    if (run.outcomeUnknown) this.journal.save(run);
+    else this.journal.remove(run.id);
   }
 
   async cleanup(): Promise<void> {
@@ -533,7 +580,11 @@ function processAlive(pid: number): boolean {
   }
 }
 
-import { validateSpaceOutputs as validateOutputs } from "./space-files";
+/** argv: target, "x" (create exclusively) or "a" (append), then base64 chunks. */
+const UPLOAD_SCRIPT = `import base64,os,sys
+os.makedirs(os.path.dirname(sys.argv[1]),exist_ok=True)
+with open(sys.argv[1],sys.argv[2]+'b') as f:
+ for chunk in sys.argv[3:]: f.write(base64.b64decode(chunk,validate=True))`;
 
 const EXPORT_SCRIPT = `import base64,hashlib,json,os,stat,sys
 result=[]

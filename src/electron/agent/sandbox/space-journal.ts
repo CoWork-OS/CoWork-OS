@@ -2,6 +2,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { getUserDataDir } from "../../utils/user-data-dir";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("SpaceJournal");
+const TERMINAL_PHASES = new Set(["deleted", "create_rejected", "abandoned"]);
+const RETAIN_TERMINAL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface SpaceRun {
   version: 1;
@@ -64,37 +69,54 @@ export class SpaceJournal {
       fs.rmSync(temporary, { force: true });
     }
   }
+  /** Drops a run's record once nothing about it needs reconciling or inspecting. */
+  remove(id: string): void {
+    fs.rmSync(path.join(this.directory, `${id}.json`), { force: true });
+  }
   pending(): SpaceRun[] {
     const pending: SpaceRun[] = [];
     for (const name of fs.readdirSync(this.directory)) {
       if (!/^[0-9a-f-]{36}\.json$/.test(name)) continue;
       const file = path.join(this.directory, name);
-      const fd = fs.openSync(
-        file,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
-      );
+      let run: SpaceRun;
       try {
-        if (!fs.fstatSync(fd).isFile() || fs.fstatSync(fd).size > 16 * 1024 * 1024)
-          throw new Error("Invalid SPACE journal size");
-        const run = JSON.parse(fs.readFileSync(fd, "utf8")) as SpaceRun;
-        if (
-          run.version !== 1 ||
-          `${run.id}.json` !== name ||
-          !Number.isFinite(run.createdAt) ||
-          run.createdAt > Date.now() + 60_000 ||
-          (run.deleteRequestedAt !== undefined &&
-            (!Number.isFinite(run.deleteRequestedAt) ||
-              run.deleteRequestedAt > Date.now() + 60_000)) ||
-          typeof run.createKey !== "string" ||
-          typeof run.deleteKey !== "string" ||
-          !Array.isArray(run.published)
-        )
-          throw new Error("Invalid SPACE journal identity");
-        if (!["deleted", "create_rejected"].includes(run.phase)) pending.push(run);
-      } finally {
-        fs.closeSync(fd);
+        run = readRun(file, name);
+      } catch (error) {
+        // One unreadable record must not block every later run; it stays for inspection.
+        log.warn(`Skipping SPACE journal ${name}: ${(error as Error).message}`);
+        continue;
       }
+      if (!TERMINAL_PHASES.has(run.phase)) pending.push(run);
+      // Records kept only for inspection (unknown outcomes, abandoned cleanup) expire.
+      else if (Date.now() - run.createdAt > RETAIN_TERMINAL_MS) fs.rmSync(file, { force: true });
     }
     return pending;
+  }
+}
+
+function readRun(file: string, name: string): SpaceRun {
+  const fd = fs.openSync(
+    file,
+    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+  );
+  try {
+    if (!fs.fstatSync(fd).isFile() || fs.fstatSync(fd).size > 16 * 1024 * 1024)
+      throw new Error("Invalid SPACE journal size");
+    const run = JSON.parse(fs.readFileSync(fd, "utf8")) as SpaceRun;
+    if (
+      run.version !== 1 ||
+      `${run.id}.json` !== name ||
+      !Number.isFinite(run.createdAt) ||
+      run.createdAt > Date.now() + 60_000 ||
+      (run.deleteRequestedAt !== undefined &&
+        (!Number.isFinite(run.deleteRequestedAt) || run.deleteRequestedAt > Date.now() + 60_000)) ||
+      typeof run.createKey !== "string" ||
+      typeof run.deleteKey !== "string" ||
+      !Array.isArray(run.published)
+    )
+      throw new Error("Invalid SPACE journal identity");
+    return run;
+  } finally {
+    fs.closeSync(fd);
   }
 }

@@ -12628,7 +12628,9 @@ a,
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 20px 24px;
+  /* Top padding keeps the card below the macOS traffic lights; the sides and
+     bottom scale with the window so the card never touches an edge. */
+  padding: max(48px, 6vh) clamp(16px, 4vw, 40px) clamp(16px, 4vh, 40px);
   background: var(--color-bg-primary, rgba(26, 26, 28, 0.97));
   overflow-y: auto;
 }
@@ -12637,7 +12639,7 @@ a,
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 520px;
+  max-width: clamp(480px, 40vw, 600px);
   max-height: 100%;
   margin: auto;
   overflow: hidden;
@@ -12854,6 +12856,58 @@ a,
 .disclaimer-accept:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
   outline-offset: 2px;
+}
+
+/* Narrow windows: stack the checkbox above full-width actions. */
+@media (max-width: 560px) {
+  .disclaimer-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .disclaimer-actions {
+    justify-content: flex-end;
+  }
+
+  .disclaimer-actions > button {
+    flex: 1 1 0;
+  }
+}
+
+/* Short windows: tighten the fixed parts so the scrolling body keeps room. */
+@media (max-height: 640px) {
+  .disclaimer-header {
+    padding-top: 14px;
+  }
+
+  .disclaimer-intro {
+    padding-bottom: 12px;
+  }
+
+  .disclaimer-section {
+    padding: 10px 0;
+  }
+
+  .disclaimer-footer {
+    padding: 10px 0 12px;
+  }
+}
+
+/* Very short windows: stop clipping the card and let the page scroll instead,
+   so the footer actions are always reachable. */
+@media (max-height: 420px) {
+  .disclaimer-overlay {
+    align-items: flex-start;
+  }
+
+  .disclaimer-card {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .disclaimer-body {
+    overflow-y: visible;
+  }
 }
 
 /* ============================================
@@ -18577,6 +18631,12 @@ a,
   .onboarding-back-btn,
   .onboarding-top-right-controls {
     top: calc(env(safe-area-inset-top, 0px) + 20px);
+  }
+
+  /* At this height the button shares a row with the macOS traffic lights
+     (trafficLightPosition 18,18), so clear them horizontally. */
+  html.platform-darwin:not(.platform-native-frame) .onboarding-back-btn {
+    left: 88px;
   }
 
   .onboarding-provider-pills {

@@ -248,6 +248,10 @@ import { buildMarkdownComponents } from "../markdown-components";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { useVirtualList } from "../../hooks/useVirtualList";
 import { formatDuration, useTaskDuration } from "../../hooks/useTaskDuration";
+import {
+  isActivityBlockInLatestTurn,
+  resolveInitialTaskTurnTiming,
+} from "../../utils/task-turn-timing";
 import type { ReplayControls } from "../../hooks/useReplayMode";
 import "./main-content.css";
 
@@ -2071,7 +2075,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   return actionBlockState.hasBlockCommandOutputs ? 180 : 0;
                 }
                 const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
-                const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
+                const isActive =
+                  isLatestActionBlock &&
+                  (isTaskWorking || isReplayMode) &&
+                  isActivityBlockInLatestTurn(item.events as TaskEvent[], events);
                 const expandSteps = verboseSteps || isReplayMode;
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
@@ -2321,6 +2328,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   row.revision,
                   getDisclosureIntent(disclosureIntents, "group", item.blockId),
                   timelineIndex === lastActionBlockTimelineIndex ? 1 : 0,
+                  timelineIndex === lastActionBlockTimelineIndex &&
+                  isActivityBlockInLatestTurn(item.events as TaskEvent[], events)
+                    ? 1
+                    : 0,
                   isTaskWorking ? 1 : 0,
                   isReplayMode ? 1 : 0,
                   verboseSteps ? 1 : 0,
@@ -2555,7 +2566,10 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                   );
                 }
                 const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
-                const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
+                const isActive =
+                  isLatestActionBlock &&
+                  (isTaskWorking || isReplayMode) &&
+                  isActivityBlockInLatestTurn(item.events as TaskEvent[], events);
                 const actionBlockState = getActionBlockRenderState(
                   item.events as TaskEvent[],
                   item.eventIndices,
@@ -5846,25 +5860,29 @@ function MainContentComponent({
     setTranscriptModeOverride((current) => (current === "inspect" ? null : "inspect"));
   }, [defaultTranscriptMode]);
   const canToggleCompletedTranscript = defaultTranscriptMode === "delivery";
-  const liveWorkStartedAt = task ? (latestUserMessageTimestamp ?? task.createdAt) : Date.now();
-  const liveWorkCompletedAt = isTaskFinished
-    ? (task?.completedAt ?? task?.updatedAt)
-    : task?.completedAt;
+  const initialTurnTiming = useMemo(
+    () =>
+      resolveInitialTaskTurnTiming({
+        task,
+        events: rawEvents,
+        isTaskWorking,
+        hasMoreHistory: hasMoreTimelineHistory,
+      }),
+    [task, rawEvents, isTaskWorking, hasMoreTimelineHistory],
+  );
   const liveWorkDuration = useTaskDuration(
-    liveWorkStartedAt,
-    liveWorkCompletedAt,
-    Boolean(task && isTaskWorking),
+    initialTurnTiming.startedAt,
+    initialTurnTiming.completedAt,
+    initialTurnTiming.isWorking,
   );
   const persistedWorkDuration =
-    isTaskFinished &&
-    typeof task?.lastRunDurationMs === "number" &&
-    Number.isFinite(task.lastRunDurationMs)
-      ? formatDuration(task.lastRunDurationMs)
+    initialTurnTiming.durationMs !== undefined
+      ? formatDuration(initialTurnTiming.durationMs)
       : null;
   const workDuration = persistedWorkDuration ?? liveWorkDuration;
-  const workDurationLabel = isTaskWorking
+  const workDurationLabel = initialTurnTiming.isWorking
     ? `Working for ${liveWorkDuration}`
-    : isTaskFinished
+    : initialTurnTiming.isFinished
       ? `Worked for ${workDuration}`
       : "Activity";
 

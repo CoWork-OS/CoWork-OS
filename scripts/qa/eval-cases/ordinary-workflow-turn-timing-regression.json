@@ -1,0 +1,20 @@
+{
+  "id": "ordinary-workflow-turn-timing-2026-10-17",
+  "title": "Follow-ups overwrite original durations and restart historical activity clocks",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 654,
+    "pullRequest": 674
+  },
+  "prompt": "Complete a task, wait, start a follow-up and inspect the original turn header and earlier activity blocks, including failed turns.",
+  "assertions": {
+    "requiredBehavior": "Anchor durations to their original turn and terminal events; only activity owned by the latest user turn may be live."
+  },
+  "executableTests": [
+    "src/renderer/utils/__tests__/task-turn-timing.test.ts",
+    "src/renderer/components/timeline/__tests__/action-block-summary.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/utils/__tests__/task-turn-timing.test.ts src/renderer/components/timeline/__tests__/action-block-summary.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

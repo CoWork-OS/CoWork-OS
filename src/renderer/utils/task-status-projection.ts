@@ -15,6 +15,7 @@ import { friendlyToolLaneCompletedLabel, friendlyToolRunningLabel } from "./time
 import { selectTaskStatusMetricSlots } from "./task-impact-metrics";
 import { deriveApprovalEventState } from "./approval-event-state";
 import { isTaskActivelyWorking } from "./task-working-state";
+import { isActivityBlockInLatestTurn } from "./task-turn-timing";
 
 interface ActivityBlockSource {
   kind: "action_block";
@@ -329,7 +330,13 @@ export function deriveActivityGroups(args: {
     const hasExplicitFinish = block.events.some(
       (event) => event.type === "timeline_group_finished",
     );
-    const running = isLatest && !hasExplicitFinish && !failed && !blocked && taskWorking;
+    const running =
+      isLatest &&
+      !hasExplicitFinish &&
+      !failed &&
+      !blocked &&
+      taskWorking &&
+      isActivityBlockInLatestTurn(block.events, activityEvents);
     const status: ActivityGroupViewModel["status"] = blocked
       ? "blocked"
       : failed

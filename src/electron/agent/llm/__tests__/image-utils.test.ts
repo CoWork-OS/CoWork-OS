@@ -21,6 +21,32 @@ describe("image-utils", () => {
     expect(validateImageForProvider(image, "gemini")).toBeNull();
   });
 
+  it("accepts images only for Z.AI's GLM-5.3-Flash series", () => {
+    const image = createImageContent("aGVsbG8=", "image/png");
+    for (const provider of ["zai", "glm"] as const) {
+      expect(validateImageForProvider(image, provider, "glm-5.3-flash")).toBeNull();
+      expect(validateImageForProvider(image, provider, "glm-5.3-flashx")).toBeNull();
+      expect(validateImageForProvider(image, provider, "glm-5.3")).toMatch(
+        /does not support inline images/i,
+      );
+      expect(validateImageForProvider(image, provider)).toMatch(/does not support inline images/i);
+    }
+    expect(
+      validateImageForProvider(
+        createImageContent("aGVsbG8=", "image/webp"),
+        "zai",
+        "glm-5.3-flash",
+      ),
+    ).toMatch(/not supported/i);
+    expect(
+      stripImagesForUnsupportedProvider(
+        [{ role: "user", content: [image] }] as LLMMessage[],
+        "zai",
+        "glm-5.3-flash",
+      )[0].content,
+    ).toEqual([image]);
+  });
+
   it("rejects unsupported providers", () => {
     const image = createImageContent("aGVsbG8=", "image/jpeg");
     expect(validateImageForProvider(image, "groq")).toMatch(/does not support inline images/i);

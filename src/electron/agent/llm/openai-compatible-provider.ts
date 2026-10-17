@@ -1,11 +1,5 @@
-import {
-  LLMProvider,
-  LLMProviderType,
-  LLMRequest,
-  LLMResponse,
-  LLMProviderError,
-  PROVIDER_IMAGE_CAPS,
-} from "./types";
+import { LLMProvider, LLMProviderType, LLMRequest, LLMResponse, LLMProviderError } from "./types";
+import { getProviderImageCaps } from "./image-utils";
 import {
   toOpenAICompatibleMessages,
   toOpenAICompatibleTools,
@@ -417,8 +411,6 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   async createMessage(request: LLMRequest): Promise<LLMResponse> {
-    const caps = PROVIDER_IMAGE_CAPS[this.type];
-    const supportsImages = caps?.supportsImages === true;
     const offeredTools = request.tools && request.tools.length > 0 ? request.tools : undefined;
 
     const deadline = createRequestDeadline(
@@ -433,6 +425,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         request.model || this.defaultModel,
         deadline.signal,
       );
+      const supportsImages = getProviderImageCaps(this.type, model).supportsImages;
       const toolSupportKey = nativeToolSupportKey(this.type, this.normalizedBaseUrl, model);
       const useTextProtocol =
         this.textToolCallFallback && areNativeToolsUnsupported(toolSupportKey);
@@ -724,7 +717,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     );
 
     try {
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { ...this.extraHeaders };
       this.addAuthHeaders(headers);
 
       const response = await fetch(this.modelsUrl, {

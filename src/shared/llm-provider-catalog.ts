@@ -27,6 +27,17 @@ export interface ProviderCatalogEntry {
   description?: string;
 }
 
+/** Pay-as-you-go GLM models served by Z.ai and, for mainland China, by BigModel. */
+const ZAI_KNOWN_MODELS = [
+  "glm-5.3",
+  "glm-5.3-flash",
+  "glm-5.3-flashx",
+  "glm-5.2",
+  "glm-5.1",
+  "glm-4.7",
+  "glm-4.5-air",
+];
+
 export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     id: "opencode",
@@ -110,8 +121,10 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     // Pay-as-you-go API. The GLM Coding Plan uses a separate endpoint and only covers
     // the coding tools Z.ai lists, so it is not the default here.
     baseUrl: "https://api.z.ai/api/paas/v4",
-    defaultModel: "glm-5.1",
-    knownModels: ["glm-5.3", "glm-5.1", "GLM-5-Turbo", "GLM-5V-Turbo", "glm-4.7", "glm-4.5-air"],
+    defaultModel: "glm-5.3",
+    // Z.ai's current pay-as-you-go lineup. GLM-5.3-Flash and FlashX are the only ones that
+    // take images. Older ids stay usable: a saved model is kept even when it is not listed.
+    knownModels: ZAI_KNOWN_MODELS,
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "zai-...",
     apiKeyUrl: "https://z.ai/manage-apikey/apikey-list",
@@ -119,13 +132,17 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   },
   {
     id: "glm",
-    name: "GLM",
+    name: "GLM (BigModel China)",
     compatibility: "openai",
-    defaultModel: "glm-4-plus",
+    // Zhipu's mainland-China API: the same paas/v4 API and model ids as Z.ai, with its own
+    // keys. The GLM Coding Plan endpoint is not used here, for the same reason as Z.ai.
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    defaultModel: "glm-5.3",
+    knownModels: ZAI_KNOWN_MODELS,
     apiKeyLabel: "API Key",
-    apiKeyPlaceholder: "glm-...",
-    requiresBaseUrl: true,
-    description: "OpenAI-compatible endpoint required.",
+    apiKeyPlaceholder: "Paste your BigModel API key",
+    apiKeyUrl: "https://open.bigmodel.cn/",
+    description: "Zhipu BigModel pay-as-you-go API for mainland China (open.bigmodel.cn).",
   },
   {
     id: "vercel-ai-gateway",

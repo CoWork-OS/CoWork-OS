@@ -46,6 +46,14 @@ CoWork reads `HERMES_HOME` when it is set, then `%LOCALAPPDATA%\hermes` on Windo
 
 The import only reads your Hermes home. It never changes or deletes anything there, so you can keep running Hermes alongside CoWork.
 
+## Running Hermes inside CoWork
+
+You do not have to choose. When Hermes is installed, CoWork lists it as an agent it can delegate
+to over the Agent Client Protocol, so a CoWork task can hand work to your existing Hermes with
+its own memory, skills and model. It needs Hermes' `acp` extra (`hermes acp --check`) and an
+unrestricted access profile, because Hermes cannot enforce CoWork's bounded file and network
+rules. See [ACP / acpx integration](acp-acpx-integration.md#hermes-agent-as-an-acp-agent).
+
 ## Privacy and safety
 
 - API keys and bot tokens are left out unless you opt in, and are stored with the operating system's encrypted storage when you do. They are never written to the database in plain text or to logs.

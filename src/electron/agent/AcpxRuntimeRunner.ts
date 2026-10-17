@@ -7,6 +7,7 @@ import {
   type WorkspacePermissions,
 } from "../../shared/types";
 import type { AdminPolicies } from "../admin/policies";
+import { hermesAcpCommand } from "../acp/hermes-agent";
 
 /** ACP adapters cannot enforce CoWork's bounded filesystem/network policy. */
 export function assertAcpxExecutionAuthority(
@@ -147,12 +148,35 @@ export function buildAcpxBaseArgs(input: {
   return args;
 }
 
+/**
+ * How acpx selects the agent: a built-in agent name, or for agents acpx does not ship
+ * (a local Hermes Agent install) the raw `--agent "<command>"` it starts over stdio.
+ */
+export function acpxAgentSelector(
+  agent: ExternalRuntimeConfig["agent"],
+  resolveHermesCommand: () => string | null = hermesAcpCommand,
+): string[] {
+  if (agent !== "hermes") return [agent];
+  const command = resolveHermesCommand();
+  if (!command) {
+    throw new AcpxRuntimeUnavailableError(
+      "Hermes Agent is not installed (no `hermes` command found). Install it, or set HERMES_BIN.",
+    );
+  }
+  return ["--agent", command];
+}
+
 export function buildAcpxCommandArgs(input: {
   cwd: string;
   runtimeConfig: ExternalRuntimeConfig;
   commandArgs: string[];
+  resolveHermesCommand?: () => string | null;
 }): string[] {
-  return [...buildAcpxBaseArgs(input), input.runtimeConfig.agent, ...input.commandArgs];
+  return [
+    ...buildAcpxBaseArgs(input),
+    ...acpxAgentSelector(input.runtimeConfig.agent, input.resolveHermesCommand),
+    ...input.commandArgs,
+  ];
 }
 
 type AcpxLauncherSpec = {

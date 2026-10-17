@@ -13,7 +13,7 @@
  */
 
 export { registerACPMethods, getACPRegistry, shutdownACP, type ACPHandlerDeps } from "./handler";
-export { ACPAgentRegistry } from "./agent-registry";
+export { ACPAgentRegistry, installedRuntimeAgents } from "./agent-registry";
 export { redactAcpControlPlanePayload, toPublicAgentCard } from "./remote-agent-secrets";
 export {
   type ACPAgentCard,

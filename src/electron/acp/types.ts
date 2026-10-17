@@ -42,6 +42,11 @@ export interface ACPAgentCard {
   origin: "local" | "remote";
   /** The local agent role ID if origin is 'local' */
   localRoleId?: string;
+  /**
+   * A locally installed agent CoWork runs through the acpx runtime (e.g. Hermes Agent)
+   * instead of a CoWork role. Tasks for it run under the same external-runtime rules.
+   */
+  externalRuntimeAgent?: "hermes";
   /** Registration timestamp */
   registeredAt: number;
   /** Last activity timestamp */

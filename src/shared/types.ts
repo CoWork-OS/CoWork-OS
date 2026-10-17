@@ -2084,6 +2084,8 @@ export const EXTERNAL_RUNTIME_AGENTS = [
   "copilot",
   "droid",
   "pi",
+  // A local Hermes Agent install, started as `hermes acp` (src/electron/acp/hermes-agent.ts).
+  "hermes",
 ] as const;
 export type ExternalRuntimeAgent = (typeof EXTERNAL_RUNTIME_AGENTS)[number];
 
@@ -2098,6 +2100,7 @@ export const EXTERNAL_RUNTIME_AGENT_LABELS: Record<ExternalRuntimeAgent, string>
   copilot: "GitHub Copilot CLI",
   droid: "Factory Droid",
   pi: "Pi",
+  hermes: "Hermes Agent",
 };
 
 export function normalizeExternalRuntimeAgent(value: unknown): ExternalRuntimeAgent | undefined {

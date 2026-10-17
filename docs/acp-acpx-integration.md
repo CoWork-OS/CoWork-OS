@@ -209,6 +209,33 @@ Operational guidance:
 
 ---
 
+## Hermes Agent as an ACP agent
+
+A local [Hermes Agent](migrating-from-hermes.md) install speaks ACP over stdio with `hermes acp`.
+CoWork runs it through the same acpx runtime as the coding agents, using acpx's raw command
+escape hatch instead of a built-in agent name:
+
+```bash
+acpx --format json --cwd ~/project --approve-reads --agent "/path/to/hermes acp" sessions ensure --name cowork-<taskId>
+```
+
+- **Finding Hermes.** `HERMES_BIN`, then `hermes` on `PATH`, then `~/.local/bin/hermes` and the
+  virtualenv under the Hermes home (`HERMES_HOME`, `%LOCALAPPDATA%\hermes` on Windows,
+  `~/.hermes`). Hermes needs its `acp` extra; `hermes acp --check` confirms it.
+- **Discovery.** When Hermes is installed, `acp.discover` lists `runtime:hermes` ("Hermes Agent",
+  origin `local`) next to CoWork's own roles.
+- **Delegation.** `acp.task.create` with `assigneeId: "runtime:hermes"` goes only through the
+  orchestration graph, as a CoWork task with `externalRuntime: { kind: "acpx", agent: "hermes" }`
+  and `permissionMode: "approve-reads"`: Hermes may read without asking; edits and commands fail
+  closed instead of being auto-approved. Without the graph the task is refused.
+- **From a task.** `spawn_agent` with `runtime: "acpx"` and `runtime_agent: "hermes"` hands a sub-task
+  to Hermes the same way.
+- **Boundaries stay.** Hermes cannot enforce CoWork's bounded filesystem and network rules, so a
+  task under a bounded access profile is rejected before Hermes starts, exactly as for the other
+  acpx agents. Hermes uses its own model, keys, memory and skills from its home.
+
+---
+
 ## acpx Quick Reference
 
 ```bash

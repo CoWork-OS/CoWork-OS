@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { registerACPMethods, getACPRegistry, shutdownACP, type ACPHandlerDeps } from "../handler";
 import { ACPMethods } from "../types";
 import { RemoteAgentInvoker } from "../remote-invoker";
+import { hermesAgentCard } from "../hermes-agent";
 
 /**
  * Mock ControlPlaneServer that captures registered method handlers
@@ -165,6 +166,15 @@ class FakeDatabase {
     this.acpAgents = [];
     this.acpTasks = [];
   }
+}
+
+function hermesCard() {
+  const card = hermesAgentCard({
+    env: { HERMES_BIN: "/opt/hermes/bin/hermes" },
+    isFile: () => true,
+  });
+  if (!card) throw new Error("expected a Hermes card");
+  return card;
 }
 
 describe("ACP Handler", () => {
@@ -349,6 +359,55 @@ describe("ACP Handler", () => {
       expect(result.task.status).toBe("running");
       expect(result.task.coworkTaskId).toBe("task-123");
       expect(deps.createTask).toHaveBeenCalled();
+    });
+
+    it("delegates to a local Hermes install through the orchestration graph", async () => {
+      shutdownACP();
+      deps.runtimeAgents = () => [hermesCard()];
+      deps.createDelegatedGraphTask = vi.fn().mockResolvedValue({
+        status: "running",
+        coworkTaskId: "task-hermes",
+      });
+      registerACPMethods(server as Any, deps);
+
+      const discovered = (await server.invoke(ACPMethods.DISCOVER, { query: "hermes" })) as Any;
+      expect(discovered.agents.map((agent: Any) => agent.id)).toEqual(["runtime:hermes"]);
+
+      const created = (await server.invoke(ACPMethods.TASK_CREATE, {
+        assigneeId: "runtime:hermes",
+        title: "Summarize",
+        prompt: "Summarize the notes",
+        workspaceId: "ws-1",
+      })) as Any;
+
+      expect(created.task).toMatchObject({ status: "running", coworkTaskId: "task-hermes" });
+      expect(deps.createDelegatedGraphTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assigneeId: "runtime:hermes",
+          externalRuntimeAgent: "hermes",
+          remote: false,
+          assignedAgentRoleId: undefined,
+        }),
+      );
+      expect(deps.createTask).not.toHaveBeenCalled();
+    });
+
+    it("refuses a Hermes task when the orchestration graph is not available", async () => {
+      shutdownACP();
+      deps.runtimeAgents = () => [hermesCard()];
+      registerACPMethods(server as Any, deps);
+
+      const created = (await server.invoke(ACPMethods.TASK_CREATE, {
+        assigneeId: "runtime:hermes",
+        title: "Summarize",
+        prompt: "Summarize the notes",
+      })) as Any;
+
+      expect(created.task).toMatchObject({
+        status: "failed",
+        error: "Hermes Agent delegation is not configured on this server",
+      });
+      expect(deps.createTask).not.toHaveBeenCalled();
     });
 
     it("rejects unknown assignee", async () => {

@@ -79,6 +79,7 @@ import {
 import mime from "mime-types";
 import { attachImageContextMenu } from "./utils/image-context-menu";
 import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
+import { installStdioErrorGuards } from "./utils/stdio-error-guards";
 import { DatabaseManager } from "./database/schema";
 import {
   SecureSettingsRepository,
@@ -1586,6 +1587,8 @@ function installProcessErrorGuards(): void {
     return;
   }
   processErrorGuardsInstalled = true;
+
+  installStdioErrorGuards([process.stdout, process.stderr]);
 
   process.on("unhandledRejection", (reason) => {
     if (isTransientMainProcessError(reason)) {

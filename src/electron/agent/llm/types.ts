@@ -299,6 +299,25 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
   },
 };
 
+/**
+ * Z.ai chat completions limit: under 5 MB and at most 6000x6000 px per image, JPEG or PNG.
+ * Only the GLM-5.3-Flash series takes images; GLM-5.3 and older text models do not.
+ */
+const GLM_FLASH_IMAGE_CAPS: LLMProviderImageCaps = {
+  supportsImages: true,
+  maxImageBytes: 5 * 1024 * 1024,
+  supportedMimeTypes: ["image/jpeg", "image/png"],
+};
+
+/**
+ * Image caps for single models on providers whose models differ in image input.
+ * Keys are lowercase model ids; any other model falls back to PROVIDER_IMAGE_CAPS.
+ */
+export const MODEL_IMAGE_CAPS: Record<string, Record<string, LLMProviderImageCaps>> = {
+  zai: { "glm-5.3-flash": GLM_FLASH_IMAGE_CAPS, "glm-5.3-flashx": GLM_FLASH_IMAGE_CAPS },
+  glm: { "glm-5.3-flash": GLM_FLASH_IMAGE_CAPS, "glm-5.3-flashx": GLM_FLASH_IMAGE_CAPS },
+};
+
 export interface LLMToolResult {
   type: "tool_result";
   tool_use_id: string;

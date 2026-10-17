@@ -29,6 +29,7 @@ import { OllamaProvider } from "./ollama-provider";
 import { GeminiProvider } from "./gemini-provider";
 import { OPENROUTER_DEFAULT_MODEL, OpenRouterProvider } from "./openrouter-provider";
 import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";
+import { getClientIdentityHeaders } from "./client-identity";
 import { OpenAIProvider } from "./openai-provider";
 import { getOpenAISiwcClientId } from "./openai-siwc-oauth";
 import { AzureOpenAIProvider } from "./azure-openai-provider";
@@ -609,6 +610,7 @@ function createCustomProvider(
       apiKey,
       baseUrl,
       defaultModel: model,
+      extraHeaders: getClientIdentityHeaders(resolvedType),
     });
   }
 
@@ -4996,6 +4998,7 @@ export class LLMProviderFactory {
         apiKey,
         baseUrl,
         defaultModel: entry.defaultModel,
+        extraHeaders: getClientIdentityHeaders(resolvedProviderType),
       });
     }
 

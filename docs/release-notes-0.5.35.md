@@ -9,7 +9,7 @@ Release `0.5.35` expands CoWork's durable runtime model in three visible directi
 ## New Features
 
 - **Managed Agents and Managed Sessions**: CoWork now includes a first-class managed-agent layer with versioned definitions, durable managed-session plumbing, control-plane methods/events, and Mission Control/runtime surfaces that observe the same underlying task graph. [Learn more](managed-agents.md)
-- **Optional Supermemory integration**: Supermemory can now operate as an external memory lane with setup flows, tool handlers, runtime metadata, policy exposure, Memory Hub controls, and prompt-time profile context injection while CoWork's local memory system remains primary. [Learn more](supermemory.md)
+- **Optional Supermemory integration**: Supermemory can now operate as an external memory lane with setup flows, tool handlers, runtime metadata, policy exposure, Memory Hub controls, and prompt-time profile context injection while CoWork's local memory system remains primary. [Learn more](supermemory-discontinuation.md)
 - **Task Trace Debugger**: the app now ships with a trace-debugger surface for inspecting task trace requests, projections, formatting, and renderer-side trace tabs. This makes runtime reasoning and failure triage much more visible during long or complex tasks.
 - **Bundled `novelist` skill**: the default skill bundle now includes a novelist workflow and related starter-mission support for narrative and long-form drafting use cases.
 - **CoWork School**: the docs now include a beginner-friendly [CoWork School guide](cowork-school.md) to help users ramp into the product's runtime model and core workflows more quickly.
@@ -43,7 +43,7 @@ Release `0.5.35` expands CoWork's durable runtime model in three visible directi
 
 - [Changelog](changelog.md) - full version history
 - [Managed Agents](managed-agents.md) - managed agent lifecycle and runtime model
-- [Supermemory](supermemory.md) - external memory integration
+- [Supermemory](supermemory-discontinuation.md) - external memory integration
 - [Workflow Intelligence](workflow-intelligence.md) - always-on memory, heartbeat, reflection, suggestions, and feedback learning
 - [Execution Runtime](execution-runtime-model.md) - task execution and turn-budget behavior
 - [Session Runtime](session-runtime.md) - ownership and task-session state model

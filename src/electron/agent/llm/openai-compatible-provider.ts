@@ -474,7 +474,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         request.model || this.defaultModel,
         deadline.signal,
       );
-      const supportsImages = getProviderImageCaps(this.type, model).supportsImages === true;
+      const supportsImages = getProviderImageCaps(this.type, model).supportsImages;
       const replaysReasoningContent = this.replaysReasoningContent(model);
       const toolSupportKey = nativeToolSupportKey(this.type, this.normalizedBaseUrl, model);
       const useTextProtocol =
@@ -772,7 +772,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     );
 
     try {
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = { ...this.extraHeaders };
       this.addAuthHeaders(headers);
 
       const response = await fetch(this.modelsUrl, {

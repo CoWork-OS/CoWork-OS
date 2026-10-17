@@ -30,7 +30,6 @@ const KNOWN_UNPRICED: Record<string, string> = {
   "kimi-code::k3": "subscription plan alias, not billed per token",
   "kimi-code::k3-256k": "subscription plan alias, not billed per token",
   "deepseek-chat": "DeepSeek alias whose target model is not published in the catalogue",
-  "glm::glm-4-plus": "legacy Zhipu model, not in the catalogue",
   "cerebras::llama3.1-8b": "not listed for Cerebras in the catalogue",
   "venice::llama-3.3-70b": "Venice route, not in the catalogue",
   "xiaomi::mimo-v2-flash": "not in the catalogue",

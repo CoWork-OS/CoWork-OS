@@ -306,6 +306,15 @@ describe("Kimi K3 tool calls keep reasoning_content", () => {
     ]);
   });
 
+  it("keeps reasoning_content when visible reasoning is stripped from the reply", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      completion({ content: "<think>draft</think>Answer.", reasoning_content: "Plan the answer." }),
+    );
+    const result = await kimi("kimi-k3").createMessage(request());
+    expect(result.content).toEqual([{ type: "text", text: "Answer." }]);
+    expect(result.reasoning?.[0]?.data).toEqual({ reasoning_content: "Plan the answer." });
+  });
+
   it("does not send reasoning produced by a different model", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(completion({ content: "ok" }));
     await kimi("kimi-k3").createMessage(

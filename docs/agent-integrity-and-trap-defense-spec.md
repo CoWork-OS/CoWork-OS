@@ -224,8 +224,6 @@ Memory must stop behaving as a flat durable store.
 
 - [src/electron/memory/MemoryService.ts](../src/electron/memory/MemoryService.ts)
 - [src/electron/memory/MemorySynthesizer.ts](../src/electron/memory/MemorySynthesizer.ts)
-- [src/electron/memory/LayeredMemoryIndexService.ts](../src/electron/memory/LayeredMemoryIndexService.ts)
-- [src/electron/memory/DailyLogSummarizer.ts](../src/electron/memory/DailyLogSummarizer.ts)
 
 ## 8.3 Knowledge Promotion Gates
 

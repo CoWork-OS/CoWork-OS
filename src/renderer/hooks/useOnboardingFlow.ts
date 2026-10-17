@@ -324,7 +324,7 @@ export const ONBOARDING_CUSTOM_PROVIDERS: Partial<
 > = {
   "nano-gpt": { baseUrl: "https://nano-gpt.com/api/v1", model: "minimax/minimax-m2.7" },
   "opencode-go": { baseUrl: "https://opencode.ai/zen/go/v1", model: "qwen3.7-plus" },
-  zai: { baseUrl: "https://api.z.ai/api/paas/v4", model: "glm-5.1" },
+  zai: { baseUrl: "https://api.z.ai/api/paas/v4", model: "glm-5.3" },
   minimax: { baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
 };
 

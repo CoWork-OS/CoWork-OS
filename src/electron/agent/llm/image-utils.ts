@@ -10,6 +10,7 @@ import {
   LLMImageMimeType,
   LLMMessage,
   LLMProviderImageCaps,
+  MODEL_IMAGE_CAPS,
   PROVIDER_IMAGE_CAPS,
 } from "./types";
 import type { LLMProviderType } from "../../../shared/types";
@@ -52,9 +53,9 @@ const KIMI_VISION_IMAGE_CAPS: LLMProviderImageCaps = {
 };
 
 /**
- * Get the image capability limits for a provider type. Pass the model for
- * routes where support differs per model (Kimi K3, K2.6 and K2.7 Code take
- * images; other Kimi models do not).
+ * Get the image capability limits for a provider type, or for one of its models when
+ * the provider's models differ in image input (MODEL_IMAGE_CAPS; on Kimi routes,
+ * K3, K2.6 and K2.7 Code take images and other Kimi models do not).
  */
 export function getProviderImageCaps(
   providerType: LLMProviderType,
@@ -63,7 +64,11 @@ export function getProviderImageCaps(
   if (model && KIMI_ROUTE_TYPES.has(providerType) && isKimiVisionModel(model)) {
     return KIMI_VISION_IMAGE_CAPS;
   }
+  const modelCaps = model
+    ? MODEL_IMAGE_CAPS[providerType]?.[model.trim().toLowerCase()]
+    : undefined;
   return (
+    modelCaps ??
     PROVIDER_IMAGE_CAPS[providerType] ?? {
       supportsImages: false,
       maxImageBytes: 0,

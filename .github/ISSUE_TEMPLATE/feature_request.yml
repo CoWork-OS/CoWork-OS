@@ -1,7 +1,7 @@
 name: Feature Request
 description: Suggest a new feature or improvement
 title: "[Feature]: "
-labels: ["enhancement", "triage"]
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
@@ -27,6 +27,15 @@ body:
       required: true
 
   - type: textarea
+    id: use-cases
+    attributes:
+      label: Use Cases
+      description: Specific situations where this feature would help.
+      placeholder: |
+        1. ...
+        2. ...
+
+  - type: textarea
     id: alternatives
     attributes:
       label: Alternatives Considered
@@ -38,8 +47,10 @@ body:
       label: Category
       options:
         - UI/UX
-        - New Tool/Capability
+        - Agent Capabilities / Tools
         - Messaging Channels
+        - MCP Integration
+        - Remote Access (Tailscale, SSH, WebSocket API)
         - Cloud Storage / Integrations
         - LLM Providers
         - Performance
@@ -49,6 +60,18 @@ body:
         - Other
     validations:
       required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security Considerations
+      description: Does this feature touch permissions, credentials, sandboxing, file access or remote access? If so, describe how.
+
+  - type: textarea
+    id: mockups
+    attributes:
+      label: Mockups / Examples
+      description: If applicable, add mockups, diagrams, or examples.
 
   - type: dropdown
     id: priority

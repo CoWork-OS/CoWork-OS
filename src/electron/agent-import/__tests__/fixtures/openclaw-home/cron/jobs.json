@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "j1",
+      "name": "Daily standup",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "30 9 * * 1-5",
+        "tz": "Europe/Berlin"
+      },
+      "payload": {
+        "kind": "agentTurn",
+        "message": "Draft my standup notes"
+      }
+    },
+    {
+      "id": "j2",
+      "name": "Ping",
+      "schedule": {
+        "kind": "every",
+        "everyMs": 3600000
+      },
+      "payload": {
+        "kind": "systemEvent",
+        "text": "ping"
+      }
+    }
+  ]
+}

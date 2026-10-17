@@ -1,0 +1,17 @@
+{
+  "agents": {
+    "*": {
+      "allowlist": [
+        {
+          "pattern": "/opt/homebrew/bin/rg"
+        },
+        {
+          "pattern": "/usr/bin/*"
+        },
+        {
+          "pattern": "/bin/bash"
+        }
+      ]
+    }
+  }
+}

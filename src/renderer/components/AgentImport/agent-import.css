@@ -1,0 +1,163 @@
+/* Settings > Import and the onboarding import step: quiet, monochrome rows. */
+
+.agent-import {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.agent-import-sources,
+.agent-import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-import-sources {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.agent-import-source {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.agent-import-source + .agent-import-source {
+  border-top: 1px solid var(--color-border);
+}
+
+.agent-import-source-name {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.agent-import-source-home {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-import-preview,
+.agent-import-result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-import-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
+
+.agent-import-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.agent-import-option select {
+  font: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.agent-import-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.agent-import-list {
+  border-top: 1px solid var(--color-border);
+}
+
+.agent-import-item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.agent-import-list--select .agent-import-item {
+  grid-template-columns: 22px minmax(0, auto) minmax(0, 1fr);
+}
+
+.agent-import .update-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-import-check {
+  justify-self: start;
+  margin: 0;
+}
+
+.agent-import-status {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-import-item--imported .agent-import-status {
+  color: var(--color-text-secondary);
+}
+
+.agent-import-item--failed .agent-import-status {
+  color: var(--color-text-primary);
+}
+
+.agent-import-label {
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-import-item--skipped .agent-import-label {
+  color: var(--color-text-secondary);
+}
+
+.agent-import-note {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-import-skipped summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 4px 0;
+}
+
+.agent-import--compact .agent-import-sources {
+  border-radius: 8px;
+}
+
+.onboarding-import-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(560px, 100%);
+  margin-top: 16px;
+  text-align: left;
+}

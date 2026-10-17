@@ -6,6 +6,7 @@ import { TypewriterText } from "./TypewriterText";
 import type { LLMProviderType } from "../../../shared/types";
 import { getModelAccessDescriptor } from "../../../shared/model-access";
 import { STARTER_MISSIONS } from "../../../shared/starter-missions";
+import { OnboardingImportStep } from "./OnboardingImportStep";
 import {
   buildOnboardingWorkspaceSummary,
   getPriorityTitles,
@@ -2119,6 +2120,14 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
 
         {/* Memory trust toggle */}
         {onboarding.state === "ask_memory_trust" && renderMemoryTrustStep()}
+
+        {/* Import from Hermes Agent / OpenClaw, before provider setup */}
+        {onboarding.state === "import_offer" && (
+          <OnboardingImportStep
+            workspaceId={workspaceId}
+            onFinish={(imported) => void onboarding.finishImportOffer(imported)}
+          />
+        )}
 
         {/* Ollama auto-detection */}
         {onboarding.showOllamaDetection && renderOllamaDetection()}

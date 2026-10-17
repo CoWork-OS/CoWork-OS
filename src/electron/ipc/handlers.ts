@@ -619,6 +619,7 @@ import { configuredImageSearch } from "../answer-surfaces/web-image-search";
 import { AnswerImageService } from "../answer-surfaces/AnswerImageService";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { setupMemoryRepoHandlers } from "./memory-repo-handlers";
+import { setupAgentImportHandlers } from "./agent-import-handlers";
 import { setupPactHandlers } from "./pact-handlers";
 import { PactSurfaceService } from "../pact/pact-surface-service";
 import { PactSettingsManager } from "../pact/settings";
@@ -11878,6 +11879,29 @@ export async function setupIpcHandlers(
           ? await dialog.showOpenDialog(owner, options)
           : await dialog.showOpenDialog(options);
       return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
+  });
+
+  // Import a Hermes or OpenClaw home (Settings > Import, onboarding). The home folder is
+  // resolved in main; the renderer only names the source.
+  setupAgentImportHandlers({
+    db,
+    findWorkspace: async (workspaceId) => {
+      if (isTempWorkspaceId(workspaceId)) return null;
+      const workspace = await workspaceRepo.findById(workspaceId);
+      return workspace && !workspace.isTemp
+        ? { id: workspace.id, name: workspace.name, path: workspace.path }
+        : null;
+    },
+    getCronService: () => {
+      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      const { getCronService } = require("../cron");
+      return getCronService();
+    },
+    onSkillsInstalled: async () => {
+      await ensureCustomSkillLoaderInitialized();
+      await customSkillLoader.reloadSkills();
+      customSkillLoader.clearEligibilityCache();
     },
   });
 }

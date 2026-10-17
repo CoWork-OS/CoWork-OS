@@ -87,6 +87,8 @@ cowork skills audit
 cowork models list
 cowork backup create --output cowork-backup.json
 cowork backup restore cowork-backup.json --dry-run
+cowork import --from hermes --dry-run
+cowork import --from openclaw --with-secrets --workspace-id <workspaceId>
 cowork security audit
 cowork security status --refresh
 cowork security findings
@@ -175,6 +177,7 @@ These command groups are local-first and do not require a Control Plane token:
 - `cowork models list` shows the current provider model list and stored model presets.
 - `cowork providers fallback list|add|remove` manages global provider fallback routes.
 - `cowork backup create|restore` exports local workspaces, recent task metadata, provider settings, tool settings, MCP settings, and skills. Task content, approval payloads, and MCP secrets are redacted unless `--include-secrets --yes` is passed. Restore previews are safe with `--dry-run`; actual restore requires `--yes`, validates settings, restores settings only, and keeps restored MCP servers disabled until re-enabled.
+- `cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]` brings a Hermes Agent or OpenClaw home into this profile: persona, memory, skills, model choice, chat channels, the command allowlist and scheduled jobs. `--dry-run` lists every item as ready or skipped (with the reason) and writes nothing. API keys and bot tokens are left out unless `--with-secrets` is passed; they are then stored encrypted. Scheduled tasks and workspace instructions need `--workspace-id` and arrive paused. Quit the desktop app before importing scheduled tasks from the CLI, or use Settings > Import. See [Migrating from Hermes](migrating-from-hermes.md) and [Migrating from OpenClaw](migrating-from-openclaw.md).
 - `cowork security audit` checks local provider/tool/permission posture. Warnings return a non-zero exit code so CI can fail on risky local settings.
 - `cowork security rules list|remove` inspects or removes workspace permission rules. Removal requires `--yes`.
 - `cowork security status|findings|finding|decisions|inventory|scan|check-rules|hooks|case|prune` operates the optional Numbat agent-security runtime. Mutating operations require `--yes` where shown by `cowork security --help`.

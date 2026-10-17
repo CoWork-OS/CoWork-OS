@@ -2423,7 +2423,7 @@ export class TaskExecutor {
       /\b(?:book|file|files|document|documents|workspace|folder|directory)\b/.test(normalized) ||
       /\b(?:kitap|dosya|dosyalar|belge|belgeler|çalışma alanı|klasör|dizin)\b/.test(normalized);
     const hasContentWork =
-      /\b(?:read|open|parse|extract|analy[sz]e|review|inspect|summari[sz]e|check|edit|write|create|delete|remove|rename|move|modify|replace|fix|update|refactor|run|execute)\b/.test(
+      /\b(?:read|open|parse|extract|analy[sz]e|review|inspect|summari[sz]e|check|verify|validate|confirm|compare|edit|write|create|delete|remove|rename|move|modify|replace|fix|update|refactor|run|execute)\b/.test(
         normalized,
       ) ||
       /\b(?:oku|aç|ayıkla|incele|analiz|özetle|kontrol et|düzenle|yaz|oluştur|sil|kaldır|yeniden adlandır|taşı|değiştir|düzelt|güncelle|yeniden düzenle|çalıştır)\b/.test(
@@ -20932,8 +20932,11 @@ ${transcript}
     const stepText = `${this.task.title || ""}\n${step.description || ""}\n${this.getExecutionTaskPrompt()}\n${this.lastUserMessage || ""}\n${this.lastAssistantOutput || ""}`;
     const messagingChannelIntent = this.hasMessagingChannelIntent(stepText);
 
+    // Verification can mention a shopping/file list while requiring its content
+    // to be read. Keep those steps on the normal verification tool policy.
     if (
       !stepContract.requiresMutation &&
+      !this.isVerificationStepForCompletion(step) &&
       this.isFileDiscoveryOnlyStepDescription(step.description) &&
       !messagingChannelIntent
     ) {

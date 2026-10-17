@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { McpTunnelForwarder } from "../McpTunnelForwarder";
+import { McpTunnelForwarder, assertAllowedTargetUrl } from "../McpTunnelForwarder";
 import { DEFAULT_SECURE_MCP_TUNNEL_POLICY, type SecureMcpTunnelConfig } from "../types";
 
 const mcpHostServerMock = {
@@ -92,5 +92,47 @@ describe("McpTunnelForwarder", () => {
         }),
       }),
     );
+  });
+});
+
+describe("assertAllowedTargetUrl", () => {
+  const rejection = "Tunnel target must be localhost, .local, or a private-network address";
+
+  it("accepts loopback targets, including bracketed IPv6", () => {
+    // new URL() keeps IPv6 hostnames bracketed ("[::1]"), which a bare "::1"
+    // comparison used to reject.
+    for (const url of [
+      "http://localhost:4444/mcp",
+      "http://127.0.0.1:4444/mcp",
+      "http://[::1]:4444/mcp",
+      "https://[::1]:4444/mcp",
+    ]) {
+      expect(() => assertAllowedTargetUrl(url), url).not.toThrow();
+    }
+  });
+
+  it("still accepts .local and private-network targets", () => {
+    for (const url of [
+      "http://printer.local:8080/mcp",
+      "http://10.0.0.5:4444/mcp",
+      "http://172.16.0.5:4444/mcp",
+      "http://192.168.1.10:4444/mcp",
+    ]) {
+      expect(() => assertAllowedTargetUrl(url), url).not.toThrow();
+    }
+  });
+
+  it("rejects the root-dot form of localhost", () => {
+    expect(() => assertAllowedTargetUrl("http://localhost.:4444/mcp")).toThrow(rejection);
+  });
+
+  it("rejects remote targets", () => {
+    for (const url of [
+      "http://example.com/mcp",
+      "http://8.8.8.8/mcp",
+      "http://[2001:db8::1]:4444/mcp",
+    ]) {
+      expect(() => assertAllowedTargetUrl(url), url).toThrow(rejection);
+    }
   });
 });

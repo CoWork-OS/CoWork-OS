@@ -737,15 +737,14 @@ export class SkillTools {
    */
   async organizeFolder(input: {
     path: string;
-    strategy: "by_type" | "by_date" | "custom";
-    rules?: Any;
+    strategy: "by_type" | "by_date";
   }): Promise<{ success: boolean; changes: number }> {
     if (!this.workspace.permissions.write) {
       throw new Error("Write permission not granted");
     }
 
     await this.assertPathAllowed(input.path, "write", "organizer folder");
-    const changes = await this.folderOrganizer.organize(input.path, input.strategy, input.rules);
+    const changes = await this.folderOrganizer.organize(input.path, input.strategy);
 
     this.daemon.logEvent(this.taskId, "file_modified", {
       action: "organize",

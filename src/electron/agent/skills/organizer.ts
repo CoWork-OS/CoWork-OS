@@ -69,8 +69,7 @@ export class FolderOrganizer {
 
   async organize(
     relativePath: string,
-    strategy: "by_type" | "by_date" | "custom",
-    rules?: Any,
+    strategy: "by_type" | "by_date",
   ): Promise<number> {
     const fullPath = this.validatePath(relativePath);
     // Organizing enumerates and stats source entries before it mutates them;
@@ -83,10 +82,12 @@ export class FolderOrganizer {
         return await this.organizeByType(fullPath);
       case "by_date":
         return await this.organizeByDate(fullPath);
-      case "custom":
-        return await this.organizeCustom(fullPath, rules);
       default:
-        throw new Error(`Unknown strategy: ${strategy}`);
+        // A caller holding a stale tool schema may still ask for "custom"; it was
+        // never implemented, so reject it instead of silently reporting success.
+        throw new Error(
+          `Unsupported strategy: ${String(strategy)}. organize_folder supports "by_type" and "by_date".`,
+        );
     }
   }
 
@@ -174,9 +175,4 @@ export class FolderOrganizer {
     return changes;
   }
 
-  private async organizeCustom(_folderPath: string, _rules: Any): Promise<number> {
-    // TODO: Implement custom organization rules
-    // For MVP, just return 0
-    return 0;
-  }
 }

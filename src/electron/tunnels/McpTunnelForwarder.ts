@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { JSONRPCRequest, JSONRPCResponse } from "../mcp/types";
 import { MCPHostServer } from "../mcp/host/MCPHostServer";
+import { isLoopbackHostname } from "../security/address-classes";
 import { createLogger } from "../utils/logger";
 import { enforceTunnelPolicy, getMcpToolName, validateJsonRpcRequest } from "./protocol";
 import type { SecureMcpTunnelAuditEvent, SecureMcpTunnelConfig } from "./types";
@@ -186,11 +187,7 @@ export function assertAllowedTargetUrl(rawUrl: string): void {
     throw new Error("Tunnel target must be an HTTP MCP endpoint");
   }
   const hostname = parsed.hostname.toLowerCase();
-  const isLocal =
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "::1" ||
-    hostname.endsWith(".local");
+  const isLocal = isLoopbackHostname(hostname) || hostname.endsWith(".local");
   const isPrivate =
     /^10\./.test(hostname) ||
     /^192\.168\./.test(hostname) ||

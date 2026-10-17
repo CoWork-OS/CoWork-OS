@@ -3,7 +3,10 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import JSZip from "jszip";
-import { extractPptxContentFromFile } from "../../src/electron/utils/pptx-extractor";
+import {
+  extractPptxContentFromFile,
+  extractPptxStructuredContentFromFile,
+} from "../../src/electron/utils/pptx-extractor";
 
 let tempDirs: string[] = [];
 
@@ -22,6 +25,25 @@ describe("pptx-extractor", () => {
   afterEach(async () => {
     await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
     tempDirs = [];
+  });
+
+  it("separates paragraphs without separating styled runs in a title", async () => {
+    const file = await createTempPptx(
+      "<p:sld><p:sp><p:txBody><a:p><a:r><a:t>Park </a:t></a:r><a:r><a:t>Meetup</a:t></a:r></a:p><a:p><a:r><a:t>Sunday 25 October</a:t></a:r></a:p></p:txBody></p:sp></p:sld>",
+    );
+    const result = await extractPptxStructuredContentFromFile(file);
+    expect(result.slides[0].title).toBe("Park Meetup");
+    expect(result.slides[0].text).toBe("Park Meetup\nSunday 25 October");
+  });
+
+  it("keeps table cells inside a graphicFrame and the text that follows it", async () => {
+    const file = await createTempPptx(
+      "<p:sld><p:sp><p:txBody><a:p><a:r><a:t>Morning schedule</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><a:graphic><a:graphicData><a:tbl><a:tr><a:tc><a:txBody><a:p><a:r><a:t>11:20–11:35</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:p><a:r><a:t>Water break</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame><p:sp><p:txBody><a:p><a:r><a:t>Bring gloves</a:t></a:r></a:p></p:txBody></p:sp></p:sld>",
+    );
+    const result = await extractPptxContentFromFile(file);
+    expect(result).toContain("| 11:20–11:35 | Water break |");
+    expect(result).toContain("Bring gloves");
+    expect(result).not.toContain("[Graphic");
   });
 
   it.each(["1000000000", "1e9", "9007199254740993"])(

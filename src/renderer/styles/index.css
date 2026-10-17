@@ -22719,6 +22719,25 @@ html.platform-darwin.theme-light .sidebar.cli-sidebar {
   color: #4b5563;
 }
 
+.theme-light .document-editor-pdf-stats strong {
+  color: #111827;
+}
+
+.theme-light .document-editor-pdf-stats span,
+.theme-light .document-editor-pdf-page-label {
+  color: #64748b;
+}
+
+.theme-light .document-editor-pdf-stats div,
+.theme-light .document-editor-pdf-page {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.theme-light .document-editor-pdf-page-text {
+  color: #374151;
+}
+
 .theme-light .document-editor-version-btn {
   background: #f9fafb;
   border-color: rgba(0, 0, 0, 0.1);

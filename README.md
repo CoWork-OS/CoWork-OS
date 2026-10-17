@@ -6,176 +6,105 @@
   </picture>
 </p>
 
-<p align="center">
-  <strong>Rent the model. Own everything else.</strong><br>
-  One app for the work. Your choice of AI.
-</p>
+<h3 align="center">The AI desktop where every action is visible and approvable before it runs.</h3>
 
-<p align="center">
-  CoWork OS is the free, open-source AI app for real work: code, browser work, documents, and automations in one workspace, with visible actions and approvals. Connect a provider account, API key, gateway, cloud credential, or local model; your workspace, memory, skills, and history stay on your machine. Model providers may charge for usage, and cloud models and connected services receive the data needed for tasks you run. <a href="docs/what-you-own.md">What you own</a>
-</p>
+<p align="center"><strong>Rent the model. Own everything else.</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/cowork-os"><img src="https://img.shields.io/npm/v/cowork-os.svg" alt="npm"></a>
   <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-blue.svg" alt="macOS"></a>
-  <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/platform-Windows-0078D6.svg" alt="Windows"></a>
+  <a href="https://github.com/CoWork-OS/CoWork-OS/discussions"><img src="https://img.shields.io/github/discussions/CoWork-OS/CoWork-OS" alt="Discussions"></a>
+  <a href="https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/github/issues/CoWork-OS/CoWork-OS/good%20first%20issue" alt="Good first issues"></a>
 </p>
 
 <p align="center">
-  <a href="docs/getting-started.md">Getting Started</a> &middot;
-  <a href="docs/composer-mentions.md">Composer Mentions</a> &middot;
-  <a href="docs/composer-predictions.md">Composer Predictions</a> &middot;
-  <a href="docs/message-box-shortcuts.md">Message Box Shortcuts</a> &middot;
-  <a href="docs/side-chat.md">Side Chat</a> &middot;
-  <a href="docs/ask-inbox-architecture.md">Ask Inbox</a> &middot;
-  <a href="docs/everything-workbench.md">Everything Workbench</a> &middot;
-  <a href="docs/cli.md">CoWork CLI</a> &middot;
-  <a href="docs/terminal-tabs.md">Terminal Tabs</a> &middot;
-  <a href="docs/browser-workbench.md">Browser Workbench</a> &middot;
-  <a href="docs/showcase.md">Use Cases</a> &middot;
-  <a href="docs/release-notes-0.5.60.md">Release Notes 0.5.60</a> &middot;
-  <a href="docs/integration-skill-bootstrap-lifecycle.md">Platform Updates</a> &middot;
-  <a href="docs/">Documentation</a> &middot;
-  <a href="CHANGELOG.md">Changelog</a> &middot;
-  <a href="SECURITY.md">Security</a> &middot;
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <strong>English</strong> &middot; <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-
+CoWork OS is a free, open-source desktop app for macOS and Windows that does real work for you: code, browser tasks, documents, inbox and automations. You watch each step as it happens. With the default **Ask for approval** access profile the agent works freely inside your workspace and stops to ask before anything that crosses it: sending, network access, credentials, exports, or files outside the workspace. Connect the model route you choose; your workspace, memory, skills and history stay on your machine. Model providers may charge for usage and receive the data needed for the tasks you run. [What you own](docs/what-you-own.md)
 
 <p align="center">
   <img src="resources/branding/images/cowork-os-1.webp" alt="CoWork OS home in the Calm style" width="700">
 </p>
 
-### Why CoWork OS?
+| | |
+| --- | --- |
+| **Visible actions and approvals** | Every tool call shows in the task timeline. Access profiles (Ask for approval, Approve for me, Full access, Custom) decide what pauses for you, and hard limits hold even with approval. [Access profiles](docs/access-profiles.md) |
+| **Everything Workbench** | Documents, spreadsheets, decks, web pages and PDFs open beside the agent, editable, with follow-up in place. [Everything Workbench](docs/everything-workbench.md) |
+| **Inbox agent** | Local-first mail triage, evidence search, drafts and replies, with sending behind approval. [Inbox Agent](docs/inbox-agent.md) |
+| **In-app browser** | A visible browser the agent drives while you watch, for research, forms and testing your own sites. [Browser Workbench](docs/browser-workbench.md) |
+| **Bots and channels** | Reusable bots with their own memory and scheduled responsibilities, and a gateway that reaches you on Telegram, Slack, Discord, WhatsApp and more. [Bots](docs/bots-and-conversations.md) · [Channels](docs/channels.md) |
+| **Memory you can read** | What CoWork knows lives as markdown in a local git folder you can edit, sync or delete. [Memory](docs/features.md#persistent-memory-system) |
+| **Your choice of model** | ChatGPT sign-in, local Ollama, or API keys for Claude, OpenAI, Gemini, OpenRouter, Groq and more, switchable per conversation. [Models & Access](docs/providers.md) |
 
-- **Rent the model, own everything else** — Connect supported provider accounts, API keys, compatible gateways, cloud credentials, or local models, and switch them per conversation. The open multi-provider harness keeps your tools, skills, memory, agents, approvals, artifacts, and workflows the same as model routes change, and keeps them on your machine. CoWork is free; provider charges and terms still apply. [What You Own](docs/what-you-own.md) · [Models & Access](docs/providers.md)
-- **AI super app for real work** — CoWork OS keeps coding, email, research, browser testing, documents, spreadsheets, presentations, PDFs, channels, devices, automations, memory, providers, and approvals in one governed workspace.
-- **GUI-first, CLI-capable agent operations** — the Bots page, Mission Control, task timelines, visual boards, teams, devices, and automations remain the main operator console, while the `cowork` CLI gives terminal users the same local runtime for quick prompts and one-shot tasks.
-- **First-class `cowork` CLI** — Type `cowork` for an interactive terminal UI or `cowork run "task"` for a local one-shot run. Normal local CLI use shares desktop provider/settings state and does not require a Control Plane token; `--remote` is the explicit token-gated path. [CoWork CLI](docs/cli.md)
-- **Long-running agent runtime** — Ask/Do/Plan work choices, separate collaboration and model-routing controls, Mixture of Agents, `/multitask`, structured input cards, Side Chat, adaptive recovery, and visible routing/fallback state make agent work inspectable while it is running. [Work modes](docs/interaction-modes.md) · [Mixture of Agents](docs/mixture-of-agents.md) · [Side Chat](docs/side-chat.md) · [Multitask](docs/multitask.md)
-- **Everything Workbench** — Generated documents, spreadsheets, decks, web pages, PDFs, previews, and file outputs open beside the agent with follow-up context, so everyday knowledge work can be created and revised inside CoWork. [Learn more](docs/everything-workbench.md)
-- **Developer workbench** — Real xterm.js + node-pty terminal tabs, title-bar terminal/browser toggles, Browser Workbench, responsive Browser V2 automation, screenshots, diagnostics, and visible web testing keep repo work, CLI work, and live app QA in the same workspace. [Terminal Tabs](docs/terminal-tabs.md) · [Browser Workbench](docs/browser-workbench.md)
-- **Inbox and channels** — Inbox Agent handles local-first mail triage, Ask Inbox evidence search, drafts, send/reply/forward, commitments, and `@Inbox` routing, while the gateway supports 17 messaging channels with specialization by workspace, agent role, guidance, and tool policy. [Inbox Agent](docs/inbox-agent.md) · [Channels](docs/channels.md)
-- **Visual automation and memory loop** — The main-sidebar Automation Studio builds versioned, testable flows with variables, branches, approvals, and durable activity, while Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, Chronicle, Knowledge Graph, durable runtime context, and Usage Insights form the reviewable learning loop. [Automation Studio](docs/automation-studio.md) · [Workflow Intelligence](docs/workflow-intelligence.md) · [Chronicle](docs/chronicle.md)
-- **Box Brain for source-backed company knowledge** — Opt-in background indexing from one Box folder through Hosted MCP and incremental private local recall with preserved Box URLs. Box remains canonical and the background index never writes back to Box. [Box Brain](docs/box-brain.md)
-- **Integrations, model routes, and skills** — Dozens of provider routes, configurable fallback chains, Mixture of Agents presets, provider-aware prompt caching, MCP connectors, bundled packs, built-in skills, Composer `@` mentions, message-box `/` shortcuts, Plugin Store, Skill Store, and external skill directories make the app extensible without giving up local control. [Models & Access](docs/providers.md) · [Mixture of Agents](docs/mixture-of-agents.md) · [Plugin Packs](docs/plugin-packs.md)
-- **Governed access profiles** — Codex-style **Ask for approval**, **Approve for me**, **Full access**, and **Custom** profiles combine sandbox, approval, reviewer, network, filesystem, and domain policy. Command tools follow the selected profile; new tasks have no separate shell enable/disable switch. An agent can also carry an access limit (**May do alone**) that only narrows what its sessions, their sub-tasks and their schedules may do. [Access Profiles](docs/access-profiles.md)
-- **Ops and portability** — Managed devices, remote access, app profiles, profile import/export, and best-fit workflow packs support both personal work and founder/operator-style autonomous company loops.
-- **Local-first security** — Workspace state and encrypted credentials are stored locally. Provider credentials go to the configured provider or gateway; approved browser autofill supplies private values to the exact destination site. Cloud-model prompts necessarily leave the device. Access profiles, approval workflows, sandboxed execution, configurable guardrails, session-scoped location prompts, private-memory filtering, and a verified automated test suite keep high-agency work bounded and reviewable.
+## Install
 
-Release `0.5.60` adds the memory folder (with daily Dreaming, sync and team memory), Bots with responsibilities and a work view, the icon-rail sidebar with a session panel, the opt-in Calm visual style, sandboxed `cowork-preview://` web previews, interactive answers, database work off the main thread, and WhatsApp Business and Twilio SMS channels. Earlier high-impact additions changed the day-to-day product shape: Automation Studio, the `cowork` CLI, Mixture of Agents model presets, Browser Use Cloud routing, Codex Security workflows, automation outcome reporting, real terminal tabs, visible Browser Workbench, Side Chat, message-box shortcuts, Everything Workbench artifacts, and Secure MCP Tunnels. Detailed feature inventory remains below for deeper evaluation.
-
-### Workflows & Media
-
-Stable workflow entry points for the newest high-impact capabilities.
-
-- **Use-case gallery** — "See how people use CoWork OS": ready-to-run prompts for tasks, builds, and bots that fill the composer in one click.
-- **Research vaults (`llm-wiki`)** — first-class workspace-local knowledge bases inspired by Andrej Karpathy's LLM Wiki concept, with deterministic raw-source capture, Obsidian-friendly notes, filed-back outputs, vault search, and vault-health analysis. [Learn more](docs/llm-wiki.md)
-- **Personal data cleanup (`unbroker`)** — bundled global privacy/security skill for consent-gated data-broker and people-search removal, with a local PII ledger, opt-out queue, human-task digest, and recurring recheck support. [Learn more](docs/skills/unbroker.md)
-- **Everything Workbench** — generated documents, spreadsheets, decks, web pages, PDFs, and previews share the same artifact model: task-feed card, sidebar open, fullscreen workspace, follow-up composer, and refresh after the agent finishes the requested edit. It makes CoWork the default place to create, inspect, and revise everyday Word/Excel/PowerPoint-style work. [Learn more](docs/everything-workbench.md)
-- **Terminal Tabs** — real PTY-backed terminal tabs live inside the task workspace, so coding and CLI work can stay beside agent tasks, artifacts, browser previews, and approvals. [Learn more](docs/terminal-tabs.md)
-- **Document artifacts** — task-created Word-style files render as compact artifact cards. `.docx` opens directly in an editable right-sidebar document surface with Google Docs-style controls, save, copy, external-open, fullscreen mode, and the same functional follow-up composer used by spreadsheet artifacts. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related Word-style formats are recognized with best-effort preview or external-app/folder actions. [Learn more](docs/document-artifacts.md)
-- **Designed editorial documents** — bundled `kami` skill for resumes, one-pagers, white papers, letters, portfolios, diagrams, and slide decks with workspace-local source scaffolding and PDF/PPTX export helpers. [Learn more](docs/skills/kami.md)
-- **Format-aware file preview popup** — clicking any file link in chat opens a unified preview modal that adapts to the format. Built-in support for HTML, Markdown, code (with `highlight.js` syntax colors), JSON / JSONL / GeoJSON (collapsible tree + raw toggle), CSV / TSV (RFC-4180 table), XLSX, DOCX, PDF (with page/OCR summary), images (fit / actual-size toggle, dimensions, alpha checkerboard), video, audio (with duration), LaTeX, and PPTX. Each format gets its own width profile, a header subtitle showing format-specific metadata, and a unified action bar with Copy path, Show in Finder, Open externally, and Close.
-- **Smart PDF attachments** — uploaded PDFs are copied into the workspace, summarized into a compact prompt excerpt with page/extraction metadata, and read on demand with the document parser when the user asks for summaries, Q&A, extraction, comparison, or transformation. Scanned/image-heavy PDFs keep OCR/scan status visible, PDF excerpts are marked as untrusted document data, and `read_pdf_visual` remains reserved for layout, formatting, and page-appearance questions.
-- **Video attachments** — uploaded `.mp4`, `.mov`, and `.webm` files are sampled into representative frames for image-capable models. CoWork extracts a contact sheet and full frame, stores them under `.cowork/video-frames/...`, and shows those screenshots inline in the task timeline. [Learn more](docs/video-attachments.md)
-- **Spreadsheet artifacts** — task-created spreadsheet files render as compact artifact cards. Excel workbooks and CSV/TSV files open in the editable right-sidebar viewer; native Numbers, Google Sheets shortcut, ODS, XLSB, and other recognized spreadsheet outputs still get the same card and external-app/folder actions. Fullscreen mode expands editable sheets across the app with cell/range/row/column selection, copy, zoom, add row/column, save, model picker, voice input, attachments, and follow-up task context. [Learn more](docs/spreadsheet-artifacts.md)
-- **Presentation artifacts** — generated `.pptx` decks render as compact artifact cards and open by default in the resizable right-sidebar presentation viewer. The viewer shows thumbnails, slide navigation, zoom, a white slide canvas, speaker notes, text-first fast loading, cached rendered slide images, fullscreen follow-up context, and background refresh after requested deck edits. Legacy PowerPoint formats are recognized with external-app/folder actions. [Learn more](docs/pptx-generation-and-preview.md)
-- **Web page artifacts** — generated `.html` / `.htm` pages and built React output such as `dist/index.html`, `build/index.html`, or `out/index.html` render as compact artifact cards and open by default in a resizable right-sidebar sandboxed iframe preview. Fullscreen mode keeps the functional follow-up composer and refreshes after the relevant file or build output changes. React-style source projects without build output show a clear build-output-needed state instead of auto-starting a dev server. [Learn more](docs/web-page-artifacts.md)
-- **Browser Workbench / Browser V2** — live website testing opens a visible in-app browser in the right sidebar by default. Browser-use tools target that shared webview through Browser V2, show cursor movement during actions, can resize the page to desktop/tablet/mobile breakpoints for responsive QA, prefer accessibility snapshot refs over selectors, expose console/network/download/storage diagnostics, support screenshots and annotation, and can expand to fullscreen with the normal follow-up composer. Explicit fallback routes include local Playwright, a separately launched Chrome with your system profile after consent, and Browser Use Cloud stealth browsers through `browser_provider: "browser-use-cloud"` for public HTTP(S) targets. [Learn more](docs/browser-workbench.md)
-- **Image generation** — configurable provider ordering across Gemini, OpenAI, Azure OpenAI, and OpenRouter.
-- **Video generation** — text-to-video and image-to-video routing with polling tools and inline preview.
-- **Programmatic technical video** — bundled `manim-video` skill for Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
-- **Motion-design films and editors** — bundled `motion-film` skill renders launch videos, promos, explainers, and social loops entirely in code (time-seeked HTML → Playwright → ffmpeg MP4, beat-synced, approval stills before the build); bundled `motion-editor` skill builds a local, offline After Effects / Screen Studio-lite editor app with keyframes, springs, timeline, and deterministic MP4 export. [Motion film](docs/skills/motion-film.md) · [Motion editor](docs/skills/motion-editor.md)
-- **Architecture design orchestration** — bundled `architecture-design` skill and local Rhino, Blender, and ComfyUI MCP connectors for concept house/building workflows with project-contained artifacts and connector evidence. [Learn more](docs/skills/architecture-design.md)
-- **React/Next.js implementation guidance** — bundled `react-best-practices` skill for React workspace changes, Next.js feature work, reviews, refactors, data-fetching improvements, bundle-size checks, and rendering-performance fixes. [Learn more](docs/skills/react-best-practices.md)
-- **High-agency frontend design** — bundled `taste-skill` for stricter anti-slop frontend work with stronger layout variance, typography, motion, and implementation rules.
-
-See [Workflow Intelligence](docs/workflow-intelligence.md), [Dreaming](docs/dreaming.md), [Core Automation](docs/core-automation.md), [I Gave CoWork OS Workflow Intelligence, And Now It Learns From Reviewable Work | Full Guide](docs/continual-learning-in-cowork.md), [Features](docs/features.md), [Heartbeat v3](docs/heartbeat-v3.md), [Providers](docs/providers.md), and [Plugin Packs](docs/plugin-packs.md) for current runtime details.
-
-### Latest Release
-
-**`0.5.60`** is a major feature release: the memory folder becomes where CoWork keeps what it knows (with dreaming, sync across machines and read-only team memory), the Bots page adds scheduled responsibilities and a work view, the sidebar becomes an icon rail with a session panel, database work moves off the main thread, and web previews run in a sandboxed origin. It also adds WhatsApp Business and Twilio SMS channels, GPT-6 models, the oMLX provider and a broad security hardening pass. First start runs one-time migrations, and Personal Health and Mobile Companions are removed; read the upgrade notes first. Electron 44 and the macOS 13 Ventura minimum remain in force. macOS 12 Monterey users should remain on `0.5.51`. Start with [Release Notes 0.5.60](docs/release-notes-0.5.60.md), then [Features](docs/features.md), [Getting Started](docs/getting-started.md), and the [Changelog](CHANGELOG.md).
-
-The larger recent feature expansion landed in `0.5.45`: Agent Builder, finance/legal packs, channel specialization, Google Workspace Tasks/Slides, mailbox compose/send upgrades, runtime network/sandbox policy controls, Dreaming memory curation, and `/multitask` lane fan-out. See [Release Notes 0.5.45](docs/release-notes-0.5.45.md), [Managed Agents](docs/managed-agents.md), [Claude-for-Legal Workflows](docs/claude-for-legal.md), [Multitask Command](docs/multitask.md), and [Dreaming](docs/dreaming.md).
-
-## Quick Start
-
-### Download the App
-
-Download the latest release from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest):
-
-| Platform                      | Download                | Install                                  |
-| ----------------------------- | ----------------------- | ---------------------------------------- |
-| **macOS 13 Ventura or later** | Terminal installer below, or `.dmg` | Run the one-line command below (no Gatekeeper dialog), or drag CoWork OS from the DMG into Applications |
-| **Windows**                   | `.exe` (NSIS installer) | Run the installer and follow the prompts |
-
-> **macOS 12 Monterey:** `0.5.51` is the final compatible CoWork OS release. The `0.5.60` app, installer, and automatic updater require macOS 13 or later. npm users who must remain on Monterey can run `npm install -g cowork-os@0.5.51`; this does not remove their existing CoWork data.
-
-#### macOS: install from the terminal (no Gatekeeper dialog)
-
-CoWork OS releases are ad hoc signed, not notarized by Apple, so a DMG downloaded in a browser is blocked on first launch. On macOS 15 Sequoia and later that dialog has no **Open** button, and Control-click > **Open** no longer bypasses it. The check is triggered by the quarantine attribute browsers attach to downloads; `curl` does not attach it. This command downloads the same release ZIP, verifies its SHA-512 against the published updater metadata, verifies the app bundle's code signature, and copies it into Applications without the quarantine attribute, so it opens like any other app:
+**macOS** (Apple Silicon, macOS 13 or later). No Gatekeeper dialog:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+curl -fsSL https://coworkosapp.com/install.sh | bash
 ```
 
-Re-run the same command to update. Options go after `bash -s --`, for example `--version 0.5.60`, `--install-dir "$HOME/Applications"` or `--no-launch`. To read the script before running it, download [`scripts/install-macos.sh`](scripts/install-macos.sh) and run `bash install-macos.sh`. Like the DMG, it needs an Apple Silicon Mac; see [macOS Installation](docs/macos-installation.md) for details, Intel Macs and uninstalling.
+**Windows** (64-bit), in PowerShell. No SmartScreen prompt:
 
-#### macOS: if you used the DMG
+```powershell
+irm https://coworkosapp.com/install.ps1 | iex
+```
 
-The DMG build needs a one-time Gatekeeper override, because the browser download carries the quarantine attribute. This is separate from the macOS 13 system requirement, and the terminal installer above avoids it:
-
-1. Drag **CoWork OS** from the DMG into **Applications** and open it once. When macOS says `"CoWork OS" Not Opened`, click **Done**.
-2. Open **System Settings > Privacy & Security**, scroll to **Security**, click **Open Anyway** next to `"CoWork OS" was blocked to protect your Mac`, then **Open Anyway** again in the confirmation dialog.
-3. Whichever install method you used, first start may ask for access to the `cowork-os Safe Storage` keychain item. Enter your Mac login password and click **Always Allow** so CoWork OS can store local credentials securely.
-
-Each step is shown with screenshots in [macOS Installation](docs/macos-installation.md#dmg-and-the-open-anyway-steps). Release maintainers create the unsigned DMG/ZIP with `npm run package:mac:unsigned`.
-
-> **Windows first launch:** Windows SmartScreen may show a warning for unrecognized apps. Click **More info** > **Run anyway** to proceed.
-
-> First launch starts with an editable task and suggestions. Choose **Start task** to use an existing model configuration or open AI setup when needed. **Personalize first** opens guided setup; **Explore CoWork** enters the app without starting work. When a request names a supported app that needs connecting, CoWork opens the existing connector controls and keeps your request ready to continue. See [First-result onboarding and contextual connections](docs/first-result-onboarding.md).
->
-> Tasks require one working model route: sign in with an existing ChatGPT subscription, use a local Ollama model, or add an API key for Claude, OpenAI API, Gemini, OpenRouter, Groq, and other providers. After onboarding, Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings. OpenRouter, Gemini through Google AI Studio, and Groq are marked when a free option is available. After at least two model routes work, you can create a Mixture of Agents preset that combines them.
-
-### Or Install via npm
+**Any platform with Node.js 24**, including Intel Macs. Installs the desktop app and the `cowork` CLI:
 
 ```bash
 npm install -g cowork-os
-cowork-os
-cowork
-cowork run "who are you?"
 ```
 
-`cowork-os` launches the desktop GUI. `cowork` launches the terminal UI, `cowork run` starts a local one-shot task, and commands like `cowork status`, `cowork sessions list`, `cowork tools list`, `cowork mcp list`, `cowork backup create`, and `cowork security audit` manage the same local profile, provider settings, workspaces, skills, and MCP configuration. Use `--remote` only when intentionally calling a remote Control Plane endpoint.
+Linux servers: use the [packaged headless server](docs/vps-linux.md). Re-run the same command to update.
 
-> **Windows npm install notes:**
->
-> - Run `npm install -g cowork-os` / `npm uninstall -g cowork-os` from `%USERPROFILE%` (or another neutral directory), **not** from `%APPDATA%\npm\node_modules\cowork-os`, to avoid `EBUSY` lock errors.
-> - On Windows ARM64, first launch may take longer while native modules are rebuilt; this can run multiple fallback steps before the app opens.
-> - If native rebuild fails, install [Visual Studio Build Tools 2022 (C++)](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and Python 3, then retry.
-> - If startup logs show `ERR_FILE_NOT_FOUND ... dist/renderer/index.html`, reinstall the latest package and check [Troubleshooting](docs/troubleshooting.md).
+<details>
+<summary>Trouble installing? Use the DMG or EXE instead</summary>
 
-### Or Build from Source
+Download the installer from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest). Releases are not notarized by Apple or code signed for Windows, so a browser download needs one extra step the first time:
 
-```bash
-git clone https://github.com/CoWork-OS/CoWork-OS.git
-cd CoWork-OS
-npm install && npm run setup
-npm run build && npm run package
-```
+- **macOS DMG:** drag CoWork OS into Applications and open it. When macOS says it was not opened, click **Done**, then go to **System Settings > Privacy & Security** and click **Open Anyway**. Step-by-step screenshots: [macOS Installation](docs/macos-installation.md).
+- **Windows EXE:** when SmartScreen says **Windows protected your PC**, click **More info > Run anyway**. Checksums and antivirus notes: [Windows Installation](docs/windows-installation.md).
+- **macOS 12 Monterey:** `0.5.51` is the last compatible release: `npm install -g cowork-os@0.5.51`.
 
-> **Windows prerequisites:** Native module setup may require [Visual Studio Build Tools 2022 (C++)](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and Python 3. On Windows ARM64, setup automatically falls back to x64 Electron emulation when ARM64 native prebuilds are unavailable.
->
-> `npm run setup` also installs local git hooks (`.githooks/`) including a pre-commit secret scan. If needed, reinstall hooks with `npm run hooks:install`.
+</details>
 
-See the [Development Guide](docs/development.md) for prerequisites and details.
+## Getting started
+
+1. **Open CoWork OS.** On macOS the first start may ask for the `cowork-os Safe Storage` keychain item; click **Always Allow**.
+2. **Pick a model.** Sign in with ChatGPT, use a detected local Ollama model, or paste an API key. Free options are marked.
+3. **Describe a task**, for example "make a spreadsheet of my last ten invoices from ~/Downloads", or pick one from the use-case gallery.
+4. **Watch and approve.** The timeline shows each step. Work inside the workspace runs on its own; anything that sends, reaches the network, uses credentials or leaves the workspace waits for your answer.
+
+From the terminal: `cowork` opens the terminal UI and `cowork run "who are you?"` runs a one-shot task against the same local profile. [Getting Started](docs/getting-started.md) · [CoWork CLI](docs/cli.md)
+
+<!-- Migrating from Hermes or OpenClaw: section lands with the importer (docs/migrating-from-hermes.md). -->
+
+## Documentation
+
+| | |
+| --- | --- |
+| [Getting Started](docs/getting-started.md) | Install, first model, first task |
+| [Feature Tour](docs/feature-tour.md) | Why CoWork OS, how a task runs, and the full feature inventory |
+| [Features](docs/features.md) | Categorized feature reference |
+| [Models & Access](docs/providers.md) | Provider routes, sign-ins, local models, fallbacks |
+| [Access Profiles](docs/access-profiles.md) | Approvals, sandbox, network and filesystem policy |
+| [Security Guide](docs/security-guide.md) | Threat model, guardrails, sandboxing, credential storage |
+| [Self-Hosting](docs/self-hosting.md) | Linux server, Docker and remote access |
+| [Development](docs/development.md) | Build from source and run the tests |
+| [All docs](docs/) · [Changelog](CHANGELOG.md) · [Release Notes 0.5.60](docs/release-notes-0.5.60.md) | |
+
+## Community
+
+- **Questions and ideas:** [GitHub Discussions](https://github.com/CoWork-OS/CoWork-OS/discussions)
+- **Bugs and requests:** [Issues](https://github.com/CoWork-OS/CoWork-OS/issues). We reply within a day.
+- **Contribute:** start with a [good first issue](https://github.com/CoWork-OS/CoWork-OS/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and read [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Security reports:** [SECURITY.md](SECURITY.md)
 
 <!-- COWORK_PUBLIC_ADOPTION_STATS_START -->
-### Public Adoption Signals
+### Adoption
 
 | Signal | Current | All time |
 |---|---:|---:|
@@ -189,466 +118,6 @@ See the [Development Guide](docs/development.md) for prerequisites and details.
 
 Generated 2026-10-17T07:44:52.096Z. These are public GitHub/npm adoption signals, not active-user or in-app telemetry numbers. All-time values are shown only where the source API provides lifetime coverage. [Full report](docs/public-adoption-stats.md).
 <!-- COWORK_PUBLIC_ADOPTION_STATS_END -->
-
-## How It Works
-
-1. **Choose an AI route** — The easiest path for many users is **Sign in with ChatGPT**. If CoWork detects a local Ollama model, it offers a private local route; Apple Silicon users can configure [MLX-LM](docs/mlx-lm.md) in Settings for another private local route. API-key providers are available for Claude, OpenAI API, Gemini, OpenRouter, Groq, and others, with free-option badges shown where applicable. Once several routes are configured, Mixture of Agents can use them as advisor and aggregator slots.
-2. **Create a task or start from the use-case gallery** — Describe what you want in the desktop app ("create a weekly plan", "create a quarterly report spreadsheet", "draft a DOCX memo", "build a small landing page"), pick a ready-to-run prompt from **See how people use CoWork OS**, or run a one-shot terminal task with `cowork run "..."`. No workspace needed — a private starter workspace is used automatically if you don't select one.
-3. **Choose how to work** — Use **Ask** to discuss or draft from supplied content without external actions, or **Do** to have CoWork work on the task within the selected access profile and approval rules. Releases before 0.5.60 label Ask as **Chat** and Do as **Smart**; the [release surface reference](docs/release-surface-reference.md) lists version-specific labels and navigation. Advanced runtime overrides include Execute, Plan, Analyze, Debug, and Verified. Autonomy, collaboration, and multi-model routing are separate task controls. [Work modes](docs/interaction-modes.md)
-4. **Monitor execution** — Watch the real-time task timeline as the agent plans, executes, and produces artifacts. Parallel tool bursts are grouped into lane summaries, shell commands stay visible, and the workspace can open real terminal tabs for direct interactive CLI work.
-5. **Inspect without interrupting** — Use `/side` to open Side Chat for read-only questions about the selected running session, or use the title-bar terminal and browser buttons when you need direct CLI or web inspection beside the task.
-6. **Respond when needed** — Actions requiring approval pause according to the selected access profile and hard guardrails. Plan overrides can pause for structured input, and location requests stay explicit and session-scoped.
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-4.webp" alt="Task feed of a running session" width="700">
-  <br><em>The task feed groups each turn: the agent's commentary, one-line activity rows, and the files it changed.</em>
-</p>
-
-## Features
-
-### Composer predictions
-
-The empty composer can suggest your next message after a response. Press **Tab** to accept, then edit and send. Enable or disable predictions under **Settings → Appearance → Composer**; a first-use sidebar tooltip links to the setting. Prediction generation uses your selected LLM provider and consumes tokens, including suggestions you dismiss. [Composer Predictions](docs/composer-predictions.md)
-
-### Calm interface
-
-An optional **Calm** visual style (Settings > Appearance) next to Modern and Terminal, in light or dark. The sidebar is an icon rail (Home, Inbox, Bots, Automations, plus Work, Team and Library in Calm) with a session panel: search sessions with Cmd/Ctrl+K and filter to **Running** or **Needs you**. Mission Control, Build and Add tools sit under **More**, and you can pin them to the rail; devices are listed in Team. In Calm, Home is **Today**: what needs you as one decision per card (approvals, questions, paused sessions, commitments, suggestions, calendar cards and opt-in reply drafts), then what was handled. **Work** lists every session by project, and **Team** shows agents, bots, schedules, automations and devices with what each waits on you for. The bell, the session panel's badge, the Bots page and Mission Control count the same decisions. [Getting Started](docs/getting-started.md#today-work-and-team-calm)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-22.webp" alt="Appearance settings with the Calm visual style selected" width="700">
-</p>
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-21.webp" alt="Sidebar with session filters and the notifications panel" width="345">
-  <img src="resources/branding/images/cowork-os-20.webp" alt="Library" width="345">
-  <br><em>Grouped notifications next to the session panel, and the Library of everything your tasks produced.</em>
-</p>
-
-### Agent Runtime
-
-Task-based execution with dynamic re-planning, Ask/Do/Plan interaction choices, separate autonomy and collaboration controls, `/multitask` lane fan-out, a shared turn kernel, metadata-driven tool scheduling, graph-backed delegation, typed worker roles, optional workflow-pipeline execution with per-phase model routing, agent teams with persistence, git worktree isolation, AI playbook, and performance reviews. [Work modes](docs/interaction-modes.md) · [Learn more](docs/features.md#agent-capabilities)
-
-Skills now follow an additive runtime model: CoWork can proactively shortlist or apply a relevant skill, but the original task remains canonical. Skills add context and scoped execution modifiers instead of replacing the task prompt. [Learn more](docs/skills-runtime-model.md)
-
-Real terminal tabs now sit beside the task runtime: xterm.js renders the terminal, node-pty owns the OS pseudoterminal, macOS uses the user's login shell, and Windows uses `cmd.exe` through ConPTY/winpty. This makes CoWork a stronger everyday developer workbench because repository work, agent execution, approvals, browser testing, and direct CLI sessions no longer require switching to a separate terminal app. [Learn more](docs/terminal-tabs.md)
-
-Side Chat gives active sessions a read-only inspection lane. `/side [question]` opens a right-side conversation about the selected running task with hidden inherited parent context, a fresh parent-status snapshot for progress questions, a side-only visible transcript, and mutating tools denied. [Learn more](docs/side-chat.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-3.webp" alt="Bots page" width="700">
-  <br><em>The Bots page shows your bots, what they need from you, what is scheduled, and templates for new ones.</em>
-</p>
-
-Give a bot a **responsibility**: a trigger, sources, a mode (Observe, Propose, or Act within granted scope), a review boundary and a budget. It is saved paused and runs only once you turn it on; each bot's Work view shows what needs you, what is working, what is scheduled and its results. [Bots and conversations](docs/bots-and-conversations.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-15.webp" alt="A bot's active responsibility in its Work view" width="345">
-  <img src="resources/branding/images/cowork-os-16.webp" alt="A bot's Results tab" width="345">
-  <br><em>An active responsibility (Propose mode) and the brief it produced in Results.</em>
-</p>
-
-### Chronicle (Desktop Research Preview)
-
-Chronicle is an opt-in desktop-only recent-screen context lane for vague on-screen references such as `this`, `that`, `the failing one`, `latest draft`, or `why is this failing`. Configure it from **Settings > Tools > Chronicle**: passive capture is consent-gated, can be paused from Settings or the tray, resolves through `screen_context_resolve`, and promotes only task-used observations into existing recall, evidence, and optional linked `screen_context` memory entries instead of creating a second memory system. [Learn more](docs/chronicle.md)
-
-### Research Vaults (`llm-wiki`)
-
-CoWork OS includes `llm-wiki` as a bundled, first-class research-vault workflow inspired by Andrej Karpathy's LLM Wiki idea: keep a `/raw` corpus, build durable linked notes on top, and make the result easy for agents to traverse later.
-
-You can launch it from the GUI with a normal prompt such as `Build a persistent Obsidian-friendly research vault for GRPO papers`, from the welcome/onboarding starter cards, or with `/llm-wiki` when you want explicit slash syntax.
-
-The welcome-screen Research vault browser is optional and disabled by default. Enable it from **Settings > Appearance > Home widgets > Show research vault** when you want the `research/wiki` vault card visible near the composer.
-
-`llm-wiki` creates and maintains a workspace-local markdown wiki with:
-
-- immutable `raw/` source captures
-- deterministic ingest helpers for articles, papers, repos, datasets, and images
-- durable Obsidian-friendly notes and maps
-- deterministic vault-first search across notes, raw captures, and filed slide decks
-- filed-back Marp slide decks and SVG charts under `outputs/`
-- `SCHEMA.md`, `index.md`, `log.md`, and `inbox.md`
-- a GUI vault browser on the welcome screen for core files, recent notes, recent queries, outputs, and raw captures
-- deterministic vault analysis for orphans, broken links, bridge pages, surprising cross-section links, and suggested follow-up questions
-
-It works in desktop and gateway channels, supports inline chaining, and writes inspectable run artifacts alongside the persistent vault. GUI-first prompts can start the flow even before you supply a topic, in which case CoWork asks one short scoping question first. [Learn more](docs/llm-wiki.md)
-
-Operator Runtime Visibility makes the runtime's learning and routing visible: task detail surfaces now show the learning progression, unified recall spans tasks/messages/files/workspace notes/memory/KG, shell sessions preserve operator state, and live routing/fallback events are surfaced in Mission Control and the task UI. [Learn more](docs/operator-runtime-visibility.md)
-
-Workflow Intelligence reflections now use the same runtime with stricter safeguards: they start only after memory services are initialized, write durable target-scoped artifacts under `.cowork/subconscious/` for compatibility, default to reviewable suggestions, and learn from act/edit/snooze/dismiss/ignore feedback; accepted memory candidates go to the archive, and Dreaming tidies the memory folder about once a day. Trusted code-change auto-create paths still require isolated git worktrees and skip non-git workspaces when isolation is required. See [Workflow Intelligence](docs/workflow-intelligence.md), [Dreaming](docs/dreaming.md), and [Troubleshooting](docs/troubleshooting.md#workflow-intelligence-startup-warnings-in-development).
-
-### Output Completion UX
-
-Completion state and file availability are now explicit:
-
-- **Everything Workbench**: generated knowledge-work outputs share one artifact model across docs, sheets, decks, pages, PDFs, and previews, making CoWork the everyday place to create, review, edit, and revise office-style work with the agent beside it
-- **High-signal completion toast**: finished tasks with outputs show `Task complete` with filename/count and actions for **Open file**, **Show in Finder**, and **View in Files**
-- **Right-sidebar focus**: if you are viewing the completed task and the panel is collapsed, the Files panel auto-opens and highlights the primary output
-- **Unseen-output badge**: if completion happens in another task/view, the collapsed right-panel toggle shows a numeric badge until you open Files
-- **Filename-first rows with clear location context**: Files rows stay filename-only, with output folder context shown separately (or **Workspace root**)
-- **Artifact parity**: artifact-only outputs are treated the same as normal file outputs in completion toasts, timeline details, and Files panel
-- **Spreadsheet artifact workbench**: spreadsheet outputs render as compact cards. `.xlsx`, `.xls`, `.xlsm`, `.csv`, and `.tsv` open into a resizable editable sidebar by default; `.numbers`, `.gsheet`, `.ods`, and `.xlsb` are recognized as spreadsheet artifacts with external-app/folder actions. Editable sheets can expand into fullscreen spreadsheet mode with copy/save controls, zoom, attachments, voice input, and model selection for follow-up prompts
-- **Document artifact workbench**: Word-style outputs render as compact cards. `.docx` opens into a resizable editable sidebar by default and can expand into fullscreen document mode with a Google Docs-style toolbar, save, copy, attachments, voice input, model selection, follow-up context, and automatic preview refresh after follow-up edits. `.doc`, `.rtf`, `.odt`, `.ott`, `.pages`, and related formats are recognized with preview/external actions according to local parser support
-- **LaTeX/PDF artifact workbench**: explicit LaTeX/TikZ paper tasks can write `.tex`, compile it with a system TeX engine, and show the source plus rendered PDF together with Summary, source, and PDF tabs
-- **Smart PDF attachment reading**: user-uploaded PDFs keep the initial prompt compact while preserving the workspace-relative path, page count, extraction mode, OCR/scan status, and a safe excerpt. For deeper PDF content tasks, CoWork calls `parse_document` on demand instead of stuffing the whole PDF into every turn; visual PDF inspection stays on `read_pdf_visual`
-- **Presentation artifact workbench**: `.pptx` outputs show inline deck cards in task events and assistant summaries, then open into a resizable sidebar or fullscreen viewer with thumbnails, previous/next navigation, zoom, speaker notes, fast text-first loading, cached rendered slide images, external actions, and follow-up prompt context. `.ppt`, `.pptm`, `.potx`, `.potm`, `.ppsx`, and `.ppsm` are recognized with external-app/folder actions
-- **Web page artifact workbench**: generated `.html` / `.htm` files and built React output entrypoints show compact web page cards, then open into a resizable sidebar or fullscreen sandboxed iframe preview with browser/folder/copy actions, persisted sidebar width, and follow-up prompt context. React-style projects without `dist`, `build`, or `out` HTML output show a build-output-needed preview state rather than auto-running a dev server
-- **Semantic completion labels**: completed tool batches and verifier verdicts now feed the richer completion text shown in timelines, feed relays, and export surfaces
-
-### Guided Input & Runtime Recovery
-
-Long-running tasks now have clearer operator handoffs and stronger recovery defaults:
-
-- **Structured input cards**: plan-mode tasks can pause with 1-3 short multiple-choice prompts, with answers captured inline in the desktop UI or via the Control Plane web dashboard
-- **Adaptive turn recovery**: main execute-mode tasks are uncapped at the turn-window level by default, still reserve room for a final answer, and use lifetime/emergency safety stops plus bounded follow-up recovery instead of strategy-assigned `30/30` style windows; explicit `maxTurns` / `windowTurnCap` still opt tasks into capped behavior
-- **Context overflow retry**: context-capacity failures trigger compaction and retry instead of immediate hard failure when the model context window is exceeded
-- **Path repair**: `/workspace/...` aliases and drifted relative paths can be normalized back into the active workspace or pinned task root, with strict-fail policies available when you want hard enforcement
-- **Parallel timeline lanes**: read-only tool batches render as grouped timeline rows so the UI stays readable even when searches/fetches run concurrently
-
-### Feature Inventory
-
-The top of this README is intentionally opinionated about what matters first. The broader surface area is still part of CoWork OS:
-
-| Area                               | Current coverage                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Agent runtime**                  | Ask/Do/Plan interaction choices, separate autonomy/collaboration/model-routing controls, `/multitask`, structured input cards, Side Chat, dynamic re-planning, shell-session continuity, completion/resume coherence, and runtime recovery                                                                                                                                                                            |
-| **Agent operations**               | Bots page, reusable managed agents, managed sessions, agent teams, the Calm Team view with per-agent access limits, Mission Control, visual boards, global queue visibility, task pinning, task wrap-up, sub-task navigation, external ACP/A2A delegation, restart-safe ACP tasks, remote cancel, and graph-backed orchestration                                                                                                                                                                                                     |
-| **Developer workbench**            | Repository work, real PTY terminal tabs, title-bar terminal/browser toggles, shell tools, git worktree isolation, Browser Workbench, Browser V2 automation, responsive viewport QA, diagnostics, screenshots, annotation, web page previews, Live Canvas, Build Mode, React/Next.js guidance, and high-agency frontend design                                                                                                                                                        |
-| **Knowledge work artifacts**       | Editable document artifacts, spreadsheet artifacts, presentation artifacts, web page artifacts, paired LaTeX/PDF outputs, smart PDF attachments, format-aware file preview, designed editorial documents, generated images, generated videos, and programmatic Manim technical videos                                                                                                                                                                                                |
-| **Inbox and communications**       | Inbox Agent, Classic and Today inbox modes, Ask Inbox, hybrid mailbox search, editable AI drafts, opt-in reply drafts on Today, manual reply/reply-all/forward, sender cleanup, commitments, Gmail forwarding automations, `@Inbox` routing, voice mode, outbound calls, and 17 messaging channels                                                                                                                                                                                                                 |
-| **Automation and memory**          | Main-screen Automation Studio with versioned structured flows, dry runs, variables, branches, approvals, cancellation, recovery, and activity; plus prompt-based Routines, scheduled tasks, webhooks, event triggers, Workflow Intelligence, Heartbeat, Reflection, Dreaming, Suggestions, AI Playbook, adaptive style learning, Usage Insights, persistent memory, Knowledge Graph, ChatGPT history import, durable runtime context, context compaction, and Chronicle |
-| **Integrations and extensibility** | Dozens of model routes, Mixture of Agents presets, ordered LLM/search fallback chains, provider-aware prompt caching, MCP connectors, native and MCP-backed Google Workspace coverage, bundled plugin packs and skills, Plugin Store, Skill Store, external skill directories, and MCP client/host/registry support                                                                                                                                                                  |
-| **Operations and deployment**      | Profiles, profile import/export, Devices, remote workspaces, remote task dispatch, remote file picking, Control Plane, Linux server package, self-hosting, Tailscale/SSH remote access, company-linked operator agents, and best-fit Support/IT/Sales workflow packs                                                                                                                                                                  |
-| **Safety and reliability**         | Approval workflows, sandboxed execution, workspace/profile permission rules, network/sandbox policy controls, private-memory filtering, session-scoped location approvals, command/path containment, import scanning and quarantine, encrypted storage, local-first data handling, renderer event caps, off-main-thread memory recall, and long-session cleanup                                                                                                                      |
-
-### Mission Control
-
-Centralized orchestration and monitoring cockpit with clear separation between Heartbeat-enabled agents, the global runtime queue, workspace-scoped Mission Board work, the real-time activity feed, core automation profile visibility, and a `Core Harness` view for traces, failure clusters, evals, experiments, and learnings. [Learn more](docs/mission-control.md) | [Core Automation](docs/core-automation.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-8.webp" alt="Mission Control task board" width="700">
-  <br><em>Mission Control shows global runtime queue state, scoped board work, agent status, and operational review without mixing the concepts.</em>
-</p>
-
-### Devices
-
-Devices (under **More** on the left icon rail; in **Team** in the Calm style) turns CoWork OS into a multi-machine control surface. Save and reconnect remote CoWork nodes, inspect device summaries (activity, apps, storage, alerts, resource signals), launch tasks against a selected machine, browse that machine's remote workspaces, and attach files directly from the remote filesystem before dispatching a task. [Learn more](docs/remote-access.md)
-
-### Automations
-
-Open **Automations** in the main sidebar to use Automation Studio. It provides Discover, Library, Builder, and Activity views for template-, prompt-, or blank-started flows; typed variables; explicit Yes/No branches; Google account and scope review; dry runs; immutable activation versions; per-step approvals; signed webhooks; cancellation; restart recovery; and retained run evidence. Saving a draft never changes the version that is live, and external writes or data exports remain approval-gated according to the flow policy. [Automation Studio guide](docs/automation-studio.md)
-
-The wider automation model keeps a hard boundary: **Workflow Intelligence** is the always-on cognitive loop, structured Studio flows are the main visual multi-step workflow product, and prompt-based `Routines` remain available in **Settings > Automations**. `Scheduled Tasks`, `Webhooks`, and `Event Triggers` serve as advanced or compiled backends. Task view can also turn the current task into a routine with `Add automation...`, preserving its title, ID, and `cowork://tasks/<taskId>` deeplink while continuing the same thread by default. [Core Automation](docs/core-automation.md) | [Task Automations](docs/task-automations.md)
-
-### Live Canvas & Build Mode
-
-Agent-driven visual workspace for interactive HTML/CSS/JS content, data visualization, and iterative image annotation. **Build Mode** adds a phased idea-to-prototype workflow with named checkpoints and revert support. Build previews open in a sandboxed `cowork-preview://` frame next to the session, with the changed files one click away. [Learn more](docs/live-canvas.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-14.webp" alt="Build session with a live preview of the generated page" width="700">
-  <br><em>A Build session with its sandboxed live preview.</em>
-</p>
-
-### Multichannel Gateway
-
-Unified AI gateway across 17 channels with security modes, rate limiting, ambient mode, scheduled tasks, channel/chat/thread specialization, and a shared message lifecycle for commands, active-task follow-ups, cancellations, progress delivery, skill slashes, and scheduled outputs. WhatsApp supports `/new`, `/new temp`, `/stop`, editable progress updates, and hidden temporary scratch workspaces; Slack supports multiple workspaces and channel specialization, Telegram supports group/topic specialization plus group-routing policies and allowlists, Discord can be limited to specific guilds and specialized per channel/thread, Feishu/Lark plus WeCom are first-class channels, and WhatsApp Business (Cloud API) and Twilio SMS/MMS use signed webhooks with delivery receipts. [Learn more](docs/channels.md) | [Per-channel guides](docs/channel-user-guides.md) | [User guide](docs/gateway-user-guide.md) | [Message lifecycle](docs/gateway-message-lifecycle.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-12.webp" alt="Messaging channel setup" width="700">
-  <br><em>Channel settings specialize routing, security, and workspace behavior per messaging surface.</em>
-</p>
-
-### Inbox Agent
-
-Local-first inbox workspace that turns email into an action queue while preserving normal email-client controls. It keeps cached mail visible on restart, syncs in the background, supports manual reply/reply-all/forward, and surfaces the right next step for each thread: triage, draft, cleanup, commitment tracking, and scheduling. [Learn more](docs/inbox-agent.md)
-
-- **Classic + Today modes**: use the familiar three-pane inbox or the Today lanes for Needs action, Happening today, Good to know, and More to browse
-- **Action cards**: Unread, Needs reply, Suggested Actions, Open Commitments
-- **Mailbox views**: Inbox, Sent, All, plus Recent/Priority sorting, saved views, account filters, and practical domain filters
-- **Normal email actions**: manual Reply, Reply all, Forward, To/Cc/Bcc, editable subject/body, and provider-backed send
-- **AI draft handling**: generated replies are editable before send, and sent drafts disappear after successful send
-- **Reply drafts on Today** (opt-in, Calm): up to three drafted replies a day for threads that need one, each sent through the outbox with Undo until it goes out. [Inbox Agent](docs/inbox-agent.md#reply-drafts-on-today)
-- **Ask Inbox**: ask mailbox questions in the right sidebar, see live retrieval/reading/answer steps, and search local FTS, semantic mailbox embeddings, provider-native mail search, and indexed attachment text with LLM summaries when configured
-- **`@Inbox` composer routing**: type `@Inbox` or `@inbox ...` in the main composer to open Inbox Agent, switch to Ask Inbox, and run the query there
-- **Workflow buttons**: Cleanup, Follow-up, Reply, Forward, Mark done, Prep thread, Extract todos, Schedule, Refresh intel
-- **Gmail auto-forwarding**: create forwarding automations from a Gmail thread with dry-run support, attachment filters, per-message dedupe, and thread-scoped execution
-- **Commitment tracking**: accept commitments into real follow-up tasks, mark already-handled threads done, or dismiss items
-- **Background sync**: load from the local database immediately and refresh in the background without blanking the inbox on restart
-
-### Desktop Location & Maps
-
-Location-aware work is available when explicitly approved for the current session. CoWork can use native desktop location helpers on macOS, Windows, and Linux, fall back to IP-based location when configured, and pass coordinates into Maps MCP tools for geocoding, reverse geocoding, route estimates, and nearby-place search. Location permission cannot be auto-approved or persisted, so local errands, travel planning, route comparisons, and nearby search remain deliberate user-approved actions. [Learn more](docs/features.md#desktop-location)
-
-### Web Scraping
-
-Advanced web scraping powered by [Scrapling](https://github.com/D4Vinci/Scrapling) with JavaScript rendering and structured data extraction. Two fetcher modes — fast HTTP and full Playwright browser. It does not bypass bot protection or CAPTCHAs. Includes batch scraping, persistent sessions, proxy support, and five built-in skills (web scraper, price tracker, site mapper, lead scraper, content monitor). Configure in **Settings** > **Web Scraping**. [Learn more](docs/features.md#web-scraping-scrapling)
-
-### Integrations
-
-- **Cloud Storage/Productivity**: 6 integrations, including Notion, Box, OneDrive, Google Workspace, Dropbox, and SharePoint
-- **MCP Connectors**: pre-built enterprise integrations for CRM, support, productivity, analytics, payments, and local creative tools (Salesforce, Jira, HubSpot, Zendesk, Stripe, Tavily, Grafana, Metabase, Socket, Rhino, Blender, ComfyUI, and more), with connector notifications available as trigger inputs for automations
-- **Background app work**: CoWork works in other apps in the background, without taking your screen, pointer, keyboard or clipboard. It uses the app's API or MCP server first, then the app's own scripting (background Photoshop), then one exact window through `native_app` on macOS, and checks every result against a fresh readback. See [Working with apps in the background](docs/background-app-work.md).
-- **Remote MCP servers with OAuth**: connect OAuth 2.1 MCP servers such as Workday Agent-Ready Tools, signing in as a person or with an agent key for headless runs, and register the Workday agent's tools from inside CoWork. See [Remote MCP OAuth](docs/remote-mcp-oauth.md).
-- **Composer mentions**: type `@` in the message box to choose configured integrations. Google Workspace appears as service-specific options: Gmail, Google Drive, Google Calendar, Google Docs, Google Sheets, Google Slides, Google Tasks, and Google Chat when native or MCP-backed tools are available. The Google Calendar chip can include both `calendar_action` and `google-workspace.calendar_*` tools for scheduling, availability, and event CRUD. Mentions render as icon+name chips and are passed as soft routing hints, not permission grants. [Learn more](docs/composer-mentions.md)
-- **Google Workspace**: one OAuth connection covers Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, and Chat. Existing users may need to reconnect when a release adds new required scopes.
-- **Developer Tools**: `glob`/`grep`/`edit_file`, Playwright browser automation, MCP client/host/registry
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-11.webp" alt="Connector catalog" width="700">
-  <br><em>Connector setup covers productivity, CRM, support, analytics, and payment tools.</em>
-</p>
-
-[Learn more](docs/features.md)
-
-### Active Context Sidebar
-
-Real-time overview of your active integrations, always visible in the right panel. Shows connected MCP connectors (see the [Connector Inventory](docs/connector-inventory.md)) and native integrations with branded Lucide icons (HubSpot, Salesforce, Google Workspace, Discord, GitHub, Postgres, and more) and green status dots, plus enabled skills from active packs. Each section shows 4 items with internal scrolling for more. Auto-refreshes every 30 seconds. [Learn more](docs/plugin-packs.md#context-panel)
-
-### Usage Insights
-
-Dashboard with task metrics, cost/token tracking by model, prompt-cache read telemetry (`cachedTokens` and cache-read rate where available), activity heatmaps (day-of-week and hourly), top skills usage, per-pack analytics, persona-level success/retry/cost breakdowns, and feedback/retry quality metrics with 7/14/30-day period selection. Access from **Settings** > **Usage Insights**. [Learn more](docs/features.md#usage-insights)
-
-### LLM Providers
-
-Dozens of routes across built-in, compatible/gateway, local, account-based, and virtual options. Use provider APIs, supported account connections, local Ollama or MLX-LM models, or Mixture of Agents presets that fan out to advisor models before a final aggregator answers. Configure ordered fallback chains for runtime failover and get prompt caching on supported routes. Claude supports direct API keys and account-token setup; Grok supports xAI API keys and an experimental browser OAuth route. Eligibility, model availability, and provider charges follow each service's current terms. [Learn more](docs/providers.md) · [MLX-LM guide](docs/mlx-lm.md) · [Mixture of Agents](docs/mixture-of-agents.md)
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-10.webp" alt="AI model provider settings" width="700">
-  <br><em>Model settings centralize providers, fallback routing, authentication, and model choices.</em>
-</p>
-
-### Plugin Platform & Customize
-
-Unified plugin platform with 38 bundled packs (Engineering, DevOps, Product, Sales, QA, Finance, Claude-for-Legal practice packs, CoWork Shortcuts, and more), each bundling skills, agent roles, connectors, slash command aliases, and "Try asking" prompts.
-
-- **Search & filter**: Real-time sidebar search across pack names, descriptions, categories, and skill names
-- **Per-skill control**: Enable or disable individual skills within a pack without toggling the whole pack
-- **Persistent toggles**: Pack and skill states survive app restarts
-- **Update detection**: Background version checks against the registry with visual indicators
-- **"Try asking" in chat**: Empty chat shows randomized prompt suggestions from active packs
-- **Plugin Store**: In-app marketplace for browsing, installing (Git/URL), and scaffolding custom packs, now with install-time security scanning and quarantine handling for imported packs
-- **Skill Store & external skills**: Desktop GUI support for CoWork Registry skills, direct ClawHub installs, and generic external skill imports from Git repos, raw manifests, and `SKILL.md` bundles, with managed scan reports and quarantine for unsafe imports
-- **External skill directories**: Add shared read-only skill folders without importing or copying those skills into CoWork's managed directory
-- **Remote Registry**: Community pack catalog with search and category filtering
-- **Admin Policies**: Organization-level controls — allow/block/require packs, restrict installations, set agent limits, distribute org-managed packs from a shared directory
-- **Per-pack analytics**: Usage Insights dashboard groups skill usage by parent pack
-- **Claude-for-Legal workflows**: Legal slash commands insert into the composer for added context before launch, and matter-heavy legal tasks can show structured main-view intake cards. [Learn more](docs/claude-for-legal.md)
-
-Access from **Settings** > **Feature Packs**. [Learn more](docs/plugin-packs.md)
-
-### Best-Fit Workflows
-
-CoWork OS ships purpose-built packs and Tier-1 connectors for three operational lanes where governed AI delivery has the clearest ROI:
-
-| Lane            | Pack                  | Connectors               |
-| --------------- | --------------------- | ------------------------ |
-| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow      |
-| **IT Ops**      | DevOps Pack           | ServiceNow, Jira, Linear |
-| **Sales Ops**   | Sales CRM Pack        | HubSpot, Salesforce      |
-
-These are the workflows where approval gates, local data control, and measurable outcome delivery pay off most — and where CoWork OS is a vendor-swap-friendly alternative to point solutions or BPO tooling. [Learn more](docs/best-fit-workflows.md)
-
-### Extensibility
-
-- **151 built-in skills** across developer, productivity, communication, documents, frontend, game development, mobile development, financial analysis, infrastructure-as-code, architecture design, privacy/security cleanup, and more
-- **Custom skills** in `~/Library/Application Support/cowork-os/skills/` (macOS) or `%APPDATA%\cowork-os\skills\` (Windows)
-- **38 bundled plugin packs** with 340 pack skills, 268 pack slash commands, 44 pack agent roles, message-box slash aliases, and Claude-for-Legal workflow cards
-- **Plugin Store** — browse, install from Git/URL, scaffold custom packs, and review quarantine/report state for imported packs
-- **Skill Store** — browse CoWork Registry skills, search ClawHub, import external skills from Git, raw JSON, or raw `SKILL.md`, and review quarantine/report state for imported skills
-- **MCP support** — client, host, and registry
-
-### Voice Mode
-
-Text-to-speech (ElevenLabs, OpenAI, Web Speech API), speech-to-text (Whisper), and outbound phone calls. [Learn more](docs/features.md#voice-mode)
-
-### Knowledge Graph
-
-Built-in structured entity and relationship memory backed by SQLite. The agent builds a knowledge graph of your workspace — people, projects, technologies, services, and their relationships — with 10 dedicated tools, FTS5 search, multi-hop graph traversal, temporal validity on edges (`valid_from` / `valid_to`), historical `as_of` queries, auto-extraction from task results, and confidence scoring with decay. [Learn more](docs/knowledge-graph.md)
-
-### Memory & Context
-
-CoWork keeps what it learns about you and your workspaces in a **memory folder**: plain markdown notes in a local git repo (`~/CoWork Memory` by default, in the open [Agent Memory Repo](https://github.com/AgentMemoryRepo/agentmemoryrepo) format), with `MEMORY.md`, `me.md`, `lessons.md` and one file per workspace. Every change is a commit you can inspect, and you can edit notes in any editor or in **Settings > Memory > What CoWork knows** (edit, pin, delete). The agent saves preferences, corrections, decisions and lessons as it works and recalls them when they are relevant, through four tools: `memory_remember`, `memory_recall`, `memory_forget` and `context_recall`. Each reply can show the memories it used. Anything learned after reading web pages, email or other untrusted content goes to an unreviewed inbox that is never put in prompts, and commitments and notes about other people stay in the local database. [Memory Engine](docs/memory-engine.md)
-
-About once a day, or when you press **Dream now**, **Dreaming** tidies the folder: it merges duplicates, removes stale notes and saves things you said that were not saved yet. Changes to the agent's own notes are applied as one commit you can undo; anything that touches your notes waits in the **Review** tab as a diff you accept or reject. Dreaming uses your model provider within a daily token budget (50,000 tokens by default) and can be turned off. You can also sync the folder across your machines through a private git remote you own, add up to three read-only **team memory** folders, import notes from another folder or what another AI assistant knows about you, and agents working on one goal share a notes folder so work is not repeated. [Dreaming](docs/dreaming.md)
-
-Private memories and anything marked `<no-memory>` never reach prompts or recall, secrets are redacted at every memory write, group chats and sub-agents get no memory by default, and **Compact history** removes old versions so deleted memories are really gone. Task outcomes, errors and feedback are kept in a local archive with full-text search, structured observations and Memory Hub privacy controls; **Import your ChatGPT history** to start with context instead of from zero. Optional extras: **Durable Runtime Context** so `context_recall` can recover compacted facts from the active task, and **proactive compaction** that summarizes long sessions at 90% of the context window while checkpoints keep the exact supporting evidence. [Learn more](docs/features.md#persistent-memory-system) | [Structured Memory](docs/memory-observations.md) | [Durable Runtime Context](docs/durable-runtime-context.md) | [.md) | [Context Compaction](docs/context-compaction.md)
-
-The workspace kit (`.cowork/`) holds durable, human-edited context. Workspace-wide files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `SOUL.md`, `IDENTITY.md`, `RULES.md`, `VIBES.md` and `LORE.md` sit next to project files such as `.cowork/projects/<projectId>/CONTEXT.md` and `ACCESS.md`; hand edits to `USER.md` and `MEMORY.md` sync back into memory. `BOOTSTRAP.md` is a one-time onboarding checklist and `HEARTBEAT.md` holds recurring Heartbeat checklist work. Every kit file is linted for freshness, secrets and missing files, with revision snapshots under `.cowork/**/.history/`; check it locally with `npm run kit:lint`.
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-17.webp" alt="What CoWork knows, notes grouped by file" width="345">
-  <img src="resources/branding/images/cowork-os-18.webp" alt="Memory review of a dream change" width="345">
-  <br><em>The memory folder's notes by file, and a dream change waiting for review.</em>
-</p>
-
-<p align="center">
-  <img src="resources/branding/images/cowork-os-19.webp" alt="A reply showing the memories it used" width="700">
-  <br><em>Each reply can show which memories it used.</em>
-</p>
-
-## Architecture
-
-<div align="center">
-<pre>
-┌─────────────────────────────────────────────────────────────────┐
-│                    Security Layers                               │
-│  Channel Access Control │ Guardrails & Limits │ Approval Flows   │
-└─────────────────────────────────────────────────────────────────┘
-                              ↕
-┌─────────────────────────────────────────────────────────────────┐
-│                    React UI (Renderer)                           │
-│  Task List │ Timeline │ Approval Dialogs │ Live Canvas           │
-└─────────────────────────────────────────────────────────────────┘
-                              ↕ IPC
-┌─────────────────────────────────────────────────────────────────┐
-│                 Agent Daemon (Main Process)                      │
-│  Task Queue │ Agent Executor │ Tool Registry │ Cron Service      │
-└─────────────────────────────────────────────────────────────────┘
-                              ↕
-┌─────────────────────────────────────────────────────────────────┐
-│                    Execution Layer                               │
-│  File Ops │ Skills │ Browser │ LLM Providers (36) │ MCP         │
-└─────────────────────────────────────────────────────────────────┘
-                              ↕
-┌─────────────────────────────────────────────────────────────────┐
-│  SQLite DB │ Knowledge Graph │ MCP Host │ WebSocket │ Remote Access  │
-└─────────────────────────────────────────────────────────────────┘
-</pre>
-</div>
-
-See [Architecture](docs/architecture.md) for the full technical deep-dive.
-
-## Security
-
-<p align="center">
-  <img src="screenshots/ZeroLeaks-result-010226.png" alt="ZeroLeaks Security Assessment" width="500">
-  <br>
-  <em>Top security score on <a href="https://zeroleaks.ai/">ZeroLeaks</a> — outperforming many commercial solutions</em>
-  <br>
-  <a href="ZeroLeaks-Report-jn70f56art03m4rj7fp4b5k9p180aqfd.pdf">View Full Report</a>
-</p>
-
-- **Configurable guardrails**: Token budgets, cost limits, iteration caps, dangerous command blocking
-- **Approval workflows**: User consent required for destructive operations
-- **Sandbox isolation**: macOS `sandbox-exec` (native), Docker containers, or process-level isolation on Windows
-- **Managed deployment hardening**: Headless Control Plane access is loopback-first and blocks unsafe public binds unless Tailscale, private container context, or an explicit break-glass override is configured
-- **Encrypted storage**: OS keychain + AES-256 fallback
-- **7,913 declared Vitest cases** (**7,911 passing, 2 todo**) across **763 tracked test files**, including **142** security cases under `tests/security/` and **405** control-plane/WebSocket-related cases
-
-See [Security Guide](docs/security-guide.md) and [Security Architecture](docs/security/) for details.
-
-## Deployment
-
-| Mode                | Platform                                  | Guide                                      |
-| ------------------- | ----------------------------------------- | ------------------------------------------ |
-| **Desktop App**     | macOS, Windows                            | [Getting Started](docs/getting-started.md) |
-| **Packaged Server** | Linux x64 VPS                             | [VPS Guide](docs/vps-linux.md)             |
-| **Self-Hosted**     | GitHub release tarball / Docker / systemd | [Self-Hosting](docs/self-hosting.md)       |
-| **Remote Access**   | Tailscale / SSH                           | [Remote Access](docs/remote-access.md)     |
-
-## Roadmap
-
-### Planned
-
-- [ ] VM sandbox using macOS Virtualization.framework
-- [ ] Network egress controls with proxy
-- [ ] Linux desktop support
-
-See [CHANGELOG.md](CHANGELOG.md) for the full history of completed features.
-
-## Documentation
-
-| Guide                                                                    | Description                                                                                                                                        |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Getting Started](docs/getting-started.md)                               | First-time setup and usage                                                                                                                         |
-| [Release Surface Reference](docs/release-surface-reference.md)           | Work-choice labels and navigation paths by release and interface                                                                                   |
-| [Bots & Conversations](docs/bots-and-conversations.md)                    | Create reusable bot identities, use durable conversations, edit/deactivate profiles, and coordinate the persistent bot team                         |
-| [Beginner's Guide](docs/cowork-school.md)                                | Practical guide to what CoWork OS is for and which workflows to try first                                                                          |
-| [Release Notes 0.5.60](docs/release-notes-0.5.60.md)                     | Memory folder, Bots responsibilities, icon rail sidebar, sandboxed previews, database worker, new channels and models                                                 |
-| [Release Notes 0.5.54](docs/release-notes-0.5.54.md)                     | Registry publication recovery, exact package/checksum validation, GitHub Packages access fixes, portable recovery CI, and refreshed adoption reporting                |
-| [Release Notes 0.5.53](docs/release-notes-0.5.53.md)                     | Approval boundaries, local MLX/Atomic Chat/Jev execution, WorkSessions, bots, Box Brain, Pulse, and security/release hardening                              |
-| [Release Notes 0.5.52](docs/release-notes-0.5.52.md)                     | OpenRouter images, OpenCode/SearXNG/Atlas providers, Electron 44, and macOS support changes                                                        |
-| [Composer Mentions](docs/composer-mentions.md)                           | `@` autocomplete for agents, configured integrations, files, rich integration chips, and `@Inbox` routing                                          |
-| [Message Box Shortcuts](docs/message-box-shortcuts.md)                   | `/` picker for deterministic app commands and skill-backed workflow shortcuts                                                                      |
-| [Side Chat](docs/side-chat.md)                                           | Right-side read-only questions about an active running session without steering or stopping the parent task                                        |
-| [Mixture of Agents](docs/mixture-of-agents.md)                           | Virtual LLM provider that runs advisor models before a final aggregator model answers                                                              |
-| [Claude-for-Legal Workflows](docs/claude-for-legal.md)                   | Bundled legal practice slash commands, editable picker selection, and main-view matter intake cards                                                |
-| [Multitask Command](docs/multitask.md)                                   | `/multitask [N] <task>` lane fan-out through collaborative team runs                                                                               |
-| [Use Case Showcase](docs/showcase.md)                                    | Comprehensive guide to what you can build and automate                                                                                             |
-| [Features](docs/features.md)                                             | Complete feature reference                                                                                                                         |
-| [First-result Onboarding](docs/first-result-onboarding.md)               | Start with a task, reuse model access, and connect supported apps while preserving the request                                                       |
-| [Add Tools Discovery](docs/add-tools-discovery.md)                        | Browse capability catalogs and inspect available setup/readiness evidence in one place                                                            |
-| [Desktop Location & Maps](docs/features.md#desktop-location)             | Explicitly approved desktop location, geocoding, routes, and nearby-place workflows                                                                |
-| [Everything Workbench](docs/everything-workbench.md)                     | Unified in-app artifact model for docs, sheets, decks, web pages, PDFs, and live browser sessions                                                  |
-| [Video Attachments](docs/video-attachments.md)                           | Uploaded video analysis through extracted contact sheets, representative frames, and inline task timeline screenshots                              |
-| [Browser Workbench](docs/browser-workbench.md)                           | Visible browser testing and automation, private login prompts, 1Password/Bitwarden, 2FA, and approved checkout autofill                             |
-| [Android Phone Control](docs/android-phone-control.md) | Opt-in Android device selection, approvals, screenshots, durable input and recovery through phone-harness |
-| [Browser V2 Architecture](docs/browser-v2-architecture.md)               | Unified browser session manager, adapters, snapshot refs, diagnostics, safety, and verification contract                                           |
-| [Ask (Chat Mode)](docs/chat-mode.md)                                     | The Ask work choice (stored `chat` mode), same-session follow-ups, and the narrow PDF-attachment read-only analysis exception                                              |
-| [Long-Document Analysis](docs/document-analysis.md)                      | Bounded read-only review of named DOCX, PDF, Markdown, and text sources with complete coverage accounting                                          |
-| [Platform Updates](docs/integration-skill-bootstrap-lifecycle.md)        | Detailed implementation notes for integration setup, skill proposals, workspace-kit contracts, and bootstrap lifecycle                             |
-| [Channels](docs/channels.md)                                             | Messaging channel setup (17 channels)                                                                                                              |
-| [Channel User Guides](docs/channel-user-guides.md)                       | End-user features and best practices across all messaging channels                                                                                 |
-| [Dedicated Channel Guides](docs/channel-guides/index.md)                 | Separate user guide pages for WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, Signal, Email, and more                                      |
-| [Gateway User Guide](docs/gateway-user-guide.md)                         | End-user guide and best practices for using CoWork from WhatsApp and other channels                                                                |
-| [Gateway Message Lifecycle](docs/gateway-message-lifecycle.md)           | Remote command routing, active-task policy, skill slashes, delivery, and scheduled channel outputs                                                 |
-| [Providers](docs/providers.md)                                           | LLM and search provider configuration, costs, and fallback chains                                                                                  |
-| [MLX-LM Local Inference](docs/mlx-lm.md)                                 | Apple Silicon setup, local API contract, runtime lifecycle, privacy, troubleshooting, and maintainer notes                                         |
-| [Atomic Chat Inference](docs/atomic-chat.md)                             | Connect to an already-running Atomic Chat API, discover exact model IDs, troubleshoot typed connection states, and understand boundaries  |
-| [Local-Model Execution](docs/local-model-execution.md)                   | Opt-in bounded budgets, capability evidence, admission control, and qualification rules for local inference                                      |
-| [CoWork Pulse](docs/cowork-pulse.md)                                     | Opt-in usage aggregates, privacy boundaries, metric definitions, delivery limits, and production operations                                        |
-| [Development](docs/development.md)                                       | Build from source, project structure                                                                                                               |
-| [Architecture](docs/architecture.md)                                     | Technical architecture deep-dive                                                                                                                   |
-| [Access Profiles](docs/access-profiles.md)                               | Codex-style access choices, custom profile fields, inheritance, migration, and cross-surface enforcement                                           |
-| [Skills Runtime Model](docs/skills-runtime-model.md)                     | Canonical prompt invariant, additive skill application, routing shortlist model, and `use_skill` contract                                          |
-| [LLM Wiki](docs/llm-wiki.md)                                             | First-class research vault workflow, slash syntax, vault layout, analyzer outputs, and Obsidian-friendly knowledge-base behavior                   |
-| [Kami Skill](docs/skills/kami.md)                                        | Bundled editorial document workflow for resumes, one-pagers, white papers, diagrams, and slide decks                                               |
-| [manim-video Skill](docs/skills/manim-video.md)                          | Bundled Manim CE workflow for technical animation, project scaffolding, and draft-to-production render flow                                        |
-| [Motion Film Skill](docs/skills/motion-film.md)                          | Bundled code-rendered motion-design film workflow for launch videos, promos, explainers, and social loops                                          |
-| [Motion Editor Skill](docs/skills/motion-editor.md)                      | Bundled build spec for a local, offline keyframe/timeline motion editor app with deterministic MP4 export                                          |
-| [Architecture Design Skill](docs/skills/architecture-design.md)          | Bundled Rhino, Blender, and ComfyUI orchestration workflow for concept architecture artifacts                                                      |
-| [React Best Practices Skill](docs/skills/react-best-practices.md)        | Bundled React and Next.js guidance for feature work, refactors, reviews, data fetching, bundle size, and rendering performance                     |
-| [Unbroker Skill](docs/skills/unbroker.md)                                | Bundled consent-gated workflow for authorized data-broker and people-search opt-outs, local PII ledgers, and recurring privacy rechecks            |
-| [Workflow Intelligence](docs/workflow-intelligence.md)                   | Memory + Heartbeat + Reflection + Dreaming + Suggestions model, reviewable outputs, and feedback learning                                          |
-| [Dreaming](docs/dreaming.md)                                             | Daily model pass over the memory folder: what it changes, the Review tab, undo, triggers and the token budget                                      |
-| [Memory Engine](docs/memory-engine.md)                                   | The memory fact store, write path, prompt injection, recall, the four memory tools, purge and retention                                           |
-| [Box Brain](docs/box-brain.md)                                           | Box MCP connection, opt-in bounded background indexing, source-backed local recall, reviewable improvement, safety boundaries, and troubleshooting |
-| [Core Automation](docs/core-automation.md)                               | Runtime boundary for Workflow Intelligence, automation profiles, and the core harness                                                              |
-| [Automation Studio](docs/automation-studio.md)                           | Main-screen structured flow builder, runtime safety model, operations, approvals, recovery, troubleshooting, and developer contract                |
-| [Task Automations](docs/task-automations.md)                             | Create task-sourced routines and scheduled thread follow-ups from a task's overflow menu                                                           |
-| [Heartbeat v3](docs/heartbeat-v3.md)                                     | Default two-lane heartbeat architecture, signals, Pulse, Dispatch, and automation-profile-backed operator semantics                                |
-| [Security Guide](docs/security-guide.md)                                 | Security model and best practices                                                                                                                  |
-| [Agent Security with Numbat](docs/agent-security-numbat.md)              | Optional monitor/enforce security decisions, policy defaults, CLI operations, provenance, and retention                                            |
-| [Enterprise Connectors](docs/enterprise-connectors.md)                   | MCP connector development                                                                                                                          |
-| [Secure MCP Tunnels](docs/secure-mcp-tunnels.md)                         | Self-hosted outbound-only private MCP access, relay setup, policy controls, and audit logs                                                         |
-| [Self-Hosting](docs/self-hosting.md)                                     | Docker and systemd deployment                                                                                                                      |
-| [VPS/Linux](docs/vps-linux.md)                                           | Headless server deployment                                                                                                                         |
-| [Remote Access](docs/remote-access.md)                                   | Tailscale, SSH tunnels, WebSocket API                                                                                                              |
-| [Knowledge Graph](docs/knowledge-graph.md)                               | Structured entity/relationship memory                                                                                                              |
-| [Durable Runtime Context](docs/durable-runtime-context.md)               | Opt-in active-task durable recall, `context_recall`, summary DAGs, and testing prompts                                                              |
-| [Context Compaction](docs/context-compaction.md)                         | Proactive session compaction with structured summaries and chat-history summarization                                                              |
-| [Mission Control](docs/mission-control.md)                               | Agent orchestration dashboard                                                                                                                      |
-| [Subconscious Loop](docs/subconscious-loop.md)                           | Compatibility redirect for the former name of Workflow Intelligence                                                                                |
-| [Plugin Packs](docs/plugin-packs.md)                                     | Plugin platform, Customize panel, and Plugin Store                                                                                                 |
-| [Skill Store & External Skills](docs/skill-store-and-external-skills.md) | ClawHub support, external skill imports, and managed-skill install flows                                                                           |
-| [Best-Fit Workflows](docs/best-fit-workflows.md)                         | Support Ops, IT Ops, and Sales Ops — where CoWork OS delivers the strongest ROI                                                                    |
-| [Admin Policies](docs/admin-policies.md)                                 | Enterprise admin policies and organization pack management                                                                                         |
-| [Windows npm Smoke Test](docs/windows-npm-smoke-test.md)                 | Clean Windows install/launch validation checklist for npm releases                                                                                 |
-| [Troubleshooting](docs/troubleshooting.md)                               | Common issues and fixes                                                                                                                            |
-| [Uninstall](docs/uninstall.md)                                           | Uninstall instructions                                                                                                                             |
-
-## Data Handling
-
-- **Stored locally**: Task metadata, timeline events, artifacts, workspace config, commitments and notes about other people (SQLite), and what CoWork knows about you and your workspaces as markdown notes in the memory folder (`~/CoWork Memory`, a local git repo you can optionally sync to a private git remote you own)
-- **Sent to provider**: Task prompt and context you choose to include
-- **Not sent**: Your API keys (stored via OS keychain), private memories
-
-## Compliance
-
-Users must comply with their model provider's terms: [Anthropic](https://www.anthropic.com/legal/commercial-terms) · [AWS Bedrock](https://aws.amazon.com/legal/bedrock/third-party-models/)
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

@@ -900,3 +900,99 @@ Validation after this change:
 - `executor-step-failures` tests pass.
 - `npm run type-check` passes.
 - `npm run build:electron` passes.
+
+## Quick Reference
+
+A short orientation for first-time contributors.
+
+### Hot reload
+
+The app supports hot reload:
+
+1. **React UI Changes**: Edit files in `src/renderer/` - auto-refreshes
+2. **Electron Main Changes**: Edit files in `src/electron/` - auto-restarts
+3. **Shared Types**: Edit `src/shared/types.ts` - both reload
+
+### Project Structure
+
+```
+src/
+├── electron/          # Backend (Node.js)
+│   ├── main.ts       # App entry point
+│   ├── agent/        # AI agent logic
+│   │   ├── llm/      # LLM providers
+│   │   ├── search/   # Search providers
+│   │   ├── browser/  # Browser V2 session manager and workbench bridge
+│   │   ├── tools/    # Tool implementations
+│   │   └── skills/   # Document skills
+│   ├── gateway/      # WhatsApp, Telegram, Discord & Slack
+│   └── database/     # SQLite storage
+├── renderer/         # Frontend (React)
+│   ├── App.tsx       # Main component
+│   └── components/   # UI components
+└── shared/           # Shared between both
+    └── types.ts      # TypeScript types
+```
+
+### Debugging
+
+**Renderer Process (UI)**:
+
+- DevTools open automatically in dev mode
+- Use `console.log()` - shows in DevTools Console
+
+**Main Process (Backend)**:
+
+- Use `console.log()` - shows in terminal
+- Check logs:
+  - macOS: `~/Library/Application Support/cowork-os/`
+  - Windows: `%APPDATA%\\cowork-os\\`
+
+### Database
+
+SQLite database location:
+
+- macOS: `~/Library/Application Support/cowork-os/cowork-os.db`
+- Windows: `%APPDATA%\\cowork-os\\cowork-os.db`
+
+View it with any SQLite browser or:
+
+```bash
+# macOS
+sqlite3 ~/Library/Application\ Support/cowork-os/cowork-os.db
+.tables
+SELECT * FROM tasks;
+```
+
+```powershell
+# Windows (PowerShell)
+sqlite3 "$env:APPDATA\cowork-os\cowork-os.db"
+.tables
+SELECT * FROM tasks;
+```
+
+### Building for Production
+
+```bash
+# Build both renderer and electron
+npm run build
+
+# Package desktop app
+npm run package
+```
+
+Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
+
+## Releasing (maintainers)
+
+`.npmrc` sets `ignore-scripts=true`, so `prepack` does not run during `npm pack` or `npm publish`. Build and check the package explicitly:
+
+1. Work from a clean worktree; never publish from a dirty tree.
+2. Bump the version (`npm version patch|minor|major`) and update `CHANGELOG.md` and the release notes.
+3. Run `npm ci --no-audit --no-fund`, then `npm run build`.
+4. Create the tarball with `npm pack --ignore-scripts --silent` and confirm `dist/` is inside it.
+5. Extract the tarball into a temporary directory, run `npm install`, and confirm the app starts.
+6. If the release changes the database schema, test the upgrade from the previous release. Fix migrations rather than asking users to delete their database.
+7. Publish with `npm publish --ignore-scripts`, then push the version commit and tag.
+8. Check that the GitHub release has the desktop assets (`.exe`, `.dmg`, `-mac.zip`, `latest.yml`, `latest-mac.yml`); the install scripts read the `latest*.yml` files.
+9. On Windows, run the [npm smoke-test checklist](windows-npm-smoke-test.md) on a clean machine. Updates with new native dependencies need a full uninstall before reinstalling.

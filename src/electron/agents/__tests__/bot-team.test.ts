@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TaskStrategyService } from "../../agent/strategy/TaskStrategyService";
 import {
   buildBotTeamContextPrompt,
   hasBotTeamDelegationRequest,
@@ -12,6 +13,32 @@ const context: BotTeamPromptContext = {
 };
 
 describe("configured bot team guidance", () => {
+  it.each([
+    "Run STARTUP. Identify available sources and missing access. Do not create\nschedules, delegate work, or launch project tasks yet.",
+    "Read my notes. Don't delegate work or use send_agent_message.",
+    "Read context without delegating to a teammate.",
+    "Never ask Quality Crew for this work.",
+    "No delegation; inspect the available files yourself.",
+    "No scheduling, delegation, or project launches. Read my notes.",
+    "Explain how delegation works.",
+    "Read my teammate’s notes.",
+    "Do not create schedules or then delegate work.",
+    "Explain how to ask Quality Crew for a review.",
+    "What does send_agent_message do?",
+  ])("does not route a prohibition to delegation: %s", (text) => {
+    expect(hasBotTeamDelegationRequest(text, context)).toBe(false);
+    expect(TaskStrategyService.hasExplicitDelegationRequest(text)).toBe(false);
+  });
+
+  it.each([
+    "Do not change files, but delegate research to another agent.",
+    "Do not run commands; delegate research to another agent.",
+    "Do not launch project work. Delegate research to another agent.",
+    "Please delegate\nresearch to another agent.",
+  ])("retains a separate affirmative delegation request: %s", (text) => {
+    expect(hasBotTeamDelegationRequest(text, context)).toBe(true);
+    expect(TaskStrategyService.hasExplicitDelegationRequest(text)).toBe(true);
+  });
   it("uses configured stable selectors and replies to the actual requester without inventing a lead", () => {
     const prompt = buildBotTeamContextPrompt(context);
     expect(prompt).toContain('bot="user-bot-id"');

@@ -70,6 +70,43 @@ describe("TaskExecutor tool allow-list semantics", () => {
     expect((executor as Any).isToolRestrictedByPolicy("read_file")).toBe(false);
   });
 
+  it("keeps context tools for a standalone bot whose startup prohibits delegation", () => {
+    const executor = createExecutor();
+    executor.task = {
+      id: "bot-context",
+      title: "Private Coordinator",
+      prompt: "Start chatting with Private Coordinator",
+      agentConfig: {
+        botConversation: true,
+        conversationMode: "task",
+        executionMode: "execute",
+        taskIntent: "execution",
+        taskDomain: "research",
+      },
+    };
+    executor.lastUserMessage =
+      "Run STARTUP. Identify available sources and missing access. Do not create\nschedules, delegate work, or launch project tasks yet.";
+    executor.daemon = { logEvent: vi.fn() };
+
+    expect(executor.getAvailableTools().map((tool: Any) => tool.name)).toContain("read_file");
+  });
+
+  it("routes the current turn independently of an earlier delegation request", () => {
+    const executor = createExecutor();
+    executor.task = {
+      id: "bot-context",
+      title: "Delegate research",
+      prompt: "Delegate research to another bot.",
+      agentConfig: { botConversation: true, executionMode: "execute", taskIntent: "execution" },
+    };
+    executor.lastUserMessage = "Read my notes yourself and give a sourced answer.";
+    executor.daemon = { logEvent: vi.fn() };
+    expect(executor.getAvailableTools().map((tool: Any) => tool.name)).toContain("read_file");
+    expect(executor.hasExplicitBotTeamDelegationRequest("Delegate work to a teammate")).toBe(false);
+    executor.lastUserMessage = "Please delegate this research to another bot.";
+    expect(executor.hasExplicitBotTeamDelegationRequest()).toBe(true);
+  });
+
   it("does not recurse through getAvailableTools when resolving via tool hints", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.getEffectiveExecutionMode = vi.fn().mockReturnValue("plan");

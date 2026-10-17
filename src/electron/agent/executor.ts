@@ -8889,7 +8889,9 @@ ${transcript}
 
     if (
       !this.task.parentTaskId &&
-      TaskStrategyService.hasExplicitDelegationRequest(this.getContractPrompt())
+      TaskStrategyService.hasExplicitDelegationRequest(
+        this.lastUserMessage || this.getContractPrompt(),
+      )
     ) {
       lines.push(
         "The user explicitly requested delegation. Use actual spawn_agent or orchestrate_agents calls and collect the child results before reconciling them. Serial research passes are not separate agents. Assign public official-source research to web_researcher, local inspection to researcher, and scoped writing to implementer. If delegation is unavailable, report the concrete blocker instead of silently substituting a solo run.",
@@ -20322,7 +20324,9 @@ ${transcript}
     );
     if (
       !this.task.parentTaskId &&
-      TaskStrategyService.hasExplicitDelegationRequest(this.getContractPrompt())
+      TaskStrategyService.hasExplicitDelegationRequest(
+        this.lastUserMessage || this.getContractPrompt(),
+      )
     ) {
       for (const name of [
         "spawn_agent",
@@ -20767,9 +20771,9 @@ ${transcript}
 
   private hasExplicitBotTeamDelegationRequest(context?: string): boolean {
     if (this.task.agentConfig?.botConversation !== true) return false;
-    const delegationContext = [context, this.task.title, this.task.prompt, this.lastUserMessage]
-      .filter(Boolean)
-      .join("\n");
+    // The latest user turn supersedes the original prompt. Step descriptions and
+    // titles are model-authored or historical and cannot authorize a new handoff.
+    const delegationContext = this.lastUserMessage || this.task.userPrompt || this.task.prompt;
     return hasBotTeamDelegationRequest(
       delegationContext,
       this.daemon.getBotTeamPromptContext?.(this.task.id),
@@ -41241,8 +41245,8 @@ Return ONLY a JSON object:
     >,
   ): Promise<void> {
     try {
-      if (!this.plan) {
-        if (recoveredBotHandoff?.message && recoveredBotHandoff.messageSource === "agent") {
+      if (!this.plan || recoveredBotHandoff?.messageSource === "user") {
+        if (recoveredBotHandoff?.message) {
           // A bot handoff may already be durably delivered when the process
           // exits. In that case the queue receipt is terminal, but the
           // receiver still needs one fresh execution turn after restart. Do
@@ -41252,19 +41256,45 @@ Return ONLY a JSON object:
             `${this.logTag} Replaying the latest delivered teammate handoff after restart`,
           );
           this.emitEvent("log", {
-            message: "Replaying the latest delivered teammate handoff after restart.",
+            message:
+              recoveredBotHandoff.messageSource === "user"
+                ? "Resuming the latest unfinished bot user turn after restart."
+                : "Replaying the latest delivered teammate handoff after restart.",
             messageId: recoveredBotHandoff.messageId,
             senderTaskId: recoveredBotHandoff.senderTaskId,
-            recovery: "bot_handoff",
+            recovery:
+              recoveredBotHandoff.messageSource === "user" ? "bot_user_turn" : "bot_handoff",
           });
           await this.sendMessageUnlocked(recoveredBotHandoff.message, undefined, undefined, {
-            messageSource: "agent",
+            messageSource: recoveredBotHandoff.messageSource,
             messageId: recoveredBotHandoff.messageId,
             senderTaskId: recoveredBotHandoff.senderTaskId,
             senderLabel: recoveredBotHandoff.senderLabel,
             inReplyToMessageId: recoveredBotHandoff.inReplyToMessageId,
             inReplyToTaskId: recoveredBotHandoff.inReplyToTaskId,
             suppressUserMessageEvent: true,
+            transcriptAlreadyContainsMessage:
+              recoveredBotHandoff.messageSource === "user" &&
+              this.conversationHistory.some((entry) => {
+                if (entry.role !== "user") return false;
+                const text =
+                  typeof entry.content === "string"
+                    ? entry.content
+                    : entry.content
+                        .filter((block) => block.type === "text")
+                        .map((block) => (block as { text: string }).text)
+                        .join("\n");
+                return text.includes(recoveredBotHandoff.message);
+              }),
+          });
+          return;
+        }
+        if (this.task.agentConfig?.botConversation === true) {
+          // An empty/finished bot has no runnable initial task. Its synthetic
+          // seed is UI metadata, never an instruction to execute on recovery.
+          this.daemon.updateTaskStatus(this.task.id, "pending");
+          this.emitEvent("log", {
+            message: "Bot recovery has no unfinished turn; conversation remains idle.",
           });
           return;
         }
@@ -43634,6 +43664,14 @@ Return ONLY a JSON object:
       memoryFeatures: memoryFeatureSettings,
       turnGuidancePrompt: followUpTurnGuidance,
     });
+    const roleContextPreserved = !roleContext || builtPrompt.prompt.includes(roleContext.trim());
+    if (!roleContextPreserved) {
+      throw new Error("Saved role instructions were not preserved in the execution prompt.");
+    }
+    logger.info(`${this.logTag} Role instruction delivery`, {
+      roleContextChars: roleContext.length,
+      roleContextPreserved,
+    });
     this.systemPrompt = this.setPromptCacheContext({
       surface: "followUps",
       systemBlocks: builtPrompt.systemBlocks,
@@ -43642,6 +43680,8 @@ Return ONLY a JSON object:
     });
     this.emitEvent("log", {
       message: "Follow-up prompt built",
+      roleContextChars: roleContext.length,
+      roleContextPreserved,
       droppedSections: builtPrompt.droppedSections,
       truncatedSections: builtPrompt.truncatedSections,
       totalTokens: builtPrompt.totalTokens,

@@ -1,5 +1,6 @@
 import type { TaskEvent } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
+import { isTaskTurnTerminalEvent } from "../../utils/task-turn-timing";
 import {
   friendlyToolLaneCompletedLabel,
   friendlyToolRunningLabel,
@@ -151,6 +152,7 @@ export function buildActionBlockSummary(
 
   let blockStart = events[0]?.timestamp ?? 0;
   let blockEnd = events[events.length - 1]?.timestamp ?? 0;
+  const lookupEvents = allEventsForLookup?.filter((event) => event.taskId === events[0]?.taskId);
 
   // A block summarizes the work between two messages the user can see. Hidden (internal)
   // step reports do not split that work: treating them as boundaries left a step's tool calls
@@ -161,26 +163,37 @@ export function buildActionBlockSummary(
     if (t === "user_message") return true;
     return t === "assistant_message" && asObject(e.payload).internal !== true;
   };
+  const isBoundary = (event: TaskEvent) =>
+    isVisibleMessageBoundary(event) || isTaskTurnTerminalEvent(event);
 
-  // Reach back to just after the previous visible message.
-  if (allEventsForLookup && allEventsForLookup.length > 0 && blockStart > 0) {
-    let previousBoundaryTs: number | null = null;
-    for (const e of allEventsForLookup) {
+  // Reach back to just after the previous message or run ending.
+  let previousBoundary: TaskEvent | undefined;
+  if (lookupEvents && lookupEvents.length > 0 && blockStart > 0) {
+    for (const e of lookupEvents) {
       const ts = e.timestamp ?? 0;
-      if (ts >= blockStart || !isVisibleMessageBoundary(e)) continue;
-      if (ts > (previousBoundaryTs ?? -1)) previousBoundaryTs = ts;
+      if (ts >= blockStart || !isBoundary(e)) continue;
+      if (ts > (previousBoundary?.timestamp ?? -1)) previousBoundary = e;
     }
-    if (previousBoundaryTs !== null) blockStart = previousBoundaryTs + 1;
+    if (previousBoundary) blockStart = previousBoundary.timestamp + 1;
   }
 
-  // In summary mode, block may have few events; expand blockEnd to just before next boundary so we capture all tool calls and llm_usage in that phase
-  if (allEventsForLookup && allEventsForLookup.length > 0 && blockStart > 0) {
-    const nextBoundary = allEventsForLookup.find((e) => {
+  // Sparse summary blocks include hidden calls up to the next message, but never
+  // cross completion into idle time or the next run's pre-message routing events.
+  if (lookupEvents && lookupEvents.length > 0 && blockStart > 0) {
+    const terminalInBlock = lookupEvents.find(
+      (event) =>
+        event.timestamp >= blockStart &&
+        event.timestamp <= blockEnd &&
+        isTaskTurnTerminalEvent(event),
+    );
+    const nextBoundary = lookupEvents.find((e) => {
       const ts = e.timestamp ?? 0;
       if (ts <= blockEnd) return false;
-      return isVisibleMessageBoundary(e);
+      return isBoundary(e);
     });
-    if (nextBoundary) {
+    if (terminalInBlock) {
+      blockEnd = terminalInBlock.timestamp;
+    } else if (nextBoundary && !(previousBoundary && isTaskTurnTerminalEvent(previousBoundary))) {
       const nextTs = (nextBoundary.timestamp ?? 0) - 1;
       if (nextTs > blockEnd) blockEnd = nextTs;
     }
@@ -188,8 +201,8 @@ export function buildActionBlockSummary(
 
   // In summary mode, block events may exclude tool_call and llm_usage; use full events in time range
   const eventsInRange =
-    allEventsForLookup && allEventsForLookup.length > 0 && (blockStart > 0 || blockEnd > 0)
-      ? allEventsForLookup.filter(
+    lookupEvents && lookupEvents.length > 0 && (blockStart > 0 || blockEnd > 0)
+      ? lookupEvents.filter(
           (e) => (e.timestamp ?? 0) >= blockStart && (e.timestamp ?? 0) <= blockEnd,
         )
       : events;
@@ -578,7 +591,7 @@ export function buildActionBlockSummary(
         : `${events.length} step${events.length === 1 ? "" : "s"}`;
 
   // Duration: use full events in range when available for more accurate span (summary mode may have fewer block events)
-  const rangeEvents = eventsInRange.length >= 2 ? eventsInRange : events;
+  const rangeEvents = eventsInRange;
   const durationMs =
     rangeEvents.length >= 2
       ? Math.max(
@@ -590,8 +603,8 @@ export function buildActionBlockSummary(
   // Sum output tokens from llm_usage events in the block's time range
   let outputTokens = 0;
   const llmUsageEvents =
-    allEventsForLookup && allEventsForLookup.length > 0
-      ? allEventsForLookup.filter(
+    lookupEvents && lookupEvents.length > 0
+      ? lookupEvents.filter(
           (e) =>
             e.type === "llm_usage" &&
             (e.timestamp ?? 0) >= blockStart &&

@@ -1013,6 +1013,7 @@ function SurfaceChecklist({
   node: Extract<AnswerSurfaceNode, { type: "checklist" }>;
   context: SurfaceContext;
 }) {
+  const text = (value: string) => interpolateText(value, context.scope);
   const checked = new Set(
     Array.isArray(context.state[node.id]) ? (context.state[node.id] as string[]) : [],
   );
@@ -1024,7 +1025,7 @@ function SurfaceChecklist({
   return (
     <div className="as-checklist">
       <div className="as-checklist-header">
-        {node.title && <span className="as-checklist-title">{node.title}</span>}
+        {node.title && <span className="as-checklist-title">{text(node.title)}</span>}
         <span className="as-checklist-progress" aria-live="polite">
           {done} of {node.items.length} done
         </span>
@@ -1038,9 +1039,10 @@ function SurfaceChecklist({
       <ul className="as-list">
         {node.items.map((item) => {
           const isChecked = checked.has(item.id);
+          const time = item.time ? text(item.time) : undefined;
           // Short times ("13:30") get a column; longer ones ("A day before") sit above the step.
-          const shortTime = item.time && item.time.length <= 12 ? item.time : undefined;
-          const longTime = item.time && !shortTime ? item.time : undefined;
+          const shortTime = time && time.length <= 12 ? time : undefined;
+          const longTime = time && !shortTime ? time : undefined;
           return (
             <li key={item.id} className={isChecked ? "as-checked" : undefined}>
               <label>
@@ -1048,8 +1050,8 @@ function SurfaceChecklist({
                 {shortTime && <span className="as-checklist-time">{shortTime}</span>}
                 <span className="as-checklist-text">
                   {longTime && <span className="as-checklist-when">{longTime}</span>}
-                  {item.text}
-                  {item.detail && <span className="as-checklist-detail">{item.detail}</span>}
+                  {text(item.text)}
+                  {item.detail && <span className="as-checklist-detail">{text(item.detail)}</span>}
                 </span>
               </label>
             </li>

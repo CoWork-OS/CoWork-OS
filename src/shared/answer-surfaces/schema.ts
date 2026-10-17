@@ -911,8 +911,10 @@ function validateSemantics(
         break;
       case "checklist": {
         declare(node.id);
+        collectText(node.title);
         const itemIds = new Set<string>();
         for (const item of node.items) {
+          collectText(item.text, item.time, item.detail);
           if (itemIds.has(item.id)) problem ??= `Duplicate checklist item id "${item.id}"`;
           itemIds.add(item.id);
         }

@@ -5,7 +5,7 @@ import {
   parseAnswerSurfaceSource,
   type AnswerSurfaceSpec,
 } from "../schema";
-import { buildSurfaceScope, formatSurfaceValue } from "../runtime";
+import { buildSurfaceScope, formatSurfaceValue, lintAnswerSurface } from "../runtime";
 
 const ROAST = JSON.stringify({
   type: "card",
@@ -116,6 +116,45 @@ describe("parseAnswerSurfaceSource", () => {
     for (let depth = 0; depth < 7; depth += 1) node = { type: "stack", children: [node] };
     const result = parseAnswerSurfaceSource(JSON.stringify(node));
     expect(result).toMatchObject({ ok: false, error: "Components are nested too deeply" });
+  });
+
+  it.each(["title", "text", "time", "detail"])("validates expressions in checklist %s", (field) => {
+    for (const expression of ["unknown / 5", "globalThis.process.exit()", "minutes +"]) {
+      const result = parseAnswerSurfaceSource(
+        JSON.stringify({
+          type: "stack",
+          children: [
+            { type: "slider", id: "minutes", label: "Duration", min: 5, max: 60, default: 20 },
+            {
+              type: "checklist",
+              id: "routine",
+              ...(field === "title" ? { title: `{{${expression}}}` } : {}),
+              items: [
+                {
+                  id: "step",
+                  text: "Disconnect",
+                  ...(field !== "title" ? { [field]: `{{${expression}}}` } : {}),
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain("Formula");
+    }
+  });
+
+  it("lints checklist expressions that have no value at the defaults", () => {
+    const spec = parse(
+      JSON.stringify({
+        type: "checklist",
+        id: "routine",
+        title: "{{1 / 0}} minutes",
+        items: [{ id: "step", text: "{{1 / 0}}", time: "{{1 / 0}}", detail: "{{1 / 0}}" }],
+      }),
+    );
+    expect(lintAnswerSurface(spec)).toHaveLength(4);
   });
 });
 

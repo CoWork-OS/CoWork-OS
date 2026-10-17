@@ -81,6 +81,36 @@ describe("AnswerSurfaceBlock", () => {
     expect(render({ closed: false })).toContain("did not finish");
   });
 
+  it.each([20, 30, 45])("resolves checklist labels from the %i minute control value", (minutes) => {
+    const html = render({
+      source: JSON.stringify({
+        type: "stack",
+        children: [
+          { type: "slider", id: "minutes", label: "Duration", min: 5, max: 60, default: minutes },
+          {
+            type: "checklist",
+            id: "routine",
+            title: "Your {{minutes}} minute routine",
+            items: [
+              {
+                id: "disconnect",
+                time: "{{minutes / 5}} min",
+                text: "Disconnect for {{minutes / 5}} minutes",
+                detail: "Dim the lights for {{round(minutes / 10, 1)}} minutes",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(html).toContain(`Your ${minutes} minute routine`);
+    expect(html).toContain(`class="as-checklist-time">${minutes / 5} min</span>`);
+    expect(html).toContain(`Disconnect for ${minutes / 5} minutes`);
+    expect(html).toContain(`Dim the lights for ${minutes / 10} minutes`);
+    expect(html).toContain("0 of 1 done");
+    expect(html).not.toContain("{{");
+  });
+
   it("renders the themed calculator with the result first and editable inputs", () => {
     const html = render({ source: JSON.stringify(ANSWER_SURFACE_EXAMPLES.calculator) });
     expect(html).toContain("as-theme-ocean");

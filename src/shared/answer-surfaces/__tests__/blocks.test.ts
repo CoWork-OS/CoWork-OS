@@ -12,6 +12,25 @@ const BLOCK =
   '{"type":"values","title":"Shopping","items":[{"label":"Lamb","value":{"expr":"people * 0.4","decimals":1,"unit":"kg"}}],"x":1}';
 const STEPPER_BLOCK =
   '{"type":"stack","children":[{"type":"stepper","id":"people","label":"People","min":1,"max":10,"default":4},{"type":"values","items":[{"label":"Lamb","value":{"expr":"people * 0.4","decimals":1,"unit":"kg"}}]},{"type":"checklist","id":"steps","title":"Timeline","items":["Prep","Roast","Rest"]}]}';
+const ROUTINE_BLOCK = JSON.stringify({
+  type: "stack",
+  children: [
+    { type: "slider", id: "minutes", label: "Duration", min: 5, max: 60, default: 20 },
+    {
+      type: "checklist",
+      id: "routine",
+      title: "{{minutes}} minute routine",
+      items: [
+        {
+          id: "disconnect",
+          time: "{{minutes / 5}} min",
+          text: "Disconnect for {{minutes / 5}} minutes",
+          detail: "{{minutes / 10}} minutes with dim lights",
+        },
+      ],
+    },
+  ],
+});
 
 describe("splitAnswerSurfaceBlocks", () => {
   it("splits text and blocks in order and marks unfinished blocks", () => {
@@ -72,6 +91,13 @@ describe("toPlainAnswerText", () => {
     expect(toPlainAnswerText("plain\n```js\nx\n```")).toBe("plain\n```js\nx\n```");
   });
 
+  it("resolves checklist text, time, detail and heading in plain answers", () => {
+    const text = toPlainAnswerText(`\`\`\`cowork-ui\n${ROUTINE_BLOCK}\n\`\`\``);
+    expect(text).toContain("**20 minute routine**");
+    expect(text).toContain("- [ ] 4 min — Disconnect for 4 minutes — 2 minutes with dim lights");
+    expect(text).not.toContain("{{");
+  });
+
   it("renders a single values block", () => {
     expect(
       toPlainAnswerText(`\`\`\`cowork-ui\n${BLOCK.replace("people * 0.4", "2")}\n\`\`\``),
@@ -88,6 +114,15 @@ describe("withoutAnswerSurfaceBlocks", () => {
 });
 
 describe("summarizeSurfaceChanges", () => {
+  it("resolves checked item labels using the updated control state", () => {
+    const parsed = parseAnswerSurfaceSource(ROUTINE_BLOCK);
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(summarizeSurfaceChanges(parsed.spec, { minutes: 30, routine: ["disconnect"] })).toEqual([
+      "Duration: 30",
+      "30 minute routine: 1/1 done (Disconnect for 6 minutes)",
+    ]);
+  });
+
   it("reports only what the user changed", () => {
     const parsed = parseAnswerSurfaceSource(STEPPER_BLOCK);
     if (!parsed.ok) throw new Error(parsed.error);

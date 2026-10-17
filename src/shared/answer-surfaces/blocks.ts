@@ -236,10 +236,11 @@ function plainLines(
     case "checklist": {
       const checked = new Set(Array.isArray(state[node.id]) ? (state[node.id] as string[]) : []);
       const lines = node.items.map((item) => {
-        const time = item.time ? `${item.time} — ` : "";
-        return `- [${checked.has(item.id) ? "x" : " "}] ${time}${item.text}`;
+        const time = item.time ? `${text(item.time)} — ` : "";
+        const detail = item.detail ? ` — ${text(item.detail)}` : "";
+        return `- [${checked.has(item.id) ? "x" : " "}] ${time}${text(item.text)}${detail}`;
       });
-      return node.title ? [`**${node.title}**`, ...lines] : lines;
+      return node.title ? [`**${text(node.title)}**`, ...lines] : lines;
     }
     case "chart": {
       const labels = resolveSurfaceLabels(node.labels, {});
@@ -339,6 +340,7 @@ export function summarizeSurfaceChanges(
   state: AnswerSurfaceState,
 ): string[] {
   const defaults = initialSurfaceState(spec);
+  const scope = buildSurfaceScope(spec, state);
   const lines: string[] = [];
   walkSurface(spec.root, (node) => {
     switch (node.type) {
@@ -364,9 +366,9 @@ export function summarizeSurfaceChanges(
         if (checked.length === 0) break;
         const done = node.items
           .filter((item) => checked.includes(item.id))
-          .map((item) => item.text);
+          .map((item) => interpolateText(item.text, scope));
         lines.push(
-          `${node.title ?? "Checklist"}: ${done.length}/${node.items.length} done (${done.join("; ")})`,
+          `${interpolateText(node.title ?? "Checklist", scope)}: ${done.length}/${node.items.length} done (${done.join("; ")})`,
         );
         break;
       }

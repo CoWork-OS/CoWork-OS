@@ -14610,7 +14610,7 @@ ${skillDescriptions}`;
               type: "string",
               enum: [...EXTERNAL_RUNTIME_AGENTS],
               description:
-                'When runtime is "acpx", selects the coding agent CLI to run, such as "codex", "claude", "gemini" or "opencode". The CLI must be installed and signed in.',
+                'When runtime is "acpx", selects the agent CLI to run, such as "codex", "claude", "gemini", "opencode", or "hermes" for the user\'s local Hermes Agent with its own memory and skills. The CLI must be installed and signed in.',
             },
             wait: {
               type: "boolean",

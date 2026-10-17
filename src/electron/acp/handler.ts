@@ -22,6 +22,7 @@ import {
 import {
   ACPMethods,
   ACPEvents,
+  type ACPAgentCard,
   type ACPMessage,
   type ACPTask,
   type ACPDiscoverParams,
@@ -76,6 +77,8 @@ export interface ACPHandlerDeps {
     workspaceId: string;
     assignedAgentRoleId?: string;
     remote: boolean;
+    /** A locally installed agent run through the acpx runtime (e.g. Hermes Agent). */
+    externalRuntimeAgent?: ACPAgentCard["externalRuntimeAgent"];
   }) => Promise<{
     status: string;
     coworkTaskId?: string;
@@ -108,6 +111,8 @@ export interface ACPHandlerDeps {
    * (safeStorage); tests inject an in-memory store.
    */
   remoteAgentSecretStore?: RemoteAgentSecretStore;
+  /** Locally installed agents run over the acpx runtime (`installedRuntimeAgents`). */
+  runtimeAgents?: () => ACPAgentCard[];
 }
 
 /** In-memory ACP task tracker */
@@ -298,7 +303,10 @@ function requireString(value: unknown, field: string): string {
  * Call this during server startup alongside registerTaskAndWorkspaceMethods.
  */
 export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerDeps): void {
-  const reg = getACPRegistry(deps.db, { secretStore: deps.remoteAgentSecretStore });
+  const reg = getACPRegistry(deps.db, {
+    secretStore: deps.remoteAgentSecretStore,
+    runtimeAgents: deps.runtimeAgents,
+  });
   remoteInvoker = new RemoteAgentInvoker({
     resolveSecrets: createRemoteAgentSecretResolver(deps.remoteAgentSecretStore),
   });
@@ -489,7 +497,13 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
       acpTask.error = "Local ACP task delegation is not configured on this server";
     }
 
-    if (deps.createDelegatedGraphTask) {
+    if (assignee.externalRuntimeAgent && !deps.createDelegatedGraphTask) {
+      // A runtime agent runs only through the orchestration graph, where the task's access
+      // profile and the external-runtime admission rules are applied.
+      acpTask.status = "failed";
+      acpTask.error = `${assignee.name} delegation is not configured on this server`;
+      acpTask.completedAt = Date.now();
+    } else if (deps.createDelegatedGraphTask) {
       try {
         const result = await deps.createDelegatedGraphTask({
           acpTaskId: acpTask.id,
@@ -499,6 +513,9 @@ export function registerACPMethods(server: ControlPlaneServer, deps: ACPHandlerD
           workspaceId: p.workspaceId || "",
           assignedAgentRoleId: assignee.origin === "local" ? assignee.localRoleId : undefined,
           remote: assignee.origin === "remote",
+          ...(assignee.externalRuntimeAgent
+            ? { externalRuntimeAgent: assignee.externalRuntimeAgent }
+            : {}),
         });
         acpTask.coworkTaskId = result.coworkTaskId;
         acpTask.remoteTaskId = result.remoteTaskId;

@@ -65,6 +65,7 @@ import { SearchProviderFactory } from "../agent/search";
 import { configureLlmFromControlPlaneParams, getControlPlaneLlmStatus } from "./llm-configure";
 import { checkTailscaleAvailability, getExposureStatus } from "../tailscale";
 import {
+  installedRuntimeAgents,
   redactAcpControlPlanePayload,
   registerACPMethods,
   shutdownACP,
@@ -2659,6 +2660,8 @@ function registerACPMethodsOnServer(
     db,
     requireScope,
     getActiveRoles: () => roleRepo.findActive(),
+    // A local Hermes Agent install shows up as an ACP agent CoWork can delegate to.
+    runtimeAgents: installedRuntimeAgents,
     createTask: async (params) => {
       // Find a workspace — use the provided one or fall back to the first available
       let workspaceId = params.workspaceId;
@@ -2712,6 +2715,22 @@ function registerACPMethodsOnServer(
             assignedAgentRoleId: params.assignedAgentRoleId,
             acpAgentId: params.remote ? params.assigneeId : undefined,
             acpTaskId: params.acpTaskId,
+            // A locally installed agent (Hermes) runs as a CoWork task on the acpx runtime: the
+            // executor rejects it under a bounded access profile before Hermes starts, and
+            // Hermes may only read without asking; writes and commands stay approval-gated.
+            ...(params.externalRuntimeAgent
+              ? {
+                  agentConfig: {
+                    externalRuntime: {
+                      kind: "acpx" as const,
+                      agent: params.externalRuntimeAgent,
+                      sessionMode: "persistent" as const,
+                      outputMode: "json" as const,
+                      permissionMode: "approve-reads" as const,
+                    },
+                  },
+                }
+              : {}),
             metadata: { source: "acp" },
           },
         ],

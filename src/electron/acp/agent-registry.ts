@@ -29,6 +29,7 @@ import {
   type RemoteAgentSecretStore,
 } from "./remote-agent-secrets";
 import { botIconText } from "../../shared/bot-mascots";
+import { hermesAgentCard } from "./hermes-agent";
 
 const logger = createLogger("ACPAgentRegistry");
 
@@ -52,6 +53,20 @@ export interface ACPAgentRegistryOptions {
    * Defaults to SecureSettingsRepository (safeStorage); cards only hold a reference.
    */
   secretStore?: RemoteAgentSecretStore;
+  /**
+   * Locally installed agents run through the acpx runtime, listed alongside CoWork's own
+   * roles (the app passes `installedRuntimeAgents`; none by default).
+   */
+  runtimeAgents?: () => ACPAgentCard[];
+}
+
+/** How long a runtime-agent lookup (a few file checks) is reused. */
+const RUNTIME_AGENT_CACHE_MS = 30_000;
+
+/** Agents installed on this machine that CoWork can run over ACP: a Hermes Agent install. */
+export function installedRuntimeAgents(): ACPAgentCard[] {
+  const hermes = hermesAgentCard();
+  return hermes ? [hermes] : [];
 }
 
 /**
@@ -71,12 +86,15 @@ export class ACPAgentRegistry {
   readonly ready: Promise<void>;
 
   private readonly secretStore: RemoteAgentSecretStore;
+  private readonly runtimeAgentSource: () => ACPAgentCard[];
+  private runtimeAgentCache: { cards: ACPAgentCard[]; at: number } | null = null;
 
   constructor(
     private db?: Database.Database,
     options: ACPAgentRegistryOptions = {},
   ) {
     this.secretStore = options.secretStore ?? getDefaultRemoteAgentSecretStore();
+    this.runtimeAgentSource = options.runtimeAgents ?? (() => []);
     this.ready = this.loadRemoteAgents();
   }
 
@@ -198,10 +216,27 @@ export class ACPAgentRegistry {
   }
 
   /**
-   * Get all agents (local + remote)
+   * Locally installed agents CoWork runs through the acpx runtime (e.g. Hermes Agent).
+   */
+  getRuntimeAgents(): ACPAgentCard[] {
+    const now = Date.now();
+    if (!this.runtimeAgentCache || now - this.runtimeAgentCache.at > RUNTIME_AGENT_CACHE_MS) {
+      let cards: ACPAgentCard[] = [];
+      try {
+        cards = this.runtimeAgentSource();
+      } catch (error) {
+        logger.warn("Could not look for locally installed ACP agents:", error);
+      }
+      this.runtimeAgentCache = { cards, at: now };
+    }
+    return this.runtimeAgentCache.cards;
+  }
+
+  /**
+   * Get all agents (local roles, local runtime agents, remote)
    */
   getAllAgents(roles: AgentRoleLike[]): ACPAgentCard[] {
-    return [...this.getLocalAgents(roles), ...this.getRemoteAgents()];
+    return [...this.getLocalAgents(roles), ...this.getRuntimeAgents(), ...this.getRemoteAgents()];
   }
 
   /**
@@ -211,6 +246,9 @@ export class ACPAgentRegistry {
     // Check remote agents first
     const remote = this.remoteAgents.get(agentId);
     if (remote) return remote;
+
+    const runtime = this.getRuntimeAgents().find((card) => card.id === agentId);
+    if (runtime) return runtime;
 
     // Check local agents
     if (agentId.startsWith("local:")) {

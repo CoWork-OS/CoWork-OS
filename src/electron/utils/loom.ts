@@ -2,18 +2,29 @@
  * Shared LOOM/Email protocol helpers
  */
 
+import { normalizeHostname } from "../security/address-classes";
+
 export type EmailProtocol = "imap-smtp" | "loom";
 
 const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 
+/**
+ * True for a loopback hostname in any spelling the WHATWG URL parser or a
+ * human may produce: `::1` and `[::1]`, `localhost` in any case, and a
+ * trailing root dot.
+ *
+ * The parser keeps IPv6 hostnames bracketed (`new URL("http://[::1]").hostname
+ * === "[::1]"`), so comparing against a bare `::1` rejected every IPv6
+ * loopback URL (issue #602).
+ */
 export function isLocalhostHost(hostname: string): boolean {
-  return LOCALHOST_HOSTNAMES.has(String(hostname).toLowerCase());
+  return LOCALHOST_HOSTNAMES.has(normalizeHostname(hostname));
 }
 
 export function isSecureOrLocalLoomUrl(rawUrl: string): boolean {
   try {
     const parsed = new URL(rawUrl);
-    if (LOCALHOST_HOSTNAMES.has(parsed.hostname.toLowerCase())) return true;
+    if (isLocalhostHost(parsed.hostname)) return true;
     return parsed.protocol === "https:";
   } catch {
     return false;

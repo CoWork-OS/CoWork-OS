@@ -30,6 +30,25 @@ describe("sanitizeGeneratedTaskTitle", () => {
     expect(title).not.toContain("...");
   });
 
+  it("rejects reasoning a reasoning model wrote instead of a name", () => {
+    // Recorded from qwen3:4b via Ollama with think disabled and maxTokens 32.
+    expect(
+      sanitizeGeneratedTaskTitle(
+        'We are given a user request: "Write a haiku about autumn and save it to haiku.md"\n We need to create a session name in 2',
+      ),
+    ).toBe("");
+    expect(sanitizeGeneratedTaskTitle("Okay, I need to name this session")).toBe("");
+  });
+
+  it("keeps the name after a reasoning block", () => {
+    expect(sanitizeGeneratedTaskTitle("<think>Short and clear.</think>\n\nAutumn Haiku")).toBe(
+      "Autumn Haiku",
+    );
+    expect(sanitizeGeneratedTaskTitle("Pick two words.\n</think>\n\nAutumn Haiku")).toBe(
+      "Autumn Haiku",
+    );
+  });
+
   it("rejects refusal or commentary responses", () => {
     expect(sanitizeGeneratedTaskTitle("Sorry, I cannot generate a title for this request.")).toBe(
       "",

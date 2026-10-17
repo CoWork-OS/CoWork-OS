@@ -24,6 +24,17 @@ describe("text-only quality passes", () => {
     expect(isQualityRewriteSafe("Updated qa.txt to beta.", draft)).toBe(true);
   });
 
+  it("keeps the draft when the editor returns its reasoning instead of a rewrite", () => {
+    const draft = "I wrote a haiku about autumn to haiku.md.";
+    expect(
+      isQualityRewriteSafe(
+        "Okay, I need to improve the draft assistant response to better satisfy the user.",
+        draft,
+      ),
+    ).toBe(false);
+    expect(isQualityRewriteSafe("Okay, here is the haiku I saved to haiku.md.", draft)).toBe(true);
+  });
+
   it("does not forbid legitimate tool JSON already present in a requested explanation", () => {
     const draft = 'Example: {"tool":"read_file","arguments":{"path":"example.txt"}}';
     expect(isQualityRewriteSafe(draft, draft)).toBe(true);

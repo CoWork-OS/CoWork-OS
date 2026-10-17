@@ -1,0 +1,20 @@
+{
+  "id": "ordinary-workflow-pdf-rendering-2026-10-17",
+  "title": "PDF canvas can stay blank after loading or page navigation",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 652,
+    "pullRequest": 672
+  },
+  "prompt": "Open a PDF in the native viewer, navigate pages and replace/close it during asynchronous loading.",
+  "assertions": {
+    "requiredBehavior": "Render when each canvas mounts, cancel obsolete renders/imports and show drawing errors without repeated unnecessary reloads."
+  },
+  "executableTests": [
+    "src/renderer/components/__tests__/pdf-document-renderer.test.ts",
+    "src/renderer/components/__tests__/pdf-document-surface.test.tsx"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/__tests__/pdf-document-renderer.test.ts src/renderer/components/__tests__/pdf-document-surface.test.tsx",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

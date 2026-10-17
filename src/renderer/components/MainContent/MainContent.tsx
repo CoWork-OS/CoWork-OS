@@ -319,6 +319,7 @@ import {
   guessVisualAttachmentMimeType,
   isVideoVisualAttachmentMimeType,
   joinWorkspaceRelativePath,
+  reconcileResolvedDraftAttachments,
 } from "./attachments";
 import {
   normalizeTimelineTitleMarkdownForDisplay,
@@ -4327,6 +4328,7 @@ function MainContentComponent({
   const taskHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
   const stagingAttachmentIdsRef = useRef<Set<string>>(new Set());
   const pendingAttachmentIdsRef = useRef<Set<string>>(new Set());
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>(pendingAttachments);
   const lastDraftAttachmentSyncRef = useRef("");
   const previousTaskIdRef = useRef<string | undefined>(undefined);
   const previousDraftKeyRef = useRef<string | undefined>(undefined);
@@ -4369,6 +4371,7 @@ function MainContentComponent({
     inputValueRef.current = inputValue;
   }, [inputValue]);
   pendingAttachmentIdsRef.current = new Set(pendingAttachments.map((attachment) => attachment.id));
+  pendingAttachmentsRef.current = pendingAttachments;
 
   // A composer draft belongs to the task it was written for. When the user
   // presses New (or opens another history row), MainContent is retained and
@@ -4425,6 +4428,15 @@ function MainContentComponent({
         !previousDraftKeyRef.current &&
         stagingAttachmentIdsRef.current.size > 0;
       if (!preserveStaging) setInputValue(draftValue ?? "");
+      // A lookup can resolve before React renders the queued attachment state.
+      pendingAttachmentsRef.current = preserveStaging
+        ? [
+            ...restoredAttachments,
+            ...pendingAttachmentsRef.current.filter(
+              (item) => !restoredAttachments.some((restored) => restored.id === item.id),
+            ),
+          ]
+        : restoredAttachments;
       setPendingAttachments((current) =>
         preserveStaging
           ? [
@@ -4448,53 +4460,35 @@ function MainContentComponent({
       setModeSuggestions([]);
       if (restoredAttachments.length > 0 && onResolveDraftAttachment && draftSnapshot?.draftKey) {
         const draftKeyAtRestore = draftSnapshot.draftKey;
-        const draftRevisionAtRestore = draftRevision;
         void Promise.all(
           restoredAttachments.map(async (attachment) => ({
             attachment,
             resolved: await onResolveDraftAttachment(attachment.draftRefId as string),
           })),
         ).then((resolvedAttachments) => {
-          if (
-            draftSnapshot?.draftKey !== draftKeyAtRestore ||
-            draftRevisionRef.current !== draftRevisionAtRestore
-          ) {
-            return;
-          }
-          const unavailableRefs = new Set<string>();
-          setPendingAttachments((current) =>
-            current.map((candidate) => {
-              const result = resolvedAttachments.find(
-                (entry) => entry.attachment.id === candidate.id,
-              )?.resolved;
-              if (!result) {
-                if (candidate.draftRefId) unavailableRefs.add(candidate.draftRefId);
-                return { ...candidate, status: "unavailable" as const };
-              }
-              return {
-                ...candidate,
-                path: result.path,
-                size: result.ref.size,
-                ...(result.ref.mimeType ? { mimeType: result.ref.mimeType } : {}),
-                status: "available" as const,
-              };
-            }),
+          const currentDraft = draftSnapshotRef.current;
+          const restored = reconcileResolvedDraftAttachments({
+            draftKeyAtRestore,
+            currentDraftKey: draftKeyRef.current,
+            currentDraft,
+            pendingAttachments: pendingAttachmentsRef.current,
+            resolvedAttachments,
+          });
+          if (!restored) return;
+          setPendingAttachments(
+            (current) =>
+              // React may apply this updater after another owner or attachment
+              // edit, so reconcile against the live state again at application.
+              reconcileResolvedDraftAttachments({
+                draftKeyAtRestore,
+                currentDraftKey: draftKeyRef.current,
+                currentDraft: draftSnapshotRef.current,
+                pendingAttachments: current,
+                resolvedAttachments,
+              })?.pendingAttachments ?? current,
           );
-          if (unavailableRefs.size > 0) {
-            onDraftPatch?.({
-              attachments: (draftSnapshot.attachments ?? []).map((attachment) =>
-                unavailableRefs.has(attachment.refId)
-                  ? { ...attachment, status: "unavailable" as const }
-                  : attachment,
-              ),
-            });
-          } else {
-            onDraftPatch?.({
-              attachments: (draftSnapshot.attachments ?? []).map((attachment) => ({
-                ...attachment,
-                status: "available" as const,
-              })),
-            });
+          if (restored.draftAttachments !== currentDraft?.attachments) {
+            recordDraftMutation(onDraftPatch?.({ attachments: restored.draftAttachments }));
           }
         });
       } else if (restoredAttachments.length > 0) {
@@ -4512,7 +4506,15 @@ function MainContentComponent({
     }
     previousTaskIdRef.current = task?.id;
     previousDraftKeyRef.current = draftKey;
-  }, [draftRevision, draftSnapshot, draftValue, onDraftPatch, onResolveDraftAttachment, task?.id]);
+  }, [
+    draftRevision,
+    draftSnapshot,
+    draftValue,
+    onDraftPatch,
+    onResolveDraftAttachment,
+    recordDraftMutation,
+    task?.id,
+  ]);
 
   // Focused mode card pool - pick random cards on mount
   const focusedCards = useMemo(

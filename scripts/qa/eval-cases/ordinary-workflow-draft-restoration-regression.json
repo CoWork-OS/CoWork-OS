@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-draft-restoration-2026-10-17",
+  "title": "Late attachment restoration overwrites the active composer draft",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 645,
+    "pullRequest": 665
+  },
+  "prompt": "Restore a draft with an attachment, then switch sessions or edit attachments before the cached-file lookup finishes.",
+  "assertions": {
+    "requiredBehavior": "Apply lookup results only to the matching live draft owner and matching attachment identity, preserving concurrent text and attachment edits."
+  },
+  "executableTests": [
+    "src/renderer/components/__tests__/draft-attachment-restoration.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/__tests__/draft-attachment-restoration.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

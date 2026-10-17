@@ -15,6 +15,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import JSZip from "jszip";
 import { getUserDataDir } from "../utils/user-data-dir";
+import { parseFrontmatterBlock } from "../utils/skill-frontmatter";
 import {
   CapabilitySecurityReport,
   CustomSkill,
@@ -46,6 +47,7 @@ const MAX_IMPORTED_SKILL_ZIP_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_IMPORTED_SKILL_FILE_BYTES = 512 * 1024;
 const MAX_IMPORTED_SKILL_TOTAL_BYTES = 5 * 1024 * 1024;
 const MAX_IMPORTED_SKILL_FILE_COUNT = 200;
+const MAX_GIT_IMPORT_SKILL_BUNDLES = 50;
 const CLAWHUB_API_URL = "https://clawhub.ai/api/v1";
 const CLAWHUB_CONVEX_URL = "https://wry-manatee-359.convex.cloud";
 const CLAWHUB_WEB_URL = "https://clawhub.ai";
@@ -113,25 +115,6 @@ function normalizeSkillSlug(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function stripQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function parseScalar(value: string): unknown {
-  const normalized = stripQuotes(value);
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  if (normalized === "null") return null;
-  return normalized;
-}
-
 function parseFrontmatter(raw: string): ParsedFrontmatterResult {
   const normalized = raw.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) {
@@ -144,38 +127,7 @@ function parseFrontmatter(raw: string): ParsedFrontmatterResult {
 
   const block = normalized.slice(4, end);
   const body = normalized.slice(end + 5);
-  const lines = block.split("\n");
-  const frontmatter: Record<string, unknown> = {};
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const match = line.match(/^([A-Za-z0-9_.-]+):(?:\s*(.*))?$/);
-    if (!match) continue;
-
-    const [, key, rawValue = ""] = match;
-    if (rawValue.trim().length > 0) {
-      frontmatter[key] = parseScalar(rawValue);
-      continue;
-    }
-
-    const items: string[] = [];
-    let nextIndex = index + 1;
-    while (nextIndex < lines.length) {
-      const itemMatch = lines[nextIndex]?.match(/^\s*-\s+(.+)$/);
-      if (!itemMatch) break;
-      items.push(stripQuotes(itemMatch[1] || ""));
-      nextIndex += 1;
-    }
-
-    if (items.length > 0) {
-      frontmatter[key] = items;
-      index = nextIndex - 1;
-    } else {
-      frontmatter[key] = "";
-    }
-  }
-
-  return { frontmatter, body };
+  return { frontmatter: parseFrontmatterBlock(block), body };
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -349,6 +301,12 @@ export type SkillInstallResult = {
   skill?: CustomSkill;
   error?: string;
   security?: InstallSecurityOutcome;
+  /** Per-bundle outcomes when one source (a Git repository) held several skills. */
+  results?: SkillBundleInstallResult[];
+};
+export type SkillBundleInstallResult = Omit<SkillInstallResult, "results"> & {
+  /** Bundle directory name in the source repository. */
+  bundle: string;
 };
 
 export class SkillRegistry {
@@ -614,36 +572,75 @@ export class SkillRegistry {
     return lines.join("\n");
   }
 
-  private detectSkillBundleRoot(rootDir: string): string | null {
-    const directSkill = path.join(rootDir, "SKILL.md");
-    if (fs.existsSync(directSkill)) {
-      return rootDir;
+  /**
+   * Find the SKILL.md bundles in a checkout: the root itself, else every direct child
+   * directory with a SKILL.md, else every skills/* directory with one.
+   */
+  private detectSkillBundleRoots(rootDir: string): string[] {
+    if (fs.existsSync(path.join(rootDir, "SKILL.md"))) {
+      return [rootDir];
     }
 
-    const directChildren = fs.readdirSync(rootDir, { withFileTypes: true });
-    const candidates = directChildren
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(rootDir, entry.name))
-      .filter((dirPath) => fs.existsSync(path.join(dirPath, "SKILL.md")));
+    const childBundles = (dir: string) =>
+      fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(dir, entry.name))
+        .filter((dirPath) => fs.existsSync(path.join(dirPath, "SKILL.md")))
+        .sort();
 
-    if (candidates.length === 1) {
-      return candidates[0];
+    const candidates = childBundles(rootDir);
+    if (candidates.length > 0) {
+      return candidates;
     }
 
     const skillsDir = path.join(rootDir, "skills");
-    if (candidates.length === 0 && fs.existsSync(skillsDir)) {
-      const nestedCandidates = fs
-        .readdirSync(skillsDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(skillsDir, entry.name))
-        .filter((dirPath) => fs.existsSync(path.join(dirPath, "SKILL.md")));
+    return fs.existsSync(skillsDir) ? childBundles(skillsDir) : [];
+  }
 
-      if (nestedCandidates.length === 1) {
-        return nestedCandidates[0];
+  /**
+   * Install several SKILL.md bundles from one source. Each bundle goes through
+   * installImportedSkill on its own (security scan, quarantine, size limits).
+   */
+  private async installSkillBundles(
+    bundleRoots: string[],
+    sourceRef: string,
+  ): Promise<SkillInstallResult> {
+    const results: SkillBundleInstallResult[] = [];
+    for (const bundleRoot of bundleRoots) {
+      const bundle = path.basename(bundleRoot);
+      try {
+        const skill = this.importSkillBundle(bundleRoot, sourceRef);
+        const result = await this.installImportedSkill(skill, {
+          sourceDir: bundleRoot,
+          source: "git",
+        });
+        results.push({ bundle, ...result });
+      } catch (error) {
+        results.push({
+          bundle,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
-    return null;
+    const installed = results.filter((result) => result.success);
+    const notInstalled = results.filter((result) => !result.success);
+    return {
+      success: installed.length > 0,
+      skill: installed[0]?.skill,
+      error:
+        notInstalled.length > 0
+          ? `Installed ${installed.length} of ${results.length} skills. Not installed: ${notInstalled
+              .map(
+                (result) =>
+                  `${result.bundle} (${result.security?.state === "quarantined" ? "quarantined" : result.error || "failed"})`,
+              )
+              .join("; ")}`
+          : undefined,
+      results,
+    };
   }
 
   private findCustomSkillManifest(
@@ -1713,10 +1710,22 @@ export class SkillRegistry {
       // Validate before discovery reads manifests or follows a support directory.
       this.rejectGitImportSymlinks(tempDir);
 
-      const bundleRoot = this.detectSkillBundleRoot(tempDir);
-      if (bundleRoot) {
-        const skill = this.importSkillBundle(bundleRoot, parsed.url);
-        return await this.installImportedSkill(skill, { sourceDir: bundleRoot, source: "git" });
+      const bundleRoots = this.detectSkillBundleRoots(tempDir);
+      if (bundleRoots.length > MAX_GIT_IMPORT_SKILL_BUNDLES) {
+        return {
+          success: false,
+          error: `Repository contains ${bundleRoots.length} skills; Git import supports up to ${MAX_GIT_IMPORT_SKILL_BUNDLES} per repository`,
+        };
+      }
+      if (bundleRoots.length === 1) {
+        const skill = this.importSkillBundle(bundleRoots[0], parsed.url);
+        return await this.installImportedSkill(skill, {
+          sourceDir: bundleRoots[0],
+          source: "git",
+        });
+      }
+      if (bundleRoots.length > 1) {
+        return await this.installSkillBundles(bundleRoots, parsed.url);
       }
 
       const manifest = this.findCustomSkillManifest(tempDir);

@@ -33,6 +33,7 @@ import { ChannelAdapter, ChannelConfig } from "../gateway/channels/types";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { getSafeStorage } from "../utils/safe-storage";
 import { createLogger } from "../utils/logger";
+import { frontmatterString, parseFrontmatterBlock } from "../utils/skill-frontmatter";
 import { isPackAllowed, isPackRequired, loadPoliciesStrict } from "../admin/policies";
 import { writePackStateFile } from "./pack-state-storage";
 import type { CustomSkill } from "../../shared/types";
@@ -48,7 +49,7 @@ interface PersistedPackStates {
 }
 
 function parseSkillMarkdownFrontmatter(markdown: string): {
-  frontmatter: Record<string, string>;
+  frontmatter: Record<string, unknown>;
   body: string;
 } {
   if (!markdown.startsWith("---\n")) {
@@ -58,23 +59,8 @@ function parseSkillMarkdownFrontmatter(markdown: string): {
   if (end === -1) {
     return { frontmatter: {}, body: markdown };
   }
-  const rawFrontmatter = markdown.slice(4, end).trim();
   const body = markdown.slice(end + 4).replace(/^\s*\n/, "");
-  const frontmatter: Record<string, string> = {};
-  for (const line of rawFrontmatter.split(/\r?\n/)) {
-    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!match) continue;
-    const key = match[1];
-    let value = match[2].trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    frontmatter[key] = value;
-  }
-  return { frontmatter, body };
+  return { frontmatter: parseFrontmatterBlock(markdown.slice(4, end)), body };
 }
 
 function titleFromSkillId(id: string): string {
@@ -669,10 +655,11 @@ export class PluginRegistry extends EventEmitter {
     }
 
     const { frontmatter, body } = parseSkillMarkdownFrontmatter(markdown);
-    const name = definition.name || frontmatter.name || titleFromSkillId(definition.id);
+    const name =
+      definition.name || frontmatterString(frontmatter, "name") || titleFromSkillId(definition.id);
     const description =
       definition.description ||
-      frontmatter.description ||
+      frontmatterString(frontmatter, "description") ||
       `Directory-backed skill from ${path.relative(pluginRoot, skillPath)}`;
     const prompt = [
       `Use the directory-backed CoWork plugin skill \`${definition.id}\`.`,

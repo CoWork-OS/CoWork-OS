@@ -198,6 +198,63 @@ describe("browser integration desktop methods", () => {
     ).toEqual(["github:example/skill"]);
   });
 
+  it("summarizes multi-skill Git imports without exposing host error details", async () => {
+    const installed = {
+      id: "alpha-skill",
+      name: "Alpha skill",
+      description: "safe description",
+      prompt: "private skill prompt",
+      filePath: "/private/skills/alpha/SKILL.md",
+      enabled: true,
+      source: "managed",
+    };
+    const installFromGit = vi.fn(async () => ({
+      success: true,
+      skill: installed,
+      error: "Installed 1 of 3 skills. Not installed: beta (private host error at /private/tmp)",
+      results: [
+        { bundle: "alpha", success: true, skill: installed, security: { state: "installed" } },
+        {
+          bundle: "beta",
+          success: false,
+          error: "private host error at /private/tmp",
+          security: { state: "quarantined", summary: "private finding summary" },
+        },
+        { bundle: "gamma", success: false, error: "private host error at /private/tmp" },
+      ],
+    }));
+    const methods = rpcFor(
+      createBrowserIntegrationDefinitions({
+        skillRegistry: {
+          install: vi.fn(),
+          installFromClawHub: vi.fn(),
+          installFromUrl: vi.fn(),
+          installFromGit,
+          uninstall: vi.fn(),
+        } as never,
+        skillLoader: {
+          initialize: vi.fn(async () => undefined),
+          reloadSkills: vi.fn(async () => undefined),
+          clearEligibilityCache: vi.fn(),
+        } as never,
+      }),
+    );
+
+    const result = await invoke(methods, "installSkillFromGit", ["github:example/skills"]);
+
+    expect(result).toMatchObject({
+      success: true,
+      skill: { id: "alpha-skill", prompt: "" },
+      error: "Installed 1 of 3 skills. Not installed: beta (quarantined); gamma (not installed)",
+      results: [
+        { bundle: "alpha", success: true, security: { state: "installed" } },
+        { bundle: "beta", success: false, security: { state: "quarantined" } },
+        { bundle: "gamma", success: false },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
   it("redacts channel configs, requires secure storage, and binds WhatsApp snapshots to a browser session", async () => {
     const added = fakeChannel({
       config: {

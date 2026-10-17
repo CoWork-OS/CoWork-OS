@@ -8430,6 +8430,14 @@ export interface ElectronAPI {
     skill?: CustomSkill;
     error?: string;
     security?: import("../shared/types").InstallSecurityOutcome;
+    /** Per-bundle outcomes when the repository held several skills. */
+    results?: Array<{
+      bundle: string;
+      success: boolean;
+      skill?: CustomSkill;
+      error?: string;
+      security?: Partial<import("../shared/types").InstallSecurityOutcome>;
+    }>;
   }>;
   updateSkillFromRegistry: (
     skillId: string,

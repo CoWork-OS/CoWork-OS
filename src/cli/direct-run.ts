@@ -42,6 +42,7 @@ import { MemoryService } from "../electron/memory/MemoryService";
 import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../electron/mcp/settings";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
+import { frontmatterString, parseFrontmatterBlock } from "../electron/utils/skill-frontmatter";
 import { LLMSettingsSchema, MCPSettingsSchema } from "../electron/utils/validation";
 import { importProcessEnvToSettings, migrateEnvToSettings } from "../electron/utils/env-migration";
 import {
@@ -3043,9 +3044,9 @@ async function scanSkillDir(
         const frontmatter = parseSkillMarkdownFrontmatter(text);
         skills.push({
           id,
-          name: frontmatter.name || id,
-          description: frontmatter.description,
-          category: frontmatter.category,
+          name: frontmatterString(frontmatter, "name") || id,
+          description: frontmatterString(frontmatter, "description"),
+          category: frontmatterString(frontmatter, "category"),
           prompt: text,
           filePath: skillMd,
           source,
@@ -3058,18 +3059,11 @@ async function scanSkillDir(
   return skills;
 }
 
-function parseSkillMarkdownFrontmatter(text: string): Record<string, string> {
+function parseSkillMarkdownFrontmatter(text: string): Record<string, unknown> {
   if (!text.startsWith("---")) return {};
   const end = text.indexOf("\n---", 3);
   if (end < 0) return {};
-  const block = text.slice(3, end);
-  const result: Record<string, string> = {};
-  for (const line of block.split(/\r?\n/)) {
-    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!match) continue;
-    result[match[1]] = match[2].replace(/^["']|["']$/g, "").trim();
-  }
-  return result;
+  return parseFrontmatterBlock(text.slice(3, end));
 }
 
 function validateBuiltinToolsSettings(

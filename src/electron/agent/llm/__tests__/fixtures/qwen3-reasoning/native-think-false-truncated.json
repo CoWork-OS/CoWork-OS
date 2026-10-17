@@ -1,0 +1,17 @@
+{
+  "model": "qwen3:4b",
+  "created_at": "2026-10-17T13:16:39.886509Z",
+  "message": {
+    "role": "assistant",
+    "content": "Hmm, the user just asked me to reply with exactly the word \"hello\". That's very specific! \n\nOkay, let me think about this. They want a precise response with no extra words or"
+  },
+  "done": true,
+  "done_reason": "length",
+  "total_duration": 429407208,
+  "load_duration": 2479541,
+  "prompt_eval_count": 17,
+  "prompt_eval_cached_count": 16,
+  "prompt_eval_duration": 10559000,
+  "eval_count": 40,
+  "eval_duration": 411975000
+}

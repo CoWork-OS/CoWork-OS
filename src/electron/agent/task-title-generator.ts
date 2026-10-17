@@ -2,6 +2,7 @@ import { LLMProviderFactory } from "./llm/provider-factory";
 import type { LLMContent, LLMProvider, LLMResponse } from "./llm/types";
 import type { AgentConfig, Task } from "../../shared/types";
 import type { TaskRepository } from "../database/repository-facades";
+import { looksLikeReasoningPreamble, splitReasoningFromText } from "./llm/reasoning-text";
 import { createLogger } from "../utils/logger";
 
 const logger = createLogger("TaskTitle");
@@ -68,8 +69,11 @@ function looksLikeRefusalOrMetaCommentary(value: string): boolean {
  * Returns an empty string when the model did not produce a usable title.
  */
 export function sanitizeGeneratedTaskTitle(value: unknown): string {
-  let title = extractStructuredTitle(compactText(value));
-  if (!title) return "";
+  const answer = typeof value === "string" ? splitReasoningFromText(value).text : value;
+  let title = extractStructuredTitle(compactText(answer));
+  // Reasoning models can spend the whole title budget thinking out loud; a
+  // truncated "We are given a request: …" is not a name.
+  if (!title || looksLikeReasoningPreamble(title)) return "";
 
   title = title
     .replace(/^[-*•]\s+/, "")

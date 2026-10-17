@@ -22,6 +22,10 @@ import {
   toTextToolProtocolMessages,
   withTextToolProtocolInstructions,
 } from "./text-tool-protocol";
+import { splitReasoningFromText } from "./reasoning-text";
+import { createLogger } from "../../utils/logger";
+
+const logger = createLogger("Ollama");
 
 function supportsOllamaThinkingControl(model: string): boolean {
   const normalized = String(model || "")
@@ -82,6 +86,35 @@ function readModelContextLength(modelInfo: unknown): number | null {
   return key ? readPositiveInteger(info[key]) : null;
 }
 
+/**
+ * Whether the chat template always opens a `<think>` block for the reply and
+ * never reads `.Think`. `think: false` cannot turn reasoning off for such
+ * models (qwen3 thinking variants); it only stops Ollama from separating the
+ * reasoning, which then arrives in `content` ending at a bare `</think>`.
+ */
+export function templateForcesThinking(template: unknown): boolean {
+  if (typeof template !== "string" || !template) return false;
+  if (/\.Think\b/.test(template)) return false;
+  return /<think>\s*(?:\{\{-?\s*end\s*-?\}\}\s*)*$/.test(template.trim());
+}
+
+/** Ollama servers + models seen ignoring `think: false` (see templateForcesThinking). */
+const thinkingAlwaysOnModels = new Set<string>();
+
+function thinkingModelKey(baseUrl: string, model: string): string {
+  return `${baseUrl}::${String(model || "").trim()}`;
+}
+
+/** Test hook: forget models learned to ignore `think: false`. */
+export function clearOllamaThinkingCacheForTests(): void {
+  thinkingAlwaysOnModels.clear();
+}
+
+interface OllamaModelProfile {
+  numCtx: number;
+  thinkingAlwaysOn: boolean;
+}
+
 function readModelfileNumCtx(parameters: unknown): number | null {
   if (typeof parameters !== "string") return null;
   const match = parameters.match(/(?:^|\n)\s*num_ctx\s+(\d+)/);
@@ -135,7 +168,7 @@ export class OllamaProvider implements LLMProvider {
   readonly type = "ollama" as const;
   private baseUrl: string;
   private apiKey?: string;
-  private readonly contextWindowByModel = new Map<string, Promise<number>>();
+  private readonly profileByModel = new Map<string, Promise<OllamaModelProfile>>();
   private readonly textToolCallFallback: boolean;
 
   constructor(config: LLMProviderConfig, options: OllamaProviderOptions = {}) {
@@ -199,10 +232,11 @@ export class OllamaProvider implements LLMProvider {
       const startTime = Date.now();
 
       const chatUrl = `${this.baseUrl}/api/chat`;
-      const numCtx = await untilAborted(
-        this.resolveNumCtx(request.model, headers),
+      const profile = await untilAborted(
+        this.resolveModelProfile(request.model, headers),
         timeoutController.signal,
       );
+      const thinkingKey = thinkingModelKey(this.baseUrl, request.model);
       const requestBody: Record<string, unknown> = {
         model: request.model,
         messages,
@@ -210,13 +244,19 @@ export class OllamaProvider implements LLMProvider {
         keep_alive: OLLAMA_KEEP_ALIVE,
         options: {
           num_predict: request.maxTokens,
-          num_ctx: numCtx,
+          num_ctx: profile.numCtx,
         },
         ...(tools && tools.length > 0 && { tools }),
       };
-      if (supportsOllamaThinkingControl(request.model)) {
+      if (
+        supportsOllamaThinkingControl(request.model) &&
+        !profile.thinkingAlwaysOn &&
+        !thinkingAlwaysOnModels.has(thinkingKey)
+      ) {
         // Ollama enables reasoning by default for supported models. Disable it
         // so private reasoning cannot consume the final-answer token budget.
+        // Models that reason regardless keep the default, so Ollama returns
+        // the reasoning in `thinking` instead of mixed into `content`.
         requestBody.think = false;
       }
 
@@ -265,6 +305,12 @@ export class OllamaProvider implements LLMProvider {
 
       const data = (await response.json()) as OllamaChatResponse;
       const converted = this.convertResponse(data);
+      if (requestBody.think === false && data.message?.reasoningInContent) {
+        thinkingAlwaysOnModels.add(thinkingKey);
+        logger.info(
+          `${request.model} reasons even with think disabled; leaving thinking on for later requests`,
+        );
+      }
       if (!this.textToolCallFallback || !offeredTools) return converted;
       return applyTextToolCallFallback(converted, request, {
         providerType: "ollama",
@@ -291,23 +337,27 @@ export class OllamaProvider implements LLMProvider {
     }
   }
 
-  /** Resolve (once per model) the num_ctx to run the model with. */
-  private resolveNumCtx(model: string, headers: Record<string, string>): Promise<number> {
+  /** Resolve (once per model) the num_ctx and thinking behavior to run the model with. */
+  private resolveModelProfile(
+    model: string,
+    headers: Record<string, string>,
+  ): Promise<OllamaModelProfile> {
     const key = String(model || "").trim();
-    let pending = this.contextWindowByModel.get(key);
+    let pending = this.profileByModel.get(key);
     if (!pending) {
-      pending = this.lookupContextWindow(key, headers);
-      this.contextWindowByModel.set(key, pending);
+      pending = this.lookupModelProfile(key, headers);
+      this.profileByModel.set(key, pending);
     }
     return pending;
   }
 
-  private async lookupContextWindow(
+  private async lookupModelProfile(
     model: string,
     headers: Record<string, string>,
-  ): Promise<number> {
+  ): Promise<OllamaModelProfile> {
     const cap = resolveOllamaNumCtxCap();
     let effective = cap;
+    let thinkingAlwaysOn = false;
     try {
       const response = await fetch(`${this.baseUrl}/api/show`, {
         method: "POST",
@@ -316,12 +366,17 @@ export class OllamaProvider implements LLMProvider {
         signal: AbortSignal.timeout(OLLAMA_SHOW_TIMEOUT_MS),
       });
       if (response.ok) {
-        const data = (await response.json()) as { model_info?: unknown; parameters?: unknown };
+        const data = (await response.json()) as {
+          model_info?: unknown;
+          parameters?: unknown;
+          template?: unknown;
+        };
         const modelMax = readModelContextLength(data?.model_info);
         // An explicit Modelfile num_ctx is the operator's choice; otherwise cap
         // long-context models so memory use stays predictable.
         const configured = readModelfileNumCtx(data?.parameters) ?? cap;
         effective = modelMax ? Math.min(configured, modelMax) : configured;
+        thinkingAlwaysOn = templateForcesThinking(data?.template);
       }
     } catch (error: Any) {
       console.warn(
@@ -330,7 +385,7 @@ export class OllamaProvider implements LLMProvider {
       );
     }
     effectiveOllamaContextWindows.set(model, effective);
-    return effective;
+    return { numCtx: effective, thinkingAlwaysOn };
   }
 
   async testConnection(): Promise<{ success: boolean; error?: string }> {
@@ -488,6 +543,15 @@ export class OllamaProvider implements LLMProvider {
       };
     }
 
+    // Reasoning mixed into content (see reasoning-text.ts) is not part of the
+    // reply; count it as thinking and keep only the answer.
+    const split = splitReasoningFromText(message.content || "");
+    if (split.reasoning) {
+      message.reasoningInContent = true;
+      message.thinking = [message.thinking, split.reasoning].filter(Boolean).join("\n\n");
+      message.content = split.text;
+    }
+
     // Handle text content
     if (message.content) {
       content.push({
@@ -587,6 +651,8 @@ interface OllamaChatResponse {
     content: string;
     thinking?: string;
     tool_calls?: OllamaToolCall[];
+    /** Set locally when convertResponse moved reasoning out of `content`. */
+    reasoningInContent?: boolean;
   };
   done: boolean;
   done_reason?: string;

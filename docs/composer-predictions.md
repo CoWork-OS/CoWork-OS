@@ -2,6 +2,8 @@
 
 After a task completes, the empty message composer can suggest a complete next message based on the current conversation. Predictions are enabled by default; toggle **Settings → Appearance → Composer → Enable composer predictions** to turn them on or off.
 
+Suggestions aim for one brief sentence of 3–8 words and are limited to 120 characters. The composer shows only the suggested text, without a keyboard hint.
+
 When the first usable prediction appears, the left sidebar shows **New: Composer predictions** with a one-time tooltip explaining acceptance and the setting. **Open settings** goes directly to Appearance. Close the tooltip with **Got it**, Escape, or an outside click; dismiss the notice with its X to hide it permanently. Availability, seen state, and dismissal persist locally across reloads.
 
 - Press **Tab** to accept, then edit or send normally. Accepting never sends a message.

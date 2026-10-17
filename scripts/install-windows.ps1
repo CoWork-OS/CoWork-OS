@@ -159,6 +159,14 @@ function Find-InstalledApp {
   return $null
 }
 
+# Starting the app directly from this PowerShell session would hand it the
+# console, so its startup log would print into the user's window. Explorer
+# starts it as a separate desktop process instead.
+function Get-LaunchCommand([string]$ExePath) {
+  $explorer = if ($env:WINDIR) { [System.IO.Path]::Combine($env:WINDIR, 'explorer.exe') } else { 'explorer.exe' }
+  return @{ FilePath = $explorer; ArgumentList = '"' + $ExePath + '"' }
+}
+
 function Invoke-CoworkInstall {
   if ($Help) {
     Show-Usage
@@ -222,7 +230,8 @@ function Invoke-CoworkInstall {
     if (-not $NoLaunch) {
       $exe = Find-InstalledApp
       if ($exe) {
-        Start-Process -FilePath $exe
+        $launch = Get-LaunchCommand $exe
+        Start-Process -FilePath $launch.FilePath -ArgumentList $launch.ArgumentList
       } else {
         Write-Log "Open $AppName from the Start menu."
       }

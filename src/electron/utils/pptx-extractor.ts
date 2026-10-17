@@ -332,7 +332,9 @@ async function extractPptxNotesFromZip(
 
 function extractTextFromPptxXml(xml: string): string {
   if (!xml) return "";
-  const withLineBreaks = xml.replace(/<(?:\w+:)?br\b[^>]*\/?>/g, "\n");
+  const withLineBreaks = xml
+    .replace(/<(?:\w+:)?br\b[^>]*\/?>/g, "\n")
+    .replace(/<\/(?:\w+:)?p\s*>/g, "\n");
 
   return withLineBreaks
     .replace(/<[^>]*>/g, "")
@@ -556,6 +558,9 @@ function extractPptxContentFromXml(
     /<(?:\w+:)?graphicFrame\b[\s\S]*?<\/(?:\w+:)?graphicFrame>/gi,
   )) {
     const shapeXml = graphicMatch[0];
+    // A table is a graphicFrame too. Its nested replacement already retains the cells;
+    // replacing the outer frame as well would drop the table and corrupt following text.
+    if (/<(?:\w+:)?tbl\b/i.test(shapeXml)) continue;
     const nameMatch = shapeXml.match(/name=(['"])(.*?)\1/i);
     const descMatch = shapeXml.match(/descr=(['"])(.*?)\1/i);
     const chartMatch = shapeXml.match(/<(?:\w+:)?chart\b[^>]*r:id=(['"])(.*?)\1/i);

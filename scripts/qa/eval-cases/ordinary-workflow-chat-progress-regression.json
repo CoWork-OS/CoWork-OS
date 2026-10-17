@@ -1,0 +1,20 @@
+{
+  "id": "ordinary-workflow-chat-progress-2026-10-17",
+  "title": "Planless conversations display an empty execution dashboard",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 643,
+    "pullRequest": 663
+  },
+  "prompt": "Start an ordinary Ask conversation and inspect the right-side progress/dashboard surfaces.",
+  "assertions": {
+    "requiredBehavior": "Hide empty plan progress while preserving real plans, tool activity and recovery controls."
+  },
+  "executableTests": [
+    "src/renderer/components/__tests__/RightPanel-chat-progress.test.ts",
+    "src/renderer/utils/__tests__/session-dashboard.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/__tests__/RightPanel-chat-progress.test.ts src/renderer/utils/__tests__/session-dashboard.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

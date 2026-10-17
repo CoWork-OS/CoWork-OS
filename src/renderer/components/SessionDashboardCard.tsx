@@ -378,12 +378,14 @@ export function SessionDashboardCard({
             <span className={`session-dashboard-phase ${progress.phase}`}>{progress.phase}</span>
           </div>
           <div className="session-dashboard-grid">
-            <Metric
-              icon={<CheckCircle2 size={14} />}
-              label="Progress"
-              value={`${metrics.progressPercent}%`}
-              detail={`${metrics.completedSteps}/${metrics.totalSteps || "—"} steps`}
-            />
+            {metrics.progressPercent !== null ? (
+              <Metric
+                icon={<CheckCircle2 size={14} />}
+                label="Progress"
+                value={`${metrics.progressPercent}%`}
+                detail={`${metrics.completedSteps}/${metrics.totalSteps} steps`}
+              />
+            ) : null}
             <Metric
               icon={<FileOutput size={14} />}
               label="Artifacts"

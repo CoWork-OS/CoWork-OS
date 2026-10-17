@@ -1,3 +1,4 @@
+import "../electron/utils/node-tls-bootstrap";
 import { BotNotificationRuntime } from "../electron/notifications/BotNotificationRuntime";
 import { BotWorkControlRecovery } from "../electron/automation/BotWorkControlRecovery";
 import { PermissionSettingsManager } from "../electron/security/permission-settings-manager";

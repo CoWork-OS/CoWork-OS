@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import "../electron/utils/node-tls-bootstrap";
 import { presentApprovalRevision } from "../electron/agent/approval-revision";
 import { toPlainAnswerText } from "../shared/answer-surfaces/blocks";
 import { formatApproval } from "./format";

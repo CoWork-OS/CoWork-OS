@@ -185,3 +185,18 @@ test("InstallLocation is used when there is no DisplayIcon", { skip: !hasPwsh },
   assert.match(fromLocation, /^C:\\Apps\\CoWork OS[\\/]CoWork OS\.exe$/);
   assert.equal(empty, "none");
 });
+
+test("the app is launched through Explorer, quoted, so it does not share the console", { skip: !hasPwsh }, () => {
+  const result = sourced(
+    [
+      "$env:WINDIR = 'C:\\Windows'",
+      "$c = Get-LaunchCommand 'C:\\Users\\demo\\AppData\\Local\\Programs\\cowork-os\\CoWork OS.exe'",
+      "$c.FilePath",
+      "$c.ArgumentList",
+    ].join("\n"),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const [filePath, args] = result.stdout.trim().split(/\r?\n/);
+  assert.match(filePath, /^C:\\Windows[\\/]explorer\.exe$/);
+  assert.equal(args, '"C:\\Users\\demo\\AppData\\Local\\Programs\\cowork-os\\CoWork OS.exe"');
+});

@@ -9605,13 +9605,16 @@ ${transcript}
       await onIncorporated();
     }
 
+    // A deterministic courtesy reply is only suitable for a social turn. An
+    // empty answer to a substantive request must stay a visible failure.
+    const emptyFallback =
+      !isThinkMode && this.isCasualCompanionPrompt(message.toLowerCase())
+        ? this.generateCompanionFallbackResponse(message)
+        : "";
     const onStreamProgress =
       this.provider.type === "azure"
         ? this.createLlmStreamingProgressHandler({
             suppressUnexecutedToolCallText: true,
-            fallbackText: isThinkMode
-              ? "Could you say more about that? I'd like to explore this further with you."
-              : this.generateCompanionFallbackResponse(message),
           })
         : undefined;
 
@@ -9634,15 +9637,20 @@ ${transcript}
           : "Chat-mode follow-up response",
         allowContinuation: !isThinkMode,
         onStreamProgress,
-        emptyFallback: isThinkMode
-          ? "Could you say more about that? I'd like to explore this further with you."
-          : this.generateCompanionFallbackResponse(message),
+        emptyFallback,
       });
+      if (this.cancelled || this.shutdownRequested) return;
       const rawAssistantText = turnResult.assistantText;
+      if (!rawAssistantText.trim()) {
+        throw new Error(
+          "The model returned an empty response. Please retry or choose another model.",
+        );
+      }
       const hasUnexecutedToolCall = this.responseLooksLikeUnexecutedToolCall(rawAssistantText);
       const assistantText = hasUnexecutedToolCall
         ? this.buildUnexecutedToolCallChatFallback()
         : await this.repairAnswerSurfaceText(rawAssistantText);
+      if (this.cancelled || this.shutdownRequested) return;
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;
@@ -9661,18 +9669,18 @@ ${transcript}
         this.completeExplicitChatCompaction(historyMessages);
       }
       if (this.saveConversationSnapshot()) await onProviderDispatchCompleted?.();
+      if (this.cancelled || this.shutdownRequested) return;
       this.emitEvent("follow_up_completed", {
         message: "Follow-up message processed (chat mode)",
         followUpMessage: message,
       });
       this.finalizeSuccessfulFollowUp(previousStatus);
     } catch (error: Any) {
+      // Cancellation owns the terminal state, including when a provider ignores
+      // the abort and settles after the user has stopped this turn.
+      if (this.cancelled || this.shutdownRequested) return;
       const fallback =
-        error instanceof LLMRefusalError
-          ? error.message
-          : isThinkMode
-            ? "I wasn't able to process that follow-up. Could you try rephrasing your question?"
-            : this.generateCompanionFallbackResponse(message);
+        error instanceof LLMRefusalError ? error.message : this.buildFollowUpFailureMessage(error);
       this.emitEvent("assistant_message", { message: fallback });
       this.lastAssistantOutput = fallback;
       this.lastNonVerificationOutput = fallback;
@@ -9685,11 +9693,18 @@ ${transcript}
         this.failExplicitChatCompaction(error);
       }
       if (this.saveConversationSnapshot()) await onProviderDispatchCompleted?.();
-      this.emitEvent("follow_up_completed", {
-        message: "Follow-up fallback processed (chat mode)",
+      if (this.cancelled || this.shutdownRequested) return;
+      const currentTask = this.daemon.getTask?.(this.task.id);
+      const hasPersistedBlocker =
+        currentTask &&
+        ["paused", "blocked", "cancelled", "interrupted"].includes(currentTask.status);
+      if (!hasPersistedBlocker) this.finalizeFollowUpFailure(error);
+      this.emitEvent("follow_up_failed", {
+        error: error?.message || String(error),
+        userMessage: fallback,
+        failureClass: this.classifyFailure(error),
       });
-      this.restoreFollowUpStatusAfterFailure(previousStatus);
-      logger.error(`${this.logTag} Chat-mode follow-up failed, using fallback:`, error);
+      logger.error(`${this.logTag} Chat-mode follow-up failed:`, error);
     }
   }
 
@@ -30750,17 +30765,8 @@ You are continuing a previous conversation. The context from the previous conver
     if (isTeamSynthesisPrompt && !teamSynthesisPromptHasMemberOutput(rawPrompt)) {
       const noAnalysesText =
         "The sub-agents did not produce any analyses to synthesize. " +
-        "All team members either failed or timed out before generating output. " +
-        "Please try again or check the sub-agent logs for details.";
-      this.emitEvent("assistant_message", { message: noAnalysesText });
-      this.lastAssistantOutput = noAnalysesText;
-      this.lastAssistantText = noAnalysesText;
-      const resultSummary = this.buildResultSummary() || noAnalysesText;
-      this.finalizeTaskBestEffort(
-        resultSummary,
-        "No team member analyses available for synthesis.",
-      );
-      return;
+        "Please retry the unfinished team work or check the sub-agent logs for details.";
+      throw new Error(noAnalysesText);
     }
 
     const roleContext = this.getRoleContextPrompt();
@@ -30779,40 +30785,35 @@ You are continuing a previous conversation. The context from the previous conver
     const maxTokens = this.task.agentConfig?.maxTokens || 16000;
     const companionUserContent = await this.buildUserContent(rawPrompt, this.initialImages);
 
-    try {
-      const userHistoryContent =
-        typeof companionUserContent === "string"
-          ? [{ type: "text" as const, text: companionUserContent }]
-          : companionUserContent;
-      const turnResult = await this.runTextTurnKernel({
-        messages: [{ role: "user", content: userHistoryContent }],
-        systemPrompt,
-        initialMaxTokens: maxTokens,
-        continuationMaxTokens: 1200,
-        mode: "follow_up",
-        operationLabel: "Sub-agent chat response",
-        allowContinuation: true,
-        emptyFallback: "No response generated.",
-      });
-      const assistantText = turnResult.assistantText;
-
-      this.emitEvent("assistant_message", { message: assistantText });
-      this.lastAssistantOutput = assistantText;
-      this.lastNonVerificationOutput = assistantText;
-      this.lastAssistantText = assistantText;
-      this.updateConversationHistory(turnResult.messages);
-      const resultSummary = this.buildResultSummary() || assistantText;
-      this.finalizeTaskBestEffort(resultSummary);
-    } catch (error: Any) {
-      const errorDetail = error instanceof Error ? error.message : String(error);
-      const fallbackText = `Synthesis encountered an error: ${errorDetail}`;
-      this.emitEvent("assistant_message", { message: fallbackText });
-      this.lastAssistantOutput = fallbackText;
-      this.lastAssistantText = fallbackText;
-      const resultSummary = this.buildResultSummary() || fallbackText;
-      this.finalizeTaskBestEffort(resultSummary, "Sub-agent chat mode failed with error.");
-      logger.error(`${this.logTag} Sub-agent chat mode failed:`, error);
+    const userHistoryContent =
+      typeof companionUserContent === "string"
+        ? [{ type: "text" as const, text: companionUserContent }]
+        : companionUserContent;
+    // A failed synthesis must reach the normal task failure lifecycle so the
+    // parent cannot mistake an error message for a completed child deliverable.
+    const turnResult = await this.runTextTurnKernel({
+      messages: [{ role: "user", content: userHistoryContent }],
+      systemPrompt,
+      initialMaxTokens: maxTokens,
+      continuationMaxTokens: 1200,
+      mode: "follow_up",
+      operationLabel: "Sub-agent chat response",
+      allowContinuation: true,
+      emptyFallback: "",
+    });
+    if (this.cancelled || this.shutdownRequested) throw new Error("Request cancelled");
+    const assistantText = turnResult.assistantText;
+    if (!assistantText.trim()) {
+      throw new Error("The model returned an empty synthesis response. Please retry.");
     }
+
+    this.emitEvent("assistant_message", { message: assistantText });
+    this.lastAssistantOutput = assistantText;
+    this.lastNonVerificationOutput = assistantText;
+    this.lastAssistantText = assistantText;
+    this.updateConversationHistory(turnResult.messages);
+    const resultSummary = this.buildResultSummary() || assistantText;
+    this.finalizeTaskBestEffort(resultSummary);
   }
 
   private async handleCompanionPrompt(): Promise<void> {
@@ -30877,9 +30878,10 @@ You are continuing a previous conversation. The context from the previous conver
 
     const companionUserContent = await this.buildUserContent(rawPrompt, this.initialImages);
     const companionMessages: LLMMessage[] = [{ role: "user", content: companionUserContent }];
-    const emptyFallback = isThinkMode
-      ? "I'd like to help you think through this. Could you share more about what's on your mind?"
-      : this.generateCompanionFallbackResponse(rawPrompt);
+    const emptyFallback =
+      !isThinkMode && this.isCasualCompanionPrompt(rawPrompt.toLowerCase())
+        ? this.generateCompanionFallbackResponse(rawPrompt)
+        : "";
 
     try {
       const explicitChatMaxTokens = isChatMode
@@ -30905,11 +30907,11 @@ You are continuing a previous conversation. The context from the previous conver
             undefined,
             {
               suppressUnexecutedToolCallText: true,
-              fallbackText: emptyFallback,
             },
           ),
         isThinkMode ? "Think-with-me response" : "Companion response",
       );
+      if (this.cancelled || this.shutdownRequested) throw new Error("Request cancelled");
 
       if (response.usage) {
         this.updateTracking(
@@ -30944,7 +30946,6 @@ You are continuing a previous conversation. The context from the previous conver
             undefined,
             {
               suppressUnexecutedToolCallText: true,
-              fallbackText: emptyFallback,
             },
           );
           if (contResponse.usage) {
@@ -30970,10 +30971,16 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       const rawAssistantText = String(text || "").trim() || emptyFallback;
+      if (!rawAssistantText) {
+        throw new Error(
+          "The model returned an empty response. Please retry or choose another model.",
+        );
+      }
       const hasUnexecutedToolCall = this.responseLooksLikeUnexecutedToolCall(rawAssistantText);
       const assistantText = hasUnexecutedToolCall
         ? this.buildUnexecutedToolCallChatFallback()
         : await this.repairAnswerSurfaceText(rawAssistantText);
+      if (this.cancelled || this.shutdownRequested) throw new Error("Request cancelled");
 
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
@@ -30999,12 +31006,11 @@ You are continuing a previous conversation. The context from the previous conver
       // Companion best-effort completion is not evidence of a successful execution.
       this.finalizeTaskBestEffort(resultSummary);
     } catch (error: Any) {
-      const assistantText =
-        error instanceof LLMRefusalError
-          ? error.message
-          : isThinkMode
-            ? "I wasn't able to process that right now. Could you try rephrasing, or let me know what specific aspect you'd like to think through?"
-            : this.generateCompanionFallbackResponse(rawPrompt);
+      // Provider and transport failures must reach the normal retry/failure
+      // lifecycle. A greeting here would incorrectly mark the request complete.
+      if (this.cancelled || this.shutdownRequested || !(error instanceof LLMRefusalError))
+        throw error;
+      const assistantText = error.message;
       this.emitEvent("assistant_message", { message: assistantText });
       this.lastAssistantOutput = assistantText;
       this.lastNonVerificationOutput = assistantText;
@@ -31015,7 +31021,7 @@ You are continuing a previous conversation. The context from the previous conver
       ]);
       const resultSummary = this.buildResultSummary() || assistantText;
       this.finalizeTaskBestEffort(resultSummary);
-      logger.error(`${this.logTag} Companion mode failed, using fallback reply:`, error);
+      logger.info(`${this.logTag} Companion response declined by provider:`, error);
     }
   }
 
@@ -31449,6 +31455,7 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private async executeUnlocked(): Promise<void> {
+    let initialCompanionTurn = false;
     try {
       this.completionVerificationMetadata = null;
       this.getSessionRuntime().resetVerificationState();
@@ -31495,6 +31502,7 @@ You are continuing a previous conversation. The context from the previous conver
 
       // Companion turns are text-only and should not enter native planning/tool execution.
       if (this.shouldHandleInitialPromptAsCompanion(initialPrompt)) {
+        initialCompanionTurn = true;
         this.emitEvent("log", {
           message: "Routing initial prompt through companion mode before planning.",
           reason: "initial_companion_prompt",
@@ -31911,7 +31919,7 @@ You are continuing a previous conversation. The context from the previous conver
       // Timeout-aborted steps should still end with a best-effort answer.
       if (this.cancelled) {
         this.discardProvisionalBootstrapArtifacts(this.cancelReason || "cancelled");
-        if (this.cancelReason === "timeout") {
+        if (this.cancelReason === "timeout" && !initialCompanionTurn) {
           const recovered = await this.finalizeWithTimeoutRecovery(
             error || new Error("Task cancelled due to timeout"),
           );
@@ -31926,7 +31934,10 @@ You are continuing a previous conversation. The context from the previous conver
         return;
       }
 
-      if (this.isAbortLikeError(error)) {
+      // A chat/synthesis timeout has no completed answer to recover. In chat
+      // mode best-effort completion would drop the failure metadata and mark
+      // the request successful, so retain the normal retry/failure lifecycle.
+      if (!initialCompanionTurn && this.isAbortLikeError(error)) {
         const recovered = await this.finalizeWithTimeoutRecovery(error);
         if (recovered) {
           return;

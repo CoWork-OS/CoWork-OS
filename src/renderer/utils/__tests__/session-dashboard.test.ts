@@ -58,4 +58,27 @@ describe("buildSessionDashboardMetrics", () => {
     const metrics = buildSessionDashboardMetrics({ ...task, source: "cron" } as Task, progress, []);
     expect(metrics.automationRunCount).toBe(1);
   });
+
+  it.each(["executing", "completed", "failed"] as const)(
+    "does not invent a progress percentage for a %s task without plan steps",
+    (status) => {
+      const metrics = buildSessionDashboardMetrics(
+        { ...task, status },
+        { ...progress, status, phase: status, completedSteps: 0, totalSteps: 0 },
+        [],
+      );
+
+      expect(metrics.progressPercent).toBeNull();
+      expect(metrics.totalSteps).toBe(0);
+    },
+  );
+
+  it("preserves zero and complete percentages when a real plan exists", () => {
+    expect(
+      buildSessionDashboardMetrics(task, { ...progress, completedSteps: 0 }, []).progressPercent,
+    ).toBe(0);
+    expect(
+      buildSessionDashboardMetrics(task, { ...progress, completedSteps: 4 }, []).progressPercent,
+    ).toBe(100);
+  });
 });

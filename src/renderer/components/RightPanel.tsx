@@ -1935,6 +1935,11 @@ function RightPanelComponent({
       deriveRevisionAwarePlanSteps(events),
     );
   }, [events, sharedTaskEventUi, rendererPerfLoggingEnabled]);
+  // A conversational turn has no execution progress to summarize. Keep the
+  // session tools available, and retain real plans from a session's work turns.
+  const showExecutionSummary =
+    !consolidatedTaskStatusVisible &&
+    (task?.agentConfig?.executionMode !== "chat" || planSteps.length > 0);
   const progressMaterialSignature = useMemo(
     () =>
       getProgressSectionMaterialSignature({
@@ -2518,13 +2523,13 @@ function RightPanelComponent({
         task={task}
         events={events}
         refreshKey={events.length}
-        showSummary={!consolidatedTaskStatusVisible}
+        showSummary={showExecutionSummary}
         onSelectTask={onSelectTask}
         onOpenFile={openFileFromFilesSection}
         workspacePath={workspace?.path}
       />
       <SessionMembersCard task={task} refreshKey={events.length} />
-      {!consolidatedTaskStatusVisible ? (
+      {showExecutionSummary ? (
         <ProgressSection
           expanded={expandedSections.progress}
           planSteps={stableProgressPlanSteps}

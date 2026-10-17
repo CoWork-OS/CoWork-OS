@@ -457,7 +457,9 @@ export function SpreadsheetArtifactViewer({
   const formatLabel = getSpreadsheetFormatLabel(fileName);
   const activeSheetId =
     workbookSession?.sheets[activeSheetIndex]?.id || workbookSession?.activeSheetId;
-  const isSpreadsheetReadOnly = workbookSession?.capabilities.canEditCells === false;
+  const isSpreadsheetReadOnly =
+    Boolean(editablePreview?.readOnlyReason) ||
+    workbookSession?.capabilities.canEditCells === false;
   const isSpreadsheetStructureReadOnly =
     isSpreadsheetReadOnly || workbookSession?.capabilities.canEditStructure === false;
   const pendingFormulaResults = useMemo(
@@ -1040,6 +1042,12 @@ export function SpreadsheetArtifactViewer({
         </button>
         {saveMessage && <div className="spreadsheet-viewer-save-message">{saveMessage}</div>}
       </div>
+
+      {editablePreview?.readOnlyReason && (
+        <div className="spreadsheet-viewer-calculation-notice" role="status">
+          {editablePreview.readOnlyReason}
+        </div>
+      )}
 
       {pendingFormulaResults && (
         <div className="spreadsheet-viewer-calculation-notice" role="status">

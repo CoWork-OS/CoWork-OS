@@ -13,9 +13,31 @@ import {
   writeDelimitedSpreadsheetPreviewToFile,
   writeSpreadsheetPreviewToFile,
 } from "../spreadsheet-preview";
-import { buildOpenpyxlStyleWorkbook } from "../document-generators/__tests__/openpyxl-style-workbook";
+import {
+  buildOpenpyxlChartWorkbook,
+  buildOpenpyxlStyleWorkbook,
+} from "../document-generators/__tests__/openpyxl-style-workbook";
 
 describe("spreadsheet preview extraction", () => {
+  it("opens chart workbooks without changing the file and prevents a destructive save", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-chart-preview-"));
+    try {
+      const file = path.join(tmpDir, "expenses.xlsx");
+      const original = await buildOpenpyxlChartWorkbook();
+      await fs.writeFile(file, original);
+      const preview = await buildSpreadsheetPreviewFromFile(file);
+      expect(preview.readOnlyReason).toContain("could remove charts");
+      expect(preview.sheets[1].rows[3][1].value).toBe("258.965");
+      preview.sheets[0].rows[1][3].value = "150";
+      await expect(writeSpreadsheetPreviewToFile(file, preview)).rejects.toThrow(
+        "could remove charts",
+      );
+      expect(await fs.readFile(file)).toEqual(original);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("extracts sheets, formulas, empty cells, styles, and bounds", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-xlsx-preview-"));
     const outPath = path.join(tmpDir, "preview.xlsx");

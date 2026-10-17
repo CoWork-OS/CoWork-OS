@@ -65,6 +65,7 @@ import type { AutomationOwner } from "./components/automation-library";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
 import { Onboarding } from "./components/Onboarding";
+import { ONBOARDING_FIRST_TASK_OPTIONS } from "../shared/onboarding";
 import { ContextualConnectorSetup } from "./components/ContextualConnectorSetup";
 import { useContextualConnectorSetup } from "./hooks/useContextualConnectorSetup";
 import { ToastContainer } from "./components/Toast";
@@ -6598,7 +6599,7 @@ export function App() {
         const started = await handleCreateTask(
           prompt.slice(0, 80),
           prompt,
-          { generateTitle: true },
+          { generateTitle: true, ...ONBOARDING_FIRST_TASK_OPTIONS },
           undefined,
           workspace,
         );

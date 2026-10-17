@@ -3866,6 +3866,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_XAI_MODELS, apiKey, baseUrl),
   xaiOAuthStart: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_XAI_OAUTH_START),
   xaiOAuthLogout: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_XAI_OAUTH_LOGOUT),
+  openrouterOAuthStart: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_OPENROUTER_OAUTH_START),
   getDeepSeekModels: (apiKey?: string, baseUrl?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_DEEPSEEK_MODELS, apiKey, baseUrl),
   getKimiModels: (apiKey?: string, baseUrl?: string) =>
@@ -7601,6 +7602,8 @@ export interface ElectronAPI {
   getXAIModels: (apiKey?: string, baseUrl?: string) => Promise<Array<{ id: string; name: string }>>;
   xaiOAuthStart: () => Promise<{ success: boolean; error?: string }>;
   xaiOAuthLogout: () => Promise<{ success: boolean; error?: string }>;
+  /** Signs in to OpenRouter in the browser; the key is stored in main and never returned. */
+  openrouterOAuthStart: () => Promise<{ success: boolean; model?: string; error?: string }>;
   getDeepSeekModels: (
     apiKey?: string,
     baseUrl?: string,

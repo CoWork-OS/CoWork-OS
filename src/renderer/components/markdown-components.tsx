@@ -22,6 +22,7 @@ import {
   FileSpreadsheet,
   FileText,
   Folder,
+  Terminal as TerminalIcon,
 } from "lucide-react";
 
 import { getEmojiIcon } from "../utils/emoji-icon-map";
@@ -32,10 +33,13 @@ import { useFileActionMenu } from "./FileActionMenu";
 import { LazyHighlightedCodeBlock } from "./lazy-renderers";
 import { RunnableCodeBlock } from "./RunnableCodeBlock";
 import {
+  OPEN_TERMINAL_TAB_EVENT,
   canRunCodeBlocks,
   isRunnableShellLanguage,
   useCodeBlockRunScope,
+  type OpenTerminalTabRequest,
 } from "../utils/code-block-runs";
+import { parseTerminalTabHref, terminalTabHref } from "../../shared/terminal-tab-links";
 
 type CodeBlockProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode;
@@ -629,6 +633,32 @@ const CITATION_REF_REGEX = /\[(\d+)\]/g;
 /** Set inside a rendered link so inline `code` in its label is not turned into a second chip. */
 const InsideMarkdownLinkContext = createContext(false);
 
+/** `[title](#terminal/<tab id>)`: a chip that opens that tab of the task's terminal panel. */
+function MarkdownTerminalLink({ tabId, children }: { tabId: string; children?: ReactNode }) {
+  const label = getTextContent(children).trim() || "terminal";
+  return (
+    <a
+      href={terminalTabHref(tabId)}
+      className="terminal-tab-link"
+      title={`Open ${label} in the terminal panel`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        window.dispatchEvent(
+          new CustomEvent<OpenTerminalTabRequest>(OPEN_TERMINAL_TAB_EVENT, { detail: { tabId } }),
+        );
+      }}
+    >
+      <span className="terminal-tab-link-icon" aria-hidden="true">
+        <TerminalIcon size={13} strokeWidth={2} />
+      </span>
+      <span className="terminal-tab-link-label">
+        <InsideMarkdownLinkContext.Provider value>{children}</InsideMarkdownLinkContext.Provider>
+      </span>
+    </a>
+  );
+}
+
 function MarkdownFileLink({
   href,
   filePath,
@@ -734,6 +764,11 @@ export function buildMarkdownComponents(options: MarkdownComponentsOptions) {
   const MarkdownLink = ({ href, children, node, ...props }: MarkdownAnchorProps) => {
     if (!href) {
       return <a {...props}>{children}</a>;
+    }
+
+    const terminalTabId = parseTerminalTabHref(href);
+    if (terminalTabId) {
+      return <MarkdownTerminalLink tabId={terminalTabId}>{children}</MarkdownTerminalLink>;
     }
 
     const linkText = getTextContent(children);

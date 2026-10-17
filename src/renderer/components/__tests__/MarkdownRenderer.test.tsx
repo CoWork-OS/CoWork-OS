@@ -1,8 +1,9 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { buildMarkdownComponents } from "../markdown-components";
+import { OPEN_TERMINAL_TAB_EVENT } from "../../utils/code-block-runs";
 
 const components = buildMarkdownComponents({
   workspacePath: "/private/tmp/qa",
@@ -106,5 +107,55 @@ describe("MarkdownRenderer workspace image links", () => {
     const markup = renderMarkdown("[my image](<my image.png>)");
     expect(markup).toContain('href="my%20image.png"');
     expect(markup).toContain('title="my image.png');
+  });
+});
+
+describe("MarkdownRenderer terminal tab links", () => {
+  const renderMarkdown = (markdown: string) =>
+    renderToStaticMarkup(React.createElement(MarkdownRenderer, { children: markdown, components }));
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("renders a #terminal link as a terminal chip", () => {
+    const markup = renderMarkdown("The tunnel ([https tunnel](#terminal/bg-1a2b3c4d)) is up.");
+    expect(markup).toMatch(
+      /<a href="#terminal\/bg-1a2b3c4d" class="terminal-tab-link" title="Open https tunnel in the terminal panel"><span class="terminal-tab-link-icon" aria-hidden="true"><svg [^>]*lucide-terminal[^>]*>/,
+    );
+    expect(markup).toContain('<span class="terminal-tab-link-label">https tunnel</span>');
+    expect(markup).not.toContain("clickable-file-path");
+  });
+
+  it("keeps inline code in the label from becoming a file chip", () => {
+    const markup = renderMarkdown("[`npm run dev`](#terminal/bg-1a2b3c4d)");
+    expect(markup).toContain('class="terminal-tab-link"');
+    expect(markup).not.toContain("clickable-file-path");
+  });
+
+  it("leaves malformed terminal hrefs as plain links", () => {
+    const markup = renderMarkdown("[x](#terminal/../y)");
+    expect(markup).not.toContain("terminal-tab-link");
+  });
+
+  it("asks the app to open the linked tab when clicked", () => {
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+    const link = (components.a as (props: Record<string, unknown>) => React.ReactElement)({
+      href: "#terminal/bg-1a2b3c4d",
+      children: "planner server",
+    });
+    const anchor = (link.type as (props: unknown) => React.ReactElement<{ onClick: Function }>)(
+      link.props,
+    );
+    const event = { preventDefault: vi.fn(), stopPropagation: vi.fn() };
+
+    anchor.props.onClick(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const dispatched = dispatchEvent.mock.calls[0][0] as CustomEvent<{ tabId: string }>;
+    expect(dispatched.type).toBe(OPEN_TERMINAL_TAB_EVENT);
+    expect(dispatched.detail).toEqual({ tabId: "bg-1a2b3c4d" });
   });
 });

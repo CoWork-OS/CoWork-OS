@@ -152,6 +152,26 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     expect(isRunning(result.pid as number)).toBe(true);
   }, 15_000);
 
+  it("shows the process as a named terminal tab and tells the agent how to link it", async () => {
+    const { shellTools } = newShellTools();
+
+    const result = await shellTools.startBackgroundCommand(TICKER, {
+      cwd: workspacePath,
+      title: "ticker server",
+    });
+
+    const processId = result.process_id as string;
+    expect(result).toMatchObject({
+      title: "ticker server",
+      terminal_tab: {
+        id: processId,
+        title: "ticker server",
+        link: `[ticker server](#terminal/${processId})`,
+      },
+    });
+    expect(result.next_steps).toContain(`[ticker server](#terminal/${processId})`);
+  }, 15_000);
+
   it("waits only the startup window for a process that prints no ready line", async () => {
     const { shellTools } = newShellTools();
     const startedAt = Date.now();

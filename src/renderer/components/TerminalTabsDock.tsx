@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Plus, SquareTerminal, X } from "lucide-react";
-import type { ShellSessionInfo, Workspace } from "../../shared/types";
+import type { AgentTerminalTab, ShellSessionInfo, Workspace } from "../../shared/types";
 import "@xterm/xterm/css/xterm.css";
 import "./terminal-tabs-dock.css";
 
@@ -12,7 +12,29 @@ type TerminalHandle = {
   fitAddon: FitAddon;
   disposables: Array<{ dispose: () => void }>;
   opened: boolean;
+  /** Agent tabs: live output is ignored until the buffered output has been written. */
+  replaying?: boolean;
 };
+
+const DIM = "\u001b[2m";
+const RESET = "\u001b[0m";
+const HIDE_CURSOR = "\u001b[?25l";
+
+function agentTabsSupported(): boolean {
+  return (
+    window.coworkBrowserHost !== true &&
+    typeof window.electronAPI?.listAgentTerminalTabs === "function"
+  );
+}
+
+function describeAgentTabEnd(tab: AgentTerminalTab): string {
+  if (tab.status === "running") return "";
+  const text =
+    tab.status === "stopped"
+      ? "Stopped"
+      : `Exited${tab.exitCode === null ? "" : ` with code ${tab.exitCode}`}`;
+  return `\r\n${DIM}[${text}]${RESET}\r\n`;
+}
 
 function uniqueTabs(tabs: ShellSessionInfo[]): ShellSessionInfo[] {
   const byId = new Map<string, ShellSessionInfo>();
@@ -55,9 +77,14 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
   onClose: () => void;
 }) {
   const [tabs, setTabs] = useState<ShellSessionInfo[]>([]);
+  const [agentTabs, setAgentTabs] = useState<AgentTerminalTab[]>([]);
+  const [agentTabsLoaded, setAgentTabsLoaded] = useState(false);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [tabsLoaded, setTabsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const agentTabIdsRef = useRef<Set<string>>(new Set());
+  const agentTabsRef = useRef<AgentTerminalTab[]>([]);
   const dockBodyRef = useRef<HTMLDivElement | null>(null);
   const terminalHandlesRef = useRef<Record<string, TerminalHandle>>({});
   const terminalContainersRef = useRef<Record<string, HTMLDivElement | null>>({});
@@ -65,17 +92,29 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
   const autoCreateAttemptedRef = useRef(false);
   const userClosedAllTabsRef = useRef(false);
   const attachedTabIdsRef = useRef<Set<string>>(new Set());
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
+  const selectedAgentTab = agentTabs.find((tab) => tab.id === activeTabId) || null;
+  const activeTab = selectedAgentTab
+    ? null
+    : tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
+  const activeAgentTab = selectedAgentTab || (activeTab ? null : agentTabs[0] || null);
+  const shownTabId = activeAgentTab?.id || activeTab?.id || null;
   const activeTabRunning = Boolean(
-    activeTab &&
-    (activeTab.status === "running" ||
-      (window.coworkBrowserHost === true && activeTab.status === "active")),
+    activeAgentTab
+      ? activeAgentTab.status === "running"
+      : activeTab &&
+          (activeTab.status === "running" ||
+            (window.coworkBrowserHost === true && activeTab.status === "active")),
   );
   const activeTabIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    activeTabIdRef.current = activeTabId;
-  }, [activeTabId]);
+    activeTabIdRef.current = shownTabId;
+  }, [shownTabId]);
+
+  useEffect(() => {
+    agentTabsRef.current = agentTabs;
+    agentTabIdsRef.current = new Set(agentTabs.map((tab) => tab.id));
+  }, [agentTabs]);
 
   const sendTerminalInput = useCallback(
     (tabId: string, input: string) => {
@@ -97,25 +136,48 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     [taskId, workspace?.id],
   );
 
-  const refresh = useCallback(async () => {
-    if (!workspace?.id) return;
+  const refresh = useCallback(async (): Promise<ShellSessionInfo[]> => {
+    if (!workspace?.id) return [];
     try {
       const nextTabs = await window.electronAPI.listTerminalTabs(workspace.id, taskId || undefined);
       const dedupedTabs = uniqueTabs(nextTabs);
       setTabs(dedupedTabs);
       setActiveTabId((current) => {
         if (current && dedupedTabs.some((tab) => tab.id === current)) return current;
+        if (current && agentTabIdsRef.current.has(current)) return current;
         return dedupedTabs[0]?.id || null;
       });
       setError(null);
       setTabsLoaded(true);
+      return dedupedTabs;
     } catch (err) {
       setTabs([]);
       setActiveTabId(null);
       setTabsLoaded(true);
       setError(err instanceof Error ? err.message : "Failed to load terminal tabs.");
+      return [];
     }
   }, [taskId, workspace?.id]);
+
+  const refreshAgentTabs = useCallback(async (): Promise<AgentTerminalTab[]> => {
+    if (!taskId || !agentTabsSupported()) {
+      setAgentTabs([]);
+      setAgentTabsLoaded(true);
+      return [];
+    }
+    try {
+      const nextTabs = await window.electronAPI.listAgentTerminalTabs(taskId);
+      agentTabIdsRef.current = new Set(nextTabs.map((tab) => tab.id));
+      setAgentTabs(nextTabs);
+      return nextTabs;
+    } catch {
+      // A task the window may not view has no agent tabs to show.
+      setAgentTabs([]);
+      return [];
+    } finally {
+      setAgentTabsLoaded(true);
+    }
+  }, [taskId]);
 
   const fitTerminal = useCallback((tabId: string) => {
     const handle = terminalHandlesRef.current[tabId];
@@ -199,22 +261,75 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     [sendTerminalInput, taskId, workspace?.id],
   );
 
+  /** A read-only terminal for an agent tab, filled with the process output buffered so far. */
+  const ensureAgentTerminal = useCallback((tab: AgentTerminalTab): TerminalHandle => {
+    const existing = terminalHandlesRef.current[tab.id];
+    if (existing) return existing;
+    const terminal = new Terminal({
+      allowProposedApi: false,
+      // Process output is plain text with bare newlines.
+      convertEol: true,
+      cursorBlink: false,
+      disableStdin: true,
+      fontFamily: readCssVar("--font-mono", '"SF Mono", Menlo, Monaco, Consolas, monospace'),
+      fontSize: 12,
+      letterSpacing: 0,
+      lineHeight: 1.35,
+      scrollback: 10_000,
+      theme: buildTerminalTheme(),
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        void window.electronAPI.openExternal(uri).catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : "Failed to open link.");
+        });
+      }),
+    );
+    const handle: TerminalHandle = {
+      terminal,
+      fitAddon,
+      disposables: [],
+      opened: false,
+      replaying: true,
+    };
+    terminalHandlesRef.current[tab.id] = handle;
+    terminal.write(HIDE_CURSOR);
+    void window.electronAPI
+      .readAgentTerminalTab({ taskId: tab.taskId, tabId: tab.id })
+      .then((buffered) => {
+        if (terminalHandlesRef.current[tab.id] !== handle) return;
+        if (buffered.truncated) terminal.write(`${DIM}[earlier output not kept]${RESET}\r\n`);
+        terminal.write(buffered.output);
+        const latest = agentTabsRef.current.find((entry) => entry.id === tab.id) || tab;
+        terminal.write(describeAgentTabEnd(latest));
+      })
+      .catch(() => {
+        // The process is gone; its removal event drops the tab.
+      })
+      .finally(() => {
+        handle.replaying = false;
+      });
+    return handle;
+  }, []);
+
   const openTerminalInContainer = useCallback(
-    (tabId: string, element: HTMLDivElement | null) => {
+    (tabId: string, element: HTMLDivElement | null, agentTab?: AgentTerminalTab) => {
       terminalContainersRef.current[tabId] = element;
       if (!element) return;
-      const handle = ensureTerminal(tabId);
+      const handle = agentTab ? ensureAgentTerminal(agentTab) : ensureTerminal(tabId);
       if (!handle.opened) {
         handle.terminal.open(element);
         handle.opened = true;
       }
       requestAnimationFrame(() => {
-        if (tabId !== activeTabId) return;
+        if (tabId !== activeTabIdRef.current) return;
         fitTerminal(tabId);
-        handle.terminal.focus();
+        if (!agentTab) handle.terminal.focus();
       });
     },
-    [activeTabId, ensureTerminal, fitTerminal],
+    [ensureAgentTerminal, ensureTerminal, fitTerminal],
   );
 
   const disposeTerminal = useCallback((tabId: string) => {
@@ -251,6 +366,18 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
   }, [taskId, workspace?.id, workspace?.name]);
 
   const stopTab = useCallback(async () => {
+    if (activeAgentTab) {
+      try {
+        const stopped = await window.electronAPI.stopAgentTerminalTab({
+          taskId: activeAgentTab.taskId,
+          tabId: activeAgentTab.id,
+        });
+        setAgentTabs((current) => current.map((tab) => (tab.id === stopped.id ? stopped : tab)));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to stop the process.");
+      }
+      return;
+    }
     if (!workspace?.id || !activeTab) return;
     try {
       const updatedTab = await window.electronAPI.stopTerminalTab({
@@ -264,7 +391,27 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to stop terminal tab.");
     }
-  }, [activeTab, taskId, workspace?.id]);
+  }, [activeAgentTab, activeTab, taskId, workspace?.id]);
+
+  const closeAgentTab = useCallback(
+    async (tab: AgentTerminalTab) => {
+      setError(null);
+      try {
+        await window.electronAPI.closeAgentTerminalTab({ taskId: tab.taskId, tabId: tab.id });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to close the process tab.");
+        return;
+      }
+      disposeTerminal(tab.id);
+      // Closing the last tab leaves the panel empty, as closing the last shell tab does.
+      if (tabs.length === 0 && agentTabsRef.current.every((entry) => entry.id === tab.id)) {
+        userClosedAllTabsRef.current = true;
+      }
+      setAgentTabs((current) => current.filter((entry) => entry.id !== tab.id));
+      setActiveTabId((activeId) => (activeId === tab.id ? null : activeId));
+    },
+    [disposeTerminal, tabs.length],
+  );
 
   const closeTab = useCallback(
     async (tabId: string) => {
@@ -313,19 +460,67 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     void refresh();
   }, [disposeTerminal, refresh, workspace?.id]);
 
-  // A code block ran in a tab the dock may not list yet: reload, then show that tab.
+  // The agent's processes of this task, kept current by their start, exit and removal events.
+  useEffect(() => {
+    setAgentTabsLoaded(false);
+    for (const tab of agentTabsRef.current) disposeTerminal(tab.id);
+    setAgentTabs([]);
+    void refreshAgentTabs();
+    if (!taskId || !agentTabsSupported()) return;
+    return window.electronAPI.onAgentTerminalEvent((event) => {
+      if (event.taskId !== taskId) return;
+      if (event.kind === "output") {
+        const handle = terminalHandlesRef.current[event.tabId];
+        if (handle && !handle.replaying && agentTabIdsRef.current.has(event.tabId)) {
+          handle.terminal.write(event.output);
+        }
+        return;
+      }
+      if (event.kind === "removed") {
+        disposeTerminal(event.tabId);
+        agentTabIdsRef.current.delete(event.tabId);
+        setAgentTabs((current) => current.filter((tab) => tab.id !== event.tabId));
+        return;
+      }
+      const previous = agentTabsRef.current.find((tab) => tab.id === event.tab.id);
+      const handle = terminalHandlesRef.current[event.tab.id];
+      if (previous?.status === "running" && event.tab.status !== "running" && handle) {
+        if (!handle.replaying) handle.terminal.write(describeAgentTabEnd(event.tab));
+      }
+      agentTabIdsRef.current.add(event.tab.id);
+      // Updated now, not after the render, so a replay that finishes first sees the exit.
+      agentTabsRef.current = previous
+        ? agentTabsRef.current.map((tab) => (tab.id === event.tab.id ? event.tab : tab))
+        : [...agentTabsRef.current, event.tab];
+      setAgentTabs((current) =>
+        current.some((tab) => tab.id === event.tab.id)
+          ? current.map((tab) => (tab.id === event.tab.id ? event.tab : tab))
+          : [...current, event.tab],
+      );
+    });
+  }, [disposeTerminal, refreshAgentTabs, taskId]);
+
+  // A code block ran in a tab, or an answer linked one, that the dock may not list yet:
+  // reload, then show that tab.
   const handledFocusRequestRef = useRef<number | null>(null);
   useEffect(() => {
     if (!focusRequest || !workspace?.id) return;
     if (handledFocusRequestRef.current === focusRequest.requestId) return;
     handledFocusRequestRef.current = focusRequest.requestId;
-    void refresh().then(() => setActiveTabId(focusRequest.tabId));
-  }, [focusRequest, refresh, workspace?.id]);
+    void Promise.all([refresh(), refreshAgentTabs()]).then(([nextTabs, nextAgentTabs]) => {
+      const exists = [...nextTabs, ...nextAgentTabs].some((tab) => tab.id === focusRequest.tabId);
+      setNotice(exists ? null : "That terminal tab is closed.");
+      if (exists) setActiveTabId(focusRequest.tabId);
+    });
+  }, [focusRequest, refresh, refreshAgentTabs, workspace?.id]);
 
+  // Open a shell when the panel would be empty; the agent's process tabs count as content.
   useEffect(() => {
     if (
       !tabsLoaded ||
+      !agentTabsLoaded ||
       tabs.length > 0 ||
+      agentTabs.length > 0 ||
       error ||
       autoCreateAttemptedRef.current ||
       userClosedAllTabsRef.current
@@ -334,7 +529,7 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
     }
     autoCreateAttemptedRef.current = true;
     void createTab();
-  }, [createTab, error, tabs.length, tabsLoaded]);
+  }, [agentTabs.length, agentTabsLoaded, createTab, error, tabs.length, tabsLoaded]);
 
   useEffect(() => {
     if (!workspace?.id) return;
@@ -378,12 +573,13 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
   }, [ensureTerminal, workspace?.id]);
 
   useEffect(() => {
-    if (!activeTabId) return;
+    if (!shownTabId) return;
+    const agentTab = agentTabIdsRef.current.has(shownTabId);
     requestAnimationFrame(() => {
-      fitTerminal(activeTabId);
-      terminalHandlesRef.current[activeTabId]?.terminal.focus();
+      fitTerminal(shownTabId);
+      if (!agentTab) terminalHandlesRef.current[shownTabId]?.terminal.focus();
     });
-  }, [activeTabId, fitTerminal]);
+  }, [fitTerminal, shownTabId]);
 
   useEffect(() => {
     window.addEventListener("focus", focusActiveTerminal);
@@ -392,13 +588,13 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
 
   useEffect(() => {
     const element = dockBodyRef.current;
-    if (!element || !activeTabId) return;
+    if (!element || !shownTabId) return;
     const resizeObserver = new ResizeObserver(() => {
-      fitTerminal(activeTabId);
+      fitTerminal(shownTabId);
     });
     resizeObserver.observe(element);
     return () => resizeObserver.disconnect();
-  }, [activeTabId, fitTerminal]);
+  }, [fitTerminal, shownTabId]);
 
   useEffect(() => {
     return () => {
@@ -422,7 +618,10 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
               <button
                 type="button"
                 className={`terminal-dock-tab ${activeTab?.id === tab.id ? "active" : ""}`}
-                onClick={() => setActiveTabId(tab.id)}
+                onClick={() => {
+                  setNotice(null);
+                  setActiveTabId(tab.id);
+                }}
                 title={tab.cwd}
               >
                 <SquareTerminal size={13} />
@@ -443,7 +642,7 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
               </button>
             </div>
           ))
-        ) : (
+        ) : agentTabs.length === 0 ? (
           <button
             type="button"
             className="terminal-dock-tab active"
@@ -452,7 +651,39 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
             <SquareTerminal size={13} />
             <span>{workspace.name || "terminal"}</span>
           </button>
-        )}
+        ) : null}
+        {agentTabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`terminal-dock-tab-wrap ${activeAgentTab?.id === tab.id ? "active" : ""}`}
+          >
+            <button
+              type="button"
+              className={`terminal-dock-tab ${activeAgentTab?.id === tab.id ? "active" : ""}`}
+              onClick={() => {
+                setNotice(null);
+                setActiveTabId(tab.id);
+              }}
+              title={`Started by the agent: ${tab.command}`}
+            >
+              <SquareTerminal size={13} />
+              <span>{tab.title}</span>
+              <span className={`terminal-dock-tab-status ${tab.status}`} />
+            </button>
+            <button
+              type="button"
+              className="terminal-dock-tab-close"
+              onClick={(event) => {
+                event.stopPropagation();
+                void closeAgentTab(tab);
+              }}
+              title={tab.status === "running" ? "Stop and close" : "Close"}
+              aria-label={tab.status === "running" ? "Stop process and close tab" : "Close tab"}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
         <button
           type="button"
           className="terminal-dock-icon-btn"
@@ -484,7 +715,20 @@ export const TerminalTabsDock = memo(function TerminalTabsDock({
             className={`terminal-dock-xterm ${activeTab?.id === tab.id ? "active" : ""}`}
           />
         ))}
-        {error && <div className="terminal-dock-error">{error}</div>}
+        {agentTabs.map((tab) => (
+          <div
+            key={tab.id}
+            ref={(element) => openTerminalInContainer(tab.id, element, tab)}
+            className={`terminal-dock-xterm ${activeAgentTab?.id === tab.id ? "active" : ""}`}
+          />
+        ))}
+        {error ? (
+          <div className="terminal-dock-error">{error}</div>
+        ) : notice ? (
+          <div className="terminal-dock-notice" role="status">
+            {notice}
+          </div>
+        ) : null}
       </div>
     </section>
   );

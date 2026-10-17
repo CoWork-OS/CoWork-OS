@@ -4422,6 +4422,33 @@ export interface TerminalBlockOutputEvent {
   output: string;
 }
 
+/**
+ * A background process the agent started (run_command background: true), shown as a
+ * read-only tab in the task's terminal panel. Its id is the process id, which answers
+ * link to as `[title](#terminal/<id>)`.
+ */
+export interface AgentTerminalTab {
+  id: string;
+  taskId: string;
+  title: string;
+  command: string;
+  cwd: string;
+  status: "running" | "exited" | "stopped";
+  exitCode: number | null;
+  startedAt: number;
+}
+
+export interface AgentTerminalTabRequest {
+  taskId: string;
+  tabId: string;
+}
+
+/** Output, status changes and removals of a task's agent terminal tabs. */
+export type AgentTerminalEvent =
+  | { kind: "output"; taskId: string; tabId: string; output: string }
+  | { kind: "status"; taskId: string; tab: AgentTerminalTab }
+  | { kind: "removed"; taskId: string; tabId: string };
+
 export type GithubReviewThreadState = "open" | "resolved" | "outdated" | "unknown";
 
 export interface GithubPullRequestReviewComment {
@@ -7990,6 +8017,11 @@ export const IPC_CHANNELS = {
   TERMINAL_BLOCK_RUN: "terminalBlock:run",
   TERMINAL_BLOCK_STOP: "terminalBlock:stop",
   TERMINAL_BLOCK_OUTPUT: "terminalBlock:output",
+  AGENT_TERMINAL_LIST: "agentTerminal:list",
+  AGENT_TERMINAL_READ: "agentTerminal:read",
+  AGENT_TERMINAL_STOP: "agentTerminal:stop",
+  AGENT_TERMINAL_CLOSE: "agentTerminal:close",
+  AGENT_TERMINAL_EVENT: "agentTerminal:event",
   SPREADSHEET_OPEN_WORKBOOK: "spreadsheet:openWorkbook",
   SPREADSHEET_GET_VIEWPORT: "spreadsheet:getViewport",
   SPREADSHEET_APPLY_PATCHES: "spreadsheet:applyPatches",

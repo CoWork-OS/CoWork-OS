@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent processes in the terminal dock, linked from answers**: a server, tunnel or watcher the agent starts with `run_command` `background: true` appears as a named, read-only tab in the task's terminal dock, where you can watch its output, stop it or close it. Answers link those tabs as chips (`[dev server](#terminal/<id>)`) that open the tab with a click. See [Terminal Tabs](terminal-tabs.md#the-agents-processes-as-tabs).
+
 - **Android phone control**: select a connected Android phone or emulator in Settings, install its pinned phone-harness runtime, and approve screenshots and individual input actions. Durable device locks and receipts support recovery without replaying uncertain input. Stop cancels pending approvals and discovery; unreadable security data blocks input, busy screens retain screenshot access, and stale visual targets require a fresh observation. Human approval waits run outside the adapter execution deadline. See [Android phone control](android-phone-control.md).
 
 - **Private browser login, 2FA, and checkout autofill**: private dialogs support saved or one-use logins, 1Password/Bitwarden CLI unlock, verification codes, addresses, and local payment cards. Saved codes require native approval; every card fill requires native confirmation and agent fills also require fresh approval. CVCs are never saved, and filling never authorizes an order. Agent capture and native control pause around private input and filled documents. Available in the local Browser Workbench; see [setup, safeguards, and validation limits](browser-workbench.md#private-login-password-managers-2fa-and-checkout).

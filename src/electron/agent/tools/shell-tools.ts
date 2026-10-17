@@ -15,6 +15,7 @@ import {
   type LoopbackListenerViolation,
 } from "../sandbox/loopback-listener-guard";
 import { getBackgroundProcessManager, type BackgroundProcessLaunch } from "./background-processes";
+import { terminalTabMarkdownLink } from "../../../shared/terminal-tab-links";
 import { applyNonInteractiveEnvDefaults } from "../sandbox/non-interactive-env";
 import { OUTPUT_TRUNCATED_MARKER, boundOutput } from "../sandbox/bounded-output";
 import { loadPolicies, type AdminPolicies } from "../../admin/policies";
@@ -1426,6 +1427,8 @@ export class ShellTools {
       env?: Record<string, string>;
       signal?: AbortSignal;
       startupWaitMs?: unknown;
+      /** Name of the terminal tab that shows the process to the user. */
+      title?: unknown;
     },
   ): Promise<Record<string, unknown>> {
     const manager = getBackgroundProcessManager();
@@ -1496,6 +1499,7 @@ export class ShellTools {
     const summary = manager.start({
       taskId: this.taskId,
       command,
+      title: options?.title,
       cwd,
       launch,
       normalizeChunk: (chunk) => this.sanitizeCommandOutput(stripScriptControlCodes(chunk)),
@@ -1541,8 +1545,16 @@ export class ShellTools {
             stdout: startup.output,
           }
         : {}),
+      terminal_tab: {
+        id: processId,
+        title: status.title,
+        link: terminalTabMarkdownLink(status.title, processId),
+      },
       next_steps: status.running
-        ? "It keeps running. Read new output with process_output, and stop it with stop_process when you no longer need it."
+        ? "It keeps running. The user can watch it in the task's terminal panel, in a tab named " +
+          `"${status.title}"; when you mention it, link that tab as ` +
+          `${terminalTabMarkdownLink(status.title, processId)} so they can open it with a click. ` +
+          "Read new output with process_output, and stop it with stop_process when you no longer need it."
         : "The command already finished, so it did not need background: true.",
     };
   }

@@ -8221,6 +8221,47 @@ button.collab-timeline-thought-agent:hover {
   text-decoration: underline;
 }
 
+/* Terminal tab links (`[title](#terminal/<id>)`): a tinted pill that opens the tab. */
+.markdown-content a.terminal-tab-link {
+  display: inline;
+  padding: 0.06em 0.45em 0.1em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+  color: var(--color-accent);
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.markdown-content a.terminal-tab-link:hover,
+.markdown-content a.terminal-tab-link:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  text-decoration: none;
+}
+
+.terminal-tab-link-icon {
+  display: inline-flex;
+  margin-right: 0.3em;
+  vertical-align: -0.12em;
+  opacity: 0.85;
+}
+
+/* A title written as `code` inside the link takes the chip's look, not a code chip.
+   The second selector matches the assistant prose inline-code rule's specificity. */
+.markdown-content a.terminal-tab-link code,
+.chat-message.assistant-message
+  .chat-bubble-content.markdown-content
+  .terminal-tab-link
+  code:not(.answer-surface *) {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.9em;
+}
+
 .markdown-content a.x-social-link {
   display: inline-flex;
   align-items: center;

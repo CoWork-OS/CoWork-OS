@@ -52,6 +52,13 @@ import * as fs from "fs";
 import * as os from "os";
 import { randomBytes } from "crypto";
 import { IPC_CHANNELS as SHARED_IPC_CHANNELS, isTempWorkspaceId } from "../shared/types";
+import type {
+  AgentImportDetection,
+  AgentImportPreview,
+  AgentImportRequest,
+  AgentImportResult,
+  AgentImportSource,
+} from "../shared/types";
 import type { BotOutcomeMetrics, BotOutcomeMetricsRequest } from "../shared/bot-outcome-metrics";
 import type {
   ChannelHealthResponse,
@@ -4987,6 +4994,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   }) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_KEEP_ENTRY, data),
   // Main opens the folder picker; no path is sent from here.
   importMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_IMPORT_FOLDER),
+  // Hermes / OpenClaw import: main resolves the home folder; only the source is sent.
+  detectAgentImports: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_IMPORT_DETECT),
+  previewAgentImport: (request: { source: AgentImportSource; withSecrets?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_IMPORT_PREVIEW, request),
+  applyAgentImport: (request: AgentImportRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_IMPORT_APPLY, request),
   getAwarenessConfig: () => ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_GET_CONFIG),
   saveAwarenessConfig: (config: Any) =>
     ipcRenderer.invoke(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, config),
@@ -9213,6 +9226,12 @@ export interface ElectronAPI {
     target: MemoryRepoKeepTarget;
   }) => Promise<MemoryRepoEntryActionResult>;
   importMemoryRepoFolder: () => Promise<MemoryRepoImportResult>;
+  detectAgentImports: () => Promise<AgentImportDetection[]>;
+  previewAgentImport: (request: {
+    source: AgentImportSource;
+    withSecrets?: boolean;
+  }) => Promise<AgentImportPreview>;
+  applyAgentImport: (request: AgentImportRequest) => Promise<AgentImportResult>;
   getAwarenessConfig: () => Promise<Any>;
   saveAwarenessConfig: (config: Any) => Promise<Any>;
   listAwarenessBeliefs: (workspaceId?: string) => Promise<Any[]>;

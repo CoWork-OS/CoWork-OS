@@ -65,6 +65,8 @@ export default defineConfig({
           { text: "MLX-LM Local Inference", link: "/mlx-lm" },
           { text: "Compare CoWork OS", link: "/comparisons/" },
           { text: "Migration Guide", link: "/migration" },
+          { text: "Migrating from Hermes", link: "/migrating-from-hermes" },
+          { text: "Migrating from OpenClaw", link: "/migrating-from-openclaw" },
           { text: "OpenClaw Comparison", link: "/openclaw-comparison" },
         ],
       },

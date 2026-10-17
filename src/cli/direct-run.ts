@@ -54,6 +54,7 @@ import type { AgentConfig, CliTaskOwnership, Task } from "../shared/types";
 import { DEFAULT_WORKSPACE_PERMISSIONS } from "../shared/types";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import { buildTaskTitle } from "./format";
+import { runAgentImportCommand } from "./agent-import-command";
 import { NumbatService } from "../electron/security/numbat";
 import type { AgentSecurityFindingStatus } from "../shared/agent-security";
 import { requiresAgentSecurityConfirmation } from "./agent-security-confirmation";
@@ -93,6 +94,7 @@ interface DirectRunArgs extends PactDirectArgs {
     | "tail"
     | "approvals-list"
     | "providers-configure"
+    | "agent-import"
     | "sessions-list"
     | "sessions-show"
     | "sessions-export"
@@ -194,6 +196,9 @@ interface DirectRunArgs extends PactDirectArgs {
   vacuum?: boolean;
   yes?: boolean;
   dryRun?: boolean;
+  /** `cowork import`: the agent home to import (hermes, openclaw). */
+  importSource?: string;
+  withSecrets?: boolean;
   refresh?: boolean;
   pulseAction?: "status" | "show" | "on" | "off" | "send" | "reset" | "delete";
   json?: boolean;
@@ -686,6 +691,16 @@ function parseDirectRunArgs(argv: string[]): DirectRunArgs {
         break;
       case "--backup-restore":
         args.command = "backup-restore";
+        break;
+      case "--agent-import":
+        args.command = "agent-import";
+        break;
+      case "--from":
+        args.importSource = next || "";
+        i++;
+        break;
+      case "--with-secrets":
+        args.withSecrets = true;
         break;
       case "--security-audit":
         args.command = "security-audit";
@@ -1313,6 +1328,27 @@ async function runLocalMetadataCommand(
       return await createBackup(dbManager, args);
     case "backup-restore":
       return await restoreBackup(args);
+    case "agent-import":
+      return await runAgentImportCommand(
+        {
+          source: args.importSource,
+          dryRun: args.dryRun === true,
+          withSecrets: args.withSecrets === true,
+          workspaceId: args.workspaceId,
+        },
+        {
+          db,
+          findWorkspace: async (workspaceId) => {
+            const workspace = await workspaces.findById(workspaceId);
+            return workspace && !workspace.isTemp
+              ? { id: workspace.id, name: workspace.name, path: workspace.path }
+              : null;
+          },
+          listWorkspacePaths: async () =>
+            (await workspaces.findAll()).map((workspace) => workspace.path),
+          write: (event, text) => writeEvent(args, event, text),
+        },
+      );
     case "security-audit":
       return securityAuditCommand(db, args);
     case "security-rules-list":

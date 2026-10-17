@@ -1,0 +1,9 @@
+model:
+  default: anthropic/claude-sonnet-4
+  provider: openrouter
+timezone: Europe/Lisbon
+command_allowlist:
+  - recursive delete
+platforms:
+  telegram:
+    allow_from: "999"

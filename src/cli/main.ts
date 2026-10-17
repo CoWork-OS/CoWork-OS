@@ -249,6 +249,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await models(ctx);
       case "backup":
         return await backup(ctx);
+      case "import":
+        return await importCommand(ctx);
       case "security":
         return await security(ctx);
       case "prompt-size":
@@ -1551,6 +1553,24 @@ async function backup(ctx: CommandContext): Promise<number> {
   return 1;
 }
 
+async function importCommand(ctx: CommandContext): Promise<number> {
+  const source = getFlag(ctx.parsed, "--from") || ctx.parsed.rest[0];
+  if (!source) {
+    return usageError(
+      "Usage: cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]",
+    );
+  }
+  const workspaceId = getFlag(ctx.parsed, "--workspace-id");
+  return runDirectCommandProcess(ctx, [
+    "--agent-import",
+    "--from",
+    source,
+    ...(workspaceId ? ["--workspace-id", workspaceId] : []),
+    ...(hasFlag(ctx.parsed, "--dry-run") ? ["--dry-run"] : []),
+    ...(hasFlag(ctx.parsed, "--with-secrets") ? ["--with-secrets"] : []),
+  ]);
+}
+
 async function security(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "audit";
   if (sub === "audit") return runDirectCommandProcess(ctx, ["--security-audit"]);
@@ -2053,6 +2073,7 @@ const RESERVED_RUN_PROMPTS = new Set([
   "models",
   "model",
   "backup",
+  "import",
   "security",
   "dashboard",
   "open",
@@ -2110,6 +2131,7 @@ function renderCompletions(shell: string): string {
     "skills",
     "models",
     "backup",
+    "import",
     "security",
     "telemetry",
     "prompt-size",
@@ -2197,6 +2219,7 @@ function usage(): void {
       "  cowork skills list|info|audit",
       "  cowork models list",
       "  cowork backup create|restore",
+      "  cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]",
       "  cowork security audit",
       "  cowork security rules list|remove",
       "  cowork security status|findings|decisions|inventory|scan|check-rules",

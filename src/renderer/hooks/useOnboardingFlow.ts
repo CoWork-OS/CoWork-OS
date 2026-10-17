@@ -41,6 +41,7 @@ export type OnboardingState =
   | "ask_memory_trust"
   | "confirm_memory_trust"
   | "transition_setup"
+  | "import_offer"
   | "ollama_detected"
   | "llm_setup"
   | "llm_api_key"
@@ -109,6 +110,8 @@ const SCRIPT = {
   confirm_memory_trust_off:
     "Understood. I'll keep memory fully off with no memory storage for now. You can enable it later in Settings > Memory.",
   transition_setup: "Now connect the AI access you want to use.",
+  import_offer: (names: string) =>
+    `I found ${names} on this Mac. Want to bring its persona, memory and skills along?`,
   ollama_detected: (modelName: string) =>
     `I found ${modelName} running locally on your machine via Ollama. Want to use it?`,
   llm_intro: "Connect AI access to run your task.",
@@ -276,6 +279,8 @@ const getFallbackTextForState = (
       return data.memoryEnabled ? SCRIPT.confirm_memory_trust_on : SCRIPT.confirm_memory_trust_off;
     case "transition_setup":
       return SCRIPT.transition_setup;
+    case "import_offer":
+      return SCRIPT.import_offer("another agent");
     case "ollama_detected":
       return data.detectedOllamaModel
         ? SCRIPT.ollama_detected(data.detectedOllamaModel)
@@ -445,6 +450,9 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const startedRef = useRef(false);
+  // Hermes / OpenClaw homes found on this machine; offered once, before provider setup.
+  const importSourcesRef = useRef<string[]>([]);
+  const importOfferedRef = useRef(false);
   const canPersistRef = useRef(false);
   const styleCountdownIntervalRef = useRef<number | null>(null);
   const saveOnboardingSettingsRef = useRef<() => Promise<OnboardingSaveResult>>(async () => ({
@@ -453,6 +461,24 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   }));
   const asyncMutationTokenRef = useRef(0);
   const pendingLlmSettingsRef = useRef<Record<string, unknown> | null>(null);
+
+  // Look for Hermes / OpenClaw homes once; the import step is offered only when one exists.
+  useEffect(() => {
+    let cancelled = false;
+    const detect = window.electronAPI?.detectAgentImports;
+    if (!detect) return;
+    void detect()
+      .then((found) => {
+        if (cancelled) return;
+        importSourcesRef.current = found
+          .filter((entry) => entry.found)
+          .map((entry) => (entry.source === "hermes" ? "Hermes Agent" : "OpenClaw"));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Clear timeout on unmount
   useEffect(() => {
@@ -648,6 +674,15 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
         break;
 
       case "transition_setup":
+        if (!importOfferedRef.current && importSourcesRef.current.length > 0) {
+          importOfferedRef.current = true;
+          const names = importSourcesRef.current.join(" and ");
+          timeoutRef.current = setTimeout(() => {
+            setState("import_offer");
+            setCurrentText(SCRIPT.import_offer(names));
+          }, 900);
+          break;
+        }
         {
           const mutationToken = beginAsyncMutation();
           timeoutRef.current = setTimeout(() => {
@@ -891,6 +926,34 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
     setState("confirm_memory_trust");
     setCurrentText(enabled ? SCRIPT.confirm_memory_trust_on : SCRIPT.confirm_memory_trust_off);
   }, []);
+
+  // After the import step: an import that set up a model skips the provider step.
+  const finishImportOffer = useCallback(
+    async (imported: boolean) => {
+      clearPendingTransition();
+      const token = beginAsyncMutation();
+      let configured = false;
+      if (imported) {
+        try {
+          const config = await window.electronAPI.getLLMConfigStatus();
+          configured = config.providers.some(
+            (provider) => provider.type === config.currentProvider && provider.configured,
+          );
+        } catch {
+          configured = false;
+        }
+      }
+      if (!isActiveAsyncMutation(token)) return;
+      if (configured) {
+        setState("llm_confirmed");
+        setCurrentText(SCRIPT.llm_success);
+      } else {
+        setState("transition_setup");
+        setCurrentText(SCRIPT.transition_setup);
+      }
+    },
+    [beginAsyncMutation, clearPendingTransition, isActiveAsyncMutation],
+  );
 
   const continueFromRecap = useCallback(() => {
     setState("final_try");
@@ -1960,6 +2023,7 @@ export function useOnboardingFlow({ onComplete, workspaceId }: UseOnboardingOpti
   return {
     // State
     state,
+    finishImportOffer,
     firstResultMode,
     preparingFirstResult,
     currentText,

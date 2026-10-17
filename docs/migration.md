@@ -17,6 +17,10 @@ If you're currently using OpenClaw, the migration is mostly an operating model s
 
 See also: [CoWork OS vs OpenClaw](comparisons/openclaw.md)
 
+To bring your OpenClaw persona, memory, skills and settings over in one step, see
+[Migrating from OpenClaw](migrating-from-openclaw.md). Hermes Agent users can do the same with
+[Migrating from Hermes](migrating-from-hermes.md).
+
 ### Practical Migration Plan
 
 1. Keep OpenClaw running in parallel for a short validation window.

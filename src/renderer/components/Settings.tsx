@@ -67,6 +67,7 @@ import {
   Building2,
   HeartPulse,
   Film,
+  Download,
 } from "lucide-react";
 import {
   LLMSettingsData,
@@ -214,6 +215,10 @@ const PulseSettingsPanel = lazySettingsPanel(
   () => import("./PulseSettingsPanel"),
   "PulseSettingsPanel",
 );
+const AgentImportPanel = lazySettingsPanel(
+  () => import("./AgentImport/AgentImportPanel"),
+  "AgentImportPanel",
+);
 const SuggestionsPanel = lazySettingsPanel(() => import("./SuggestionsPanel"), "SuggestionsPanel");
 const CustomizePanel = lazySettingsPanel(() => import("./CustomizePanel"), "CustomizePanel");
 const AddToolsPanel = lazySettingsPanel(() => import("./AddToolsPanel"), "AddToolsPanel");
@@ -305,7 +310,8 @@ type SettingsTab =
   | "subconscious"
   | "access"
   | "webaccess"
-  | "browser";
+  | "browser"
+  | "import";
 
 // A missing browser service should produce an explanation, never an endless loading panel.
 const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
@@ -326,6 +332,7 @@ const BROWSER_SETTINGS_METHODS: Partial<Record<SettingsTab, string[]>> = {
   suggestions: ["listSuggestions", "dismissSuggestion"],
   mcp: ["getMCPSettings", "saveMCPSettings"],
   memory: ["getMemorySettings", "getMemoryFeaturesSettings", "getRecentMemories"],
+  import: ["detectAgentImports", "applyAgentImport", "listWorkspaces"],
   tools: ["getBuiltinToolsSettings", "saveBuiltinToolsSettings"],
   integrations: ["getConnectorSettings"],
   customize: ["listPluginPacks"],
@@ -791,6 +798,12 @@ const sidebarItems: SidebarItem[] = [
   },
   { tab: "voice", label: "Voice Mode", group: "General", icon: <Mic {...I} /> },
   {
+    tab: "import",
+    label: "Import",
+    group: "General",
+    icon: <Download {...I} />,
+  },
+  {
     tab: "aimodels",
     label: "AI & Models",
     group: "AI & Models",
@@ -1071,6 +1084,11 @@ export const sidebarSearchEntries: Partial<Record<SettingsTab, SidebarSearchEntr
     target: { tab: "morechannels", secondaryChannel: item.key },
   })),
   memory: [{ terms: ["memory", "memories", "memory hub", "knowledge"] }],
+  import: [
+    {
+      terms: ["import", "hermes", "hermes agent", "openclaw", "migrate", "migration", "move from"],
+    },
+  ],
   automations: [
     {
       terms: ["routines", "routine", "automation routines"],
@@ -9714,6 +9732,8 @@ export function Settings({
                 />
               ) : activeTab === "insights" ? (
                 <UsageInsightsPanel workspaceId={workspaceId} />
+              ) : activeTab === "import" ? (
+                <AgentImportPanel workspaceId={workspaceId} />
               ) : activeTab === "pulse" ? (
                 <PulseSettingsPanel />
               ) : activeTab === "suggestions" ? (

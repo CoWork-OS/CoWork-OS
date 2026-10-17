@@ -1,0 +1,43 @@
+{
+  "jobs": [
+    {
+      "id": "a1",
+      "name": "Morning brief",
+      "prompt": "Summarize what changed in my notes overnight",
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 8 * * *",
+        "display": "0 8 * * *"
+      },
+      "enabled": true
+    },
+    {
+      "id": "b2",
+      "prompt": "Check whether the nightly build passed",
+      "schedule": {
+        "kind": "interval",
+        "minutes": 30,
+        "display": "every 30m"
+      }
+    },
+    {
+      "id": "c3",
+      "name": "Old reminder",
+      "prompt": "Remind me about the dentist",
+      "schedule": {
+        "kind": "once",
+        "run_at": "2020-01-01T00:00:00Z"
+      }
+    },
+    {
+      "id": "d4",
+      "name": "Cleanup",
+      "script": "cleanup.py",
+      "no_agent": true,
+      "schedule": {
+        "kind": "interval",
+        "minutes": 60
+      }
+    }
+  ]
+}

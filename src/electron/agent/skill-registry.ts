@@ -821,7 +821,7 @@ export class SkillRegistry {
     skill: CustomSkill,
     options: {
       sourceDir?: string;
-      source: "registry" | "clawhub" | "url" | "git";
+      source: "registry" | "clawhub" | "url" | "git" | "local-import";
     },
   ): Promise<SkillInstallResult> {
     const safeId = sanitizeSkillId(skill.id);
@@ -1761,16 +1761,40 @@ export class SkillRegistry {
     }
   }
 
+  /**
+   * Install one SKILL.md bundle from a local folder (an agent import, docs/migrating-from-hermes.md).
+   * The folder goes through the same checks as a Git import: no symbolic links, size and
+   * file-count limits, the security scan, and quarantine on a failed scan.
+   */
+  async installFromLocalBundle(bundleDir: string, sourceRef: string): Promise<SkillInstallResult> {
+    try {
+      const root = path.resolve(bundleDir);
+      if (!fs.existsSync(path.join(root, "SKILL.md"))) {
+        return { success: false, error: "The folder has no SKILL.md." };
+      }
+      this.rejectGitImportSymlinks(root);
+      this.validateImportBundleDir(root);
+      const skill = this.importSkillBundle(root, sourceRef);
+      return await this.installImportedSkill(skill, { sourceDir: root, source: "local-import" });
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        security: { state: "failed" },
+      };
+    }
+  }
+
   private rejectGitImportSymlinks(rootDir: string): void {
     if (fs.lstatSync(rootDir).isSymbolicLink()) {
-      throw new Error("Git skill import must not contain symbolic links");
+      throw new Error("A skill import must not contain symbolic links");
     }
     for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
       if (entry.name === ".git") continue;
       const entryPath = path.join(rootDir, entry.name);
       const stat = fs.lstatSync(entryPath);
       if (stat.isSymbolicLink()) {
-        throw new Error("Git skill import must not contain symbolic links");
+        throw new Error("A skill import must not contain symbolic links");
       }
       if (stat.isDirectory()) this.rejectGitImportSymlinks(entryPath);
     }

@@ -9044,6 +9044,10 @@ export const IPC_CHANNELS = {
   MEMORY_REPO_BOT_FORGET: "memoryRepo:botForget",
   MEMORY_REPO_BOT_UNDO: "memoryRepo:botUndo",
   MEMORY_REPO_BOT_DELETE_MEMORY: "memoryRepo:botDeleteMemory",
+  // Importing a Hermes or OpenClaw home (docs/migrating-from-hermes.md)
+  AGENT_IMPORT_DETECT: "agentImport:detect",
+  AGENT_IMPORT_PREVIEW: "agentImport:preview",
+  AGENT_IMPORT_APPLY: "agentImport:apply",
   // PACT business agents (docs/pact.md). Sign-in links never reach the desktop renderer:
   // PACT_AUTHORIZATION_OPEN_SIGN_IN opens the business's login in the system browser from main.
   PACT_STATUS: "pact:status",
@@ -11241,7 +11245,8 @@ export type CapabilitySecurityImportSource =
   | "url"
   | "git"
   | "managed"
-  | "unmanaged-local";
+  | "unmanaged-local"
+  | "local-import";
 
 export interface CapabilitySecurityFinding {
   code: string;
@@ -13807,4 +13812,81 @@ export interface MissionControlBrief {
 export interface StrategicPlannerRunRequest {
   companyId: string;
   trigger?: StrategicPlannerRun["trigger"];
+}
+
+// Importing another agent's home (docs/migrating-from-hermes.md, docs/migrating-from-openclaw.md)
+
+export const AGENT_IMPORT_SOURCES = ["hermes", "openclaw"] as const;
+export type AgentImportSource = (typeof AGENT_IMPORT_SOURCES)[number];
+
+export type AgentImportCategory =
+  | "persona"
+  | "user_profile"
+  | "memory"
+  | "skill"
+  | "provider_key"
+  | "model"
+  | "channel"
+  | "command_rule"
+  | "scheduled_task"
+  | "workspace_instructions";
+
+/** One thing an import would bring over. Never carries a secret value. */
+export interface AgentImportPreviewItem {
+  /** Stable within one source home, e.g. `skill:obsidian`. */
+  id: string;
+  category: AgentImportCategory;
+  label: string;
+  detail?: string;
+  /** A credential: imported only when secrets are opted in. */
+  secret: boolean;
+  status: "ready" | "skipped";
+  reason?: string;
+}
+
+export interface AgentImportPreview {
+  source: AgentImportSource;
+  home: string;
+  found: boolean;
+  withSecrets: boolean;
+  items: AgentImportPreviewItem[];
+}
+
+export interface AgentImportItemResult {
+  id: string;
+  category: AgentImportCategory;
+  label: string;
+  detail?: string;
+  secret?: boolean;
+  /** `ready`: a dry run found nothing in the way; nothing was written. */
+  status: "imported" | "ready" | "skipped" | "failed";
+  reason?: string;
+}
+
+export interface AgentImportResult {
+  source: AgentImportSource;
+  home: string;
+  dryRun: boolean;
+  imported: number;
+  ready: number;
+  skipped: number;
+  failed: number;
+  items: AgentImportItemResult[];
+}
+
+export interface AgentImportDetection {
+  source: AgentImportSource;
+  home: string;
+  found: boolean;
+}
+
+export interface AgentImportRequest {
+  source: AgentImportSource;
+  withSecrets?: boolean;
+  /** Workspace for scheduled tasks, workspace instructions and agent notes. */
+  workspaceId?: string;
+  /** Preview item ids the user unticked. */
+  excludeItemIds?: string[];
+  /** Walk the same checks and write nothing. */
+  dryRun?: boolean;
 }

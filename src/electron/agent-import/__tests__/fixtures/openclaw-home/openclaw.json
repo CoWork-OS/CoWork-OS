@@ -1,0 +1,23 @@
+// Fixture config: JSON5, as OpenClaw writes it.
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "model": { "primary": "openrouter/anthropic/claude-sonnet-4" }
+    }
+  },
+  "models": {
+    "providers": {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "apiKey": "${OPENROUTER_API_KEY}"
+      },
+      "mylab": { "baseUrl": "https://llm.example.test/v1", "apiKey": "${MYLAB_API_KEY}" }
+    }
+  },
+  "channels": {
+    "telegram": { "botToken": { "source": "env", "id": "TELEGRAM_BOT_TOKEN" } },
+    "discord": { "token": "${DISCORD_BOT_TOKEN}", "allowFrom": ["555"] },
+    "whatsapp": { "allowFrom": ["+15550000000"] }
+  }
+}

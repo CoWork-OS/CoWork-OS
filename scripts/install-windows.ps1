@@ -118,8 +118,25 @@ function Test-Sha512([string]$FilePath, [string]$Expected) {
   return (Get-FileSha512Base64 $FilePath) -eq $Expected
 }
 
-# The per-user NSIS install registers itself under HKCU; read its location
-# from there rather than guessing the folder name.
+# Turns an uninstall entry into the app's executable path. electron-builder's
+# per-user NSIS installer writes DisplayIcon ("...\CoWork OS.exe,0") but not
+# InstallLocation, so DisplayIcon is read first.
+function Get-ExePathFromUninstallEntry($Entry) {
+  if (-not $Entry) { return $null }
+  if ($Entry.DisplayIcon) {
+    $icon = ([string]$Entry.DisplayIcon).Trim()
+    $icon = $icon -replace ',\s*-?\d+$', ''
+    $icon = $icon.Trim('"')
+    if ($icon -like '*.exe') { return $icon }
+  }
+  if ($Entry.InstallLocation) {
+    return [System.IO.Path]::Combine(([string]$Entry.InstallLocation).Trim('"'), "$AppName.exe")
+  }
+  return $null
+}
+
+# Finds the installed app through its uninstall entry, falling back to the
+# per-user default install folder.
 function Find-InstalledApp {
   $roots = @(
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -129,11 +146,15 @@ function Find-InstalledApp {
     if (-not (Test-Path $root)) { continue }
     foreach ($key in Get-ChildItem $root -ErrorAction SilentlyContinue) {
       $entry = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue
-      if ($entry -and $entry.DisplayName -like "$AppName*" -and $entry.InstallLocation) {
-        $exe = Join-Path $entry.InstallLocation "$AppName.exe"
-        if (Test-Path $exe) { return $exe }
+      if ($entry -and $entry.DisplayName -like "$AppName*") {
+        $exe = Get-ExePathFromUninstallEntry $entry
+        if ($exe -and (Test-Path -LiteralPath $exe)) { return $exe }
       }
     }
+  }
+  if ($env:LOCALAPPDATA) {
+    $fallback = [System.IO.Path]::Combine($env:LOCALAPPDATA, 'Programs', 'cowork-os', "$AppName.exe")
+    if (Test-Path -LiteralPath $fallback) { return $fallback }
   }
   return $null
 }

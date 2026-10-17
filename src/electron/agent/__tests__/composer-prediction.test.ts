@@ -126,7 +126,7 @@ describe("composer predictions", () => {
   it.each([
     ['{"text":""}', "end_turn"],
     ['{"text":"line one\\nline two"}', "end_turn"],
-    [JSON.stringify({ text: "x".repeat(501) }), "end_turn"],
+    [JSON.stringify({ text: "x".repeat(121) }), "end_turn"],
     ["not json", "end_turn"],
     ['{"text":"partial"}', "max_tokens"],
     ['{"text":"refused"}', "refusal"],
@@ -134,6 +134,13 @@ describe("composer predictions", () => {
     expect(
       await generateComposerPrediction(task, events, "c", provider(text, stop), "m"),
     ).toBeNull();
+  });
+
+  it("keeps a suggestion at the concise length limit intact", async () => {
+    const text = "x".repeat(120);
+    expect(
+      await generateComposerPrediction(task, events, "c", provider(JSON.stringify({ text })), "m"),
+    ).toEqual({ revision: "c", text });
   });
 
   it("fails quietly when the provider is unavailable", async () => {

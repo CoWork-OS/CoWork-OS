@@ -942,9 +942,7 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         role="textbox"
         aria-multiline="true"
         aria-label={ariaLabel}
-        data-placeholder={
-          !value && prediction ? `${prediction}  ⇥ Tab to accept` : placeholder || ""
-        }
+        data-placeholder={!value && prediction ? prediction : placeholder || ""}
         data-has-prediction={!value && !!prediction ? "true" : undefined}
         aria-description={
           !value && prediction

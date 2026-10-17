@@ -798,7 +798,11 @@ describe("TaskExecutor plan parsing", () => {
     },
   );
 
-  it("offers only discovery tools while locating workspace book files", () => {
+  it.each([
+    "Locate the book files in the workspace.",
+    "List the documents in the selected folder.",
+    "Find the shopping list file in the workspace.",
+  ])("offers only discovery tools for: %s", (description) => {
     const executor = createPlanExecutor({ content: [] });
     executor.task.title = "Review manuscript";
     executor.task.prompt = "Review the manuscript in this workspace.";
@@ -810,7 +814,7 @@ describe("TaskExecutor plan parsing", () => {
       steps: [
         {
           id: "1",
-          description: "Locate the book files in the workspace.",
+          description,
           status: "pending",
         },
       ],
@@ -829,6 +833,60 @@ describe("TaskExecutor plan parsing", () => {
       "search_files",
       "request_user_input",
     ]);
+  });
+
+  it.each([
+    {
+      description:
+        "Verify that both output files exist and are nonempty, the PDF is valid and contains exactly one page, and both versions contain the three shopping groups, 250 g pasta to buy, 500 g yogurt, 19:00 arrival, 19:30 service, and separate dairy-free serving instructions. Confirm that kitchen staples are absent from the shopping list and provide links to both files.",
+      kind: undefined,
+    },
+    { description: "Confirm both documents contain the shopping list.", kind: "verification" },
+    { description: "Compare the shopping list in both documents.", kind: "verification" },
+    { description: "Validate the shopping list in both documents.", kind: "verification" },
+    { description: "List the generated document files.", kind: "verification" },
+  ])("keeps document readers available for: $description", ({ description, kind }) => {
+    const executor = createPlanExecutor({ content: [] });
+    executor.task.title = "Dinner plan";
+    executor.task.prompt = "Create dinner-plan.md and dinner-plan.pdf from the attached notes.";
+    executor.task.rawPrompt = executor.task.prompt;
+    executor.currentStepId = "verify";
+    executor.getEffectiveTaskDomain = vi.fn().mockReturnValue("general");
+    executor.plan = {
+      steps: [{ id: "verify", description, kind, status: "pending" }],
+    };
+    if (!description.startsWith("List")) {
+      expect(executor.isFileDiscoveryOnlyStepDescription(description)).toBe(false);
+    }
+
+    const scoped = executor.applyStepScopedToolPolicy(
+      [
+        "list_directory",
+        "search_files",
+        "get_file_info",
+        "read_file",
+        "read_files",
+        "parse_document",
+        "tool_search",
+        "request_user_input",
+        "write_file",
+        "edit_file",
+        "create_document",
+      ].map((name) => ({ name })),
+    );
+    const names = scoped.map((tool: Any) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "get_file_info",
+        "read_file",
+        "read_files",
+        "parse_document",
+        "tool_search",
+      ]),
+    );
+    expect(names).not.toContain("write_file");
+    expect(names).not.toContain("edit_file");
+    expect(names).not.toContain("create_document");
   });
 
   it("keeps the configured desktop MCP driver in native GUI steps", () => {

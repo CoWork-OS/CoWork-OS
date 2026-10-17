@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-verification-tools-2026-10-17",
+  "title": "Document verification is narrowed to file discovery by the word list",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 651,
+    "pullRequest": 671
+  },
+  "prompt": "Create a document and shopping list, then run a step that verifies their content and quantities.",
+  "assertions": {
+    "requiredBehavior": "Keep normal read-only verification tools for content verification while retaining narrow tools for genuine file-location-only steps."
+  },
+  "executableTests": [
+    "src/electron/agent/__tests__/executor-plan-parsing.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/__tests__/executor-plan-parsing.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

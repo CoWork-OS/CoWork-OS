@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-spreadsheet-stale-2026-10-17",
+  "title": "Spreadsheet edits continue showing stale dependent totals",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 647,
+    "pullRequest": 667
+  },
+  "prompt": "Open a formula workbook, change a quantity without saving and inspect line totals, grand totals and a linked Summary sheet.",
+  "assertions": {
+    "requiredBehavior": "Show pending formula expressions and a Save-to-recalculate notice until saved results are recomputed."
+  },
+  "executableTests": [
+    "src/renderer/components/__tests__/spreadsheet-artifact-viewer.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/__tests__/spreadsheet-artifact-viewer.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

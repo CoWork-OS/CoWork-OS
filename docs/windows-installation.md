@@ -22,6 +22,8 @@ irm https://coworkosapp.com/install.ps1 | iex
 2. Downloads `CoWork-OS-Setup-<version>.exe` and checks its SHA-512 against the metadata.
 3. Runs the installer silently for the current user, so no administrator prompt appears, then opens CoWork OS.
 
+On Windows on ARM (for example Windows 11 on an Apple Silicon Mac or a Snapdragon laptop), the same command installs the x64 build, which Windows runs through its built-in x64 emulation.
+
 Re-run the same command to update. To pass options, run the script as a script block:
 
 ```powershell

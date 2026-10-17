@@ -1,3 +1,5 @@
+import { looksLikeReasoningPreamble } from "./llm/reasoning-text";
+
 /** Editing passes cannot execute or verify the task; their only evidence is the draft. */
 export const QUALITY_PASS_SYSTEM_PROMPT = [
   "You edit or critique an assistant response that was already produced by a task runtime.",
@@ -11,6 +13,8 @@ export const QUALITY_PASS_SYSTEM_PROMPT = [
 export function isQualityRewriteSafe(text: string, draft: string): boolean {
   if (!text.trim()) return false;
   if (/^\s*User Safety:\s*(safe|unsafe)\s*$/i.test(text)) return false;
+  // "Okay, I need to improve the draft…" is the editor thinking, not a reply.
+  if (looksLikeReasoningPreamble(text) && !looksLikeReasoningPreamble(draft)) return false;
   const toolCall =
     /["'](?:tool|tool_name)["']\s*:\s*["'][^"']+["']\s*,\s*["'](?:arguments|input|path)["']\s*:/;
   return !toolCall.test(text) || toolCall.test(draft);

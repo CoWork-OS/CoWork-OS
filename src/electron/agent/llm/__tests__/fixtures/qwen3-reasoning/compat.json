@@ -1,0 +1,26 @@
+{
+  "id": "chatcmpl-495",
+  "object": "chat.completion",
+  "created": 1792243013,
+  "model": "qwen3:4b",
+  "system_fingerprint": "fp_ollama",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "hello",
+        "reasoning": "Hmm, the user just asked me to reply with exactly the word \"hello\". That's very specific! \n\nOkay, let me think about this. They want a precise response with no extra words or punctuation. Just the word \"hello\" as a standalone string. \n\nI wonder why they need this... Maybe they're testing if I can follow simple instructions? Or perhaps they're building some kind of automated system that requires strict output formatting. \n\nThe key here is to be absolutely precise. No \"hello \" with space, no \"hello!\" with exclamation, no extra characters. Just the word \"hello\" exactly as written. \n\n*checks mental note* Must avoid: \n- Adding period or space \n- Using capitalization (they said \"hello\" lowercase) \n- Any additional text \n\nThis seems straightforward but important to get right since they emphasized \"exactly\". I'll craft the response carefully. \n\n...Done. Response is clean: just \"hello\" with no extras. Perfect match for their request.\n"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 17,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens": 209,
+    "total_tokens": 226
+  }
+}

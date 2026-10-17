@@ -10,6 +10,7 @@ import {
 import { createHash } from "node:crypto";
 import { imageToTextFallback } from "./image-utils";
 import { chatReasoningContentReplay } from "./reasoning-replay";
+import { splitReasoningFromText } from "./reasoning-text";
 import { createLogger } from "../../utils/logger";
 import { assertNormalizedTurnTranscript } from "../runtime/turn-transcript-normalizer";
 import {
@@ -378,11 +379,17 @@ export function fromOpenAICompatibleResponse(response: Any): LLMResponse {
   }
 
   const message = choice.message;
+  // Local servers can mix a reasoning model's thinking into content
+  // (see reasoning-text.ts); only the answer belongs in the reply.
+  const text =
+    typeof message?.content === "string"
+      ? splitReasoningFromText(message.content).text
+      : message?.content;
 
-  if (message?.content) {
+  if (text) {
     content.push({
       type: "text",
-      text: message.content,
+      text,
     });
   }
 

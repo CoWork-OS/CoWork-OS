@@ -5,7 +5,7 @@
   <br><em>The home screen is the fastest way to start tasks, reopen recent work, and launch common workflows.</em>
 </p>
 
-CoWork OS is an open desktop for getting work done with the AI you choose. Code, browser work, documents, and automations live in one workspace with visible actions and approvals. CoWork is free and open source. Model providers may charge for usage. Your workspace stays local; cloud models and connected services receive the data needed for tasks you run. See [Model Providers](providers.md).
+Rent the model. Own everything else. CoWork OS is the free, open-source AI app for real work: code, browser work, documents, and automations live in one workspace with visible actions and approvals. Model providers may charge for usage. Your workspace stays local; cloud models and connected services receive the data needed for tasks you run. See [Model Providers](providers.md) and [What You Own](what-you-own.md).
 
 ## Quick Start
 

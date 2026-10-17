@@ -7,13 +7,12 @@
 </p>
 
 <p align="center">
-  <strong>An open desktop for getting work done with the AI you choose.</strong><br>
-  Code, browser work, documents, and automations in one workspace—with visible actions and approvals. Supported provider accounts, API keys, gateways, cloud credentials, and local models can power the same desktop tools.
+  <strong>Rent the model. Own everything else.</strong><br>
+  One app for the work. Your choice of AI.
 </p>
 
 <p align="center">
-  <strong>One app for the work. Your choice of AI.</strong><br>
-  CoWork OS is free and open source. Model providers may charge for usage. Your workspace stays local; cloud models and connected services receive the data needed for tasks you run.
+  CoWork OS is the free, open-source AI app for real work: code, browser work, documents, and automations in one workspace, with visible actions and approvals. Connect a provider account, API key, gateway, cloud credential, or local model; your workspace, memory, skills, and history stay on your machine. Model providers may charge for usage, and cloud models and connected services receive the data needed for tasks you run. <a href="docs/what-you-own.md">What you own</a>
 </p>
 
 <p align="center">
@@ -52,8 +51,8 @@
 
 ### Why CoWork OS?
 
+- **Rent the model, own everything else** — Connect supported provider accounts, API keys, compatible gateways, cloud credentials, or local models, and switch them per conversation. The open multi-provider harness keeps your tools, skills, memory, agents, approvals, artifacts, and workflows the same as model routes change, and keeps them on your machine. CoWork is free; provider charges and terms still apply. [What You Own](docs/what-you-own.md) · [Models & Access](docs/providers.md)
 - **AI super app for real work** — CoWork OS keeps coding, email, research, browser testing, documents, spreadsheets, presentations, PDFs, channels, devices, automations, memory, providers, and approvals in one governed workspace.
-- **Open multi-provider harness** — Connect supported provider accounts, API keys, compatible gateways, cloud credentials, or local models, then keep the same CoWork tools, skills, memory, agents, approvals, artifacts, and workflows as model routes change. CoWork is free; provider charges and terms still apply. [Models & Access](docs/providers.md)
 - **GUI-first, CLI-capable agent operations** — the Bots page, Mission Control, task timelines, visual boards, teams, devices, and automations remain the main operator console, while the `cowork` CLI gives terminal users the same local runtime for quick prompts and one-shot tasks.
 - **First-class `cowork` CLI** — Type `cowork` for an interactive terminal UI or `cowork run "task"` for a local one-shot run. Normal local CLI use shares desktop provider/settings state and does not require a Control Plane token; `--remote` is the explicit token-gated path. [CoWork CLI](docs/cli.md)
 - **Long-running agent runtime** — Ask/Do/Plan work choices, separate collaboration and model-routing controls, Mixture of Agents, `/multitask`, structured input cards, Side Chat, adaptive recovery, and visible routing/fallback state make agent work inspectable while it is running. [Work modes](docs/interaction-modes.md) · [Mixture of Agents](docs/mixture-of-agents.md) · [Side Chat](docs/side-chat.md) · [Multitask](docs/multitask.md)

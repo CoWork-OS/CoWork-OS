@@ -3,7 +3,7 @@ import { defineConfig } from "vitepress";
 export default defineConfig({
   title: "CoWork OS",
   description:
-    "CoWork OS is a free, open-source AI super app powered by a multi-provider agent harness for desktop, CLI, and headless work.",
+    "Rent the model. Own everything else. CoWork OS is a free, open-source AI app powered by a multi-provider agent harness for desktop, CLI, and headless work.",
   base: "/CoWork-OS/",
 
   ignoreDeadLinks: true,
@@ -15,7 +15,7 @@ export default defineConfig({
       {
         name: "description",
         content:
-          "One app for the work. Your choice of AI. Bring supported accounts, APIs, gateways, or local models into an open AI super app for coding, knowledge work, artifacts, channels, and automation.",
+          "Rent the model. Own everything else. CoWork OS is a free, open-source AI app for coding, knowledge work, artifacts, channels, and automation, with the provider, gateway, or local model you choose.",
       },
     ],
     [

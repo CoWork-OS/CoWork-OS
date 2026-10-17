@@ -2,7 +2,7 @@
   "name": "cowork-os",
   "version": "0.5.60",
   "private": false,
-  "description": "Free, open-source AI super app and multi-provider agent harness for coding, knowledge work, documents, communication, automation, and everyday tasks",
+  "description": "Rent the model. Own everything else. Free, open-source AI app and multi-provider agent harness for coding, knowledge work, documents, and automation",
   "keywords": [
     "agent-harness",
     "agentic-os",

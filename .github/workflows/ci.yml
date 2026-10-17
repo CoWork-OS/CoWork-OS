@@ -33,6 +33,7 @@ jobs:
       - run: node --test scripts/qa/validate-doc-versions.test.mjs
       - run: npm run test:release-surfaces
       - run: npm run qa:docs-versions
+      - run: npm run qa:positioning-copy
 
   secret-scan:
     name: Secret Scan

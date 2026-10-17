@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: CoWork OS
-  text: The free, open-source AI super app for real work
-  tagline: One app for the work. Your choice of AI. Bring supported provider accounts, APIs, gateways, cloud credentials, or local models into one GUI-first, CLI-capable workspace for coding, research, browser work, inbox, documents, data, channels, automations, and agents.
+  text: Rent the model. Own everything else.
+  tagline: One app for the work. Your choice of AI. CoWork OS is the free, open-source AI app for coding, research, browser work, inbox, documents, data, channels, automations, and agents, powered by the provider account, API, gateway, cloud credential, or local model you choose.
   actions:
     - theme: brand
       text: Get Started

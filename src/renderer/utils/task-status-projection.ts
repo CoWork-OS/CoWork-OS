@@ -495,6 +495,10 @@ export function deriveTaskStatusStrip(args: {
   let state = stripState(args.task);
   if (blocking?.state === "approval") state = "waiting_for_approval";
   if (blocking?.state === "input") state = "waiting_for_input";
+  const failureLabel =
+    state === "failed" && typeof args.task?.error === "string"
+      ? args.task.error.trim().slice(0, 2_000)
+      : "";
   const activeIndex = args.planSteps.findIndex((step) => step.status === "in_progress");
   const failedIndex = args.planSteps.findIndex((step) => step.status === "failed");
   const pendingIndex = args.planSteps.findIndex((step) => step.status === "pending");
@@ -548,14 +552,17 @@ export function deriveTaskStatusStrip(args: {
     state,
     tone: toneForState(state),
     primaryLabel,
+    ...(failureLabel ? { failureLabel } : {}),
     // The strip already shows `primaryLabel`; a phase label that reads the same (a running
     // group whose latest event resolves to "Working") would print the state twice.
-    ...(currentGroup?.latestActivityLabel &&
-    !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel)
-      ? { phaseLabel: currentGroup.latestActivityLabel }
-      : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
-        ? { phaseLabel: planStepLabel(activeStep.description) }
-        : {}),
+    ...(failureLabel
+      ? {}
+      : currentGroup?.latestActivityLabel &&
+          !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel)
+        ? { phaseLabel: currentGroup.latestActivityLabel }
+        : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
+          ? { phaseLabel: planStepLabel(activeStep.description) }
+          : {}),
     compactMetricSlots: selectTaskStatusMetricSlots(args.outcomeMetrics, 2),
     planSteps: args.planSteps,
     ...(activeStep ? { activeStepId: activeStep.id } : {}),

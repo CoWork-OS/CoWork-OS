@@ -99,6 +99,30 @@ describe("deriveRevisionAwarePlanSteps", () => {
 });
 
 describe("activity and status projections", () => {
+  it("exposes the task's terminal error and drops it when the task recovers", () => {
+    const error = "You have hit your ChatGPT usage limit. Try again later.";
+    const input = {
+      task: { id: "task-1", status: "failed", updatedAt: 1_001, error } as Any,
+      events: [event("failed", 1, "error", { message: error })],
+      planSteps: [],
+      activityGroups: [],
+      outcomeMetrics: [],
+      outputSummary: null,
+    };
+    expect(deriveTaskStatusStrip(input)).toMatchObject({
+      state: "failed",
+      failureLabel: error,
+    });
+    expect(
+      deriveTaskStatusStrip({ ...input, task: { ...input.task, status: "executing" } })
+        .failureLabel,
+    ).toBeUndefined();
+    expect(
+      deriveTaskStatusStrip({ ...input, task: { ...input.task, error: "x".repeat(3_000) } })
+        .failureLabel,
+    ).toHaveLength(2_000);
+  });
+
   it("keeps the latest group running and uses sanitized typed labels", () => {
     const planSteps = [
       { id: "one", description: "Research competitors", status: "in_progress" as const },

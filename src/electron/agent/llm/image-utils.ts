@@ -13,6 +13,7 @@ import {
   PROVIDER_IMAGE_CAPS,
 } from "./types";
 import type { LLMProviderType } from "../../../shared/types";
+import { isKimiVisionModel } from "../../../shared/kimi-models";
 
 const SUPPORTED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
@@ -37,8 +38,31 @@ export function isSupportedImageFile(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
-/** Get the image capability limits for a given provider type. */
-export function getProviderImageCaps(providerType: LLMProviderType): LLMProviderImageCaps {
+/** Routes that serve Moonshot's Kimi models, where image input depends on the model. */
+const KIMI_ROUTE_TYPES: ReadonlySet<string> = new Set(["kimi", "moonshot", "kimi-code"]);
+
+/**
+ * Kimi vision input: base64 data URLs only, request body under 100 MB
+ * (https://platform.kimi.ai/docs/guide/use-kimi-vision-model.md).
+ */
+const KIMI_VISION_IMAGE_CAPS: LLMProviderImageCaps = {
+  supportsImages: true,
+  maxImageBytes: 20 * 1024 * 1024,
+  supportedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+};
+
+/**
+ * Get the image capability limits for a provider type. Pass the model for
+ * routes where support differs per model (Kimi K3, K2.6 and K2.7 Code take
+ * images; other Kimi models do not).
+ */
+export function getProviderImageCaps(
+  providerType: LLMProviderType,
+  model?: string,
+): LLMProviderImageCaps {
+  if (model && KIMI_ROUTE_TYPES.has(providerType) && isKimiVisionModel(model)) {
+    return KIMI_VISION_IMAGE_CAPS;
+  }
   return (
     PROVIDER_IMAGE_CAPS[providerType] ?? {
       supportsImages: false,
@@ -55,8 +79,9 @@ export function getProviderImageCaps(providerType: LLMProviderType): LLMProvider
 export function validateImageForProvider(
   image: LLMImageContent,
   providerType: LLMProviderType,
+  model?: string,
 ): string | null {
-  const caps = getProviderImageCaps(providerType);
+  const caps = getProviderImageCaps(providerType, model);
   if (!caps.supportsImages) {
     return `Provider "${providerType}" does not support inline images.`;
   }
@@ -139,8 +164,9 @@ export function imageToTextFallback(image: LLMImageContent): string {
 export function stripImagesForUnsupportedProvider(
   messages: LLMMessage[],
   providerType: LLMProviderType,
+  model?: string,
 ): LLMMessage[] {
-  const caps = getProviderImageCaps(providerType);
+  const caps = getProviderImageCaps(providerType, model);
   if (caps.supportsImages) return messages;
 
   return messages.map((msg) => {

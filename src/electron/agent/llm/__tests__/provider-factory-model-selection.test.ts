@@ -107,9 +107,9 @@ describe("LLMProviderFactory model status", () => {
       settings: {
         providerType: "kimi",
         modelKey: "sonnet-4-5",
-        kimi: { model: "kimi-k2.5" },
+        kimi: { model: "kimi-k3" },
       } as LLMSettings,
-      expectedCurrentModel: "kimi-k2.5",
+      expectedCurrentModel: "kimi-k3",
     },
   ])("uses provider-specific current model for $name", ({ settings, expectedCurrentModel }) => {
     vi.spyOn(LLMProviderFactory, "loadSettings").mockReturnValue(settings);

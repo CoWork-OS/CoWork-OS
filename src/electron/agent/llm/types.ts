@@ -284,6 +284,7 @@ export const PROVIDER_IMAGE_CAPS: Record<string, LLMProviderImageCaps> = {
   },
   mlx: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   groq: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
+  // Text-only default; K3, K2.6 and K2.7 Code take images (see getProviderImageCaps).
   kimi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   pi: { supportsImages: false, maxImageBytes: 0, supportedMimeTypes: [] },
   opencode: {
@@ -308,8 +309,11 @@ export interface LLMToolResult {
 
 /** Opaque provider reasoning state, replayed only to the model that produced it. */
 export interface LLMReasoningItem {
-  /** "anthropic": a thinking/redacted_thinking block (see anthropic-thinking.ts). */
-  format: "openai-responses" | "pi-ai" | "anthropic";
+  /**
+   * "anthropic": a thinking/redacted_thinking block (see anthropic-thinking.ts).
+   * "chat-reasoning-content": a Chat Completions `reasoning_content` string (Kimi K3).
+   */
+  format: "openai-responses" | "pi-ai" | "anthropic" | "chat-reasoning-content";
   model: string;
   data: unknown;
 }
@@ -764,30 +768,25 @@ export type XAIModelKey = keyof typeof XAI_MODELS;
  * Kimi (Moonshot) models
  */
 export const KIMI_MODELS = {
-  "kimi-k2.5": {
-    id: "kimi-k2.5",
-    displayName: "Kimi K2.5",
-    description: "Latest Kimi K2.5 model",
+  "kimi-k3": {
+    id: "kimi-k3",
+    displayName: "Kimi K3",
+    description: "Flagship model with 1M context, vision and always-on thinking",
   },
-  "kimi-k2-0905-preview": {
-    id: "kimi-k2-0905-preview",
-    displayName: "Kimi K2.5 Preview",
-    description: "Preview K2.5 model",
+  "kimi-k2.7-code": {
+    id: "kimi-k2.7-code",
+    displayName: "Kimi K2.7 Code",
+    description: "Coding model with 256K context and vision",
   },
-  "kimi-k2-turbo-preview": {
-    id: "kimi-k2-turbo-preview",
-    displayName: "Kimi K2 Turbo (Preview)",
-    description: "Faster K2 preview model",
+  "kimi-k2.7-code-highspeed": {
+    id: "kimi-k2.7-code-highspeed",
+    displayName: "Kimi K2.7 Code HighSpeed",
+    description: "Faster output from the K2.7 Code model",
   },
-  "kimi-k2-thinking": {
-    id: "kimi-k2-thinking",
-    displayName: "Kimi K2 Thinking",
-    description: "Reasoning-focused K2 model",
-  },
-  "kimi-k2-thinking-turbo": {
-    id: "kimi-k2-thinking-turbo",
-    displayName: "Kimi K2 Thinking Turbo",
-    description: "Faster reasoning K2 model",
+  "kimi-k2.6": {
+    id: "kimi-k2.6",
+    displayName: "Kimi K2.6",
+    description: "General model with 256K context, vision and optional thinking",
   },
 } as const;
 

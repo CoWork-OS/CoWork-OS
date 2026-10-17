@@ -49,11 +49,13 @@ import { MoaProvider, type ResolvedMoaSlot } from "./moa-provider";
 import { GitHubCopilotProvider } from "./github-copilot-provider";
 import { isOpenCodeBaseUrl } from "./opencode-go-routing";
 import { SecureSettingsRepository } from "../../database/SecureSettingsRepository";
+import { getDiscontinuedKimiModel, KIMI_DEFAULT_MODEL } from "../../../shared/kimi-models";
 import {
   CUSTOM_PROVIDER_CATALOG,
   CUSTOM_PROVIDER_MAP,
   CUSTOM_PROVIDER_IDS,
   GEMINI_DEFAULT_MODEL,
+  KIMI_CODE_CHINA_BASE_URL,
   type ProviderCatalogEntry,
 } from "../../../shared/llm-provider-catalog";
 import { withLlmModelSelectionMetadata } from "../../../shared/llm-model-selection";
@@ -1231,6 +1233,8 @@ export class LLMProviderFactory {
       }
     }
 
+    this.migrateKimiSettings(settings);
+
     const rawProviderType = String((settings as { providerType?: string }).providerType || "");
     if (rawProviderType === "kimi-coding") {
       settings.providerType = "kimi-code";
@@ -1239,6 +1243,62 @@ export class LLMProviderFactory {
     }
 
     this.normalizeProviderFailoverSettings(settings);
+  }
+
+  /**
+   * Moonshot discontinued the K2 series (2026-05-25) and K2.5 (2026-08-31).
+   * Saved Kimi choices move to the replacement model so the next request does
+   * not fail, and an existing Kimi Code key keeps the endpoint it was saved for.
+   */
+  static migrateKimiSettings(settings: LLMSettings): void {
+    const migrateModel = (model: string | undefined, where: string): string | undefined => {
+      if (!model) return model;
+      const discontinued = getDiscontinuedKimiModel(model);
+      if (!discontinued) return model;
+      console.warn(
+        `[LLMProviderFactory] ${where} model "${model}" was discontinued by Moonshot on ${discontinued.discontinuedOn}; switched to "${discontinued.replacement}".`,
+      );
+      return discontinued.replacement;
+    };
+
+    if (settings.kimi?.model) {
+      settings.kimi.model = migrateModel(settings.kimi.model, "Kimi");
+    }
+    if (Array.isArray(settings.cachedKimiModels)) {
+      settings.cachedKimiModels = settings.cachedKimiModels.filter(
+        (model) => !getDiscontinuedKimiModel(String(model?.key || "")),
+      );
+    }
+
+    const moonshot = settings.customProviders?.moonshot;
+    if (moonshot?.model) {
+      moonshot.model = migrateModel(moonshot.model, "Moonshot");
+    }
+
+    const migrateFallbacks = (node: ProviderRoutingSettings | undefined): void => {
+      for (const entry of node?.fallbackProviders ?? []) {
+        if (entry?.providerType === "kimi" || entry?.providerType === "moonshot") {
+          const modelKey = migrateModel(entry.modelKey, "Kimi fallback");
+          if (modelKey) entry.modelKey = modelKey;
+        }
+      }
+    };
+    migrateFallbacks(settings);
+    for (const node of Object.values(settings)) {
+      if (node && typeof node === "object" && !Array.isArray(node)) {
+        migrateFallbacks(node as ProviderRoutingSettings);
+      }
+    }
+    for (const provider of Object.values(settings.customProviders ?? {})) {
+      migrateFallbacks(provider);
+    }
+
+    // The Kimi Code default moved to the overseas endpoint; keys saved against
+    // the old default (the mainland China endpoint) keep using it.
+    const kimiCode = settings.customProviders?.["kimi-code"];
+    if (kimiCode?.apiKey && !kimiCode.baseUrl?.trim()) {
+      kimiCode.baseUrl = KIMI_CODE_CHINA_BASE_URL;
+    }
   }
 
   private static normalizeProviderFailoverSettings(settings: LLMSettings): void {
@@ -2608,7 +2668,7 @@ export class LLMProviderFactory {
 
     // For Kimi, use the specific model if provided or default
     if (providerType === "kimi") {
-      return kimiModel || "kimi-k2.5";
+      return kimiModel || KIMI_DEFAULT_MODEL;
     }
 
     // For Pi, use the specific model from settings
@@ -3324,7 +3384,7 @@ export class LLMProviderFactory {
       }
 
       case "kimi": {
-        const currentModel = settings.kimi?.model || "kimi-k2.5";
+        const currentModel = settings.kimi?.model || KIMI_DEFAULT_MODEL;
         const modelList =
           settings.cachedKimiModels && settings.cachedKimiModels.length > 0
             ? settings.cachedKimiModels
@@ -4549,13 +4609,10 @@ export class LLMProviderFactory {
       label: "Kimi",
     });
 
-    const defaultModels = [
-      { id: "kimi-k2.5", name: "Kimi K2.5" },
-      { id: "kimi-k2-0905-preview", name: "Kimi K2.5 Preview" },
-      { id: "kimi-k2-turbo-preview", name: "Kimi K2 Turbo (Preview)" },
-      { id: "kimi-k2-thinking", name: "Kimi K2 Thinking" },
-      { id: "kimi-k2-thinking-turbo", name: "Kimi K2 Thinking Turbo" },
-    ];
+    const defaultModels = Object.values(KIMI_MODELS).map((model) => ({
+      id: model.id,
+      name: model.displayName,
+    }));
 
     if (!key) {
       return defaultModels;
@@ -4568,7 +4625,8 @@ export class LLMProviderFactory {
         kimiApiKey: key,
         kimiBaseUrl: resolvedBaseUrl,
       });
-      return await provider.getAvailableModels();
+      const models = await provider.getAvailableModels();
+      return models.filter((model) => !getDiscontinuedKimiModel(model.id));
     } catch (error: Any) {
       console.error("Failed to fetch Kimi models:", error);
       return defaultModels;

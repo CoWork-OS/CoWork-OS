@@ -80,6 +80,7 @@ function inferClaudeLimit(key: string): number | null {
  */
 function inferOpenModelLimit(key: string): number | null {
   if (key.includes("gemini")) return 1_000_000;
+  if (key.includes("kimi-k3")) return 1_048_576;
   if (/kimi-k2(?![-.]?0711)/.test(key)) return 262_144;
   if (key.includes("kimi") || key.includes("moonshot")) return 131_072;
   if (/glm-(?:4\.[6-9]|[5-9])/.test(key)) return 200_000;
@@ -231,11 +232,17 @@ export function estimateMessageTokens(message: LLMMessage): number {
  * Anthropic thinking blocks ride on `reasoning` and are sent back with the turn
  * (see llm/anthropic-thinking.ts). The signature carries the encrypted thinking,
  * so its length stands in for the thinking even when the text is omitted.
+ * Kimi reasoning_content rides on `reasoning` too and is resent with every request.
  */
 function estimateAnthropicThinkingTokens(message: LLMMessage): number {
   if (message.role !== "assistant" || !Array.isArray(message.reasoning)) return 0;
   let tokens = 0;
   for (const item of message.reasoning) {
+    if (item?.format === "chat-reasoning-content") {
+      // Kimi K3 reasoning_content is resent as plain text with the message.
+      tokens += estimateTokens(String((item.data as Any)?.reasoning_content || ""));
+      continue;
+    }
     if (item?.format !== "anthropic") continue;
     const block = (item.data as { block?: Any } | undefined)?.block;
     if (block?.type === "thinking") {

@@ -87,3 +87,30 @@ export function piAiReplay(
     provider: typeof first?.provider === "string" ? first.provider : undefined,
   };
 }
+
+// ---- Chat Completions `reasoning_content` (Kimi K3, K2.7 Code) ------------------------
+
+/**
+ * Kimi K3 always thinks and requires each assistant message to be sent back
+ * exactly as returned, including `reasoning_content`, on every later request:
+ * across tool calls and across turns, since the model was trained on preserved
+ * thinking history (https://platform.kimi.ai/docs/guide/use-thinking-effort.md).
+ */
+export function reasoningFromChatCompletionMessage(
+  message: unknown,
+  model: string,
+): LLMReasoningItem[] {
+  const reasoningContent = (message as Any)?.reasoning_content;
+  if (typeof reasoningContent !== "string" || reasoningContent.length === 0) return [];
+  return [
+    { format: "chat-reasoning-content", model, data: { reasoning_content: reasoningContent } },
+  ];
+}
+
+/** The `reasoning_content` to send with this assistant message to `model`, if any. */
+export function chatReasoningContentReplay(message: LLMMessage, model: string): string | undefined {
+  const parts = itemsFor(message, "chat-reasoning-content", model)
+    .map((item) => (item.data as Any)?.reasoning_content)
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  return parts.length > 0 ? parts.join("") : undefined;
+}

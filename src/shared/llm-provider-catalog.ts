@@ -1,4 +1,5 @@
 import type { LLMProviderType } from "./types";
+import { KIMI_CODE_MODEL_IDS, KIMI_CURRENT_MODEL_IDS, KIMI_DEFAULT_MODEL } from "./kimi-models";
 
 export type ProviderCompatibility = "openai" | "anthropic";
 
@@ -11,6 +12,11 @@ export const OPENROUTER_DEFAULT_MODEL_ID = "anthropic/claude-sonnet-4.6";
  * needs (tools, images, structured output), so a new account works without credits.
  */
 export const OPENROUTER_FREE_MODEL_ID = "openrouter/free";
+
+/** Kimi Code overseas endpoint (https://www.kimi.com/code/docs/en/kimi-code/models.html). */
+export const KIMI_CODE_DEFAULT_BASE_URL = "https://api.kimi.ai/coding/v1";
+/** Kimi Code mainland China endpoint; the catalog default before 2026-10. */
+export const KIMI_CODE_CHINA_BASE_URL = "https://api.kimi.com/coding/v1";
 
 export interface ProviderCatalogEntry {
   id: LLMProviderType;
@@ -142,7 +148,8 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     name: "Moonshot (Kimi)",
     compatibility: "openai",
     baseUrl: "https://api.moonshot.ai/v1",
-    defaultModel: "kimi-k2.5",
+    defaultModel: KIMI_DEFAULT_MODEL,
+    knownModels: [...KIMI_CURRENT_MODEL_IDS],
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "sk-...",
   },
@@ -267,10 +274,13 @@ export const CUSTOM_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     id: "kimi-code",
     name: "Kimi Code",
     compatibility: "openai",
-    baseUrl: "https://api.kimi.com/coding/v1",
+    baseUrl: KIMI_CODE_DEFAULT_BASE_URL,
     defaultModel: "kimi-for-coding",
+    knownModels: [...KIMI_CODE_MODEL_IDS],
     apiKeyLabel: "API Key",
     apiKeyPlaceholder: "sk-...",
+    apiKeyUrl: "https://www.kimi.com/code/console",
+    description: `Kimi Code plan keys only; Moonshot platform keys do not work here. Mainland China accounts use ${KIMI_CODE_CHINA_BASE_URL}.`,
   },
   {
     id: "anthropic-compatible",

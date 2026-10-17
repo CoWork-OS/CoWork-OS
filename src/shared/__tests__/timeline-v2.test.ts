@@ -18,6 +18,16 @@ describe("timeline v2 helpers", () => {
     expect(formatTimelineActivityLabel("Working on: BUILD")).toBe("Building");
   });
 
+  it("keeps stage identifiers out of completed and running status labels", () => {
+    expect(formatTimelineActivityLabel("Starting DELIVER")).toBe("Preparing final response");
+    expect(formatTimelineActivityLabel("Completed DELIVER")).toBe("Response ready");
+    expect(formatTimelineActivityLabel("Completed VERIFY")).toBe("Checks complete");
+    expect(formatTimelineActivityLabel("Completed BUILD")).toBe("Work complete");
+    expect(formatTimelineActivityLabel("Completed the shopping spreadsheet")).toBe(
+      "Completed the shopping spreadsheet",
+    );
+  });
+
   it("renders model-authored markdown emphasis as plain header text", () => {
     expect(formatTimelineActivityLabel("**Collect the required details**")).toBe(
       "Collect the required details",

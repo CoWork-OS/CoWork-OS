@@ -195,6 +195,7 @@ import {
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
+import { findUnfinishedBotUserTurn } from "../agents/bot-turn-recovery";
 import {
   getCurrentBotHandoffScope,
   getOutstandingBotHandoffReply,
@@ -2509,7 +2510,16 @@ export class AgentDaemon extends EventEmitter {
             ) && Boolean(event.payload?.plan),
         );
 
-        if (hasSnapshot || hasPlan) {
+        const unfinishedBotUserTurn =
+          task.agentConfig?.botConversation === true
+            ? findUnfinishedBotUserTurn(
+                this.getTaskEventsForReplay(task.id).map((event) => ({
+                  ...event,
+                  type: this.resolveLegacyEventType(event) as TaskEvent["type"],
+                })),
+              )
+            : undefined;
+        if (hasSnapshot || hasPlan || unfinishedBotUserTurn) {
           if (!this.shouldResumeTaskOnStartup(task)) {
             this.skipStartupResume(task);
             continue;
@@ -3330,8 +3340,27 @@ export class AgentDaemon extends EventEmitter {
       );
 
       // Start execution (non-blocking)
-      executor
-        .execute()
+      const recoveryEvents =
+        executionTask.agentConfig?.botConversation === true
+          ? this.getTaskEventsForReplay(executionTask.id)
+          : undefined;
+      if (recoveryEvents && !reusableExecutor) {
+        executor.rebuildConversationFromEvents(
+          this.getTaskEventsForResume(executionTask.id, effectiveWorkspace.path),
+        );
+      }
+      const recoveryTurn = recoveryEvents
+        ? findUnfinishedBotUserTurn(
+            recoveryEvents.map((event) => ({
+              ...event,
+              type: this.resolveLegacyEventType(event) as TaskEvent["type"],
+            })),
+          ) || this.findRecoverableBotHandoff(executionTask, recoveryEvents)
+        : undefined;
+      const execution = recoveryEvents
+        ? executor.resumeAfterInterruption(recoveryTurn)
+        : executor.execute();
+      execution
         .then(() => {
           MemoryService.clearExecutionSideChannelPolicy();
           if (this.shutdownRequested) return;
@@ -3516,7 +3545,12 @@ export class AgentDaemon extends EventEmitter {
     const events = this.getTaskEventsForResume(task.id, workspace.path, readGuard);
     const recoveredBotHandoff =
       task.agentConfig?.botConversation === true
-        ? this.findRecoverableBotHandoff(task, this.getTaskEventsForReplay(task.id))
+        ? findUnfinishedBotUserTurn(
+            this.getTaskEventsForReplay(task.id).map((event) => ({
+              ...event,
+              type: this.resolveLegacyEventType(event) as TaskEvent["type"],
+            })),
+          ) || this.findRecoverableBotHandoff(task, this.getTaskEventsForReplay(task.id))
         : undefined;
 
     // Check if we have meaningful state to restore from
@@ -3629,7 +3663,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     // Reconstruct the Plan from events with correct step statuses
-    if (hasPlan) {
+    if (hasPlan && recoveredBotHandoff?.messageSource !== "user") {
       const rawPlan = planEvent!.payload.plan as Plan;
       const completedStepIds = new Set<string>();
       const failedStepIds = new Set<string>();
@@ -19456,6 +19490,16 @@ export class AgentDaemon extends EventEmitter {
       // A retained executor may have completed a follow-up via a direct task
       // update. Never turn a durable terminal result into a restart request.
       if (currentTask && isTerminalTaskStatus(deriveCanonicalTaskStatus(currentTask))) return;
+      // Bot turns return to pending when idle, while their executor stays cached.
+      // Do not resume the synthetic conversation seed after a clean restart.
+      if (
+        currentTask?.agentConfig?.botConversation === true &&
+        currentTask.status === "pending" &&
+        cached.executor.isRunning === false &&
+        !cached.executor.hasPendingFollowUps
+      ) {
+        return;
+      }
 
       // Best-effort snapshot save
       try {

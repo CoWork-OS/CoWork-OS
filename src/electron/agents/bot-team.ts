@@ -1,4 +1,9 @@
 import type { AgentRole } from "../../shared/types";
+import {
+  affirmativeDelegationText,
+  hasAffirmativeDelegationAction,
+  DELEGATION_REQUEST_LEAD,
+} from "../../shared/delegation-intent";
 
 /** Built from verified workspace/team membership, never from a seeded roster. */
 export interface BotTeamPromptContext {
@@ -31,12 +36,16 @@ export function buildBotTeamContextPrompt(context: BotTeamPromptContext): string
 
 /** Recognize configured identities without granting any messaging authority. */
 export function hasBotTeamDelegationRequest(text: string, context?: BotTeamPromptContext): boolean {
-  if (/\b(?:send_agent_message|delegat(?:e|es|ed|ing|ion)|teammate|bot team)\b/i.test(text)) {
+  text = affirmativeDelegationText(text);
+  if (hasAffirmativeDelegationAction(text)) {
     return true;
   }
   const selectors = context?.peers.flatMap((peer) => [peer.id, peer.name, peer.displayName]) || [];
   return selectors.some((selector) => {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
-    return new RegExp(`\\bask\\s+(?:the\\s+)?@?${escaped}(?=$|[^\\p{L}\\p{N}_-])`, "iu").test(text);
+    return new RegExp(
+      `${DELEGATION_REQUEST_LEAD}ask\\s+(?:the\\s+)?@?${escaped}(?=$|[^\\p{L}\\p{N}_-])`,
+      "iu",
+    ).test(text);
   });
 }

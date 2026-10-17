@@ -11,7 +11,8 @@ interface ExecutorProbe {
     getBotTeamPromptContext: Mock<() => BotTeamPromptContext | undefined>;
   };
   getRoleContextPrompt(): string;
-  hasExplicitBotTeamDelegationRequest(context: string): boolean;
+  lastUserMessage?: string;
+  hasExplicitBotTeamDelegationRequest(context?: string): boolean;
 }
 
 function executor(teamContext?: BotTeamPromptContext): ExecutorProbe {
@@ -54,12 +55,10 @@ describe("bot role prompt authorization", () => {
     const prompt = instance.getRoleContextPrompt();
     expect(prompt).toContain('bot="peer-stable-id"');
     expect(prompt).not.toContain("As the configured team lead");
-    expect(instance.hasExplicitBotTeamDelegationRequest("Ask Chosen reviewer for evidence")).toBe(
-      true,
-    );
-    expect(
-      instance.hasExplicitBotTeamDelegationRequest("Ask an unknown colleague for evidence"),
-    ).toBe(false);
+    instance.lastUserMessage = "Ask Chosen reviewer for evidence";
+    expect(instance.hasExplicitBotTeamDelegationRequest()).toBe(true);
+    instance.lastUserMessage = "Ask an unknown colleague for evidence";
+    expect(instance.hasExplicitBotTeamDelegationRequest()).toBe(false);
   });
 
   it("does not attach team guidance to ordinary role-assigned work", () => {

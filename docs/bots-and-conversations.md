@@ -516,6 +516,16 @@ rules, filesystem boundaries, or tool hard guardrails. A lead role can have
 delegation guidance, but it still cannot message a bot outside its verified
 team.
 
+Saved role instructions are included in full in execution prompts. Optional context
+may be reduced to make room; instructions are never silently shortened to fit a
+prompt budget. Tool routing uses an affirmative request in the current user turn:
+mentioning delegation, prohibiting it, or an earlier handoff does not restrict a
+later context review to teammate messaging.
+
+An interrupted bot review resumes its latest unfinished user turn, preserving
+the existing transcript. It does not execute the placeholder conversation prompt
+or an older plan. Idle conversations remain idle across a clean restart.
+
 ### Where a bot works
 
 Each bot has a **Works on** setting, chosen in its create and edit dialogs:

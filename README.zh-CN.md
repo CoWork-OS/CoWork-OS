@@ -78,11 +78,22 @@ Linux 服务器请使用[打包好的无界面服务端](docs/vps-linux.md)。�
 ## 快速上手
 
 1. **打开 CoWork OS。**在 macOS 上首次启动时，系统可能会询问是否允许访问钥匙串项目 `cowork-os Safe Storage`，请点击 **始终允许**。
-2. **选择模型。**用 ChatGPT 账号登录、使用检测到的本地 Ollama 模型，或填入 API key。有免费额度的选项会被标出。
+2. **选择模型。**选择 **Continue with OpenRouter**，无需复制 API key 即可使用免费模型（0.5.61 起）；也可以用 ChatGPT 账号登录、使用检测到的本地 Ollama 模型，或填入 API key。有免费额度的选项会被标出，模型随时可以切换。
 3. **描述任务**，比如“把 ~/Downloads 里最近十张发票整理成一个表格”，也可以从用例库里选一个现成的任务。
 4. **观察并批准。**时间线会显示每一步。工作区内的操作会自动进行；凡是发送、联网、使用凭据或离开工作区的操作，都会等你回答。
 
 在终端中：`cowork` 打开终端界面，`cowork run "你是谁？"` 运行一次性任务，两者使用同一份本地配置。[入门指南](docs/getting-started.md) · [CoWork CLI](docs/cli.md)
+
+## 从 Hermes 或 OpenClaw 迁移
+
+可以把你的 Hermes Agent 或 OpenClaw 配置一起带过来（0.5.61 起）。CoWork 只读取 `~/.hermes` 或 `~/.openclaw`，不会修改它们，并会在写入任何内容之前先列出将要导入的项目：人设、记忆、你自己的技能、模型选择、聊天机器人及其白名单，以及定时任务。API key 和机器人令牌只有在你明确要求时才会导入，并保存在操作系统的加密存储中。
+
+```bash
+cowork import --from hermes --dry-run
+cowork import --from hermes
+```
+
+OpenClaw 请使用 `--from openclaw`，也可以在应用的 **Settings > Import** 中操作；首次启动时如果发现上述文件夹，也会主动提示导入。你还可以继续使用现有的 Hermes，并通过 ACP 从 CoWork 把任务交给它。详见（英文）：[Migrating from Hermes](docs/migrating-from-hermes.md) · [Migrating from OpenClaw](docs/migrating-from-openclaw.md)
 
 ## 文档
 

@@ -612,6 +612,28 @@ describe("deriveSharedTaskEventUiState action blocks", () => {
     expect(ids.has("terminal-1")).toBe(true);
   });
 
+  it("keeps the new-run boundary when the follow-up outgrows the live window", () => {
+    const shared = deriveSharedTaskEventUiState({
+      rawEvents: [
+        makeEvent("old-plan", 1, "plan_created", {
+          plan: { steps: [{ id: "old", description: "Read dinner notes", status: "failed" }] },
+        }),
+        makeEvent("follow-up", 2, "task_resumed", { newRunStarted: true }),
+        makeEvent("user", 3, "user_message", { message: "Finish the dinner plan" }),
+        ...Array.from({ length: 200 }, (_, index) =>
+          makeEvent(`progress-${index}`, index + 4, "progress_update", { message: "Working" }),
+        ),
+      ],
+      task: { id: "task-1", status: "executing" } as Any,
+      workspace: null,
+      verboseSteps: false,
+      projectionMode: "live",
+      liveWindowSize: 20,
+    });
+    expect(shared.planSteps).toEqual([]);
+    expect(shared.taskStatusStrip.primaryLabel).toBe("Working");
+  });
+
   it("retains every conversation message outside the bounded live window", () => {
     const rawEvents = [
       makeEvent("user-early", 1, "user_message", { message: "First request" }),

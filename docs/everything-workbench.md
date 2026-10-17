@@ -79,6 +79,8 @@ The product promise is "one app for the everyday work most people currently spli
 ## Related Docs
 
 - [Application Execution Backend](application-execution-backend.md) — implemented shared operation lifecycle, feedback, recovery, and verification baseline for application pilots.
+- [Application Execution Strategy](headless-apps-strategy.md) — proposed direction for completing work across applications with results and selective feedback in CoWork.
+- [Application Execution Architecture](application-execution-architecture.md) — researched backend and harness proposal covering MCP, APIs, CLI, browser, and computer use; proposed extensions are separate from current support.
 - [Features](features.md)
 - [Getting Started](getting-started.md)
 - [Document Artifacts](document-artifacts.md)

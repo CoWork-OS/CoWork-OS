@@ -7,6 +7,7 @@ import {
 } from "../../../shared/types";
 import { requestsCliAnythingApp } from "../../applications/application-task-intent";
 import { IntentRoute } from "./IntentRouter";
+import { hasAffirmativeDelegationAction } from "../../../shared/delegation-intent";
 import type {
   DirectResponseMode,
   PreflightGate,
@@ -45,17 +46,7 @@ const IMAGE_TOOL_CALL_ONCE =
 
 export class TaskStrategyService {
   static hasExplicitDelegationRequest(text: string): boolean {
-    return String(text || "")
-      .split(/[.!?\n]+/)
-      .some(
-        (clause) =>
-          !/\b(do not|don't|never|without)\b.{0,35}\b(delegat\w*|agents?|subagents?)\b/i.test(
-            clause,
-          ) &&
-          /\b(separate|independent|another|multiple|different|one|two|three)\b.{0,45}\b(?:agents?|sub-?agents?)\b|\b(?:delegate|spawn|orchestrate)\b.{0,60}\b(?:agents?|sub-?agents?|work|research)\b/i.test(
-            clause,
-          ),
-      );
+    return hasAffirmativeDelegationAction(text);
   }
   private static hasTextToImageGenerationIntent(lower: string): boolean {
     return (

@@ -197,10 +197,11 @@ export class ContentBuilder {
             layerKind: "always",
             cacheScope: "session",
           }),
-          makeSection("role_context", params.roleContext, 900, {
-            required: false,
+          makeSection("role_context", params.roleContext, undefined, {
+            preserveWhole: true,
+            required: true,
             dropPriority: 2,
-            layerKind: "optional",
+            layerKind: "always",
             cacheScope: "session",
           }),
           ...buildMemoryContextSections(params),
@@ -320,10 +321,11 @@ export class ContentBuilder {
             layerKind: "always",
             cacheScope: "session",
           }),
-          makeSection("role_context", params.roleContext, 900, {
-            required: false,
+          makeSection("role_context", params.roleContext, undefined, {
+            preserveWhole: true,
+            required: true,
             dropPriority: 2,
-            layerKind: "optional",
+            layerKind: "always",
             cacheScope: "session",
           }),
           ...buildMemoryContextSections(params),

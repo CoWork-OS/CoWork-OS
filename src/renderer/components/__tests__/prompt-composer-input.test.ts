@@ -13,6 +13,25 @@ import {
 } from "../PromptComposerInput";
 
 describe("PromptComposerInput", () => {
+  it("shows only the suggestion in the empty composer, without a visible acceptance hint", () => {
+    const prediction = "Show me the tradeoffs.";
+    const markup = renderToStaticMarkup(
+      React.createElement(PromptComposerInput, {
+        value: "",
+        prediction,
+        mentions: [],
+        className: "input-field input-textarea",
+        ariaLabel: "Message",
+        onChange: vi.fn(),
+        onKeyDown: vi.fn(),
+        onPaste: vi.fn(),
+        onCursorChange: vi.fn(),
+      }),
+    );
+
+    expect(markup.match(/data-placeholder="([^"]*)"/)?.[1]).toBe(prediction);
+  });
+
   it("renders integration mention chips inline from canonical mention text", () => {
     const markup = renderToStaticMarkup(
       React.createElement(PromptComposerInput, {

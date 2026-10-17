@@ -45,10 +45,15 @@ describe("daemon shutdown persistence", () => {
     expect(daemon.finishQueueSlot).toHaveBeenCalledWith("policy-wait");
     expect(daemon.activeTasks.size).toBe(0);
   });
-  it.each(["completed", "failed", "cancelled"])(
+  it.each(["completed", "failed", "cancelled", "pending"])(
     "does not interrupt a durable %s task left active in the executor cache",
     async (status) => {
-      const executor = { saveConversationSnapshot: vi.fn(), cancel: vi.fn(async () => undefined) };
+      const executor = {
+        isRunning: false,
+        hasPendingFollowUps: false,
+        saveConversationSnapshot: vi.fn(),
+        cancel: vi.fn(async () => undefined),
+      };
       const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
         orchestrationGraphEngine: { stop: vi.fn() },
         workSessionProtocolService: { getReliabilityService: () => ({ stop: vi.fn() }) },
@@ -58,7 +63,10 @@ describe("daemon shutdown persistence", () => {
         pendingRetries: new Map(),
         pendingTaskImages: new Map(),
         activeTasks: new Map([["task", { status: "active", executor }]]),
-        taskRepo: { findById: () => ({ id: "task", status }), update: vi.fn() },
+        taskRepo: {
+          findById: () => ({ id: "task", status, agentConfig: { botConversation: true } }),
+          update: vi.fn(),
+        },
         logEvent: vi.fn(),
         removeAllListeners: vi.fn(),
       });
@@ -91,6 +99,39 @@ describe("daemon shutdown persistence", () => {
       expect(cached.lastAccessed).toBeGreaterThan(0);
     },
   );
+
+  it.each([
+    { isRunning: true, hasPendingFollowUps: false },
+    { isRunning: false, hasPendingFollowUps: true },
+  ])("still interrupts a pending bot with admitted work: %j", async (state) => {
+    const executor = {
+      ...state,
+      saveConversationSnapshot: vi.fn(),
+      cancel: vi.fn(async () => undefined),
+    };
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      orchestrationGraphEngine: { stop: vi.fn() },
+      workSessionProtocolService: { getReliabilityService: () => ({ stop: vi.fn() }) },
+      pendingApprovals: new Map(),
+      pendingDurableApprovalGrants: new Map(),
+      pendingInputRequests: new Map(),
+      pendingRetries: new Map(),
+      pendingTaskImages: new Map(),
+      activeTasks: new Map([["bot", { status: "active", executor }]]),
+      taskRepo: {
+        findById: () => ({ id: "bot", status: "pending", agentConfig: { botConversation: true } }),
+        update: vi.fn(),
+      },
+      logEvent: vi.fn(),
+      removeAllListeners: vi.fn(),
+    });
+    await daemon.shutdown();
+    expect(executor.saveConversationSnapshot).toHaveBeenCalledOnce();
+    expect(daemon.taskRepo.update).toHaveBeenCalledWith(
+      "bot",
+      expect.objectContaining({ status: "interrupted" }),
+    );
+  });
 
   it.each(["orchestration", "reliability"])(
     "persists interruption even if %s stop throws",

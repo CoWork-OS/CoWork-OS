@@ -186,12 +186,28 @@ function getCellText(cell: SpreadsheetPreviewCell | null): string {
 
 /**
  * Grid text for a cell: what Excel shows (number format applied, or the formula when the file has
- * no saved result), falling back to the raw value. Editing always works on the raw value.
+ * no saved result), falling back to the raw value. A draft edit makes all cached formula results
+ * stale, including cross-sheet dependencies; show the formula until Save recalculates them.
+ * Editing always works on the raw value.
  */
-export function getCellDisplayText(cell: SpreadsheetPreviewCell | undefined): string {
+export function getCellDisplayText(
+  cell: SpreadsheetPreviewCell | undefined,
+  formulaResultsStale = false,
+): string {
   if (!cell) return "";
+  if (cell.formula && formulaResultsStale) return `=${cell.formula}`;
   if (cell.formula && cell.value.startsWith("=")) return cell.value;
   return cell.displayValue ?? cell.value ?? "";
+}
+
+export function hasPendingFormulaResults(
+  preview: SpreadsheetPreview | null,
+  dirty: boolean,
+): boolean {
+  return Boolean(
+    dirty &&
+    preview?.sheets.some((sheet) => sheet.rows.some((row) => row.some((cell) => cell.formula))),
+  );
 }
 
 /** Formatting and pending-result flags describe the saved value, so an edit drops them. */
@@ -446,6 +462,10 @@ export function SpreadsheetArtifactViewer({
     workbookSession?.capabilities.canEditCells === false;
   const isSpreadsheetStructureReadOnly =
     isSpreadsheetReadOnly || workbookSession?.capabilities.canEditStructure === false;
+  const pendingFormulaResults = useMemo(
+    () => hasPendingFormulaResults(editablePreview, dirty),
+    [editablePreview, dirty],
+  );
 
   const queuePatch = (patch: SpreadsheetPatch) => {
     setPendingPatches((current) => {
@@ -1029,6 +1049,12 @@ export function SpreadsheetArtifactViewer({
         </div>
       )}
 
+      {pendingFormulaResults && (
+        <div className="spreadsheet-viewer-calculation-notice" role="status">
+          Save to recalculate formulas
+        </div>
+      )}
+
       <div className="spreadsheet-viewer-formula">
         <span className="spreadsheet-viewer-cell-address">
           {selected?.address || selectedAddress}
@@ -1144,7 +1170,9 @@ export function SpreadsheetArtifactViewer({
                             [
                               rangeSelected ? "range-selected" : "",
                               selectedCellActive ? "selected" : "",
-                              cell?.formulaPending ? "formula-pending" : "",
+                              cell?.formulaPending || (dirty && cell?.formula)
+                                ? "formula-pending"
+                                : "",
                             ]
                               .filter(Boolean)
                               .join(" ") || undefined
@@ -1169,11 +1197,13 @@ export function SpreadsheetArtifactViewer({
                             startEditing({ row: rowIndex + 1, column: columnIndex + 1 })
                           }
                           title={
-                            cell?.formulaPending
-                              ? `=${cell.formula} (no saved result; Excel calculates it when the file is opened)`
-                              : cell?.formula
-                                ? `=${cell.formula}`
-                                : cell?.value
+                            dirty && cell?.formula
+                              ? `=${cell.formula} (result pending; save to recalculate)`
+                              : cell?.formulaPending
+                                ? `=${cell.formula} (no saved result; Excel calculates it when the file is opened)`
+                                : cell?.formula
+                                  ? `=${cell.formula}`
+                                  : cell?.value
                           }
                         >
                           {editingCell?.row === rowIndex + 1 &&
@@ -1197,7 +1227,7 @@ export function SpreadsheetArtifactViewer({
                               }}
                             />
                           ) : (
-                            getCellDisplayText(cell)
+                            getCellDisplayText(cell, dirty)
                           )}
                         </td>
                       );

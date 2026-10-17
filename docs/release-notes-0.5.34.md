@@ -11,8 +11,8 @@ Release `0.5.34` is the biggest runtime and product consolidation since the last
 - **Core automation profiles**: a new automation profile model now owns the always-on runtime surface, replacing older heartbeat/pseudo-persona ownership paths.
 - **Trace, failure, and learning pipelines**: the core runtime now has first-class trace, failure-record, failure-cluster, eval-case, harness-experiment, learnings, memory-candidate, and regression-gate services and repositories.
 - **Memory distillation**: the core memory distiller now operates as a dedicated runtime layer with scoped memory resolution, distill-run persistence, and supporting query paths.
-- **Research vaults (`LLM Wiki`)**: first-class workspace-local research vaults inspired by Andrej Karpathy's LLM Wiki concept, with deterministic raw-source capture, Obsidian-friendly notes, vault search, graph reporting, and filed-back outputs. [Learn more](docs/llm-wiki.md)
-- **Programmatic technical video skill (`manim-video`)**: a bundled skill for planning and scaffolding Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](docs/skills/manim-video.md)
+- **Research vaults (`LLM Wiki`)**: first-class workspace-local research vaults inspired by Andrej Karpathy's LLM Wiki concept, with deterministic raw-source capture, Obsidian-friendly notes, vault search, graph reporting, and filed-back outputs. [Learn more](llm-wiki.md)
+- **Programmatic technical video skill (`manim-video`)**: a bundled skill for planning and scaffolding Manim CE explainers, equation walkthroughs, algorithm visualizations, and animated architecture/data stories. [Learn more](skills/manim-video.md)
 - **Curated memory and recall services**: new curated-memory, quote-recall, and session-recall services expand how the app stores and surfaces durable context.
 - **Workspace path healing**: desktop workspace paths can now be repaired when a workspace is moved or renamed.
 - **File provenance registry**: imported or exported files can carry trust and provenance metadata through a dedicated registry.
@@ -49,10 +49,10 @@ Release `0.5.34` is the biggest runtime and product consolidation since the last
 
 ## References
 
-- [Changelog](docs/changelog.md) - full version history
-- [Core Automation](docs/core-automation.md) - current automation runtime model
-- [LLM Wiki](docs/llm-wiki.md) - research vault workflow and graph reporting
-- [Manim Video](docs/skills/manim-video.md) - technical explainer video skill
-- [Memory Flow](docs/workspace-memory-flow.md) - current workspace memory architecture
+- [Changelog](changelog.md) - full version history
+- [Core Automation](core-automation.md) - current automation runtime model
+- [LLM Wiki](llm-wiki.md) - research vault workflow and graph reporting
+- [Manim Video](skills/manim-video.md) - technical explainer video skill
+- [Memory Flow](workspace-memory-flow.md) - current workspace memory architecture
 
 This page is the canonical high-level summary for the changes included in `0.5.34`.

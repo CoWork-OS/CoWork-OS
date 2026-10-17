@@ -1,18 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PdfRegionSelection } from "../../shared/types";
-
-type PdfPageRender = {
-  width: number;
-  height: number;
-};
-
-type PdfTextItem = {
-  str: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+import {
+  createPdfDocumentRenderer,
+  type PdfPageRender,
+  type PdfTextItem,
+} from "./pdf-document-renderer";
 
 type PDFDocumentSurfaceProps = {
   fileName: string;
@@ -58,9 +50,10 @@ export function PDFDocumentSurface({
   visiblePageIndex = null,
   onPageCountChange,
 }: PDFDocumentSurfaceProps) {
-  const pageCanvases = useRef<Array<HTMLCanvasElement | null>>([]);
   const pageLayers = useRef<Array<HTMLDivElement | null>>([]);
   const pageTextItems = useRef<Array<PdfTextItem[]>>([]);
+  const onPageCountChangeRef = useRef(onPageCountChange);
+  onPageCountChangeRef.current = onPageCountChange;
   const dragStartRef = useRef<{ pageIndex: number; x: number; y: number } | null>(null);
   const [pageRenders, setPageRenders] = useState<PdfPageRender[]>([]);
   const [draftSelection, setDraftSelection] = useState<DraftSelection | null>(null);
@@ -68,95 +61,34 @@ export function PDFDocumentSurface({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-    let cleanup: (() => Promise<void>) | null = null;
-
-    const renderPdf = async () => {
-      setLoading(true);
-      setError(null);
-      try {
+    setLoading(true);
+    setError(null);
+    setPageRenders([]);
+    setDraftSelection(null);
+    dragStartRef.current = null;
+    pageTextItems.current = [];
+    const renderer = createPdfDocumentRenderer({
+      openDocument: async () => {
         const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
         pdfjs.GlobalWorkerOptions.workerSrc = new URL(
           "pdfjs-dist/legacy/build/pdf.worker.mjs",
           import.meta.url,
         ).toString();
-        const loadingTask = pdfjs.getDocument({ data: base64ToUint8Array(pdfDataBase64) });
-        const document = await loadingTask.promise;
-        if (!cancelled) {
-          onPageCountChange?.(document.numPages);
-        }
-        cleanup = async () => {
-          await loadingTask.destroy();
-        };
-
-        const nextPages: PdfPageRender[] = [];
-        for (let pageIndex = 0; pageIndex < document.numPages; pageIndex += 1) {
-          const page = await document.getPage(pageIndex + 1);
-          const viewport = page.getViewport({ scale: 1.25 });
-          nextPages.push({ width: viewport.width, height: viewport.height });
-          const textContent = await page.getTextContent();
-          const typedTextItems = (
-            textContent.items as Array<{
-              str?: unknown;
-              transform: number[];
-              width?: number;
-              height?: number;
-            }>
-          )
-            .filter((item) => typeof item.str === "string" && item.str.trim().length > 0)
-            .map((item) => {
-              const text = item.str as string;
-              const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-              return {
-                str: text,
-                x,
-                y,
-                width: Math.max(0, Number(item.width || 0)),
-                height: Math.max(0, Number(item.height || 0)),
-              };
-            });
-          pageTextItems.current[pageIndex] = typedTextItems;
-          if (cancelled) return;
-          setPageRenders((prev) => {
-            const cloned = [...prev];
-            cloned[pageIndex] = { width: viewport.width, height: viewport.height };
-            return cloned;
-          });
-          requestAnimationFrame(async () => {
-            const canvas = pageCanvases.current[pageIndex];
-            if (!canvas) return;
-            const context = canvas.getContext("2d");
-            if (!context) return;
-            const devicePixelRatio = window.devicePixelRatio || 1;
-            canvas.width = Math.floor(viewport.width * devicePixelRatio);
-            canvas.height = Math.floor(viewport.height * devicePixelRatio);
-            canvas.style.width = `${viewport.width}px`;
-            canvas.style.height = `${viewport.height}px`;
-            context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-            await page.render({ canvas, canvasContext: context, viewport }).promise;
-          });
-        }
-        if (!cancelled) {
-          setPageRenders(nextPages);
-        }
-      } catch (renderError: unknown) {
-        if (!cancelled) {
-          setError(renderError instanceof Error ? renderError.message : "Failed to render PDF");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void renderPdf();
-
-    return () => {
-      cancelled = true;
-      if (cleanup) void cleanup();
-    };
-  }, [onPageCountChange, pdfDataBase64]);
+        return pdfjs.getDocument({ data: base64ToUint8Array(pdfDataBase64) });
+      },
+      onPages: (pages) => {
+        pageTextItems.current = pages.map((page) => page.textItems);
+        setPageRenders(pages);
+        setLoading(false);
+        onPageCountChangeRef.current?.(pages.length);
+      },
+      onError: (message) => {
+        setError(message);
+        setLoading(false);
+      },
+    });
+    return renderer.dispose;
+  }, [pdfDataBase64]);
 
   const selectionStyle = useMemo(() => {
     const target = draftSelection || selection;
@@ -292,12 +224,7 @@ export function PDFDocumentSurface({
                     }
               }
             >
-              <canvas
-                ref={(node) => {
-                  pageCanvases.current[pageIndex] = node;
-                }}
-                className="pdf-page-canvas"
-              />
+              <canvas ref={page.mountCanvas} className="pdf-page-canvas" />
               {!readOnly && showSelection && selectionStyle && (
                 <div className="pdf-selection-box" style={selectionStyle} />
               )}

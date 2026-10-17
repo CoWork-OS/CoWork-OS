@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { checkpointCrashRoundTrip } from "../../../../tests/helpers/checkpoint-crash-roundtrip";
-import { AwaitingUserInputError, TaskExecutor } from "../executor";
+import { AwaitingUserInputError, CANVAS_EXPORT_STEP_DESCRIPTION, TaskExecutor } from "../executor";
 import type { LLMResponse } from "../llm";
 import { FileOperationTracker, ToolCallDeduplicator } from "../executor-helpers";
 import { fromOpenAICompatibleResponse } from "../llm/openai-compatible";
@@ -2007,6 +2007,103 @@ relationship_memory:
     const contract = (executor as Any).resolveStepExecutionContract(step);
     expect(Array.from(contract.requiredTools)).toContain("canvas_create");
     expect(Array.from(contract.requiredTools)).toContain("canvas_push");
+  });
+
+  describe("required Live Canvas export step", () => {
+    const step = (id: string, description: string, kind = "primary") => ({
+      id,
+      description,
+      kind,
+      status: "pending",
+    });
+
+    it("adds an export step before the final check when the canvas shows generated media", () => {
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).task.prompt = "Use the pdf-storybook skill on guide.pdf.";
+      const plan = (executor as Any).ensureRequiredPlanSteps({
+        description: "Storybook",
+        steps: [
+          step("1", "Create the Live Canvas story with five chapters and media placeholders."),
+          step("2", "Generate the five chapter pictures and animate two of them."),
+          step("3", "Verify: confirm the story has five chapters and its media.", "verification"),
+        ],
+      });
+      const descriptions = plan.steps.map((s: Any) => s.description);
+      const exportIndex = descriptions.findIndex((d: string) => /canvas_export/.test(d));
+      expect(exportIndex).toBeGreaterThan(1);
+      expect(descriptions[exportIndex + 1]).toMatch(/^Verify:/);
+    });
+
+    it("leaves plans alone that already export or never use the Live Canvas", () => {
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).task.prompt = "Build a drawing app.";
+      const exporting = (executor as Any).ensureRequiredPlanSteps({
+        description: "P",
+        steps: [
+          step("1", "Create the Live Canvas page with the pictures."),
+          step("2", "Export the page with canvas_export."),
+        ],
+      });
+      expect(exporting.steps.filter((s: Any) => /canvas_export/.test(s.description))).toHaveLength(
+        1,
+      );
+      const webApp = (executor as Any).ensureRequiredPlanSteps({
+        description: "P",
+        steps: [step("1", "Build an HTML canvas drawing game that loads sprite images.")],
+      });
+      expect(webApp.steps.some((s: Any) => /canvas_export/.test(s.description))).toBe(false);
+    });
+
+    it("does not require a new canvas once the task already has one", () => {
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      const addPicture = step(
+        "2",
+        "Add the chapter picture to the Live Canvas page with canvas_add_asset and canvas_push.",
+      );
+      (executor as Any).toolRegistry.getLatestCanvasSessionId = () => null;
+      expect(
+        Array.from((executor as Any).resolveStepExecutionContract(addPicture).requiredTools),
+      ).toContain("canvas_create");
+      (executor as Any).toolRegistry.getLatestCanvasSessionId = () => "canvas-1";
+      const required = Array.from(
+        (executor as Any).resolveStepExecutionContract(addPicture).requiredTools,
+      );
+      expect(required).not.toContain("canvas_create");
+      expect(required).toContain("canvas_push");
+    });
+
+    it("does not require writing a file when a canvas step names an input picture", () => {
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      (executor as Any).toolRegistry.getLatestCanvasSessionId = () => "canvas-1";
+      const required = Array.from(
+        (executor as Any).resolveStepExecutionContract(
+          step(
+            "2",
+            "Add the chapter picture scene.png to the Live Canvas page with canvas_add_asset and canvas_push.",
+          ),
+        ).requiredTools,
+      );
+      expect(required).toEqual(["canvas_push"]);
+      const savesFile = Array.from(
+        (executor as Any).resolveStepExecutionContract(
+          step(
+            "5",
+            "Push the page to the Live Canvas with canvas_push and save the outline as outline.md.",
+          ),
+        ).requiredTools,
+      );
+      expect(savesFile).toContain("write_file");
+    });
+
+    it("requires canvas_export, not a new canvas, in the export step", () => {
+      executor = createExecutorWithStubs([textResponse("OK")], {});
+      const contract = (executor as Any).resolveStepExecutionContract(
+        step("4", CANVAS_EXPORT_STEP_DESCRIPTION),
+      );
+      const required = Array.from(contract.requiredTools);
+      expect(required).toEqual(["canvas_export"]);
+      expect((executor as Any).isMutationSatisfyingTool("canvas_export")).toBe(true);
+    });
   });
 
   it("does not require in-app canvas tools for app-internal canvas gameplay wording", () => {

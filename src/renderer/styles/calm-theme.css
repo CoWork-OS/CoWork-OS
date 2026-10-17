@@ -14,7 +14,7 @@ html.visual-calm {
   --calm-radius-pill: 999px;
   --calm-radius-card: 20px;
   --calm-radius-item: 10px;
-  --calm-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --calm-ease: var(--ease-out);
 
   /* Dark defaults; the light block below overrides them. */
   --calm-page: #141518;
@@ -182,9 +182,9 @@ html.visual-calm .calm-segmented > button {
   border-radius: var(--calm-radius-pill);
   cursor: pointer;
   transition:
-    background 0.18s var(--calm-ease),
-    color 0.18s var(--calm-ease),
-    box-shadow 0.18s var(--calm-ease);
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 html.visual-calm .calm-segmented > button:hover:not(.active):not(:disabled) {
@@ -237,8 +237,8 @@ html.visual-calm .calm-send-button {
   color: var(--calm-ink-contrast);
   cursor: pointer;
   transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
+    opacity 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
 }
 
 html.visual-calm .calm-send-button:disabled {
@@ -248,6 +248,10 @@ html.visual-calm .calm-send-button:disabled {
 
 html.visual-calm .calm-send-button:not(:disabled):hover {
   transform: translateY(-1px);
+}
+
+html.visual-calm .calm-send-button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 html.visual-calm .calm-greeting {
@@ -288,11 +292,13 @@ html.visual-calm .calm-popover {
   border-radius: 16px;
   box-shadow: var(--calm-shadow-pop);
   animation: calm-pop-in 0.16s var(--calm-ease);
+  transform-origin: top left;
 }
 
 html.visual-calm .calm-popover-right {
   left: auto;
   right: 0;
+  transform-origin: top right;
 }
 
 @keyframes calm-pop-in {
@@ -303,6 +309,14 @@ html.visual-calm .calm-popover-right {
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes calm-pop-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -495,13 +509,21 @@ html.visual-calm .calm-welcome .welcome-view {
 html.visual-calm .calm-welcome .welcome-content {
   max-width: 680px;
   font-family: var(--font-ui);
-  animation: calm-home-in 0.42s var(--calm-ease) both;
+  animation: calm-home-in 0.3s var(--calm-ease) both;
 }
 
 @keyframes calm-home-in {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes calm-home-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 
@@ -1411,9 +1433,9 @@ html.visual-calm .calm-build-starter {
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    transform 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out);
 }
 
 html.visual-calm .calm-build-starter > svg {
@@ -1629,11 +1651,11 @@ html.visual-calm .calm-today-card {
   box-shadow:
     var(--calm-shadow-soft),
     0 10px 28px -18px rgba(15, 23, 42, 0.18);
-  animation: calm-home-in 0.32s var(--calm-ease) both;
+  animation: calm-home-in 0.28s var(--calm-ease) both;
 }
 
 html.visual-calm .calm-today-card.is-leaving {
-  animation: calm-today-out 0.22s var(--calm-ease) forwards;
+  animation: calm-today-out 0.16s var(--calm-ease) forwards;
   pointer-events: none;
 }
 
@@ -1911,7 +1933,7 @@ html.visual-calm .calm-today-handled-row {
   color: var(--calm-text);
   font: 400 13.5px/1.3 var(--font-ui);
   text-align: left;
-  animation: calm-home-in 0.32s var(--calm-ease) both;
+  animation: calm-home-in 0.28s var(--calm-ease) both;
 }
 
 html.visual-calm button.calm-today-handled-row {
@@ -3098,7 +3120,7 @@ html.visual-calm .right-panel .cli-section-toggle {
 
 html.visual-calm .right-panel .cli-section-chevron {
   display: inline-flex;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s var(--ease-out);
 }
 
 html.visual-calm .right-panel .cli-section-header[aria-expanded="false"] .cli-section-chevron {

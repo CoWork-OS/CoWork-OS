@@ -8,7 +8,7 @@ describe("CustomizePanel styling", () => {
   it("keeps Feature Packs aligned with the Devices panel visual language", () => {
     const source = readFileSync(componentPath, "utf8");
 
-    expect(source).toContain("animation: dp-fade-in 0.6s ease-out");
+    expect(source).toContain("animation: dp-fade-in 0.24s var(--ease-out)");
     expect(source).toContain("border-radius: var(--radius-xl)");
     expect(source).toContain("box-shadow: var(--shadow-lg), var(--shadow-glow)");
     expect(source).toContain(

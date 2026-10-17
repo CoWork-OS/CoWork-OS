@@ -324,7 +324,7 @@ export function MentionList({
           border-radius: 8px;
           border-left: 3px solid transparent;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: background-color 0.15s ease;
         }
 
         .mention-item:hover {
@@ -425,7 +425,7 @@ export function MentionList({
           border-radius: 4px;
           font-size: 12px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
         }
 
         .btn-acknowledge {

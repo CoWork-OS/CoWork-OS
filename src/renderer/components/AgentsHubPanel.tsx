@@ -76,6 +76,7 @@ import {
 } from "../../shared/access-profiles";
 import { resolveBotMascot } from "../../shared/bot-mascots";
 import { hasHostMethod, hasHostMethods } from "../host/browser-capabilities";
+import { scrollBehavior } from "../utils/motion";
 
 type SkillLite = {
   id: string;
@@ -3494,7 +3495,7 @@ export function AgentsHubPanel({
         window.requestAnimationFrame(() => {
           document
             .getElementById(sectionId)
-            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            ?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
         });
       });
     };
@@ -5071,10 +5072,7 @@ function renderAgentsStyles() {
         background: rgba(255, 255, 255, 0.88);
         color: var(--agents-text);
         cursor: pointer;
-        transition:
-          transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          border-color 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          background 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 200ms var(--ease-out), border-color 200ms var(--ease-out), background 200ms var(--ease-out);
       }
       .agents-preset-chip.ghost {
         color: var(--agents-muted);
@@ -5251,9 +5249,7 @@ function renderAgentsStyles() {
         border-radius: 22px;
         cursor: pointer;
         align-self: flex-end;
-        transition:
-          transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
       }
       .agents-showcase-side-card.top {
         margin-right: 8%;
@@ -5313,10 +5309,7 @@ function renderAgentsStyles() {
         border-radius: 999px;
         padding: 12px 18px;
         font-weight: 600;
-        transition:
-          transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          background 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          border-color 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 200ms var(--ease-out), background 200ms var(--ease-out), border-color 200ms var(--ease-out);
       }
       .agents-primary-btn:active,
       .agents-create-submit:active,
@@ -5739,10 +5732,7 @@ function renderAgentsStyles() {
         cursor: pointer;
         font-size: 0.94rem;
         line-height: 1.2;
-        transition:
-          transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          border-color 0.28s cubic-bezier(0.16, 1, 0.3, 1),
-          background 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 200ms var(--ease-out), border-color 200ms var(--ease-out), background 200ms var(--ease-out);
       }
       .agents-tab.active {
         color: var(--agents-text);
@@ -5774,9 +5764,7 @@ function renderAgentsStyles() {
         border: 1px solid var(--agents-border);
         background: rgba(255, 255, 255, 0.86);
         box-shadow: none;
-        transition:
-          transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
-          box-shadow 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+        transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
       }
       .agents-library-card:hover {
         transform: translateY(-2px);
@@ -6276,6 +6264,12 @@ function renderAgentsStyles() {
         }
         50% {
           transform: translate3d(0, -6px, 0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .agents-showcase::before,
+        .agents-showcase-core-card {
+          animation: none;
         }
       }
       @media (max-width: 1100px) {

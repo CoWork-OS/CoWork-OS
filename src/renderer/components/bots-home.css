@@ -363,7 +363,7 @@
 .agents-workspace-toggle svg {
   flex: none;
   color: var(--agents-muted);
-  transition: transform 0.2s ease;
+  transition: transform 0.2s var(--ease-out);
 }
 
 .agents-workspace-toggle[aria-expanded="true"] svg {

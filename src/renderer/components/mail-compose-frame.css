@@ -243,7 +243,7 @@
 }
 
 .mail-compose-spin {
-  animation: mail-compose-spin 0.9s linear infinite;
+  animation: mail-compose-spin 0.8s linear infinite;
 }
 
 .sr-only {

@@ -712,7 +712,7 @@ export function PluginStore({
           font-weight: 500;
           cursor: pointer;
           white-space: nowrap;
-          transition: all 0.15s;
+          transition: opacity 0.15s;
         }
 
         .ps-btn:disabled {
@@ -796,7 +796,7 @@ export function PluginStore({
           color: var(--color-text-muted);
           font-size: 11px;
           cursor: pointer;
-          transition: all 0.15s;
+          transition: color 0.15s, border-color 0.15s;
         }
 
         .ps-chip:hover {

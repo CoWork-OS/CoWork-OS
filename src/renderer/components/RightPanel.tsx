@@ -99,6 +99,7 @@ import {
 import { AgentGlyph, type AgentGlyphState } from "./AgentGlyph";
 import { assignAgentGlyphs, getAgentGlyphForSeed } from "../utils/agent-glyphs";
 import { resolveAgentDisplayName } from "../utils/agent-lifecycle-rows";
+import { scrollBehavior } from "../utils/motion";
 import "./right-panel.css";
 
 /**
@@ -2135,7 +2136,7 @@ function RightPanelComponent({
       return;
     }
 
-    targetEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    targetEl.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
     setHighlightedOutputPath(targetPath);
     setHighlightRequestCount((count) => count + 1);
     onHighlightConsumed?.();
@@ -2310,7 +2311,7 @@ function RightPanelComponent({
       requestAnimationFrame(() => {
         collaborativeAgentsSectionRef.current?.scrollIntoView({
           block: "start",
-          behavior: "smooth",
+          behavior: scrollBehavior(),
         });
       });
     }

@@ -14,7 +14,7 @@
   min-height: 0;
   background: var(--color-bg-primary);
   font-family: var(--font-ui);
-  animation: dp-fade-in 0.6s ease-out;
+  animation: dp-fade-in 0.24s var(--ease-out);
 }
 
 .mc-v2-loading {
@@ -232,9 +232,9 @@
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   box-shadow: var(--shadow-sm);
   transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease;
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out);
 }
 
 .mc-v2-card:hover {
@@ -303,9 +303,9 @@
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease;
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out);
 }
 
 .mc-v2-agent-card:hover {
@@ -1595,7 +1595,7 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  animation: mc-v2-slide-in 0.2s ease-out;
+  animation: mc-v2-slide-in 0.2s var(--ease-out);
 }
 
 @keyframes mc-v2-slide-in {
@@ -1606,6 +1606,14 @@
   to {
     transform: translateX(0);
     opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes mc-v2-slide-in {
+    from {
+      opacity: 0;
+    }
   }
 }
 

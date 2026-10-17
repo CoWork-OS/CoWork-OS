@@ -96,9 +96,9 @@
   font-weight: 500;
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    transform 0.18s ease;
+    border-color 0.18s var(--ease-out),
+    background 0.18s var(--ease-out),
+    transform 0.18s var(--ease-out);
 }
 
 .task-trace-action-btn:hover {
@@ -195,10 +195,10 @@
   overflow: hidden;
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+    border-color 0.18s var(--ease-out),
+    background 0.18s var(--ease-out),
+    transform 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out);
 }
 
 .task-trace-run-card:hover {
@@ -452,9 +452,9 @@
   cursor: pointer;
   opacity: 0.9;
   transition:
-    transform 0.16s ease,
-    box-shadow 0.16s ease,
-    opacity 0.16s ease;
+    transform 0.16s var(--ease-out),
+    box-shadow 0.16s var(--ease-out),
+    opacity 0.16s var(--ease-out);
 }
 
 .task-trace-strip-segment:hover,
@@ -545,9 +545,9 @@
   cursor: pointer;
   flex-shrink: 0;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    transform 0.18s ease;
+    border-color 0.18s var(--ease-out),
+    background 0.18s var(--ease-out),
+    transform 0.18s var(--ease-out);
 }
 
 .task-trace-feed-row:hover {

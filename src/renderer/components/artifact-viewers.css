@@ -1178,7 +1178,7 @@
 .spreadsheet-viewer-turn-header svg {
   flex: 0 0 auto;
   color: #8b8f97;
-  transition: transform 160ms ease;
+  transition: transform 160ms var(--ease-out);
 }
 
 .spreadsheet-viewer-turn-header[aria-expanded="true"] svg {

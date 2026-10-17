@@ -322,8 +322,8 @@
   border-radius: 50%;
   background: var(--color-text-muted);
   transition:
-    transform 0.18s ease,
-    background 0.18s ease;
+    transform 0.18s var(--ease-out),
+    background 0.18s var(--ease-out);
 }
 
 .bot-details-switch:checked {

@@ -1,6 +1,7 @@
 import type { AttentionItem } from "../../../shared/attention";
 import type { MissionControlItem } from "../../../shared/types";
 import type { MissionControlData } from "./useMissionControlData";
+import { scrollBehavior } from "../../utils/motion";
 
 interface MCOverviewTabProps {
   data: MissionControlData;
@@ -258,13 +259,13 @@ export function MCOverviewTab({ data, onOpenAttention }: MCOverviewTabProps) {
   const focusNeedsYou = () => {
     document.getElementById("mc-v2-needs-you")?.scrollIntoView({
       block: "start",
-      behavior: "smooth",
+      behavior: scrollBehavior(),
     });
   };
   const focusRuntimeQueue = () => {
     document.getElementById("mc-v2-runtime-queue-card")?.scrollIntoView({
       block: "start",
-      behavior: "smooth",
+      behavior: scrollBehavior(),
     });
   };
 

@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-answer-turn-status-2026-10-17",
+  "title": "Cancelling a follow-up labels an earlier successful answer Cancelled",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 657,
+    "pullRequest": 677
+  },
+  "prompt": "Complete a task, start another message, then stop the follow-up before it emits an answer.",
+  "assertions": {
+    "requiredBehavior": "Scope answer status labels and render-cache invalidation to the answer\u2019s own user turn, excluding unrelated child-task events."
+  },
+  "executableTests": [
+    "src/renderer/components/MainContent/task-event-presentation.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/MainContent/task-event-presentation.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

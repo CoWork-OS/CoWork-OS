@@ -25,6 +25,35 @@ function event(
 }
 
 describe("deriveRevisionAwarePlanSteps", () => {
+  it("fences the previous failed plan at a new follow-up run and accepts a fresh plan", () => {
+    const history = [
+      event("old-plan", 1, "plan_created", {
+        revision: 8,
+        plan: { steps: [{ id: "old", description: "Read dinner notes", status: "failed" }] },
+      }),
+      event("follow-up", 2, "timeline_step_updated", {
+        legacyType: "task_resumed",
+        newRunStarted: true,
+      }),
+      event("message", 3, "user_message"),
+    ];
+    expect(deriveRevisionAwarePlanSteps(history)).toEqual([]);
+    expect(
+      deriveRevisionAwarePlanSteps([
+        ...history,
+        event("new-plan", 4, "plan_created", {
+          plan: { steps: [{ id: "new", description: "Finish dinner plan", status: "pending" }] },
+        }),
+      ]),
+    ).toMatchObject([{ id: "new", description: "Finish dinner plan", status: "pending" }]);
+    expect(
+      deriveRevisionAwarePlanSteps([
+        history[0],
+        event("checkpoint", 2, "task_resumed", { message: "Task resumed" }),
+      ]),
+    ).toMatchObject([{ id: "old", status: "failed" }]);
+  });
+
   it("selects the newest full revision and ignores stale late status events", () => {
     const steps = deriveRevisionAwarePlanSteps([
       event("plan-1", 1, "plan_created", {

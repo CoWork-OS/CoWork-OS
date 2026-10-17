@@ -124,7 +124,14 @@ function applyPlanDelta(current: PlanStep[], event: TaskEvent, eventIndex: numbe
 
 /** Select the newest valid plan definition, then fold only causally newer step state. */
 export function deriveRevisionAwarePlanSteps(events: TaskEvent[]): PlanStep[] {
-  const ordered = events.map((event, index) => ({ event, index })).sort(compareEventOrder);
+  const history = events.map((event, index) => ({ event, index })).sort(compareEventOrder);
+  // A terminal task's follow-up starts a new run; its historical plan is not
+  // the follow-up's live progress. Ordinary checkpoint resumes retain the plan.
+  const runStart = history.findLastIndex(
+    ({ event }) =>
+      getEffectiveTaskEventType(event) === "task_resumed" && event.payload?.newRunStarted === true,
+  );
+  const ordered = runStart >= 0 ? history.slice(runStart) : history;
   let steps: PlanStep[] = [];
   let selectedRevision = -1;
   let selectedOrderIndex = -1;

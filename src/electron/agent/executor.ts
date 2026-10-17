@@ -793,6 +793,17 @@ function isFeatureEnabled(envName: string, defaultValue = true): boolean {
   return defaultValue;
 }
 
+/** Successful calls that change the Live Canvas page or write its export. */
+const CANVAS_MUTATION_TOOL_NAMES = new Set([
+  "canvas_create",
+  "canvas_push",
+  "canvas_add_asset",
+  "canvas_export",
+]);
+
+export const CANVAS_EXPORT_STEP_DESCRIPTION =
+  "Show every finished picture and clip in the Live Canvas page (canvas_add_asset for any not shown yet), then export the page with canvas_export.";
+
 class TurnLimitExceededError extends Error {
   readonly code = TASK_ERROR_CODES.TURN_LIMIT_EXCEEDED;
 
@@ -12426,6 +12437,8 @@ ${transcript}
       canonical === "create_diagram" ||
       canonical === "canvas_create" ||
       canonical === "canvas_push" ||
+      canonical === "canvas_add_asset" ||
+      canonical === "canvas_export" ||
       canonical === "create_document" ||
       canonical === "generate_document" ||
       canonical === "compile_latex" ||
@@ -13505,6 +13518,27 @@ ${transcript}
       });
     }
 
+    // A Live Canvas page that shows generated pictures or clips must end up
+    // exported. Models tend to fold this into a media step and then skip it, so
+    // it becomes its own step whose contract requires canvas_export.
+    if (
+      this.planBuildsCanvasWithMedia(nextPlan.steps) &&
+      !nextPlan.steps.some((step) => /\bcanvas_export\b/.test(String(step.description || "")))
+    ) {
+      const exportStep: PlanStep = {
+        id: this.nextPlanStepId(nextPlan.steps),
+        description: CANVAS_EXPORT_STEP_DESCRIPTION,
+        kind: "primary",
+        status: "pending",
+      };
+      const lastStep = nextPlan.steps[nextPlan.steps.length - 1];
+      if (lastStep && this.isVerificationStep(lastStep)) {
+        nextPlan.steps.splice(nextPlan.steps.length - 1, 0, exportStep);
+      } else {
+        nextPlan.steps.push(exportStep);
+      }
+    }
+
     // A research answer the user asked to be linked or sourced ends with a
     // check of its links, so the verification repair pass can fix unlinked
     // facts. Plans that already end with a check keep it.
@@ -13576,6 +13610,21 @@ ${transcript}
       });
     }
     return nextPlan;
+  }
+
+  /** A plan that builds a Live Canvas page and also makes pictures or clips for it. */
+  private planBuildsCanvasWithMedia(steps: PlanStep[]): boolean {
+    const texts = steps.map((step) => String(step.description || "").toLowerCase());
+    // The in-app Live Canvas only: an HTML <canvas> in an app being coded is not it.
+    const buildsCanvas = texts.some((text) =>
+      /\b(?:live\s+canvas|in-app\s+canvas|canvas_create|canvas_push|canvas_add_asset)\b/.test(text),
+    );
+    const makesMedia = texts.some((text) =>
+      /\b(?:pictures?|images?|illustrations?|videos?|clips?|animat(?:e|ed|ion|ions)|generate_image|generate_video)\b/.test(
+        text,
+      ),
+    );
+    return buildsCanvas && makesMedia;
   }
 
   private stepRequiresImageVerification(step: PlanStep): boolean {
@@ -13860,8 +13909,18 @@ ${transcript}
         desc,
       );
     if (canvasIntent) {
-      required.add(canonicalizeToolNameUtil("canvas_push"));
-      required.add(canonicalizeToolNameUtil("canvas_create"));
+      const taskHasCanvas =
+        typeof this.toolRegistry?.getLatestCanvasSessionId === "function" &&
+        Boolean(this.toolRegistry.getLatestCanvasSessionId());
+      if (/\bcanvas_export\b/.test(desc)) {
+        // Exporting works on the page the task already has: no new page, and no
+        // push when there is nothing new to add.
+        required.add(canonicalizeToolNameUtil("canvas_export"));
+      } else {
+        required.add(canonicalizeToolNameUtil("canvas_push"));
+        // Later steps update the existing page instead of creating a second one.
+        if (!taskHasCanvas) required.add(canonicalizeToolNameUtil("canvas_create"));
+      }
     }
 
     const inlineDiagramIntent = this.stepIndicatesInlineDiagramIntent(desc);
@@ -13968,6 +14027,16 @@ ${transcript}
       addRequiredToolIfKnown("screen_context_resolve");
     }
 
+    // A step that works through canvas tools writes the page with them. A file it
+    // names ("add scene.png to the page") is an input, not a file to write, unless
+    // the step also says to write or save one.
+    if (
+      /\b(?:canvas_create|canvas_push|canvas_add_asset|canvas_export)\b/.test(desc) &&
+      !/\b(?:write|save)\b[^.!?\n]{0,60}\.[a-z0-9]{2,5}\b/.test(desc)
+    ) {
+      required.delete(canonicalizeToolNameUtil("write_file"));
+      required.delete(canonicalizeToolNameUtil("edit_file"));
+    }
     return required;
   }
 
@@ -37505,7 +37574,7 @@ Return ONLY a JSON object:
                               });
                             }
                           }
-                          if (content.name === "canvas_create" || content.name === "canvas_push") {
+                          if (CANVAS_MUTATION_TOOL_NAMES.has(content.name)) {
                             stepSucceededWithCanvasMutation = true;
                             foundCanvasEvidence = true;
                             this.canvasEvidenceObserved = true;
@@ -38919,7 +38988,7 @@ Return ONLY a JSON object:
                     });
                   }
                 }
-                if (content.name === "canvas_create" || content.name === "canvas_push") {
+                if (CANVAS_MUTATION_TOOL_NAMES.has(content.name)) {
                   stepSucceededWithCanvasMutation = true;
                   foundCanvasEvidence = true;
                   this.canvasEvidenceObserved = true;
@@ -45048,7 +45117,7 @@ Return ONLY a JSON object:
                             );
                           }
                           this.recordToolResult(content.name, result, content.input);
-                          if (content.name === "canvas_create" || content.name === "canvas_push") {
+                          if (CANVAS_MUTATION_TOOL_NAMES.has(content.name)) {
                             this.canvasEvidenceObserved = true;
                           }
                           const currentFailures =

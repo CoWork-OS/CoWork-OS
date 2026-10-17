@@ -33,6 +33,7 @@ import { getSpreadsheetFormatLabel } from "../../shared/spreadsheet-formats";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import { SpreadsheetArtifactCard } from "./SpreadsheetArtifactCard";
+import { FileTypeIcon } from "./FileTypeIcon";
 import "./artifact-viewers.css";
 import { AttachmentTile } from "./AttachmentTile";
 
@@ -935,7 +936,9 @@ export function SpreadsheetArtifactViewer({
     <section className={`spreadsheet-viewer spreadsheet-viewer-${mode}`}>
       <div className="spreadsheet-viewer-tabbar">
         <div className="spreadsheet-viewer-tab">
-          <span className="spreadsheet-viewer-file-icon">X</span>
+          <span className="spreadsheet-viewer-file-icon" aria-hidden="true">
+            <FileTypeIcon kind="spreadsheet" />
+          </span>
           <span className="spreadsheet-viewer-tab-title">{fileName}</span>
         </div>
         <button

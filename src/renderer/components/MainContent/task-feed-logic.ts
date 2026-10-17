@@ -1051,3 +1051,29 @@ export function getTaskFeedReadingAnchorDrift(
   if (!row) return null;
   return row.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.top;
 }
+
+/** Timeline items that mean the agent kept working after a message. */
+const AGENT_ACTIVITY_ITEM_KINDS = new Set([
+  "action_block",
+  "agent-lifecycle",
+  "dispatched-agents",
+  "cli-agent-frame",
+]);
+
+/**
+ * Assistant messages that narrate between agent steps rather than answer the user:
+ * ones followed by more agent activity, and the latest one while the task still runs.
+ */
+export function getStepMessageEventIds(
+  timelineItems: ReadonlyArray<{ kind: string; event?: TaskEvent }>,
+  isTaskWorking: boolean,
+): Set<string> {
+  const ids = new Set<string>();
+  timelineItems.forEach((item, index) => {
+    if (item.kind !== "event" || !item.event?.id) return;
+    if (getEffectiveTaskEventType(item.event) !== "assistant_message") return;
+    const next = timelineItems[index + 1];
+    if (next ? AGENT_ACTIVITY_ITEM_KINDS.has(next.kind) : isTaskWorking) ids.add(item.event.id);
+  });
+  return ids;
+}

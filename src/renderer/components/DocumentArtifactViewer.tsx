@@ -41,6 +41,7 @@ import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
 import { DocumentArtifactCard } from "./DocumentArtifactCard";
 import { ChevronDown } from "lucide-react";
+import { FileTypeIcon, getDocumentIconKind } from "./FileTypeIcon";
 import "./artifact-viewers.css";
 import { AttachmentTile } from "./AttachmentTile";
 
@@ -84,14 +85,6 @@ type ViewerData = NonNullable<FileViewerResult["data"]>;
 
 function getFileName(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
-}
-
-function getDocumentViewerIconLabel(filePath: string, fileType?: ViewerData["fileType"]): string {
-  const lowerPath = filePath.toLowerCase();
-  if (fileType === "markdown" || lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown")) {
-    return "M";
-  }
-  return "W";
 }
 
 function isImageAttachment(attachment: PendingDocumentAttachment): boolean {
@@ -394,7 +387,7 @@ export function DocumentArtifactViewer({
   const formatLabel = preview?.format || getDocumentFormatLabel(fileName);
   const canEditDirectly = Boolean(preview?.canEdit && fileData?.fileType === "docx");
   const isMarkdownDocument = fileData?.fileType === "markdown";
-  const documentIconLabel = getDocumentViewerIconLabel(filePath, fileData?.fileType);
+  const documentIconKind = getDocumentIconKind(filePath, fileData?.fileType);
 
   useEffect(() => {
     if (!canEditDirectly || !preview || !editorRef.current) return;
@@ -592,7 +585,9 @@ export function DocumentArtifactViewer({
     <section className={`document-viewer document-viewer-${mode}`}>
       <div className="document-viewer-tabbar">
         <div className="document-viewer-tab">
-          <span className="document-viewer-file-icon">{documentIconLabel}</span>
+          <span className={`document-viewer-file-icon is-${documentIconKind}`} aria-hidden="true">
+            <FileTypeIcon kind={documentIconKind} />
+          </span>
           <span className="document-viewer-tab-title">{fileName}</span>
         </div>
         <button

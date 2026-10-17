@@ -1,7 +1,9 @@
+import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { memo, useEffect, useId, useRef, useState } from "react";
 
 import {
   LIVE_PLAN_MAX_ROWS,
+  collapsedLivePlanRow,
   windowLivePlanRows,
   type LivePlanItem,
   type LivePlanItemStatus,
@@ -13,6 +15,24 @@ import { TaskStatusPlanStepDescription } from "./TaskStatusPlanStepDescription";
 const LEAVE_MS = 900;
 /** How long a row keeps its "just changed" class, so its glyph animation can finish. */
 const CHANGE_HIGHLIGHT_MS = 700;
+/** Remembers across tasks whether the user folded the plan down to its current step. */
+const COLLAPSED_KEY = "cowork:live-plan:collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return window.localStorage?.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage?.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // Storage can be unavailable; the toggle still works for this session.
+  }
+}
 
 const STATUS_TEXT: Record<LivePlanItemStatus, string> = {
   pending: "Not started",
@@ -158,20 +178,54 @@ export const LivePlan = memo(function LivePlan({
 
   const [expanded, setExpanded] = useState(false);
   useEffect(() => setExpanded(false), [scopeKey]);
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window === "undefined" ? false : readCollapsed(),
+  );
+  const listId = `live-plan-list-${useId().replace(/[^\w-]/g, "")}`;
+  const toggleCollapsed = () => {
+    setCollapsed((value) => {
+      writeCollapsed(!value);
+      return !value;
+    });
+  };
 
   const shown = plan ?? (leaving ? held?.plan : null) ?? null;
   const recentChanges = useRecentStatusChanges(shown?.items, scopeKey);
   if (!shown) return null;
 
-  const rows = windowLivePlanRows(shown, expanded);
   const total = shown.items.length;
+  const canCollapse = total > 1;
+  const isCollapsed = canCollapse && collapsed;
+  const collapsedRow = isCollapsed ? collapsedLivePlanRow(shown) : null;
+  const rows = collapsedRow ? [collapsedRow] : windowLivePlanRows(shown, expanded);
   const summary = `Plan, ${shown.doneCount} of ${total} done`;
 
   return (
-    <section className={`live-plan${leaving ? " is-leaving" : ""}`} aria-label={summary}>
+    <section
+      className={`live-plan${leaving ? " is-leaving" : ""}${isCollapsed ? " is-collapsed" : ""}`}
+      aria-label={summary}
+    >
       <div className="live-plan-inner">
+        {canCollapse && (
+          <button
+            type="button"
+            className="live-plan-toggle"
+            onClick={toggleCollapsed}
+            aria-expanded={!isCollapsed}
+            aria-controls={listId}
+            aria-label={isCollapsed ? `Show all ${total} steps` : "Show only the current step"}
+            title={isCollapsed ? "Show all steps" : "Show only the current step"}
+          >
+            {isCollapsed ? (
+              <ChevronsUpDown aria-hidden="true" />
+            ) : (
+              <ChevronsDownUp aria-hidden="true" />
+            )}
+          </button>
+        )}
         <ol
-          className={`live-plan-list${expanded ? " is-expanded" : ""}`}
+          id={listId}
+          className={`live-plan-list${expanded && !isCollapsed ? " is-expanded" : ""}`}
           aria-busy={shown.activeId ? true : undefined}
         >
           {rows.map((row) => {
@@ -232,7 +286,7 @@ export const LivePlan = memo(function LivePlan({
               </li>
             );
           })}
-          {expanded && total > LIVE_PLAN_MAX_ROWS && (
+          {expanded && !isCollapsed && total > LIVE_PLAN_MAX_ROWS && (
             <li className="live-plan-fold">
               <button type="button" onClick={() => setExpanded(false)}>
                 <span className="live-plan-fold-dots" aria-hidden="true" />

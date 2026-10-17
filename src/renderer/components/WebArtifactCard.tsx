@@ -2,6 +2,7 @@ import { usePositionUpdates } from "../hooks/usePositionUpdates";
 import { getFloatingPosition, type FloatingPosition } from "../utils/floating-position";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { FileTypeIcon } from "./FileTypeIcon";
 import { ArrowUpRight, Clipboard, ExternalLink, FolderOpen } from "lucide-react";
 import { canPreviewWebPageInApp, getWebPageFormatLabel } from "../../shared/web-page-formats";
 
@@ -95,7 +96,7 @@ export function WebArtifactCard({ filePath, workspacePath, onOpenViewer }: WebAr
   return (
     <div className="web-artifact-card">
       <div className="web-artifact-icon" aria-hidden="true">
-        <span>W</span>
+        <FileTypeIcon kind="web" />
       </div>
       <button
         type="button"

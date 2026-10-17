@@ -413,6 +413,7 @@ import {
   shouldScheduleAutoScrollWrite,
   captureTaskFeedReadingAnchor,
   getTaskFeedReadingAnchorDrift,
+  getStepMessageEventIds,
   type TaskFeedReadingAnchor,
 } from "./task-feed-logic";
 import {
@@ -2261,6 +2262,13 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
     }
     return -1;
   }, [timelineItems]);
+  // Narration between agent steps ("I'll read the config next…") isn't a reply the
+  // user acts on, so it gets no copy/feedback row; the row's reserved height only
+  // pushed the next step away.
+  const stepMessageEventIds = useMemo(
+    () => getStepMessageEventIds(timelineItems, isTaskWorking),
+    [timelineItems, isTaskWorking],
+  );
 
   const conversationFlow = useMemo(
     () => (
@@ -2325,6 +2333,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 rejectMenuOpenFor === event.id ? 1 : 0,
                 messageFeedbackMap.get(event.id) ?? "none",
                 lastAssistantMessage?.id === event.id ? 1 : 0,
+                stepMessageEventIds.has(event.id) ? 1 : 0,
                 stepFeedbackOpen ? 1 : 0,
                 stepFeedbackSending ? 1 : 0,
                 stepFeedbackText,
@@ -3294,6 +3303,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                 const inlineFrames = getTaskEventInlineFrames(event);
                 const sourceUserMessage = getPreviousUserMessageText(events, item.eventIndex);
                 const isLastAssistant = isLastAssistantMessageEvent(event, lastAssistantMessage);
+                const isStepMessage = Boolean(event.id) && stepMessageEventIds.has(event.id);
                 const assistantStatusLabel =
                   isLastAssistant && !isConversationOnlySurface
                     ? getAssistantBubbleStatusLabel(
@@ -3407,97 +3417,99 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
                             </div>
                           )}
                           {/* Icon-only actions; reply to a passage by selecting it (SelectionReplyPopover). */}
-                          <div className="message-actions">
-                            <MessageCopyButton text={cleanedMessageText} />
-                            <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
-                            {event.id &&
-                              onForkTaskSessionFromEvent &&
-                              !isBotConversation &&
-                              isLastAssistant && (
-                                <MessageForkButton
-                                  onFork={() => onForkTaskSessionFromEvent(event)}
-                                />
-                              )}
-                            {isLastAssistant && event.id && !isTaskWorking && (
-                              <>
-                                <button
-                                  type="button"
-                                  className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
-                                  title="Helpful"
-                                  aria-label="Helpful"
-                                  aria-pressed={messageFeedbackMap.get(event.id) === "accepted"}
-                                  onClick={() =>
-                                    void handleMessageFeedback({
-                                      messageId: event.id!,
-                                      decision: "accepted",
-                                    })
-                                  }
-                                >
-                                  <ThumbsUp size={15} strokeWidth={1.75} aria-hidden="true" />
-                                </button>
-                                <div
-                                  ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
-                                  className="message-feedback-thumbdown-wrap"
-                                >
+                          {!isStepMessage && (
+                            <div className="message-actions">
+                              <MessageCopyButton text={cleanedMessageText} />
+                              <MessageSpeakButton text={messageText} voiceEnabled={voiceEnabled} />
+                              {event.id &&
+                                onForkTaskSessionFromEvent &&
+                                !isBotConversation &&
+                                isLastAssistant && (
+                                  <MessageForkButton
+                                    onFork={() => onForkTaskSessionFromEvent(event)}
+                                  />
+                                )}
+                              {isLastAssistant && event.id && !isTaskWorking && (
+                                <>
                                   <button
                                     type="button"
-                                    className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
-                                    title="Not helpful"
-                                    aria-label="Not helpful"
-                                    aria-haspopup="menu"
-                                    aria-expanded={rejectMenuOpenFor === event.id}
+                                    className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "accepted" ? " active" : ""}`}
+                                    title="Helpful"
+                                    aria-label="Helpful"
+                                    aria-pressed={messageFeedbackMap.get(event.id) === "accepted"}
                                     onClick={() =>
-                                      setRejectMenuOpenFor((v) =>
-                                        v === event.id ? null : (event.id ?? null),
-                                      )
+                                      void handleMessageFeedback({
+                                        messageId: event.id!,
+                                        decision: "accepted",
+                                      })
                                     }
                                   >
-                                    <ThumbsDown size={15} strokeWidth={1.75} aria-hidden="true" />
+                                    <ThumbsUp size={15} strokeWidth={1.75} aria-hidden="true" />
                                   </button>
-                                  {rejectMenuOpenFor === event.id && (
-                                    <div className="message-feedback-menu" role="menu">
-                                      {(
-                                        [
-                                          ["incorrect", "Incorrect"],
-                                          ["too_verbose", "Too verbose"],
-                                          ["ignored_instructions", "Ignored instructions"],
-                                          ["wrong_tone", "Wrong tone"],
-                                          ["unsafe", "Unsafe / unwanted"],
-                                        ] as const
-                                      ).map(([reason, label]) => (
-                                        <button
-                                          key={reason}
-                                          type="button"
-                                          role="menuitem"
-                                          className="message-feedback-reason"
-                                          onClick={() =>
-                                            void handleMessageFeedback({
-                                              messageId: event.id!,
-                                              decision: "rejected",
-                                              reason,
-                                            })
-                                          }
-                                        >
-                                          {label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              </>
-                            )}
-                            {isLastAssistant && isTaskWorking && !isBotConversation && (
-                              <button
-                                type="button"
-                                className="message-action-btn bubble-feedback-toggle"
-                                onClick={() => setStepFeedbackOpen((o) => !o)}
-                                title="Give feedback"
-                                aria-label="Give feedback"
-                              >
-                                <Ellipsis size={15} strokeWidth={1.75} aria-hidden="true" />
-                              </button>
-                            )}
-                          </div>
+                                  <div
+                                    ref={rejectMenuOpenFor === event.id ? rejectMenuRef : undefined}
+                                    className="message-feedback-thumbdown-wrap"
+                                  >
+                                    <button
+                                      type="button"
+                                      className={`message-action-btn message-feedback-btn${messageFeedbackMap.get(event.id) === "rejected" ? " active" : ""}`}
+                                      title="Not helpful"
+                                      aria-label="Not helpful"
+                                      aria-haspopup="menu"
+                                      aria-expanded={rejectMenuOpenFor === event.id}
+                                      onClick={() =>
+                                        setRejectMenuOpenFor((v) =>
+                                          v === event.id ? null : (event.id ?? null),
+                                        )
+                                      }
+                                    >
+                                      <ThumbsDown size={15} strokeWidth={1.75} aria-hidden="true" />
+                                    </button>
+                                    {rejectMenuOpenFor === event.id && (
+                                      <div className="message-feedback-menu" role="menu">
+                                        {(
+                                          [
+                                            ["incorrect", "Incorrect"],
+                                            ["too_verbose", "Too verbose"],
+                                            ["ignored_instructions", "Ignored instructions"],
+                                            ["wrong_tone", "Wrong tone"],
+                                            ["unsafe", "Unsafe / unwanted"],
+                                          ] as const
+                                        ).map(([reason, label]) => (
+                                          <button
+                                            key={reason}
+                                            type="button"
+                                            role="menuitem"
+                                            className="message-feedback-reason"
+                                            onClick={() =>
+                                              void handleMessageFeedback({
+                                                messageId: event.id!,
+                                                decision: "rejected",
+                                                reason,
+                                              })
+                                            }
+                                          >
+                                            {label}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                              {isLastAssistant && isTaskWorking && !isBotConversation && (
+                                <button
+                                  type="button"
+                                  className="message-action-btn bubble-feedback-toggle"
+                                  onClick={() => setStepFeedbackOpen((o) => !o)}
+                                  title="Give feedback"
+                                  aria-label="Give feedback"
+                                >
+                                  <Ellipsis size={15} strokeWidth={1.75} aria-hidden="true" />
+                                </button>
+                              )}
+                            </div>
+                          )}
                           {/* Memory the reply used (hidden memory_used events, attributed in main). */}
                           {!isBotConversation && (
                             <MemoryUsedAffordance
@@ -3825,6 +3837,7 @@ const TaskConversationFlow = memo(function TaskConversationFlow(props: any) {
       defaultTranscriptMode,
       lastActionBlockTimelineIndex,
       lastAssistantMessage,
+      stepMessageEventIds,
       returnToDefaultTranscript,
       timelineItems,
       timelineRef,

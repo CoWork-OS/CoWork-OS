@@ -2,10 +2,10 @@ import { usePositionUpdates } from "../hooks/usePositionUpdates";
 import { getFloatingPosition, type FloatingPosition } from "../utils/floating-position";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { FileTypeIcon } from "./FileTypeIcon";
 import { ArrowUpRight, FolderOpen } from "lucide-react";
 import {
   canOpenSpreadsheetInApp,
-  getSpreadsheetFileExtension,
   getSpreadsheetFormatLabel,
 } from "../../shared/spreadsheet-formats";
 
@@ -30,9 +30,7 @@ export function SpreadsheetArtifactCard({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const fileName = getFileName(filePath);
   const formatLabel = getSpreadsheetFormatLabel(filePath);
-  const extension = getSpreadsheetFileExtension(filePath);
   const canOpenInViewer = canOpenSpreadsheetInApp(filePath);
-  const iconLabel = extension === ".numbers" ? "N" : extension === ".gsheet" ? "G" : "X";
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -102,7 +100,7 @@ export function SpreadsheetArtifactCard({
   return (
     <div className="spreadsheet-artifact-card">
       <div className="spreadsheet-artifact-icon" aria-hidden="true">
-        <span>{iconLabel}</span>
+        <FileTypeIcon kind="spreadsheet" />
       </div>
       <button
         type="button"

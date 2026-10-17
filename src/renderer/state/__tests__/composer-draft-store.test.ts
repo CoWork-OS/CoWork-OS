@@ -4,6 +4,91 @@ import { createEmptyComposerDraft } from "../../../shared/composer-drafts";
 import { ComposerDraftStore } from "../composer-draft-store";
 
 describe("ComposerDraftStore", () => {
+  it("keeps a submitted revision stable across repeated navigation and unmount flushes", async () => {
+    let persisted: ReturnType<typeof createEmptyComposerDraft> | null = null;
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => {
+      const accepted = !persisted || draft.revision > persisted.revision;
+      if (accepted) persisted = draft;
+      return { accepted, draft: persisted };
+    });
+    const store = new ComposerDraftStore({ transport: { upsert } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: null };
+    const submitted = store.update(input, { text: "Create a shopping spreadsheet" });
+
+    await store.flush(submitted.draftKey);
+    await store.flush(submitted.draftKey);
+    await store.flushAll();
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(store.get(submitted.draftKey)?.revision).toBe(submitted.revision);
+  });
+
+  it("acknowledges the latest revision when an edit arrives before a queued flush dispatches", async () => {
+    let persisted: ReturnType<typeof createEmptyComposerDraft> | null = null;
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => {
+      const accepted = !persisted || draft.revision > persisted.revision;
+      if (accepted) persisted = draft;
+      return { accepted, draft: persisted };
+    });
+    const store = new ComposerDraftStore({ transport: { upsert } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: null };
+    const first = store.update(input, { text: "First version" });
+    const flushing = store.flush(first.draftKey);
+    const latest = store.update(input, { text: "Complete request" });
+    const secondFlush = store.flush(latest.draftKey);
+
+    await Promise.all([flushing, secondFlush]);
+    await store.flushAll();
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(upsert).toHaveBeenCalledWith(latest);
+    expect(store.get(latest.draftKey)?.revision).toBe(latest.revision);
+  });
+
+  it("still persists attachment-only edits and an explicitly emptied draft", async () => {
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => ({
+      accepted: true,
+      draft,
+    }));
+    const store = new ComposerDraftStore({ transport: { upsert } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: null };
+    const first = store.update(input, { text: "Describe the attachment" });
+    await store.flush(first.draftKey);
+    const attachment = {
+      refId: "12345678-1234-1234-1234-123456789012",
+      name: "notes.txt",
+      size: 1,
+      sha256: "a".repeat(64),
+    };
+    const staged = store.update(input, { attachments: [attachment] });
+    await store.flush(staged.draftKey);
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ attachments: [attachment], revision: staged.revision }),
+    );
+
+    const emptied = store.update(input, { text: "", attachments: [] });
+    await store.flush(emptied.draftKey);
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: "", attachments: [], revision: emptied.revision }),
+    );
+    expect(upsert).toHaveBeenCalledTimes(3);
+  });
+
+  it("persists a draft explicitly installed with persistence enabled", async () => {
+    const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => ({
+      accepted: true,
+      draft,
+    }));
+    const store = new ComposerDraftStore({ transport: { upsert } });
+    const draft = createEmptyComposerDraft({ scope: "local", workspaceId: "w", taskId: null });
+    draft.text = "Recovered draft";
+    store.setDraft(draft, true);
+
+    await store.flush(draft.draftKey);
+
+    expect(upsert).toHaveBeenCalledWith(draft);
+  });
+
   it("restores task-scoped text and flushes the newest revision", async () => {
     const persisted = new Map<string, ReturnType<typeof createEmptyComposerDraft>>();
     const upsert = vi.fn(async (draft: ReturnType<typeof createEmptyComposerDraft>) => {

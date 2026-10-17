@@ -2,6 +2,7 @@ import { usePositionUpdates } from "../hooks/usePositionUpdates";
 import { getFloatingPosition, type FloatingPosition } from "../utils/floating-position";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { FileTypeIcon } from "./FileTypeIcon";
 import { ArrowUpRight, FolderOpen } from "lucide-react";
 import {
   canPreviewPresentationInApp,
@@ -99,7 +100,7 @@ export function PresentationArtifactCard({
   return (
     <div className="presentation-artifact-card">
       <div className="presentation-artifact-icon" aria-hidden="true">
-        <span>P</span>
+        <FileTypeIcon kind="presentation" />
       </div>
       <button
         type="button"

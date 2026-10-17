@@ -15,10 +15,14 @@
 # or weakens checks for anything else on the Mac.
 #
 # Usage (one line):
-#   curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh | bash
+#   curl -fsSL https://coworkosapp.com/install.sh | bash
+#
+# coworkosapp.com/install.sh serves this file from the main branch; the raw
+# GitHub URL (raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh)
+# works the same way.
 #
 # With options:
-#   curl -fsSL https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/scripts/install-macos.sh \
+#   curl -fsSL https://coworkosapp.com/install.sh \
 #     | bash -s -- --version 0.5.60 --install-dir "$HOME/Applications" --no-launch
 #
 # Or download it first, read it, then run it:
@@ -83,7 +87,7 @@ CoWork OS macOS installer
 
 Usage:
   install-macos.sh [options]
-  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/main/scripts/install-macos.sh | bash -s -- [options]
+  curl -fsSL https://coworkosapp.com/install.sh | bash -s -- [options]
 
 Options:
   --version X.Y.Z      Install a specific release instead of the latest one.
@@ -192,7 +196,7 @@ detect_arch() {
 
 preflight() {
   if [ "$(uname -s)" != "Darwin" ]; then
-    die "This installer is for macOS. Windows users: download the installer from https://github.com/$REPO/releases/latest. Other systems: see the README."
+    die "This installer is for macOS. Windows users, in PowerShell: irm https://coworkosapp.com/install.ps1 | iex. Other systems: npm install -g cowork-os."
   fi
   local tool
   for tool in curl ditto codesign plutil sw_vers sysctl xattr; do

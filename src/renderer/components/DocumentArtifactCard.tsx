@@ -3,11 +3,8 @@ import { getFloatingPosition, type FloatingPosition } from "../utils/floating-po
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, FolderOpen } from "lucide-react";
-import {
-  canPreviewDocumentInApp,
-  getDocumentFileExtension,
-  getDocumentFormatLabel,
-} from "../../shared/document-formats";
+import { canPreviewDocumentInApp, getDocumentFormatLabel } from "../../shared/document-formats";
+import { FileTypeIcon, getDocumentIconKind } from "./FileTypeIcon";
 
 type DocumentArtifactCardProps = {
   filePath: string;
@@ -17,15 +14,6 @@ type DocumentArtifactCardProps = {
 
 function getFileName(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
-}
-
-function getDocumentIconLabel(filePath: string): string {
-  const extension = getDocumentFileExtension(filePath);
-  if (extension === ".md" || extension === ".markdown") return "M";
-  if (extension === ".pages") return "P";
-  if (extension === ".rtf") return "R";
-  if (extension === ".odt" || extension === ".ott") return "O";
-  return "W";
 }
 
 export function DocumentArtifactCard({
@@ -40,7 +28,7 @@ export function DocumentArtifactCard({
   const fileName = getFileName(filePath);
   const formatLabel = getDocumentFormatLabel(filePath);
   const canOpenInViewer = canPreviewDocumentInApp(filePath);
-  const iconLabel = getDocumentIconLabel(filePath);
+  const iconKind = getDocumentIconKind(filePath);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -109,8 +97,8 @@ export function DocumentArtifactCard({
 
   return (
     <div className="document-artifact-card">
-      <div className="document-artifact-icon" aria-hidden="true">
-        <span>{iconLabel}</span>
+      <div className={`document-artifact-icon is-${iconKind}`} aria-hidden="true">
+        <FileTypeIcon kind={iconKind} />
       </div>
       <button
         type="button"

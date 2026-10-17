@@ -298,6 +298,26 @@ describe("OpenClaw reader", () => {
     expectNoSecrets(toPreview(plan), OPENCLAW_SECRETS);
   });
 
+  it("reads JSON5 with comments, unquoted keys and trailing commas", () => {
+    fs.writeFileSync(
+      path.join(openclawHome, "openclaw.json"),
+      [
+        "// written by hand",
+        "{",
+        "  agents: { defaults: { model: 'anthropic/claude-opus-4', }, },",
+        "  /* trailing comma below */",
+        "  channels: {},",
+        "}",
+      ].join("\n"),
+    );
+    const plan = readOpenClawHome(openclawHome, { withSecrets: false, nowMs: NOW, homedir: base });
+    expect(byId(plan, "model").payload).toEqual({
+      kind: "model",
+      provider: "anthropic",
+      model: "claude-opus-4",
+    });
+  });
+
   it("reports a config it cannot parse instead of failing", () => {
     fs.writeFileSync(path.join(openclawHome, "openclaw.json"), "{ not json5");
     const plan = readOpenClawHome(openclawHome, { withSecrets: false, nowMs: NOW, homedir: base });

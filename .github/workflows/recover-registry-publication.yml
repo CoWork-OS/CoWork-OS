@@ -16,6 +16,8 @@ permissions:
   contents: write
   packages: write
   actions: read
+  # npm trusted publishing (OIDC); the token secret stays as a fallback.
+  id-token: write
 
 concurrency:
   group: release-${{ github.repository }}-${{ inputs.tag }}

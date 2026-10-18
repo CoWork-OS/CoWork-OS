@@ -4,7 +4,13 @@ import { createHash } from "node:crypto";
 import { chmod, mkdtemp, symlink, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inspectRegistry, publishPackage, runCli } from "./registry-publication.mjs";
+import {
+  inspectRegistry,
+  publishPackage,
+  publishAuthMode,
+  redactPublishOutput,
+  runCli,
+} from "./registry-publication.mjs";
 
 const bytes = Buffer.from("bundle");
 const otherBytes = Buffer.from("different bundle");
@@ -557,4 +563,49 @@ test("CLI verify rejects an absent package", async () => {
       }),
     /Verification failed for npm/,
   );
+});
+
+test("publish output is kept for the failure message with tokens masked", () => {
+  const token = "npm_" + "A".repeat(36);
+  const output = [
+    "npm notice Publishing to https://registry.npmjs.org/",
+    `npm error 403 Forbidden - PUT https://registry.npmjs.org/cowork-os - token ${token} expired`,
+    "//registry.npmjs.org/:_authToken=npm_" + "B".repeat(36),
+    "ghp_" + "C".repeat(36),
+  ].join("\n");
+  const redacted = redactPublishOutput(output, token);
+  assert.match(redacted, /403 Forbidden/);
+  assert.doesNotMatch(redacted, /AAAA|BBBB|CCCC/);
+  assert.equal(redactPublishOutput("x".repeat(10_000), token).length, 4_000);
+});
+
+test("a failed publish reports npm's error in the final message", async () => {
+  await withBundle(entry, bytes, async (directory) => {
+    await assert.rejects(
+      () =>
+        publishPackage(entry, {
+          directory,
+          fetchImpl: async () => response(200, packument()),
+          publishImpl: async () => {
+            throw new Error("npm publish failed (exit 1):\nnpm error code E403");
+          },
+          sleep: async () => {},
+        }),
+      /could not be verified: npm publish failed \(exit 1\):\nnpm error code E403/,
+    );
+  });
+});
+
+test("npm publishes through GitHub OIDC when the job can mint a token", () => {
+  const oidc = {
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid/token",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "x",
+  };
+  const github = { ...entry, id: "github", name: "@cowork-os/cowork-os" };
+  assert.equal(publishAuthMode(entry, "npm-token", oidc), "oidc");
+  assert.equal(publishAuthMode(entry, undefined, oidc), "oidc");
+  assert.equal(publishAuthMode(entry, "npm-token", {}), "token");
+  assert.equal(publishAuthMode(entry, undefined, {}), null);
+  // GitHub Packages keeps using its token even when OIDC is available.
+  assert.equal(publishAuthMode(github, "gh-token", oidc), "token");
 });

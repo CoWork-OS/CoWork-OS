@@ -517,6 +517,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare-registry]
     timeout-minutes: 20
+    # id-token lets npm publish through trusted publishing (OIDC) instead of a
+    # stored token. A job-level block replaces the workflow one, so repeat it.
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+      id-token: write
     env:
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_SHA: ${{ github.sha }}

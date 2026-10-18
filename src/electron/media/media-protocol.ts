@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -25,7 +26,7 @@ type MediaTokenRecord = {
 const mediaTokenStore = new Map<string, MediaTokenRecord>();
 
 function getElectronProtocol(): typeof import("electron").protocol {
-  return require("electron").protocol as typeof import("electron").protocol;
+  return createRequire(__filename)("electron").protocol as typeof import("electron").protocol;
 }
 
 function purgeExpiredTokens(now = Date.now()): void {

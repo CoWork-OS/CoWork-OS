@@ -96,6 +96,28 @@ db.transaction(() => {})();
     expect(at(4)).toBe("(module)");
   });
 
+  it.each([
+    'import { createRequire } from "node:module"; const Database = createRequire(__filename)("better-sqlite3");',
+    'import { createRequire as makeRequire } from "module"; const loadNative = makeRequire(import.meta.url); const Database = loadNative("better-sqlite3");',
+    'import { createRequire as makeRequire } from "node:module"; const Database = makeRequire(__filename)("better-sqlite3");',
+    'import * as nodeModule from "node:module"; const Database = nodeModule.createRequire(__filename)("better-sqlite3");',
+    'import { createRequire } from "node:module"; const require = createRequire(import.meta.url); const Database = require("better-sqlite3");',
+  ])("counts one runtime SQLite import through a Node-created loader: %s", (source) => {
+    expect(scanSource("src/loader.ts", source).counts.runtimeImport).toBe(1);
+  });
+
+  it.each([
+    'import type { createRequire } from "node:module"; const Database = createRequire(__filename)("better-sqlite3");',
+    'import { type createRequire } from "node:module"; const Database = createRequire(__filename)("better-sqlite3");',
+    'import { createRequire } from "unrelated-package"; const Database = createRequire(__filename)("better-sqlite3");',
+    'function createRequire() { return () => {}; } createRequire()("better-sqlite3");',
+    'import { createRequire } from "node:module"; const loadNative = createRequire(__filename); loadNative("another-package");',
+    'import { createRequire } from "node:module"; // createRequire(__filename)("better-sqlite3")',
+    'import { createRequire } from "node:module"; const loadNative = createRequire(__filename); function inspect(loadNative: (id: string) => void) { loadNative("better-sqlite3"); }',
+  ])("does not invent a Node runtime SQLite import: %s", (source) => {
+    expect(scanSource("src/loader.ts", source).counts.runtimeImport).toBe(0);
+  });
+
   it("renders a markdown report", () => {
     const scan = scanSource("src/electron/a.ts", "db.transaction(() => {})();\n");
     const markdown = renderMarkdown({

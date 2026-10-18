@@ -126,7 +126,7 @@ export class BrowserUseCloudClient {
         headers: {
           "Content-Type": "application/json",
           "X-Browser-Use-API-Key": this.apiKey,
-          ...(init.headers || {}),
+          ...init.headers,
         },
       });
       if (response.ok) return (await response.json()) as T;
@@ -231,8 +231,8 @@ export function isPrivateOrLocalBrowserTarget(rawUrl: unknown): boolean {
       const mapped172 = host.match(/^::ffff:172\.(\d+)\./);
       if (mapped172 && Number(mapped172[1]) >= 16 && Number(mapped172[1]) <= 31) return true;
     }
-    if (/^127\./.test(host) || /^10\./.test(host) || /^0\./.test(host)) return true;
-    if (/^192\.168\./.test(host)) return true;
+    if (host.startsWith("127.") || host.startsWith("10.") || host.startsWith("0.")) return true;
+    if (host.startsWith("192.168.")) return true;
     const parts = host.split(".").map((part) => Number(part));
     if (
       parts.length === 4 &&

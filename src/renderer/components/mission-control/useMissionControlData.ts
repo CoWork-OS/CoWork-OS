@@ -32,6 +32,7 @@ import type {
   StrategicPlannerConfig,
   StrategicPlannerRun,
   Task,
+  TaskEvent,
   Workspace,
 } from "../../../shared/types";
 import { getTaskEventStatus } from "../../../shared/task-event-status-map";
@@ -43,7 +44,6 @@ import { attentionWaitingByTask } from "../../../shared/attention";
 import { attentionInScope } from "../../utils/attention-scope";
 
 type AgentRole = AgentRoleData;
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
 const logger = createRendererLogger("MissionControlData");
 
 export const ALL_WORKSPACES_ID = "__all__";
@@ -1085,8 +1085,8 @@ export function useMissionControlData(
       }
     });
 
-    const unsubTaskEvents = window.electronAPI.onTaskEvent((event: Any) => {
-      const effectiveType = getEffectiveTaskEventType(event as Any);
+    const unsubTaskEvents = window.electronAPI.onTaskEvent((event: TaskEvent) => {
+      const effectiveType = getEffectiveTaskEventType(event);
       const isAutoApproval =
         effectiveType === "approval_requested" && event.payload?.autoApproved === true;
       if (effectiveType === "task_created") {

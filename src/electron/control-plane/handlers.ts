@@ -1,3 +1,11 @@
+import type {
+  ManagedEnvironment,
+  Workspace,
+  ChannelData,
+  ChannelSecurityConfig,
+} from "../../shared/types";
+import type { ControlPlaneClient, ClientScope } from "./client";
+import type { ControlPlaneServerEvent } from "./server";
 import { registerBotWorkControlMethods } from "./registerBotWorkControlMethods";
 import { registerBotResponsibilityMethods } from "./registerBotResponsibilityMethods";
 import { registerAutomationRuntimeMethods } from "./registerAutomationRuntimeMethods";
@@ -9,6 +17,11 @@ import { registerPactMethods } from "./registerPactMethods";
  * IPC handlers for managing the WebSocket control plane from the renderer.
  */
 
+/**
+ * Control Plane IPC Handlers
+ *
+ * IPC handlers for managing the WebSocket control plane from the renderer.
+ */
 import { AgentRoleRepository } from "../agents/agent-repository-facades";
 import { TaskRepository, WorkspaceRepository } from "../database/repository-facades";
 import { generateAndApplyTaskTitle, shouldGenerateTaskTitle } from "../agent/task-title-generator";
@@ -39,13 +52,11 @@ import type {
   TailscaleAvailability,
   TailscaleMode,
   DeviceProxyRequest,
-  ImageAttachment,
   ManagedDevice,
   ManagedDeviceAlert,
   ManagedDeviceAttentionState,
   ManagedDeviceSummary,
   NodeInfo,
-  NodePlatform,
   RemoteGatewayConfig,
   RemoteGatewayStatus,
   SSHTunnelConfig,
@@ -220,18 +231,6 @@ function toNodePlatform(platform?: string): "ios" | "android" | "macos" | "linux
   }
 }
 
-async function getRemoteGatewayNodeInfo(): Promise<import("../../shared/types").NodeInfo | null> {
-  const settings = ControlPlaneSettingsManager.loadSettings();
-  const activeRemoteId =
-    settings.activeManagedDeviceId && settings.activeManagedDeviceId !== LOCAL_MANAGED_DEVICE_ID
-      ? settings.activeManagedDeviceId
-      : settings.activeRemoteDeviceId;
-  if (!activeRemoteId) return null;
-  const device = findManagedDeviceById(activeRemoteId);
-  if (!device || device.role !== "remote") return null;
-  return getManagedRemoteNodeInfo(device);
-}
-
 /**
  * Get the current control plane server instance
  */
@@ -245,13 +244,37 @@ export function getStartupAutoConnectRemoteDeviceIds(
   return devices.filter((device) => device.autoConnect === true).map((device) => device.id);
 }
 
-function requireScope(client: any, scope: "admin" | "read" | "write" | "operator"): void {
-  if (!client?.hasScope?.(scope)) {
+function parameterRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function errorMessage(error: unknown, fallback = String(error)): string {
+  return error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message
+    ? error.message
+    : fallback;
+}
+
+function requireScope(client: unknown, scope: ClientScope): void {
+  if (
+    !client ||
+    typeof client !== "object" ||
+    !("hasScope" in client) ||
+    typeof client.hasScope !== "function" ||
+    !client.hasScope(scope)
+  ) {
     throw { code: ErrorCodes.UNAUTHORIZED, message: `Missing required scope: ${scope}` };
   }
 }
 
-export function redactManagedEnvironmentForRead(environment: any) {
+export function redactManagedEnvironmentForRead(
+  environment: ManagedEnvironment | null | undefined,
+) {
   if (!environment) return environment;
   return {
     ...environment,
@@ -706,7 +729,7 @@ async function getLocalStorageSummary(db: Any): Promise<{
   workspaceRoots: Array<{ id: string; name: string; path: string }>;
 }> {
   const workspaceRepo = new WorkspaceRepository(db);
-  const artifactRepo = new ArtifactRepository(db);
+  new ArtifactRepository(db);
   const workspaces = (await workspaceRepo.findAll()).filter(
     (workspace) => !workspace.isTemp && !isTempWorkspaceId(workspace.id),
   );
@@ -1668,7 +1691,7 @@ function sanitizeTaskCreateParams(params: unknown): {
   shellAccess?: boolean;
   generateTitle?: boolean;
 } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   if (p.generateTitle !== undefined && typeof p.generateTitle !== "boolean") {
     throw { code: ErrorCodes.INVALID_PARAMS, message: "generateTitle must be a boolean" };
   }
@@ -1702,7 +1725,7 @@ function sanitizeTaskCreateParams(params: unknown): {
 
   let permissionMode: AgentConfig["permissionMode"] | undefined;
   if (typeof p.permissionMode === "string") {
-    const allowedPermissionModes = new Set<NonNullable<AgentConfig["permissionMode"]>>([
+    const allowedPermissionModes = new Set<string>([
       "default",
       "plan",
       "dangerous_only",
@@ -1713,7 +1736,7 @@ function sanitizeTaskCreateParams(params: unknown): {
     if (!allowedPermissionModes.has(p.permissionMode)) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid permissionMode" };
     }
-    permissionMode = p.permissionMode;
+    permissionMode = p.permissionMode as NonNullable<AgentConfig["permissionMode"]>;
   }
 
   const agentConfig: AgentConfig | undefined = (() => {
@@ -1759,7 +1782,7 @@ function sanitizeTaskCreateParams(params: unknown): {
 }
 
 function sanitizeTaskIdParams(params: unknown): { taskId: string } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   if (!taskId) throw { code: ErrorCodes.INVALID_PARAMS, message: "taskId is required" };
   return { taskId };
@@ -1770,7 +1793,7 @@ function sanitizeApprovalRespondParams(params: unknown): {
   approved: boolean;
   expectedRevisionHash?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const approvalId = typeof p.approvalId === "string" ? p.approvalId.trim() : "";
   const approved = p.approved;
   const expectedRevisionHash = p.expectedRevisionHash;
@@ -1816,7 +1839,7 @@ function sanitizeTaskListParams(params: unknown): {
   offset: number;
   workspaceId?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
   const rawOffset =
@@ -1832,7 +1855,7 @@ function sanitizeApprovalListParams(params: unknown): {
   offset: number;
   taskId?: string;
 } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
   const rawOffset =
@@ -1844,7 +1867,7 @@ function sanitizeApprovalListParams(params: unknown): {
 }
 
 function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: number } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const { taskId } = sanitizeTaskIdParams(params);
   const rawLimit =
     typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.floor(p.limit) : 200;
@@ -1853,7 +1876,7 @@ function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: num
 }
 
 function sanitizeWorkspaceIdParams(params: unknown): { workspaceId: string } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
   if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
   return { workspaceId };
@@ -2130,7 +2153,7 @@ export function sanitizeManagedSessionSendEventParams(params: unknown): Any {
 }
 
 function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: string } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const name = typeof p.name === "string" ? p.name.trim() : "";
   const rawPath = typeof p.path === "string" ? p.path.trim() : "";
   if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: "name is required" };
@@ -2150,7 +2173,7 @@ function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: s
 }
 
 function sanitizeChannelIdParams(params: unknown): { channelId: string } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
   if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: "channelId is required" };
   return { channelId };
@@ -2163,7 +2186,7 @@ function sanitizeChannelCreateParams(params: unknown): {
   config: Record<string, unknown>;
   securityConfig: Record<string, unknown>;
 } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const type = typeof p.type === "string" ? p.type.trim() : "";
   const name = typeof p.name === "string" ? p.name.trim() : "";
   const enabled = typeof p.enabled === "boolean" ? p.enabled : false;
@@ -2210,11 +2233,11 @@ function sanitizeChannelUpdateParams(params: unknown): {
     securityConfig?: Record<string, unknown>;
   };
 } {
-  const p = (params ?? {}) as any;
+  const p = parameterRecord(params);
   const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
   if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: "channelId is required" };
 
-  const updates: any = {};
+  const updates: ReturnType<typeof sanitizeChannelUpdateParams>["updates"] = {};
   if (p.name !== undefined) {
     const name = typeof p.name === "string" ? p.name.trim() : "";
     if (!name)
@@ -2350,14 +2373,14 @@ function attachAgentDaemonTaskBridge(
   const unsubscribes: Array<() => void> = [];
 
   for (const eventType of allowlist) {
-    const handler = async (evt: any) => {
+    const handler = async (evt: Record<string, unknown>) => {
       try {
         const taskId = typeof evt?.taskId === "string" ? evt.taskId : "";
         if (!taskId) return;
 
         const payload =
           evt?.payload && typeof evt.payload === "object" && !Array.isArray(evt.payload)
-            ? ({ ...evt.payload } as any)
+            ? ({ ...evt.payload } as Record<string, unknown>)
             : {};
 
         if (eventType === "timeline_step_updated" && typeof payload.message === "string") {
@@ -2369,24 +2392,27 @@ function attachAgentDaemonTaskBridge(
         }
 
         if (eventType === "timeline_evidence_attached" && Array.isArray(payload.evidenceRefs)) {
-          payload.evidenceRefs = payload.evidenceRefs.slice(0, 20).map((ref: any) => ({
-            evidenceId:
-              typeof ref?.evidenceId === "string" && ref.evidenceId.trim().length > 0
-                ? ref.evidenceId.trim()
-                : "evidence",
-            sourceType:
-              typeof ref?.sourceType === "string" && ref.sourceType.trim().length > 0
-                ? ref.sourceType.trim()
-                : "other",
-            sourceUrlOrPath:
-              typeof ref?.sourceUrlOrPath === "string"
-                ? truncateForBroadcastKey(ref.sourceUrlOrPath, "sourceUrlOrPath")
-                : "",
-            snippet:
-              typeof ref?.snippet === "string"
-                ? truncateForBroadcastKey(ref.snippet, "snippet")
-                : undefined,
-          }));
+          payload.evidenceRefs = payload.evidenceRefs.slice(0, 20).map((value: unknown) => {
+            const ref = parameterRecord(value);
+            return {
+              evidenceId:
+                typeof ref?.evidenceId === "string" && ref.evidenceId.trim().length > 0
+                  ? ref.evidenceId.trim()
+                  : "evidence",
+              sourceType:
+                typeof ref?.sourceType === "string" && ref.sourceType.trim().length > 0
+                  ? ref.sourceType.trim()
+                  : "other",
+              sourceUrlOrPath:
+                typeof ref?.sourceUrlOrPath === "string"
+                  ? truncateForBroadcastKey(ref.sourceUrlOrPath, "sourceUrlOrPath")
+                  : "",
+              snippet:
+                typeof ref?.snippet === "string"
+                  ? truncateForBroadcastKey(ref.snippet, "snippet")
+                  : undefined,
+            };
+          });
         }
 
         const sanitizedPayload = sanitizeForBroadcast(payload);
@@ -2450,7 +2476,7 @@ function attachAgentDaemonTaskBridge(
     };
 
     // The broadcast awaits storage reads; the listener itself stays synchronous.
-    const listener = (evt: any) => void handler(evt);
+    const listener = (evt: Record<string, unknown>) => void handler(evt);
     daemon.on(eventType, listener);
     unsubscribes.push(() => daemon.off(eventType, listener));
   }
@@ -2464,7 +2490,7 @@ export async function startControlPlaneFromSettings(
   options: {
     deps?: ControlPlaneMethodDeps;
     forceEnable?: boolean;
-    onEvent?: (event: any) => void;
+    onEvent?: (event: ControlPlaneServerEvent) => void;
   } = {},
 ): Promise<{
   ok: boolean;
@@ -2638,9 +2664,9 @@ export async function startControlPlaneFromSettings(
         ? { httpsUrl: tailscaleResult.httpsUrl, wssUrl: tailscaleResult.wssUrl }
         : undefined,
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error("[ControlPlane] Auto-start error:", error);
-    return { ok: false, error: error?.message || String(error) };
+    return { ok: false, error: errorMessage(error) };
   }
 }
 
@@ -2667,7 +2693,7 @@ function registerACPMethodsOnServer(
       let workspaceId = params.workspaceId;
       if (!workspaceId) {
         const workspaceRepo = new WorkspaceRepository(db);
-        const workspaces = (await workspaceRepo.findAll()).filter((w: any) => !w.isTemp);
+        const workspaces = (await workspaceRepo.findAll()).filter((w) => !w.isTemp);
         if (workspaces.length > 0) {
           workspaceId = workspaces[0].id;
         } else {
@@ -2684,7 +2710,7 @@ function registerACPMethodsOnServer(
           PermissionSettingsManager.loadSettings(),
         ),
         assignedAgentRoleId: params.assignedAgentRoleId,
-      } as any);
+      });
       await deps.agentDaemon.startTask(task);
       return { taskId: task.id };
     },
@@ -2692,7 +2718,7 @@ function registerACPMethodsOnServer(
       let workspaceId = params.workspaceId;
       if (!workspaceId) {
         const workspaceRepo = new WorkspaceRepository(db);
-        const workspaces = (await workspaceRepo.findAll()).filter((w: any) => !w.isTemp);
+        const workspaces = (await workspaceRepo.findAll()).filter((w) => !w.isTemp);
         if (workspaces.length > 0) {
           workspaceId = workspaces[0].id;
         } else {
@@ -2768,7 +2794,7 @@ function registerACPMethodsOnServer(
     getTask: async (taskId) => {
       const task = await taskRepo.findById(taskId);
       if (!task) return undefined;
-      return { id: task.id, status: task.status, error: (task as any).error };
+      return { id: task.id, status: task.status, error: task.error ?? undefined };
     },
     cancelTask: async (taskId) => {
       await deps.agentDaemon.cancelTask(taskId);
@@ -2977,7 +3003,8 @@ export function registerTaskAndWorkspaceMethods(
   const managedSessions = getManagedSessionService(deps);
   const agentDaemon = deps.agentDaemon;
   const channelGateway = deps.channelGateway;
-  const isAdminClient = (client: any) => !!client?.hasScope?.("admin");
+  const isAdminClient = (client: Pick<ControlPlaneClient, "hasScope">) =>
+    !!client?.hasScope?.("admin");
 
   registerBotWorkMethods({ server, db, requireScope });
   registerPactMethods({ server, agentDaemon, requireScope });
@@ -2997,14 +3024,14 @@ export function registerTaskAndWorkspaceMethods(
   });
   registerApplicationExecutionMethods({ server, agentDaemon, requireScope });
 
-  const redactWorkspaceForRead = (workspace: any) => ({
+  const redactWorkspaceForRead = (workspace: Workspace) => ({
     id: workspace.id,
     name: workspace.name,
     createdAt: workspace.createdAt,
     lastUsedAt: workspace.lastUsedAt,
   });
 
-  const redactTaskForRead = (task: any) => ({
+  const redactTaskForRead = (task: Task) => ({
     id: task.id,
     title: task.title,
     status: task.status,
@@ -3022,14 +3049,18 @@ export function registerTaskAndWorkspaceMethods(
     dueDate: task.dueDate,
   });
 
-  const redactChannelForRead = (channel: any) => ({
+  const redactChannelForRead = (
+    channel: Omit<Awaited<ReturnType<ChannelRepository["findAll"]>>[number], "config">,
+  ) => ({
     id: channel.id,
     type: channel.type,
     name: channel.name,
     enabled: channel.enabled,
     status: channel.status,
     botUsername: channel.botUsername,
-    securityConfig: channel.securityConfig ? { mode: channel.securityConfig.mode } : undefined,
+    securityConfig: channel.securityConfig
+      ? { mode: parameterRecord(channel.securityConfig).mode }
+      : undefined,
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt,
   });
@@ -3067,10 +3098,10 @@ export function registerTaskAndWorkspaceMethods(
 
     try {
       await fs.mkdir(validated.path, { recursive: true });
-    } catch (error: any) {
+    } catch (error) {
       throw {
         code: ErrorCodes.METHOD_FAILED,
-        message: error?.message || `Failed to create workspace directory: ${validated.path}`,
+        message: errorMessage(error, `Failed to create workspace directory: ${validated.path}`),
       };
     }
 
@@ -3079,7 +3110,7 @@ export function registerTaskAndWorkspaceMethods(
     const workspace = await workspaceRepo.create(
       validated.name,
       validated.path,
-      defaultPermissions as any,
+      defaultPermissions,
     );
     return { workspace };
   });
@@ -3087,7 +3118,7 @@ export function registerTaskAndWorkspaceMethods(
   // File operations (for remote file selection)
   server.registerMethod(Methods.FILE_LIST_DIRECTORY, async (client, params) => {
     requireScope(client, "read");
-    const p = (params ?? {}) as any;
+    const p = parameterRecord(params);
     const workspaceId = typeof p.workspaceId === "string" ? p.workspaceId.trim() : "";
     const relativePath = typeof p.path === "string" ? p.path.trim() || "." : ".";
     if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: "workspaceId is required" };
@@ -3120,10 +3151,10 @@ export function registerTaskAndWorkspaceMethods(
         }),
       );
       return { files };
-    } catch (error: any) {
+    } catch (error) {
       throw {
         code: ErrorCodes.METHOD_FAILED,
-        message: error?.message || `Failed to list directory: ${relativePath}`,
+        message: errorMessage(error, `Failed to list directory: ${relativePath}`),
       };
     }
   });
@@ -3331,7 +3362,7 @@ export function registerTaskAndWorkspaceMethods(
       validated.shellAccess === undefined
         ? validated.agentConfig
         : {
-            ...(validated.agentConfig || {}),
+            ...validated.agentConfig,
             shellAccess: validated.shellAccess,
             ...(validated.shellAccess === true && !hasNamedAccessProfile
               ? { accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval }
@@ -3401,12 +3432,15 @@ export function registerTaskAndWorkspaceMethods(
 
       try {
         await agentDaemon.startAdmittedTask(validated.operationKey, admitted.task.id);
-      } catch (error: any) {
+      } catch (error) {
         // Keep the durable queued receipt intact. A same-key retry or startup
         // recovery can wake this admission without manufacturing another task.
         throw {
           code: ErrorCodes.METHOD_FAILED,
-          message: error?.message || "Failed to start admitted task. Check LLM provider settings.",
+          message: errorMessage(
+            error,
+            "Failed to start admitted task. Check LLM provider settings.",
+          ),
         };
       }
 
@@ -3433,7 +3467,7 @@ export function registerTaskAndWorkspaceMethods(
     }
 
     // Apply assignment metadata (update DB + in-memory object before starting).
-    const initialUpdates: any = {};
+    const initialUpdates: Partial<Task> = {};
     if (validated.assignedAgentRoleId) {
       initialUpdates.boardColumn = "todo";
     }
@@ -3452,11 +3486,11 @@ export function registerTaskAndWorkspaceMethods(
 
     try {
       await agentDaemon.startTask(task);
-    } catch (error: any) {
-      await agentDaemon.failTask(task.id, error?.message || "Failed to start task");
+    } catch (error) {
+      await agentDaemon.failTask(task.id, errorMessage(error, "Failed to start task"));
       throw {
         code: ErrorCodes.METHOD_FAILED,
-        message: error?.message || "Failed to start task. Check LLM provider settings.",
+        message: errorMessage(error, "Failed to start task. Check LLM provider settings."),
       };
     }
 
@@ -3576,13 +3610,13 @@ export function registerTaskAndWorkspaceMethods(
           const rows = (await controlPlaneStatements(db).all("api_listPendingApprovals", [
             limit,
             offset,
-          ])) as any[];
+          ])) as Record<string, unknown>[];
           return rows.map((row) => approvalFromDatabaseRow(row));
         })();
     const approvals = approvalRows.map((approval) => presentApprovalRevision(approval));
 
     const enriched = await Promise.all(
-      approvals.map(async (a: any) => {
+      approvals.map(async (a) => {
         const t = a.taskId ? await taskRepo.findById(a.taskId) : undefined;
         return {
           ...a,
@@ -3611,7 +3645,10 @@ export function registerTaskAndWorkspaceMethods(
   // Channels (gateway)
   server.registerMethod(Methods.CHANNEL_LIST, async (client) => {
     requireScope(client, "read");
-    const rows = (await controlPlaneStatements(db).all("api_listChannels", [])) as any[];
+    const rows = (await controlPlaneStatements(db).all("api_listChannels", [])) as Record<
+      string,
+      unknown
+    >[];
     const channels = rows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -3660,7 +3697,9 @@ export function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.CHANNEL_GET, async (client, params) => {
     requireScope(client, "read");
     const { channelId } = sanitizeChannelIdParams(params);
-    const row = (await controlPlaneStatements(db).get("api_getChannel", [channelId])) as any;
+    const row = (await controlPlaneStatements(db).get("api_getChannel", [channelId])) as
+      | Record<string, unknown>
+      | undefined;
     if (!row) {
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel not found: ${channelId}` };
     }
@@ -3715,7 +3754,7 @@ export function registerTaskAndWorkspaceMethods(
     // Enforce one channel per type (router registers by type).
     const existing = (await controlPlaneStatements(db).get("api_channelIdForType", [
       validated.type,
-    ])) as any;
+    ])) as Record<string, unknown> | undefined;
     if (existing?.id) {
       throw {
         code: ErrorCodes.INVALID_PARAMS,
@@ -3742,7 +3781,7 @@ export function registerTaskAndWorkspaceMethods(
     if (validated.enabled && channelGateway) {
       try {
         await channelGateway.enableChannel(id);
-      } catch (error: any) {
+      } catch (error) {
         // Keep the channel record but surface the connection error.
         await controlPlaneStatements(db).run("api_disableChannel", [
           "disconnected",
@@ -3751,7 +3790,7 @@ export function registerTaskAndWorkspaceMethods(
         ]);
         throw {
           code: ErrorCodes.METHOD_FAILED,
-          message: error?.message || "Failed to enable channel",
+          message: errorMessage(error, "Failed to enable channel"),
         };
       }
     }
@@ -3764,7 +3803,14 @@ export function registerTaskAndWorkspaceMethods(
     const { channelId, updates } = sanitizeChannelUpdateParams(params);
 
     if (channelGateway) {
-      await channelGateway.updateChannel(channelId, updates as any);
+      await channelGateway.updateChannel(
+        channelId,
+        updates as {
+          name?: string;
+          config?: ChannelData["config"];
+          securityConfig?: ChannelSecurityConfig;
+        },
+      );
       return { ok: true };
     }
 
@@ -3935,7 +3981,10 @@ export function registerTaskAndWorkspaceMethods(
     }
 
     // Channels summary (no secrets).
-    const channelRows = (await controlPlaneStatements(db).all("api_channelSummaries", [])) as any[];
+    const channelRows = (await controlPlaneStatements(db).all(
+      "api_channelSummaries",
+      [],
+    )) as Record<string, unknown>[];
     const channels = channelRows.map((row) => ({
       id: String(row.id ?? ""),
       type: String(row.type ?? ""),
@@ -4010,8 +4059,8 @@ export function setupControlPlaneHandlers(
       try {
         ControlPlaneSettingsManager.updateSettings(settings);
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4027,8 +4076,8 @@ export function setupControlPlaneHandlers(
       try {
         const settings = ControlPlaneSettingsManager.enable();
         return { ok: true, token: settings.token };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4049,8 +4098,8 @@ export function setupControlPlaneHandlers(
         }
         ControlPlaneSettingsManager.disable();
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4177,9 +4226,9 @@ export function setupControlPlaneHandlers(
           }
           throw error;
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error("[ControlPlane Handlers] Start error:", error);
-        return { ok: false, error: error.message || String(error) };
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4198,8 +4247,8 @@ export function setupControlPlaneHandlers(
           controlPlaneServer = null;
         }
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4267,8 +4316,8 @@ export function setupControlPlaneHandlers(
           token: settings.token || "",
           remoteToken: settings.remote?.token || "",
         };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4326,8 +4375,8 @@ export function setupControlPlaneHandlers(
         }
 
         return { ok: true, token: newToken };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4404,8 +4453,8 @@ export function setupControlPlaneHandlers(
         }
 
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4480,8 +4529,8 @@ export function setupControlPlaneHandlers(
         await connectManagedRemoteDevice(targetDeviceId);
 
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4499,8 +4548,8 @@ export function setupControlPlaneHandlers(
           connectionMode: "local",
         });
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4583,8 +4632,8 @@ export function setupControlPlaneHandlers(
           activeRemoteDeviceId: targetDeviceId,
         });
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4608,8 +4657,8 @@ export function setupControlPlaneHandlers(
           latencyMs: result.latencyMs,
           error: result.error,
         };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4667,7 +4716,7 @@ export function setupControlPlaneHandlers(
           if (mainWindowRef && !mainWindowRef.isDestroyed()) {
             mainWindowRef.webContents.send(IPC_CHANNELS.SSH_TUNNEL_EVENT, {
               type: "error",
-              error: error.message,
+              error: errorMessage(error),
             });
           }
         });
@@ -4682,13 +4731,13 @@ export function setupControlPlaneHandlers(
               url: tunnel.getLocalUrl(),
               token: settings.remote?.token || "",
               sshTunnel: config,
-            } as any,
+            },
           });
         }
 
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4700,8 +4749,8 @@ export function setupControlPlaneHandlers(
       try {
         shutdownSSHTunnelManager();
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4727,11 +4776,11 @@ export function setupControlPlaneHandlers(
             url: settings.remote?.url || "",
             token: settings.remote?.token || "",
             sshTunnel: config,
-          } as any,
+          },
         });
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4755,8 +4804,8 @@ export function setupControlPlaneHandlers(
           latencyMs: result.latencyMs,
           error: result.error,
         };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4766,8 +4815,8 @@ export function setupControlPlaneHandlers(
   ipcMain.handle(IPC_CHANNELS.DEVICE_LIST_TASKS, async (_, nodeId: string) => {
     try {
       return { ok: true, tasks: await listTasksForNode(nodeId) };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
@@ -4801,8 +4850,8 @@ export function setupControlPlaneHandlers(
           10000,
         )) as { files?: Array<{ name: string; type: "file" | "directory"; size: number }> };
         return { ok: true, files: res?.files || [] };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4839,8 +4888,8 @@ export function setupControlPlaneHandlers(
           name: w.name || w.id,
         }));
         return { ok: true, workspaces };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4921,7 +4970,7 @@ export function setupControlPlaneHandlers(
           }
           if (params.shellAccess !== undefined) {
             taskCreateParams.agentConfig = {
-              ...(taskCreateParams.agentConfig || {}),
+              ...taskCreateParams.agentConfig,
               shellAccess: params.shellAccess,
               ...(params.shellAccess === true &&
               typeof taskCreateParams.agentConfig?.accessProfileId !== "string"
@@ -4932,7 +4981,7 @@ export function setupControlPlaneHandlers(
           remoteTaskRes = await remoteClient.request(Methods.TASK_CREATE, taskCreateParams, 15000);
         } catch (error: Any) {
           console.error("[ControlPlane] Remote task execution failed:", error);
-          return { ok: false, error: error?.message || "Remote execution failed" };
+          return { ok: false, error: errorMessage(error, "Remote execution failed") };
         }
 
         const remoteTask = remoteTaskRes?.task;
@@ -4950,8 +4999,8 @@ export function setupControlPlaneHandlers(
         );
 
         return { ok: true, taskId: id };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );
@@ -4959,16 +5008,16 @@ export function setupControlPlaneHandlers(
   ipcMain.handle(IPC_CHANNELS.DEVICE_LIST_MANAGED, async () => {
     try {
       return { ok: true, devices: await listManagedDevicesForRenderer() };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.DEVICE_GET_SUMMARY, async (_, deviceId: string) => {
     try {
       return { ok: true, summary: await buildManagedDeviceSummary(deviceId) };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
@@ -4976,8 +5025,8 @@ export function setupControlPlaneHandlers(
     try {
       const status = await connectManagedRemoteDevice(deviceId);
       return { ok: true, status };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
@@ -4985,8 +5034,8 @@ export function setupControlPlaneHandlers(
     try {
       const status = disconnectManagedRemoteDevice(deviceId);
       return { ok: true, status };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
@@ -5018,8 +5067,8 @@ export function setupControlPlaneHandlers(
       const payload = await client.request(request.method, params, 15000);
       // A remote device may predate ACP credential redaction; never forward its tokens.
       return { ok: true, payload: redactAcpControlPlanePayload(request.method, payload) };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
@@ -5029,8 +5078,8 @@ export function setupControlPlaneHandlers(
       const { DeviceProfileRepository } = await import("../database/repository-facades");
       const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
       return { ok: true, profiles: await repo.list() };
-    } catch (error: any) {
-      return { ok: false, error: error.message || String(error) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
     }
   });
 
@@ -5047,8 +5096,8 @@ export function setupControlPlaneHandlers(
         const repo = new DeviceProfileRepository(controlPlaneDeps.dbManager.getDatabase());
         await repo.upsert(deviceId, data);
         return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error.message || String(error) };
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) };
       }
     },
   );

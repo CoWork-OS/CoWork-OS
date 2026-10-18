@@ -2,8 +2,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDaemon } from "../daemon";
 
-type Any = any;
-
 // These permission/recovery fixtures stub TaskRepository instead of persisting
 // SQL task rows. Keep the new persisted-policy read separate from their subject.
 beforeEach(() =>

@@ -71,7 +71,7 @@ import {
   type IpcMainInvokeEvent,
 } from "electron";
 import { normalizeTaskEvents } from "../agent/timeline/timeline-normalizer";
-import { randomUUID } from "node:crypto";
+
 import { evaluateWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 import { withEffectiveAccessProfile } from "../security/effective-workspace";
@@ -279,7 +279,6 @@ import {
   IPC_CHANNELS,
   AgentMailSettingsData,
   AgentMailListEntry,
-  LLMSettingsData,
   AddChannelRequest,
   UpdateChannelRequest as _UpdateChannelRequest,
   SecurityMode as _SecurityMode,
@@ -305,7 +304,6 @@ import {
   AgentConfig,
   LLMReasoningEffort,
   LLMProviderType,
-  LLM_PROVIDER_TYPES,
   PdfReviewSummary,
   TaskLearningProgress,
   UnifiedRecallQuery,
@@ -378,7 +376,7 @@ import { assertTerminalShellAllowed } from "../terminal/terminal-shell-policy";
 import { setupTerminalBlockRunHandlers } from "./terminal-block-run-handlers";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
 import { ChannelGateway } from "../gateway";
-import { CHANNEL_TYPES } from "../gateway/channels/types";
+
 import { getUpdatePrompt, UpdatePreferencesStore, updateManager } from "../updater";
 import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
 import { toPublicChannel } from "./channel-config-sanitizer";
@@ -389,10 +387,7 @@ import { ProfileManager } from "../profiles/ProfileManager";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { resolveAccessProfileDefinitionWithStatus } from "../../shared/access-profiles";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
-import {
-  appendWorkspacePermissionManifestRule,
-  removeWorkspacePermissionManifestRule,
-} from "../security/workspace-permission-manifest";
+import { removeWorkspacePermissionManifestRule } from "../security/workspace-permission-manifest";
 import {
   validateInput,
   CronJobCreateSchema,
@@ -1968,7 +1963,7 @@ export async function setupIpcHandlers(
       }
     }
   };
-  const taskSessionMetadataRepo = new TaskSessionMetadataRepository(db);
+  new TaskSessionMetadataRepository(db);
   const botNotificationPreferenceRepo = new BotNotificationPreferenceRepository(db);
   const approvalRepo = new ApprovalRepository(db);
   const inputRequestRepo = new InputRequestRepository(db);
@@ -6684,7 +6679,7 @@ export async function setupIpcHandlers(
     return artifactRepo.findByTaskId(taskId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.ARTIFACT_PREVIEW, async (_, _id: string) => {
+  ipcMain.handle(IPC_CHANNELS.ARTIFACT_PREVIEW, async () => {
     // TODO: Implement artifact preview
     return null;
   });
@@ -6886,7 +6881,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.MANAGED_AGENT_CONVERT_ROLE_IPC, async (_, request: Any) => {
     const routineService = getRoutineService();
     const converted = await managedSessionService.convertAgentRoleToManagedAgent(request);
-    const routines = routineService
+    void (routineService
       ? await Promise.all(
           converted.routineDrafts.map(async (draft) =>
             routineService.create(
@@ -6897,7 +6892,7 @@ export async function setupIpcHandlers(
             ),
           ),
         )
-      : [];
+      : []);
     await managedSessionService.syncManagedAgentRoutineRefs(converted.agent.id);
     return {
       agent: converted.agent,
@@ -11597,7 +11592,7 @@ export async function setupIpcHandlers(
   setupKitHandlers(workspaceRepo, agentDaemon);
 
   // Memory system handlers
-  setupMemoryHandlers({
+  setupMemoryHandlers(getPluginRegistry, {
     workspaceName: async (workspaceId) => (await workspaceRepo.findById(workspaceId))?.name ?? null,
   });
 
@@ -11914,7 +11909,7 @@ export async function setupIpcHandlers(
         : null;
     },
     getCronService: () => {
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      // oxlint-disable-next-line typescript/no-require-imports
       const { getCronService } = require("../cron");
       return getCronService();
     },
@@ -12530,12 +12525,8 @@ function setupMCPHandlers(): void {
  * Set up Scraping (Scrapling integration) IPC handlers
  */
 function setupScrapingHandlers(): void {
-  // oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript/no-require-imports
   const { ScrapingSettingsManager } = require("../scraping/scraping-settings");
-  // oxlint-disable-next-line typescript-eslint(no-require-imports)
-  const { spawn } = require("child_process");
-  // oxlint-disable-next-line typescript-eslint(no-require-imports)
-  const _path = require("path");
 
   ipcMain.handle(IPC_CHANNELS.SCRAPING_GET_SETTINGS, async () => {
     return ScrapingSettingsManager.loadSettings();
@@ -12560,7 +12551,7 @@ function setupScrapingHandlers(): void {
         });
         return;
       }
-      const child = spawn(pythonPath, [
+      const child = spawnProcess(pythonPath, [
         "-c",
         "import scrapling; print(getattr(scrapling, '__version__', 'unknown'))",
       ]);
@@ -12628,7 +12619,7 @@ function setupScrapingHandlers(): void {
  * Set up Cron (Scheduled Tasks) IPC handlers
  */
 function setupCronHandlers(): void {
-  // oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript/no-require-imports
   const { getCronService } = require("../cron");
 
   // Get service status
@@ -12778,7 +12769,7 @@ function setupNotificationHandlers(): void {
   const getDesktopSettings = () => {
     try {
       // Import lazily to avoid a startup dependency cycle with tray initialization.
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      // oxlint-disable-next-line typescript/no-require-imports
       const { trayManager } = require("../tray");
       return trayManager.getSettings();
     } catch {
@@ -12791,7 +12782,7 @@ function setupNotificationHandlers(): void {
     db: DatabaseManager.getInstance().getDatabase(),
     onEvent: (event) => {
       // Import lazily because tray initialization depends on the notification handlers.
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
+      // oxlint-disable-next-line typescript/no-require-imports
       const { trayManager } = require("../tray");
       trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
       if (event.type === "updated" && event.notification?.read)
@@ -12801,9 +12792,6 @@ function setupNotificationHandlers(): void {
       if (event.type === "cleared" || (event.type === "updated" && event.notifications))
         overlayManager.dismissAll();
       // Forward notification events to renderer
-      // We need to import BrowserWindow from electron to send to all windows
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
-      const { BrowserWindow } = require("electron");
       const windows = BrowserWindow.getAllWindows();
       for (const win of windows) {
         if (win.webContents) {
@@ -13669,6 +13657,7 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository, agentDaemon: Agent
  * Set up Memory System IPC handlers
  */
 function setupMemoryHandlers(
+  getPluginRegistry: typeof import("../extensions/registry").getPluginRegistry,
   deps: { workspaceName?: (workspaceId: string) => Promise<string | null> } = {},
 ): void {
   rateLimiter.configure(IPC_CHANNELS.AWARENESS_SAVE_CONFIG, RATE_LIMIT_CONFIGS.limited);
@@ -14447,9 +14436,6 @@ function setupMemoryHandlers(
   logger.debug("[Migration] Handlers initialized");
 
   // === Extension / Plugin Handlers ===
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  // oxlint-disable-next-line typescript-eslint(no-require-imports)
-  const { getPluginRegistry } = require("../extensions/registry");
   const ensurePluginRegistryInitialized = async (): Promise<Any> => {
     const registry = getPluginRegistry();
     await registry.initialize();

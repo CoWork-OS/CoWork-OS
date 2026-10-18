@@ -275,7 +275,7 @@ function start(): void {
     }
     if (data.testCommandsModule) {
       // Tests only: extra commands for crash and contention scenarios.
-      // oxlint-disable-next-line typescript-eslint(no-require-imports) -- path is chosen at runtime by tests
+      // oxlint-disable-next-line typescript/no-require-imports -- path is chosen at runtime by tests
       const extra = require(data.testCommandsModule) as { commands: Record<string, AnyCommand> };
       commands = { ...commands, ...extra.commands };
     }

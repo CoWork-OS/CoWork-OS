@@ -144,8 +144,6 @@ import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 import { approvalRequestRevisionHash, approvalRevisionMatches } from "../agent/approval-revision";
 export type { RouterConfig } from "./router-helpers";
 
-type Any = any;
-
 function quoteSkillSlashValue(value: string): string {
   const text = String(value ?? "");
   if (!text.length) return '""';

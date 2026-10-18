@@ -20,7 +20,6 @@ import type {
 import { WorkContextRepository } from "./WorkContextRepository";
 import { WorkContextStore } from "./WorkContextService";
 
-type Any = any;
 type InviteRole = Exclude<SessionHumanRole, "owner">;
 type Metadata = Record<string, string | number | boolean | null>;
 

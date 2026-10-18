@@ -729,7 +729,6 @@ export class GmailTools {
           if (typeof input.draft_id !== "string" || !input.draft_id.trim()) {
             throw new Error("draft_id is required for gmail_send_draft");
           }
-          const draftPath = `/users/me/drafts/${encodeURIComponent(input.draft_id)}`;
           const snapshot = await this.readDraftReviewSnapshot(settings, input.draft_id);
           const reviewedRevision = snapshot.revisionSha256;
           const draftMessage = snapshot.message;

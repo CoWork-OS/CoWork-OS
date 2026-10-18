@@ -1,44 +1,46 @@
 import React from "react";
-import type { Task, TaskEvent } from "../../../shared/types";
-import { getEffectiveTaskEventType, getTimelineErrorText } from "../../utils/task-event-compat";
-import {
-  normalizeMarkdownForDisplay,
-  cleanAssistantMessageForDisplay,
-  stripHtmlTags,
-} from "./markdown-normalization";
-import { humanizeTimelineMessage, condenseStepText } from "./task-event-presentation";
-import { getInlinePreviewKindForGeneratedFile } from "./artifact-logic";
-import { useFileActionMenu } from "../FileActionMenu";
-import { InlineVideoPreview } from "../InlineVideoPreview";
-import { InlineImagePreview } from "../InlineImagePreview";
-import { InlineDocumentPreview } from "../InlineDocumentPreview";
-import { LatexArtifactWorkbench } from "../LatexArtifactWorkbench";
-import { friendlyToolCallTitle, friendlyToolResultTitle } from "../../utils/timeline-tool-labels";
+import type { Components } from "react-markdown";
 import { buildApprovalCommandPreview } from "../../../shared/approval-command-preview";
-import { formatTimelineActivityLabel } from "../../../shared/timeline-v2";
-import {
-  AssistantMessageContent,
-  OsascriptCommandExcerpt,
-  isLongOsascriptCommandText,
-} from "../AssistantMessageContent";
+import { isVerificationStepDescription } from "../../../shared/plan-utils";
 import { formatProviderErrorForDisplay } from "../../../shared/provider-error-format";
-import { parseCodeBlockRunMessage } from "../../../shared/terminal-output-text";
-import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
-import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
 import {
   buildSpawnInstructionsPreview,
   formatSpawnRecapLine,
   formatSpawnedAgentLabel,
 } from "../../../shared/subagent-presentation";
-import { isVerificationStepDescription } from "../../../shared/plan-utils";
-import { getMessage } from "../../utils/agentMessages";
-import type { AgentContext } from "../../hooks/useAgentContext";
+import { parseCodeBlockRunMessage } from "../../../shared/terminal-output-text";
+import { formatTimelineActivityLabel } from "../../../shared/timeline-v2";
+import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
+import type { Task, TaskEvent } from "../../../shared/types";
 import { DEFAULT_QUIRKS } from "../../../shared/types";
-import { JsonlPreview, parseJsonlPreview } from "../JsonlPreview";
-import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
-import { findLatexPdfPair } from "../../utils/latex-artifacts";
-import { formatFileSize } from "./attachments";
+import type { AgentContext } from "../../hooks/useAgentContext";
 import { getAgentMessageReceipt } from "../../utils/agent-message-receipt";
+import { getMessage } from "../../utils/agentMessages";
+import { findLatexPdfPair } from "../../utils/latex-artifacts";
+import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
+import { getEffectiveTaskEventType, getTimelineErrorText } from "../../utils/task-event-compat";
+import type { CommandOutputSession } from "../../utils/task-event-derived";
+import { friendlyToolCallTitle, friendlyToolResultTitle } from "../../utils/timeline-tool-labels";
+import {
+  AssistantMessageContent,
+  OsascriptCommandExcerpt,
+  isLongOsascriptCommandText,
+} from "../AssistantMessageContent";
+import { useFileActionMenu } from "../FileActionMenu";
+import { InlineDocumentPreview } from "../InlineDocumentPreview";
+import { InlineImagePreview } from "../InlineImagePreview";
+import { InlineVideoPreview } from "../InlineVideoPreview";
+import { JsonlPreview, parseJsonlPreview } from "../JsonlPreview";
+import { LatexArtifactWorkbench } from "../LatexArtifactWorkbench";
+import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
+import { getInlinePreviewKindForGeneratedFile } from "./artifact-logic";
+import { formatFileSize } from "./attachments";
+import { DOCUMENT_PREVIEW_EXT_RE } from "./main-content-constants";
+import {
+  cleanAssistantMessageForDisplay,
+  normalizeMarkdownForDisplay,
+  stripHtmlTags,
+} from "./markdown-normalization";
 import {
   DeferredMarkdown,
   HighlightedCodePreview,
@@ -46,10 +48,24 @@ import {
   MessageForkButton,
   MessageSpeakButton,
 } from "./message-ui";
-import type { CommandOutputSession } from "../../utils/task-event-derived";
-import { DOCUMENT_PREVIEW_EXT_RE } from "./main-content-constants";
-
-type Any = Record<string, any>;
+import { condenseStepText, humanizeTimelineMessage } from "./task-event-presentation";
+import {
+  type Payload,
+  extractApprovalCommand,
+  getApprovalDescription,
+  getApprovalPayload,
+  isRunCommandApproval,
+  payloadRecord,
+} from "./timeline-event-classification";
+export {
+  describeLoopRisk,
+  extractApprovalCommand,
+  formatSignedScore,
+  getApprovalDescription,
+  getApprovalPayload,
+  isRunCommandApproval,
+  shouldHideApprovalEventInStepFeed,
+} from "./timeline-event-classification";
 
 function getEvidenceSiteLabel(hostname: string): string {
   const normalized = hostname.replace(/^www\./i, "");
@@ -144,19 +160,6 @@ export function ClickableFilePath({
   );
 }
 
-export function formatSignedScore(value: number): string {
-  if (!Number.isFinite(value)) return "0.00";
-  const normalized = Math.max(-1, Math.min(1, value));
-  return `${normalized >= 0 ? "+" : ""}${normalized.toFixed(2)}`;
-}
-
-export function describeLoopRisk(loopRisk: number): "low" | "medium" | "high" {
-  if (!Number.isFinite(loopRisk)) return "low";
-  if (loopRisk >= 0.7) return "high";
-  if (loopRisk >= 0.4) return "medium";
-  return "low";
-}
-
 /**
  * Truncate long text for display, with expand option handled via CSS
  */
@@ -201,12 +204,12 @@ export function formatTimelineErrorTitleForDisplay(message: string): string {
   return formatCompletionGuardFailureTitle(message) || message;
 }
 
-export function formatStepFailedTitleForDisplay(payload: Any): string {
+export function formatStepFailedTitleForDisplay(payload: Payload): string {
   const step = payload?.step && typeof payload.step === "object" ? payload.step : {};
-  const description = coerceStepFailureText((step as Any).description);
+  const description = coerceStepFailureText((step as Payload).description);
   const reason =
     coerceStepFailureText(payload?.reason) ||
-    coerceStepFailureText((step as Any).error) ||
+    coerceStepFailureText((step as Payload).error) ||
     coerceStepFailureText(payload?.error);
   const guardTitle = formatCompletionGuardFailureTitle(reason || description);
   if (guardTitle) return guardTitle;
@@ -418,49 +421,6 @@ function renderCompactionDetails(event: TaskEvent): React.ReactNode {
       ) : null}
     </div>
   );
-}
-
-export function getApprovalPayload(event: TaskEvent): Any | null {
-  if (!event?.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) {
-    return null;
-  }
-  const approval = (event.payload as Any).approval;
-  if (!approval || typeof approval !== "object" || Array.isArray(approval)) {
-    return null;
-  }
-  return approval as Any;
-}
-
-export function getApprovalDescription(approval: Any | null): string {
-  const description = approval?.description;
-  return typeof description === "string" ? description.trim() : "";
-}
-
-export function extractApprovalCommand(approval: Any | null): string | null {
-  const commandFromDetails = approval?.details?.command;
-  if (typeof commandFromDetails === "string") {
-    const trimmed = commandFromDetails.trim();
-    if (trimmed.length > 0) return trimmed;
-  }
-
-  const description = getApprovalDescription(approval);
-  if (!description) return null;
-
-  const commandMatch = description.match(/^Run(?:ning)? command(?:\s*\([^)]+\))?:\s*([\s\S]+)$/i);
-  if (!commandMatch || typeof commandMatch[1] !== "string") return null;
-  const command = commandMatch[1].trim();
-  return command.length > 0 ? command : null;
-}
-
-export function isRunCommandApproval(approval: Any | null): boolean {
-  if (approval?.type === "run_command") return true;
-  return Boolean(extractApprovalCommand(approval));
-}
-
-export function shouldHideApprovalEventInStepFeed(event: TaskEvent): boolean {
-  if (getEffectiveTaskEventType(event) !== "approval_requested") return false;
-  if (event.payload?.autoApproved === true || event.payload?.autoResolving === true) return true;
-  return isRunCommandApproval(getApprovalPayload(event));
 }
 
 export function getTimelineEventStepId(event: TaskEvent): string | null {
@@ -886,7 +846,7 @@ export function renderEventTitle(
           return `Every ${Math.round(ms / 1000)}s`;
         };
 
-        const describeScheduleShort = (schedule: Any): string | null => {
+        const describeScheduleShort = (schedule: Payload): string | null => {
           if (!schedule || typeof schedule !== "object") return null;
           if (schedule.kind === "every" && typeof schedule.everyMs === "number") {
             return describeEvery(schedule.everyMs);
@@ -910,9 +870,9 @@ export function renderEventTitle(
         // "create"/"update" responses include { success, job }.
         const job = result?.job;
         if (job && typeof job === "object") {
-          const jobName = String((job as Any).name || "").trim() || "Scheduled task";
-          const scheduleDesc = describeScheduleShort((job as Any).schedule);
-          const nextRunAtMs = (job as Any).state?.nextRunAtMs;
+          const jobName = String((job as Payload).name || "").trim() || "Scheduled task";
+          const scheduleDesc = describeScheduleShort(payloadRecord(payloadRecord(job).schedule));
+          const nextRunAtMs = payloadRecord(payloadRecord(job).state).nextRunAtMs;
           const next =
             typeof nextRunAtMs === "number" ? new Date(nextRunAtMs).toLocaleString() : null;
           const parts = [scheduleDesc, next ? `Next: ${next}` : null].filter(Boolean) as string[];
@@ -1090,7 +1050,7 @@ export function renderEventTitle(
 export function renderEventDetails(
   event: TaskEvent,
   voiceEnabled: boolean,
-  markdownComponents: Any,
+  markdownComponents: Components,
   options?: {
     workspacePath?: string;
     onOpenViewer?: (path: string) => void;
@@ -1252,7 +1212,7 @@ export function renderEventDetails(
         <div className="evidence-event-details-title">Evidence</div>
         <div className="evidence-event-details-scroll">
           <ul className="evidence-event-details-list">
-            {refs.map((entry: Any, index: number) => {
+            {refs.map((entry: Payload, index: number) => {
               const source =
                 typeof entry?.sourceUrlOrPath === "string" ? entry.sourceUrlOrPath.trim() : "";
               if (!source) return null;
@@ -1359,14 +1319,19 @@ export function renderEventDetails(
       );
     }
     case "plan_created": {
-      const inlinePlanMarkdownComponents = {
+      const inlinePlanMarkdownComponents: Components = {
         ...markdownComponents,
         // Keep each list item inline; avoid wrapping with extra <p> inside <li>.
-        p: ({ children }: Any) => <>{children}</>,
+        p: ({ children }) => <>{children}</>,
       };
       const planSteps = Array.isArray(event.payload.plan?.steps) ? event.payload.plan.steps : [];
       const visiblePlanSteps = options?.hideVerificationSteps
-        ? planSteps.filter((step: Any) => !isVerificationStepDescription(step?.description))
+        ? planSteps.filter(
+            (step: Payload) =>
+              !isVerificationStepDescription(
+                typeof step.description === "string" ? step.description : "",
+              ),
+          )
         : planSteps;
       return (
         <div className="event-details markdown-content">
@@ -1377,7 +1342,7 @@ export function renderEventDetails(
           </div>
           {visiblePlanSteps.length > 0 && (
             <div className="plan-checklist">
-              {visiblePlanSteps.map((step: Any, i: number) => (
+              {visiblePlanSteps.map((step: Payload, i: number) => (
                 <div key={i} className="plan-checklist-item">
                   <span className="plan-checklist-circle" />
                   <span className="plan-checklist-text">
@@ -1576,10 +1541,11 @@ export function renderEventDetails(
 
       const description = getApprovalDescription(approval);
       const command = extractApprovalCommand(approval);
-      const cwd = typeof approval?.details?.cwd === "string" ? approval.details.cwd : "";
+      const details = payloadRecord(approval.details);
+      const cwd = typeof details.cwd === "string" ? details.cwd : "";
       const timeoutMs =
-        typeof approval?.details?.timeout === "number" && Number.isFinite(approval.details.timeout)
-          ? approval.details.timeout
+        typeof details.timeout === "number" && Number.isFinite(details.timeout)
+          ? details.timeout
           : null;
       const timeoutLabel =
         typeof timeoutMs === "number" ? `${Math.max(1, Math.round(timeoutMs / 1000))}s` : null;
@@ -1614,7 +1580,7 @@ export function renderEventDetails(
           {description ? (
             <div style={{ marginBottom: approval.details ? 8 : 0 }}>{description}</div>
           ) : null}
-          {approval.details && (
+          {Boolean(approval.details) && (
             <pre>{truncateForDisplay(JSON.stringify(approval.details, null, 2), 4000)}</pre>
           )}
         </div>

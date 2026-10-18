@@ -1533,13 +1533,10 @@ describe("TaskExecutor chat mode", () => {
     const summary = await (TaskExecutor as Any).prototype.buildCompactionSummaryBlock.call(
       executor,
       {
-        removedMessages: [
-          ...Array.from({ length: 10 }, (_, index) => ({
-            role: "user",
-            content:
-              index === 0 ? "Research brief" : `Research result ${index} ` + "x".repeat(4000),
-          })),
-        ],
+        removedMessages: Array.from({ length: 10 }, (_, index) => ({
+          role: "user",
+          content: index === 0 ? "Research brief" : `Research result ${index} ` + "x".repeat(4000),
+        })),
         maxOutputTokens: 512,
         contextLabel: "bot research",
       },

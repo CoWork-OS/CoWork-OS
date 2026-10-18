@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { spawnSync } from "child_process";
 import crypto from "crypto";
 import fs from "fs";
@@ -333,7 +334,7 @@ function normalizeGitRemote(remote: string | undefined): string | undefined {
 
 function isPackagedElectronApp(): boolean {
   try {
-    const electron = require("electron") as { app?: { isPackaged?: boolean } };
+    const electron = createRequire(__filename)("electron") as { app?: { isPackaged?: boolean } };
     return Boolean(electron.app?.isPackaged);
   } catch {
     return false;

@@ -14,8 +14,6 @@ import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
 import { validateInput } from "../utils/validation";
 import { QAStartRunSchema, StringIdSchema } from "../utils/validation";
 
-type Any = any;
-
 function checkRateLimit(channel: string): void {
   if (!rateLimiter.check(channel)) {
     throw new Error("Rate limit exceeded. Please wait before starting another QA run.");

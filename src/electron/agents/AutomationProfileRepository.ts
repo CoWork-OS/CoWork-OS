@@ -12,7 +12,6 @@ import type {
 } from "../../shared/types";
 import { createLogger } from "../utils/logger";
 
-type Any = any;
 const logger = createLogger("AutomationProfileRepository");
 
 function safeJsonParse<T>(jsonString: string | null, fallback: T): T {

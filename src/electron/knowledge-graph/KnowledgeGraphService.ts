@@ -55,10 +55,6 @@ function compactText(text: string, max = 240): string {
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 
-function normalizeEdgeTime(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) ? (value as number) : fallback;
-}
-
 export class KnowledgeGraphService {
   private static repo: KnowledgeGraphRepository | null = null;
   private static port: MemoryStatementPort | null = null;

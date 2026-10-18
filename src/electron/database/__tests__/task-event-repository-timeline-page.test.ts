@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TaskEventRepository } from "../repositories";
 
-type Any = any;
-
 describe("TaskEventRepository.findTimelinePage", () => {
   let db: FakeTaskEventDb;
   let repo: TaskEventRepository;

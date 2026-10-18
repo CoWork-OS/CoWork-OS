@@ -1,8 +1,6 @@
 import Database from "better-sqlite3";
 import type { CoreMemoryScopeKind, CoreMemoryScopeState } from "../../shared/types";
 
-type Any = any;
-
 export class CoreMemoryScopeStateStore {
   constructor(private readonly db: Database.Database) {}
 

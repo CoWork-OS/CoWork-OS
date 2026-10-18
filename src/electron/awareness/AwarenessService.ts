@@ -1,5 +1,6 @@
+import { createRequire } from "node:module";
 import os from "os";
-import path from "path";
+
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { createHash, randomUUID } from "crypto";
@@ -61,7 +62,9 @@ const BROWSER_APPS = new Set([
 
 function readClipboardText(): string {
   try {
-    const electron = require("electron") as { clipboard?: { readText?: () => string } };
+    const electron = createRequire(__filename)("electron") as {
+      clipboard?: { readText?: () => string };
+    };
     return String(electron.clipboard?.readText?.() || "");
   } catch {
     return "";

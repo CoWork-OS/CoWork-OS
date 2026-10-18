@@ -29,9 +29,17 @@ describe("BatchImageTools", () => {
         id: "ws-1",
         name: "workspace",
         path: rootDir,
-        permissions: { read: true, write: true, allowedPaths: [] },
-      } as any,
-      { logEvent: () => undefined } as any,
+        createdAt: 0,
+        permissions: {
+          read: true,
+          write: true,
+          delete: false,
+          network: false,
+          shell: false,
+          allowedPaths: [],
+        },
+      },
+      { logEvent: () => undefined },
       "task-1",
     );
 
@@ -56,9 +64,17 @@ describe("BatchImageTools", () => {
         id: "ws-1",
         name: "workspace",
         path: rootDir,
-        permissions: { read: true, write: true, allowedPaths: [] },
-      } as any,
-      { logEvent: () => undefined } as any,
+        createdAt: 0,
+        permissions: {
+          read: true,
+          write: true,
+          delete: false,
+          network: false,
+          shell: false,
+          allowedPaths: [],
+        },
+      },
+      { logEvent: () => undefined },
       "task-1",
     );
 
@@ -83,14 +99,18 @@ describe("BatchImageTools", () => {
         id: "ws-1",
         name: "workspace",
         path: rootDir,
+        createdAt: 0,
         permissions: {
           read: true,
           write: true,
+          delete: false,
+          network: false,
+          shell: false,
           allowedPaths: [],
           accessFilesystemRules: [{ path: deniedImage, access: "deny" }],
         },
-      } as any,
-      { logEvent: () => undefined } as any,
+      },
+      { logEvent: () => undefined },
       "task-1",
     );
 

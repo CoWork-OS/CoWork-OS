@@ -11,6 +11,17 @@ export interface DeviceProfile {
   updatedAt: number;
 }
 
+interface DeviceProfileRow {
+  device_id: string;
+  custom_name: string | null;
+  platform: string | null;
+  model_identifier: string | null;
+  last_seen_at: number | null;
+  settings_json: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 export class DeviceProfileStore {
   constructor(private db: Database.Database) {}
 
@@ -59,7 +70,7 @@ export class DeviceProfileStore {
   get(deviceId: string): DeviceProfile | null {
     const row = this.db
       .prepare("SELECT * FROM device_profiles WHERE device_id = ?")
-      .get(deviceId) as any;
+      .get(deviceId) as DeviceProfileRow | undefined;
     if (!row) return null;
     return this.mapRow(row);
   }
@@ -67,7 +78,7 @@ export class DeviceProfileStore {
   list(): DeviceProfile[] {
     const rows = this.db
       .prepare("SELECT * FROM device_profiles ORDER BY last_seen_at DESC")
-      .all() as any[];
+      .all() as DeviceProfileRow[];
     return rows.map(this.mapRow);
   }
 
@@ -83,7 +94,7 @@ export class DeviceProfileStore {
       .run(timestamp, Date.now(), deviceId);
   }
 
-  private mapRow(row: any): DeviceProfile {
+  private mapRow(row: DeviceProfileRow): DeviceProfile {
     return {
       deviceId: row.device_id,
       customName: row.custom_name,

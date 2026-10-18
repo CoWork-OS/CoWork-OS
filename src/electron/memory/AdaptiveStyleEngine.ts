@@ -75,9 +75,8 @@ interface AdaptiveStyleState {
 
 const OBSERVATION_WINDOW = 50; // Last N messages
 const MIN_MESSAGES_FOR_ADAPTATION = 15; // Need enough signal before acting
-const SIGNAL_THRESHOLD = 0.6; // Minimum accumulated signal strength to trigger
+// Minimum accumulated signal strength to trigger
 const DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes between adaptation checks
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Style signals for the structured 👎 reasons the renderer sends

@@ -9,8 +9,6 @@ import type { AgentDaemon } from "../agent/daemon";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 
-type Any = any;
-
 type Mention = {
   display: string;
   count: number;

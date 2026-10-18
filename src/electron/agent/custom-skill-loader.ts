@@ -25,7 +25,13 @@ import { getSkillRegistry as _getSkillRegistry } from "./skill-registry";
 import { InputSanitizer } from "./security";
 import { getUserDataDir } from "../utils/user-data-dir";
 import { createLogger } from "../utils/logger";
-import { matchesExplicitSkillInvocationPhrase } from "./skill-invocation-utils";
+import {
+  isModelInvocableSkill,
+  matchesSkillRoutingQuery,
+  rankModelInvocableSkillsForQuery,
+  rankSkillsForQuery,
+  sanitizeRoutingQuery,
+} from "../../shared/skill-routing";
 
 const SKILLS_FOLDER_NAME = "skills";
 const SKILL_FILE_EXTENSION = ".json";
@@ -110,8 +116,6 @@ interface RankSkillsForQueryOptions {
   includePrereqBlockedSkills?: boolean;
 }
 
-type RoutingIntentCue = "review" | "fix";
-
 function isPackagedElectronApp(): boolean {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -131,20 +135,6 @@ export class CustomSkillLoader {
       /no fabricated tool-side behavior/i,
     ],
   } as const;
-
-  private static readonly ROUTING_INTENT_CUE_PATTERNS: Record<RoutingIntentCue, RegExp[]> = {
-    review: [/\bpull request\b/i, /\bpr\b/i, /\breview\b/i, /\bfeedback\b/i, /\bmerge\b/i],
-    fix: [
-      /\bfix(?:ing)?\b/i,
-      /\bbug\b/i,
-      // "issue" is intentionally narrowed to require a technical co-signal to avoid
-      // false positives on "issue an invoice", "issue tracking", etc.
-      /\b(?:bug\s+issue|issue\s+(?:with|in|on)|known\s+issue)\b/i,
-      /\berror\b/i,
-      /\bbroken\b/i,
-      /\brepair\b/i,
-    ],
-  };
 
   private bundledSkillsDir: string;
   private managedSkillsDir: string;
@@ -608,330 +598,25 @@ export class CustomSkillLoader {
       includePrereqBlockedSkills?: boolean;
     } = {},
   ): CustomSkill[] {
-    const availableToolNames = options.availableToolNames;
-    const includePrereqBlockedSkills = options.includePrereqBlockedSkills === true;
-    return this.listSkills().filter((skill) => {
-      // Exclude guideline skills
-      if (skill.type === "guideline") return false;
-      // Exclude disabled skills
-      if (skill.enabled === false) return false;
-      // Exclude skills that explicitly disable model invocation
-      if (skill.invocation?.disableModelInvocation === true) return false;
-
-      // If tool availability is provided, filter out skills that cannot run in this context.
-      if (availableToolNames) {
-        const skillRequires = (skill.requires || {}) as Any;
-        const requiredTools: string[] = Array.isArray(skillRequires.tools)
-          ? skillRequires.tools.filter(
-              (tool: unknown): tool is string => typeof tool === "string" && tool.trim().length > 0,
-            )
-          : [];
-
-        if (requiredTools.some((tool) => !availableToolNames.has(tool))) {
-          return false;
-        }
-
-        // Skills requiring external binaries generally need run_command access.
-        const hasBinaryRequirements =
-          (Array.isArray(skill.requires?.bins) && skill.requires.bins.length > 0) ||
-          (Array.isArray(skill.requires?.anyBins) && skill.requires.anyBins.length > 0);
-        if (
-          hasBinaryRequirements &&
-          !includePrereqBlockedSkills &&
-          !availableToolNames.has("run_command")
-        ) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }
-
-  private tokenizeForRouting(text: string): Set<string> {
-    const tokens = String(text || "")
-      .toLowerCase()
-      .split(/[^a-z0-9_]+/g)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 3);
-    return new Set(tokens);
-  }
-
-  private buildRoutingHaystack(texts: string[]): string {
-    return texts
-      .filter((text) => typeof text === "string" && text.trim().length > 0)
-      .join(" ")
-      .toLowerCase()
-      .trim();
-  }
-
-  private normalizeRoutingPhrase(text: string): string {
-    return String(text || "")
-      .toLowerCase()
-      .replace(/[-_\s]+/g, " ")
-      .trim();
-  }
-
-  private sanitizeRoutingQuery(query: string): string {
-    return String(query || "")
-      .replace(/```[\s\S]*?```/g, " ")
-      .replace(/`[^`\n]*`/g, " ")
-      .replace(/https?:\/\/\S+/gi, " ")
-      .replace(/(^|\n)\s*>\s.*$/gm, " ")
-      .replace(/\b(?:[A-Za-z]:)?(?:\/|\.\/|\.\.\/)?[\w.-]+(?:\/[\w.-]+)+\b/g, " ")
-      .replace(
-        /\b[\w.-]+\.(?:ts|tsx|js|jsx|json|md|txt|html|css|scss|py|rb|go|rs|java|c|cpp|h|hpp|docx?|pdf|xlsx?|pptx?|ya?ml)\b/gi,
-        " ",
-      )
-      .replace(/["“”'‘’][^"“”'‘’]{1,160}["“”'‘’]/g, " ");
-  }
-
-  private escapeRegExp(text: string): string {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  private queryContainsRoutingPhrase(query: string, phrase: string): boolean {
-    const normalizedQuery = this.normalizeRoutingPhrase(query);
-    const normalizedPhrase = this.normalizeRoutingPhrase(phrase);
-    if (!normalizedQuery || !normalizedPhrase) return false;
-
-    const escapedPhrasePattern = normalizedPhrase
-      .split(" ")
-      .filter(Boolean)
-      .map((segment) => this.escapeRegExp(segment))
-      .join("\\s+");
-
-    if (!escapedPhrasePattern) return false;
-
-    return new RegExp(`(?:^|[^a-z0-9])${escapedPhrasePattern}(?:$|[^a-z0-9])`, "i").test(
-      normalizedQuery,
-    );
-  }
-
-  private requiresExplicitSkillInvocation(skill: CustomSkill): boolean {
-    return skill.id === "codex-cli" || skill.id === "gemini";
-  }
-
-  private matchesExplicitSkillInvocationTarget(query: string, phrase: string): boolean {
-    const normalizedQuery = this.normalizeRoutingPhrase(this.sanitizeRoutingQuery(query));
-    const normalizedPhrase = this.normalizeRoutingPhrase(phrase);
-    return matchesExplicitSkillInvocationPhrase(normalizedQuery, normalizedPhrase, (segment) =>
-      this.escapeRegExp(segment),
-    );
-  }
-
-  private matchesExplicitSkillInvocation(skill: CustomSkill, query: string): boolean {
-    const skillId = String(skill.id || "").trim();
-    const skillName = String(skill.name || "").trim();
-
-    return (
-      (skillId.length > 0 && this.matchesExplicitSkillInvocationTarget(query, skillId)) ||
-      (skillName.length > 0 && this.matchesExplicitSkillInvocationTarget(query, skillName))
-    );
+    return this.listSkills().filter((skill) => isModelInvocableSkill(skill, options));
   }
 
   matchesSkillRoutingQuery(skill: CustomSkill, query: string): boolean {
-    const explicitMatch = this.matchesExplicitSkillInvocation(skill, query);
-    if (this.requiresExplicitSkillInvocation(skill)) {
-      if (!explicitMatch) {
-        logger.debug(
-          `Explicit invocation gate BLOCKED skill "${skill.id}" for query "${query.slice(0, 80)}"`,
-        );
-      }
-      return explicitMatch;
-    }
-
-    if (explicitMatch) {
-      return true;
-    }
-
-    const routing = skill.metadata?.routing;
-    const hasRoutingMetadata =
-      Boolean(routing?.useWhen) ||
-      Boolean(routing?.dontUseWhen) ||
-      Boolean(routing?.outputs) ||
-      Boolean(routing?.successCriteria) ||
-      (Array.isArray(routing?.expectedArtifacts) && routing.expectedArtifacts.length > 0) ||
-      (Array.isArray(routing?.keywords) && routing.keywords.length > 0) ||
-      (Array.isArray(routing?.examples?.positive) && routing.examples.positive.length > 0) ||
-      (Array.isArray(routing?.examples?.negative) && routing.examples.negative.length > 0);
-    if (!hasRoutingMetadata) {
-      return true;
-    }
-
-    const keywords = routing?.keywords;
-    if (!Array.isArray(keywords) || keywords.length === 0) return true;
-
-    const normalizedQuery = this.normalizeRoutingPhrase(this.sanitizeRoutingQuery(query));
-    if (!normalizedQuery) return false;
-
-    const matched = keywords.some(
-      (keyword) =>
-        typeof keyword === "string" && this.queryContainsRoutingPhrase(normalizedQuery, keyword),
-    );
-    if (!matched) {
-      logger.debug(
-        `Keyword gate BLOCKED skill "${skill.id}" for query "${query.slice(0, 80)}" (keywords: ${JSON.stringify(keywords)})`,
-      );
-    }
+    const matched = matchesSkillRoutingQuery(skill, query);
+    if (!matched)
+      logger.debug(`Routing gate BLOCKED skill "${skill.id}" for query "${query.slice(0, 80)}"`);
     return matched;
   }
 
-  private scoreTextOverlap(queryTokens: Set<string>, texts: string[]): number {
-    const haystack = this.buildRoutingHaystack(texts);
-    if (!haystack || queryTokens.size === 0) return 0;
-
-    let overlap = 0;
-    for (const token of queryTokens) {
-      if (haystack.includes(token)) overlap += 1;
-    }
-    return overlap / Math.max(queryTokens.size, 1);
-  }
-
-  private getIntentCueCount(texts: string[], cue: RoutingIntentCue): number {
-    const haystack = this.buildRoutingHaystack(texts);
-    if (!haystack) return 0;
-    return CustomSkillLoader.ROUTING_INTENT_CUE_PATTERNS[cue].reduce((count, pattern) => {
-      const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-      const globalPattern = new RegExp(pattern.source, flags);
-      const matches = Array.from(haystack.matchAll(globalPattern)).length;
-      return count + matches;
-    }, 0);
-  }
-
-  private inferDominantIntentCue(texts: string[]): RoutingIntentCue | null {
-    const reviewCount = this.getIntentCueCount(texts, "review");
-    const fixCount = this.getIntentCueCount(texts, "fix");
-    if (reviewCount === 0 && fixCount === 0) return null;
-    if (reviewCount === fixCount) return null;
-    return reviewCount > fixCount ? "review" : "fix";
-  }
-
-  private getRoutingExamples(skill: CustomSkill, polarity: "positive" | "negative"): string[] {
-    const examples = skill.metadata?.routing?.examples;
-    const raw = polarity === "positive" ? examples?.positive : examples?.negative;
-    if (!Array.isArray(raw)) return [];
-    return raw.filter(
-      (example): example is string => typeof example === "string" && example.trim().length > 0,
-    );
-  }
-
-  private getBestExampleOverlap(queryTokens: Set<string>, examples: string[]): number {
-    let best = 0;
-    for (const example of examples) {
-      best = Math.max(best, this.scoreTextOverlap(queryTokens, [example]));
-    }
-    return best;
-  }
-
   private rankSkillsForQuery(skills: CustomSkill[], query: string): RankedSkillMatch[] {
-    const normalizedQuery = this.sanitizeRoutingQuery(String(query || "")).trim();
-    if (!normalizedQuery) {
-      return skills.map((skill) => ({ skill, score: 1 }));
-    }
-
-    const queryTokens = this.tokenizeForRouting(normalizedQuery);
-    if (queryTokens.size === 0) {
-      return skills.map((skill) => ({ skill, score: 0 }));
-    }
-
-    return skills
-      .map((skill) => ({
-        skill,
-        score: this.scoreSkillForQuery(skill, normalizedQuery, queryTokens),
-      }))
-      .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id));
+    return rankSkillsForQuery(skills, query);
   }
 
   rankModelInvocableSkillsForQuery(
     query: string,
     options: RankSkillsForQueryOptions = {},
   ): RankedSkillMatch[] {
-    const eligibleSkills = this.listModelInvocableSkills({
-      availableToolNames: options.availableToolNames,
-      includePrereqBlockedSkills: options.includePrereqBlockedSkills,
-    }).filter((skill) => this.matchesSkillRoutingQuery(skill, query));
-
-    const ranked = this.rankSkillsForQuery(eligibleSkills, query);
-    const limit =
-      typeof options.limit === "number" && Number.isFinite(options.limit)
-        ? Math.max(Math.floor(options.limit), 0)
-        : ranked.length;
-    return ranked.slice(0, limit);
-  }
-
-  private scoreSkillForQuery(skill: CustomSkill, query: string, queryTokens: Set<string>): number {
-    if (!query || queryTokens.size === 0) return 0;
-
-    const positiveExamples = this.getRoutingExamples(skill, "positive");
-    const negativeExamples = this.getRoutingExamples(skill, "negative");
-    const positiveTexts = [
-      skill.id || "",
-      skill.name || "",
-      skill.description || "",
-      skill.category || "",
-      skill.metadata?.routing?.useWhen || "",
-      skill.metadata?.routing?.outputs || "",
-      skill.metadata?.routing?.successCriteria || "",
-      ...positiveExamples,
-    ].filter((text) => typeof text === "string" && text.trim().length > 0);
-    if (positiveTexts.length === 0) return 0;
-
-    const overlapScore = this.scoreTextOverlap(queryTokens, positiveTexts);
-    const positiveExampleBoost = Math.min(
-      0.45,
-      this.getBestExampleOverlap(queryTokens, positiveExamples) * 0.6,
-    );
-    const negativeOverlap = this.getBestExampleOverlap(queryTokens, [
-      skill.metadata?.routing?.dontUseWhen || "",
-      ...negativeExamples,
-    ]);
-    const negativePenalty = Math.min(0.65, negativeOverlap * 0.85);
-
-    const dominantQueryIntent = this.inferDominantIntentCue([query]);
-    const dominantSkillIntent = this.inferDominantIntentCue(positiveTexts);
-    let intentAlignmentBoost = 0;
-    let intentMismatchPenalty = 0;
-    if (dominantQueryIntent && dominantSkillIntent) {
-      if (dominantQueryIntent === dominantSkillIntent) {
-        intentAlignmentBoost = 0.2;
-      } else {
-        intentMismatchPenalty = 0.3;
-      }
-    } else if (
-      dominantQueryIntent &&
-      this.getIntentCueCount(positiveTexts, dominantQueryIntent) > 0
-    ) {
-      intentAlignmentBoost = 0.1;
-    }
-
-    const exactIdHit = query.toLowerCase().includes((skill.id || "").toLowerCase()) ? 0.35 : 0;
-    const exactNameHit = query.toLowerCase().includes((skill.name || "").toLowerCase()) ? 0.2 : 0;
-    const routingBoost = skill.metadata?.routing?.useWhen ? 0.05 : 0;
-
-    // Explicit keyword triggers: any keyword match gives a guaranteed strong routing signal
-    const routingKeywords = skill.metadata?.routing?.keywords ?? [];
-    const keywordHit =
-      routingKeywords.length > 0 &&
-      routingKeywords.some((kw) => kw && query.toLowerCase().includes(kw.toLowerCase()))
-        ? 0.5
-        : 0;
-
-    return Math.max(
-      0,
-      Math.min(
-        1,
-        overlapScore +
-          positiveExampleBoost +
-          intentAlignmentBoost +
-          exactIdHit +
-          exactNameHit +
-          routingBoost +
-          keywordHit -
-          negativePenalty -
-          intentMismatchPenalty,
-      ),
-    );
+    return rankModelInvocableSkillsForQuery(this.listSkills(), query, options);
   }
 
   private shortlistSkillsForQuery(
@@ -943,7 +628,7 @@ export class CustomSkillLoader {
     confidence: number;
     totalEligible: number;
   } {
-    const normalizedQuery = this.sanitizeRoutingQuery(String(query || "")).trim();
+    const normalizedQuery = sanitizeRoutingQuery(String(query || "")).trim();
 
     if (!normalizedQuery) {
       return {

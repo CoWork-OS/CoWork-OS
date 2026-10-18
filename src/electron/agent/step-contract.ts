@@ -346,7 +346,7 @@ export function isReadOnlyConstraintOnlyStep(text: string): boolean {
   if (!match) return false;
 
   const target = String(match[1] || "").replace(
-    /\b[A-Za-z0-9_.\/-]+\.(?:csv|tsv|xlsx?|docx?|pdf|md|txt|json|jsonl|ya?ml|toml|xml|pptx?|html?|css|js|tsx?|py|go|rs|swift|sql)\b/gi,
+    /\b[A-Za-z0-9_./-]+\.(?:csv|tsv|xlsx?|docx?|pdf|md|txt|json|jsonl|ya?ml|toml|xml|pptx?|html?|css|js|tsx?|py|go|rs|swift|sql)\b/gi,
     " ",
   );
   if (!/\b(?:files?|directories|folders?|paths?|workspace)\b/i.test(target)) return false;

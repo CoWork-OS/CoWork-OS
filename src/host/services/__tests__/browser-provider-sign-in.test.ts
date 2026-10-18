@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrowserProviderSignIn } from "../browser-provider-sign-in";
+import type { BrowserProviderSignIn } from "../../../shared/host-api/provider-sign-in";
 import type { OpenAIOAuth } from "../../../electron/agent/llm/openai-oauth";
 
 const tokens = {
@@ -27,7 +28,10 @@ function setup(persist = vi.fn(), ttlMs = 300_000) {
     context = owner,
   ) => {
     const method = service.definitions[name];
-    return method.handler(method.validate?.(args) ?? args, context) as Promise<any>;
+    return method.handler(
+      method.validate?.(args) ?? args,
+      context,
+    ) as Promise<BrowserProviderSignIn>;
   };
   return { service, call, persist, authenticate };
 }
@@ -109,7 +113,10 @@ describe("browser account sign-in", () => {
       },
     });
     try {
-      const flow = (await service.definitions.beginOpenAIBrowserSignIn.handler([], owner)) as any;
+      const flow = (await service.definitions.beginOpenAIBrowserSignIn.handler(
+        [],
+        owner,
+      )) as BrowserProviderSignIn;
       service.revokeSession("owner");
       finish(tokens);
       await new Promise((resolve) => setImmediate(resolve));

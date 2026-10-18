@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IPC_CHANNELS } from "../../../shared/types";
 
 const { registeredHandlers, mockTaskTraceRepo } = vi.hoisted(() => {
-  const registeredHandlers = new Map<string, (...args: any[]) => unknown>();
+  const registeredHandlers = new Map<string, (...args: unknown[]) => unknown>();
   const mockTaskTraceRepo = {
     listTaskTraceRuns: vi.fn(() => []),
     getTaskTraceRun: vi.fn(() => undefined),
@@ -13,7 +13,7 @@ const { registeredHandlers, mockTaskTraceRepo } = vi.hoisted(() => {
 
 vi.mock("electron", () => ({
   ipcMain: {
-    handle: vi.fn((channel: string, handler: (...args: any[]) => unknown) => {
+    handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
       registeredHandlers.set(channel, handler);
     }),
   },

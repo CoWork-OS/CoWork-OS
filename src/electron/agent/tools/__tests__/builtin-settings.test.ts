@@ -6,7 +6,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Track writes manually since mocking fs can be complex
 let writeCount = 0;
-let savedSettings: Any = null;
 
 // Mock fs module entirely
 vi.mock("fs", () => ({
@@ -15,7 +14,7 @@ vi.mock("fs", () => ({
     readFileSync: vi.fn().mockReturnValue("{}"),
     writeFileSync: vi.fn().mockImplementation((_path: string, content: string) => {
       writeCount++;
-      savedSettings = JSON.parse(content);
+      JSON.parse(content);
     }),
     mkdirSync: vi.fn(),
   },
@@ -23,7 +22,7 @@ vi.mock("fs", () => ({
   readFileSync: vi.fn().mockReturnValue("{}"),
   writeFileSync: vi.fn().mockImplementation((_path: string, content: string) => {
     writeCount++;
-    savedSettings = JSON.parse(content);
+    JSON.parse(content);
   }),
   mkdirSync: vi.fn(),
 }));
@@ -42,7 +41,6 @@ describe("BuiltinToolsSettingsManager - webfetch category", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     writeCount = 0;
-    savedSettings = null;
     BuiltinToolsSettingsManager.clearCache();
   });
 

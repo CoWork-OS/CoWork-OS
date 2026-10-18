@@ -5,7 +5,6 @@ import {
   LLMRequest,
   LLMResponse,
   LLMContent,
-  LLMMessage,
   LLMTool,
 } from "./types";
 import { getOpenRouterAttributionHeaders } from "./openrouter-attribution";

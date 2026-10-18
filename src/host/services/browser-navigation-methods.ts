@@ -2479,7 +2479,6 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
 
   const agents = "agents.manage" as const;
   const automation = "automation.manage" as const;
-  const memory = "memory.manage" as const;
 
   definitions.listManagedAgents = definition(
     agents,
@@ -2866,7 +2865,6 @@ export function createBrowserNavigationDefinitions(options: BrowserNavigationOpt
     agents,
     async ([value]) => {
       const sessionInput = validateSessionCreate(value);
-      const agentId = sessionInput.agentId;
       const environmentId = sessionInput.environmentId;
       const environment = await managed.getEnvironment(environmentId);
       if (!environment) throw new Error("Managed environment not found.");

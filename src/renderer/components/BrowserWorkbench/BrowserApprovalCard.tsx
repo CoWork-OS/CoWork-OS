@@ -1,4 +1,5 @@
 import { ShieldQuestion } from "lucide-react";
+import { ExportRiskReview } from "../ExportRiskReview";
 import type { ApprovalRequest, ApprovalResponseAction } from "../../../shared/types";
 
 type ApprovalDetails = {
@@ -129,6 +130,7 @@ export function BrowserApprovalCard({
         <span className="browser-workbench-approval-title">{title}</span>
         {subject && <span className="browser-workbench-driving-label"> · {subject}</span>}
       </span>
+      <ExportRiskReview approval={approval} />
       {choices.map((choice) => (
         <button
           key={choice.action}

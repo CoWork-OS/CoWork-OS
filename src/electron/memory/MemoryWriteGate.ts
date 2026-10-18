@@ -307,7 +307,7 @@ export class MemoryWriteGate {
       throw new Error("Pending archive memory payload is missing type or content.");
     }
     const options = this.asPlainObject(payload.options);
-    const workspace = effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId));
+    void (effectiveWorkspace ?? (await this.getStoredWorkspace(pending.workspaceId)));
     const memory = await MemoryService.capture(
       pending.workspaceId,
       pending.taskId,

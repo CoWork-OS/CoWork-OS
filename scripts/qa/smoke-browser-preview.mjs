@@ -617,12 +617,25 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByLabel("Pairing code").fill(pairing.code);
     await page.getByRole("button", { name: "Connect" }).click();
     await page.getByRole("button", { name: "Skip onboarding" }).click();
-    const understand = page.getByText("Yes, I understand", { exact: true });
-    await understand.waitFor({ state: "visible" });
-    await understand.click();
-    const continueButton = page.getByRole("button", { name: "Continue", exact: true });
-    await continueButton.waitFor({ state: "visible" });
-    await continueButton.click();
+    const securityNotice = page.getByRole("dialog", { name: "Before you start", exact: true });
+    await securityNotice.waitFor({ state: "visible" });
+    await securityNotice.getByRole("button", { name: "Decline", exact: true }).click();
+    await securityNotice.getByRole("status").waitFor({ state: "visible" });
+    assert.equal(await securityNotice.isVisible(), true, "Declining must keep the security gate open");
+    assert.equal(await page.locator(".sidebar-rail").count(), 0, "Declining must not open the app");
+    assert.equal(
+      await page.evaluate(async () => (await window.electronAPI.getAppearanceSettings()).disclaimerAccepted),
+      false,
+      "Declining must not persist security notice acceptance",
+    );
+    await securityNotice.getByRole("checkbox", { name: "Don't show this again", exact: true }).check();
+    await securityNotice.getByRole("button", { name: "I understand the risks", exact: true }).click();
+    await securityNotice.waitFor({ state: "detached" });
+    assert.equal(
+      await page.evaluate(async () => (await window.electronAPI.getAppearanceSettings()).disclaimerAccepted),
+      true,
+      "Explicit acceptance must persist the browser preference",
+    );
 
     // Rail items carry their destination; aria-labels can include an unread count.
     const railButton = (destination) =>
@@ -632,6 +645,8 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       await page.getByRole("menuitem", { name, exact: true }).click();
     };
     const inboxButton = railButton("inbox");
+    const inboxHeading = page.getByRole("region", { name: "Threads", exact: true })
+      .getByRole("heading", { name: "Inbox", exact: true });
     try {
       await inboxButton.waitFor({ state: "visible", timeout: 7_000 });
     } catch {
@@ -655,6 +670,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
       .click();
     await inboxButton.waitFor({ state: "visible" });
     await page.locator(".browser-host-update-banner").waitFor({ state: "detached" });
+    assert.equal(await securityNotice.count(), 0, "Accepted security notice must stay dismissed after reload");
     await page.evaluate(() => {
       const probe = document.createElement("button");
       probe.type = "button";
@@ -687,7 +703,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     });
     await page.getByRole("button", { name: "Back", exact: true }).click();
     await inboxButton.click();
-    await page.getByText("Inbox Agent", { exact: true }).waitFor({ state: "visible" });
+    await inboxHeading.waitFor({ state: "visible" });
 
     await railButton("automations").click();
     await page.locator('section[aria-label="Automation Studio"]').waitFor({ state: "visible" });
@@ -699,7 +715,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await openMoreItem("Mission Control");
     await page.locator(".mc-v2-topbar h1").waitFor({ state: "visible" });
     await inboxButton.click();
-    await page.getByText("Inbox Agent", { exact: true }).waitFor({ state: "visible" });
+    await inboxHeading.waitFor({ state: "visible" });
 
     await page.evaluate(async () => {
       const project = (await window.electronAPI.listWorkspaces()).find(
@@ -810,7 +826,7 @@ async function runBrowserUiSmoke({ base, port, token, profile, awarenessWorkspac
     await page.getByRole("button", { name: /^Notifications(, \d+ unread)?$/ }).click();
 
     await openMoreItem("Mission Control");
-    for (const name of ["Teams"]) {
+    for (const name of ["Agent teams"]) {
       const button = page.getByRole("button", { name, exact: true });
       assert.equal(
         await button.isDisabled(),

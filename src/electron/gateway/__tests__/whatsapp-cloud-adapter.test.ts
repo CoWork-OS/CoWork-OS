@@ -299,9 +299,7 @@ describe("WhatsAppCloudAdapter", () => {
     await first.disconnect();
 
     const second = new WhatsAppCloudAdapter(config);
-    expect(
-      ((await second.getInfo()).extra?.health as { pendingInbound: number }).pendingInbound,
-    ).toBe(1);
+    expect((await second.getInfo()).extra?.health).toMatchObject({ pendingInbound: 1 });
     // A provider retry of the same event is still recognised as a duplicate.
     const received: IncomingMessage[] = [];
     second.onMessage((message) => {

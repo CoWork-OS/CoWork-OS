@@ -72,6 +72,59 @@ describe("TaskEventScheduler", () => {
     expect(scheduler.getSnapshot(c).events.map((item) => item.id)).toEqual(["current-c"]);
   });
 
+  it("rejects a delayed response after switching away from and back to the same task", () => {
+    const scheduler = createTaskEventScheduler();
+    const a = target("task-a");
+    const firstGeneration = scheduler.switchTarget(a);
+    scheduler.switchTarget(target("task-b"));
+    const currentGeneration = scheduler.switchTarget(a);
+
+    expect(enqueue(scheduler, a, firstGeneration, event("stale-a", "assistant_message"))).toBe(
+      false,
+    );
+    expect(enqueue(scheduler, a, currentGeneration, event("current-a", "assistant_message"))).toBe(
+      true,
+    );
+    expect(scheduler.getSnapshot(a).events.map((item) => item.id)).toEqual(["current-a"]);
+  });
+
+  it("rejects frames from a previous remote device even with the current generation", () => {
+    const scheduler = createTaskEventScheduler();
+    const firstDevice = { ...target("task-a", "remote"), deviceId: "device-1" };
+    const currentDevice = { ...firstDevice, deviceId: "device-2" };
+    scheduler.switchTarget(firstDevice);
+    const generation = scheduler.switchTarget(currentDevice);
+
+    expect(
+      enqueue(scheduler, firstDevice, generation, event("wrong-device", "assistant_message")),
+    ).toBe(false);
+    expect(
+      enqueue(scheduler, currentDevice, generation, event("current-device", "assistant_message")),
+    ).toBe(true);
+    expect(scheduler.getSnapshot(firstDevice).events).toEqual([]);
+    expect(scheduler.getSnapshot(currentDevice).events.map((item) => item.id)).toEqual([
+      "current-device",
+    ]);
+  });
+
+  it("keeps side-chat frames isolated when the main surface changes tasks", () => {
+    const scheduler = createTaskEventScheduler();
+    const main = target("task-a");
+    const sideChat = target("task-a", "local", "side-chat");
+    const mainGeneration = scheduler.switchTarget(main);
+    const sideChatGeneration = scheduler.switchTarget(sideChat);
+    scheduler.switchTarget(target("task-b"));
+
+    expect(enqueue(scheduler, main, mainGeneration, event("stale-main", "assistant_message"))).toBe(
+      false,
+    );
+    expect(
+      enqueue(scheduler, sideChat, sideChatGeneration, event("side-chat", "assistant_message")),
+    ).toBe(true);
+    expect(scheduler.getSnapshot(main).events).toEqual([]);
+    expect(scheduler.getSnapshot(sideChat).events.map((item) => item.id)).toEqual(["side-chat"]);
+  });
+
   it("keeps local and remote sources on the same scheduling path", () => {
     vi.useFakeTimers();
     const localScheduler = createTaskEventScheduler({ batchIntervalMs: 50 });

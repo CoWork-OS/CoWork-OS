@@ -13,7 +13,10 @@ import {
   type PhotoshopModel,
 } from "../photoshop-document-edit";
 import { createPhotoshopEditAdapter, photoshopEditResources } from "../photoshop-edit-adapter";
-import { ApplicationAdapterCatalog } from "../ApplicationAdapterCatalog";
+import {
+  ApplicationAdapterCatalog,
+  type ApplicationAdapterContext,
+} from "../ApplicationAdapterCatalog";
 import { ApplicationOperationRequestSchema } from "../../../shared/application-execution";
 import {
   NativeApplicationTools,
@@ -26,6 +29,13 @@ vi.mock("../native-desktop-session", () => ({
   requireNativeDesktopSession: vi.fn(async () => {}),
 }));
 afterEach(() => vi.restoreAllMocks());
+type NativeToolHooks = {
+  script: NativeApplicationTools["script"];
+  compileNative: NativeApplicationTools["compileNative"];
+  launchPhotoshop: NativeApplicationTools["launchPhotoshop"];
+  requireRunning: NativeApplicationTools["requireRunning"];
+};
+
 const model: PhotoshopModel = {
   width: 1200,
   height: 630,
@@ -132,11 +142,11 @@ async function fixture() {
     "task",
     true,
   );
-  vi.spyOn(tools as any, "requireRunning").mockResolvedValue("27.11");
-  vi.spyOn(tools as any, "compileNative").mockResolvedValue(undefined);
+  vi.spyOn(tools as unknown as NativeToolHooks, "requireRunning").mockResolvedValue("27.11");
+  vi.spyOn(tools as unknown as NativeToolHooks, "compileNative").mockResolvedValue(undefined);
   const script = vi
-    .spyOn(tools as any, "script")
-    .mockImplementation(async (s: any) =>
+    .spyOn(tools as unknown as NativeToolHooks, "script")
+    .mockImplementation(async (s: string) =>
       s.includes("var changes=") ? input.path : JSON.stringify({ appVersion: "27.11", model }),
     );
   return { root, input, bytes, tools, authorize, approval, script };
@@ -332,7 +342,7 @@ describe("Existing Photoshop document editing", () => {
         pendingAction: "prepare",
         cancellation: "none",
       },
-    } as any;
+    } as unknown as ApplicationAdapterContext;
     expect((await adapter.observe!(context)).status).toBe("prepared");
     expect(call.mock.calls.map((c) => c[0])).toEqual(["local_photoshop_read"]);
     context.operation.cancellation = "requested";
@@ -366,7 +376,7 @@ describe("Existing Photoshop document editing", () => {
         ...readback(expectedPhotoshopEdit(model, edit.changes), "output"),
         path: edit.path,
       };
-    const call = vi.fn(async (name: string, args: any) =>
+    const call = vi.fn(async (name: string, args: Record<string, unknown>) =>
       name === "local_photoshop_edit"
         ? { path: edit.path }
         : args.path === edit.sourcePath
@@ -376,7 +386,7 @@ describe("Existing Photoshop document editing", () => {
     const context = {
       tools: { call },
       operation: { request: { input: edit }, result: { data: output } },
-    } as any;
+    } as unknown as ApplicationAdapterContext;
     expect((await adapter.verify(context)).status).toBe("verified");
     await adapter.observe!(context);
     expect(call.mock.calls.every((c) => c[0] === "local_photoshop_read")).toBe(true);
@@ -495,8 +505,8 @@ describe("Existing Photoshop document editing", () => {
         accessApprovalPolicy: "on-request",
         accessNetworkMode: "disabled",
       },
-    } as any;
-    const request = {
+    } as Parameters<typeof PermissionEngine.evaluate>[0]["workspace"];
+    const request: Parameters<typeof PermissionEngine.evaluate>[0] = {
       workspace,
       toolName: "local_photoshop_edit",
       toolInput: {
@@ -508,7 +518,7 @@ describe("Existing Photoshop document editing", () => {
       approvalType: "workspace_write",
       mode: "default",
       rules: [],
-    } as any;
+    };
     expect(PermissionEngine.evaluate(request).decision).not.toBe("allow");
   });
 });

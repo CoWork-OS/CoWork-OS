@@ -543,7 +543,7 @@ export function HomeDashboard({
 
     (async () => {
       try {
-        const electronApi = (window as any).electronAPI;
+        const electronApi = window.electronAPI;
         const recent = await electronApi.getRecentHubFiles(8);
         if (cancelled) return;
         setRecentHubFiles(Array.isArray(recent) ? (recent as RecentHubFile[]) : []);
@@ -1286,9 +1286,7 @@ export function HomeDashboard({
                 type="button"
                 key={file.id}
                 className="home-file-thumb"
-                onClick={() =>
-                  void (window as any).electronAPI.openFile(file.path, workspace?.path)
-                }
+                onClick={() => void window.electronAPI.openFile(file.path, workspace?.path)}
               >
                 <HomeFilePreview
                   filePath={file.path}

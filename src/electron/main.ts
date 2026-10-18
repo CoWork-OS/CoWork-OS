@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import {
   configureBrowserCredentialService,
   getBrowserCredentialService,
@@ -241,10 +242,8 @@ import { sanitizeTaskMessageParams } from "./control-plane/sanitize";
 import {
   getArgValue,
   getControlPlaneAllowedOriginsFromEnv,
-  getControlPlaneBindContextFromEnv,
   getEnvSettingsImportModeFromArgsOrEnv,
   isHeadlessMode,
-  shouldAllowInsecureControlPlanePublicBindFromEnv,
   shouldEnableControlPlaneFromArgsOrEnv,
   shouldImportEnvSettingsFromArgsOrEnv,
   shouldPrintControlPlaneTokenFromArgsOrEnv,
@@ -1687,9 +1686,10 @@ async function runCliDirectMode(): Promise<void> {
         `CoWork CLI runtime is missing at ${directRunPath}. Run npm run build:cli or reinstall CoWork OS.`,
       );
     }
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const directRun = require(directRunPath) as { main: (argv: string[]) => Promise<number> };
+
+    const directRun = createRequire(__filename)(directRunPath) as {
+      main: (argv: string[]) => Promise<number>;
+    };
     const code = await directRun.main(getCliDirectRunArgv());
     app.quit();
     process.exit(code);
@@ -2157,7 +2157,7 @@ if (isMacSafeStorageMigrationWorker) {
         });
       };
 
-      const resolvedUserDataDir = startupUserDataDir || applyStableUserDataPath();
+      void (startupUserDataDir || applyStableUserDataPath());
       const activeProfileId = getActiveProfileId();
       if (hasNonDefaultProfile()) {
         logger.info(`Active profile: ${activeProfileId}`);
@@ -4716,8 +4716,7 @@ if (isMacSafeStorageMigrationWorker) {
             }
           },
           getRendererPath: () => {
-            // oxlint-disable-next-line typescript-eslint(no-require-imports)
-            const { app } = require("electron");
+            const { app } = createRequire(__filename)("electron");
             return path.join(app.getAppPath(), "dist", "renderer");
           },
           log: (...args: unknown[]) => console.log("[WebAccess]", ...args),

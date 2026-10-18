@@ -314,10 +314,7 @@ async function extractPlaybookFragments(
   }
 }
 
-async function extractArchiveFragments(
-  workspaceId: string,
-  taskPrompt: string,
-): Promise<MemoryFragment[]> {
+async function extractArchiveFragments(workspaceId: string): Promise<MemoryFragment[]> {
   try {
     const recent = (await MemoryService.getRecentForPromptRecall(workspaceId, 4)).map((memory) => ({
       key: fingerprint(`archive:${memory.id}`),
@@ -558,7 +555,7 @@ export class MemorySynthesizer {
       fragments.push(...(await extractKnowledgeGraphFragments(workspaceId, taskPrompt)));
     }
     if (options.includeArchive) {
-      fragments.push(...(await extractArchiveFragments(workspaceId, taskPrompt)));
+      fragments.push(...(await extractArchiveFragments(workspaceId)));
     }
     const ranked = dedupeAndRank(fragments, now);
     const { selected, droppedCount } = selectFragments(ranked, options.tokenBudget ?? 1000);

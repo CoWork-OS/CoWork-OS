@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 /**
  * Plugin Loader
  *
@@ -28,7 +29,7 @@ const securityService = getCapabilityBundleSecurityService();
 
 function getElectronApp(): { isPackaged?: boolean } | null {
   try {
-    const electron = require("electron") as { app?: { isPackaged?: boolean } };
+    const electron = createRequire(__filename)("electron") as { app?: { isPackaged?: boolean } };
     return electron.app ?? null;
   } catch {
     return null;
@@ -75,7 +76,7 @@ const getDefaultExtensionsDirs = (): string[] => {
 
   // Organization plugin packs directory (admin-managed)
   try {
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const { getOrgPluginDir } = require("../admin/policies");
     const orgDir = getOrgPluginDir();
     if (orgDir && fs.existsSync(orgDir)) {
@@ -325,8 +326,8 @@ export async function loadPlugin(pluginPath: string): Promise<PluginLoadResult> 
     }
 
     // Load the plugin module
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pluginModule = require(entryPoint);
+
+    const pluginModule = createRequire(__filename)(entryPoint);
     const plugin: Plugin = pluginModule.default || pluginModule;
 
     // Validate plugin interface

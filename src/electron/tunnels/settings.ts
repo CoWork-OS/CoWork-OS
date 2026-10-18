@@ -172,7 +172,7 @@ export class SecureMcpTunnelSettingsManager {
             enabled: Boolean(tunnel.enabled),
             policy: {
               ...DEFAULT_SECURE_MCP_TUNNEL_POLICY,
-              ...(tunnel.policy || {}),
+              ...tunnel.policy,
               allowedTools: sanitizeAllowedTools(tunnel.policy?.allowedTools),
             },
             coworkHostPort: tunnel.coworkHostPort ?? 3333,

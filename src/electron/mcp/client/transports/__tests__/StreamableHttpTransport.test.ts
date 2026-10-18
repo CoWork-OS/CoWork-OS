@@ -6,7 +6,6 @@ import { MCPSettingsManager } from "../../../settings";
 import { BoxSettingsManager } from "../../../../settings/box-manager";
 
 const nativeFetch = globalThis.fetch;
-type Any = any; // oxlint-disable-line typescript-eslint/no-explicit-any
 
 describe("StreamableHttpTransport", () => {
   const fetchMock = vi.fn();
@@ -602,7 +601,7 @@ describe("StreamableHttpTransport", () => {
   const jsonRpc = (result: unknown, init: ResponseInit = {}) =>
     new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
       ...init,
-      headers: { "content-type": "application/json", ...(init.headers || {}) },
+      headers: { "content-type": "application/json", ...init.headers },
     });
   const oauthServer = (auth: Record<string, unknown>) =>
     new StreamableHttpTransport({

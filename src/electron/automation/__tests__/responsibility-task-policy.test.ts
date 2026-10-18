@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseManager } from "../../database/schema";
 import { WorkspaceStore, TaskStore } from "../../database/repositories";
 import { AgentRoleStore } from "../../agents/AgentRoleRepository";
@@ -25,6 +25,24 @@ import type {
   BotResponsibilityDefinition,
   BotResponsibilityScope,
 } from "../../../shared/bot-responsibility";
+
+// Collect the cold production dependency graph before starting fixture deadlines.
+// A timed-out import must not resume after teardown has replaced its database.
+const importProfile = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-policy-import-"));
+const previousImportProfile = process.env.COWORK_USER_DATA_DIR;
+process.env.COWORK_USER_DATA_DIR = importProfile;
+const [{ ToolRegistry }, { FileTools }] = await (async () => {
+  try {
+    return await Promise.all([
+      import("../../agent/tools/registry"),
+      import("../../agent/tools/file-tools"),
+    ]);
+  } finally {
+    if (previousImportProfile === undefined) delete process.env.COWORK_USER_DATA_DIR;
+    else process.env.COWORK_USER_DATA_DIR = previousImportProfile;
+  }
+})();
+afterAll(() => fs.rmSync(importProfile, { recursive: true, force: true }));
 
 describe("immutable responsibility task admission and per-tool policy", () => {
   let dir: string,
@@ -496,7 +514,6 @@ describe("immutable responsibility task admission and per-tool policy", () => {
     );
   });
   it("production registered-tool entrypoint checks persisted authority despite runtime wrappers", async () => {
-    const { ToolRegistry } = await import("../../agent/tools/registry");
     bind();
     const t = task();
     const handler = vi.fn().mockResolvedValue({ result: { text: "Selected" } });
@@ -523,7 +540,6 @@ describe("immutable responsibility task admission and per-tool policy", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
   it("native writes recheck pause after mutation preparation and leave the file intact", async () => {
-    const { FileTools } = await import("../../agent/tools/file-tools");
     const b = bind("act");
     const t = task();
     fs.writeFileSync(path.join(dir, "approved.md"), "Original");
@@ -619,7 +635,6 @@ describe("immutable responsibility task admission and per-tool policy", () => {
 });
 
 it("the production tool entrypoint blocks a registered handler before execution", async () => {
-  const { ToolRegistry } = await import("../../agent/tools/registry");
   const blocked = vi.fn();
   const registry = Object.create(ToolRegistry.prototype);
   Object.assign(registry, {

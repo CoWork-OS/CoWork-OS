@@ -14,6 +14,7 @@ import {
   InputRequestRepository,
 } from "../electron/database/repository-facades";
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -714,7 +715,7 @@ function getCoworkVersionFromNearestPackageJson(): string | undefined {
     const candidate = path.join(dir, "package.json");
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const pkg = require(candidate) as Any;
+      const pkg = JSON.parse(fsSync.readFileSync(candidate, "utf8")) as { version?: unknown };
       const version = typeof pkg?.version === "string" ? pkg.version.trim() : "";
       if (version) return version;
     } catch {
@@ -1031,7 +1032,7 @@ export function registerControlPlaneMethods(
       validated.shellAccess === undefined
         ? validated.agentConfig
         : {
-            ...(validated.agentConfig || {}),
+            ...validated.agentConfig,
             // Keep an explicit legacy shell=false as a task-level ceiling;
             // otherwise the configured named default could silently enable
             // command tools on this direct daemon entry point.

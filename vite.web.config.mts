@@ -3,6 +3,12 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  rendererBundleReport,
+  mermaidParserPlugin,
+  rendererCodeSplitting,
+  rendererVendorAliases,
+} from "./scripts/build/renderer-bundle-config.mjs";
 
 // Keep this build artifact version explicit; the host refuses assets whose
 // version differs from its runtime WEB_API_VERSION.
@@ -18,6 +24,8 @@ const webBuildId = `${packageManifest.version}-${randomUUID()}`;
 export default defineConfig({
   plugins: [
     react(),
+    mermaidParserPlugin(),
+    rendererBundleReport("web"),
     {
       name: "cowork-web-artifact-manifest",
       closeBundle() {
@@ -44,12 +52,14 @@ export default defineConfig({
   build: {
     outDir: WEB_OUTPUT_DIR,
     emptyOutDir: true,
+    rolldownOptions: { output: { codeSplitting: rendererCodeSplitting } },
   },
   resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "src"),
-      "@shared": path.resolve(import.meta.dirname, "src/shared"),
-    },
+    alias: [
+      ...rendererVendorAliases,
+      { find: "@", replacement: path.resolve(import.meta.dirname, "src") },
+      { find: "@shared", replacement: path.resolve(import.meta.dirname, "src/shared") },
+    ],
   },
   define: {
     __WEB_BUILD_ID__: JSON.stringify(webBuildId),

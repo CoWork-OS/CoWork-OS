@@ -620,6 +620,53 @@ describeWithSqlite("OrchestrationGraphEngine dispatch and cancellation recovery"
     ]);
   });
 
+  it("dispatches independent nodes and advances a dependency chain only after completion", async () => {
+    const { deps, tasks } = makeDeps();
+    const engine = new OrchestrationGraphEngine(db, deps);
+    const initial = await engine.createRun({
+      rootTaskId: "root-dependency-chain",
+      workspaceId: "workspace-1",
+      kind: "workflow",
+      maxParallel: 4,
+      nodes: [makeNode("A"), makeNode("B"), makeNode("C"), makeNode("D")],
+      edges: [
+        { fromNodeKey: "A", toNodeKey: "B" },
+        { fromNodeKey: "B", toNodeKey: "C" },
+      ],
+    });
+    const statuses = (snapshot: typeof initial) =>
+      Object.fromEntries(snapshot.nodes.map((node) => [node.key, node.status]));
+    const complete = (snapshot: typeof initial, key: string) => {
+      const taskId = snapshot.nodes.find((node) => node.key === key)!.taskId!;
+      tasks.set(taskId, { ...tasks.get(taskId)!, status: "completed" });
+    };
+
+    expect(statuses(initial)).toEqual({ A: "running", B: "pending", C: "pending", D: "running" });
+    await engine.tickRun(initial.run.id);
+    expect(deps.createChildTask).toHaveBeenCalledTimes(2);
+
+    complete(initial, "A");
+    const afterA = (await engine.tickRun(initial.run.id))!;
+    expect(statuses(afterA)).toEqual({ A: "completed", B: "running", C: "pending", D: "running" });
+
+    complete(afterA, "B");
+    complete(afterA, "D");
+    const afterB = (await engine.tickRun(initial.run.id))!;
+    expect(statuses(afterB)).toEqual({
+      A: "completed",
+      B: "completed",
+      C: "running",
+      D: "completed",
+    });
+
+    complete(afterB, "C");
+    const finished = (await engine.tickRun(initial.run.id))!;
+    expect(finished.run.status).toBe("completed");
+    expect(finished.nodes.every((node) => node.status === "completed")).toBe(true);
+    await engine.tickRun(initial.run.id);
+    expect(deps.createChildTask).toHaveBeenCalledTimes(4);
+  });
+
   it("preserves completed dependency behavior after persisted task recovery", async () => {
     const { deps, tasks } = makeDeps();
     const engine = new OrchestrationGraphEngine(db, deps);

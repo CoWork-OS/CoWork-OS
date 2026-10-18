@@ -257,7 +257,6 @@ export const ASYNC_SQLITE_LINT_FILES = [
   "src/electron/activity/activity-repository-facades.ts",
   "src/electron/activity/activity-units.ts",
   "src/electron/agent/OrchestrationRepository.ts",
-  "src/electron/agent/SubAgentOrchestrator.ts",
   "src/electron/agent/orchestration/OrchestrationGraphEngine.ts",
   "src/electron/agent/orchestration/OrchestrationGraphRepository.ts",
   "src/electron/agent/orchestration/orchestration-graph-repository-facades.ts",

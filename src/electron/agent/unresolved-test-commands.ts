@@ -74,7 +74,7 @@ export function findUnresolvedTestCommandFailures(
     const segments = testSegments(run.command, isTestCommand);
     if (segments.length === 0) continue;
     if (run.succeeded) {
-      for (const failed of [...failing.keys()]) {
+      for (const failed of failing.keys()) {
         if (segments.some((segment) => covers(segment, failed))) failing.delete(failed);
       }
       passingCommand = segments.join(" && ");

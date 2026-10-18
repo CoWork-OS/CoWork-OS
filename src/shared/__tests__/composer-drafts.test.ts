@@ -84,14 +84,12 @@ describe("composer draft bounds", () => {
     expect(
       normalizeComposerDraft({
         ...base,
-        attachments: [
-          ...Array.from({ length: 5 }, (_, index) => ({
-            refId: `${index + 1}`.padStart(32, "1"),
-            name: `attachment-${index}.bin`,
-            size: 25 * 1024 * 1024,
-            sha256: String.fromCharCode(97 + index).repeat(64),
-          })),
-        ],
+        attachments: Array.from({ length: 5 }, (_, index) => ({
+          refId: `${index + 1}`.padStart(32, "1"),
+          name: `attachment-${index}.bin`,
+          size: 25 * 1024 * 1024,
+          sha256: String.fromCharCode(97 + index).repeat(64),
+        })),
       }),
     ).toBeNull();
   });

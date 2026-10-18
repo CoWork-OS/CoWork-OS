@@ -1,10 +1,10 @@
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 type MarkdownRendererProps = {
   children: string;
-  components?: unknown;
+  components?: Components;
   withBreaks?: boolean;
 };
 
@@ -27,7 +27,7 @@ export function MarkdownRenderer({
   return (
     <ReactMarkdown
       remarkPlugins={withBreaks ? gfmBreaksPlugins : gfmPlugins}
-      components={components as any}
+      components={components}
       urlTransform={transformMarkdownUrl}
     >
       {children}

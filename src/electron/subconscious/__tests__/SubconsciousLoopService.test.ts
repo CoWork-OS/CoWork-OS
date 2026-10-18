@@ -6,8 +6,6 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SUBCONSCIOUS_SETTINGS } from "../../../shared/subconscious";
 
-type Any = any;
-
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
     try {

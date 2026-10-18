@@ -122,7 +122,7 @@ async function downscaleWithNativeImage(
   maxDim: number,
 ): Promise<DownscaleResult> {
   // Use Electron's built-in nativeImage (works on all platforms, no external tools needed)
-  const { nativeImage } = require("electron");
+  const { nativeImage } = await import("electron");
   const img = nativeImage.createFromPath(inputPath);
   const { width, height } = img.getSize();
 
@@ -153,7 +153,7 @@ export function coverImageToSize(
 ): { buffer: Buffer; mimeType: "image/jpeg" } | null {
   let nativeImage: Any;
   try {
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     nativeImage = require("electron").nativeImage;
   } catch {
     return null;

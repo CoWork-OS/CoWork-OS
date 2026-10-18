@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
 import { TaskAdmissionConflictError } from "../../control-plane/task-admission-service";
 
-type Any = any;
-
 function createDaemonLike(options?: {
   replayed?: boolean;
   status?: string;
@@ -89,7 +87,7 @@ describe("AgentDaemon idempotent task admission", () => {
     const { daemon, task, taskAdmissionService } = createDaemonLike();
     const refs = [{ key: "attachment-key", mimeType: "image/png", sizeBytes: 8 }];
     const store = {
-      persistBytes: vi.fn((taskId: string, messageId: string) => ({ refs, images: [] })),
+      persistBytes: vi.fn((_taskId: string, _messageId: string) => ({ refs, images: [] })),
       release: vi.fn(),
     };
     (daemon as Any).queuedAttachmentStore = store;

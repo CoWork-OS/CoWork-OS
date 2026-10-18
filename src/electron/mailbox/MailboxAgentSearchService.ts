@@ -580,7 +580,7 @@ export class MailboxAgentSearchService {
       text.includes(normalizeSearchText(entity)),
     ).length;
     const dueDateEvidence =
-      /\b(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}|due|son odeme|son ödeme|tarih)\b/i.test(text);
+      /\b(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|due|son odeme|son ödeme|tarih)\b/i.test(text);
     const financialEvidence =
       /\b(qnb|bank|credit|card|kredi|kart|payment|odeme|ödeme|ekstre|hesap|asgari|tutari)\b/i.test(
         text,

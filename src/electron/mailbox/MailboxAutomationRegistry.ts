@@ -159,7 +159,7 @@ export class MailboxAutomationRegistry {
     automationId: string,
     limit = 25,
   ): Promise<MailboxAutomationAuditRow[]> {
-    const deps = this.getDeps();
+    this.getDeps();
     return (await this.statements().all("automation_listAutomationHistory_1", [
       automationId,
       Math.min(Math.max(limit, 1), 100),
@@ -617,7 +617,7 @@ export class MailboxAutomationRegistry {
   }
 
   static async deleteSchedule(automationId: string): Promise<boolean> {
-    const deps = this.getDeps();
+    this.getDeps();
     const row = await this.fetchRow(automationId);
     if (!row || (row.kind !== "schedule" && row.kind !== "reminder")) return false;
     const record = this.enrichRecord(row);
@@ -636,7 +636,7 @@ export class MailboxAutomationRegistry {
     event: TriggerEvent;
     historyEntry: TriggerHistoryEntry;
   }): Promise<void> {
-    const deps = this.getDeps();
+    this.getDeps();
     const row = (await this.statements().get("automation_recordTriggerFire_1", [
       payload.trigger.id,
     ])) as MailboxAutomationRow | undefined;
@@ -659,7 +659,7 @@ export class MailboxAutomationRegistry {
   }
 
   static async recordCronEvent(evt: CronEvent): Promise<void> {
-    const deps = this.getDeps();
+    this.getDeps();
     const row = (await this.statements().get("automation_recordCronEvent_1", [evt.jobId])) as
       | MailboxAutomationRow
       | undefined;
@@ -762,7 +762,7 @@ export class MailboxAutomationRegistry {
   }
 
   private static async fetchRow(automationId: string): Promise<MailboxAutomationRow | undefined> {
-    const deps = this.getDeps();
+    this.getDeps();
     return (await this.statements().get("automation_fetchRow_1", [automationId])) as
       | MailboxAutomationRow
       | undefined;
@@ -891,7 +891,7 @@ export class MailboxAutomationRegistry {
     eventType: MailboxAutomationAuditEvent,
     detail: Record<string, unknown>,
   ): Promise<void> {
-    const deps = this.getDeps();
+    this.getDeps();
     await this.statements().run("automation_appendAudit_1", [
       randomUUID(),
       automationId,
@@ -914,7 +914,7 @@ export class MailboxAutomationRegistry {
   }
 
   static async markForwardRunStarted(automationId: string, runAtMs: number): Promise<void> {
-    const deps = this.getDeps();
+    this.getDeps();
     await this.statements().run("automation_markForwardRunStarted_1", [
       runAtMs,
       Date.now(),
@@ -936,7 +936,7 @@ export class MailboxAutomationRegistry {
       nextRunAt?: number | null;
     },
   ): Promise<void> {
-    const deps = this.getDeps();
+    this.getDeps();
     await this.statements().run("automation_markForwardRunFinished_1", [
       input.status,
       input.latestOutcome || null,
@@ -959,7 +959,7 @@ export class MailboxAutomationRegistry {
   }
 
   static async setForwardNextRun(automationId: string, nextRunAt?: number): Promise<void> {
-    const deps = this.getDeps();
+    this.getDeps();
     await this.statements().run("automation_setForwardNextRun_1", [
       nextRunAt ?? null,
       Date.now(),

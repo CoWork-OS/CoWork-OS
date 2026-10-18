@@ -4,12 +4,13 @@ import {
   createDeterministicWorkSessionReplayFixtures,
   evaluateDeterministicReplayFixtures,
   evaluateIsolatedReplay,
+  replayWorkSessionItems,
 } from "../WorkSessionReplayEvaluationService";
 import { WorkSessionRolloutService } from "../WorkSessionRolloutService";
 import Database from "better-sqlite3";
 
 describe("WorkSession Phase 5 replay and rollout", () => {
-  it("evaluates deterministic crash, compaction, approval, credential, revocation, and child fixtures in isolation", () => {
+  it("evaluates deterministic crash, compaction, approval, credential, revocation, child, and handoff fixtures in isolation", () => {
     const fixtures = createDeterministicWorkSessionReplayFixtures();
     const results = evaluateDeterministicReplayFixtures();
     expect(results).toHaveLength(fixtures.length);
@@ -54,6 +55,36 @@ describe("WorkSession Phase 5 replay and rollout", () => {
         "authorization_bypass:write:1",
         "false_success:pending_wait",
       ]),
+    );
+  });
+
+  it("continues a handoff with only the unsatisfied requirement and flags a repeated one", () => {
+    const fixture = createDeterministicWorkSessionReplayFixtures().find(
+      (candidate) => candidate.kind === "handoff",
+    )!;
+    expect(fixture).toBeDefined();
+    const continued = replayWorkSessionItems(fixture.items);
+    const newToolCalls = fixture.items.filter((entry) => entry.kind === "tool_call");
+    expect(newToolCalls).toHaveLength(1);
+    expect(continued.sideEffects).toEqual([
+      "write:requirement-1",
+      "write:requirement-2",
+      "write:requirement-3",
+    ]);
+    expect(evaluateIsolatedReplay(fixture.items, fixture.id).findings).toEqual([]);
+
+    const rerun = fixture.items.map((entry) => ({ ...entry }));
+    rerun.splice(2, 0, {
+      ...fixture.items[1],
+      id: "handoff-continuation:rerun",
+      sequence: 2.5,
+      payload: {
+        eventType: "side_effect",
+        payload: { sideEffect: true, sideEffectKey: "write:requirement-1", approved: true },
+      },
+    });
+    expect(evaluateIsolatedReplay(rerun, fixture.id).findings).toContain(
+      "duplicate_side_effect:write:requirement-1",
     );
   });
 

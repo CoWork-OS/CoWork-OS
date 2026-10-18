@@ -42,6 +42,7 @@ export class ToolExecutionCoordinator {
         followUp: context.followUp,
         stepId: context.stepId,
         applicationAttempt: context.applicationAttempt,
+        toolAttempt: context.toolAttempt,
       });
       const result = executionWithRuntime?.result;
       const policyTrace = executionWithRuntime?.policyTrace;

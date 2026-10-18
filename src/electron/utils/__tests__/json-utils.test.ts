@@ -26,9 +26,7 @@ describe("stableJsonStringify", () => {
   it("clamps indent to the supported range", () => {
     expect(stableJsonStringify({ a: 1 }, { indent: 2 })).toBe('{\n  "a": 1\n}');
     // Above 8 is 8, below 0 is 0 rather than an invalid JSON.stringify space.
-    expect(stableJsonStringify({ a: 1 }, { indent: 20 })).toBe(
-      `{\n${" ".repeat(8)}"a": 1\n}`,
-    );
+    expect(stableJsonStringify({ a: 1 }, { indent: 20 })).toBe(`{\n${" ".repeat(8)}"a": 1\n}`);
     expect(stableJsonStringify({ a: 1 }, { indent: -5 })).toBe('{"a":1}');
   });
 

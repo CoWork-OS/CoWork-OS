@@ -3399,6 +3399,8 @@ export class DatabaseManager {
           item_id TEXT,
           artifact_revision_id TEXT,
           idempotency_key TEXT,
+          basis TEXT,
+          data_as_of INTEGER,
           created_at INTEGER NOT NULL,
           UNIQUE (session_id, idempotency_key),
           FOREIGN KEY (session_id) REFERENCES work_sessions(id) ON DELETE CASCADE,
@@ -3657,6 +3659,18 @@ export class DatabaseManager {
           updated_at INTEGER NOT NULL
         );
       `);
+      // Evidence basis and source data time (WP5) on profiles created before them.
+      const evidenceColumns = new Set(
+        (this.db.pragma("table_info(work_session_evidence)") as Array<{ name?: string }>).map(
+          (column) => column.name,
+        ),
+      );
+      if (!evidenceColumns.has("basis")) {
+        this.db.exec("ALTER TABLE work_session_evidence ADD COLUMN basis TEXT");
+      }
+      if (!evidenceColumns.has("data_as_of")) {
+        this.db.exec("ALTER TABLE work_session_evidence ADD COLUMN data_as_of INTEGER");
+      }
       const rolloutColumns = this.db
         .prepare("PRAGMA table_info(work_session_rollout_config)")
         .all() as Array<{ name?: string }>;

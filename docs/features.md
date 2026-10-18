@@ -893,19 +893,36 @@ The workspace dropdown at the top lets you filter insights to a single workspace
 
 Inspired by [Salesforce's AWU concept](https://www.salesforce.com/agentforce/agentic-work-unit/), an **Agentic Work Unit** represents one successfully completed unit of agent work.
 
-**Definition:** 1 AWU = 1 task with `status = 'completed'` AND `terminal_status` of `ok` or `partial_success`.
+**Definitions** (shared by the live report and the day rollups, in
+`src/electron/reports/awu-outcomes.ts`):
+
+- **Completed unit (any status):** a task with `status = 'completed'` and `terminal_status` of
+  `ok`, `partial_success`, `needs_user_action` or none.
+- **Verified unit:** a completed task with `terminal_status = 'ok'` whose latest outcome contract
+  is not `unmet` or `partial`. It is verified **by contract** when the contract is `satisfied` (a
+  server-side check passed) and **by terminal status** when the task has no contract, or one with
+  nothing the server can check.
+- **Partial** and **needs action** units are counted separately and never as verified.
 
 The AWU section shows:
 
-| Metric               | Description                                                                                                                                    |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AWU Count**        | Number of completed work units in the period                                                                                                   |
-| **Tokens per AWU**   | Total tokens consumed ÷ AWU count (lower is more efficient)                                                                                    |
-| **Cost per AWU**     | Total cost ÷ AWU count (lower is cheaper)                                                                                                      |
-| **AWUs per Dollar**  | AWU count ÷ total cost (higher is better ROI)                                                                                                  |
-| **Efficiency Trend** | Percentage change in tokens/AWU and cost/AWU vs the previous period. A downward arrow (green) means improvement; upward (red) means regression |
+| Metric                                         | Description                                                                                                                                                             |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Verified work units**                        | Verified units in the period, with partial, needs-action and any-status counts beside it                                                                                |
+| **Cost per verified unit (incl. escalations)** | All model cost in the period, retries and provider escalations included, ÷ verified units. The tooltip shows cost per completed unit of any status for one release     |
+| **Human interventions per task**               | Approval decisions (not auto-approved), answers to input requests and follow-up messages sent after a task started, ÷ completed units. The tooltip lists each count, plus provider escalations and re-runs |
+| **Tokens per AWU**                             | Total tokens ÷ completed units (lower is more efficient)                                                                                                                |
+| **AWUs per Dollar**                            | Completed units ÷ total cost                                                                                                                                            |
+| **Efficiency Trend**                           | Percentage change vs the previous period. A downward arrow (green) means improvement; upward (red) means regression                                                     |
 
 The trend comparison uses the same period length — e.g., if you're viewing a 7-day window, it compares against the prior 7 days. The AWU section is hidden when no tasks were completed in the period.
+
+**History:** before the verified split, "Cost per AWU" divided by every completed unit, including
+partial and needs-action ones. That number is still in the report as cost per completed unit (any
+status). Because verified units are a subset, the headline count and cost per unit change for the
+same work: expect a lower unit count and a higher cost per unit. Provider escalations are counted
+from `llm_routing_changed` events that record a fallback; their cost is already part of the total.
+Computer takeovers are not yet counted as interventions.
 
 ### Period Selection
 

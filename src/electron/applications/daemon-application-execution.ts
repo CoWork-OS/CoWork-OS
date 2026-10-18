@@ -85,6 +85,9 @@ export function createDaemonApplicationExecution(
                   ? "contradicting"
                   : "neutral",
             confidence: operation.verification === "verified" ? 1 : 0,
+            // A qualified verifier read the result back; "unavailable" means nobody checked.
+            basis: operation.verification === "unavailable" ? "unknown" : "observed",
+            capturedAt: operation.verificationResult.checkedAt,
             freshnessExpiresAt: operation.verificationResult.expiresAt,
             snippet: JSON.stringify(operation.verificationResult.evidence),
             idempotencyKey: `application:${operation.id}:verification:${operation.revision}`,

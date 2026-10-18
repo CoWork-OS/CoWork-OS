@@ -617,6 +617,22 @@ const registryLogger = createLogger("ToolRegistry");
 /** Servers exposing more tools than this load them through tool_search instead of every request. */
 export const MCP_DEFERRED_SERVER_TOOL_THRESHOLD = 25;
 
+/** The executor's tool attempt from the runtime context, when it is well formed. */
+function readToolAttempt(
+  runtime: Record<string, unknown> | undefined,
+): { idempotencyKey: string; attemptId: string } | undefined {
+  const value = runtime?.toolAttempt as
+    | { idempotencyKey?: unknown; attemptId?: unknown }
+    | undefined;
+  return value &&
+    typeof value.idempotencyKey === "string" &&
+    value.idempotencyKey &&
+    typeof value.attemptId === "string" &&
+    value.attemptId
+    ? { idempotencyKey: value.idempotencyKey, attemptId: value.attemptId }
+    : undefined;
+}
+
 export class ToolRegistry {
   private static mermaidValidationInitialized = false;
   private fileTools: FileTools;
@@ -5887,7 +5903,7 @@ ${skillDescriptions}`;
     }
 
     // MCP tools (prefixed with mcp_ by default)
-    const mcpToolResult = await this.tryExecuteMCPTool(name, input);
+    const mcpToolResult = await this.tryExecuteMCPTool(name, input, _runtime);
     if (mcpToolResult !== null) {
       return mcpToolResult;
     }
@@ -6050,9 +6066,14 @@ ${skillDescriptions}`;
 
     try {
       const signal = runtime?.signal instanceof AbortSignal ? runtime.signal : undefined;
+      const toolAttempt = readToolAttempt(runtime);
       const result = await mcpManager.callTool(mcpToolName, input, {
         signal,
         beforeSend,
+        // The same call retried carries the same key, so the server can avoid acting twice.
+        ...(toolAttempt
+          ? { idempotencyKey: toolAttempt.idempotencyKey, attemptId: toolAttempt.attemptId }
+          : {}),
         onElicitation: async (request) => {
           const server = request.computerUseApp ? this.getCodexConsentServer(name) : null;
           if (server && request.computerUseApp) {
@@ -6124,6 +6145,19 @@ ${skillDescriptions}`;
           return approved === true ? { action: "accept", content: {} } : { action: "decline" };
         },
       });
+      // A write the server could not confirm (an error result with `status: "unknown"`, the
+      // connector contract in docs/enterprise-connectors.md) is an unknown outcome: recorded as
+      // such and checked before any retry. Read calls carry no attempt, so their data is untouched.
+      const structured = result?.structuredContent as
+        | { status?: unknown; message?: unknown }
+        | undefined;
+      if (toolAttempt && result?.isError === true && structured?.status === "unknown") {
+        const detail =
+          typeof structured.message === "string"
+            ? structured.message.slice(0, 300)
+            : "the server could not confirm the write";
+        throw new Error(`Outcome unknown: ${detail}`);
+      }
       // Format MCP result and process any generated files
       return await this.formatMCPResult(result, mcpToolName, input);
     } catch (error: Any) {

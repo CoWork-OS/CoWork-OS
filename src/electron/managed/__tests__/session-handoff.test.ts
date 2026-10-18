@@ -117,7 +117,7 @@ describe("session handoff helpers", () => {
     expect(handoffRestoreRefusal(".cowork/SOUL.md")).toMatch(/hidden/);
     expect(handoffRestoreRefusal("app/.husky/pre-commit")).toMatch(/hidden/);
     expect(handoffRestoreRefusal("node_modules/x/index.js")).toMatch(/dependency/);
-    expect(handoffRestoreRefusal("docs/CLAUDE.md")).toMatch(/instruction/);
+    expect(handoffRestoreRefusal("docs/GEMINI.md")).toMatch(/instruction/);
     expect(handoffRestoreRefusal("AGENTS.md")).toMatch(/instruction/);
   });
 

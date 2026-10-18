@@ -542,11 +542,7 @@ import {
   MCPRegistrySearchSchema,
   HookMappingSchema,
 } from "../utils/validation";
-import {
-  NotificationService,
-  NotificationOverlayManager,
-  NativeNotificationCenter,
-} from "../notifications";
+import { NotificationService, NativeNotificationCenter } from "../notifications";
 import { showDesktopNotification } from "../notifications/desktop-delivery";
 import {
   notifyDetectedIntegrationAuthIssue,
@@ -12766,13 +12762,11 @@ function setupCronHandlers(): void {
  * Set up Notification IPC handlers
  */
 function setupNotificationHandlers(): void {
-  // Initialize native system notifications, with the custom overlay kept as a fallback.
+  // Desktop alerts are delivered by the operating system's notification center only.
   const nativeNotificationCenter = NativeNotificationCenter.getInstance();
-  const overlayManager = NotificationOverlayManager.getInstance();
 
   // Clicking a notification brings the main window to focus and opens the task.
   const handleNotificationClick = (_notificationId: string, taskId?: string) => {
-    overlayManager.dismiss(_notificationId);
     void notificationService
       ?.markRead(_notificationId)
       .catch((error) => console.warn("[Notifications] Could not mark notification read:", error));
@@ -12787,12 +12781,6 @@ function setupNotificationHandlers(): void {
     }
   };
   nativeNotificationCenter.setOnClick(handleNotificationClick);
-  overlayManager.setOnClick(handleNotificationClick);
-  overlayManager.setOnRead((id) => {
-    void notificationService
-      ?.markRead(id)
-      .catch((error) => console.warn("[Notifications] Could not mark notification read:", error));
-  });
 
   const getDesktopSettings = () => {
     try {
@@ -12801,7 +12789,7 @@ function setupNotificationHandlers(): void {
       const { trayManager } = require("../tray");
       return trayManager.getSettings();
     } catch {
-      return { showNotifications: true, notificationStyle: "system" as const };
+      return { showNotifications: true };
     }
   };
 
@@ -12809,16 +12797,6 @@ function setupNotificationHandlers(): void {
   notificationService = new NotificationService({
     db: DatabaseManager.getInstance().getDatabase(),
     onEvent: (event) => {
-      // Import lazily because tray initialization depends on the notification handlers.
-      // oxlint-disable-next-line typescript/no-require-imports
-      const { trayManager } = require("../tray");
-      trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
-      if (event.type === "updated" && event.notification?.read)
-        overlayManager.dismiss(event.notification.id);
-      if (event.type === "removed" && event.notification)
-        overlayManager.dismiss(event.notification.id);
-      if (event.type === "cleared" || (event.type === "updated" && event.notifications))
-        overlayManager.dismissAll();
       // Forward notification events to renderer
       const windows = BrowserWindow.getAllWindows();
       for (const win of windows) {
@@ -12827,7 +12805,7 @@ function setupNotificationHandlers(): void {
         }
       }
 
-      // Deliver exactly one alert through the selected desktop style.
+      // Deliver exactly one alert through the system notification center.
       if (
         event.type === "added" &&
         event.notification &&
@@ -12837,27 +12815,20 @@ function setupNotificationHandlers(): void {
         if (!settings.showNotifications) {
           return { desktopRequested: false };
         }
-        showDesktopNotification(
-          {
-            id: event.notification.id,
-            title: event.notification.title,
-            message: event.notification.message,
-            type: event.notification.type,
-            taskId: event.notification.taskId,
-          },
-          settings.notificationStyle,
-        );
+        showDesktopNotification({
+          id: event.notification.id,
+          title: event.notification.title,
+          message: event.notification.message,
+          type: event.notification.type,
+          taskId: event.notification.taskId,
+        });
         return { desktopRequested: true };
       }
     },
   });
-  // Seed the badge from persisted notifications before the first new event.
+  // Load persisted notifications before the first new event.
   void notificationService
     .refresh()
-    .then(() => import("../tray"))
-    .then(({ trayManager }) => {
-      trayManager.setUnreadNotificationCount(notificationService?.getUnreadCount() ?? 0);
-    })
     .catch((error) => console.warn("[Notifications] Could not load persisted inbox:", error));
   setIntegrationAuthNotificationServiceProvider(() => notificationService);
   setLogObserver((event) => {

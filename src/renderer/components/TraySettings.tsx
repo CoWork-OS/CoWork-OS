@@ -231,37 +231,6 @@ export function TraySettings({ onStatusChange }: TraySettingsProps) {
             </div>
           </div>
 
-          {isMacOS && (
-            <div className="settings-form-group tray-settings-option">
-              <div className="tray-settings-option-inner">
-                <div className="tray-settings-option-text">
-                  <label className="tray-settings-option-title" htmlFor="notification-style">
-                    Notification style
-                  </label>
-                  <p className="tray-settings-option-desc">
-                    Near Dock shows a floating card with read and dismiss buttons, plus an unread
-                    Dock badge. Click the card to open CoWork.
-                  </p>
-                </div>
-                <select
-                  className="settings-select tray-notification-style"
-                  id="notification-style"
-                  aria-label="Notification style"
-                  value={settings?.notificationStyle ?? "system"}
-                  disabled={saving || !settings || !settings.showNotifications}
-                  onChange={(event) =>
-                    void handleSave({
-                      notificationStyle: event.target.value as "system" | "near-dock",
-                    })
-                  }
-                >
-                  <option value="system">System</option>
-                  <option value="near-dock">Near Dock</option>
-                </select>
-              </div>
-            </div>
-          )}
-
           <div className="settings-form-group tray-settings-option">
             <div className="tray-settings-option-inner">
               <div className="tray-settings-option-text">

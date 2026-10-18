@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isBlockedInternalHost,
   isLoopbackAddress,
+  isLoopbackHostname,
   isPrivateOrLoopbackAddress,
   normalizeHostname,
 } from "../address-classes";
@@ -64,5 +65,32 @@ describe("address classification", () => {
 
   it("treats an empty host as blocked", () => {
     expect(isBlockedInternalHost("", true)).toBe(true);
+  });
+});
+
+describe("isLoopbackHostname", () => {
+  it("accepts exactly localhost, 127.0.0.1, and ::1, bracketed or not", () => {
+    for (const host of ["localhost", "LOCALHOST", "127.0.0.1", "::1", "[::1]"]) {
+      expect(isLoopbackHostname(host), host).toBe(true);
+    }
+    expect(isLoopbackHostname(new URL("http://[::1]:8787").hostname)).toBe(true);
+  });
+
+  it("keeps the root dot, so localhost. is rejected", () => {
+    expect(isLoopbackHostname("localhost.")).toBe(false);
+    expect(isLoopbackHostname(new URL("http://localhost.:8787").hostname)).toBe(false);
+  });
+
+  it("does not widen to the rest of the loopback range", () => {
+    // isLoopbackAddress covers these; plain-HTTP decisions stay exact.
+    for (const host of ["127.0.0.2", "app.localhost", "::ffff:127.0.0.1", "[::ffff:7f00:1]"]) {
+      expect(isLoopbackHostname(host), host).toBe(false);
+    }
+  });
+
+  it("rejects remote, private, and empty hosts", () => {
+    for (const host of ["example.com", "10.0.0.1", "[fd00::1]", "", "[]"]) {
+      expect(isLoopbackHostname(host), host).toBe(false);
+    }
   });
 });

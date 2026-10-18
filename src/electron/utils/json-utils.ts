@@ -31,15 +31,22 @@ function sortKeysDeep(value: unknown, seen: WeakSet<object>): unknown {
   return value;
 }
 
+function bigintReplacer(_key: string, value: unknown): unknown {
+  if (typeof value !== "bigint") return value;
+  const asNumber = Number(value);
+  return Number.isSafeInteger(asNumber) ? asNumber : value.toString();
+}
+
 /**
- * JSON.stringify that always returns a string.
+ * Deterministic JSON.stringify.
  *
  * `JSON.stringify` returns `undefined` for `undefined`, functions and symbols,
- * so reading `out.length` crashed on those. It also throws for circular
- * structures and `BigInt`; that branch used to fall back to `String(value)`,
- * which returned non-JSON text such as `"[object Object]"`. Both paths now
- * produce `"null"`, matching what `JSON.stringify` emits for these values
- * inside arrays (issue #608).
+ * so reading `out.length` crashed on those; they now produce `"null"`, matching
+ * what `JSON.stringify` emits for them inside arrays (issue #608). `BigInt`
+ * values are written as numbers when they fit safely, otherwise as decimal
+ * strings, so large Python ints keep their digits. Circular structures and
+ * throwing `toJSON` methods raise an error, like Python's `json.dumps`,
+ * instead of returning text that could be mistaken for a real `null`.
  */
 export function stableJsonStringify(value: unknown, options?: JsonStringifyOptions): string {
   const indent = typeof options?.indent === "number" ? Math.max(0, Math.min(8, options.indent)) : 0;
@@ -55,12 +62,11 @@ export function stableJsonStringify(value: unknown, options?: JsonStringifyOptio
   try {
     // Typed explicitly because the lib.d.ts overload claims `string`, while the
     // runtime returns undefined for undefined, functions and symbols.
-    const serialized: string | undefined = JSON.stringify(prepared, null, indent);
+    const serialized: string | undefined = JSON.stringify(prepared, bigintReplacer, indent);
     out = serialized ?? "null";
-  } catch {
-    // Circular structures and BigInt throw here; String() would leak text
-    // like "[object Object]" into something callers treat as JSON.
-    out = "null";
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Value is not JSON serializable: ${reason}`);
   }
 
   if (maxOutputChars > 0 && out.length > maxOutputChars) {

@@ -42,25 +42,28 @@ describe("stableJsonStringify", () => {
     expect(stableJsonStringify("short", { maxOutputChars: 100 })).toBe('"short"');
   });
 
-  it("does not throw on a circular object", () => {
+  it("throws on a circular object instead of returning a fake null", () => {
     const circular: Record<string, unknown> = { a: 1 };
     circular.self = circular;
-    expect(() => stableJsonStringify(circular)).not.toThrow();
-    expect(stableJsonStringify(circular)).toBe("null");
+    expect(() => stableJsonStringify(circular)).toThrow(/not JSON serializable/);
   });
 
-  it("does not throw on values JSON refuses to serialize", () => {
-    // Both throw inside JSON.stringify; neither may escape the helper.
-    expect(() => stableJsonStringify(10n)).not.toThrow();
-    expect(stableJsonStringify(10n)).toBe("null");
-
+  it("throws when toJSON throws", () => {
     const exploding = {
       toJSON() {
         throw new Error("nope");
       },
     };
-    expect(() => stableJsonStringify(exploding)).not.toThrow();
-    expect(stableJsonStringify(exploding)).toBe("null");
+    expect(() => stableJsonStringify(exploding)).toThrow(/not JSON serializable: nope/);
+  });
+
+  it("keeps BigInt digits", () => {
+    expect(stableJsonStringify(10n)).toBe("10");
+    expect(stableJsonStringify({ n: 5n })).toBe('{"n":5}');
+    expect(stableJsonStringify(2n ** 70n)).toBe('"1180591620717411303424"');
+    expect(stableJsonStringify({ big: 2n ** 70n }, { sortKeys: true })).toBe(
+      '{"big":"1180591620717411303424"}',
+    );
   });
 
   it("still serializes a null-prototype object", () => {

@@ -83,6 +83,15 @@ Default runtime behavior:
 - the agent writes facts with `memory_remember` (the earlier `memory_curate` tool is removed); items keep stable `id` values so Memory Hub edit/delete operations are deterministic
 - Curated file sync into `.cowork/USER.md` and `.cowork/MEMORY.md` is serialized per workspace and retried on file-change races; the generated blocks are rendered from `memory_items` and hand edits are synced back
 
+### Rules: what they protect and their evidence
+
+A rule (a curated `constraint` or `workflow_rule`, memory kind `rule`) can record what it is for, in Mission Control > Operations > Hygiene:
+
+- **Protects**: the decision it protects, as a constraint ledger entry id or free text.
+- **Evidence**: the eval case, fixture or task id of the failure it prevents.
+
+Both are stored in `lifecycle_meta` next to the rule's owner. A rule unused for 90 days that names no evidence is listed in Hygiene as a retirement candidate; retiring archives it and nothing is deleted. A rule with evidence is still listed when unused, without the "no evidence" mark.
+
 ### Dreaming curation
 
 Dreaming is the curator of `memory_items`. It merges duplicates, flags conflicts, promotes archive outcomes that recur in two or more tasks into inferred facts, decays unused inferences and closes finished commitments. Safe operations on inferred facts are applied through `MemoryWriter` (each one logged and undoable); everything else, and anything the user stated or confirmed, waits in the Memory Hub Review tab. Curation changes `L0` and `L1` only through the facts it writes. See [Dreaming](dreaming.md).

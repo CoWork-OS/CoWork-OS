@@ -476,6 +476,60 @@ Task state and application data are persisted locally by default. Prompts, selec
 
 ---
 
+## How CoWork Identifies Itself to Websites
+
+By default, requests CoWork makes for you (`web_fetch`, `http_request` and pages it opens in the
+in-app browser) use a browser-compatible user agent, as before.
+
+**Settings > Browser > Agent identity** turns on declared agent identity (opt-in):
+
+- `web_fetch` and `http_request` send `CoWork-OS/<version> (+https://coworkosapp.com/agent)`
+  instead of a browser user agent. Domains you list keep the browser-compatible one (for sites
+  that block agents).
+- When you set a **key directory origin** (a public https origin: not localhost or an IP
+  address), every such request over https also carries an HTTP Message Signature (RFC 9421) in
+  the Web Bot Auth format of `draft-ietf-webbotauth-httpsig-protocol-00`:
+  `Signature-Agent: sig="<origin>"`, and a signature over `@authority` and that header with
+  `created`, `expires` (60 seconds), `keyid`, `alg="ed25519"`, a random `nonce` and
+  `tag="web-bot-auth"`. Sites can check it against the public key at
+  `<origin>/.well-known/http-message-signatures-directory`. Plain-http requests are never signed.
+- The signature covers only the host, so anyone who sees it could replay it to that host until
+  it expires; that is why the window is one minute. It is recomputed on every redirect, so it is
+  never forwarded to another site. With identity on, a `Signature`, `Signature-Input`,
+  `Signature-Agent` or `Host` header supplied to `http_request` is dropped, and a protected
+  credential cannot be placed in one of them.
+- Pages CoWork opens in the in-app browser carry the same signature on the navigation request
+  and each redirect hop, added by the browser partition's request hook only while that
+  navigation loads. Nothing is stored on the history entry, so reloads, back/forward and pages
+  you open or click yourself are never signed, and a page cannot set these headers on a
+  navigation. The browser keeps its Chrome-compatible user agent, because sign-in pages refuse
+  unknown ones.
+
+Keys and the directory:
+
+- CoWork creates one Ed25519 key per profile on first use. The private key is stored only in the
+  encrypted settings store (safeStorage) and never leaves the main process.
+- `keyid` is the key's RFC 7638 thumbprint. Settings shows the public JWK Set to host, and
+  **Replace key** rotates it after a native confirmation (the draft has no revocation; rotation
+  is how a key is retired). The replaced public key stays in the directory for 7 days, so sites
+  that cached the old directory keep verifying until they fetch the new one.
+- If the stored key cannot be read (for example after a keychain change), CoWork does not
+  create a new one silently, which would break every published directory: requests go out
+  unsigned and Settings says so, until you choose **Replace key**. A profile export carries the
+  key encrypted for this machine's keychain; if a copied profile cannot read it (for example on
+  another machine), replace the key there and publish the new directory.
+- A self-hosted coworkd with a public address serves the directory itself, signed with
+  `tag="http-message-signatures-directory"`, while declared identity is on, and only to requests
+  for the configured directory origin's host (other hosts get 404), with `Vary: Host`.
+  Otherwise host the JSON from Settings at that path with content type
+  `application/http-message-signatures-directory+json`. CoWork does not run a directory service.
+
+Each signed `web_fetch` or `http_request` hop adds a local `agent_identity_signed` task event
+(`keyid`, `expires`, host), and each response an `agent_identity_response` event (host, status,
+user-agent mode); a browser navigation reports the signed hosts in its tool result. Block
+rates (403/429) can then be compared between the honest and the browser user agent. Nothing about
+this is sent to CoWork.
+
 ## Data Storage
 
 ### Encrypted Settings Storage (SecureSettingsRepository)

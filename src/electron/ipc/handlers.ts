@@ -404,6 +404,7 @@ import {
   TaskModelSelectionSchema,
   AgentRoleModelFieldsSchema,
   TaskMessageSchema,
+  EditQueuedTaskInputSchema,
   FileImportSchema,
   FileImportDataSchema,
   DocumentEditorOpenSessionSchema,
@@ -1184,6 +1185,8 @@ async function validateJevBaseUrl(
 // Configure rate limits for sensitive channels
 rateLimiter.configure(IPC_CHANNELS.TASK_CREATE, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.TASK_SEND_MESSAGE, RATE_LIMIT_CONFIGS.expensive);
+rateLimiter.configure(IPC_CHANNELS.TASK_EDIT_QUEUED_INPUT, RATE_LIMIT_CONFIGS.limited);
+rateLimiter.configure(IPC_CHANNELS.TASK_QUEUED_INPUTS, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.TASK_STEP_FEEDBACK, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_WRAP_UP, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.TASK_CONTINUE, RATE_LIMIT_CONFIGS.limited);
@@ -6571,6 +6574,19 @@ export async function setupIpcHandlers(
       return session;
     },
   );
+
+  ipcMain.handle(IPC_CHANNELS.TASK_QUEUED_INPUTS, async (event, id) => {
+    checkRateLimit(IPC_CHANNELS.TASK_QUEUED_INPUTS);
+    const taskId = validateInput(UUIDSchema, id, "task ID");
+    await authorizeTaskForEvent(event, taskId, "view");
+    return agentDaemon.getQueuedTaskInputs(taskId);
+  });
+  ipcMain.handle(IPC_CHANNELS.TASK_EDIT_QUEUED_INPUT, async (event, data) => {
+    checkRateLimit(IPC_CHANNELS.TASK_EDIT_QUEUED_INPUT);
+    const input = validateInput(EditQueuedTaskInputSchema, data, "queued message edit");
+    await authorizeTaskForEvent(event, input.taskId, "contribute");
+    return agentDaemon.editQueuedTaskInput(input);
+  });
 
   // Send follow-up message to a task
   ipcMain.handle(IPC_CHANNELS.TASK_SEND_MESSAGE, async (event, data) => {

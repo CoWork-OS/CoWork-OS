@@ -1,4 +1,6 @@
 import { narrowestBotWorksOn } from "../../shared/bot-computer";
+import { editQueuedFollowUp, listQueuedTaskInputs } from "./queued-task-input";
+import type { EditQueuedTaskInput, QueuedTaskInput } from "../../shared/queued-task-input";
 import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
@@ -19251,6 +19253,57 @@ export class AgentDaemon extends EventEmitter {
       throw new Error(`Task ${normalizedTaskId} was not found after updating its prompt.`);
     }
     return updatedTask;
+  }
+
+  getQueuedTaskInputs(taskId: string): QueuedTaskInput[] {
+    const task = this.taskRepo.findById(taskId);
+    if (!task) throw new Error("Task not found.");
+    return listQueuedTaskInputs(
+      task,
+      this.queueManager.isQueued(taskId),
+      readDurableTaskEvents(this, taskId, "user_message"),
+      this.getExecutorForTask(taskId)?.runtime,
+    );
+  }
+
+  async editQueuedTaskInput(input: EditQueuedTaskInput): Promise<QueuedTaskInput> {
+    const task = this.taskRepo.findById(input.taskId);
+    if (!task) throw new Error("Task not found.");
+    let result: QueuedTaskInput;
+    if (input.kind === "initial") {
+      if (
+        input.id !== task.id ||
+        task.prompt !== input.expectedMessage ||
+        (task.updatedAt ?? 0) !== input.expectedRevision
+      )
+        throw new Error("This queued prompt changed. Reload it before saving.");
+      const updated = this.updateQueuedTaskPrompt(task.id, input.message);
+      result = {
+        id: task.id,
+        kind: "initial",
+        message: updated.prompt,
+        revision: updated.updatedAt ?? 0,
+      };
+      this.logEvent(task.id, "log", { message: "Queued prompt edited", queuedInputUpdated: true });
+    } else {
+      if (["cancelled", "failed"].includes(task.status))
+        throw new Error("This task is no longer accepting queue edits.");
+      result = editQueuedFollowUp(
+        input,
+        readDurableTaskEvents(this, task.id, "user_message"),
+        this.getExecutorForTask(task.id)?.runtime,
+        (event) => {
+          this.eventRepo.updatePayloadById(event.id, event.payload);
+          try {
+            this.emitTaskEvent(event);
+          } catch {
+            /* The receipt remains authoritative. */
+          }
+        },
+      );
+    }
+    await this.timelineRowsCommitted(task.id);
+    return result;
   }
 
   async getActiveWorkTaskIds(): Promise<string[]> {

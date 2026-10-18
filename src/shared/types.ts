@@ -8422,6 +8422,8 @@ export const IPC_CHANNELS = {
   TASK_LEARNING_PROGRESS: "task:learningProgress",
   TASK_LEARNING_EVENT: "task:learningEvent",
   TASK_SEND_MESSAGE: "task:sendMessage",
+  TASK_QUEUED_INPUTS: "task:queuedInputs",
+  TASK_EDIT_QUEUED_INPUT: "task:editQueuedInput",
   TASK_STEP_FEEDBACK: "task:stepFeedback", // Send feedback on an in-progress step
   TASK_SEND_STDIN: "task:sendStdin", // Send stdin input to running command
   TASK_KILL_COMMAND: "task:killCommand", // Kill running command (Ctrl+C)

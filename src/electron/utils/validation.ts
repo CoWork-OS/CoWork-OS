@@ -529,6 +529,17 @@ export const TaskModelSelectionSchema = z
   })
   .strict();
 
+export const EditQueuedTaskInputSchema = z
+  .object({
+    taskId: z.string().uuid(),
+    id: z.string().trim().min(1).max(200),
+    kind: z.enum(["initial", "follow_up"]),
+    expectedMessage: z.string().max(MAX_PROMPT_LENGTH),
+    expectedRevision: z.number().int().nonnegative(),
+    message: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
+  })
+  .strict();
+
 export const TaskMessageSchema = z
   .object({
     taskId: z.string().uuid(),

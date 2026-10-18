@@ -9512,6 +9512,7 @@ ${transcript}
     onIncorporated?: () => Promise<void>,
     onProviderDispatchCompleted?: () => Promise<void>,
     transcriptAlreadyContainsMessage = false,
+    onProviderDispatchStarted?: () => Promise<void>,
   ): Promise<void> {
     const personalityIdOverride = this.task.agentConfig?.personalityId;
     const contextMode = detectContextMode(
@@ -9596,6 +9597,9 @@ ${transcript}
       // incorporation must remain retryable without making a provider call.
       await onIncorporated();
     }
+    // Dispatch may be journaled only after the chat turn and acceptance receipt commit.
+    // Starting it in the caller refused still-started queued inputs before this callback ran.
+    await onProviderDispatchStarted?.();
 
     // A deterministic courtesy reply is only suitable for a social turn. An
     // empty answer to a substantive request must stay a visible failure.
@@ -42170,7 +42174,6 @@ Return ONLY a JSON object:
           quotedAssistantMessage,
         );
       }
-      await notifyProviderDispatchStarted();
       await this.respondInChatMode(
         followUpConversationMessage,
         previousStatus,
@@ -42178,6 +42181,7 @@ Return ONLY a JSON object:
         opts?.onAccepted ? acceptFollowUp : undefined,
         notifyProviderDispatchCompleted,
         opts?.transcriptAlreadyContainsMessage === true,
+        notifyProviderDispatchStarted,
       );
       return;
     }

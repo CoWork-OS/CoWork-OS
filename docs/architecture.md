@@ -414,3 +414,9 @@ Design and phases: [async SQLite migration plan](async-sqlite-migration-plan-202
 ## Update Rule
 
 If defaults, behavior, or architecture change, update this file in the same PR.
+
+## Queued input editing
+
+Local Desktop edits queued initial prompts and human follow-ups through authorized IPC.
+The durable receipt owns complete edits; checkpoint text wins over truncated previews.
+See [Editable queued inputs](queued-inputs.md).

@@ -4474,6 +4474,16 @@ export class SessionRuntime {
       if (receipt?.deliveryMode === "follow_up") {
         followUp = {
           ...followUp,
+          // The durable receipt wins if a restart separated a queue edit from its snapshot.
+          ...(Number.isSafeInteger(receipt.queuedEditRevision) &&
+          Number(receipt.queuedEditRevision) > 0 &&
+          typeof receipt.message === "string" &&
+          receipt.message.length <= 60_000 &&
+          !receipt.__coworkPayloadTruncated &&
+          !receipt.annotationContextInjected &&
+          !this.isFollowUpMessageConsumed(messageId)
+            ? { message: receipt.message }
+            : {}),
           deliveryMode: "follow_up",
           ...(followUp.quotedAssistantMessage === undefined &&
           receipt.quotedAssistantMessage &&

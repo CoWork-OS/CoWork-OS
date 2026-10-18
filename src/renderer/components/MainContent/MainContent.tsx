@@ -204,6 +204,7 @@ import {
 import { useFullAccessConfirmation } from "../FullAccessConfirmationDialog";
 
 import { TaskPauseBanner } from "../TaskPauseBanner";
+import { QueuedMessagesPanel } from "../QueuedMessagesPanel";
 
 import { Suspense } from "react";
 import type { SurfaceActionOrigin } from "../../../shared/answer-surfaces/actions";
@@ -9750,6 +9751,9 @@ function MainContentComponent({
                 </div>
               </div>
             )}
+          {!remoteSession && (
+            <QueuedMessagesPanel key={task.id} taskId={task.id} onChanged={onTasksChanged} />
+          )}
           {quotedAssistantMessage && (
             <div className="composer-quoted-assistant">
               <div className="composer-quoted-assistant-copy">

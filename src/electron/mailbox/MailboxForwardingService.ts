@@ -323,7 +323,7 @@ export class MailboxForwardingService {
     if (!automation?.forward) {
       throw new Error("Forwarding automation not found");
     }
-    const summary = await this.runAutomation(automation, true);
+    const summary = await this.runAutomation(automation);
     await this.refresh();
     return summary.summary;
   }
@@ -416,7 +416,7 @@ export class MailboxForwardingService {
 
     for (const automation of automations) {
       try {
-        await this.runAutomation(automation, false);
+        await this.runAutomation(automation);
       } catch (error) {
         logger.error("Forwarding automation failed", {
           automationId: automation.id,
@@ -428,10 +428,7 @@ export class MailboxForwardingService {
     await this.refresh();
   }
 
-  private async runAutomation(
-    automation: MailboxAutomationRecord,
-    manual: boolean,
-  ): Promise<RunSummary> {
+  private async runAutomation(automation: MailboxAutomationRecord): Promise<RunSummary> {
     if (!automation.forward) {
       throw new Error("Forwarding automation is missing recipe data");
     }

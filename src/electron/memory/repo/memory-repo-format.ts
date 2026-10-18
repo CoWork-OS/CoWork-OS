@@ -144,7 +144,7 @@ export function cleanEntryText(value: string): string {
 /** Metadata values cannot contain `;`, `]` or line breaks. */
 function cleanMetaValue(value: string): string {
   return String(value || "")
-    .replace(/[;\]\[\r\n]+/g, " ")
+    .replace(/[;\][\r\n]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 200);

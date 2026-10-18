@@ -6,8 +6,6 @@ import type {
   ListCoreExperimentsRequest,
 } from "../../shared/types";
 
-type Any = any;
-
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {

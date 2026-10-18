@@ -2,8 +2,8 @@ import fs from "fs";
 import path from "path";
 import type Database from "better-sqlite3";
 import { serviceStatements } from "../database/service-statements";
-import type { TempWorkspaceRow } from "./temp-workspace-sql";
-import { TEMP_WORKSPACE_ID, TEMP_WORKSPACE_ID_PREFIX } from "../../shared/types";
+
+import { TEMP_WORKSPACE_ID_PREFIX } from "../../shared/types";
 
 export interface TempWorkspacePruneOptions {
   db: Database.Database;

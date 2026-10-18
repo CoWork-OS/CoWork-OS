@@ -26,8 +26,6 @@ import {
 } from "./browser-keyboard";
 import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
 
-type Any = any;
-
 export type BrowserBackendKind = "electron-workbench" | "playwright-local" | "external-cdp";
 
 export interface BrowserBounds {

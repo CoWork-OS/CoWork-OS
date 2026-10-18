@@ -11,6 +11,8 @@ import { BrowserUseCloudClient } from "../../browser/browser-use-cloud-client";
 import { BrowserSettingsManager } from "../../../settings/browser-settings-manager";
 import { DEFAULT_BROWSER_SETTINGS } from "../../../../shared/browser-settings";
 import { ComputerViewService } from "../../../computer-use/computer-view-service";
+import { buildPermissionSecurityContext } from "../../security/export-permission-context";
+import { buildExportRiskChain } from "../../../../shared/export-risk-chain";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1355,7 +1357,9 @@ describe("BrowserTools headless browser capabilities", () => {
     let uploadWorkspace: Any;
 
     const setup = () => {
-      workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ws-"));
+      workspaceRoot = fs.realpathSync(
+        fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ws-")),
+      );
       externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browser-upload-headless-ext-"));
       uploadWorkspace = {
         ...workspace,
@@ -1475,6 +1479,56 @@ describe("BrowserTools headless browser capabilities", () => {
         cleanup();
       }
     });
+
+    it.each([
+      ["https://user:secret@uploads.example.com/form?token=private", "uploads.example.com"],
+      ["", "Destination not identified"],
+    ])(
+      "carries the actual upload source and page destination into approval context (%s)",
+      async (pageUrl, destination) => {
+        setup();
+        vi.spyOn(BrowserSettingsManager, "loadSettings").mockReturnValue({
+          ...DEFAULT_BROWSER_SETTINGS,
+          agentUploads: "ask",
+        });
+        try {
+          fs.writeFileSync(path.join(workspaceRoot, "report.pdf"), "synthetic report");
+          const uploadFile = vi.fn();
+          const { tools, daemon, browserWorkbenchService } = makeHeadlessTools(
+            { uploadFile, getUrl: () => pageUrl },
+            uploadWorkspace,
+          );
+          browserWorkbenchService.getSession.mockReturnValue({
+            url: "https://other-visible-tab.example",
+          });
+          daemon.requestApproval.mockResolvedValue(false);
+          await tools.executeTool("browser_upload_file", {
+            file_path: "report.pdf",
+            selector: "#upload",
+            force_headless: true,
+            url: "https://untrusted-tool-argument.example",
+          });
+          const details = daemon.requestApproval.mock.calls.at(-1)[3];
+          expect(details.tool).toBe("browser_upload_file");
+          const chain = buildExportRiskChain(
+            buildPermissionSecurityContext({
+              workspace: uploadWorkspace,
+              toolName: details.tool,
+              toolInput: details,
+            }),
+          );
+          expect(chain).toMatchObject({
+            data: "report.pdf",
+            destination,
+            sideEffect: "browser_upload_file export",
+          });
+          expect(JSON.stringify(details)).not.toMatch(/secret|token=|untrusted-tool-argument/);
+          expect(uploadFile).not.toHaveBeenCalled();
+        } finally {
+          cleanup();
+        }
+      },
+    );
 
     it("requires a selector for headless uploads", async () => {
       setup();

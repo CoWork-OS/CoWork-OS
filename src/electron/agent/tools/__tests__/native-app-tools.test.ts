@@ -35,7 +35,7 @@ const action = {
   expectedValue: "old",
   value: "new",
 };
-function fixture(events: any[] = []) {
+function fixture(events: Array<{ type: string; payload: Record<string, unknown> }> = []) {
   Object.defineProperty(process, "platform", { configurable: true, value: "darwin" });
   const runtime = {
     ensureReadyWithInteractivePermissions: vi.fn(async () => {}),
@@ -48,7 +48,9 @@ function fixture(events: any[] = []) {
     timelineRowsCommitted: vi.fn(async () => {}),
     getTaskEvents: () => events,
     requestApproval: vi.fn(async () => true),
-    logEvent: vi.fn((typeId, type, payload) => events.push({ type, payload })),
+    logEvent: vi.fn((_taskId: string, type: string, payload: Record<string, unknown>) =>
+      events.push({ type, payload }),
+    ),
   };
   const files = { authorizeApplicationPath: vi.fn(async () => "/tmp/fixture.psd") };
   const tools = new NativeAppTools(files as never, daemon as never, "task", runtime as never);
@@ -153,13 +155,13 @@ describe("strict background native app control", () => {
     await expect(restarted.run(action)).rejects.toThrow(/outcome_unknown/);
     await restarted.run({ action: "observe", pid: 42, windowId: 100, screenshot: false });
     expect(f.runtime.background).toHaveBeenCalledTimes(2);
-    expect(f.events.at(-1).payload.status).toBe("outcome_unknown");
+    expect(f.events.at(-1)?.payload.status).toBe("outcome_unknown");
   });
   it("keeps stale pre-dispatch refusal distinct from unknown mutations", async () => {
     const f = fixture();
     f.runtime.background.mockRejectedValueOnce(new HelperCommandError("stale", "stale_snapshot"));
     await expect(f.tools.run(action)).rejects.toThrow(/stale/);
-    expect(f.events.at(-1).payload.status).toBe("not_dispatched");
+    expect(f.events.at(-1)?.payload.status).toBe("not_dispatched");
     await f.tools.run({ ...action, snapshotId: "12345678-1234-4123-8123-123456789abe" });
   });
   it("retains element tokens when attaching the native screenshot to the model", () => {
@@ -180,7 +182,7 @@ describe("strict background native app control", () => {
       rawResult: "{}",
       sanitizeToolResult: (_t: string, r: string) => r,
       getToolFailureReason: () => "",
-    } as any);
+    });
     expect(JSON.stringify(result)).toContain(token);
   });
 });

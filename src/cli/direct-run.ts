@@ -34,7 +34,10 @@ import { AgentDaemon } from "../electron/agent/daemon";
 import { generateAndApplyTaskTitle } from "../electron/agent/task-title-generator";
 import { LLMProviderFactory } from "../electron/agent/llm";
 import { SearchProviderFactory } from "../electron/agent/search";
-import { BuiltinToolsSettingsManager } from "../electron/agent/tools/builtin-settings";
+import {
+  BuiltinToolsSettingsManager,
+  type ToolCategoryConfig,
+} from "../electron/agent/tools/builtin-settings";
 import { GuardrailManager } from "../electron/guardrails/guardrail-manager";
 import { AppearanceManager } from "../electron/settings/appearance-manager";
 import { PersonalityManager } from "../electron/settings/personality-manager";
@@ -42,6 +45,7 @@ import { MemoryFeaturesManager } from "../electron/settings/memory-features-mana
 import { MemoryService } from "../electron/memory/MemoryService";
 import { MCPClientManager } from "../electron/mcp/client/MCPClientManager";
 import { MCPSettingsManager } from "../electron/mcp/settings";
+import { DEFAULT_MCP_SETTINGS } from "../electron/mcp/types";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
 import { frontmatterString, parseFrontmatterBlock } from "../electron/utils/skill-frontmatter";
 import { LLMSettingsSchema, MCPSettingsSchema } from "../electron/utils/validation";
@@ -51,8 +55,8 @@ import {
   shouldImportEnvSettingsFromArgsOrEnv,
 } from "../electron/utils/runtime-mode";
 import { isTerminalTaskStatus } from "../shared/task-status";
-import type { AgentConfig, CliTaskOwnership, Task } from "../shared/types";
-import { DEFAULT_WORKSPACE_PERMISSIONS } from "../shared/types";
+import type { AgentConfig, CliTaskOwnership, LLMProviderType, Task } from "../shared/types";
+import { DEFAULT_WORKSPACE_PERMISSIONS, LLM_PROVIDER_TYPES } from "../shared/types";
 import { BUILTIN_ACCESS_PROFILE_IDS, type AccessProfileId } from "../shared/access-profiles";
 import { buildTaskTitle } from "./format";
 import { runAgentImportCommand } from "./agent-import-command";
@@ -76,7 +80,10 @@ import {
   type HostPerfMonitorHandle,
 } from "../electron/utils/host-perf-monitor";
 
-type Any = Record<string, any>;
+type Payload = Record<string, unknown>;
+const isPayload = (value: unknown): value is Payload =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+const payloadRecord = (value: unknown): Payload => (isPayload(value) ? value : {});
 
 interface DirectRunArgs extends PactDirectArgs {
   /** `cowork run`: stop with exit code 3 instead of waiting when a person must act. */
@@ -348,7 +355,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       await writeDetachedReadyFile(args.readyFile, task);
     }
 
-    daemon.on("assistant_message", (payload: Any) => {
+    daemon.on("assistant_message", (payload: Payload) => {
       if (payload?.taskId !== task.id) return;
       // Interactive answer components print as their text version.
       const message = toPlainAnswerText(
@@ -357,12 +364,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       if (message)
         writeEvent(args, { type: "assistant_message", taskId: task.id, message }, message);
     });
-    daemon.on("task_status", (payload: Any) => {
+    daemon.on("task_status", (payload: Payload) => {
       if (payload?.taskId !== task.id) return;
       const message = stringifyMessage(payload.message || payload.status);
       if (message) writeEvent(args, { type: "task_status", taskId: task.id, message }, message);
     });
-    daemon.on("task_completed", (payload: Any) => {
+    daemon.on("task_completed", (payload: Payload) => {
       if (payload?.taskId !== task.id) return;
       const message = stringifyMessage(
         payload.message || payload.resultSummary || "Task completed.",
@@ -452,7 +459,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (!task || !cli || cli.runId !== runId) return;
     await taskRepo.update(taskId, {
       agentConfig: {
-        ...(task.agentConfig || {}),
+        ...task.agentConfig,
         cli: {
           ...cli,
           ...updates,
@@ -1747,7 +1754,7 @@ function toolsCommand(args: DirectRunArgs): number {
   }
   const target = args.category || args.tool || args.name || args.prompt;
   if (!target) throw new Error("Usage: cowork tools info|enable|disable <category-or-tool>");
-  const categories = settings.categories as Any;
+  const categories: Record<string, ToolCategoryConfig> = settings.categories;
   const isCategory = Boolean(categories[target]);
   if (args.command === "tools-info") {
     const payload = isCategory
@@ -1960,7 +1967,7 @@ async function modelsCommand(modelRepo: LLMModelRepository, args: DirectRunArgs)
 }
 
 function providerFallbackCommand(args: DirectRunArgs): number {
-  const settings = LLMProviderFactory.loadSettings() as Any;
+  const settings = LLMProviderFactory.loadSettings();
   const fallbacks = Array.isArray(settings.fallbackProviders) ? settings.fallbackProviders : [];
   if (args.command === "providers-fallback-list") {
     writeEvent(
@@ -1969,7 +1976,7 @@ function providerFallbackCommand(args: DirectRunArgs): number {
       fallbacks.length
         ? fallbacks
             .map(
-              (fallback: Any, index: number) =>
+              (fallback, index: number) =>
                 `${index + 1}. ${fallback.providerType}${fallback.modelKey ? ` (${fallback.modelKey})` : ""}`,
             )
             .join("\n")
@@ -1983,12 +1990,12 @@ function providerFallbackCommand(args: DirectRunArgs): number {
     const next = [
       ...fallbacks,
       {
-        providerType: normalizeProviderType(args.providerType),
+        providerType: resolveSupportedProviderType(args.providerType),
         ...(args.model ? { modelKey: args.model } : {}),
       },
     ];
     settings.fallbackProviders = next;
-    LLMProviderFactory.saveSettings(settings as ReturnType<typeof LLMProviderFactory.loadSettings>);
+    LLMProviderFactory.saveSettings(settings);
     writeEvent(
       args,
       { type: "provider_fallback_added", fallbackProviders: next },
@@ -1996,11 +2003,12 @@ function providerFallbackCommand(args: DirectRunArgs): number {
     );
     return 0;
   }
-  const provider = normalizeProviderType(args.providerType || args.name || args.prompt || "");
-  if (!provider) throw new Error("Usage: cowork providers fallback remove <provider>");
-  const next = fallbacks.filter((fallback: Any) => fallback.providerType !== provider);
+  const rawProvider = args.providerType || args.name || args.prompt;
+  if (!rawProvider) throw new Error("Usage: cowork providers fallback remove <provider>");
+  const provider = normalizeProviderType(rawProvider);
+  const next = fallbacks.filter((fallback) => fallback.providerType !== provider);
   settings.fallbackProviders = next;
-  LLMProviderFactory.saveSettings(settings as ReturnType<typeof LLMProviderFactory.loadSettings>);
+  LLMProviderFactory.saveSettings(settings);
   writeEvent(
     args,
     { type: "provider_fallback_removed", provider, fallbackProviders: next },
@@ -2060,7 +2068,7 @@ async function createBackup(dbManager: DatabaseManager, args: DirectRunArgs): Pr
 async function restoreBackup(args: DirectRunArgs): Promise<number> {
   const input = args.output || args.prompt;
   if (!input) throw new Error("Usage: cowork backup restore <backup.json> [--dry-run] [--yes]");
-  const parsed = JSON.parse(await fs.readFile(path.resolve(input), "utf8")) as Any;
+  const parsed = JSON.parse(await fs.readFile(path.resolve(input), "utf8")) as Payload;
   if (parsed.type !== "cowork_backup") throw new Error("Not a CoWork backup file.");
   const summary = {
     workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces.length : 0,
@@ -2096,7 +2104,7 @@ async function restoreBackup(args: DirectRunArgs): Promise<number> {
     MCPSettingsManager.saveSettings(
       disableRestoredMcpServers(
         MCPSettingsSchema.parse(preserveRedactedMcpSecrets(parsed.mcp, currentMcp)),
-      ) as ReturnType<typeof MCPSettingsManager.loadSettings>,
+      ),
     );
   }
   writeEvent(
@@ -2406,12 +2414,18 @@ function promptCommand(args: DirectRunArgs): number {
   return 0;
 }
 
-function configureLocalProvider(args: DirectRunArgs): { providerType: string; model?: string } {
+function configureLocalProvider(args: DirectRunArgs): {
+  providerType: LLMProviderType;
+  model?: string;
+} {
   const rawProviderType = (args.providerType || "").trim();
-  const providerType = normalizeProviderType(rawProviderType);
-  if (!providerType) throw new Error("Provider is required.");
+  if (!rawProviderType) throw new Error("Provider is required.");
+  const providerType = resolveSupportedProviderType(rawProviderType);
 
-  const settings = LLMProviderFactory.loadSettings() as Any;
+  const settings = LLMProviderFactory.loadSettings() as ReturnType<
+    typeof LLMProviderFactory.loadSettings
+  > &
+    Payload;
   const apiKey = args.apiKey?.trim();
   const model = args.model?.trim();
   const baseUrl = args.baseUrl?.trim();
@@ -2429,11 +2443,12 @@ function configureLocalProvider(args: DirectRunArgs): { providerType: string; mo
   settings.providerType = providerType;
   if (model) settings.modelKey = model;
 
-  const ensureNode = (key: string): Any => {
+  const ensureNode = (key: string): Payload => {
     const existing = settings[key];
-    if (existing && typeof existing === "object") return existing;
-    settings[key] = {};
-    return settings[key];
+    if (isPayload(existing)) return existing;
+    const node: Payload = {};
+    settings[key] = node;
+    return node;
   };
 
   switch (providerType) {
@@ -2495,10 +2510,7 @@ function configureLocalProvider(args: DirectRunArgs): { providerType: string; mo
       break;
     }
     default: {
-      const customProviders =
-        settings.customProviders && typeof settings.customProviders === "object"
-          ? settings.customProviders
-          : {};
+      const customProviders = settings.customProviders || {};
       settings.customProviders = customProviders;
       const node =
         customProviders[providerType] && typeof customProviders[providerType] === "object"
@@ -2512,7 +2524,7 @@ function configureLocalProvider(args: DirectRunArgs): { providerType: string; mo
     }
   }
 
-  LLMProviderFactory.saveSettings(settings as ReturnType<typeof LLMProviderFactory.loadSettings>);
+  LLMProviderFactory.saveSettings(settings);
   return { providerType, model };
 }
 
@@ -2527,6 +2539,17 @@ function normalizeProviderType(providerType: string): string {
     default:
       return providerType;
   }
+}
+
+function resolveSupportedProviderType(providerType: string): LLMProviderType {
+  const normalized = normalizeProviderType(providerType);
+  const supportedProvider = LLM_PROVIDER_TYPES.find((candidate) => candidate === normalized);
+  if (!supportedProvider) {
+    throw new Error(
+      `Unknown provider type: ${providerType}. Run cowork providers list for supported providers.`,
+    );
+  }
+  return supportedProvider;
 }
 
 function shouldImportEnvForCommand(command: DirectRunArgs["command"]): boolean {
@@ -2571,7 +2594,7 @@ async function markTaskCancelled(
     ...(cli
       ? {
           agentConfig: {
-            ...(task.agentConfig || {}),
+            ...task.agentConfig,
             cli: {
               ...cli,
               endedAt: completedAt,
@@ -2682,7 +2705,7 @@ function countTasksByStatus(db: Database.Database): Record<string, number> {
   try {
     const rows = db
       .prepare("SELECT status, COUNT(1) as count FROM tasks GROUP BY status")
-      .all() as Any[];
+      .all() as Payload[];
     return Object.fromEntries(
       rows.map((row) => [String(row.status || "unknown"), Number(row.count || 0)]),
     );
@@ -2808,8 +2831,8 @@ function redactObject(value: unknown, redact: boolean): unknown {
   if (!redact) return value;
   if (Array.isArray(value)) return value.map((item) => redactObject(item, redact));
   if (!value || typeof value !== "object") return value;
-  const out: Any = {};
-  for (const [key, child] of Object.entries(value as Any)) {
+  const out: Payload = {};
+  for (const [key, child] of Object.entries(value as Payload)) {
     if (/api.?key|token|secret|password|credential|accessKeyId|sessionToken/i.test(key)) {
       out[key] = child ? "[redacted]" : child;
     } else {
@@ -2827,16 +2850,18 @@ function preserveRedactedSecrets(value: unknown, current: unknown): unknown {
     );
   }
   if (!value || typeof value !== "object") return value;
-  const currentObject = current && typeof current === "object" ? (current as Any) : {};
+  const currentObject = current && typeof current === "object" ? (current as Payload) : {};
   // A live secret may only stay with the endpoint it was configured for.
   const endpointKeys = new Set(
-    [...Object.keys(value as Any), ...Object.keys(currentObject)].filter((key) =>
+    [...Object.keys(value as Payload), ...Object.keys(currentObject)].filter((key) =>
       /(?:url|endpoint|host)$/i.test(key),
     ),
   );
-  const sameEndpoint = [...endpointKeys].every((key) => (value as Any)[key] === currentObject[key]);
+  const sameEndpoint = [...endpointKeys].every(
+    (key) => (value as Payload)[key] === currentObject[key],
+  );
   return Object.fromEntries(
-    Object.entries(value as Any)
+    Object.entries(value as Payload)
       .filter(([, child]) => child !== "[redacted]" || sameEndpoint)
       .map(([key, child]) => [key, preserveRedactedSecrets(child, currentObject[key])])
       .filter(([, restored]) => restored !== undefined),
@@ -2850,17 +2875,16 @@ function isMcpRedactedValue(value: unknown): boolean {
   return typeof value === "string" && MCP_REDACTED_VALUES.has(value);
 }
 
-function restoreMcpSecretMap(value: unknown, current: unknown): Any {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value as Any;
-  const currentMap: Any =
-    current && typeof current === "object" && !Array.isArray(current) ? current : {};
-  const restored: Any = {};
-  for (const [key, entry] of Object.entries(value as Any)) {
+function restoreMcpSecretMap(value: unknown, current: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const currentMap: Payload = isPayload(current) ? current : {};
+  const restored: Payload = {};
+  for (const [key, entry] of Object.entries(value as Payload)) {
     if (!isMcpRedactedValue(entry)) {
       restored[key] = entry;
       continue;
     }
-    const currentEntry = (currentMap as Any)[key];
+    const currentEntry = (currentMap as Payload)[key];
     if (typeof currentEntry === "string" && !isMcpRedactedValue(currentEntry))
       restored[key] = currentEntry;
   }
@@ -2868,8 +2892,8 @@ function restoreMcpSecretMap(value: unknown, current: unknown): Any {
 }
 
 function mcpServerSecretCompatibility(
-  backup: Any,
-  current: Any | undefined,
+  backup: Payload,
+  current: Payload | undefined,
 ): {
   endpoint: boolean;
   auth: boolean;
@@ -2885,7 +2909,7 @@ function mcpServerSecretCompatibility(
       : backup.url === current.url;
   return {
     endpoint,
-    auth: endpoint && backup.auth?.type === current.auth?.type,
+    auth: endpoint && payloadRecord(backup.auth).type === payloadRecord(current.auth).type,
   };
 }
 
@@ -2896,30 +2920,31 @@ function mcpServerSecretCompatibility(
  */
 function preserveRedactedMcpSecrets(value: unknown, current: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const backup = value as Any;
-  const currentServers =
-    current && typeof current === "object" && Array.isArray((current as Any).servers)
-      ? (current as Any).servers
-      : [];
-  const currentById = new Map<string, Any>(
+  const backup = value as Payload;
+  const candidateServers = payloadRecord(current).servers;
+  const currentServers: unknown[] = Array.isArray(candidateServers) ? candidateServers : [];
+  const currentById = new Map<string, Payload>(
     currentServers
-      .filter((server: Any) => server && typeof server.id === "string")
-      .map((server: Any) => [server.id, server]),
+      .filter(
+        (server): server is Payload & { id: string } =>
+          isPayload(server) && typeof server.id === "string",
+      )
+      .map((server) => [server.id, server]),
   );
 
   return {
     ...backup,
     servers: Array.isArray(backup.servers)
-      ? backup.servers.map((server: Any) => {
+      ? backup.servers.map((server: Payload) => {
           if (!server || typeof server !== "object") return server;
-          const live: Any | undefined =
+          const live: Payload | undefined =
             typeof server.id === "string" ? currentById.get(server.id) : undefined;
           const compatibility = mcpServerSecretCompatibility(server, live);
           const restored = { ...server };
 
           if (server.auth && typeof server.auth === "object" && !Array.isArray(server.auth)) {
-            const auth = { ...server.auth };
-            const liveAuth = live?.auth;
+            const auth: Payload = { ...server.auth };
+            const liveAuth = payloadRecord(live?.auth);
             for (const key of MCP_AUTH_SECRET_KEYS) {
               if (!isMcpRedactedValue(auth[key])) continue;
               if (
@@ -2977,7 +3002,7 @@ function sanitizeApprovalsForBackup(
   if (includeSensitiveContent) return approvals;
   return approvals.map((approval) => {
     if (!approval || typeof approval !== "object") return approval;
-    const row = approval as Any;
+    const row = approval as Payload;
     return {
       id: row.id,
       taskId: row.taskId,
@@ -2992,9 +3017,9 @@ function sanitizeApprovalsForBackup(
 
 function sanitizeMcpForBackup(settings: unknown, includeSensitiveContent: boolean): unknown {
   if (includeSensitiveContent) return settings;
-  const cloned = redactObject(settings, true) as Any;
+  const cloned = redactObject(settings, true) as Payload;
   if (Array.isArray(cloned?.servers)) {
-    cloned.servers = cloned.servers.map((server: Any) => ({
+    cloned.servers = cloned.servers.map((server: Payload) => ({
       ...server,
       env: server.env ? redactObject(server.env, true) : undefined,
       headers: server.headers ? redactObject(server.headers, true) : undefined,
@@ -3058,7 +3083,7 @@ async function scanSkillDir(
     const fullPath = path.join(dir, entry.name);
     try {
       if (entry.isFile() && entry.name.endsWith(".json")) {
-        const parsed = JSON.parse(await fs.readFile(fullPath, "utf8")) as Any;
+        const parsed = JSON.parse(await fs.readFile(fullPath, "utf8")) as Payload;
         const id = String(parsed.id || path.basename(entry.name, ".json")).trim();
         const name = String(parsed.name || id).trim();
         if (!id || !name) continue;
@@ -3109,7 +3134,7 @@ function validateBuiltinToolsSettings(
   const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
   if (!value || typeof value !== "object")
     throw new Error("Invalid built-in tools settings in backup.");
-  const raw = value as Any;
+  const raw = value as Payload;
   if (!raw.categories || typeof raw.categories !== "object") {
     throw new Error("Invalid built-in tools settings: missing categories.");
   }
@@ -3144,12 +3169,16 @@ function validateBuiltinToolsSettings(
   return next;
 }
 
-function disableRestoredMcpServers(settings: Any): Any {
+function disableRestoredMcpServers(
+  settings: ReturnType<typeof MCPSettingsSchema.parse>,
+): ReturnType<typeof MCPSettingsManager.loadSettings> {
   return {
     ...settings,
+    registryUrl: settings.registryUrl ?? DEFAULT_MCP_SETTINGS.registryUrl,
     servers: Array.isArray(settings.servers)
-      ? settings.servers.map((server: Any) => ({
+      ? settings.servers.map((server) => ({
           ...server,
+          id: server.id ?? randomUUID(),
           enabled: false,
           lastError: "Restored by CLI backup restore; disabled until re-enabled.",
         }))

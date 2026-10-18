@@ -374,160 +374,175 @@ describe("latex compiler", () => {
     },
   );
 
-  const live = process.env.COWORK_LATEX_SANDBOX_LIVE === "1";
+  const forceLive = process.env.COWORK_LATEX_SANDBOX_LIVE === "1";
   const engines = (
     process.env.COWORK_LATEX_LIVE_ENGINES || "latexmk,xelatex,lualatex,pdflatex"
   ).split(",") as LatexEngine[];
   const dockerImage = process.env.COWORK_LATEX_DOCKER_IMAGE;
-  it.runIf(live).each(engines)(
-    "live %s blocks host reads and retains local includes",
-    async (engine) => {
-      let networkVerified = false;
-      const compileLive = (params: CompileLatexParams) =>
-        compileLatex({
-          ...params,
-          ...(dockerImage
-            ? {
-                workspacePermissions: {
-                  read: true,
-                  write: true,
-                  delete: true,
-                  shell: true,
-                  network: false,
-                  ...params.workspacePermissions,
-                  dockerConfig: { image: dockerImage },
-                },
+  for (const engine of engines) {
+    const installed =
+      process.platform === "darwin" &&
+      (() => {
+        try {
+          execFileSync("which", [engine], { stdio: "ignore" });
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+    it.runIf(forceLive || installed)(
+      `live ${engine} blocks host reads and retains local includes`,
+      async () => {
+        let networkVerified = false;
+        const compileLive = (params: CompileLatexParams) =>
+          compileLatex({
+            ...params,
+            ...(dockerImage
+              ? {
+                  workspacePermissions: {
+                    read: true,
+                    write: true,
+                    delete: true,
+                    shell: true,
+                    network: false,
+                    ...params.workspacePermissions,
+                    dockerConfig: { image: dockerImage },
+                  },
+                }
+              : {}),
+            sandboxFactory: async (sandboxWorkspace) => {
+              const expectedType = dockerImage ? "docker" : "macos";
+              const sandbox = await createSandbox(sandboxWorkspace, expectedType);
+              expect(sandbox.type).toBe(expectedType);
+              if (!networkVerified) {
+                const probe = await sandbox.execute(
+                  "node",
+                  [
+                    "-e",
+                    "const net=require('node:net');const s=net.createConnection({host:'198.51.100.1',port:443});s.on('connect',()=>process.exit(1));s.on('error',e=>{console.log(e.code);process.exit(0)});setTimeout(()=>process.exit(2),2000)",
+                  ],
+                  {
+                    cwd: sandboxWorkspace.path,
+                    allowNetwork: false,
+                    privateDocumentWorkspace: true,
+                    timeout: 5000,
+                  },
+                );
+                expect(probe.exitCode, probe.stderr).toBe(0);
+                expect(probe.stdout.trim()).toMatch(/^(EPERM|EACCES|ENETUNREACH)$/);
+                networkVerified = true;
               }
-            : {}),
-          sandboxFactory: async (sandboxWorkspace) => {
-            const expectedType = dockerImage ? "docker" : "macos";
-            const sandbox = await createSandbox(sandboxWorkspace, expectedType);
-            expect(sandbox.type).toBe(expectedType);
-            if (!networkVerified) {
-              const probe = await sandbox.execute(
-                "node",
-                [
-                  "-e",
-                  "const net=require('node:net');const s=net.createConnection({host:'198.51.100.1',port:443});s.on('connect',()=>process.exit(1));s.on('error',e=>{console.log(e.code);process.exit(0)});setTimeout(()=>process.exit(2),2000)",
-                ],
-                {
-                  cwd: sandboxWorkspace.path,
-                  allowNetwork: false,
-                  privateDocumentWorkspace: true,
-                  timeout: 5000,
-                },
-              );
-              expect(probe.exitCode, probe.stderr).toBe(0);
-              expect(probe.stdout.trim()).toMatch(/^(EPERM|EACCES|ENETUNREACH)$/);
-              networkVerified = true;
-            }
-            return sandbox;
-          },
-        });
-      const workspace = await makeWorkspace();
-      const outside = await makeWorkspace();
-      const sentinel = "LATEX_HOST_SENTINEL_" + randomUUID().replaceAll("-", "");
-      const secretPath = path.join(outside, "secret.tex");
-      await fs.writeFile(secretPath, sentinel);
-      await fs.writeFile(path.join(workspace, "local.tex"), "Local dependency");
-      await fs.mkdir(path.join(workspace, "nested"));
-      await fs.writeFile(
-        path.join(workspace, "nested", "paper.tex"),
-        String.raw`\documentclass{article}\begin{document}\input{../local.tex}\end{document}`,
-      );
-      const good = await compileLive({
-        workspacePath: workspace,
-        sourcePath: "nested/paper.tex",
-        outputPath: "custom.pdf",
-        engine,
-      });
-      expect(good.success, good.diagnostic).toBe(true);
-      expect((await fs.readFile(good.pdfPath)).subarray(0, 5).toString()).toBe("%PDF-");
-      await fs.writeFile(path.join(outside, "chapter.tex"), "Approved dependency");
-      await fs.writeFile(
-        path.join(outside, "approved.tex"),
-        String.raw`\documentclass{article}\begin{document}\input{chapter.tex}\end{document}`,
-      );
-      const approved = await compileLive({
-        workspacePath: workspace,
-        sourcePath: path.join(outside, "approved.tex"),
-        outputPath: "approved.pdf",
-        engine,
-        allowExternalPaths: true,
-        workspacePermissions: {
-          read: true,
-          write: true,
-          delete: true,
-          shell: true,
-          network: false,
-          accessFilesystemScoped: true,
-          accessWorkspaceRoots: [outside],
-          ...(dockerImage
-            ? {}
-            : {
-                accessFilesystemRules: [{ path: path.join(outside, "denied"), access: "deny" }],
-              }),
-        },
-      });
-      expect(approved.success, approved.diagnostic).toBe(true);
-      // Establish the original host-execution trigger without exposing real secrets.
-      const trigger = String.raw`\documentclass{article}\begin{document}\newread\secret\openin\secret=${secretPath}\relax\ifeof\secret\errmessage{Blocked input}\else\read\secret to\stolen\typeout{\stolen}\fi Control page\end{document}`;
-      await fs.writeFile(
-        path.join(outside, "control.tex"),
-        dockerImage ? trigger.replace(secretPath, "/control/secret.tex") : trigger,
-      );
-      const hostArgs =
-        engine === "tectonic"
-          ? ["--only-cached", "--print", "control.tex"]
-          : engine === "latexmk"
-            ? ["-norc", "-no-shell-escape", "-pdf", "control.tex"]
-            : ["-no-shell-escape", "-interaction=nonstopmode", "control.tex"];
-      const hostOutput = execFileSync(
-        dockerImage ? "docker" : engine,
-        dockerImage
-          ? [
-              "run",
-              "--rm",
-              "--network=none",
-              "-v",
-              `${outside}:/control`,
-              "-w",
-              "/control",
-              dockerImage,
-              engine,
-              ...hostArgs,
-            ]
-          : hostArgs,
-        {
-          cwd: outside,
-          encoding: "utf8",
-          timeout: 120000,
-        },
-      );
-      expect(hostOutput).toContain(sentinel);
-      await fs.symlink(secretPath, path.join(workspace, "alias.tex"));
-      await fs.writeFile(path.join(outside, ".gitconfig"), sentinel);
-      await fs.mkdir(path.join(outside, ".npm"));
-      await fs.writeFile(path.join(outside, ".npm", "secret.tex"), sentinel);
-      if (engine !== "tectonic") vi.stubEnv("HOME", outside);
-      for (const target of [
-        secretPath,
-        path.relative(workspace, secretPath),
-        "alias.tex",
-        path.join(outside, ".gitconfig"),
-        path.join(outside, ".npm", "secret.tex"),
-      ]) {
-        await fs.writeFile(path.join(workspace, "paper.tex"), trigger.replace(secretPath, target));
-        const bad = await compileLive({
+              return sandbox;
+            },
+          });
+        const workspace = await makeWorkspace();
+        const outside = await makeWorkspace();
+        const sentinel = "LATEX_HOST_SENTINEL_" + randomUUID().replaceAll("-", "");
+        const secretPath = path.join(outside, "secret.tex");
+        await fs.writeFile(secretPath, sentinel);
+        await fs.writeFile(path.join(workspace, "local.tex"), "Local dependency");
+        await fs.mkdir(path.join(workspace, "nested"));
+        await fs.writeFile(
+          path.join(workspace, "nested", "paper.tex"),
+          String.raw`\documentclass{article}\begin{document}\input{../local.tex}\end{document}`,
+        );
+        const good = await compileLive({
           workspacePath: workspace,
-          sourcePath: "paper.tex",
+          sourcePath: "nested/paper.tex",
+          outputPath: "custom.pdf",
           engine,
         });
-        expect(bad.success).toBe(false);
-        expect(bad.diagnostic).not.toContain(sentinel);
-        await expect(fs.access(path.join(workspace, "paper.pdf"))).rejects.toThrow();
-      }
-    },
-    120000,
-  );
+        expect(good.success, good.diagnostic).toBe(true);
+        expect((await fs.readFile(good.pdfPath)).subarray(0, 5).toString()).toBe("%PDF-");
+        await fs.writeFile(path.join(outside, "chapter.tex"), "Approved dependency");
+        await fs.writeFile(
+          path.join(outside, "approved.tex"),
+          String.raw`\documentclass{article}\begin{document}\input{chapter.tex}\end{document}`,
+        );
+        const approved = await compileLive({
+          workspacePath: workspace,
+          sourcePath: path.join(outside, "approved.tex"),
+          outputPath: "approved.pdf",
+          engine,
+          allowExternalPaths: true,
+          workspacePermissions: {
+            read: true,
+            write: true,
+            delete: true,
+            shell: true,
+            network: false,
+            accessFilesystemScoped: true,
+            accessWorkspaceRoots: [outside],
+            ...(dockerImage
+              ? {}
+              : {
+                  accessFilesystemRules: [{ path: path.join(outside, "denied"), access: "deny" }],
+                }),
+          },
+        });
+        expect(approved.success, approved.diagnostic).toBe(true);
+        // Establish the original host-execution trigger without exposing real secrets.
+        const trigger = String.raw`\documentclass{article}\begin{document}\newread\secret\openin\secret=${secretPath}\relax\ifeof\secret\errmessage{Blocked input}\else\read\secret to\stolen\typeout{\stolen}\fi Control page\end{document}`;
+        await fs.writeFile(
+          path.join(outside, "control.tex"),
+          dockerImage ? trigger.replace(secretPath, "/control/secret.tex") : trigger,
+        );
+        const hostArgs =
+          engine === "tectonic"
+            ? ["--only-cached", "--print", "control.tex"]
+            : engine === "latexmk"
+              ? ["-norc", "-no-shell-escape", "-pdf", "control.tex"]
+              : ["-no-shell-escape", "-interaction=nonstopmode", "control.tex"];
+        const hostOutput = execFileSync(
+          dockerImage ? "docker" : engine,
+          dockerImage
+            ? [
+                "run",
+                "--rm",
+                "--network=none",
+                "-v",
+                `${outside}:/control`,
+                "-w",
+                "/control",
+                dockerImage,
+                engine,
+                ...hostArgs,
+              ]
+            : hostArgs,
+          {
+            cwd: outside,
+            encoding: "utf8",
+            timeout: 120000,
+          },
+        );
+        expect(hostOutput).toContain(sentinel);
+        await fs.symlink(secretPath, path.join(workspace, "alias.tex"));
+        await fs.writeFile(path.join(outside, ".gitconfig"), sentinel);
+        await fs.mkdir(path.join(outside, ".npm"));
+        await fs.writeFile(path.join(outside, ".npm", "secret.tex"), sentinel);
+        if (engine !== "tectonic") vi.stubEnv("HOME", outside);
+        for (const target of [
+          secretPath,
+          path.relative(workspace, secretPath),
+          "alias.tex",
+          path.join(outside, ".gitconfig"),
+          path.join(outside, ".npm", "secret.tex"),
+        ]) {
+          await fs.writeFile(
+            path.join(workspace, "paper.tex"),
+            trigger.replace(secretPath, target),
+          );
+          const bad = await compileLive({
+            workspacePath: workspace,
+            sourcePath: "paper.tex",
+            engine,
+          });
+          expect(bad.success).toBe(false);
+          expect(bad.diagnostic).not.toContain(sentinel);
+          await expect(fs.access(path.join(workspace, "paper.pdf"))).rejects.toThrow();
+        }
+      },
+      120000,
+    );
+  }
 });

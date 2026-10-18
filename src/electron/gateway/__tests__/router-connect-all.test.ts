@@ -25,8 +25,6 @@ vi.mock("electron", () => ({
 
 import { MessageRouter } from "../router";
 
-type Any = any;
-
 function createMockDb() {
   return {
     prepare: vi.fn().mockReturnValue({

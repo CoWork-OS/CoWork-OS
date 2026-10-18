@@ -138,7 +138,7 @@ export function appendUserUpdatesToPrompt(prompt: string, updates: string[]): st
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     if (!electron || typeof electron !== "object") return [];
     const BrowserWindow = electron?.BrowserWindow;
@@ -441,7 +441,7 @@ export class AgentTeamOrchestrator {
       }
 
       const refreshedItems = await this.itemRepo.listByRun(run.id);
-      const inProgress = refreshedItems.filter((i) => i.status === "in_progress");
+      refreshedItems.filter((i) => i.status === "in_progress");
 
       // If everything is terminal, complete or transition the run.
       const nonTerminal = refreshedItems.filter((i) => !isTerminalItemStatus(i.status));

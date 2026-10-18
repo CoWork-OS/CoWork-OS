@@ -70,7 +70,6 @@ import { SubconsciousMigrationService } from "./SubconsciousMigrationService";
 
 import { SubconsciousSettingsManager } from "./SubconsciousSettingsManager";
 
-type Any = any;
 const logger = createLogger("Subconscious");
 
 interface SubconsciousLoopServiceDeps {
@@ -1925,7 +1924,10 @@ export class SubconsciousLoopService {
           kind: "pull_request",
           workspaceId: row.workspace_id || undefined,
           pullRequestId: String(prNumber),
-          label: pullRequest?.title || `Pull request ${prNumber}`,
+          label:
+            typeof pullRequest?.title === "string" && pullRequest.title
+              ? pullRequest.title
+              : `Pull request ${prNumber}`,
           metadata: {
             url: pullRequest?.url,
             branchName: pullRequest?.branchName,
@@ -2599,10 +2601,13 @@ export class SubconsciousLoopService {
     return (await this.runRepo.findById(id))!;
   }
 
-  private safeJsonParseRecord(value: unknown): Record<string, any> | undefined {
+  private safeJsonParseRecord(value: unknown): Record<string, unknown> | undefined {
     if (typeof value !== "string" || !value.trim()) return undefined;
     try {
-      return JSON.parse(value) as Record<string, any>;
+      const parsed: unknown = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : undefined;
     } catch {
       return undefined;
     }

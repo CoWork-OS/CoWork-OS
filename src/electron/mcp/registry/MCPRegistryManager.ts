@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 /**
  * MCPRegistryManager - Manages discovery and installation of MCP servers from a registry
  *
@@ -248,7 +249,7 @@ const SHIPPED_LOCAL_CONNECTOR_IDS = new Set([
 function isPackagedElectronApp(): boolean {
   try {
     // Avoid hard import-time dependency on Electron binary in Node-only test environments.
-    const electron = require("electron") as { app?: { isPackaged?: boolean } };
+    const electron = createRequire(__filename)("electron") as { app?: { isPackaged?: boolean } };
     return Boolean(electron.app?.isPackaged);
   } catch {
     return false;

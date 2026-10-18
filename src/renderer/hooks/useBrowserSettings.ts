@@ -6,6 +6,7 @@ import {
   DEFAULT_BROWSER_SETTINGS,
   normalizeBrowserSettings,
 } from "../../shared/browser-settings";
+import { hasHostMethod } from "../host/browser-capabilities";
 
 const CHANGE_EVENT = "cowork:browser-settings-changed";
 
@@ -23,7 +24,9 @@ export function useBrowserSettings(): {
 
   useEffect(() => {
     let cancelled = false;
-    const load = window.electronAPI?.getBrowserSettings;
+    const load = hasHostMethod("getBrowserSettings")
+      ? window.electronAPI?.getBrowserSettings
+      : undefined;
     if (load) {
       void load()
         .then((value) => {
@@ -51,6 +54,9 @@ export function useBrowserSettings(): {
   }, []);
 
   const save = useCallback(async (patch: Partial<BrowserSettings>) => {
+    if (!hasHostMethod("saveBrowserSettings")) {
+      throw new Error("Browser settings cannot be changed in this browser session.");
+    }
     setSettings((current) => normalizeBrowserSettings({ ...current, ...patch }));
     const result = await window.electronAPI?.saveBrowserSettings?.(patch);
     if (result?.settings) {

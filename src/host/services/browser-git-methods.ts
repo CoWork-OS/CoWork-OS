@@ -9,7 +9,6 @@ import type {
   BrowserGitAction,
   BrowserGitDiffSummary as SharedBrowserGitDiffSummary,
   BrowserGitFileStatus,
-  BrowserGitMutationInput,
   BrowserGitMutationIntent,
   BrowserGitMutationReceipt,
   BrowserGitMutationReceipts,

@@ -8,8 +8,6 @@ import type {
 } from "../../shared/types";
 import { normalizeCandidateSummary } from "./core-memory-hygiene";
 
-type Any = any;
-
 /** Which existing duplicate absorbs a new candidate: a user's rejection wins, then the most advanced state. */
 const UPSERT_STATUS_RANK: Record<CoreMemoryCandidateStatus, number> = {
   rejected: 4,

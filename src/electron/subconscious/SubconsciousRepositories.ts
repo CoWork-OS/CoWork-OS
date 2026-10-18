@@ -5,15 +5,12 @@ import type {
   SubconsciousCritique,
   SubconsciousDecision,
   SubconsciousDispatchRecord,
-  SubconsciousEvidence,
   SubconsciousHypothesis,
   SubconsciousRunOutcome,
   SubconsciousRun,
   SubconsciousTargetKind,
   SubconsciousTargetSummary,
 } from "../../shared/subconscious";
-
-type Any = any;
 
 function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
@@ -366,29 +363,6 @@ export class SubconsciousRunStore {
       completedAt: row.completed_at ? Number(row.completed_at) : undefined,
       createdAt: Number(row.created_at || Date.now()),
     };
-  }
-}
-
-class JsonListRepository<T extends { id: string }> {
-  constructor(
-    private readonly db: Database.Database,
-    private readonly table: string,
-    private readonly mapper: (row: Any) => T,
-  ) {}
-
-  insertMany(rows: Array<Record<string, unknown>>, sql: string): void {
-    const stmt = this.db.prepare(sql);
-    const tx = this.db.transaction((items: Array<Record<string, unknown>>) => {
-      for (const item of items) {
-        stmt.run(...Object.values(item));
-      }
-    });
-    tx(rows);
-  }
-
-  list(whereSql: string, values: unknown[] = []): T[] {
-    const rows = this.db.prepare(`SELECT * FROM ${this.table} ${whereSql}`).all(...values) as Any[];
-    return rows.map((row) => this.mapper(row));
   }
 }
 

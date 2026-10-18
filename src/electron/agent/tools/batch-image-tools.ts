@@ -19,8 +19,6 @@ import {
   type WorkspaceFilesystemApprovalHandlers,
 } from "../../security/access-profile-paths";
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
-
 const execFileAsync = promisify(execFile);
 const PROCESS_TIMEOUT_MS = 60_000;
 export type ImageOutputFormat = "png" | "jpeg" | "webp";
@@ -60,10 +58,13 @@ export interface BatchImageResult {
  *
  * Uses macOS `sips` for resize/convert and ImageMagick `composite` for watermarks.
  */
+type BatchImageDaemon = Pick<AgentDaemon, "logEvent"> &
+  Partial<Pick<AgentDaemon, "requestApproval" | "consumeExternalFileApproval">>;
+
 export class BatchImageTools {
   constructor(
     private workspace: Workspace,
-    private daemon: AgentDaemon,
+    private daemon: BatchImageDaemon,
     private taskId: string,
   ) {}
 
@@ -72,12 +73,20 @@ export class BatchImageTools {
   }
 
   private getFileApprovalHandlers(): WorkspaceFilesystemApprovalHandlers {
-    const daemon = this.daemon as Any;
+    const daemon = this.daemon;
+    const requestApproval =
+      typeof daemon.requestApproval === "function"
+        ? daemon.requestApproval.bind(daemon)
+        : undefined;
+    const consumeApproval =
+      typeof daemon.consumeExternalFileApproval === "function"
+        ? daemon.consumeExternalFileApproval.bind(daemon)
+        : undefined;
     return {
-      ...(typeof daemon.requestApproval === "function"
+      ...(requestApproval
         ? {
             request: ({ path: approvedPath, operation, label }) =>
-              daemon.requestApproval(
+              requestApproval(
                 this.taskId,
                 "external_file_access",
                 `Allow ${operation} access to external ${label}: ${approvedPath}`,
@@ -85,10 +94,10 @@ export class BatchImageTools {
               ),
           }
         : {}),
-      ...(typeof daemon.consumeExternalFileApproval === "function"
+      ...(consumeApproval
         ? {
             consume: (approvedPath: string, operation: "read" | "write" | "delete") =>
-              daemon.consumeExternalFileApproval(this.taskId, approvedPath, operation),
+              consumeApproval(this.taskId, approvedPath, operation),
           }
         : {}),
     };

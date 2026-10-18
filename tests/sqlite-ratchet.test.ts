@@ -4,6 +4,7 @@ import {
   checkRatchet,
   compareToBaseline,
   formatReport,
+  readBaseline,
   trackedCounts,
 } from "../scripts/qa/sqlite-ratchet.mjs";
 
@@ -60,6 +61,11 @@ describe("sqlite-ratchet", () => {
       tracked: ["prepare", "getDatabase", "runtimeImport"],
       totals: { prepare: 2, getDatabase: 3, runtimeImport: 0 },
     });
+  });
+
+  it("keeps register totals equal to its per-file allowances", () => {
+    const baseline = readBaseline();
+    expect(baseline.totals).toEqual(buildBaseline(baseline.files).totals);
   });
 
   it("lets a unit store's SQL grow but not an application-thread file's (DB7 gate)", () => {

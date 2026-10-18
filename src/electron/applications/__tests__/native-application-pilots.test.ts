@@ -11,7 +11,10 @@ import {
   photoshopCreateScript,
   excelCreateScript,
 } from "../native-application-scripts";
-import { ApplicationAdapterCatalog } from "../ApplicationAdapterCatalog";
+import {
+  ApplicationAdapterCatalog,
+  type ApplicationAdapterContext,
+} from "../ApplicationAdapterCatalog";
 import { ApplicationOperationRequestSchema } from "../../../shared/application-execution";
 import { NativeApplicationTools } from "../../agent/tools/native-application-tools";
 import { evaluateToolPolicy } from "../../agent/tool-policy-engine";
@@ -27,6 +30,13 @@ vi.mock("../native-desktop-session", async (original) => ({
   ...(await original<object>()),
   requireNativeDesktopSession: vi.fn(async () => {}),
 }));
+
+type NativeToolHooks = {
+  script: NativeApplicationTools["script"];
+  compileNative: NativeApplicationTools["compileNative"];
+  launchPhotoshop: NativeApplicationTools["launchPhotoshop"];
+  requireRunning: NativeApplicationTools["requireRunning"];
+};
 
 const excel = {
   app: "excel" as const,
@@ -71,7 +81,7 @@ describe("Native application qualification", () => {
       {} as never,
       "task",
     );
-    const script = vi.spyOn(tools as any, "script");
+    const script = vi.spyOn(tools as unknown as NativeToolHooks, "script");
     vi.mocked(requireNativeDesktopSession).mockRejectedValueOnce(new Error("Desktop locked"));
     await expect(tools.create(excel)).rejects.toThrow(/Desktop locked/);
     expect(script).not.toHaveBeenCalled();
@@ -213,8 +223,10 @@ describe("Native application qualification", () => {
       { requestApproval: approval } as never,
       "task",
     );
-    const script = vi.spyOn(tools as any, "script").mockResolvedValue("16.100");
-    vi.spyOn(tools as any, "compileNative").mockResolvedValue(undefined);
+    const script = vi
+      .spyOn(tools as unknown as NativeToolHooks, "script")
+      .mockResolvedValue("16.100");
+    vi.spyOn(tools as unknown as NativeToolHooks, "compileNative").mockResolvedValue(undefined);
     await expect(tools.create(excel)).rejects.toThrow(/Outside workspace/);
     expect(script).not.toHaveBeenCalled();
     authorize.mockImplementation(async (p: string) => p);
@@ -266,7 +278,7 @@ describe("Native application qualification", () => {
         { requestApproval: approval } as never,
         "task",
       );
-      const script = vi.spyOn(tools as any, "script");
+      const script = vi.spyOn(tools as unknown as NativeToolHooks, "script");
       await expect(tools.create({ ...excel, path: file })).rejects.toThrow(/fresh output/);
       expect(authorize).toHaveBeenCalledWith(file, "write");
       expect(approval).not.toHaveBeenCalled();
@@ -313,7 +325,7 @@ describe("Native application qualification", () => {
         {} as never,
         "task",
       );
-      vi.spyOn(tools as any, "script")
+      vi.spyOn(tools as unknown as NativeToolHooks, "script")
         .mockResolvedValueOnce("16.100")
         .mockResolvedValueOnce(
           `16.100\n${file}\ntrue\n${input.title}\n=B5*C5\n=SUM(G5:G7)\n0.0\n0.0\n0.0\n0.0`,
@@ -325,8 +337,10 @@ describe("Native application qualification", () => {
       });
       expect(authorize).toHaveBeenCalledTimes(2);
       expect(nativePilotUnmet(input, state)).toEqual([]);
-      const mutated = structuredClone(state) as any;
-      mutated.persisted.rows[1][3].result = 42;
+      const mutated = structuredClone(state);
+      const persisted = mutated.persisted as { rows: Array<Array<unknown>> };
+      const formulaCell = persisted.rows[1][3] as { formula: string; result: number };
+      formulaCell.result = 42;
       expect(nativePilotUnmet(input, mutated)).toContain("Saved formula/cache D5 differs");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -368,7 +382,7 @@ describe("VM-free local Photoshop route", () => {
       phase: "execute",
       tools: { call },
       operation: { request: { input: photoshop } },
-    } as any;
+    } as unknown as ApplicationAdapterContext;
     await adapter.readiness(context);
     await adapter.execute(context);
     expect(call.mock.calls.map((c) => c[0])).toEqual([
@@ -379,8 +393,10 @@ describe("VM-free local Photoshop route", () => {
   it("does not launch Photoshop from the read-only inspector", async () => {
     vi.mocked(requireNativeDesktopSession).mockResolvedValue(undefined);
     const tools = new NativeApplicationTools({} as never, {} as never, "task", true);
-    vi.spyOn(tools as any, "script").mockResolvedValue("NOT_RUNNING");
-    const launch = vi.spyOn(tools as any, "launchPhotoshop").mockResolvedValue(undefined);
+    vi.spyOn(tools as unknown as NativeToolHooks, "script").mockResolvedValue("NOT_RUNNING");
+    const launch = vi
+      .spyOn(tools as unknown as NativeToolHooks, "launchPhotoshop")
+      .mockResolvedValue(undefined);
     await expect(tools.inspect({ app: "photoshop", action: "readiness" })).rejects.toThrow(
       /Open the application/,
     );
@@ -389,7 +405,7 @@ describe("VM-free local Photoshop route", () => {
   it("does not admit other applications through the local Photoshop tool", async () => {
     vi.mocked(requireNativeDesktopSession).mockResolvedValue(undefined);
     const tools = new NativeApplicationTools({} as never, {} as never, "task", true);
-    const script = vi.spyOn(tools as any, "script");
+    const script = vi.spyOn(tools as unknown as NativeToolHooks, "script");
     await expect(tools.inspect({ app: "excel", action: "readiness" })).rejects.toThrow(
       /Photoshop only/,
     );
@@ -403,9 +419,11 @@ describe("VM-free local Photoshop route", () => {
       "task",
       true,
     );
-    const launch = vi.spyOn(tools as any, "launchPhotoshop").mockResolvedValue(undefined);
-    vi.spyOn(tools as any, "compileNative").mockResolvedValue(undefined);
-    vi.spyOn(tools as any, "script")
+    const launch = vi
+      .spyOn(tools as unknown as NativeToolHooks, "launchPhotoshop")
+      .mockResolvedValue(undefined);
+    vi.spyOn(tools as unknown as NativeToolHooks, "compileNative").mockResolvedValue(undefined);
+    vi.spyOn(tools as unknown as NativeToolHooks, "script")
       .mockResolvedValueOnce("NOT_RUNNING")
       .mockResolvedValueOnce("27.11")
       .mockResolvedValueOnce(photoshop.path);

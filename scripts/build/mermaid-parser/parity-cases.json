@@ -1,0 +1,137 @@
+[
+  {
+    "language": "info",
+    "factory": "createInfoServices",
+    "service": "Info",
+    "astType": "Info",
+    "valid": "info showInfo",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "info showInfo\n@ invalid diagram {\n"
+  },
+  {
+    "language": "packet",
+    "factory": "createPacketServices",
+    "service": "Packet",
+    "astType": "Packet",
+    "valid": "packet-beta\n0-7: \"Header\"\n8-15: \"Payload\"",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "packet-beta\n0-7: \"Header\"\n8-15: \"Payload\"\n@ invalid diagram {\n"
+  },
+  {
+    "language": "pie",
+    "factory": "createPieServices",
+    "service": "Pie",
+    "astType": "Pie",
+    "valid": "pie showData\ntitle Values\n\"One\": 60.5\n\"Two\": 39.5",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "pie showData\ntitle Values\n\"One\": 60.5\n\"Two\": 39.5\n@ invalid diagram {\n"
+  },
+  {
+    "language": "treeView",
+    "factory": "createTreeViewServices",
+    "service": "TreeView",
+    "astType": "TreeView",
+    "valid": "treeView-beta\n\"Root\"\n    \"Child\"",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "treeView-beta\n\"Root\"\n    \"Child\"\n  \"unterminated"
+  },
+  {
+    "language": "architecture",
+    "factory": "createArchitectureServices",
+    "service": "Architecture",
+    "astType": "Architecture",
+    "valid": "architecture-beta\ngroup api(cloud)[API]\nservice db(database)[Database] in api\nservice server(server)[Server] in api\nserver:R -- L:db",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "architecture-beta\ngroup api(cloud)[API]\nservice db(database)[Database] in api\nservice server(server)[Server] in api\nserver:R -- L:db\n@ invalid diagram {\n"
+  },
+  {
+    "language": "gitGraph",
+    "factory": "createGitGraphServices",
+    "service": "GitGraph",
+    "astType": "GitGraph",
+    "valid": "gitGraph\ncommit id:\"initial\"\nbranch develop\ncheckout develop\ncommit\ncheckout main\nmerge develop",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "gitGraph\ncommit id:\"initial\"\nbranch develop\ncheckout develop\ncommit\ncheckout main\nmerge develop\n@ invalid diagram {\n"
+  },
+  {
+    "language": "eventmodeling",
+    "factory": "createEventModelingServices",
+    "service": "EventModel",
+    "astType": "EventModel",
+    "valid": "eventmodeling\ntf 01 cmd UpdateCart\ntf 02 evt CartUpdated ->> 01\ndata CartData {\n  { value: true }\n}\nnote 02 {\nUpdated cart\n}\n",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "eventmodeling\ntf 01 cmd UpdateCart\ntf 02 evt CartUpdated ->> 01\ndata CartData {\n  { value: true }\n}\nnote 02 {\nUpdated cart\n}\n\n@ invalid diagram {\n"
+  },
+  {
+    "language": "radar",
+    "factory": "createRadarServices",
+    "service": "Radar",
+    "astType": "Radar",
+    "valid": "radar-beta\naxis speed[\"Speed\"], quality[\"Quality\"]\ncurve a[\"A\"]{speed:3,quality:5}",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "radar-beta\naxis speed[\"Speed\"], quality[\"Quality\"]\ncurve a[\"A\"]{speed:3,quality:5}\n@ invalid diagram {\n"
+  },
+  {
+    "language": "railroad",
+    "factory": "createRailroadServices",
+    "service": "Railroad",
+    "astType": "Railroad",
+    "valid": "railroad-beta\nrule = sequence(terminal(\"a\"), optional(nonterminal(\"b\"))) ;",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "railroad-beta\nrule = sequence(terminal(\"a\"), optional(nonterminal(\"b\"))) ;\n@ invalid diagram {\n"
+  },
+  {
+    "language": "railroadEbnf",
+    "factory": "createRailroadEbnfServices",
+    "service": "RailroadEbnf",
+    "astType": "RailroadEbnf",
+    "valid": "railroad-ebnf-beta\nrule = \"a\", [ \"b\" ] ;",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "railroad-ebnf-beta\nrule = \"a\", [ \"b\" ] ;\n@ invalid diagram {\n"
+  },
+  {
+    "language": "railroadAbnf",
+    "factory": "createRailroadAbnfServices",
+    "service": "RailroadAbnf",
+    "astType": "RailroadAbnf",
+    "valid": "railroad-abnf-beta\nrule = \"a\" / \"b\" ;",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "railroad-abnf-beta\nrule = \"a\" / \"b\" ;\n@ invalid diagram {\n"
+  },
+  {
+    "language": "railroadPeg",
+    "factory": "createRailroadPegServices",
+    "service": "RailroadPeg",
+    "astType": "RailroadPeg",
+    "valid": "railroad-peg-beta\nrule <- \"a\" / \"b\" ;",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "railroad-peg-beta\nrule <- \"a\" / \"b\" ;\n@ invalid diagram {\n"
+  },
+  {
+    "language": "treemap",
+    "factory": "createTreemapServices",
+    "service": "Treemap",
+    "astType": "Treemap",
+    "valid": "treemap\n\"Root\"\n  \"Child1\" : 100\n  \"Child2\" : 200",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "treemap\n\"Root\"\n  \"Child1\" : 100\n  \"Child2\" : 200\n@ invalid diagram {\n"
+  },
+  {
+    "language": "wardley",
+    "factory": "createWardleyServices",
+    "service": "Wardley",
+    "astType": "Wardley",
+    "valid": "wardley-beta\nanchor Users [0.9, 0.1]\ncomponent API [0.6, 0.5]\nUsers -> API\n",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "wardley-beta\nanchor Users [0.9, 0.1]\ncomponent API [0.6, 0.5]\nUsers -> API\n\n@ invalid diagram {\n"
+  },
+  {
+    "language": "cynefin",
+    "factory": "createCynefinServices",
+    "service": "Cynefin",
+    "astType": "Cynefin",
+    "valid": "cynefin-beta\nclear\n\"Checklists\"\ncomplicated\n\"Analysis\"\nclear --> complicated: \"Escalate\"",
+    "invalid": "@ invalid diagram { \n",
+    "malformed": "cynefin-beta\nclear\n\"Checklists\"\ncomplicated\n\"Analysis\"\nclear --> complicated: \"Escalate\"\n@ invalid diagram {\n"
+  }
+]

@@ -1,0 +1,49 @@
+{
+  "id": "test-audit-skips-finalization-warnings-2026-10-18",
+  "title": "Meaningful integration coverage and warning-free maintenance",
+  "source": {
+    "incident": "deep-test-audit-16-skips-2-finalization-todos-remaining-warnings"
+  },
+  "scenarios": [
+    "Exercise all original16 skipped cases against real isolated prerequisites: Android1,PACT4,LaTeX4,Docker5,macOSnonloopback2",
+    "Use real executor/finalizer paths for ACP verified,warn,user-action and deterministic onboard/start/begin outcomes",
+    "Reject wrong PACT profiles and fail opted-in setup instead of reporting an unexecuted pass",
+    "Keep Docker image discovery read-only/no-pull; require explicit device and provider targets",
+    "Preserve side effects when removing unused results and prove dead branches/local declarations unreferenced",
+    "Reject malformed native snapshots and preserve secure-field exclusions",
+    "Restore MCP server IDs/defaults safely, disable restored servers, and protect live credentials",
+    "Validate provider selection while allowing cleanup of legacy unsupported fallback entries",
+    "Render unavailable device health separately from a measured zero; preserve full joined emoji sequences",
+    "Compile the missing React guide from all64 bundled rules and reject stale generated content",
+    "Import the exact shared scorer in native Node without ambiguous module-type warnings and preserve all CommonJS builds"
+  ],
+  "assertions": {
+    "allOriginalSkippedCasesRetained": true,
+    "finalizationTodoCount": 0,
+    "allowedLintWarnings": 0,
+    "lintRulesWeakened": false,
+    "newSuppressionDirectives": 0,
+    "existingCompatibilityExceptionsDocumented": true,
+    "routingThresholdsUnchanged": true,
+    "externalModelCalls": false,
+    "externalBusinessMessages": false
+  },
+  "executableCoverage": [
+    "src/electron/agent/__tests__/executor-finalization-state.test.ts",
+    "src/electron/applications/__tests__/android-phone-adapter.test.ts",
+    "src/electron/pact/__tests__/reference-provider.conformance.test.ts",
+    "src/electron/utils/__tests__/latex-compiler.test.ts",
+    "src/electron/agent/sandbox/__tests__/docker-filesystem-policy.test.ts",
+    "src/electron/agent/tools/__tests__/shell-tools-background-sandbox.test.ts",
+    "src/electron/agent/__tests__/native-app-observation.test.ts",
+    "src/electron/agent/browser/__tests__/browser-service-evaluate.test.ts",
+    "src/renderer/utils/__tests__/device-metrics.test.ts",
+    "src/renderer/utils/__tests__/emoji-replacer.test.ts",
+    "tests/cli-direct-run-settings.test.ts",
+    "tests/cli-backup-restore-regressions.test.ts",
+    "tests/skills-routing-evaluator.test.ts",
+    "scripts/qa/routing-export-risk-smoke.mjs",
+    "scripts/qa/build-react-best-practices-guide.mjs"
+  ],
+  "notes": "Specification is not an executed result. Full runtime prerequisites and recorded results are in tmp/qa/skip-finalization-warning-audit.json. The Android/PACT gates remain explicit because they install/control devices or send messages to configured providers. Compatibility lint exceptions retain their original intent with corrected rule identifiers; zero warnings does not imply all legacy Any usage has been migrated."
+}

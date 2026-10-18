@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
-import { EventEmitter } from "node:events";
 import ts from "typescript";
 
 // Exercise the real orchestration functions with isolated dependencies. The
@@ -15,9 +14,22 @@ function directFunctions(names: string[], bindings: Record<string, unknown>) {
     (node) => ts.isFunctionDeclaration(node) && node.name && names.includes(node.name.text),
   );
   expect(declarations).toHaveLength(names.length);
-  const javascript = ts.transpileModule(declarations.map((node) => node.getText(ast)).join("\n"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
-  }).outputText;
+  const payloadGuards = ast.statements.filter(
+    (node) =>
+      ts.isVariableStatement(node) &&
+      node.declarationList.declarations.some(
+        (declaration) =>
+          ts.isIdentifier(declaration.name) &&
+          ["isPayload", "payloadRecord"].includes(declaration.name.text),
+      ),
+  );
+  expect(payloadGuards).toHaveLength(2);
+  const javascript = ts.transpileModule(
+    [...payloadGuards, ...declarations].map((node) => node.getText(ast)).join("\n"),
+    {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    },
+  ).outputText;
   return vm.runInNewContext(`${javascript}\n({${names.join(",")}})`, bindings);
 }
 

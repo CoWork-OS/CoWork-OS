@@ -371,7 +371,7 @@ export class WorkSessionProtocolRepository {
     const replacementSessionId = randomUUID();
     const now = Date.now();
     const details = redactPayload({
-      ...(recovery.details || {}),
+      ...recovery.details,
       previousSessionId,
       previousWorkspaceId,
       replacementSessionId,

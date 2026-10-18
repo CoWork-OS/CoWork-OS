@@ -14,11 +14,9 @@
 import { Workspace } from "../../../shared/types";
 import { AgentDaemon } from "../daemon";
 import { PlaywrightQAService } from "../qa/playwright-qa-service";
-import { QARunConfig, QACheckType, QAInteractionStep, DEFAULT_QA_CONFIG } from "../qa/types";
+import { QARunConfig, QACheckType, QAInteractionStep } from "../qa/types";
 import { LLMTool } from "../llm/types";
 import { createWorkspaceFilesystemApprovalHandlers } from "../../security/access-profile-paths";
-
-type Any = any;
 
 export class QATools {
   private qaService: PlaywrightQAService;

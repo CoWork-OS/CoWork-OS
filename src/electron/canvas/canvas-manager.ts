@@ -12,7 +12,7 @@
  * - A2UI (Agent-to-UI) action handling
  */
 
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, WebContentsConsoleMessageEventParams } from "electron";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { constants as fsConstants, existsSync, readdirSync, statSync } from "fs";
@@ -80,7 +80,7 @@ function getElectronRuntime(): {
 } | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     // In plain Node.js, `require('electron')` resolves to the Electron binary path (string),
     // not the runtime API object. Only treat it as available when it looks like the API.
@@ -708,12 +708,15 @@ export class CanvasManager {
       });
 
       // Forward console messages from canvas to the renderer
-      window.webContents.on("console-message", (_event, level, message) => {
-        const levelMap: Record<number, "log" | "warn" | "error" | "info"> = {
-          0: "log", // Verbose/debug → log
-          1: "info",
-          2: "warn",
-          3: "error",
+      window.webContents.on("console-message", ({ level, message }) => {
+        const levelMap: Record<
+          WebContentsConsoleMessageEventParams["level"],
+          "log" | "warn" | "error" | "info"
+        > = {
+          debug: "log",
+          info: "info",
+          warning: "warn",
+          error: "error",
         };
         this.emitEvent({
           type: "console_message",

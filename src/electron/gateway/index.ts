@@ -7,6 +7,12 @@ import { authorizationFingerprint } from "../security/authorization-identity";
  * Manages channel adapters, routing, and sessions.
  */
 
+/**
+ * Channel Gateway
+ *
+ * Main entry point for multi-channel messaging support.
+ * Manages channel adapters, routing, and sessions.
+ */
 import {
   ChannelRepository,
   ChannelSessionRepository,
@@ -53,18 +59,18 @@ import {
   createWhatsAppAdapter,
   loadChannelAdapterModule,
 } from "./channels/lazy-adapters";
-import { ImessageAdapter, createImessageAdapter } from "./channels/imessage";
-import { SignalAdapter, createSignalAdapter } from "./channels/signal";
+import { createImessageAdapter } from "./channels/imessage";
+import { createSignalAdapter } from "./channels/signal";
 import { createFeishuAdapter } from "./channels/feishu";
 import { createWeComAdapter } from "./channels/wecom";
 import { createWhatsAppCloudAdapter } from "./channels/whatsapp-cloud";
 import { createTwilioSmsAdapter } from "./channels/twilio-sms";
-import { MattermostAdapter, createMattermostAdapter } from "./channels/mattermost";
-import { MatrixAdapter, createMatrixAdapter } from "./channels/matrix";
-import { LineAdapter, createLineAdapter } from "./channels/line";
-import { BlueBubblesAdapter, createBlueBubblesAdapter } from "./channels/bluebubbles";
+import { createMattermostAdapter } from "./channels/mattermost";
+import { createMatrixAdapter } from "./channels/matrix";
+import { createLineAdapter } from "./channels/line";
+import { createBlueBubblesAdapter } from "./channels/bluebubbles";
 import { createGoogleChatAdapter } from "./channels/google-chat";
-import { EmailAdapter, createEmailAdapter } from "./channels/email";
+import { createEmailAdapter } from "./channels/email";
 import { Channel } from "../database/repositories";
 import { AgentDaemon } from "../agent/daemon";
 import { PersonalityManager } from "../settings/personality-manager";
@@ -2692,7 +2698,7 @@ export class ChannelGateway {
     const info = await adapter.getInfo();
     return {
       status: running ? running.status : "disconnected",
-      ...(info.extra || {}),
+      ...info.extra,
     };
   }
 

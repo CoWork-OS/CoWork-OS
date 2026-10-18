@@ -1540,6 +1540,8 @@ export type ApprovalType =
   | "run_command"
   | "risk_gate"
   | "computer_use"
+  /** In-app browser site, upload, download, and developer-access requests. */
+  | "browser"
   | "protected_credential";
 
 // ============ Security Tool Groups & Risk Levels ============

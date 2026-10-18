@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
+import type { Task } from "../../../shared/types";
 import { InFlightWork } from "../../utils/in-flight-work";
 import { enforceResponsibilityTaskStart } from "../../automation/responsibility-task-policy";
 
@@ -34,8 +35,13 @@ describe("daemon shutdown persistence", () => {
     });
     const starter = AgentDaemon.prototype.startTaskImmediate.call(daemon, {
       id: "policy-wait",
+      title: "Policy wait",
+      prompt: "Wait for policy.",
+      status: "pending",
+      createdAt: 0,
+      updatedAt: 0,
       workspaceId: "fixture",
-    } as any);
+    } satisfies Task);
     expect(daemon.admittedStartOperations?.size).toBe(1);
     const shutdown = daemon.shutdown();
     releasePolicy();

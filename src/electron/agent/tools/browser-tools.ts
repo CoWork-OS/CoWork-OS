@@ -918,12 +918,19 @@ export class BrowserTools {
     }
     const sessionId = this.getSessionId(input);
     const pageUrl =
-      (this.hasVisibleWorkbenchSession(input)
+      (this.shouldPreferVisibleWorkbench(input) && this.hasVisibleWorkbenchSession(input)
         ? this.browserWorkbenchService.getSession(this.taskId, sessionId)?.url
-        : undefined) || "";
+        : typeof this.browserService.getUrl === "function"
+          ? this.browserService.getUrl()
+          : undefined) || "";
     let host = "";
+    let origin = "";
     try {
-      host = new URL(pageUrl).host;
+      const parsed = new URL(pageUrl);
+      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+        host = parsed.host;
+        origin = parsed.origin;
+      }
     } catch {
       host = "";
     }
@@ -937,7 +944,15 @@ export class BrowserTools {
         `Allow CoWork to upload ${filePath ? `"${path.basename(filePath)}"` : "a file"}${
           host ? ` to ${host}` : ""
         }?`,
-        { kind: "browser_upload", filePath, host: host || undefined },
+        {
+          kind: "browser_upload",
+          tool: "browser_upload_file",
+          filePath,
+          host: host || undefined,
+          // The active page is authoritative; a tool argument cannot supply its destination.
+          url: origin || undefined,
+          browserSessionId: sessionId || undefined,
+        },
         { allowAutoApprove: false },
       ));
     return approved ? null : { success: false, error: "The user did not allow this upload." };

@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "description": "Explicit, reviewed replacements for stale routing expectations. Every original prompt remains checked. These contracts are independent of live eligibility and fail if invocation policy or corpus coverage drifts. No generic eligibility-based skips. Historical positive domain examples remain untouched because human invocation and guideline application are separate supported surfaces.",
+  "corpus": {
+    "positiveExamples": 629,
+    "negativeExamples": 613,
+    "datasetRows": 32,
+    "contractsByKind": {
+      "manual_only": 8,
+      "guideline": 6,
+      "explicit_only": 2,
+      "installed_pack": 1
+    },
+    "datasetExpectedCases": 32,
+    "datasetForbiddenCases": 32
+  },
+  "cases": [
+    {
+      "source": "positive_example",
+      "skillId": "gog",
+      "prompt": "Use the gog skill for this request.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "gog",
+      "prompt": "Help me with gog.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "gog",
+      "prompt": "Use when the user asks to use the Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Tasks, Sheets, Docs, or Slides.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "gog",
+      "prompt": "Gog: provide an actionable result.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "himalaya",
+      "prompt": "Use the himalaya skill for this request.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "himalaya",
+      "prompt": "Help me with himalaya.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "himalaya",
+      "prompt": "Use when the user asks to cLI to manage emails via IMAP/SMTP. Use himalaya to list, read, write, reply, forward, search, and organize emails from the terminal. Supports multiple accounts and message composition with MML MIME Meta Language.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "himalaya",
+      "prompt": "Himalaya: provide an actionable result.",
+      "kind": "manual_only",
+      "policy": {
+        "enabled": true,
+        "disableModelInvocation": true,
+        "userInvocable": true
+      },
+      "evidence": "f4dac201cc63d5208db7192df952cefe435a578c (2026-02-08) deliberately disabled model invocation; explicit slash access remains supported. Generated domain examples cannot override invocation policy."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "karpathy-guidelines",
+      "prompt": "Use the karpathy-guidelines skill for this request.",
+      "kind": "guideline",
+      "policy": {
+        "enabled": true,
+        "type": "guideline"
+      },
+      "evidence": "730dc553e originally bundled this skill as a guideline. custom-skill-loader.getEnabledGuidelinesPrompt injects its sanitized guidance; listTaskSkills and model invocation exclude it."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "karpathy-guidelines",
+      "prompt": "Fix this bug without refactoring unrelated modules.",
+      "kind": "guideline",
+      "policy": {
+        "enabled": true,
+        "type": "guideline"
+      },
+      "evidence": "730dc553e originally bundled this skill as a guideline. custom-skill-loader.getEnabledGuidelinesPrompt injects its sanitized guidance; listTaskSkills and model invocation exclude it."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "karpathy-guidelines",
+      "prompt": "Review this patch and point out overcomplicated or unnecessary changes.",
+      "kind": "guideline",
+      "policy": {
+        "enabled": true,
+        "type": "guideline"
+      },
+      "evidence": "730dc553e originally bundled this skill as a guideline. custom-skill-loader.getEnabledGuidelinesPrompt injects its sanitized guidance; listTaskSkills and model invocation exclude it."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "karpathy-guidelines",
+      "prompt": "Refactor this file surgically while preserving behavior.",
+      "kind": "guideline",
+      "policy": {
+        "enabled": true,
+        "type": "guideline"
+      },
+      "evidence": "730dc553e originally bundled this skill as a guideline. custom-skill-loader.getEnabledGuidelinesPrompt injects its sanitized guidance; listTaskSkills and model invocation exclude it."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "karpathy-guidelines",
+      "prompt": "Implement this feature and verify the narrowest relevant test passes.",
+      "kind": "guideline",
+      "policy": {
+        "enabled": true,
+        "type": "guideline"
+      },
+      "evidence": "730dc553e originally bundled this skill as a guideline. custom-skill-loader.getEnabledGuidelinesPrompt injects its sanitized guidance; listTaskSkills and model invocation exclude it."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "gemini",
+      "prompt": "Use when the user asks to gemini CLI for one-shot Q&A, summaries, and generation.",
+      "kind": "explicit_only",
+      "policy": {
+        "enabled": true
+      },
+      "evidence": "32b5d413c generated these descriptive examples before 4976db5e2 (2026-05-21) required explicit Gemini invocation, protected by 1c76ba473. Descriptive text does not authorize execution."
+    },
+    {
+      "source": "positive_example",
+      "skillId": "gemini",
+      "prompt": "Gemini: provide an actionable result.",
+      "kind": "explicit_only",
+      "policy": {
+        "enabled": true
+      },
+      "evidence": "32b5d413c generated these descriptive examples before 4976db5e2 (2026-05-21) required explicit Gemini invocation, protected by 1c76ba473. Descriptive text does not authorize execution."
+    },
+    {
+      "source": "dataset_expected",
+      "skillId": "create-changelog",
+      "prompt": "Create a changelog entry from these merged commits.",
+      "kind": "installed_pack",
+      "packPath": "resources/plugin-packs/technical-writing/cowork.plugin.json",
+      "packSkillId": "tw-changelog",
+      "evidence": "05d15b0b33e6df84f807cfe771f75aa39c77a858 (2026-03-18) deliberately retired create-changelog resources. extensions/registry.ts registers technical-writing-pack skills on installation, including tw-changelog; this original prompt must route in that installed-pack scenario without exposing uninstalled skills globally."
+    },
+    {
+      "source": "dataset_expected",
+      "skillId": "karpathy-guidelines",
+      "prompt": "Fix this bug without refactoring unrelated modules or changing behavior outside the failing path.",
+      "kind": "guideline",
+      "policy": {
+        "enabled": true,
+        "type": "guideline"
+      },
+      "evidence": "730dc553e originally bundled this as injected guidance, not a callable skill. The bug-fix task still receives the guideline through getEnabledGuidelinesPrompt."
+    }
+  ]
+}

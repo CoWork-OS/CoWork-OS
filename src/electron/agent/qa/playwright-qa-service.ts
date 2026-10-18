@@ -37,8 +37,6 @@ import {
   DEFAULT_QA_CONFIG,
 } from "./types";
 
-type Any = any;
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -741,7 +739,7 @@ export class PlaywrightQAService {
   // Private: Check implementations
   // -----------------------------------------------------------------------
 
-  private async runConsoleErrorCheck(run: QARun, screenshotDir: string): Promise<void> {
+  private async runConsoleErrorCheck(run: QARun, _screenshotDir: string): Promise<void> {
     const start = now();
 
     // Inject console error collector and evaluate
@@ -806,7 +804,7 @@ export class PlaywrightQAService {
     this.emit("qa:check", { check });
   }
 
-  private async runNetworkErrorCheck(run: QARun, screenshotDir: string): Promise<void> {
+  private async runNetworkErrorCheck(run: QARun, _screenshotDir: string): Promise<void> {
     const start = now();
 
     const networkResult = await this.browserService!.evaluate(`
@@ -1182,7 +1180,7 @@ export class PlaywrightQAService {
     this.emit("qa:check", { check });
   }
 
-  private async runAccessibilityCheck(run: QARun, screenshotDir: string): Promise<void> {
+  private async runAccessibilityCheck(run: QARun, _screenshotDir: string): Promise<void> {
     const start = now();
 
     const a11yResult = await this.browserService!.evaluate(`
@@ -1265,7 +1263,7 @@ export class PlaywrightQAService {
     this.emit("qa:check", { check });
   }
 
-  private async runPerformanceCheck(run: QARun, screenshotDir: string): Promise<void> {
+  private async runPerformanceCheck(run: QARun, _screenshotDir: string): Promise<void> {
     const start = now();
 
     const perfResult = await this.browserService!.evaluate(`
@@ -1400,7 +1398,6 @@ export class PlaywrightQAService {
     const major = run.issues.filter((i) => i.severity === "major").length;
     const minor = run.issues.filter((i) => i.severity === "minor").length;
     const passed = run.checks.filter((c) => c.passed).length;
-    const failed = run.checks.filter((c) => !c.passed).length;
 
     if (total === 0) {
       return `All ${run.checks.length} QA checks passed. No issues found.`;

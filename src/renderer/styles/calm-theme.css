@@ -2027,20 +2027,6 @@ html.visual-calm:not(.theme-light) .calm-today-card-idea {
   }
 }
 
-/* Summary events in the timeline read as result cards. */
-html.visual-calm .calm-task .summary-event-card .event-content {
-  background: var(--calm-surface);
-  border: 1px solid var(--calm-border);
-  border-radius: 16px;
-  padding: 12px 14px;
-}
-
-html.visual-calm .calm-task .summary-event-card .event-summary-text {
-  font-size: 14.5px;
-  font-weight: 500;
-  color: var(--calm-text);
-}
-
 /* ---------- Fixes from the live walkthrough ---------- */
 
 /* A global button rule adds padding; calm's fixed-size icon buttons need none

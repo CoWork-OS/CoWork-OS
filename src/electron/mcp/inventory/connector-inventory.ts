@@ -282,7 +282,7 @@ export function inferMcpRequirements(entry: MCPRegistryEntry): IntegrationRequir
   if (hasOAuth) requirements.add("oauth-consent");
   if (
     envKeys.some((key) => /(API_KEY|_TOKEN|_SECRET|_KEY|PASSWORD)$/.test(key)) &&
-    !(hasOAuth && envKeys.every((key) => !/API_KEY$/.test(key)))
+    !(hasOAuth && envKeys.every((key) => !key.endsWith("API_KEY")))
   ) {
     requirements.add("api-key");
   }

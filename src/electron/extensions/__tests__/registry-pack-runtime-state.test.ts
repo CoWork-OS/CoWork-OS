@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   setPluginSkillEnabled: vi.fn(),
   secureInitialized: false,
   secureRefusesWrites: false,
-  strictPolicies: undefined as any,
+  strictPolicies: undefined as import("../../admin/policies").AdminPolicies | undefined,
   securePayload: undefined as
     | { packs?: Record<string, boolean>; skills?: Record<string, Record<string, boolean>> }
     | undefined,

@@ -74,7 +74,7 @@ Growing `Map` and `Set` refs (`latestAttentionEventByTaskIdRef`, `taskLastEventT
 - Added `onTasksChangedRef` in `MainContent` to decouple the event subscription from prop identity
 - Guarded `setWelcomeTaskSuggestions([])` to skip when already empty
 
-**Files:** `src/renderer/App.tsx`, `src/renderer/components/MainContent.tsx`
+**Files:** `src/renderer/App.tsx`, `src/renderer/components/MainContent/MainContent.tsx`
 
 ### Single-Event Merge Fast Path
 
@@ -84,15 +84,19 @@ Growing `Map` and `Set` refs (`latestAttentionEventByTaskIdRef`, `taskLastEventT
 
 ### Timeline Virtualization
 
-| Constant               | Value | Purpose                                            |
-| ---------------------- | ----- | -------------------------------------------------- |
-| `VIRTUALIZE_THRESHOLD` | 50    | Switch to virtual rendering above this event count |
-| `MAX_SHOW_ALL_EVENTS`  | 200   | Cap for "Show All" mode                            |
-| `WINDOW_SIZE`          | 6     | Default visible events in windowed mode            |
+`MainContent` virtualizes the task feed at 18 renderable rows, except in delivery
+and replay views. `useVirtualList` uses measured row heights, an estimated height
+of 160 pixels, and 12 rows of overscan. Older history loads through bounded pages
+while the feed preserves the reader's scroll position.
 
-Virtualization is now always enabled when events exceed 50, regardless of feature flags. "Show All" is capped at the last 200 events.
+The former standalone semantic-card timeline had no renderer callers and was
+removed. Its six-event window and 200-event "Show All" limit do not govern the
+current task feed. See [Long-Session Timeline Performance](long-session-performance.md)
+for the active history-loading and rendering contract.
 
-**File:** `src/renderer/components/timeline/SemanticTimeline.tsx`
+**Files:** `src/renderer/components/MainContent/MainContent.tsx`,
+`src/renderer/components/MainContent/TaskConversationFlow.tsx`,
+`src/renderer/components/MainContent/task-feed-logic.ts`, `src/renderer/hooks/useVirtualList.ts`
 
 ---
 
@@ -277,9 +281,8 @@ Previously, the phase stayed at `"think"` during the entire child task execution
 | File                                                    | Changes                                                                                 |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `src/renderer/App.tsx`                                  | Event capping, polling stop, reconciliation guard, Map cleanup, loadTasks stabilization |
-| `src/renderer/components/MainContent.tsx`               | onTasksChangedRef, welcome suggestions guard                                            |
+| `src/renderer/components/MainContent/MainContent.tsx`   | Callback guards, measured feed virtualization, bounded history paging                   |
 | `src/renderer/components/CollaborativeSummaryPanel.tsx` | Phase display labels                                                                    |
-| `src/renderer/components/timeline/SemanticTimeline.tsx` | Virtualization enforcement, Show All cap                                                |
 | `src/renderer/utils/task-event-stream.ts`               | Single-event merge fast path                                                            |
 | `src/electron/agent/daemon.ts`                          | Executor cache, verification dedup, MCP cleanup, DB maintenance                         |
 | `src/electron/agent/executor.ts`                        | Review snapshot, tool restrictions, verification routing                                |

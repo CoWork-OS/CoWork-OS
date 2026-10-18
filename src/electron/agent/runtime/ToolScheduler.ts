@@ -607,7 +607,7 @@ export class ToolScheduler {
     maxParallel = batch.calls.length,
     shouldContinue?: () => boolean,
   ): Promise<ToolScheduleRawExecutionOutcome[]> {
-    const outcomes = new Array<ToolScheduleRawExecutionOutcome>(batch.calls.length);
+    const outcomes: ToolScheduleRawExecutionOutcome[] = [];
     const concurrency = Math.min(Math.max(1, maxParallel || 1), batch.calls.length);
     let cursor = 0;
 

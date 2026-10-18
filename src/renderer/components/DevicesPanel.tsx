@@ -38,6 +38,7 @@ import type {
   ExecutionMode,
   ManagedDevice,
   ManagedDeviceSummary,
+  ChannelData,
   RemoteGatewayConfig,
   RemoteGatewayStatus,
   SavedRemoteGatewayDevice,
@@ -60,6 +61,15 @@ import { RemoteFilePicker } from "./RemoteFilePicker";
 import { RemoteDeviceControlVisual } from "./RemoteDeviceControlVisual";
 import { hasHostMethod } from "../host/browser-capabilities";
 import { scrollBehavior } from "../utils/motion";
+import { deviceMetricLabel } from "../utils/device-metrics";
+
+type DeviceChannel = Pick<ChannelData, "id" | "name" | "type" | "enabled" | "status">;
+interface DeviceAccount {
+  id: string;
+  label?: string;
+  provider: string;
+  status?: string;
+}
 
 export interface DeviceTaskOptions {
   interactionMode?: InteractionModeSelection;
@@ -1631,7 +1641,7 @@ export function DevicesPanel({
                 </div>
               </div>
               <div className="dp-support-list">
-                {(activeSummary.apps.channels || []).slice(0, 3).map((channel: any) => (
+                {(activeSummary.apps.channels || []).slice(0, 3).map((channel: DeviceChannel) => (
                   <div key={channel.id} className="dp-support-row">
                     <div>
                       <strong>{channel.name}</strong>
@@ -1760,15 +1770,15 @@ export function DevicesPanel({
           {activeSummary ? (
             <div className="dp-support-stats">
               <div>
-                <strong>{(activeSummary.device as any).cpuUsage?.toFixed(0) || 0}%</strong>
+                <strong>{deviceMetricLabel(activeSummary.device, "cpuUsage")}</strong>
                 <span>CPU Load</span>
               </div>
               <div>
-                <strong>{(activeSummary.device as any).memoryUsage?.toFixed(0) || 0}%</strong>
+                <strong>{deviceMetricLabel(activeSummary.device, "memoryUsage")}</strong>
                 <span>Memory</span>
               </div>
               <div>
-                <strong>{(activeSummary.device as any).loadAverage?.[0]?.toFixed(1) || 0}</strong>
+                <strong>{deviceMetricLabel(activeSummary.device, "loadAverage")}</strong>
                 <span>Load Avg</span>
               </div>
             </div>
@@ -2732,8 +2742,8 @@ function AppsManagerModal({
   onRefresh: () => Promise<void>;
 }) {
   const { device } = summary;
-  const [channels, setChannels] = useState<any[]>(summary.apps.channels || []);
-  const [accounts, setAccounts] = useState<any[]>(summary.apps.accounts || []);
+  const [channels, setChannels] = useState<DeviceChannel[]>(summary.apps.channels || []);
+  const [accounts, setAccounts] = useState<DeviceAccount[]>(summary.apps.accounts || []);
   const [loading, setLoading] = useState(false);
   const [workingKey, setWorkingKey] = useState<string | null>(null);
   const [newChannelType, setNewChannelType] = useState<AppsChannelType>("whatsapp");
@@ -2755,11 +2765,11 @@ function AppsManagerModal({
         }),
       ]);
       if (channelsResult?.ok) {
-        const payload = channelsResult.payload as { channels?: any[] } | undefined;
+        const payload = channelsResult.payload as { channels?: DeviceChannel[] } | undefined;
         setChannels(Array.isArray(payload?.channels) ? payload.channels : []);
       }
       if (accountsResult?.ok) {
-        const payload = accountsResult.payload as { accounts?: any[] } | undefined;
+        const payload = accountsResult.payload as { accounts?: DeviceAccount[] } | undefined;
         setAccounts(Array.isArray(payload?.accounts) ? payload.accounts : []);
       }
     } catch (error) {

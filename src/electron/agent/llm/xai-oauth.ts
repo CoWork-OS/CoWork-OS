@@ -28,7 +28,7 @@ interface DiscoveryResult {
 
 function getElectronShell(): { openExternal?: (url: string) => Promise<void> | void } | null {
   try {
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     return electron?.shell || null;
   } catch {

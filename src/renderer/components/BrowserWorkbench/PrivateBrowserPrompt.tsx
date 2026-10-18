@@ -8,6 +8,7 @@ import {
   type BrowserVaultPrompt,
 } from "../../../shared/browser-vault";
 import "./private-browser-prompt.css";
+import { hasHostMethod } from "../../host/browser-capabilities";
 
 const SECRET_FIELDS = new Set(["password", "otpSecret", "cardNumber", "cvc", "code"]);
 
@@ -211,6 +212,7 @@ export function PrivateBrowserPromptDialog({
 export function PrivateBrowserPrompts() {
   const [prompts, setPrompts] = useState<BrowserVaultPrompt[]>([]);
   useEffect(() => {
+    if (!hasHostMethod("listBrowserVaultPrompts")) return;
     let disposed = false;
     let revision = 0;
     const refresh = async () => {
@@ -222,7 +224,9 @@ export function PrivateBrowserPrompts() {
         if (!disposed) setPrompts([]);
       }
     };
-    const unsubscribe = window.electronAPI.onBrowserVaultPromptChanged?.(() => void refresh());
+    const unsubscribe = hasHostMethod("onBrowserVaultPromptChanged")
+      ? window.electronAPI.onBrowserVaultPromptChanged?.(() => void refresh())
+      : undefined;
     void refresh();
     return () => {
       disposed = true;

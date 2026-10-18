@@ -496,7 +496,7 @@ export class StreamableHttpTransport extends EventEmitter implements MCPTranspor
         const previousAuth = this.config.auth ? structuredClone(this.config.auth) : undefined;
         const accessToken = await getBoxAccessToken(boxSettings);
         const nextAuth = {
-          ...(this.config.auth || {}),
+          ...this.config.auth,
           type: "bearer" as const,
           token: accessToken,
           refreshToken: boxSettings.refreshToken,

@@ -8,7 +8,7 @@ import { DATABASE_COMMANDS, requiredTablesFor } from "../async/commands";
 import { DatabaseManager } from "../schema";
 import { serviceStatements } from "../service-statements";
 import { setStatementClient } from "../statements/statement-route";
-import { TaskRepository } from "../repository-facades";
+
 import { EventTriggerService } from "../../triggers/EventTriggerService";
 import { HookSessionRepository } from "../../hooks/hook-session-repository-facades";
 import { ContextPolicyManager } from "../../gateway/context-policy-repository-facades";

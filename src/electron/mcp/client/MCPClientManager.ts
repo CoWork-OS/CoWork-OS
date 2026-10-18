@@ -49,7 +49,7 @@ const logger = createLogger("MCPClientManager");
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) return BrowserWindow.getAllWindows();

@@ -14,7 +14,7 @@ import {
 } from "../agent/runtime/queued-attachment-store";
 import { createLogger } from "../utils/logger";
 
-type Any = Record<string, any>;
+type SessionPayload = Record<string, unknown>;
 const logger = createLogger("SessionRetentionService");
 
 const QUEUED_ATTACHMENT_ORPHAN_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -565,13 +565,13 @@ function groupEventsByTaskId(events: TaskEvent[]): Map<string, TaskEvent[]> {
   return out;
 }
 
-function normalizePayload(payload: unknown): Any {
+function normalizePayload(payload: unknown): SessionPayload {
   if (!payload) return {};
-  if (typeof payload === "object") return payload as Any;
+  if (typeof payload === "object") return payload as SessionPayload;
   if (typeof payload !== "string") return {};
   try {
     const parsed = JSON.parse(payload) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Any) : {};
+    return parsed && typeof parsed === "object" ? (parsed as SessionPayload) : {};
   } catch {
     return {};
   }

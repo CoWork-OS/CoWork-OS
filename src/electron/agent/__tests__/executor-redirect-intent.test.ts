@@ -34,7 +34,7 @@ describe("TaskExecutor — isRedirectIntent", () => {
 
   const isRedirect = (text: string): boolean =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (executor as any).isRedirectIntent(text);
+    executor.isRedirectIntent(text);
 
   describe("Pattern 1 — ignore-and-pivot", () => {
     it("detects the canonical failure case", () => {
@@ -189,7 +189,7 @@ describe("TaskExecutor — compactHistoryForRedirect", () => {
       { role: "assistant", content: [{ type: "text", text: "Logs look clean." }] },
     ];
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     expect(executor.conversationHistory).toHaveLength(2);
   });
@@ -199,7 +199,7 @@ describe("TaskExecutor — compactHistoryForRedirect", () => {
     executor.task = { title: "Fix OpenClaw Bugs" };
     executor.conversationHistory = [];
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     const [first, second] = executor.conversationHistory;
     // Must be user → assistant so appending the redirect message yields user,assistant,user
@@ -212,7 +212,7 @@ describe("TaskExecutor — compactHistoryForRedirect", () => {
     executor.task = { title: "Fix OpenClaw Bugs" };
     executor.conversationHistory = [];
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     const userText = executor.conversationHistory[0].content[0].text as string;
     expect(userText).toContain("Fix OpenClaw Bugs");
@@ -225,7 +225,7 @@ describe("TaskExecutor — compactHistoryForRedirect", () => {
       { role: "user", content: [{ type: "text", text: "do something" }] },
     ];
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     const userText = executor.conversationHistory[0].content[0].text as string;
     expect(userText).toContain("previous session");
@@ -236,7 +236,7 @@ describe("TaskExecutor — compactHistoryForRedirect", () => {
     executor.task = { title: "Some Task" };
     executor.conversationHistory = [];
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     for (const msg of executor.conversationHistory) {
       expect(Array.isArray(msg.content)).toBe(true);
@@ -251,7 +251,7 @@ describe("TaskExecutor — compactHistoryForRedirect", () => {
     executor.task = { title: "Old Task" };
     executor.conversationHistory = [];
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     // Simulate what sendMessageLegacy does: append the redirect message
     executor.conversationHistory.push({
@@ -269,7 +269,7 @@ describe("TaskExecutor — sendMessageLegacy redirect wiring", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
 
     // Use the public isRedirectIntent surface via direct call
-    const check = (text: string) => (executor as any).isRedirectIntent(text);
+    const check = (text: string) => executor.isRedirectIntent(text);
 
     expect(check("ignore the openclaw fixes and focus on new features")).toBe(true);
     expect(check("pivot to the authentication module")).toBe(true);
@@ -288,7 +288,7 @@ describe("TaskExecutor — sendMessageLegacy redirect wiring", () => {
       content: [{ type: "text", text: `message ${i}` }],
     }));
 
-    (executor as any).compactHistoryForRedirect();
+    executor.compactHistoryForRedirect();
 
     // History is compacted to just 2 stub entries — not 20
     expect(executor.conversationHistory).toHaveLength(2);

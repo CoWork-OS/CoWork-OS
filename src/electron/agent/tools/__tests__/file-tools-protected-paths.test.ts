@@ -16,8 +16,6 @@ import path from "path";
 import type { Workspace } from "../../../../shared/types";
 import { FileTools } from "../file-tools";
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
-
 describe("FileTools protected workspace paths", () => {
   let tmpDir: string;
   let fileTools: FileTools;

@@ -6,6 +6,23 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDaemon, shouldRestartInterruptedTask } from "../daemon";
+import type { Task, TaskEvent } from "../../../shared/types";
+import type { TaskStore } from "../../database/repositories";
+
+type BotRecoveryMethods = Pick<
+  AgentDaemon,
+  | "reopenBotConversation"
+  | "listBotTeamPeers"
+  | "getBotConversationMessagingContext"
+  | "getBotTeamPromptContext"
+  | "resolveBotTeamPeer"
+> & {
+  ensureBotTaskTeam: AgentDaemon["ensureBotTaskTeam"];
+  getBotTeamContext: AgentDaemon["getBotTeamContext"];
+};
+const daemonPrototype = AgentDaemon.prototype as unknown as {
+  findRecoverableBotHandoff: AgentDaemon["findRecoverableBotHandoff"];
+};
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
@@ -21,7 +38,6 @@ const nativeSqliteAvailable = await import("better-sqlite3")
   .catch(() => false);
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
-type Any = Record<string, any>;
 
 describeWithSqlite("AgentDaemon bot recovery", () => {
   let tempDir: string;
@@ -74,11 +90,11 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const memberRepo = new AgentTeamMemberStore(db);
     roles.forEach((role) => memberRepo.add({ teamId: team.id, agentRoleId: role.id }));
     const taskRepo = new repositories.TaskStore(db);
-    const daemon = {
+    const daemonFixture = {
       dbManager: manager,
       taskRepo,
       logEvent: vi.fn(),
-      createTask: vi.fn(async (params: Any) =>
+      createTask: vi.fn(async (params: Parameters<AgentDaemon["createTask"]>[0]) =>
         taskRepo.create({
           title: params.title,
           prompt: params.prompt,
@@ -90,9 +106,15 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
           agentConfig: params.agentConfig,
         }),
       ),
-    } as Any;
-    Object.setPrototypeOf(daemon, AgentDaemon.prototype);
-    const conversation = (role = roles[0], overrides: Any = {}) =>
+    };
+    const daemon = Object.setPrototypeOf(
+      daemonFixture,
+      AgentDaemon.prototype,
+    ) as typeof daemonFixture & BotRecoveryMethods;
+    const conversation = (
+      role = roles[0],
+      overrides: Partial<Parameters<TaskStore["create"]>[0]> = {},
+    ) =>
       taskRepo.create({
         title: role.displayName,
         prompt: "Original private transcript",
@@ -189,9 +211,9 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     f.roleRepo.delete(f.roles[2].id);
     const sender = f.conversation();
     const peers = await f.daemon.listBotTeamPeers(sender.id);
-    expect(peers.map((peer: Any) => peer.roleId)).toEqual([f.roles[0].id, f.roles[1].id]);
-    expect(peers.some((peer: Any) => peer.roleId === outsider.id)).toBe(false);
-    expect(peers.find((peer: Any) => peer.roleId === f.roles[1].id)).toMatchObject({
+    expect(peers.map((peer) => peer.roleId)).toEqual([f.roles[0].id, f.roles[1].id]);
+    expect(peers.some((peer) => peer.roleId === outsider.id)).toBe(false);
+    expect(peers.find((peer) => peer.roleId === f.roles[1].id)).toMatchObject({
       available: false,
       availability: "conversation_unavailable",
       recoveryAction: "reopen",
@@ -201,7 +223,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
   it("preserves configured team IDs and resolves a renamed teammate by stable bot ID", async () => {
     const f = await fixture();
     const source = f.conversation();
-    f.roleRepo.update({ id: f.roles[1].id, name: randomUUID(), displayName: "Renamed researcher" });
+    f.roleRepo.update({ id: f.roles[1].id, displayName: "Renamed researcher" });
     const peer = await f.daemon.resolveBotTeamPeer(source.id, { botName: f.roles[1].id });
     expect(peer).toMatchObject({
       ok: true,
@@ -329,7 +351,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const task = {
       id: "receiver-task",
       agentConfig: { botConversation: true },
-    } as Any;
+    } as Task;
     const events = [
       {
         id: "inbound",
@@ -346,10 +368,10 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
         },
       },
     ];
-    const daemonLike = { resolveLegacyEventType: (event: Any) => event.type } as Any;
+    const daemonLike = { resolveLegacyEventType: (event: TaskEvent) => event.type };
 
     expect(
-      (AgentDaemon.prototype as Any).findRecoverableBotHandoff.call(daemonLike, task, events),
+      daemonPrototype.findRecoverableBotHandoff.call(daemonLike, task, events as TaskEvent[]),
     ).toMatchObject({
       message: "PROMO_RESEARCH\nFind five opportunities.",
       messageSource: "agent",
@@ -388,7 +410,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
     const task = {
       id: "receiver-task",
       agentConfig: { botConversation: true },
-    } as Any;
+    } as Task;
     const events = [
       {
         id: "inbound",
@@ -413,10 +435,10 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
         },
       },
     ];
-    const daemonLike = { resolveLegacyEventType: (event: Any) => event.type } as Any;
+    const daemonLike = { resolveLegacyEventType: (event: TaskEvent) => event.type };
 
     expect(
-      (AgentDaemon.prototype as Any).findRecoverableBotHandoff.call(daemonLike, task, events),
+      daemonPrototype.findRecoverableBotHandoff.call(daemonLike, task, events as TaskEvent[]),
     ).toBeUndefined();
   });
 
@@ -426,7 +448,7 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
       const task = {
         id: "receiver-task",
         agentConfig: { botConversation: true },
-      } as Any;
+      } as Task;
       const events = [
         {
           id: "inbound",
@@ -454,10 +476,10 @@ describeWithSqlite("AgentDaemon bot recovery", () => {
           },
         },
       ];
-      const daemonLike = { resolveLegacyEventType: (event: Any) => event.type } as Any;
+      const daemonLike = { resolveLegacyEventType: (event: TaskEvent) => event.type };
 
       expect(
-        (AgentDaemon.prototype as Any).findRecoverableBotHandoff.call(daemonLike, task, events),
+        daemonPrototype.findRecoverableBotHandoff.call(daemonLike, task, events as TaskEvent[]),
       ).toMatchObject({
         messageId: "handoff-1",
         senderTaskId: "sender-task",

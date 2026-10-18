@@ -1,11 +1,14 @@
+type MailboxServiceHooks = {
+  normalizeImapThreads: MailboxService["normalizeImapThreads"];
+  normalizeGmailThread: MailboxService["normalizeGmailThread"];
+  upsertThread: MailboxService["upsertThread"];
+};
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MICROSOFT_EMAIL_GRAPH_READWRITE_SCOPES } from "../../../shared/microsoft-email";
-
-type Any = any;
 
 const nativeSqliteAvailable = await import("better-sqlite3")
   .then((module) => {
@@ -22,6 +25,29 @@ const nativeSqliteAvailable = await import("better-sqlite3")
 
 const describeWithSqlite = nativeSqliteAvailable ? describe : describe.skip;
 
+// Cold transforms of the mailbox dependency graph can take longer than a fixture
+// hook's deadline. Load modules during collection so a timed-out import cannot
+// resume after the next test has replaced the shared fixture db/tmpDir variables.
+// Keep import-time initialization inside a synthetic profile too.
+const dependencies = await (async () => {
+  if (!nativeSqliteAvailable) return null;
+  const importDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-mailbox-import-"));
+  const previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
+  process.env.COWORK_USER_DATA_DIR = importDir;
+  try {
+    return await Promise.all([
+      import("../../database/schema"),
+      import("../MailboxService"),
+      import("../../control-plane/ControlPlaneCoreService"),
+      import("../../agents/AgentRoleRepository"),
+    ]);
+  } finally {
+    if (previousUserDataDir === undefined) delete process.env.COWORK_USER_DATA_DIR;
+    else process.env.COWORK_USER_DATA_DIR = previousUserDataDir;
+    fs.rmSync(importDir, { recursive: true, force: true });
+  }
+})();
+
 describeWithSqlite("MailboxService", () => {
   let tmpDir: string;
   let previousUserDataDir: string | undefined;
@@ -33,7 +59,7 @@ describeWithSqlite("MailboxService", () => {
 
   const now = Date.now();
 
-  beforeEach(async () => {
+  beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-mailbox-"));
     previousUserDataDir = process.env.COWORK_USER_DATA_DIR;
     process.env.COWORK_USER_DATA_DIR = tmpDir;
@@ -43,12 +69,7 @@ describeWithSqlite("MailboxService", () => {
       { MailboxService },
       { ControlPlaneCoreService },
       { AgentRoleStore: AgentRoleRepository },
-    ] = await Promise.all([
-      import("../../database/schema"),
-      import("../MailboxService"),
-      import("../../control-plane/ControlPlaneCoreService"),
-      import("../../agents/AgentRoleRepository"),
-    ]);
+    ] = dependencies!;
 
     manager = new DatabaseManager();
     db = manager.getDatabase();
@@ -1717,21 +1738,25 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("normalizes structured IMAP addresses and html content from the email client", () => {
-    const normalized = (service as any).normalizeImapThreads("imap:user@msn.com", "user@msn.com", [
-      {
-        uid: 901,
-        messageId: "msg-901@example.com",
-        from: {
-          name: "Microsoft account team",
-          address: "account-security-noreply@accountprotection.microsoft.com",
+    const normalized = (service as unknown as MailboxServiceHooks).normalizeImapThreads(
+      "imap:user@msn.com",
+      "user@msn.com",
+      [
+        {
+          uid: 901,
+          messageId: "msg-901@example.com",
+          from: {
+            name: "Microsoft account team",
+            address: "account-security-noreply@accountprotection.microsoft.com",
+          },
+          to: [{ name: "Recipient", address: "user@msn.com" }],
+          subject: "Microsoft hesabınıza yeni uygulamalar bağlandı",
+          html: "<p>MSN Mail App, test</p><p>Review this sign-in.</p>",
+          date: new Date(now).toISOString(),
+          isRead: false,
         },
-        to: [{ name: "Recipient", address: "user@msn.com" }],
-        subject: "Microsoft hesabınıza yeni uygulamalar bağlandı",
-        html: "<p>MSN Mail App, test</p><p>Review this sign-in.</p>",
-        date: new Date(now).toISOString(),
-        isRead: false,
-      },
-    ]);
+      ],
+    );
 
     expect(normalized).toHaveLength(1);
     expect(normalized[0]?.id).toBe("imap-thread:message:3090ad3d96cdf4b4925a38b1");
@@ -1760,65 +1785,73 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("keeps repeated standalone IMAP transactional emails as separate local threads", () => {
-    const normalized = (service as any).normalizeImapThreads("imap:user@msn.com", "user@msn.com", [
-      {
-        uid: 901,
-        messageId: "apple-invoice-march@example.com",
-        from: { name: "Apple", address: "no_reply@email.apple.com" },
-        to: [{ name: "Recipient", address: "user@msn.com" }],
-        subject: "Your invoice from Apple.",
-        text: "Invoice 28 March 2026",
-        date: "2026-03-28T23:06:26.000Z",
-        isRead: true,
-      },
-      {
-        uid: 902,
-        messageId: "apple-invoice-april@example.com",
-        from: { name: "Apple", address: "no_reply@email.apple.com" },
-        to: [{ name: "Recipient", address: "user@msn.com" }],
-        subject: "Your invoice from Apple.",
-        text: "Invoice 28 April 2026",
-        date: "2026-04-28T17:11:26.000Z",
-        isRead: true,
-      },
-    ]);
+    const normalized = (service as unknown as MailboxServiceHooks).normalizeImapThreads(
+      "imap:user@msn.com",
+      "user@msn.com",
+      [
+        {
+          uid: 901,
+          messageId: "apple-invoice-march@example.com",
+          from: { name: "Apple", address: "no_reply@email.apple.com" },
+          to: [{ name: "Recipient", address: "user@msn.com" }],
+          subject: "Your invoice from Apple.",
+          text: "Invoice 28 March 2026",
+          date: "2026-03-28T23:06:26.000Z",
+          isRead: true,
+        },
+        {
+          uid: 902,
+          messageId: "apple-invoice-april@example.com",
+          from: { name: "Apple", address: "no_reply@email.apple.com" },
+          to: [{ name: "Recipient", address: "user@msn.com" }],
+          subject: "Your invoice from Apple.",
+          text: "Invoice 28 April 2026",
+          date: "2026-04-28T17:11:26.000Z",
+          isRead: true,
+        },
+      ],
+    );
 
     expect(normalized).toHaveLength(2);
-    expect(normalized.map((thread: any) => thread.messages)).toEqual([
+    expect(normalized.map((thread) => thread.messages)).toEqual([
       [expect.objectContaining({ providerMessageId: "901" })],
       [expect.objectContaining({ providerMessageId: "902" })],
     ]);
   });
 
   it("groups IMAP replies when reference headers identify a conversation", () => {
-    const normalized = (service as any).normalizeImapThreads("imap:user@msn.com", "user@msn.com", [
-      {
-        uid: 901,
-        messageId: "root@example.com",
-        from: { name: "Sender", address: "sender@example.com" },
-        to: [{ name: "Recipient", address: "user@msn.com" }],
-        subject: "Project update",
-        text: "Root message",
-        date: "2026-04-28T10:00:00.000Z",
-        isRead: true,
-      },
-      {
-        uid: 902,
-        messageId: "reply@example.com",
-        inReplyTo: "root@example.com",
-        references: ["root@example.com"],
-        from: { name: "Sender", address: "sender@example.com" },
-        to: [{ name: "Recipient", address: "user@msn.com" }],
-        subject: "Re: Project update",
-        text: "Reply message",
-        date: "2026-04-28T10:05:00.000Z",
-        isRead: false,
-      },
-    ]);
+    const normalized = (service as unknown as MailboxServiceHooks).normalizeImapThreads(
+      "imap:user@msn.com",
+      "user@msn.com",
+      [
+        {
+          uid: 901,
+          messageId: "root@example.com",
+          from: { name: "Sender", address: "sender@example.com" },
+          to: [{ name: "Recipient", address: "user@msn.com" }],
+          subject: "Project update",
+          text: "Root message",
+          date: "2026-04-28T10:00:00.000Z",
+          isRead: true,
+        },
+        {
+          uid: 902,
+          messageId: "reply@example.com",
+          inReplyTo: "root@example.com",
+          references: ["root@example.com"],
+          from: { name: "Sender", address: "sender@example.com" },
+          to: [{ name: "Recipient", address: "user@msn.com" }],
+          subject: "Re: Project update",
+          text: "Reply message",
+          date: "2026-04-28T10:05:00.000Z",
+          isRead: false,
+        },
+      ],
+    );
 
     expect(normalized).toHaveLength(1);
     expect(normalized[0]?.id).toBe("imap-thread:conversation:7988c5c046ac0d336fdf3502");
-    expect(normalized[0]?.messages.map((message: any) => message.providerMessageId)).toEqual([
+    expect(normalized[0]?.messages.map((message) => message.providerMessageId)).toEqual([
       "901",
       "902",
     ]);
@@ -2348,7 +2381,7 @@ describeWithSqlite("MailboxService", () => {
   });
 
   it("does not treat onboarding or automated mail as priority follow-up", async () => {
-    const normalized = (service as any).normalizeGmailThread(
+    const normalized = (service as unknown as MailboxServiceHooks).normalizeGmailThread(
       "gmail:test@example.com",
       "test@example.com",
       {
@@ -2409,7 +2442,7 @@ describeWithSqlite("MailboxService", () => {
   ])(
     "does not classify transactional Amazon notifications as reply-needed",
     async ({ threadId, subject, from, body }) => {
-      const normalized = (service as any).normalizeGmailThread(
+      const normalized = (service as unknown as MailboxServiceHooks).normalizeGmailThread(
         "gmail:test@example.com",
         "test@example.com",
         {
@@ -2782,7 +2815,7 @@ describeWithSqlite("MailboxService", () => {
     try {
       await service.reclassifyThread("gmail-thread:alpha");
 
-      const changedThread = (service as any).normalizeGmailThread(
+      const changedThread = (service as unknown as MailboxServiceHooks).normalizeGmailThread(
         "gmail:test@example.com",
         "test@example.com",
         {
@@ -2815,10 +2848,12 @@ describeWithSqlite("MailboxService", () => {
         },
       );
 
-      const classifiedUpsert = await (service as any).upsertThread(changedThread);
+      const classifiedUpsert = await (service as unknown as MailboxServiceHooks).upsertThread(
+        changedThread,
+      );
       expect(classifiedUpsert.shouldClassify).toBe(false);
 
-      const newThread = (service as any).normalizeGmailThread(
+      const newThread = (service as unknown as MailboxServiceHooks).normalizeGmailThread(
         "gmail:test@example.com",
         "test@example.com",
         {
@@ -2849,7 +2884,9 @@ describeWithSqlite("MailboxService", () => {
         },
       );
 
-      const newThreadUpsert = await (service as any).upsertThread(newThread);
+      const newThreadUpsert = await (service as unknown as MailboxServiceHooks).upsertThread(
+        newThread,
+      );
       expect(newThreadUpsert.shouldClassify).toBe(true);
 
       const row = db

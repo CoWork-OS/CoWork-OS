@@ -1,19 +1,20 @@
 import { Children, type ReactNode } from "react";
 import { getEmojiIcon } from "./emoji-icon-map";
 
+// Treat modifiers and joiners as part of one emoji, so names do not retain a
+// dangling skin tone or half of a family/profession sequence after removal.
+const EMOJI_BASE = "[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2139}\\u{2702}-\\u{27B0}]";
+const EMOJI_SUFFIX = "[\\uFE0F\\uFE0E]?\\p{Emoji_Modifier}?";
+const EMOJI_SEQUENCE = `(?:\\p{Regional_Indicator}{2}|${EMOJI_BASE}${EMOJI_SUFFIX}(?:\\u200D${EMOJI_BASE}${EMOJI_SUFFIX})*)`;
+const LEADING_EMOJI_REGEX = new RegExp(`^\\s*${EMOJI_SEQUENCE}\\s*`, "u");
+
 /** Strip leading emoji (e.g. "🔬 Researcher" -> "Researcher") for display when icon is shown separately */
 export function stripLeadingEmoji(text: string): string {
-  return text
-    .replace(
-      /^[\s\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2139}\u{2702}-\u{27B0}][\uFE0F\uFE0E\u{1F3FB}-\u{1F3FF}\u200D]*\s*/u,
-      "",
-    )
-    .trim();
+  return text.replace(LEADING_EMOJI_REGEX, "").trim();
 }
 
 /** Remove all emoji from a string (for display when icons are shown separately) */
-const STRIP_EMOJI_REGEX =
-  /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2139}\u{2702}-\u{27B0}][\uFE0F\uFE0E\u{1F3FB}-\u{1F3FF}\u200D]*/gu;
+const STRIP_EMOJI_REGEX = new RegExp(EMOJI_SEQUENCE, "gu");
 
 export function stripAllEmojis(text: string): string {
   return text.replace(STRIP_EMOJI_REGEX, "").replace(/\s+/g, " ").trim();
@@ -24,8 +25,7 @@ export function stripAllEmojis(text: string): string {
  * Covers modern emoji (1F300-1FAFF), misc symbols (2600-27BF),
  * and info source (2139), with optional variation selectors.
  */
-const INLINE_EMOJI_REGEX =
-  /([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2139}\u{2702}-\u{27B0}][\uFE0F\uFE0E]?)/gu;
+const INLINE_EMOJI_REGEX = new RegExp(`(${EMOJI_SEQUENCE})`, "gu");
 
 function replaceEmojisInString(text: string, size: number): ReactNode[] {
   const parts: ReactNode[] = [];

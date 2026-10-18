@@ -49,7 +49,7 @@ import {
   type SidebarDestinationId,
   type SidebarPanelTab,
 } from "./components/sidebar/sidebar-destinations";
-import { BotDetailsRail } from "./components/BotDetailsRail";
+
 import type { BotRole } from "./components/BotsPane";
 import {
   BOT_CONVERSATION_HISTORY_OPEN_EVENT,
@@ -64,7 +64,7 @@ import type { SpreadsheetTurnContext } from "./components/SpreadsheetArtifactVie
 import type { AutomationOwner } from "./components/automation-library";
 import { ResizableDividerHandle } from "./components/ResizableDividerHandle";
 import { DisclaimerModal } from "./components/DisclaimerModal";
-import { Onboarding } from "./components/Onboarding";
+
 import { ONBOARDING_FIRST_TASK_OPTIONS } from "../shared/onboarding";
 import { ContextualConnectorSetup } from "./components/ContextualConnectorSetup";
 import { useContextualConnectorSetup } from "./hooks/useContextualConnectorSetup";
@@ -83,14 +83,14 @@ import {
   isBrowserTabApproval,
 } from "./components/BrowserWorkbench/BrowserApprovalCard";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
-import { LibraryPanel } from "./components/calm/LibraryPanel";
-import { BuildPanel, type RecentBuild } from "./components/calm/BuildPanel";
+
+import type { RecentBuild } from "./components/calm/BuildPanel";
 import { isBuildPrompt, isBuildTask } from "./components/calm/build-task";
 import {
   prepareTaskAttachments,
   type PendingAttachment,
 } from "./components/MainContent/attachments";
-import { GitChangesPanel } from "./components/GitChangesPanel";
+
 import { QuickTaskFAB } from "./components/QuickTaskFAB";
 import {
   NotificationPanel,
@@ -105,7 +105,7 @@ import {
   toNavigationEntry,
   type NavigationEntry,
 } from "./utils/navigation-history";
-import { WebAccessClient } from "./components/WebAccessClient";
+
 import { approvalResponseDisposition } from "./utils/approval-response-result";
 import {
   Task,
@@ -266,13 +266,31 @@ import {
 } from "./components/lazy-renderers";
 import { serializeTaskSurfaceKey, type TaskSurfaceKey } from "./state/task-view-cache";
 
+const Onboarding = preloadableLazy(() =>
+  import("./components/Onboarding").then((module) => module.Onboarding),
+);
+const LibraryPanel = preloadableLazy(() =>
+  import("./components/calm/LibraryPanel").then((module) => module.LibraryPanel),
+);
+const BuildPanel = preloadableLazy(() =>
+  import("./components/calm/BuildPanel").then((module) => module.BuildPanel),
+);
+const GitChangesPanel = preloadableLazy(() =>
+  import("./components/GitChangesPanel").then((module) => module.GitChangesPanel),
+);
+const WebAccessClient = preloadableLazy(() =>
+  import("./components/WebAccessClient").then((module) => module.WebAccessClient),
+);
+const BotDetailsRail = preloadableLazy(() =>
+  import("./components/BotDetailsRail").then((module) => module.BotDetailsRail),
+);
+
 const Settings = preloadableLazy(() =>
   import("./components/Settings").then((module) => module.Settings),
 );
-const mainContentModulePromise = import("./components/MainContent");
-void mainContentModulePromise.catch(() => {});
-const MainContent = lazy(() =>
-  mainContentModulePromise.then((module) => ({ default: module.MainContent })),
+// First-run setup and non-chat destinations do not need the conversation surface.
+const MainContent = preloadableLazy(() =>
+  import("./components/MainContent/MainContent").then((module) => module.MainContent),
 );
 const RightPanel = preloadableLazy(() =>
   import("./components/RightPanel").then((module) => module.RightPanel),
@@ -2008,27 +2026,29 @@ const SelectedTaskWorkspaceView = memo(
             ) : task?.agentConfig?.botConversation &&
               !remoteTaskView &&
               !effectiveRightCollapsed ? (
-              <BotDetailsRail
-                // One rail per bot: switching bots must not show the last bot's settings or
-                // let its late save land on the new one.
-                key={task.assignedAgentRoleId || task.id}
-                task={task}
-                conversationProjection={botConversationProjection}
-                onEdit={() => {
-                  // The bot identity header owns the profile dialog; focus it
-                  // through the same history action rather than duplicating the
-                  // editor here.
-                  const profileButton = document.querySelector<HTMLButtonElement>(
-                    ".bot-conversation-identity",
-                  );
-                  profileButton?.click();
-                }}
-                onOpenHistory={() => {
-                  window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
-                }}
-                onClose={onCloseRightPanel}
-                onSelectTask={onSelectTask}
-              />
+              <Suspense fallback={<RightPanelFallback />}>
+                <BotDetailsRail
+                  // One rail per bot: switching bots must not show the last bot's settings or
+                  // let its late save land on the new one.
+                  key={task.assignedAgentRoleId || task.id}
+                  task={task}
+                  conversationProjection={botConversationProjection}
+                  onEdit={() => {
+                    // The bot identity header owns the profile dialog; focus it
+                    // through the same history action rather than duplicating the
+                    // editor here.
+                    const profileButton = document.querySelector<HTMLButtonElement>(
+                      ".bot-conversation-identity",
+                    );
+                    profileButton?.click();
+                  }}
+                  onOpenHistory={() => {
+                    window.dispatchEvent(new Event(BOT_CONVERSATION_HISTORY_OPEN_EVENT));
+                  }}
+                  onClose={onCloseRightPanel}
+                  onSelectTask={onSelectTask}
+                />
+              </Suspense>
             ) : !effectiveRightCollapsed && !remoteTaskView ? (
               <Suspense fallback={<RightPanelFallback />}>
                 <RightPanel
@@ -7101,7 +7121,7 @@ export function App() {
             message: nextMessage,
             images,
             quotedAssistantMessage,
-            ...(nextOptions || {}),
+            ...nextOptions,
           },
         });
       } else {
@@ -8382,7 +8402,11 @@ export function App() {
       (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
     if (isHttpContext && !isViteDevServer) {
-      return <WebAccessClient />;
+      return (
+        <Suspense fallback={<TaskViewSkeleton />}>
+          <WebAccessClient />
+        </Suspense>
+      );
     }
 
     return (
@@ -8413,11 +8437,13 @@ export function App() {
   if (!onboardingCompleted) {
     return (
       <div className="app">
-        <Onboarding
-          onComplete={handleOnboardingComplete}
-          initialPrompt={pendingOnboardingPrompt ?? undefined}
-          workspaceId={currentWorkspace?.id ?? null}
-        />
+        <Suspense fallback={<TaskViewSkeleton />}>
+          <Onboarding
+            onComplete={handleOnboardingComplete}
+            initialPrompt={pendingOnboardingPrompt ?? undefined}
+            workspaceId={currentWorkspace?.id ?? null}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -8859,12 +8885,15 @@ export function App() {
                       } else {
                         throw new Error(res?.error || "Unknown error assigning task");
                       }
-                    } catch (err: any) {
+                    } catch (err: unknown) {
                       console.error("[Devices] deviceAssignTask record failed:", err);
                       addToast({
                         type: "error",
                         title: "Remote Task Failed",
-                        message: err?.message || "Failed to start task on remote device",
+                        message:
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to start task on remote device",
                       });
                     }
                   }}

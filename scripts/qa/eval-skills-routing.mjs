@@ -2,37 +2,20 @@
 import fs from "fs";
 import path from "path";
 
-function normalize(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  isModelInvocableSkill,
+  matchesExplicitSkillInvocationPhrase,
+  normalizeSkillInvocationText,
+  sanitizeRoutingQuery,
+  matchesSkillRoutingQuery,
+  rankModelInvocableSkillsForQuery,
+} from "../../src/shared/skill-routing/index.ts";
 
-function tokenize(value) {
-  const normalized = normalize(value);
-  if (!normalized) return [];
-  return normalized.split(" ");
-}
-
-function overlapScore(prompt, signal) {
-  const promptTokens = tokenize(prompt);
-  const signalTokens = tokenize(signal);
-  if (promptTokens.length === 0 || signalTokens.length === 0) {
-    return 0;
-  }
-
-  const promptSet = new Set(promptTokens);
-  const signalSet = new Set(signalTokens);
-  let overlap = 0;
-  for (const token of promptSet) {
-    if (signalSet.has(token)) overlap += 1;
-  }
-
-  if (overlap === 0) return 0;
-  return overlap / Math.sqrt(promptSet.size * signalSet.size);
-}
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const BUNDLED_SKILLS_DIR = path.join(PROJECT_ROOT, "resources", "skills");
+const BUNDLED_DATASET = path.join(BUNDLED_SKILLS_DIR, "_evals", "routing-cases.jsonl");
+const BUNDLED_CONTRACTS = path.join(BUNDLED_SKILLS_DIR, "_evals", "routing-contracts.json");
 
 function parseArgs(argv) {
   const args = {
@@ -40,18 +23,21 @@ function parseArgs(argv) {
     datasetPath: path.join(process.cwd(), "resources", "skills", "_evals", "routing-cases.jsonl"),
     strict: false,
     liveModel: false,
+    reportPath: null,
+    contractsPath: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--skills-dir") {
-      args.skillsDir = path.resolve(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg === "--dataset") {
-      args.datasetPath = path.resolve(argv[i + 1]);
-      i += 1;
+    if (["--skills-dir", "--dataset", "--report", "--contracts"].includes(arg)) {
+      if (!argv[i + 1] || argv[i + 1].startsWith("--")) throw new Error(`${arg} requires a path`);
+      const key = {
+        "--skills-dir": "skillsDir",
+        "--dataset": "datasetPath",
+        "--report": "reportPath",
+        "--contracts": "contractsPath",
+      }[arg];
+      args[key] = path.resolve(argv[++i]);
       continue;
     }
     if (arg === "--strict") {
@@ -60,17 +46,22 @@ function parseArgs(argv) {
     }
     if (arg === "--live-model") {
       args.liveModel = true;
+      continue;
     }
+    throw new Error(`Unknown option: ${arg}`);
   }
 
   return args;
 }
 
-function loadSkills(skillsDir) {
+export function loadSkills(skillsDir) {
   const files = fs
     .readdirSync(skillsDir)
     .filter((name) => name.endsWith(".json"))
-    .filter((name) => name.toLowerCase() !== "build-mode.json")
+    .filter(
+      (name) =>
+        name.toLowerCase() !== "build-mode.json" && !name.toLowerCase().endsWith(".security.json"),
+    )
     .sort();
 
   return files
@@ -78,147 +69,406 @@ function loadSkills(skillsDir) {
       const filePath = path.join(skillsDir, file);
       try {
         const skill = JSON.parse(fs.readFileSync(filePath, "utf8"));
-        const signal = [
-          skill.id,
-          skill.name,
-          skill.description,
-          skill?.metadata?.routing?.useWhen,
-          skill?.metadata?.routing?.dontUseWhen,
-          ...(skill?.metadata?.routing?.examples?.positive || []),
-          ...(skill?.metadata?.routing?.examples?.negative || []),
-        ]
-          .filter(Boolean)
-          .join(" ");
-
-        return { id: skill.id || path.basename(file, ".json"), signal, skill };
-      } catch {
-        return null;
+        const id = skill.id || path.basename(file, ".json");
+        return { id, skill: { ...skill, id } };
+      } catch (error) {
+        throw new Error(`Invalid routing skill: ${filePath}`, { cause: error });
       }
     })
     .filter(Boolean);
 }
 
-function rankSkills(prompt, skills) {
-  return skills
-    .map((skill) => ({ id: skill.id, score: overlapScore(prompt, skill.signal) }))
-    .sort((a, b) => b.score - a.score);
+export function rankSkills(prompt, skills, options = {}) {
+  return rankModelInvocableSkillsForQuery(
+    skills.map((item) => item.skill),
+    prompt,
+    options,
+  ).map(({ skill, score }) => ({ id: skill.id, score }));
 }
 
-function evaluateExamples(skills) {
-  let expectedTotal = 0;
-  let expectedHits = 0;
-  let forbiddenTotal = 0;
-  let forbiddenMisfires = 0;
-
-  for (const item of skills) {
-    const examples = item.skill?.metadata?.routing?.examples;
-    const positives = Array.isArray(examples?.positive) ? examples.positive : [];
-    const negatives = Array.isArray(examples?.negative) ? examples.negative : [];
-
-    for (const prompt of positives) {
-      expectedTotal += 1;
-      const ranked = rankSkills(prompt, skills);
-      if (ranked[0]?.id === item.id) {
-        expectedHits += 1;
-      }
-    }
-
-    for (const prompt of negatives) {
-      forbiddenTotal += 1;
-      const ranked = rankSkills(prompt, skills);
-      if (ranked[0]?.id === item.id) {
-        forbiddenMisfires += 1;
-      }
-    }
-  }
-
-  return { expectedTotal, expectedHits, forbiddenTotal, forbiddenMisfires };
-}
-
-function evaluateDataset(skills, datasetPath) {
-  if (!fs.existsSync(datasetPath)) {
-    return { expectedTotal: 0, expectedHits: 0, forbiddenTotal: 0, forbiddenMisfires: 0 };
-  }
-
-  const lines = fs
+function loadDataset(datasetPath) {
+  if (!fs.existsSync(datasetPath)) throw new Error(`Routing dataset not found: ${datasetPath}`);
+  return fs
     .readFileSync(datasetPath, "utf8")
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        const row = JSON.parse(line);
+        const idsValid = (ids) =>
+          ids === undefined ||
+          (Array.isArray(ids) && ids.every((id) => typeof id === "string" && id.trim()));
+        if (
+          typeof row.prompt !== "string" ||
+          !row.prompt.trim() ||
+          !idsValid(row.expectedSkillIds) ||
+          !idsValid(row.forbiddenSkillIds) ||
+          (!row.expectedSkillIds?.length && !row.forbiddenSkillIds?.length)
+        )
+          throw new Error("A routing case requires a prompt and expected or forbidden skill IDs");
+        return row;
+      } catch (error) {
+        throw new Error(`Invalid routing case at ${datasetPath}:${index + 1}`, { cause: error });
+      }
+    });
+}
 
+function contractKey({ source, skillId, prompt }) {
+  return JSON.stringify([source, skillId, prompt]);
+}
+
+function validateContracts(contracts, corpus) {
+  if (!contracts || contracts.version !== 1 || !contracts.corpus || !Array.isArray(contracts.cases))
+    throw new Error("Invalid routing contracts: expected version 1, corpus and cases");
+  for (const [key, observed] of Object.entries(corpus)) {
+    const expected = contracts.corpus[key];
+    if (!Number.isInteger(expected) || expected < 0)
+      throw new Error(`Invalid routing contracts: corpus.${key} must be a nonnegative integer`);
+    if (expected !== observed)
+      throw new Error(
+        `Routing contract corpus drift: ${key} expected ${expected}, received ${observed}`,
+      );
+  }
+  for (const kind of ["manual_only", "guideline", "explicit_only", "installed_pack"]) {
+    const expected = contracts.corpus.contractsByKind?.[kind];
+    const observed = contracts.cases.filter((entry) => entry?.kind === kind).length;
+    if (!Number.isInteger(expected) || expected < 0)
+      throw new Error(`Invalid routing contracts: corpus.contractsByKind.${kind} is required`);
+    if (expected !== observed)
+      throw new Error(
+        `Routing contract coverage drift: ${kind} expected ${expected}, received ${observed}`,
+      );
+  }
+  const byKey = new Map();
+  for (const entry of contracts.cases) {
+    if (
+      !entry ||
+      !["positive_example", "dataset_expected"].includes(entry.source) ||
+      typeof entry.skillId !== "string" ||
+      !entry.skillId.trim() ||
+      typeof entry.prompt !== "string" ||
+      !entry.prompt.trim() ||
+      typeof entry.evidence !== "string" ||
+      !entry.evidence.trim() ||
+      !["manual_only", "guideline", "explicit_only", "installed_pack"].includes(entry.kind)
+    )
+      throw new Error(
+        "Invalid routing contract case: source, skillId, prompt, kind and evidence required",
+      );
+    if (entry.kind === "installed_pack") {
+      if (
+        !entry.packPath ||
+        typeof entry.packPath !== "string" ||
+        !entry.packSkillId ||
+        typeof entry.packSkillId !== "string"
+      )
+        throw new Error(`Invalid installed-pack routing contract: ${entry.skillId}`);
+    } else {
+      const required = { enabled: true };
+      if (entry.kind === "manual_only")
+        Object.assign(required, { disableModelInvocation: true, userInvocable: true });
+      if (entry.kind === "guideline") required.type = "guideline";
+      if (
+        !entry.policy ||
+        Object.entries(required).some(([key, value]) => entry.policy[key] !== value)
+      )
+        throw new Error(
+          `Missing independent policy snapshot for routing contract: ${entry.skillId}`,
+        );
+      if (
+        Object.entries(entry.policy).some(
+          ([key, value]) =>
+            !["enabled", "type", "disableModelInvocation", "userInvocable"].includes(key) ||
+            (key === "type" ? value !== "guideline" : value !== true),
+        )
+      )
+        throw new Error(`Invalid policy snapshot for routing contract: ${entry.skillId}`);
+    }
+    const key = contractKey(entry);
+    if (byKey.has(key))
+      throw new Error(`Duplicate routing contract: ${entry.skillId} ${entry.prompt}`);
+    byKey.set(key, entry);
+  }
+  return byKey;
+}
+
+function loadPackSkills(entry, skills) {
+  const packPath = path.resolve(PROJECT_ROOT, entry.packPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(packPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Cannot load contracted plugin pack: ${packPath}`, { cause: error });
+  }
+  if (!Array.isArray(manifest.skills) || !manifest.skills.length)
+    throw new Error(`Contracted plugin pack contains no skills: ${packPath}`);
+  const seen = new Set(skills.map(({ id }) => id));
+  return manifest.skills.map((skill) => {
+    if (
+      !skill ||
+      typeof skill.id !== "string" ||
+      !skill.id.trim() ||
+      typeof skill.name !== "string" ||
+      typeof skill.description !== "string" ||
+      typeof skill.prompt !== "string" ||
+      seen.has(skill.id)
+    )
+      throw new Error(`Invalid or duplicate skill in contracted plugin pack: ${packPath}`);
+    seen.add(skill.id);
+    return { id: skill.id, skill };
+  });
+}
+
+function explicitInvocationMatches(skill, prompt) {
+  const query = normalizeSkillInvocationText(sanitizeRoutingQuery(prompt));
+  const aliases = [skill.id, skill.name].filter(Boolean);
+  return aliases.some((phrase) =>
+    matchesExplicitSkillInvocationPhrase(
+      query,
+      normalizeSkillInvocationText(phrase),
+      (segment) => segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      aliases,
+    ),
+  );
+}
+
+export function evaluateRouting(skills, datasetPath, { contracts } = {}) {
+  const dataset = loadDataset(datasetPath);
+  const corpus = {
+    positiveExamples: skills.reduce(
+      (sum, { skill }) => sum + (skill.metadata?.routing?.examples?.positive?.length || 0),
+      0,
+    ),
+    negativeExamples: skills.reduce(
+      (sum, { skill }) => sum + (skill.metadata?.routing?.examples?.negative?.length || 0),
+      0,
+    ),
+    datasetRows: dataset.length,
+    datasetExpectedCases: dataset.filter((row) => row.expectedSkillIds?.length > 0).length,
+    datasetForbiddenCases: dataset.filter((row) => row.forbiddenSkillIds?.length > 0).length,
+  };
+  const byKey = contracts ? validateContracts(contracts, corpus) : new Map();
+  const matched = new Set();
+  const contractResults = [];
+  const failures = [];
+  const rankings = new Map();
+  const baseRank = (prompt) => {
+    if (!rankings.has(prompt)) rankings.set(prompt, rankSkills(prompt, skills));
+    return rankings.get(prompt);
+  };
   let expectedTotal = 0;
   let expectedHits = 0;
   let forbiddenTotal = 0;
   let forbiddenMisfires = 0;
+  let policyTotal = 0;
+  let policyHits = 0;
+  let installedPackTotal = 0;
+  let installedPackHits = 0;
 
-  for (const line of lines) {
-    try {
-      const row = JSON.parse(line);
-      const prompt = String(row.prompt || "");
-      const expectedIds = Array.isArray(row.expectedSkillIds) ? row.expectedSkillIds : [];
-      const forbiddenIds = Array.isArray(row.forbiddenSkillIds) ? row.forbiddenSkillIds : [];
-      if (!prompt) continue;
-
-      const ranked = rankSkills(prompt, skills);
-      const top3 = ranked.slice(0, 3).map((entry) => entry.id);
-      const top1 = ranked[0]?.id;
-
-      if (expectedIds.length > 0) {
+  const expected = (source, skillId, prompt, expectedIds, rankLimit) => {
+    const key = contractKey({ source, skillId, prompt });
+    const contract = byKey.get(key);
+    let ranked = baseRank(prompt);
+    if (contract) {
+      if (matched.has(key))
+        throw new Error(`Routing contract matches multiple source cases: ${skillId}`);
+      matched.add(key);
+      const reasons = [];
+      if (contract.kind === "installed_pack") {
+        installedPackTotal += 1;
+        if (skills.some(({ id }) => id === skillId)) reasons.push("retired_skill_present");
+        if (skills.some(({ id }) => id === contract.packSkillId))
+          reasons.push("pack_skill_globally_exposed");
+        const packSkills = loadPackSkills(contract, skills);
+        if (!packSkills.some(({ id }) => id === contract.packSkillId))
+          throw new Error(`Contracted pack skill not found: ${contract.packSkillId}`);
+        ranked = rankSkills(prompt, [...skills, ...packSkills]);
         expectedTotal += 1;
-        if (expectedIds.some((id) => top3.includes(id))) {
+        const hit = ranked.slice(0, rankLimit).some(({ id }) => id === contract.packSkillId);
+        if (!hit) reasons.push("installed_pack_rank_miss");
+        if (hit) {
           expectedHits += 1;
+          if (!reasons.length) installedPackHits += 1;
         }
+      } else {
+        policyTotal += 1;
+        const skill = skills.find(({ id }) => id === skillId)?.skill;
+        if (!skill) throw new Error(`Contracted routing skill not found: ${skillId}`);
+        const observed = {
+          enabled: skill.enabled !== false,
+          type: skill.type || "task",
+          disableModelInvocation: skill.invocation?.disableModelInvocation === true,
+          userInvocable: skill.invocation?.userInvocable !== false,
+        };
+        for (const [field, value] of Object.entries(contract.policy)) {
+          if (observed[field] !== value) reasons.push(`policy_snapshot_${field}`);
+        }
+        if (contract.kind === "manual_only" && observed.type === "guideline")
+          reasons.push("manual_skill_became_guideline");
+        if (contract.kind === "explicit_only") {
+          if (observed.type === "guideline" || observed.disableModelInvocation)
+            reasons.push("explicit_skill_became_non_invocable");
+          if (explicitInvocationMatches(skill, prompt)) reasons.push("explicit_invocation_matched");
+        }
+        const candidate = ranked.find(({ id }) => id === skillId);
+        if (candidate) reasons.push("protected_skill_in_candidates");
+        if (!reasons.length) policyHits += 1;
       }
+      const result = {
+        ...contract,
+        passed: reasons.length === 0,
+        reasons,
+        ranked: ranked.slice(0, 5),
+      };
+      contractResults.push(result);
+      if (reasons.length) failures.push({ ...result, source: "contract", contractSource: source });
+      return ranked;
+    }
+    expectedTotal += 1;
+    if (ranked.slice(0, rankLimit).some(({ id }) => expectedIds.includes(id))) expectedHits += 1;
+    else
+      failures.push({
+        source,
+        ...(source === "positive_example" ? { skillId } : {}),
+        prompt,
+        expectedSkillIds: expectedIds,
+        ranked: ranked.slice(0, 5),
+      });
+    return ranked;
+  };
+  const forbidden = (source, skillId, prompt, forbiddenIds, ranked) => {
+    forbiddenTotal += 1;
+    if (forbiddenIds.includes(ranked[0]?.id)) {
+      forbiddenMisfires += 1;
+      failures.push({
+        source,
+        ...(source === "negative_example" ? { skillId } : {}),
+        prompt,
+        forbiddenSkillIds: forbiddenIds,
+        ranked: ranked.slice(0, 5),
+      });
+    }
+  };
+  for (const { id, skill } of skills) {
+    for (const prompt of skill.metadata?.routing?.examples?.positive || [])
+      expected("positive_example", id, prompt, [id], 1);
+    for (const prompt of skill.metadata?.routing?.examples?.negative || [])
+      forbidden("negative_example", id, prompt, [id], baseRank(prompt));
+  }
+  for (const row of dataset) {
+    const expectedIds = row.expectedSkillIds || [];
+    if (expectedIds.length)
+      expected(
+        "dataset_expected",
+        expectedIds.length === 1 ? expectedIds[0] : null,
+        row.prompt,
+        expectedIds,
+        3,
+      );
+    if (row.forbiddenSkillIds?.length)
+      forbidden("dataset_forbidden", null, row.prompt, row.forbiddenSkillIds, baseRank(row.prompt));
+  }
+  for (const [key, entry] of byKey) {
+    if (!matched.has(key))
+      throw new Error(`Unmatched or stale routing contract: ${entry.skillId} ${entry.prompt}`);
+  }
+  for (const failure of failures) {
+    if (!failure.expectedSkillIds) continue;
+    failure.expectedEligibility = Object.fromEntries(
+      failure.expectedSkillIds.map((id) => {
+        const skill = skills.find((entry) => entry.id === id)?.skill;
+        const reason = !skill
+          ? "skill_missing"
+          : skill.type === "guideline"
+            ? "guideline"
+            : skill.enabled === false
+              ? "skill_disabled"
+              : !isModelInvocableSkill(skill)
+                ? "model_invocation_disabled"
+                : !matchesSkillRoutingQuery(skill, failure.prompt)
+                  ? "routing_gate"
+                  : "ranked_below_expected";
+        return [id, reason];
+      }),
+    );
+  }
+  return {
+    mode: "production_routing",
+    corpus,
+    expectedTotal,
+    expectedHits,
+    baseExpectedTotal: expectedTotal - installedPackTotal,
+    originalExpectedTotal: expectedTotal + policyTotal,
+    forbiddenTotal,
+    forbiddenMisfires,
+    expectedHitRate: expectedTotal === 0 ? 1 : expectedHits / expectedTotal,
+    forbiddenMisfireRate: forbiddenTotal === 0 ? 0 : forbiddenMisfires / forbiddenTotal,
+    policyTotal,
+    policyHits,
+    installedPackTotal,
+    installedPackHits,
+    contractTotal: byKey.size,
+    contractMatched: matched.size,
+    contractFailures: contractResults.filter(({ passed }) => !passed).length,
+    contractResults,
+    failures,
+  };
+}
 
-      if (forbiddenIds.length > 0) {
-        forbiddenTotal += 1;
-        if (forbiddenIds.includes(top1)) {
-          forbiddenMisfires += 1;
-        }
-      }
-    } catch {
-      // skip invalid rows
+export function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
+  const skills = loadSkills(args.skillsDir);
+  if (args.liveModel)
+    throw new Error(
+      "Live model routing evaluation is not implemented; use the production deterministic router.",
+    );
+  const isBundled =
+    path.resolve(args.skillsDir) === BUNDLED_SKILLS_DIR &&
+    path.resolve(args.datasetPath) === BUNDLED_DATASET;
+  const contractsPath = args.contractsPath || (isBundled ? BUNDLED_CONTRACTS : null);
+  let contracts;
+  if (contractsPath) {
+    try {
+      contracts = JSON.parse(fs.readFileSync(contractsPath, "utf8"));
+    } catch (error) {
+      throw new Error(`Cannot load routing contracts: ${contractsPath}`, { cause: error });
     }
   }
-
-  return { expectedTotal, expectedHits, forbiddenTotal, forbiddenMisfires };
-}
-
-const args = parseArgs(process.argv.slice(2));
-const skills = loadSkills(args.skillsDir);
-
-if (args.liveModel) {
+  const report = evaluateRouting(skills, args.datasetPath, { contracts });
+  console.log(`[skills-eval-routing] Skills: ${skills.length}`);
   console.log(
-    "[skills-eval-routing] --live-model requested. Running deterministic eval now (live model mode is intentionally non-blocking).",
+    "[skills-eval-routing] Mode: production deterministic routing (shared runtime scorer and gates)",
   );
-}
-
-const examples = evaluateExamples(skills);
-const dataset = evaluateDataset(skills, args.datasetPath);
-
-const expectedTotal = examples.expectedTotal + dataset.expectedTotal;
-const expectedHits = examples.expectedHits + dataset.expectedHits;
-const forbiddenTotal = examples.forbiddenTotal + dataset.forbiddenTotal;
-const forbiddenMisfires = examples.forbiddenMisfires + dataset.forbiddenMisfires;
-
-const expectedHitRate = expectedTotal === 0 ? 1 : expectedHits / expectedTotal;
-const forbiddenMisfireRate = forbiddenTotal === 0 ? 0 : forbiddenMisfires / forbiddenTotal;
-
-console.log(`[skills-eval-routing] Skills: ${skills.length}`);
-console.log(
-  `[skills-eval-routing] Expected hit rate: ${(expectedHitRate * 100).toFixed(2)}% (${expectedHits}/${expectedTotal})`,
-);
-console.log(
-  `[skills-eval-routing] Forbidden misfire rate: ${(forbiddenMisfireRate * 100).toFixed(2)}% (${forbiddenMisfires}/${forbiddenTotal})`,
-);
-
-if (args.strict) {
-  const expectedOk = expectedHitRate >= 0.95;
-  const forbiddenOk = forbiddenMisfireRate <= 0.02;
-  if (!expectedOk || !forbiddenOk) {
-    console.log("[skills-eval-routing] Strict threshold failure");
-    process.exit(1);
+  console.log(
+    `[skills-eval-routing] Expected hit rate: ${(report.expectedHitRate * 100).toFixed(2)}% (${report.expectedHits}/${report.expectedTotal})`,
+  );
+  console.log(
+    `[skills-eval-routing] Forbidden misfire rate: ${(report.forbiddenMisfireRate * 100).toFixed(2)}% (${report.forbiddenMisfires}/${report.forbiddenTotal})`,
+  );
+  console.log(
+    `[skills-eval-routing] Policy contracts: ${report.policyHits}/${report.policyTotal}; installed-pack cases: ${report.installedPackHits}/${report.installedPackTotal}; matched contracts: ${report.contractMatched}/${report.contractTotal}`,
+  );
+  console.log(
+    `[skills-eval-routing] Preserved expected obligations: ${report.baseExpectedTotal} base + ${report.installedPackTotal} installed + ${report.policyTotal} policy = ${report.originalExpectedTotal}; contract failures: ${report.contractFailures}`,
+  );
+  if (args.reportPath) {
+    fs.mkdirSync(path.dirname(args.reportPath), { recursive: true });
+    fs.writeFileSync(args.reportPath, JSON.stringify(report, null, 2) + "\n");
+    console.log(`[skills-eval-routing] Failure report: ${args.reportPath}`);
   }
+  if (
+    args.strict &&
+    (report.contractFailures > 0 ||
+      report.expectedHitRate < 0.95 ||
+      report.forbiddenMisfireRate > 0.02)
+  ) {
+    console.log("[skills-eval-routing] Strict threshold failure");
+    return 1;
+  }
+  return 0;
 }
 
-process.exit(0);
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  process.exitCode = main();
+}

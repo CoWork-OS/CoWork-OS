@@ -1,64 +1,23 @@
-import { ModalDialog } from "./ModalDialog";
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CustomSkill, SkillParameter } from "../../shared/types";
-
-export type SkillParameterFormValue = string | number | boolean;
-export type SkillParameterFormValues = Record<string, SkillParameterFormValue>;
+import { ModalDialog } from "./ModalDialog";
+import {
+  collectSkillParameterValues,
+  normalizeTemplateDefault,
+  type SkillParameterFormValues,
+} from "./skill-parameter-utils";
+export {
+  collectSkillParameterValues,
+  expandSkillPrompt,
+  type SkillParameterFormValue,
+  type SkillParameterFormValues,
+} from "./skill-parameter-utils";
 
 interface SkillParameterModalProps {
   skill: CustomSkill;
   onSubmit: (values: SkillParameterFormValues) => void;
   onAskInChat?: (values: SkillParameterFormValues) => void;
   onCancel: () => void;
-}
-
-const ARTIFACT_DIR_FALLBACK = "artifacts";
-
-function normalizeTemplateDefault(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  return value.replace(/\{artifactDir\}/g, ARTIFACT_DIR_FALLBACK);
-}
-
-export function collectSkillParameterValues(
-  skill: CustomSkill,
-  values: SkillParameterFormValues,
-  touched: Record<string, boolean> = {},
-): SkillParameterFormValues {
-  const collected: SkillParameterFormValues = {};
-  for (const param of skill.parameters || []) {
-    const value = values[param.name];
-    const hasDefault = param.default !== undefined;
-    const wasTouched = touched[param.name] === true;
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (trimmed.length > 0) {
-        collected[param.name] = trimmed;
-      } else if (hasDefault) {
-        collected[param.name] = normalizeTemplateDefault(param.default) as SkillParameterFormValue;
-      }
-      continue;
-    }
-    if (value !== undefined && (wasTouched || hasDefault)) {
-      collected[param.name] = hasDefault
-        ? (normalizeTemplateDefault(value) as SkillParameterFormValue)
-        : value;
-    }
-  }
-  return collected;
-}
-
-export function expandSkillPrompt(skill: CustomSkill, values: SkillParameterFormValues): string {
-  let prompt = skill.prompt;
-  skill.parameters?.forEach((param) => {
-    const value = values[param.name] ?? normalizeTemplateDefault(param.default) ?? "";
-    const placeholder = new RegExp(`\\{\\{${param.name}\\}\\}`, "g");
-    const normalizedValue =
-      typeof value === "string" ? value.replace(/\{artifactDir\}/g, ARTIFACT_DIR_FALLBACK) : value;
-    prompt = prompt.replace(placeholder, String(normalizedValue));
-  });
-  prompt = prompt.replace(/\{\{[^}]+\}\}/g, "");
-  prompt = prompt.replace(/\{artifactDir\}/g, ARTIFACT_DIR_FALLBACK);
-  return prompt.trim();
 }
 
 export function SkillParameterModal({

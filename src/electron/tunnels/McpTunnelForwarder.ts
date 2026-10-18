@@ -189,8 +189,8 @@ export function assertAllowedTargetUrl(rawUrl: string): void {
   const hostname = parsed.hostname.toLowerCase();
   const isLocal = isLoopbackHostname(hostname) || hostname.endsWith(".local");
   const isPrivate =
-    /^10\./.test(hostname) ||
-    /^192\.168\./.test(hostname) ||
+    hostname.startsWith("10.") ||
+    hostname.startsWith("192.168.") ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
   if (!isLocal && !isPrivate) {
     throw new Error("Tunnel target must be localhost, .local, or a private-network address");

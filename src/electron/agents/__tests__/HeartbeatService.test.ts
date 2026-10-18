@@ -804,7 +804,7 @@ describe("HeartbeatService v3", () => {
   it("reconciles stale agent heartbeat runs on service start without touching issue-linked runs", async () => {
     createAgent("agent-1");
     const service = createService();
-    const runRepo = (service as any).runRepo as {
+    const runRepo = (service as unknown as { runRepo: HeartbeatService["runRepo"] }).runRepo as {
       create: (input: {
         issueId?: string;
         agentRoleId?: string;

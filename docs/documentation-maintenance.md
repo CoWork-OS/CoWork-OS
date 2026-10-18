@@ -28,3 +28,12 @@ minimums and fenced code examples are also allowed. Do not exempt living support
 guides as historical records. Add regression fixtures when introducing another
 format for release claims; this check cannot assess every natural-language claim
 or verify whether registry publication has completed.
+
+## Implementation status claims
+
+A roadmap phase, feature table row or doc section may say “Implemented” only
+when a regression test or replay fixture that proves it is named in that
+document's Verification section (or next to the claim). Until then, call it
+“Planned” and keep any design text under an explicit “Target design — not yet
+implemented” banner. Do not link to sections that do not exist yet; link once the
+section ships.

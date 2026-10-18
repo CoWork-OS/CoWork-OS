@@ -264,8 +264,15 @@ To change the model for one conversation, pick it in the composer's model
 picker while the conversation is open. The conversation stays open and keeps
 its history: the next message goes to the new model with the full transcript.
 When the provider changes (for example from Anthropic to Ollama), that message
-starts with a short handoff note naming the previous model and the tools used
-in earlier turns. The choice applies to that conversation only; the global
+starts with a short handoff note. It names the previous model and, from the
+conversation's session record, the goal, each requirement with its status
+(satisfied, pending, failed or waived), the active decisions, constraints and
+unverified assumptions, decisions that were reversed, approvals or input still
+pending, how much evidence is stale or past its freshness window, and the files
+already written. A line with the tools used in earlier turns follows. The note
+is bounded (about 1,500 characters for the session record part), marked as data
+rather than instructions, and never includes values that look like secrets.
+The choice applies to that conversation only; the global
 default model and the bot's other conversations are unchanged. If the chosen
 provider is later disconnected, the conversation falls back to the global
 model. An effort level picked there is saved as that provider's effort setting.

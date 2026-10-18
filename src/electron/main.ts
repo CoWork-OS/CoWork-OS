@@ -1,3 +1,4 @@
+import "./utils/node-tls-bootstrap";
 import { createRequire } from "node:module";
 import {
   configureBrowserCredentialService,
@@ -80,6 +81,7 @@ import {
 import mime from "mime-types";
 import { attachImageContextMenu } from "./utils/image-context-menu";
 import { closeWindowsForShutdown, installGracefulShutdown } from "./utils/graceful-shutdown";
+import { installStdioErrorGuards } from "./utils/stdio-error-guards";
 import { DatabaseManager } from "./database/schema";
 import {
   SecureSettingsRepository,
@@ -1586,6 +1588,8 @@ function installProcessErrorGuards(): void {
   }
   processErrorGuardsInstalled = true;
 
+  installStdioErrorGuards([process.stdout, process.stderr]);
+
   process.on("unhandledRejection", (reason) => {
     if (isTransientMainProcessError(reason)) {
       logger.warn(`Suppressed transient unhandledRejection: ${toErrorMessage(reason)}`);
@@ -1621,8 +1625,8 @@ function isStartupQuietMode(): boolean {
 
 installProcessErrorGuards();
 
-// Use the OS certificate store so Node.js TLS connections (e.g. WhatsApp WebSocket)
-// can verify certificates issued by system-trusted CAs
+// Chromium networking uses its own certificate store. Node fetch/HTTPS trust is
+// initialized separately by the first import above.
 app.commandLine.appendSwitch("use-system-cert-store");
 
 // Suppress GPU-related Chromium errors that occur with transparent windows and vibrancy

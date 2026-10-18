@@ -1326,6 +1326,7 @@ export class ToolRegistry {
         env: input.env,
         signal,
         startupWaitMs: input.startup_wait_ms,
+        title: input.title,
       });
     }
     return this.shellTools.runCommand(input.command, {
@@ -9934,6 +9935,11 @@ ${skillDescriptions}`;
               type: "number",
               description:
                 "With background: true, how long to wait for a ready line (for example 'Local: http://localhost:5173') or an early exit before returning (default 5000, max 30000).",
+            },
+            title: {
+              type: "string",
+              description:
+                "With background: true, a short name (2-4 words, e.g. 'dev server', 'https tunnel') for the terminal tab where the user can watch the process. Link it in your reply as [title](#terminal/<process_id>).",
             },
           },
           required: ["command"],

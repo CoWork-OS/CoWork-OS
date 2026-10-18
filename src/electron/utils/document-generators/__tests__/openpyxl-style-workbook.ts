@@ -79,3 +79,32 @@ export async function buildOpenpyxlStyleWorkbook(
   zip.file("xl/worksheets/sheet2.xml", sheets.summary ?? SUMMARY_SHEET_XML);
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 }
+
+/** An openpyxl-style chart drawing, referenced by Summary's worksheet relationship. */
+export async function buildOpenpyxlChartWorkbook(): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(await buildOpenpyxlStyleWorkbook());
+  zip.file(
+    "xl/worksheets/sheet2.xml",
+    SUMMARY_SHEET_XML.replace(
+      "</worksheet>",
+      `<drawing xmlns:r="${REL_NS}" r:id="rId1"/></worksheet>`,
+    ),
+  );
+  zip.file(
+    "xl/worksheets/_rels/sheet2.xml.rels",
+    `<Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId1" Type="${REL_NS}/drawing" Target="/xl/drawings/drawing1.xml"/></Relationships>`,
+  );
+  zip.file(
+    "xl/drawings/drawing1.xml",
+    '<wsDr xmlns="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"><oneCellAnchor><graphicFrame><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/></a:graphicData></a:graphic></graphicFrame><clientData/></oneCellAnchor></wsDr>',
+  );
+  zip.file(
+    "xl/drawings/_rels/drawing1.xml.rels",
+    `<Relationships xmlns="${PKG_REL_NS}"><Relationship Type="${REL_NS}/chart" Target="/xl/charts/chart1.xml" Id="rId1"/></Relationships>`,
+  );
+  zip.file(
+    "xl/charts/chart1.xml",
+    '<chartSpace xmlns="http://schemas.openxmlformats.org/drawingml/2006/chart"><chart><plotArea><barChart><barDir val="col"/></barChart></plotArea></chart></chartSpace>',
+  );
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}

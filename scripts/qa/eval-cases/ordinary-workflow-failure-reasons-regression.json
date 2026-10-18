@@ -1,0 +1,20 @@
+{
+  "id": "ordinary-workflow-failure-reasons-2026-10-17",
+  "title": "Terminal provider failures hide the actionable error from the composer",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 655,
+    "pullRequest": 675
+  },
+  "prompt": "Trigger a provider quota or other terminal failure and inspect the compact task status above the composer.",
+  "assertions": {
+    "requiredBehavior": "Display a bounded, accessible terminal reason directly and clear it after recovery without stale announcements."
+  },
+  "executableTests": [
+    "src/renderer/components/__tests__/task-status-strip.test.ts",
+    "src/renderer/utils/__tests__/task-status-projection.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/__tests__/task-status-strip.test.ts src/renderer/utils/__tests__/task-status-projection.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

@@ -2,7 +2,12 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { getCellDisplayText, SpreadsheetArtifactViewer } from "../SpreadsheetArtifactViewer";
+import {
+  getCellDisplayText,
+  hasPendingFormulaResults,
+  SpreadsheetArtifactViewer,
+} from "../SpreadsheetArtifactViewer";
+import type { SpreadsheetPreview } from "../../../shared/spreadsheet-preview";
 
 function render(element: React.ReactElement): string {
   return renderToStaticMarkup(element);
@@ -99,5 +104,71 @@ describe("SpreadsheetArtifactViewer", () => {
     // A formula typed in the viewer shows as typed until it is saved and calculated.
     expect(getCellDisplayText({ ...cell, value: "=B2*2", formula: "B2*2" })).toBe("=B2*2");
     expect(getCellDisplayText(undefined)).toBe("");
+  });
+
+  it("hides cached dependent totals across sheets while draft edits await Save", () => {
+    const quantity = { address: "B2", row: 2, column: 2, value: "3" };
+    const lineTotal = {
+      address: "D2",
+      row: 2,
+      column: 4,
+      value: "4.8",
+      displayValue: "€4.80",
+      formula: "B2*C2",
+    };
+    const grandTotal = {
+      address: "D6",
+      row: 6,
+      column: 4,
+      value: "16.7",
+      displayValue: "€16.70",
+      formula: "SUM(Shopping!D2:D5)",
+    };
+    const preview = {
+      sheetCount: 2,
+      sheets: [
+        {
+          name: "Shopping",
+          rowCount: 2,
+          columnCount: 4,
+          columnWidths: [],
+          rows: [[quantity, lineTotal]],
+        },
+        { name: "Summary", rowCount: 1, columnCount: 4, columnWidths: [], rows: [[grandTotal]] },
+      ],
+    } as SpreadsheetPreview;
+
+    expect(hasPendingFormulaResults(preview, true)).toBe(true);
+    expect(getCellDisplayText(quantity, true)).toBe("3");
+    expect(getCellDisplayText(lineTotal, true)).toBe("=B2*C2");
+    expect(getCellDisplayText(grandTotal, true)).toBe("=SUM(Shopping!D2:D5)");
+    // Presentation must preserve raw formulas and data for the existing save path.
+    expect(lineTotal.value).toBe("4.8");
+    expect(lineTotal.formula).toBe("B2*C2");
+
+    expect(hasPendingFormulaResults(preview, false)).toBe(false);
+    expect(getCellDisplayText({ ...lineTotal, value: "7.2", displayValue: "€7.20" }, false)).toBe(
+      "€7.20",
+    );
+    expect(
+      getCellDisplayText({ ...grandTotal, value: "19.1", displayValue: "€19.10" }, false),
+    ).toBe("€19.10");
+  });
+
+  it("does not show a recalculation notice for edits in a workbook without formulas", () => {
+    const preview = {
+      sheetCount: 1,
+      sheets: [
+        {
+          name: "List",
+          rowCount: 1,
+          columnCount: 1,
+          columnWidths: [],
+          rows: [[{ address: "A1", row: 1, column: 1, value: "Apples" }]],
+        },
+      ],
+    } as SpreadsheetPreview;
+    expect(hasPendingFormulaResults(preview, true)).toBe(false);
+    expect(hasPendingFormulaResults(null, true)).toBe(false);
   });
 });

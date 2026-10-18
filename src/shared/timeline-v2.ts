@@ -33,6 +33,14 @@ const TIMELINE_STAGE_ACTIVITY_LABELS: Record<TimelineStage, string> = {
   DELIVER: "Preparing final response",
 };
 
+const TIMELINE_STAGE_COMPLETION_LABELS: Record<TimelineStage, string> = {
+  DISCOVER: "Discovery complete",
+  BUILD: "Work complete",
+  VERIFY: "Checks complete",
+  FIX: "Fixes complete",
+  DELIVER: "Response ready",
+};
+
 const ACTIVITY_VERB_LABELS: Record<string, string> = {
   add: "Adding",
   adapt: "Adapting",
@@ -103,6 +111,14 @@ export function formatTimelineActivityLabel(raw: string, maxLength = 72): string
   // Upstream messages sometimes prefix an already-progressive label ("Starting Adjusting the
   // plan"). Keep a single verb so headers don't stack two of them.
   text = text.replace(/^Start(?:ing)?\s+(?=[A-Za-z]+ing\b)/i, "").trim();
+
+  const stageBoundary = /^(Starting|Completed)\s+(DISCOVER|BUILD|VERIFY|FIX|DELIVER)$/i.exec(text);
+  if (stageBoundary) {
+    const stage = stageBoundary[2].toUpperCase() as TimelineStage;
+    return stageBoundary[1].toLowerCase() === "completed"
+      ? TIMELINE_STAGE_COMPLETION_LABELS[stage]
+      : TIMELINE_STAGE_ACTIVITY_LABELS[stage];
+  }
 
   const upper = text.toUpperCase();
   if (upper in TIMELINE_STAGE_ACTIVITY_LABELS) {

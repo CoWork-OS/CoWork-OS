@@ -110,11 +110,14 @@ export function TaskStatusStrip({
   const announcementSignature = `${model.state}:${model.activeStepId ?? "none"}:${model.primaryLabel}`;
   // Phase labels can change on every tool event. Keep the live region scoped to
   // step/state transitions and actionable blocking details.
-  const announcementDetail = model.blockingLabel || "";
+  const announcementDetail = model.failureLabel || model.blockingLabel || "";
   const announceable = shouldAnnounce(model);
 
   useEffect(() => {
-    if (replay || !announceable) return;
+    if (replay || !announceable) {
+      setAnnouncement("");
+      return;
+    }
     if (announcementTimerRef.current) clearTimeout(announcementTimerRef.current);
     announcementTimerRef.current = setTimeout(() => {
       setAnnouncement([model.primaryLabel, announcementDetail].filter(Boolean).join(", "));
@@ -183,6 +186,12 @@ export function TaskStatusStrip({
         getItemTarget={getLivePlanTarget}
         onSelectTarget={scrollToLivePlanTarget}
       />
+      {model.state === "failed" && model.failureLabel && (
+        <div className="task-status-blocking task-status-failure" role="alert">
+          <AlertCircle size={15} aria-hidden="true" />
+          <span>{model.failureLabel}</span>
+        </div>
+      )}
       {open && (
         <div id="task-status-drawer" className="task-status-drawer">
           <div className="task-status-drawer-header">

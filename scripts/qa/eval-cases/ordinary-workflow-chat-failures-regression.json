@@ -1,0 +1,19 @@
+{
+  "id": "ordinary-workflow-chat-failures-2026-10-17",
+  "title": "Failed or empty chat responses are reported as completed",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 642,
+    "pullRequest": 662
+  },
+  "prompt": "Send a substantive Ask/think/follow-up request while the provider fails or returns no text; also exercise a synthesis with no member output.",
+  "assertions": {
+    "requiredBehavior": "Retain truthful failure and retry state, preserve explicit cancellation/approval blockers, and never claim a missing deliverable completed."
+  },
+  "executableTests": [
+    "src/electron/agent/__tests__/executor-chat-mode.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/__tests__/executor-chat-mode.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

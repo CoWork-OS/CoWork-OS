@@ -34,6 +34,8 @@ export interface SpreadsheetPreviewSheet {
 
 export interface SpreadsheetPreview {
   activeSheetName?: string;
+  /** Prevents destructive round trips through a writer that cannot preserve workbook features. */
+  readOnlyReason?: string;
   sheetCount: number;
   sheets: SpreadsheetPreviewSheet[];
 }

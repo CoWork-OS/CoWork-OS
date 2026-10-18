@@ -1,0 +1,21 @@
+{
+  "id": "ordinary-workflow-checklist-expressions-2026-10-17",
+  "title": "Interactive checklist fields display literal template expressions",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 650,
+    "pullRequest": 670
+  },
+  "prompt": "Create an interactive checklist whose text fields reference a numeric control, then change that control.",
+  "assertions": {
+    "requiredBehavior": "Evaluate allowed bounded expressions consistently in rendering, schema validation, plain-text output and follow-up summaries."
+  },
+  "executableTests": [
+    "src/renderer/components/__tests__/answer-surface.test.ts",
+    "src/shared/answer-surfaces/__tests__/blocks.test.ts",
+    "src/shared/answer-surfaces/__tests__/schema.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/renderer/components/__tests__/answer-surface.test.ts src/shared/answer-surfaces/__tests__/blocks.test.ts src/shared/answer-surfaces/__tests__/schema.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

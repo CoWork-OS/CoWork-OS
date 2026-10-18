@@ -238,6 +238,14 @@ export function lintAnswerSurface(
   };
   walkSurface(spec.root, (node) => {
     switch (node.type) {
+      case "checklist":
+        check(node.title);
+        for (const item of node.items) {
+          check(item.text);
+          check(item.time);
+          check(item.detail);
+        }
+        break;
       case "hero":
         check(node.value);
         check(node.delta);

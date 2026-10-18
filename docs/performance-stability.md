@@ -74,7 +74,7 @@ Growing `Map` and `Set` refs (`latestAttentionEventByTaskIdRef`, `taskLastEventT
 - Added `onTasksChangedRef` in `MainContent` to decouple the event subscription from prop identity
 - Guarded `setWelcomeTaskSuggestions([])` to skip when already empty
 
-**Files:** `src/renderer/App.tsx`, `src/renderer/components/MainContent.tsx`
+**Files:** `src/renderer/App.tsx`, `src/renderer/components/MainContent/MainContent.tsx`
 
 ### Single-Event Merge Fast Path
 
@@ -95,6 +95,7 @@ current task feed. See [Long-Session Timeline Performance](long-session-performa
 for the active history-loading and rendering contract.
 
 **Files:** `src/renderer/components/MainContent/MainContent.tsx`,
+`src/renderer/components/MainContent/TaskConversationFlow.tsx`,
 `src/renderer/components/MainContent/task-feed-logic.ts`, `src/renderer/hooks/useVirtualList.ts`
 
 ---

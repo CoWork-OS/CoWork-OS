@@ -37,6 +37,388 @@ vi.mock("../../settings/personality-manager", () => ({
 }));
 
 describe("TaskExecutor chat mode", () => {
+  const createChatResponseExecutor = (prompt: string, conversationMode = "chat") => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    executor.task = {
+      id: "chat-response",
+      prompt,
+      status: "executing",
+      agentConfig: { executionMode: "chat", conversationMode, retainMemory: false },
+    };
+    executor.workspace = { id: "workspace-1", path: "/tmp/workspace" };
+    executor.provider = { type: "openai" };
+    executor.conversationHistory = [];
+    executor.daemon = {
+      updateTaskStatus: vi.fn(),
+      updateTask: vi.fn(),
+      failTask: vi.fn(),
+    };
+    executor.getRoleContextPrompt = () => "";
+    executor.buildChatOrThinkSystemBlocks = () => [];
+    executor.setPromptCacheContext = () => "system";
+    executor.buildPromptCacheRequestExtras = () => ({});
+    executor.resolveLLMMaxTokens = () => 4096;
+    executor.buildUserContent = async (message: string) => message;
+    executor.buildExplicitChatMessages = async (message: string) => [
+      { role: "user", content: message },
+    ];
+    executor.callLLMWithRetry = vi.fn(async (fn: Any) => fn(0));
+    executor.createMessageWithTimeout = vi.fn();
+    executor.runTextTurnKernel = vi.fn();
+    executor.emitEvent = vi.fn();
+    executor.updateTracking = vi.fn();
+    executor.updateConversationHistory = vi.fn();
+    executor.saveConversationSnapshot = vi.fn(() => true);
+    executor.buildResultSummary = () => executor.lastAssistantText || "";
+    executor.repairAnswerSurfaceText = async (text: string) => text;
+    executor.generateCompanionFallbackResponse = vi.fn(() => "Hello! Ready to help.");
+    executor.finalizeTaskBestEffort = vi.fn();
+    executor.finalizeSuccessfulFollowUp = vi.fn();
+    executor.failExplicitChatCompaction = vi.fn();
+    executor.applyRuntimeTaskProjectionToTask = () => ({});
+    executor.getCompletionProjectionFields = () => ({});
+    return executor;
+  };
+
+  const prepareChatLifecycle = (executor: Any, retryAvailable = false) => {
+    executor.daemon.handleTransientTaskFailure = vi.fn(() => retryAvailable);
+    executor.getSessionRuntime = () => ({ resetVerificationState: vi.fn() });
+    executor.stepStopReasons = new Map();
+    executor.taskFailureDomains = new Set();
+    executor.maybeFinalizeAsNeedsUserAction = () => false;
+    executor.maybeFinalizeAsPartialSuccess = () => false;
+    executor.finalizeWithTimeoutRecovery = vi.fn().mockResolvedValue(true);
+    executor.capturePlaybookOutcome = vi.fn();
+    executor.trackLearning = vi.fn().mockResolvedValue(undefined);
+    executor.persistBestKnownOutcome = vi.fn();
+    executor.getContentFallback = () => "";
+    executor.getBudgetUsage = () => ({});
+    executor.emitRunSummary = vi.fn();
+    executor.emitTerminalFailureOnce = vi.fn();
+    executor.discardProvisionalBootstrapArtifacts = vi.fn();
+    executor.clearQueuedAgentConfigOverride = vi.fn();
+    executor.toolRegistry = { cleanup: vi.fn().mockResolvedValue(undefined) };
+  };
+
+  it.each(["chat", "think"])(
+    "propagates exhausted initial %s provider failures without completing or inventing an answer",
+    async (conversationMode) => {
+      const executor = createChatResponseExecutor(
+        "Help me plan a relaxed Saturday at home. I have 90 minutes to tidy the kitchen, prepare lunch, and read. Suggest a simple schedule with short breaks.",
+        conversationMode,
+      );
+      const failure = new TypeError("fetch failed");
+      executor.createMessageWithTimeout.mockRejectedValue(failure);
+
+      await expect(executor.handleCompanionPrompt()).rejects.toBe(failure);
+
+      expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
+      expect(executor.updateConversationHistory).not.toHaveBeenCalled();
+      expect(executor.generateCompanionFallbackResponse).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not mask a provider outage even when the user only greets the assistant", async () => {
+    const executor = createChatResponseExecutor("hello");
+    executor.createMessageWithTimeout.mockRejectedValue(new TypeError("fetch failed"));
+
+    await expect(executor.handleCompanionPrompt()).rejects.toThrow("fetch failed");
+
+    expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+    expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
+  });
+
+  it.each(
+    ["chat", "think", "synthesis"].flatMap((kind) =>
+      ["network", "timeout", "abort"].flatMap((failureKind) =>
+        [true, false].map((retryAvailable) => ({ kind, failureKind, retryAvailable })),
+      ),
+    ),
+  )(
+    "routes an initial $kind $failureKind through the task lifecycle (retry available=$retryAvailable)",
+    async ({ kind, failureKind, retryAvailable }) => {
+      const executor = createChatResponseExecutor(
+        kind === "synthesis"
+          ? "Synthesize the findings. ".repeat(100)
+          : "Plan a relaxed Saturday at home",
+        kind === "think" ? "think" : "chat",
+      );
+      if (kind === "synthesis") executor.task.parentTaskId = "parent-1";
+      const failure =
+        failureKind === "network"
+          ? new TypeError("fetch failed")
+          : failureKind === "timeout"
+            ? new Error("Provider response timed out after 120000ms")
+            : Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+      executor.createMessageWithTimeout.mockRejectedValue(failure);
+      executor.runTextTurnKernel.mockRejectedValue(failure);
+      prepareChatLifecycle(executor, retryAvailable);
+
+      await executor.executeUnlocked();
+
+      if (failureKind === "abort") {
+        expect(executor.daemon.handleTransientTaskFailure).not.toHaveBeenCalled();
+      } else {
+        expect(executor.daemon.handleTransientTaskFailure).toHaveBeenCalledWith(
+          "chat-response",
+          failure.message,
+          undefined,
+        );
+      }
+      expect(executor.finalizeWithTimeoutRecovery).not.toHaveBeenCalled();
+      expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("task_completed", expect.anything());
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
+      if (retryAvailable && failureKind !== "abort") {
+        expect(executor.daemon.updateTask).not.toHaveBeenCalled();
+        expect(executor.emitTerminalFailureOnce).not.toHaveBeenCalled();
+      } else {
+        expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+          "chat-response",
+          expect.objectContaining({
+            status: "failed",
+            terminalStatus: "failed",
+            error: failure.message,
+          }),
+        );
+        expect(executor.emitTerminalFailureOnce).toHaveBeenCalledWith(
+          expect.objectContaining({ message: failure.message }),
+        );
+      }
+    },
+  );
+
+  it.each(["user", "system", "shutdown", "timeout"])(
+    "leaves %s cancellation of an initial chat turn to the daemon",
+    async (cancelReason) => {
+      const executor = createChatResponseExecutor("Plan my afternoon");
+      prepareChatLifecycle(executor);
+      executor.createMessageWithTimeout.mockImplementation(async () => {
+        executor.cancelled = true;
+        executor.cancelReason = cancelReason;
+        throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+      });
+
+      await executor.executeUnlocked();
+
+      expect(executor.daemon.updateTask).not.toHaveBeenCalled();
+      expect(executor.daemon.handleTransientTaskFailure).not.toHaveBeenCalled();
+      expect(executor.finalizeWithTimeoutRecovery).not.toHaveBeenCalled();
+      expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+      expect(executor.emitTerminalFailureOnce).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails a synthesis with missing member output through the actual task lifecycle", async () => {
+    const executor = createChatResponseExecutor(
+      `TEAM WORK ITEM STATUS:\n- [DONE] Prepare the results\n${"Instructions. ".repeat(200)}`,
+    );
+    executor.task.parentTaskId = "parent-1";
+    prepareChatLifecycle(executor, true);
+
+    await executor.executeUnlocked();
+
+    expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
+    expect(executor.finalizeWithTimeoutRecovery).not.toHaveBeenCalled();
+    expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+    expect(executor.daemon.handleTransientTaskFailure).not.toHaveBeenCalled();
+    expect(executor.daemon.updateTask).toHaveBeenCalledWith(
+      "chat-response",
+      expect.objectContaining({
+        status: "failed",
+        terminalStatus: "failed",
+        error: expect.stringContaining("did not produce any analyses"),
+      }),
+    );
+  });
+
+  it.each(["chat", "think"])(
+    "rejects an empty initial %s answer to a substantive request",
+    async (conversationMode) => {
+      const executor = createChatResponseExecutor(
+        "Suggest a simple lunch recipe",
+        conversationMode,
+      );
+      executor.createMessageWithTimeout.mockResolvedValue({ content: [], stopReason: "end_turn" });
+
+      await expect(executor.handleCompanionPrompt()).rejects.toThrow("empty response");
+
+      expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
+    },
+  );
+
+  it("retains a courtesy reply for an empty successful social turn", async () => {
+    const executor = createChatResponseExecutor("hello");
+    executor.createMessageWithTimeout.mockResolvedValue({ content: [], stopReason: "end_turn" });
+
+    await executor.handleCompanionPrompt();
+
+    expect(executor.emitEvent).toHaveBeenCalledWith("assistant_message", {
+      message: "Hello! Ready to help.",
+    });
+    expect(executor.finalizeTaskBestEffort).toHaveBeenCalledWith("Hello! Ready to help.");
+  });
+
+  it.each(["chat", "think"])(
+    "marks a failed %s follow-up as failed with retry guidance",
+    async (conversationMode) => {
+      const executor = createChatResponseExecutor("Plan my afternoon", conversationMode);
+      executor.runTextTurnKernel.mockRejectedValue(new TypeError("fetch failed"));
+      const dispatchCompleted = vi.fn();
+
+      await executor.respondInChatMode(
+        "Give me a 90-minute schedule",
+        "completed",
+        undefined,
+        undefined,
+        dispatchCompleted,
+      );
+
+      expect(executor.daemon.failTask).toHaveBeenCalledWith(
+        "chat-response",
+        "fetch failed",
+        expect.anything(),
+      );
+      expect(executor.task.status).toBe("failed");
+      expect(executor.emitEvent).toHaveBeenCalledWith(
+        "follow_up_failed",
+        expect.objectContaining({
+          error: "fetch failed",
+          userMessage: expect.stringContaining("Please retry"),
+        }),
+      );
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("follow_up_completed", expect.anything());
+      expect(executor.finalizeSuccessfulFollowUp).not.toHaveBeenCalled();
+      expect(executor.generateCompanionFallbackResponse).not.toHaveBeenCalled();
+      expect(dispatchCompleted).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("marks an empty substantive follow-up as failed instead of emitting a greeting", async () => {
+    const executor = createChatResponseExecutor("Plan my afternoon");
+    executor.runTextTurnKernel.mockImplementation(async ({ emptyFallback, messages }: Any) => ({
+      assistantText: emptyFallback,
+      messages,
+    }));
+
+    await executor.respondInChatMode("Give me a 90-minute schedule", "completed");
+
+    expect(executor.task.status).toBe("failed");
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "follow_up_failed",
+      expect.objectContaining({
+        error: expect.stringContaining("empty response"),
+      }),
+    );
+    expect(executor.finalizeSuccessfulFollowUp).not.toHaveBeenCalled();
+    expect(executor.generateCompanionFallbackResponse).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["initial", "reject"],
+    ["initial", "resolve"],
+    ["follow-up", "reject"],
+    ["follow-up", "resolve"],
+    ["synthesis", "reject"],
+    ["synthesis", "resolve"],
+  ])(
+    "preserves cancellation when a pending %s provider call later settles with %s",
+    async (kind, outcome) => {
+      const executor = createChatResponseExecutor("Plan my afternoon");
+      let providerStarted!: () => void;
+      let resolveProvider!: (value: Any) => void;
+      let rejectProvider!: (error: Error) => void;
+      const started = new Promise<void>((resolve) => {
+        providerStarted = resolve;
+      });
+      const pending = new Promise<Any>((resolve, reject) => {
+        resolveProvider = resolve;
+        rejectProvider = reject;
+      });
+      const providerCall = () => {
+        providerStarted();
+        return pending;
+      };
+      executor.createMessageWithTimeout.mockImplementation(providerCall);
+      executor.runTextTurnKernel.mockImplementation(providerCall);
+      const turn =
+        kind === "initial"
+          ? executor.handleCompanionPrompt()
+          : kind === "synthesis"
+            ? executor.handleSubAgentChatMode("Synthesize the findings")
+            : executor.respondInChatMode("Give me a schedule", "completed");
+      await started;
+      executor.cancelled = true;
+      executor.task.status = "cancelled";
+      if (outcome === "reject") {
+        rejectProvider(Object.assign(new Error("Request cancelled"), { name: "AbortError" }));
+      } else {
+        resolveProvider({
+          content: [{ type: "text", text: "Late answer" }],
+          assistantText: "Late answer",
+          messages: [],
+          stopReason: "end_turn",
+        });
+      }
+      if (kind === "follow-up") await turn;
+      else await expect(turn).rejects.toThrow("Request cancelled");
+
+      expect(executor.task.status).toBe("cancelled");
+      expect(executor.daemon.failTask).not.toHaveBeenCalled();
+      expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+      expect(executor.finalizeSuccessfulFollowUp).not.toHaveBeenCalled();
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("follow_up_failed", expect.anything());
+      expect(executor.emitEvent).not.toHaveBeenCalledWith("follow_up_completed", expect.anything());
+    },
+  );
+
+  it("preserves a persisted approval blocker when a chat follow-up fails", async () => {
+    const executor = createChatResponseExecutor("Plan my afternoon");
+    const blockedTask = {
+      ...executor.task,
+      status: "blocked",
+      terminalStatus: "awaiting_approval",
+    };
+    executor.daemon.getTask = vi.fn(() => blockedTask);
+    executor.runTextTurnKernel.mockRejectedValue(new Error("Approval is required"));
+
+    await executor.respondInChatMode("Give me a schedule", "completed");
+
+    expect(executor.daemon.failTask).not.toHaveBeenCalled();
+    expect(executor.finalizeSuccessfulFollowUp).not.toHaveBeenCalled();
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "follow_up_failed",
+      expect.objectContaining({
+        error: "Approval is required",
+      }),
+    );
+  });
+
+  it.each(["partial_success", "failed", "awaiting_approval"])(
+    "does not leave a failed follow-up executing because of stale %s terminal metadata",
+    async (terminalStatus) => {
+      const executor = createChatResponseExecutor("Plan my afternoon");
+      executor.daemon.getTask = vi.fn(() => ({
+        ...executor.task,
+        status: "executing",
+        terminalStatus,
+      }));
+      executor.runTextTurnKernel.mockRejectedValue(new TypeError("fetch failed"));
+
+      await executor.respondInChatMode("Give me a schedule", "completed");
+
+      expect(executor.task.status).toBe("failed");
+      expect(executor.daemon.failTask).toHaveBeenCalledWith(
+        "chat-response",
+        "fetch failed",
+        expect.anything(),
+      );
+    },
+  );
+
   it("keeps initial and follow-up reminders outside the stable chat policy", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.task = { agentConfig: {} };
@@ -212,6 +594,8 @@ describe("TaskExecutor chat mode", () => {
     executor.emitEvent = vi.fn();
     executor.saveConversationSnapshot = vi.fn(() => false);
     executor.restoreFollowUpStatusAfterFailure = vi.fn();
+    executor.finalizeFollowUpFailure = vi.fn();
+    executor.daemon = { getTask: vi.fn() };
     executor.generateCompanionFallbackResponse = () => "Hey! How can I help?";
     executor.updateConversationHistory = vi.fn();
     executor.buildUserContent = vi.fn(async (message: string) => message);
@@ -1710,12 +2094,27 @@ describe("TaskExecutor chat mode", () => {
   it("skips the model only when a team synthesis has no member output", async () => {
     const executor = makeSynthesisExecutor();
 
-    await (TaskExecutor as Any).prototype.handleSubAgentChatMode.call(executor, synthesisTask);
+    await expect(executor.handleSubAgentChatMode(synthesisTask)).rejects.toThrow(
+      "did not produce any analyses",
+    );
 
     expect(executor.runTextTurnKernel).not.toHaveBeenCalled();
-    expect(executor.emitEvent).toHaveBeenCalledWith("assistant_message", {
-      message: expect.stringContaining("did not produce any analyses"),
-    });
+    expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("does not hand an empty synthesis response to the parent as a completed result", async () => {
+    const executor = makeSynthesisExecutor();
+    executor.runTextTurnKernel.mockImplementation(async ({ emptyFallback }: Any) => ({
+      assistantText: emptyFallback,
+      messages: [],
+    }));
+
+    await expect(executor.handleSubAgentChatMode("Synthesize the findings")).rejects.toThrow(
+      "empty synthesis response",
+    );
+
+    expect(executor.finalizeTaskBestEffort).not.toHaveBeenCalled();
+    expect(executor.emitEvent).not.toHaveBeenCalledWith("assistant_message", expect.anything());
   });
 });
 

@@ -138,6 +138,45 @@ export class ComposerDraftAttachmentStore {
     }
   }
 
+  /** Import only intact staged bytes belonging to this destination workspace. */
+  async readForWorkspaceImport(
+    sourcePath: string,
+    workspaceId: string,
+  ): Promise<{ ref: DraftAttachmentRef; bytes: Buffer } | null> {
+    const directory = this.workspaceDirectory(workspaceId);
+    const absolutePath = path.resolve(sourcePath);
+    if (path.dirname(absolutePath) !== directory) return null;
+    const match = /^([0-9a-f-]{20,64})\.bin$/i.exec(path.basename(absolutePath));
+    if (!match) return null;
+    const metadata = await readMetadataFile(path.join(directory, `${match[1]}.json`));
+    if (!metadata || metadata.workspaceId !== workspaceId || metadata.refId !== match[1]) {
+      return null;
+    }
+    try {
+      if ((await fs.lstat(absolutePath)).isSymbolicLink()) return null;
+      const handle = await fs.open(
+        absolutePath,
+        fsSync.constants.O_RDONLY | (fsSync.constants.O_NOFOLLOW ?? 0),
+      );
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size !== metadata.size) return null;
+        const bytes = await handle.readFile();
+        if (
+          bytes.length !== metadata.size ||
+          createHash("sha256").update(bytes).digest("hex") !== metadata.sha256
+        )
+          return null;
+        return { ref: { ...metadata, status: "available" }, bytes };
+      } finally {
+        await handle.close();
+      }
+    } catch (error: Any) {
+      if (error?.code === "ENOENT" || error?.code === "ELOOP") return null;
+      throw error;
+    }
+  }
+
   async release(draftKey: string, workspaceId: string, refId: string): Promise<boolean> {
     const metadata = await this.readMetadata(draftKey, workspaceId, refId);
     if (!metadata) return false;

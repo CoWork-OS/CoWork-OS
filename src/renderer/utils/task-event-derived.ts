@@ -266,6 +266,7 @@ function selectLiveProjectionRawEvents(events: TaskEvent[], liveWindowSize: numb
 }
 
 const TASK_STATUS_HISTORY_TYPES = new Set([
+  "task_resumed",
   "plan_created",
   "plan_updated",
   "plan_revised",

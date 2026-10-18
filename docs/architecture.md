@@ -48,6 +48,40 @@ CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, eve
 - **Scheduled-run accounting**: each cron job keeps versioned per-category outcome counts (`src/shared/cron-outcomes.ts`, `src/electron/cron/outcome-counts.ts`) recorded together with each run's history entry. Run success is `ok / classified attempts`; partial, needs-attention, failed, cancelled, skipped, and unknown-outcome runs are reported separately, follow-ups are classified from the thread's durable result, and legacy aggregates keep their old semantics for existing callers
 - **Learning evidence**: Playbook promotion and success context read the `playbook_success_evidence` ledger (`src/electron/memory/PlaybookEvidenceStore.ts`) instead of searching memory text. Outcomes are `playbook_entries` rows, not archive memories, written only when memory settings allow (privacy redaction applied); only terminal-ok executions with a durably recorded entry create success evidence; one row per task; the ledger holds no text, so readable fields come from the source entry and private entries are never served; reinforcement is a durable link that requires a deterministic relevance gate plus a matching approach key; corrections and deleted/edited source entries invalidate dependent evidence. Playbook outcomes never reach generic prompt recall or archive synthesis, and skill proposals carry evidence provenance (legacy auto-proposals are `unverified` and cannot be approved until revalidated)
 
+## Renderer loading and diagram execution
+
+Desktop and browser production builds share feature loading boundaries. First-run
+setup, Library, Build, Git changes, web access and bot details load when needed.
+Task conversation history loads separately from `MainContent`, so its composer
+and task-scoped unsent drafts keep their existing owner during history loading.
+React, React DOM and the scheduler share one cached runtime chunk.
+
+Mermaid keeps all 15 parser grammars and its complete public parser API. The
+production-only build adapter reconstructs the original modular TypeScript from
+the installed parser's source maps and retained upstream forwarding barrels,
+then preserves per-language grammar caches and lazy initialization. It accepts
+only the reviewed Mermaid 12.1.0, parser 2.0.1 and Langium 4.4.0 sources; version,
+source hash or source-shape drift fails the build. Development uses the published
+parser. See the [parser adaptation contract](../scripts/build/mermaid-parser/README.md)
+before upgrading those dependencies.
+
+ELK layout uses the full engine in real short-lived workers. The adapter retains
+render callbacks and DOM handles in the renderer, transports structured graph
+data and restores worker geometry into the original graph identities. Success,
+failure and explicit adapter cancellation release the workers; component
+unmount prevents stale SVG updates and releases the worker after settlement.
+Vite supplies the worker URL for HTTP and production file assets without
+loosening the renderer's content security policy. Mermaid rendering also owns
+and cleans its measurement container, while invalid charts keep visible inline
+errors.
+
+Both production build commands enforce the unchanged 500,000-byte budget for
+every emitted JavaScript chunk, including optional chunks. The gate binds its
+inventory to the actual output directory, complete script list, byte lengths and
+SHA-256 hashes. Full worker assets are accounted separately and remain shipped;
+moving ELK off the UI thread is not a reduction of its engine download size.
+Run `npm run qa:bundle-sizes` after building to recheck the emitted artifacts.
+
 ## Profiles and Isolation
 
 ### CoWork Pulse analytics boundary

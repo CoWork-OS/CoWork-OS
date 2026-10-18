@@ -947,6 +947,12 @@
   font-size: 12px;
 }
 
+.spreadsheet-viewer-calculation-notice {
+  padding: 6px 14px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .spreadsheet-viewer-formula {
   height: 56px;
   gap: 18px;

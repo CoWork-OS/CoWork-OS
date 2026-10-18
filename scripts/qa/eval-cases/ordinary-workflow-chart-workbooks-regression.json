@@ -1,0 +1,23 @@
+{
+  "id": "ordinary-workflow-chart-workbooks-2026-10-17",
+  "title": "Chart workbooks fail cell reads and can lose charts on preview save",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 659,
+    "pullRequest": 679
+  },
+  "prompt": "Open or parse an XLSX containing a column chart created by openpyxl, then attempt a native preview edit/save.",
+  "assertions": {
+    "requiredBehavior": "Read cells without modifying the original drawing package. Keep chart-containing previews read-only with an explanation until native saves can preserve charts; support verified chart-preserving updates through chat."
+  },
+  "executableTests": [
+    "src/electron/agent/tools/__tests__/document-parser-tools.test.ts",
+    "src/electron/spreadsheet/__tests__/SpreadsheetWorkbookSessionService.test.ts",
+    "src/electron/utils/__tests__/spreadsheet-preview.test.ts",
+    "src/electron/utils/document-generators/__tests__/spreadsheet-formula-cache.test.ts",
+    "src/renderer/components/__tests__/spreadsheet-artifact-viewer.test.ts"
+  ],
+  "executableCommand": "npx vitest run src/electron/agent/tools/__tests__/document-parser-tools.test.ts src/electron/spreadsheet/__tests__/SpreadsheetWorkbookSessionService.test.ts src/electron/utils/__tests__/spreadsheet-preview.test.ts src/electron/utils/document-generators/__tests__/spreadsheet-formula-cache.test.ts src/renderer/components/__tests__/spreadsheet-artifact-viewer.test.ts",
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests passed on this independent issue branch; this metadata commit does not change runtime code."
+}

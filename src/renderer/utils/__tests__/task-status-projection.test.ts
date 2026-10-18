@@ -25,6 +25,35 @@ function event(
 }
 
 describe("deriveRevisionAwarePlanSteps", () => {
+  it("fences the previous failed plan at a new follow-up run and accepts a fresh plan", () => {
+    const history = [
+      event("old-plan", 1, "plan_created", {
+        revision: 8,
+        plan: { steps: [{ id: "old", description: "Read dinner notes", status: "failed" }] },
+      }),
+      event("follow-up", 2, "timeline_step_updated", {
+        legacyType: "task_resumed",
+        newRunStarted: true,
+      }),
+      event("message", 3, "user_message"),
+    ];
+    expect(deriveRevisionAwarePlanSteps(history)).toEqual([]);
+    expect(
+      deriveRevisionAwarePlanSteps([
+        ...history,
+        event("new-plan", 4, "plan_created", {
+          plan: { steps: [{ id: "new", description: "Finish dinner plan", status: "pending" }] },
+        }),
+      ]),
+    ).toMatchObject([{ id: "new", description: "Finish dinner plan", status: "pending" }]);
+    expect(
+      deriveRevisionAwarePlanSteps([
+        history[0],
+        event("checkpoint", 2, "task_resumed", { message: "Task resumed" }),
+      ]),
+    ).toMatchObject([{ id: "old", status: "failed" }]);
+  });
+
   it("selects the newest full revision and ignores stale late status events", () => {
     const steps = deriveRevisionAwarePlanSteps([
       event("plan-1", 1, "plan_created", {
@@ -99,6 +128,30 @@ describe("deriveRevisionAwarePlanSteps", () => {
 });
 
 describe("activity and status projections", () => {
+  it("exposes the task's terminal error and drops it when the task recovers", () => {
+    const error = "You have hit your ChatGPT usage limit. Try again later.";
+    const input = {
+      task: { id: "task-1", status: "failed", updatedAt: 1_001, error } as Any,
+      events: [event("failed", 1, "error", { message: error })],
+      planSteps: [],
+      activityGroups: [],
+      outcomeMetrics: [],
+      outputSummary: null,
+    };
+    expect(deriveTaskStatusStrip(input)).toMatchObject({
+      state: "failed",
+      failureLabel: error,
+    });
+    expect(
+      deriveTaskStatusStrip({ ...input, task: { ...input.task, status: "executing" } })
+        .failureLabel,
+    ).toBeUndefined();
+    expect(
+      deriveTaskStatusStrip({ ...input, task: { ...input.task, error: "x".repeat(3_000) } })
+        .failureLabel,
+    ).toHaveLength(2_000);
+  });
+
   it("keeps the latest group running and uses sanitized typed labels", () => {
     const planSteps = [
       { id: "one", description: "Research competitors", status: "in_progress" as const },

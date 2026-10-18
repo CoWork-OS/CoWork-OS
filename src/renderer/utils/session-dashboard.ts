@@ -3,7 +3,7 @@ import type { SessionProgressState, Task, TaskEvent } from "../../shared/types";
 export interface SessionDashboardMetrics {
   completedSteps: number;
   totalSteps: number;
-  progressPercent: number;
+  progressPercent: number | null;
   artifactCount: number;
   approvalCount: number;
   memberCount: number;
@@ -90,7 +90,7 @@ export function buildSessionDashboardMetrics(
   return {
     completedSteps,
     totalSteps,
-    progressPercent: totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0,
+    progressPercent: totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : null,
     artifactCount: Math.max(
       options.artifactCount || 0,
       changeEvents.filter((event) => eventType(event) === "artifact_created").length,

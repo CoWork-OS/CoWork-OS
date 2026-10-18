@@ -152,3 +152,51 @@ test("a malformed -Repo is rejected before anything runs", { skip: !hasPwsh }, (
   assert.notEqual(result.status, 0);
   assert.match(result.stdout + result.stderr, /-Repo must look like OWNER\/NAME/);
 });
+
+test("the app path comes from DisplayIcon, as the per-user NSIS installer writes it", { skip: !hasPwsh }, () => {
+  // Values recorded from a real per-user install of CoWork-OS-Setup-0.5.60.exe
+  // (Windows 11 on ARM): no InstallLocation, DisplayIcon with an icon index.
+  const result = sourced(
+    [
+      "$e = [pscustomobject]@{ DisplayName = 'CoWork OS 0.5.60'; DisplayIcon = 'C:\\Users\\demo\\AppData\\Local\\Programs\\cowork-os\\CoWork OS.exe,0' }",
+      "Get-ExePathFromUninstallEntry $e",
+      "$q = [pscustomobject]@{ DisplayIcon = '\"C:\\Program Files\\CoWork OS\\CoWork OS.exe\"' }",
+      "Get-ExePathFromUninstallEntry $q",
+    ].join("\n"),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split(/\r?\n/), [
+    "C:\\Users\\demo\\AppData\\Local\\Programs\\cowork-os\\CoWork OS.exe",
+    "C:\\Program Files\\CoWork OS\\CoWork OS.exe",
+  ]);
+});
+
+test("InstallLocation is used when there is no DisplayIcon", { skip: !hasPwsh }, () => {
+  const result = sourced(
+    [
+      "$e = [pscustomobject]@{ InstallLocation = 'C:\\Apps\\CoWork OS' }",
+      "Get-ExePathFromUninstallEntry $e",
+      "$none = [pscustomobject]@{ DisplayName = 'CoWork OS' }",
+      "if ($null -eq (Get-ExePathFromUninstallEntry $none)) { 'none' }",
+    ].join("\n"),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const [fromLocation, empty] = result.stdout.trim().split(/\r?\n/);
+  assert.match(fromLocation, /^C:\\Apps\\CoWork OS[\\/]CoWork OS\.exe$/);
+  assert.equal(empty, "none");
+});
+
+test("the app is launched through Explorer, quoted, so it does not share the console", { skip: !hasPwsh }, () => {
+  const result = sourced(
+    [
+      "$env:WINDIR = 'C:\\Windows'",
+      "$c = Get-LaunchCommand 'C:\\Users\\demo\\AppData\\Local\\Programs\\cowork-os\\CoWork OS.exe'",
+      "$c.FilePath",
+      "$c.ArgumentList",
+    ].join("\n"),
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const [filePath, args] = result.stdout.trim().split(/\r?\n/);
+  assert.match(filePath, /^C:\\Windows[\\/]explorer\.exe$/);
+  assert.equal(args, '"C:\\Users\\demo\\AppData\\Local\\Programs\\cowork-os\\CoWork OS.exe"');
+});

@@ -374,6 +374,7 @@ import { GitHubReviewService } from "../git/GitHubReviewService";
 import { TerminalPtyManager } from "../terminal/TerminalPtyManager";
 import { assertTerminalShellAllowed } from "../terminal/terminal-shell-policy";
 import { setupTerminalBlockRunHandlers } from "./terminal-block-run-handlers";
+import { setupAgentTerminalHandlers } from "./agent-terminal-handlers";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
 import { ChannelGateway } from "../gateway";
 
@@ -3777,6 +3778,10 @@ export async function setupIpcHandlers(
 
       for (const filePath of validated.files) {
         const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+        const stagedAttachment = await composerDraftAttachmentStore.readForWorkspaceImport(
+          absolutePath,
+          workspace.id,
+        );
         const stats = await fs.stat(absolutePath);
 
         if (!stats.isFile()) {
@@ -3790,7 +3795,9 @@ export async function setupIpcHandlers(
           );
         }
 
-        const mimeType = (mime.lookup(absolutePath) || undefined) as string | undefined;
+        const mimeType =
+          stagedAttachment?.ref.mimeType ||
+          ((mime.lookup(absolutePath) || undefined) as string | undefined);
 
         if (await isPathWithinWorkspace(absolutePath, workspace.path)) {
           results.push({
@@ -3802,24 +3809,29 @@ export async function setupIpcHandlers(
           continue;
         }
 
-        if (!isApprovedImportFile(absolutePath)) {
+        if (!stagedAttachment && !isApprovedImportFile(absolutePath)) {
           throw new Error(
             `Import denied for "${path.basename(absolutePath)}". Select the file again from the native picker before attaching it.`,
           );
         }
 
-        const safeName = sanitizeFileName(path.basename(absolutePath));
+        const sourceName = stagedAttachment?.ref.name || path.basename(absolutePath);
+        const safeName = sanitizeFileName(sourceName);
         const targetRoot = await ensureUploadRoot();
         const uniqueName = ensureUniqueName(targetRoot, safeName, usedNames);
         const destination = path.join(targetRoot, uniqueName);
 
-        await fs.copyFile(absolutePath, destination);
+        if (stagedAttachment) {
+          await fs.writeFile(destination, stagedAttachment.bytes, { flag: "wx" });
+        } else {
+          await fs.copyFile(absolutePath, destination);
+        }
         FileProvenanceRegistry.record({
           path: destination,
           workspaceId: workspace.id,
           sourceKind: "user_imported_external",
           trustLevel: "untrusted",
-          sourceLabel: path.basename(absolutePath),
+          sourceLabel: sourceName,
         });
 
         results.push({
@@ -4899,6 +4911,22 @@ export async function setupIpcHandlers(
         "code_block_run",
         metadata.runId,
         { command: metadata.command },
+        authorization.actor.principalId,
+      );
+    },
+  });
+
+  // The agent's background processes, shown as read-only tabs in the terminal panel.
+  setupAgentTerminalHandlers({
+    authorizeTask: (event, taskId, capability) => authorizeTaskForEvent(event, taskId, capability),
+    recordAction: async (event, taskId, action, tabId) => {
+      const authorization = await authorizeTaskForEvent(event, taskId, "manage");
+      await sessionMembershipService.recordTaskAction(
+        taskId,
+        "manage",
+        action,
+        tabId,
+        {},
         authorization.actor.principalId,
       );
     },

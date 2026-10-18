@@ -145,7 +145,10 @@ export class ComposerDraftStore {
     if (current && current.revision > normalized.revision) return current;
     this.drafts.set(normalized.draftKey, normalized);
     this.emit(normalized.draftKey, normalized);
-    if (persist) this.schedulePersist(normalized.draftKey);
+    if (persist) {
+      this.dirtyRevisions.set(normalized.draftKey, normalized.revision);
+      this.schedulePersist(normalized.draftKey);
+    }
     return normalized;
   }
 
@@ -164,14 +167,17 @@ export class ComposerDraftStore {
     }
 
     const draft = this.drafts.get(key);
-    if (!draft || !this.transport.upsert) return;
-    const revision = draft.revision;
+    if (!draft || !this.transport.upsert || !this.dirtyRevisions.has(key)) return;
     const write = this.writeChains.get(key) ?? Promise.resolve();
     const nextWrite = write
       .catch(() => undefined)
       .then(async () => {
         const current = this.drafts.get(key);
-        if (!current || current.revision < revision) return;
+        if (!current || !this.dirtyRevisions.has(key)) return;
+        // A queued flush writes the latest edit, not the revision that queued
+        // it. Acknowledge that exact revision so a second navigation/unmount
+        // flush cannot rebase an unchanged, already-persisted submission.
+        const revision = current.revision;
         const result = await this.transport.upsert?.(current);
         // Rebase only onto a known authoritative revision. A rejection without one
         // (expired row, invalid draft) waits for the next edit instead of looping.

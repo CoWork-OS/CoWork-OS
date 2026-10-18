@@ -88,7 +88,11 @@ describe("buildActionBlockSummary", () => {
         toolUseId: "b",
         input: { path: "b.csv" },
       }),
-      event("fail-b", "tool_error", 1003, { tool: "edit_file", toolUseId: "b", error: "denied" }),
+      event("fail-b", "tool_error", 1003, {
+        tool: "edit_file",
+        toolUseId: "b",
+        error: "denied",
+      }),
     ];
     expect(buildActionBlockSummary(events).summary).toBe("Edited 1 file");
     expect(buildActionBlockSummary(events, undefined, { isActive: true }).summary).toBe(
@@ -131,14 +135,21 @@ describe("buildActionBlockSummary", () => {
       }),
       toolEvent("list", "list_directory", 1010),
       toolEvent("info", "get_file_info", 1020),
-      event("report", "assistant_message", 1100, { message: "Step 2 done.", internal: true }),
+      event("report", "assistant_message", 1100, {
+        message: "Step 2 done.",
+        internal: true,
+      }),
       event("step-done", "step_completed", 1200, { step: { id: "2" } }),
       event("step-next", "step_started", 1210, { step: { id: "3" } }),
-      event("next-message", "assistant_message", 2000, { message: "Counting lines now." }),
+      event("next-message", "assistant_message", 2000, {
+        message: "Counting lines now.",
+      }),
     ];
     const blockEvents = allEvents.filter((entry) => entry.id.startsWith("step-"));
 
-    const summary = buildActionBlockSummary(blockEvents, allEvents, { isActive: false });
+    const summary = buildActionBlockSummary(blockEvents, allEvents, {
+      isActive: false,
+    });
 
     expect(summary.toolCallCount).toBe(2);
     expect(summary.activityPhrase).toBe("Read files");
@@ -150,6 +161,87 @@ describe("buildActionBlockSummary", () => {
     ]);
 
     expect(summary.activityPhrase).toBe("Worked");
+  });
+
+  it("ends the original work at completion instead of including idle time before a follow-up", () => {
+    const allEvents = [
+      event("commentary", "assistant_message", 1000, { phase: "commentary" }),
+      toolEvent("read", "read_file", 1010),
+      event("step-done", "step_completed", 1500),
+      event("final", "assistant_message", 1550, { message: "Done." }),
+      // Stage transitions can be stamped a few ms after the completion they surround.
+      event("deliver", "step_started", 1603),
+      event("complete", "timeline_step_finished", 1600, {
+        legacyType: "task_completed",
+      }),
+      event("impact", "task_impact_updated", 1700),
+      event("route", "log", 600_000),
+      event("resume", "task_resumed", 600_010, { newRunStarted: true }),
+      event("user", "user_message", 600_020),
+      toolEvent("follow-up-read", "read_file", 600_100),
+      event("follow-up-usage", "llm_usage", 600_110, {
+        delta: { outputTokens: 20 },
+      }),
+    ];
+    const summary = buildActionBlockSummary([allEvents[2], allEvents[4]], allEvents);
+    expect(summary.durationMs).toBe(590);
+    expect(summary.toolCallCount).toBe(1);
+    expect(summary.outputTokens).toBe(0);
+  });
+
+  it("keeps post-completion stage markers short when a later follow-up appears", () => {
+    const stage = event("deliver", "step_started", 1603);
+    const complete = event("complete", "task_completed", 1600);
+    const allEvents = [
+      complete,
+      stage,
+      event("deliver-done", "step_completed", 1607),
+      event("impact", "task_impact_updated", 1700),
+      event("route", "log", 600_000),
+      event("user", "user_message", 600_020),
+    ];
+    expect(buildActionBlockSummary([stage], allEvents).durationMs).toBe(0);
+    expect(buildActionBlockSummary([stage, allEvents[2]], allEvents).durationMs).toBe(4);
+  });
+
+  it("uses terminal boundaries when filtered blocks end before the completion event", () => {
+    for (const terminal of [
+      event("complete", "follow_up_completed", 1600),
+      event("cancelled", "task_cancelled", 1600),
+      event("quota-failure", "timeline_error", 1600, {
+        terminal_failure_fingerprint: "ChatGPT usage limit|unknown|",
+      }),
+      event("failed", "timeline_step_updated", 1600, {
+        legacyType: "task_status",
+        status: "failed",
+      }),
+    ]) {
+      const step = event("step", "step_started", 1100);
+      const allEvents = [
+        event("user", "user_message", 1000),
+        step,
+        toolEvent("read", "read_file", 1200),
+        terminal,
+        event("route", "log", 600_000),
+        event("next-user", "user_message", 600_020),
+      ];
+      expect(buildActionBlockSummary([step], allEvents).durationMs).toBe(100);
+    }
+  });
+
+  it("does not truncate a parent's work at a child task's completion", () => {
+    const step = event("step", "step_started", 1100);
+    const allEvents = [
+      event("user", "user_message", 1000),
+      step,
+      { ...event("child", "task_completed", 1200), taskId: "child" },
+      toolEvent("read", "read_file", 1400),
+      event("answer", "assistant_message", 1500),
+    ];
+    expect(buildActionBlockSummary([step], allEvents)).toMatchObject({
+      durationMs: 300,
+      toolCallCount: 1,
+    });
   });
 
   it("summarizes recorded calls of retired memory tools with the generic tool label", () => {
@@ -283,7 +375,10 @@ describe("buildActionBlockSummary", () => {
         toolUseId: "call-1",
         result: { success: true, stdout: "/tmp\\nSHELL_SMOKE_OK\\n" },
       }),
-      event("duplicate-result", "tool_result", 1003, { tool: "run_command", success: true }),
+      event("duplicate-result", "tool_result", 1003, {
+        tool: "run_command",
+        success: true,
+      }),
     ]);
 
     expect(summary.summary).toBe("Ran 1 command");

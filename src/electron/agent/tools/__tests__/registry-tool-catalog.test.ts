@@ -1072,6 +1072,7 @@ describe("ToolRegistry tool catalog versioning", () => {
       cwd: "web",
       background: true,
       startup_wait_ms: 8000,
+      title: "dev server",
     });
     await registry.executeTool("process_output", { process_id: "bg-1", tail_lines: 5 });
     await registry.executeTool("stop_process", { process_id: "bg-1" });
@@ -1081,6 +1082,7 @@ describe("ToolRegistry tool catalog versioning", () => {
       env: undefined,
       signal: undefined,
       startupWaitMs: 8000,
+      title: "dev server",
     });
     expect(runCommand).not.toHaveBeenCalled();
     expect(output).toHaveBeenCalledWith({ process_id: "bg-1", tail_lines: 5 }, undefined);

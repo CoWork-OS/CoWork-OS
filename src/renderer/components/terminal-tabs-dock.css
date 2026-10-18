@@ -171,6 +171,16 @@
   pointer-events: none;
 }
 
+.terminal-dock-notice {
+  position: absolute;
+  right: 16px;
+  bottom: 10px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  pointer-events: none;
+}
+
 .terminal-dock-icon-btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;

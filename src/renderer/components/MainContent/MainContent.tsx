@@ -121,6 +121,7 @@ import { useIsCalmTheme } from "../../hooks/useIsCalmTheme";
 import { usePositionUpdates } from "../../hooks/usePositionUpdates";
 import type { ReplayControls } from "../../hooks/useReplayMode";
 import { formatDuration, useTaskDuration } from "../../hooks/useTaskDuration";
+import { resolveInitialTaskTurnTiming } from "../../utils/task-turn-timing";
 import { useVoiceInput } from "../../hooks/useVoiceInput";
 import { useVoiceTalkMode } from "../../hooks/useVoiceTalkMode";
 import {
@@ -144,6 +145,8 @@ import {
   type OpenTerminalTabRequest,
 } from "../../utils/code-block-runs";
 import {
+  clearAcceptedComposerDraft,
+  clearAcceptedComposerDraftFence,
   isSameAcceptedComposerDraftFence,
   isSameComposerDraftSubmission,
   isTaskCreationAccepted,
@@ -311,6 +314,7 @@ import {
   guessVisualAttachmentMimeType,
   isVideoVisualAttachmentMimeType,
   joinWorkspaceRelativePath,
+  reconcileResolvedDraftAttachments,
   type ImportedAttachment,
   type PendingAttachment,
 } from "./attachments";
@@ -1081,6 +1085,7 @@ function MainContentComponent({
   const taskHeaderMenuButtonRef = useRef<HTMLButtonElement>(null);
   const stagingAttachmentIdsRef = useRef<Set<string>>(new Set());
   const pendingAttachmentIdsRef = useRef<Set<string>>(new Set());
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>(pendingAttachments);
   const lastDraftAttachmentSyncRef = useRef("");
   const previousTaskIdRef = useRef<string | undefined>(undefined);
   const previousDraftKeyRef = useRef<string | undefined>(undefined);
@@ -1123,6 +1128,7 @@ function MainContentComponent({
     inputValueRef.current = inputValue;
   }, [inputValue]);
   pendingAttachmentIdsRef.current = new Set(pendingAttachments.map((attachment) => attachment.id));
+  pendingAttachmentsRef.current = pendingAttachments;
 
   // A composer draft belongs to the task it was written for. When the user
   // presses New (or opens another history row), MainContent is retained and
@@ -1179,6 +1185,15 @@ function MainContentComponent({
         !previousDraftKeyRef.current &&
         stagingAttachmentIdsRef.current.size > 0;
       if (!preserveStaging) setInputValue(draftValue ?? "");
+      // A lookup can resolve before React renders the queued attachment state.
+      pendingAttachmentsRef.current = preserveStaging
+        ? [
+            ...restoredAttachments,
+            ...pendingAttachmentsRef.current.filter(
+              (item) => !restoredAttachments.some((restored) => restored.id === item.id),
+            ),
+          ]
+        : restoredAttachments;
       setPendingAttachments((current) =>
         preserveStaging
           ? [
@@ -1202,53 +1217,35 @@ function MainContentComponent({
       setModeSuggestions([]);
       if (restoredAttachments.length > 0 && onResolveDraftAttachment && draftSnapshot?.draftKey) {
         const draftKeyAtRestore = draftSnapshot.draftKey;
-        const draftRevisionAtRestore = draftRevision;
         void Promise.all(
           restoredAttachments.map(async (attachment) => ({
             attachment,
             resolved: await onResolveDraftAttachment(attachment.draftRefId as string),
           })),
         ).then((resolvedAttachments) => {
-          if (
-            draftSnapshot?.draftKey !== draftKeyAtRestore ||
-            draftRevisionRef.current !== draftRevisionAtRestore
-          ) {
-            return;
-          }
-          const unavailableRefs = new Set<string>();
-          setPendingAttachments((current) =>
-            current.map((candidate) => {
-              const result = resolvedAttachments.find(
-                (entry) => entry.attachment.id === candidate.id,
-              )?.resolved;
-              if (!result) {
-                if (candidate.draftRefId) unavailableRefs.add(candidate.draftRefId);
-                return { ...candidate, status: "unavailable" as const };
-              }
-              return {
-                ...candidate,
-                path: result.path,
-                size: result.ref.size,
-                ...(result.ref.mimeType ? { mimeType: result.ref.mimeType } : {}),
-                status: "available" as const,
-              };
-            }),
+          const currentDraft = draftSnapshotRef.current;
+          const restored = reconcileResolvedDraftAttachments({
+            draftKeyAtRestore,
+            currentDraftKey: draftKeyRef.current,
+            currentDraft,
+            pendingAttachments: pendingAttachmentsRef.current,
+            resolvedAttachments,
+          });
+          if (!restored) return;
+          setPendingAttachments(
+            (current) =>
+              // React may apply this updater after another owner or attachment
+              // edit, so reconcile against the live state again at application.
+              reconcileResolvedDraftAttachments({
+                draftKeyAtRestore,
+                currentDraftKey: draftKeyRef.current,
+                currentDraft: draftSnapshotRef.current,
+                pendingAttachments: current,
+                resolvedAttachments,
+              })?.pendingAttachments ?? current,
           );
-          if (unavailableRefs.size > 0) {
-            onDraftPatch?.({
-              attachments: (draftSnapshot.attachments ?? []).map((attachment) =>
-                unavailableRefs.has(attachment.refId)
-                  ? { ...attachment, status: "unavailable" as const }
-                  : attachment,
-              ),
-            });
-          } else {
-            onDraftPatch?.({
-              attachments: (draftSnapshot.attachments ?? []).map((attachment) => ({
-                ...attachment,
-                status: "available" as const,
-              })),
-            });
+          if (restored.draftAttachments !== currentDraft?.attachments) {
+            recordDraftMutation(onDraftPatch?.({ attachments: restored.draftAttachments }));
           }
         });
       } else if (restoredAttachments.length > 0) {
@@ -1266,7 +1263,15 @@ function MainContentComponent({
     }
     previousTaskIdRef.current = task?.id;
     previousDraftKeyRef.current = draftKey;
-  }, [draftRevision, draftSnapshot, draftValue, onDraftPatch, onResolveDraftAttachment, task?.id]);
+  }, [
+    draftRevision,
+    draftSnapshot,
+    draftValue,
+    onDraftPatch,
+    onResolveDraftAttachment,
+    recordDraftMutation,
+    task?.id,
+  ]);
 
   // Focused mode card pool - pick random cards on mount
   const focusedCards = useMemo(
@@ -2598,25 +2603,29 @@ function MainContentComponent({
     setTranscriptModeOverride((current) => (current === "inspect" ? null : "inspect"));
   }, [defaultTranscriptMode]);
   const canToggleCompletedTranscript = defaultTranscriptMode === "delivery";
-  const liveWorkStartedAt = task ? (latestUserMessageTimestamp ?? task.createdAt) : Date.now();
-  const liveWorkCompletedAt = isTaskFinished
-    ? (task?.completedAt ?? task?.updatedAt)
-    : task?.completedAt;
+  const initialTurnTiming = useMemo(
+    () =>
+      resolveInitialTaskTurnTiming({
+        task,
+        events: rawEvents,
+        isTaskWorking,
+        hasMoreHistory: hasMoreTimelineHistory,
+      }),
+    [task, rawEvents, isTaskWorking, hasMoreTimelineHistory],
+  );
   const liveWorkDuration = useTaskDuration(
-    liveWorkStartedAt,
-    liveWorkCompletedAt,
-    Boolean(task && isTaskWorking),
+    initialTurnTiming.startedAt,
+    initialTurnTiming.completedAt,
+    initialTurnTiming.isWorking,
   );
   const persistedWorkDuration =
-    isTaskFinished &&
-    typeof task?.lastRunDurationMs === "number" &&
-    Number.isFinite(task.lastRunDurationMs)
-      ? formatDuration(task.lastRunDurationMs)
+    initialTurnTiming.durationMs !== undefined
+      ? formatDuration(initialTurnTiming.durationMs)
       : null;
   const workDuration = persistedWorkDuration ?? liveWorkDuration;
-  const workDurationLabel = isTaskWorking
+  const workDurationLabel = initialTurnTiming.isWorking
     ? `Working for ${liveWorkDuration}`
-    : isTaskFinished
+    : initialTurnTiming.isFinished
       ? `Worked for ${workDuration}`
       : "Activity";
 
@@ -5054,30 +5063,35 @@ function MainContentComponent({
       return false;
     };
     const clearAcceptedComposer = async (): Promise<boolean> => {
-      if (!isSubmittedDraftCurrent()) return false;
-      acceptedDraftClearRef.current = {
-        draftKey: submittedDraftKey,
-        taskId: submittedTaskId,
-        revision: submittedDraftRevision,
-        text: submittedInputValue,
-      };
-      // Clear the visible editor at the durable execution-acceptance boundary
-      // instead of making the user wait for the SQLite draft deletion round
-      // trip. The hydration fence above prevents the old persisted snapshot
-      // from immediately putting the accepted prompt back.
-      clearComposer(false);
-      try {
-        const accepted = await onDraftAccepted?.(submittedDraftRevision, submittedDraft);
-        if (accepted === false) {
-          restoreAcceptedComposer();
-          return false;
-        }
-      } catch {
-        restoreAcceptedComposer();
-        return false;
+      const accepted = await clearAcceptedComposerDraft({
+        isCurrentSubmission: isSubmittedDraftCurrent,
+        clearVisible: () => {
+          acceptedDraftClearRef.current = {
+            draftKey: submittedDraftKey,
+            taskId: submittedTaskId,
+            revision: submittedDraftRevision,
+            text: submittedInputValue,
+          };
+          // Hide the accepted text while the durable clear is in flight. The
+          // hydration fence prevents an old snapshot from restoring it.
+          clearComposer(false);
+        },
+        // Creating a task selects it before returning. Always retire the
+        // original Home draft even if a different editor is now visible.
+        clearPersisted: () => onDraftAccepted?.(submittedDraftRevision, submittedDraft),
+        restoreVisible: restoreAcceptedComposer,
+      });
+      if (accepted) {
+        acceptedDraftClearRef.current = clearAcceptedComposerDraftFence(
+          acceptedDraftClearRef.current,
+          {
+            draftKey: submittedDraftKey,
+            taskId: submittedTaskId,
+            revision: submittedDraftRevision,
+          },
+        );
       }
-      acceptedDraftClearRef.current = null;
-      return true;
+      return accepted;
     };
     let shouldDeferComposerClear = false;
     let submissionResult: void | boolean | Promise<void | boolean> = undefined;
@@ -5438,7 +5452,7 @@ function MainContentComponent({
       if (shouldDeferComposerClear) {
         void Promise.resolve(submissionResult)
           .then(async (sent) => {
-            if (!isTaskCreationAccepted(sent) || !isSubmittedDraftCurrent()) {
+            if (!isTaskCreationAccepted(sent)) {
               if (
                 submittedFollowUpMessageId &&
                 pendingFollowUpSubmissionRef.current?.messageId === submittedFollowUpMessageId
@@ -5447,10 +5461,8 @@ function MainContentComponent({
               }
               return;
             }
-            // Clear the durable draft before clearing the local input. Task
-            // progress events can re-render this component while the IPC
-            // clear is in flight; clearing local state first lets the still
-            // persisted draft hydrate the just-sent text back into the box.
+            // Acceptance clears the submitted owner even if the user has
+            // moved to another task while its send was pending.
             await clearAcceptedComposer();
             if (
               submittedFollowUpMessageId &&

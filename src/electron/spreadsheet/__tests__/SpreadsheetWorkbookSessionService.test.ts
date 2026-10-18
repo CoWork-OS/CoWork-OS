@@ -5,8 +5,46 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 
 import { SpreadsheetWorkbookSessionService } from "../SpreadsheetWorkbookSessionService";
+import { buildOpenpyxlChartWorkbook } from "../../utils/document-generators/__tests__/openpyxl-style-workbook";
 
 describe("SpreadsheetWorkbookSessionService", () => {
+  it("makes chart workbooks read-only and leaves their package intact", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-chart-session-"));
+    try {
+      const file = path.join(tmpDir, "chart.xlsx");
+      const original = await buildOpenpyxlChartWorkbook();
+      await fs.writeFile(file, original);
+      const service = new SpreadsheetWorkbookSessionService();
+      const opened = await service.openWorkbook({ filePath: file, workspacePath: tmpDir });
+      expect(opened.session?.capabilities).toMatchObject({
+        canEditCells: false,
+        canEditStructure: false,
+      });
+      expect(opened.session?.warnings).toContainEqual(
+        expect.objectContaining({ code: "compat-chart-read-only" }),
+      );
+      const session = opened.session!;
+      expect(
+        service.applyPatches(session.sessionId, [
+          {
+            type: "setCell",
+            sheetId: session.sheets[0].id,
+            row: 2,
+            column: 4,
+            input: { value: "150" },
+          },
+        ]),
+      ).toMatchObject({ success: false, error: expect.stringContaining("could remove charts") });
+      expect(await service.saveWorkbook(session.sessionId)).toMatchObject({
+        success: false,
+        error: expect.stringContaining("could remove charts"),
+      });
+      expect(await fs.readFile(file)).toEqual(original);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("opens an xlsx workbook and returns a viewport", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-workbook-session-"));
     const outPath = path.join(tmpDir, "book.xlsx");

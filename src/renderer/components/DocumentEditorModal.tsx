@@ -315,7 +315,7 @@ export function DocumentEditorModal({
                       <div className="document-editor-pdf-page-label">
                         Page {page.pageIndex + 1}
                         {page.usedOcr ? " • OCR" : ""}
-                        {page.truncated ? " • clipped" : ""}
+                        {page.truncated ? " • text excerpt" : ""}
                       </div>
                       <div className="document-editor-pdf-page-text">{page.text}</div>
                     </div>

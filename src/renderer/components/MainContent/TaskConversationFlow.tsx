@@ -65,6 +65,7 @@ import {
 } from "lucide-react";
 import { InlineImagePreview } from "../InlineImagePreview";
 import { useVirtualList } from "../../hooks/useVirtualList";
+import { isActivityBlockInLatestTurn } from "../../utils/task-turn-timing";
 import { TASK_FEED_MEASUREMENT_LAYOUT_VERSION } from "./main-content-constants";
 import type { SettingsTab } from "./main-content-types";
 import {
@@ -77,6 +78,7 @@ import { collectTurnOutputSummaries } from "./turn-outputs";
 import { TurnOutputsRow } from "./TurnOutputsRow";
 import {
   getAssistantBubbleStatusLabel,
+  isAssistantMessageInLatestTurn,
   getCompletionSummaryText,
   normalizeInitialPromptText,
   shouldSuppressInitialPromptUserEvent,
@@ -1385,7 +1387,10 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                   return actionBlockState.hasBlockCommandOutputs ? 180 : 0;
                 }
                 const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
-                const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
+                const isActive =
+                  isLatestActionBlock &&
+                  (isTaskWorking || isReplayMode) &&
+                  isActivityBlockInLatestTurn(item.events as TaskEvent[], events);
                 const expandSteps = verboseSteps || isReplayMode;
                 const expanded = resolveDisclosureExpanded({
                   intent: getDisclosureIntent(disclosureIntents, "group", item.blockId),
@@ -1638,6 +1643,10 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                   row.revision,
                   getDisclosureIntent(disclosureIntents, "group", item.blockId),
                   timelineIndex === lastActionBlockTimelineIndex ? 1 : 0,
+                  timelineIndex === lastActionBlockTimelineIndex &&
+                  isActivityBlockInLatestTurn(item.events as TaskEvent[], events)
+                    ? 1
+                    : 0,
                   isTaskWorking ? 1 : 0,
                   isReplayMode ? 1 : 0,
                   verboseSteps ? 1 : 0,
@@ -1660,6 +1669,10 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                 currentStep?.description ?? "none",
                 task.status,
                 task.terminalStatus ?? "none",
+                lastAssistantMessage?.id === event.id &&
+                isAssistantMessageInLatestTurn(event, events)
+                  ? 1
+                  : 0,
                 isTaskWorking ? 1 : 0,
                 verboseSteps ? 1 : 0,
                 effectiveType,
@@ -1872,7 +1885,10 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                   );
                 }
                 const isLatestActionBlock = timelineIndex === lastActionBlockTimelineIndex;
-                const isActive = isLatestActionBlock && (isTaskWorking || isReplayMode);
+                const isActive =
+                  isLatestActionBlock &&
+                  (isTaskWorking || isReplayMode) &&
+                  isActivityBlockInLatestTurn(item.events as TaskEvent[], events);
                 const actionBlockState = getActionBlockRenderState(
                   item.events as TaskEvent[],
                   item.eventIndices,
@@ -2630,6 +2646,7 @@ export const TaskConversationFlow = memo(function TaskConversationFlow(
                     ? getAssistantBubbleStatusLabel(
                         task,
                         agentContext.getMessage("taskBlocked") || "Needs approval",
+                        { event, events },
                       )
                     : "";
                 const botMessageSender =

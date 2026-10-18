@@ -83,7 +83,11 @@ export const getCompletionSummaryText = (event: TaskEvent): string => {
 export const getAssistantBubbleStatusLabel = (
   task: Pick<Task, "status" | "terminalStatus" | "awaitingUserInputReasonCode">,
   blockedApprovalLabel = "Needs approval",
+  context?: { event: TaskEvent; events: TaskEvent[] },
 ): string => {
+  // A follow-up can be cancelled or paused before it produces any answer.
+  // Its status must not relabel the last successful answer from an older turn.
+  if (context && !isAssistantMessageInLatestTurn(context.event, context.events)) return "";
   if (task.status === "completed") {
     if (task.terminalStatus === "needs_user_action") return "Completed - action required";
     if (task.terminalStatus === "partial_success") return "Completed - partial success";
@@ -112,6 +116,15 @@ export const getAssistantBubbleStatusLabel = (
   }
   return "";
 };
+
+export function isAssistantMessageInLatestTurn(event: TaskEvent, events: TaskEvent[]): boolean {
+  return !events.some(
+    (candidate) =>
+      candidate.taskId === event.taskId &&
+      candidate.timestamp > event.timestamp &&
+      getEffectiveTaskEventType(candidate) === "user_message",
+  );
+}
 
 export const isLowSignalPauseMessage = (
   message: string | null | undefined,

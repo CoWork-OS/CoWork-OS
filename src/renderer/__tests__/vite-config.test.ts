@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,7 @@ import { loadConfigFromFile } from "vite";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const viteConfigPath = path.join(repositoryRoot, "vite.config.mts");
 const webViteConfigPath = path.join(repositoryRoot, "vite.web.config.mts");
+const require = createRequire(import.meta.url);
 
 describe("renderer Vite configuration", () => {
   it("preserves the Electron renderer output contract under Vite 8", async () => {
@@ -23,6 +25,21 @@ describe("renderer Vite configuration", () => {
     expect(loaded?.config.build?.emptyOutDir).toBe(true);
     expect(loaded?.config.server?.host).toBe("127.0.0.1");
     expect(loaded?.config.server?.strictPort).toBe(true);
+  });
+
+  it("serves font and PDF worker assets from shared dependency packages without exposing all dependencies", async () => {
+    const loaded = await loadConfigFromFile(
+      { command: "serve", mode: "development" },
+      viteConfigPath,
+      repositoryRoot,
+    );
+    const allowedPaths = loaded?.config.server?.fs?.allow ?? [];
+    const pdfRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+    const fontRoot = path.dirname(require.resolve("@fontsource/montserrat/package.json"));
+
+    expect(allowedPaths).toContain(pdfRoot);
+    expect(allowedPaths).toContain(fontRoot);
+    expect(allowedPaths).not.toContain(path.dirname(pdfRoot));
   });
 });
 

@@ -1,0 +1,17 @@
+{
+  "id": "ordinary-workflow-pdf-contrast-2026-10-17",
+  "title": "PDF text sidebar is hard to read in the light theme",
+  "source": {
+    "audit": "ordinary-desktop-workflow-walkthrough-2026-10-17",
+    "issue": 653,
+    "pullRequest": 673
+  },
+  "prompt": "Open a PDF in the document editor using the light theme and inspect its statistics and text sidebar.",
+  "assertions": {
+    "requiredBehavior": "Use readable light-theme colors and describe the bounded sidebar extract as a text excerpt."
+  },
+  "executableTests": [],
+  "executableCommand": null,
+  "liveAcceptance": "Verified in the macOS Electron walkthrough; provider-backed journeys used the connected ChatGPT subscription with GPT-6.1 Sol.",
+  "notes": "Traceability specification, not an automatically graded eval result. The linked executable tests provide measured regression coverage. The PDF contrast/text-label change additionally relies on the recorded live visual check."
+}

@@ -15,6 +15,7 @@ import { friendlyToolLaneCompletedLabel, friendlyToolRunningLabel } from "./time
 import { selectTaskStatusMetricSlots } from "./task-impact-metrics";
 import { deriveApprovalEventState } from "./approval-event-state";
 import { isTaskActivelyWorking } from "./task-working-state";
+import { isActivityBlockInLatestTurn } from "./task-turn-timing";
 
 interface ActivityBlockSource {
   kind: "action_block";
@@ -124,7 +125,14 @@ function applyPlanDelta(current: PlanStep[], event: TaskEvent, eventIndex: numbe
 
 /** Select the newest valid plan definition, then fold only causally newer step state. */
 export function deriveRevisionAwarePlanSteps(events: TaskEvent[]): PlanStep[] {
-  const ordered = events.map((event, index) => ({ event, index })).sort(compareEventOrder);
+  const history = events.map((event, index) => ({ event, index })).sort(compareEventOrder);
+  // A terminal task's follow-up starts a new run; its historical plan is not
+  // the follow-up's live progress. Ordinary checkpoint resumes retain the plan.
+  const runStart = history.findLastIndex(
+    ({ event }) =>
+      getEffectiveTaskEventType(event) === "task_resumed" && event.payload?.newRunStarted === true,
+  );
+  const ordered = runStart >= 0 ? history.slice(runStart) : history;
   let steps: PlanStep[] = [];
   let selectedRevision = -1;
   let selectedOrderIndex = -1;
@@ -322,7 +330,13 @@ export function deriveActivityGroups(args: {
     const hasExplicitFinish = block.events.some(
       (event) => event.type === "timeline_group_finished",
     );
-    const running = isLatest && !hasExplicitFinish && !failed && !blocked && taskWorking;
+    const running =
+      isLatest &&
+      !hasExplicitFinish &&
+      !failed &&
+      !blocked &&
+      taskWorking &&
+      isActivityBlockInLatestTurn(block.events, activityEvents);
     const status: ActivityGroupViewModel["status"] = blocked
       ? "blocked"
       : failed
@@ -495,6 +509,10 @@ export function deriveTaskStatusStrip(args: {
   let state = stripState(args.task);
   if (blocking?.state === "approval") state = "waiting_for_approval";
   if (blocking?.state === "input") state = "waiting_for_input";
+  const failureLabel =
+    state === "failed" && typeof args.task?.error === "string"
+      ? args.task.error.trim().slice(0, 2_000)
+      : "";
   const activeIndex = args.planSteps.findIndex((step) => step.status === "in_progress");
   const failedIndex = args.planSteps.findIndex((step) => step.status === "failed");
   const pendingIndex = args.planSteps.findIndex((step) => step.status === "pending");
@@ -548,14 +566,17 @@ export function deriveTaskStatusStrip(args: {
     state,
     tone: toneForState(state),
     primaryLabel,
+    ...(failureLabel ? { failureLabel } : {}),
     // The strip already shows `primaryLabel`; a phase label that reads the same (a running
     // group whose latest event resolves to "Working") would print the state twice.
-    ...(currentGroup?.latestActivityLabel &&
-    !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel)
-      ? { phaseLabel: currentGroup.latestActivityLabel }
-      : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
-        ? { phaseLabel: planStepLabel(activeStep.description) }
-        : {}),
+    ...(failureLabel
+      ? {}
+      : currentGroup?.latestActivityLabel &&
+          !labelsAreEquivalent(currentGroup.latestActivityLabel, primaryLabel)
+        ? { phaseLabel: currentGroup.latestActivityLabel }
+        : activeStep?.description && !labelsAreEquivalent(activeStep.description, primaryLabel)
+          ? { phaseLabel: planStepLabel(activeStep.description) }
+          : {}),
     compactMetricSlots: selectTaskStatusMetricSlots(args.outcomeMetrics, 2),
     planSteps: args.planSteps,
     ...(activeStep ? { activeStepId: activeStep.id } : {}),

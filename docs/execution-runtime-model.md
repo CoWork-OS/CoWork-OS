@@ -115,6 +115,44 @@ That provenance is then reused by the approval layer:
 This preserves the existing rich read/search workflow while making outbound transfer decisions aware
 of where the candidate content came from.
 
+## Tool Attempts and Unknown Outcomes
+
+A call that can change something outside the conversation is recorded before it is dispatched,
+so a timeout, a lost connection, a stop or a crash leaves a record instead of nothing.
+
+- **Effect.** `resolveToolEffect` (`src/electron/agent/runtime/tool-effect.ts`) classifies each
+  call as `read`, `write` or `unknown`. Built-in tools use the same taxonomy as the permission
+  engine (`isMutatingTool`, which consults `TOOL_GROUPS["group:write"]` and
+  `["group:destructive"]` first). An MCP tool is a read only when its server marks it
+  `readOnlyHint`; otherwise its effect is `unknown`.
+- **Attempts.** For `write` and `unknown` calls, `TaskExecutor` writes a `tool_attempts` row
+  (`started`) before dispatch and finishes it as `completed`, `failed`, `cancelled` or `unknown`.
+  The store is `src/electron/database/tool-attempt-sql.ts`, reached through the async
+  `ToolAttemptRepository` facade.
+- **Idempotency key.** `sha256(taskId, stepId, toolName, canonical arguments)`, truncated to 32 hex
+  characters. It depends only on persisted inputs, so it is the same across retries and restarts.
+- **Unknown outcome.** When a `write` or `unknown` call times out, loses its transport or is
+  aborted while running, `normalizeToolOutcome(…, { effect })` returns `unknown` instead of
+  `error`. The model receives: "Outcome unknown: `<tool>` may have completed. Do not repeat it
+  blindly. First check the current state with `<read tool>`. If you must retry, reuse idempotency
+  key `<key>`." Read-only calls keep the previous timeout handling.
+- **Read-back.** A later successful read of the same target marks the attempt `checked`. A later
+  completed call with the same idempotency key also settles it.
+- **Completion.** When a task finishes with an unknown attempt that was neither read back nor
+  repeated successfully, it ends `needs_user_action` instead of `ok` or `partial_success`, and
+  the summary gets a "Not verified: …" line naming each call.
+- **Restart.** At startup, attempts a previous process left `started` become `unknown`
+  (`process_restarted`).
+- **Stop.** `agent_interrupt_confirmed` carries `inFlight`: the calls that were running when the
+  stop was requested, each with `toolName`, `attemptId`, `idempotencyKey`, `effect` and
+  `outcome` (`unknown`, `completed` or `cancelled`). Calls still open become `unknown`, and the
+  persisted cancellation reason names them.
+
+Replay fixtures `unknown-outcome` and `stop-in-flight` in
+`src/electron/sessions/WorkSessionReplayEvaluationService.ts` check that an unresolved unknown
+outcome never replays as `completed` (finding `false_success:unknown_outcome`) and that a stop
+reports the call in flight.
+
 ## Prompt Stack
 
 Execution prompts are assembled from named sections instead of a single monolithic string.

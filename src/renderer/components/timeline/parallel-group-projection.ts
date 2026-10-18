@@ -384,7 +384,10 @@ export function buildParallelGroupProjection(events: TaskEvent[]): ParallelGroup
       lane.finishedAt = event.timestamp;
       lane.status = "failed";
       const finalName = toolName || lane.toolName || "";
-      if (finalName) {
+      if (payload.outcome === "unknown") {
+        // The call may have taken effect; say so instead of reporting a plain failure.
+        lane.title = `Outcome unknown: ${laneTitleForToolName(finalName || "tool")}`;
+      } else if (finalName) {
         lane.title = friendlyToolResultTitle(
           finalName,
           { error: typeof payload.error === "string" ? payload.error : "Tool failed" },

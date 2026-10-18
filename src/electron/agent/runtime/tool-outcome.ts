@@ -1,4 +1,4 @@
-import type { ToolResultEnvelopeStatus } from "../../../shared/types";
+import type { ToolAttemptEffect, ToolResultEnvelopeStatus } from "../../../shared/types";
 
 export type CanonicalToolOutcomeStatus = "success" | "error" | "blocked" | "cancelled" | "unknown";
 
@@ -31,6 +31,32 @@ const BLOCKED_STATUSES = new Set([
   "rejected",
 ]);
 const CANCELLED_STATUSES = new Set(["cancelled", "canceled", "aborted", "interrupted"]);
+const TIMEOUT_STATUSES = new Set(["timeout", "timed_out", "timed-out"]);
+/**
+ * Failures after which a dispatched call may still have had its effect: a timeout, a lost
+ * connection or transport, or an abort that arrived while the call was running.
+ */
+const OUTCOME_UNKNOWN_FAILURE =
+  /timed out|timeout|etimedout|econnreset|econnaborted|epipe|socket hang up|connection (?:closed|reset|lost)|transport (?:closed|error)|network error|aborted/i;
+
+/** What the caller knows about the call beyond its result. */
+export interface ToolOutcomeContext {
+  /** Whether the tool can change something; only `read` keeps the old timeout handling. */
+  effect?: ToolAttemptEffect;
+  /** The call's abort signal fired while it was running. */
+  aborted?: boolean;
+}
+
+function outcomeUnknown(reasonDetail: string | undefined, error?: unknown): CanonicalToolOutcome {
+  return {
+    status: "unknown",
+    success: false,
+    blocked: false,
+    retryable: false,
+    ...(error !== undefined ? { error } : {}),
+    reason: reasonDetail ? `outcome_unknown: ${reasonDetail}` : "outcome_unknown",
+  };
+}
 const UNKNOWN_STATUSES = new Set([
   "unknown",
   "queued",
@@ -74,8 +100,17 @@ function statusFrom(value: unknown): CanonicalToolOutcomeStatus | null {
  * win over optimistic `success` fields; a missing result is unknown rather
  * than silently treated as success.
  */
-export function normalizeToolOutcome(value: unknown, thrownError?: unknown): CanonicalToolOutcome {
+export function normalizeToolOutcome(
+  value: unknown,
+  thrownError?: unknown,
+  context: ToolOutcomeContext = {},
+): CanonicalToolOutcome {
+  const mayHaveEffect = context.effect !== undefined && context.effect !== "read";
   if (thrownError !== undefined) {
+    const message = messageFrom(thrownError);
+    if (mayHaveEffect && (context.aborted || OUTCOME_UNKNOWN_FAILURE.test(message ?? ""))) {
+      return outcomeUnknown(message, thrownError);
+    }
     return {
       status: "error",
       success: false,
@@ -110,6 +145,15 @@ export function normalizeToolOutcome(value: unknown, thrownError?: unknown): Can
           outer.type === "tool_result" ||
           outer.type === "tool_error")));
   const resultRecord = asRecord(nestedResult);
+  if (
+    mayHaveEffect &&
+    [...sources.map((candidate) => candidate.status), resultRecord?.status].some(
+      (candidate) =>
+        typeof candidate === "string" && TIMEOUT_STATUSES.has(candidate.trim().toLowerCase()),
+    )
+  ) {
+    return outcomeUnknown("timeout");
+  }
   const statuses = [
     ...sources.map((candidate) => statusFrom(candidate.status)),
     statusFrom(resultRecord?.status),

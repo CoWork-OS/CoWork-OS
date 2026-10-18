@@ -42,6 +42,7 @@ import {
 } from "./browser-host-sql";
 import { ComposerDraftStore } from "./composer-draft-repository";
 import { FollowUpRecoveryStore } from "./follow-up-recovery-sql";
+import { ToolAttemptStore } from "./tool-attempt-sql";
 import { TaskLabelStore } from "./TaskLabelRepository";
 import { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";
@@ -147,6 +148,27 @@ export const STORAGE_UNITS = {
     (db: Database.Database) => new TaskEventRepository(db),
     "findScopedMutationPage",
     { readonly: true },
+  ),
+  toolAttempt_begin: storeUnit((db: Database.Database) => new ToolAttemptStore(db), "begin", {
+    readonly: false,
+  }),
+  toolAttempt_finish: storeUnit((db: Database.Database) => new ToolAttemptStore(db), "finish", {
+    readonly: false,
+  }),
+  toolAttempt_listForTask: storeUnit(
+    (db: Database.Database) => new ToolAttemptStore(db),
+    "listForTask",
+    { readonly: true },
+  ),
+  toolAttempt_markStartedUnknown: storeUnit(
+    (db: Database.Database) => new ToolAttemptStore(db),
+    "markStartedUnknown",
+    { readonly: false },
+  ),
+  toolAttempt_recoverStartedAttempts: storeUnit(
+    (db: Database.Database) => new ToolAttemptStore(db),
+    "recoverStartedAttempts",
+    { readonly: false },
   ),
   // Startup follow-up recovery: reads every follow-up receipt, so it runs on the reader.
   taskEvent_findUnstartedFollowUpTaskIds: storeUnit(

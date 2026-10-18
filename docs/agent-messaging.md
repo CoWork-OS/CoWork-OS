@@ -18,7 +18,7 @@ incorporated the request.
 
 Agent creation also has two lifecycle states: `agent_spawn_requested` means dispatch has started, while `agent_spawned` is emitted only after a child handle exists. A failed dispatch is represented by `agent_failed` and is never shown as a successful creation.
 
-Queued follow-ups emit `agent_follow_up_scheduled` when accepted and `agent_follow_up_started` when the worker incorporates the message at a turn boundary. User cancellation emits `agent_interrupt_requested` followed by `agent_interrupt_confirmed` after the runtime has stopped the task. These events are persisted, projected into the semantic timeline, and kept separate from task completion so replay can distinguish acceptance, execution and interruption.
+Queued follow-ups emit `agent_follow_up_scheduled` when accepted and `agent_follow_up_started` when the worker incorporates the message at a turn boundary. User cancellation emits `agent_interrupt_requested` followed by `agent_interrupt_confirmed` after the runtime has stopped the task. When calls that write (or whose effect is unknown) were running at the stop, `agent_interrupt_confirmed.inFlight` lists each one as `{ toolName, attemptId, idempotencyKey, effect, outcome, target? }`; `outcome` is `unknown` for a call that never reported back, and the persisted cancellation reason names those calls. These events are persisted, projected into the semantic timeline, and kept separate from task completion so replay can distinguish acceptance, execution and interruption.
 
 ## Persistent bot-team messaging
 

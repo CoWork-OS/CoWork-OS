@@ -731,8 +731,16 @@ export function renderEventTitle(
       return "Started a follow-up";
     case "agent_interrupt_requested":
       return "Interruption requested";
-    case "agent_interrupt_confirmed":
-      return "Interruption confirmed";
+    case "agent_interrupt_confirmed": {
+      const inFlight = Array.isArray(event.payload?.inFlight) ? event.payload.inFlight : [];
+      const unverified = inFlight.filter(
+        (call: unknown) => (call as { outcome?: unknown } | null)?.outcome === "unknown",
+      ).length;
+      if (unverified === 0) return "Interruption confirmed";
+      return unverified === 1
+        ? "Stopped. 1 call was in flight; its result was not verified"
+        : `Stopped. ${unverified} calls were in flight; their results were not verified`;
+    }
     case "agent_completed":
       return "Closed an agent";
     case "agent_failed":

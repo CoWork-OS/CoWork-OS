@@ -30,6 +30,12 @@ import {
   type HandoffContractSummary,
   type ModelHandoff,
 } from "./model-handoff-note";
+import {
+  isToolOutcomeUnknownError,
+  ToolAttemptTracker,
+  type ToolAttemptPersistence,
+} from "./runtime/tool-attempts";
+import { resolveToolEffect } from "./runtime/tool-effect";
 import { effectiveTaskModelConfig } from "./task-model-config";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
@@ -7095,6 +7101,7 @@ ${transcript}
   private providerFailoverPreserveUntil = 0;
   /** Set when a thread moves to another provider; noted once on the next user message. */
   private pendingModelHandoff: ModelHandoff | null = null;
+  private toolAttemptTracker?: ToolAttemptTracker;
   private providerFailoverRequiresImageInput = false;
   private toolBatchExecutor?: ToolBatchExecutor;
 
@@ -11777,6 +11784,29 @@ ${transcript}
     );
   }
 
+  /** Durable attempts for write and unknown-effect calls; a no-op without a store. */
+  private get toolAttempts(): ToolAttemptTracker {
+    if (!this.toolAttemptTracker) {
+      let store: ToolAttemptPersistence | undefined;
+      try {
+        store = this.daemon.getToolAttemptRepository?.();
+      } catch (error) {
+        logger.debug(`${this.logTag} Tool attempts are not recorded:`, error);
+      }
+      this.toolAttemptTracker = new ToolAttemptTracker(store, this.task.id, () =>
+        this.daemon.noteToolOutcomeUnknown?.(this.task.id),
+      );
+    }
+    return this.toolAttemptTracker;
+  }
+
+  /** Correlation for a tool_error whose call may have had its effect. */
+  private toolErrorOutcomeFields(error: unknown): Record<string, unknown> {
+    return isToolOutcomeUnknownError(error)
+      ? { outcome: "unknown", idempotencyKey: error.idempotencyKey, attemptId: error.attemptId }
+      : {};
+  }
+
   private async runToolWithHeartbeat(
     toolName: string,
     input: unknown,
@@ -11819,6 +11849,15 @@ ${transcript}
             .catch(() => null)
         : null;
 
+    // Written before dispatch, so a timeout, lost transport, stop or crash leaves a record of a
+    // call whose effect is unknown instead of nothing.
+    const effect = resolveToolEffect(toolName);
+    const attempt = await this.toolAttempts.begin(
+      toolName,
+      input,
+      effect,
+      this.currentStepId || undefined,
+    );
     try {
       const coordinated = await withTimeout(
         runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
@@ -11865,7 +11904,13 @@ ${transcript}
       if (coordinated.error) {
         throw coordinated.error;
       }
+      const succeeded = coordinated.result?.success !== false;
+      if (attempt) await this.toolAttempts.completed(attempt, succeeded);
+      else if (effect === "read" && succeeded) await this.toolAttempts.readBack(toolName, input);
       return coordinated;
+    } catch (error) {
+      // A dispatched write that timed out or lost its transport may have had its effect.
+      throw await this.toolAttempts.failed(attempt, error, toolAbort.signal.aborted);
     } finally {
       parentSignal.removeEventListener("abort", onParentAbort);
     }
@@ -37281,6 +37326,7 @@ Return ONLY a JSON object:
                                 error: failureMessage,
                                 disabled: failureTracking.shouldDisable,
                                 disabledScope,
+                                ...this.toolErrorOutcomeFields(rawOutcome.error),
                               },
                               effectiveCorrelation,
                             ),
@@ -43710,6 +43756,7 @@ Return ONLY a JSON object:
                                 error: failureMessage,
                                 disabled: failureTracking.shouldDisable,
                                 disabledScope,
+                                ...this.toolErrorOutcomeFields(rawOutcome.error),
                               },
                               effectiveCorrelation,
                             ),

@@ -1325,6 +1325,49 @@ export type ToolResultEnvelopeStatus =
   | "cancelled"
   | "discarded";
 
+/** Whether a tool call can change something outside the conversation. */
+export type ToolAttemptEffect = "read" | "write" | "unknown";
+
+/**
+ * How a durable tool attempt ended. `unknown`: dispatched, then a timeout, lost transport or
+ * stop left its effect unknown. `checked`: an unknown attempt whose target was read back.
+ */
+export type ToolAttemptStatus =
+  | "started"
+  | "completed"
+  | "failed"
+  | "unknown"
+  | "cancelled"
+  | "checked";
+
+/** One dispatched call of a tool that writes or whose effect is unknown. */
+export interface ToolAttempt {
+  id: string;
+  taskId: string;
+  stepId?: string;
+  toolName: string;
+  argsHash: string;
+  /** Stable across retries and restarts: derived from task, step, tool and canonical args. */
+  idempotencyKey: string;
+  effect: Exclude<ToolAttemptEffect, "read">;
+  /** File, path or URL the call acts on, when its input names one. */
+  target?: string;
+  status: ToolAttemptStatus;
+  reason?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+/** A call that was running when a task was stopped (`agent_interrupt_confirmed.inFlight`). */
+export interface InterruptInFlightCall {
+  toolName: string;
+  attemptId: string;
+  idempotencyKey: string;
+  effect: Exclude<ToolAttemptEffect, "read">;
+  outcome: "unknown" | "completed" | "cancelled";
+  target?: string;
+}
+
 export interface ToolResultEvidence {
   type: "file" | "command" | "url" | "artifact" | "runtime_log";
   label: string;
@@ -3616,6 +3659,8 @@ export type WorkSessionReplayFixtureKind =
   | "credential"
   | "policy_revocation"
   | "child_session"
+  | "unknown_outcome"
+  | "stop_in_flight"
   | "handoff";
 
 export interface WorkSessionReplayFixture {

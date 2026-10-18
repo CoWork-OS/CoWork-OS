@@ -75,4 +75,40 @@ describe("normalizeToolOutcome", () => {
       success: false,
     });
   });
+
+  it("reports a timed-out or disconnected write as an unknown outcome, not an error", () => {
+    for (const message of [
+      "Tool write_file timed out after 30s",
+      "socket hang up",
+      "MCP transport closed",
+    ]) {
+      expect(
+        normalizeToolOutcome(undefined, new Error(message), { effect: "write" }),
+      ).toMatchObject({
+        status: "unknown",
+        retryable: false,
+        reason: expect.stringMatching(/^outcome_unknown/),
+      });
+    }
+    expect(
+      normalizeToolOutcome(undefined, new Error("stopped"), { effect: "unknown", aborted: true }),
+    ).toMatchObject({ status: "unknown" });
+    expect(
+      normalizeToolOutcome({ status: "timeout" }, undefined, { effect: "write" }),
+    ).toMatchObject({ status: "unknown" });
+  });
+
+  it("keeps the old handling for reads and for definite write failures", () => {
+    expect(
+      normalizeToolOutcome(undefined, new Error("Tool read_file timed out after 30s"), {
+        effect: "read",
+      }),
+    ).toMatchObject({ status: "error" });
+    expect(
+      normalizeToolOutcome(undefined, new Error("Path is outside the workspace"), {
+        effect: "write",
+      }),
+    ).toMatchObject({ status: "error" });
+    expect(normalizeToolOutcome({ status: "timeout" })).toMatchObject({ status: "error" });
+  });
 });

@@ -143,6 +143,8 @@ export type SettingsCategory =
   // Reply drafts on Today: whether it's on, and which drafts it prepared.
   | "mail-reply-drafts"
   | "improvement-loop"
+  // Ed25519 key CoWork signs its own web requests with when declared agent identity is on.
+  | "agent-identity"
   | "improvement-owner"
   | "improvement-history"
   | "worktree"

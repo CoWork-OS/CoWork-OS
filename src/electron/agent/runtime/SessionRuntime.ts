@@ -1608,6 +1608,7 @@ export class SessionRuntime {
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
+    notificationKind?: TaskFollowUpInput["notificationKind"],
   ): void {
     this.state.queues.pendingFollowUps.push({
       message,
@@ -1624,6 +1625,7 @@ export class SessionRuntime {
       ...(inReplyToMessageId !== undefined ? { inReplyToMessageId } : {}),
       ...(inReplyToTaskId !== undefined ? { inReplyToTaskId } : {}),
       ...(surfaceOrigin !== undefined ? { surfaceOrigin } : {}),
+      ...(notificationKind !== undefined ? { notificationKind } : {}),
     });
     this.saveSnapshot();
   }
@@ -4598,6 +4600,9 @@ export class SessionRuntime {
       const interactionMode = payload.interactionMode;
       pending.push({
         message: payload.message,
+        ...(payload.notificationKind === "background_process"
+          ? { notificationKind: "background_process" as const }
+          : {}),
         deliveryMode: payload.deliveryMode === "follow_up" ? "follow_up" : "message",
         ...(recoveredImages ? { images: recoveredImages } : {}),
         messageSource:

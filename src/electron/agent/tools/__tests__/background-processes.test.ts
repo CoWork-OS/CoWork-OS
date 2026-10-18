@@ -49,6 +49,73 @@ function startFake(manager: BackgroundProcessManager, taskId = "task-a", child =
 }
 
 describe("BackgroundProcessManager", () => {
+  it("promotes two quiet polls and delivers a redacted final tail once after stdio closes", () => {
+    const manager = new BackgroundProcessManager();
+    const { child, summary } = startFake(manager);
+    const completed = vi.fn();
+    const poll = () =>
+      manager.observeQuietPoll(
+        "task-a",
+        summary.process_id,
+        manager.read("task-a", summary.process_id),
+        completed,
+      );
+    expect(poll()).toBe(false);
+    expect(poll()).toBe(true);
+    expect(poll()).toBe(true);
+    child.emit("exit", 7, null);
+    expect(completed).not.toHaveBeenCalled();
+    child.stdout!.emit("data", "final password=hunter2\n");
+    child.emit("close", 7, null);
+    child.emit("close", 7, null);
+    expect(completed).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ exit_code: 7 }),
+      "final password=[REDACTED]\n",
+    );
+  });
+  it("resets quiet checks on new output and never promises a notification after exit", () => {
+    const manager = new BackgroundProcessManager();
+    const { child, summary } = startFake(manager);
+    const poll = () =>
+      manager.observeQuietPoll(
+        "task-a",
+        summary.process_id,
+        manager.read("task-a", summary.process_id),
+        vi.fn(),
+      );
+    expect(poll()).toBe(false);
+    child.stdout!.emit("data", "progress");
+    expect(poll()).toBe(false);
+    expect(poll()).toBe(false);
+    child.emit("exit", 0, null);
+    expect(poll()).toBe(false);
+    child.emit("close", 0, null);
+  });
+  it("does not deliver completion after task cancellation", async () => {
+    const manager = new BackgroundProcessManager();
+    const { child, summary } = startFake(manager);
+    const completed = vi.fn();
+    const output = manager.read("task-a", summary.process_id);
+    manager.observeQuietPoll("task-a", summary.process_id, output, completed);
+    manager.observeQuietPoll("task-a", summary.process_id, output, completed);
+    await manager.stopAllForTask("task-a", "task_cancelled");
+    child.emit("close", null, "SIGTERM");
+    expect(completed).not.toHaveBeenCalled();
+  });
+  it("keeps a notification-owned job alive without requiring more polling", () => {
+    let now = 0;
+    const manager = new BackgroundProcessManager(() => now);
+    const { child, summary, signals } = startFake(manager);
+    const output = manager.read("task-a", summary.process_id);
+    manager.observeQuietPoll("task-a", summary.process_id, output, vi.fn());
+    manager.observeQuietPoll("task-a", summary.process_id, output, vi.fn());
+    now = BACKGROUND_PROCESS_IDLE_TIMEOUT_MS + 1;
+    manager.sweep();
+    expect(signals).toEqual([]);
+    child.emit("exit", 0, null);
+    child.emit("close", 0, null);
+  });
+
   it("pages output with offsets, rereads from 0 and tails lines", () => {
     const manager = new BackgroundProcessManager();
     const { child, summary } = startFake(manager);

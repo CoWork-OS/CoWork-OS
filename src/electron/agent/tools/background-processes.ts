@@ -153,6 +153,9 @@ interface ProcessRecord {
   exited: Promise<void>;
   released: boolean;
   silenced: boolean;
+  quietPolls?: number;
+  lastPollOffset?: number;
+  completion?: (summary: BackgroundProcessSummary, output: string) => void;
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
@@ -267,7 +270,22 @@ export class BackgroundProcessManager {
     };
     child.once("exit", (code, signal) => finish(code, signal));
     child.once("error", (error) => finish(null, null, error));
-    child.once("close", () => this.release(record));
+    child.once("close", () => {
+      this.release(record);
+      const completion = record.completion;
+      record.completion = undefined;
+      // close follows stdio draining. A stopped/cancelled task must never be woken.
+      if (completion && !record.silenced && record.status === "exited") {
+        try {
+          completion(
+            this.summarize(record),
+            boundOutput(record.redact(record.buffer), DEFAULT_READ_CHARS).text,
+          );
+        } catch (error) {
+          log.warn("Background completion notification failed", error);
+        }
+      }
+    });
     if (record.pid === null) {
       // spawn() failed synchronously enough that no PID exists; "error" follows.
       log.warn(`Background process ${record.id} has no PID`);
@@ -363,6 +381,29 @@ export class BackgroundProcessManager {
     };
   }
 
+  /** Two empty observations hand ownership of waiting to the completion callback. */
+  observeQuietPoll(
+    taskId: string,
+    processId: string,
+    output: BackgroundProcessOutput,
+    completion: (summary: BackgroundProcessSummary, output: string) => void,
+  ): boolean {
+    const record = this.get(taskId, processId);
+    if (record.status !== "running") return false;
+    if (record.completion) return true;
+    if (
+      output.output.length > 0 ||
+      (record.lastPollOffset !== undefined && record.lastPollOffset !== output.next_offset)
+    ) {
+      record.quietPolls = 0;
+    } else record.quietPolls = (record.quietPolls ?? 0) + 1;
+    record.lastPollOffset = output.next_offset;
+    if ((record.quietPolls ?? 0) < 2) return false;
+    // This synchronous claim cannot race an exit callback on the same event loop.
+    record.completion = completion;
+    return true;
+  }
+
   /** Add a line from CoWork itself (not the process) to the process output. */
   appendNotice(taskId: string, processId: string, text: string): void {
     this.append(this.get(taskId, processId), text);
@@ -449,7 +490,7 @@ export class BackgroundProcessManager {
     const finishedByTask = new Map<string, ProcessRecord[]>();
     for (const record of this.records.values()) {
       if (record.status === "running") {
-        if (now - record.lastAccessAt >= BACKGROUND_PROCESS_IDLE_TIMEOUT_MS) {
+        if (!record.completion && now - record.lastAccessAt >= BACKGROUND_PROCESS_IDLE_TIMEOUT_MS) {
           void this.stopRecord(record, "idle_timeout");
         }
         continue;

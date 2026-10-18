@@ -1,4 +1,5 @@
 import { verifiedPhoneScreenshotPath } from "../phone/phone-screenshot-evidence";
+import { isFreshAgentHandoff } from "./background-process-notifications";
 import { narrowestBotWorksOn, type BotWorksOn } from "../../shared/bot-computer";
 import { COMPUTER_USE_WAIT_MS, isComputerUseToolName } from "../../shared/computer-use-contract";
 import { AGENT_DISPATCH_STEP_DESCRIPTION } from "../../shared/generated-plan-steps";
@@ -449,6 +450,7 @@ type TaskExecutorFollowUpOptions = Pick<
   | "agentConfigOverride"
   | "interactionMode"
   | "messageSource"
+  | "notificationKind"
   | "messageId"
   | "senderTaskId"
   | "senderLabel"
@@ -35263,7 +35265,7 @@ Return ONLY a JSON object:
                 throw new Error(`Queued follow-up ${pendingMessageId} has no active receipt.`);
               }
               this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
-              const isPendingBotHandoff = pendingMsg.messageSource === "agent";
+              const isPendingBotHandoff = isFreshAgentHandoff(pendingMsg);
               if (isPendingBotHandoff && !resetForPendingBotHandoff) {
                 this.resetConversationForBotHandoff();
                 messages = this.conversationHistory;
@@ -41049,6 +41051,7 @@ Return ONLY a JSON object:
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
+    notificationKind?: TaskFollowUpInput["notificationKind"],
   ): void {
     if (this.shutdownRequested) {
       throw new Error("Task executor is shutting down; follow-up was not queued.");
@@ -41068,6 +41071,7 @@ Return ONLY a JSON object:
       inReplyToMessageId,
       inReplyToTaskId,
       surfaceOrigin,
+      notificationKind,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
@@ -41159,6 +41163,7 @@ Return ONLY a JSON object:
     context?: Pick<
       TaskFollowUpInput,
       | "messageSource"
+      | "notificationKind"
       | "messageId"
       | "senderTaskId"
       | "senderLabel"
@@ -41169,6 +41174,7 @@ Return ONLY a JSON object:
   ): Record<string, string> {
     return {
       ...(context?.surfaceOrigin ? { surfaceOrigin: context.surfaceOrigin } : {}),
+      ...(context?.notificationKind ? { notificationKind: context.notificationKind } : {}),
       ...(context?.messageSource ? { messageSource: context.messageSource } : {}),
       ...(context?.messageId ? { messageId: context.messageId } : {}),
       ...(context?.senderTaskId ? { senderTaskId: context.senderTaskId } : {}),
@@ -41809,6 +41815,7 @@ Return ONLY a JSON object:
       messageContext?: Pick<
         TaskFollowUpInput,
         | "messageSource"
+        | "notificationKind"
         | "messageId"
         | "senderTaskId"
         | "senderLabel"
@@ -41959,7 +41966,7 @@ Return ONLY a JSON object:
     if (goalFollowUp.executionMessage) {
       executionMessage = goalFollowUp.executionMessage;
     }
-    const isFreshBotHandoff = opts?.messageContext?.messageSource === "agent";
+    const isFreshBotHandoff = isFreshAgentHandoff(opts?.messageContext);
     if (isFreshBotHandoff && !recoveredFromTurnLimit) {
       this.resetConversationForBotHandoff();
       executionMessage = buildFreshBotHandoffPrompt(
@@ -42525,7 +42532,7 @@ Return ONLY a JSON object:
                 throw new Error(`Queued follow-up ${pendingMessageId} has no active receipt.`);
               }
               this.applyQueuedAgentConfigOverride(pendingMsg.agentConfigOverride);
-              const isPendingBotHandoff = pendingMsg.messageSource === "agent";
+              const isPendingBotHandoff = isFreshAgentHandoff(pendingMsg);
               if (isPendingBotHandoff && !resetForPendingBotHandoff) {
                 this.resetConversationForBotHandoff();
                 messages = this.conversationHistory;

@@ -420,3 +420,10 @@ If defaults, behavior, or architecture change, update this file in the same PR.
 Local Desktop edits queued initial prompts and human follow-ups through authorized IPC.
 The durable receipt owns complete edits; checkpoint text wins over truncated previews.
 See [Editable queued inputs](queued-inputs.md).
+
+## Background job completion
+
+Tracked jobs promote repeated quiet polls into completion delivery. Finished notices wait
+in the task journal during a pause or block and retry on lifecycle changes. Deterministic
+message IDs and cancellation tombstones prevent duplicate or cancelled delivery.
+See [Tracked background jobs](background-jobs.md).

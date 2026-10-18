@@ -1003,6 +1003,30 @@ describe("SessionRuntime", () => {
     },
   );
 
+  it("restores a background notification's provenance even without a runtime snapshot", () => {
+    const restored = createHarness();
+    restored.runtime.restoreFromEvents([
+      {
+        id: "receipt",
+        taskId: "task-1",
+        timestamp: 1,
+        type: "user_message",
+        payload: {
+          message: "Job finished",
+          messageId: "notice-1",
+          messageSource: "agent",
+          notificationKind: "background_process",
+          deliveryMode: "follow_up",
+          deliveryStatus: "queued",
+        },
+      } as Any,
+    ]);
+    expect(restored.runtime.state.queues.pendingFollowUps[0]).toMatchObject({
+      notificationKind: "background_process",
+      messageSource: "agent",
+    });
+  });
+
   it.each([false, true])(
     "preserves a complete checkpoint when a receipt preview is truncated (edited=%s)",
     (edited) => {

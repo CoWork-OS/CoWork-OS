@@ -133,6 +133,48 @@ describe.skipIf(process.platform === "win32")("run_command background processes"
     await rm(testUserDataDir, { recursive: true, force: true, maxRetries: 5 });
   });
 
+  it("delivers a real quiet job's final output after two empty polls", async () => {
+    const daemon = {
+      ...createDaemon(),
+      canReceiveBackgroundProcessCompletion: vi.fn(() => true),
+      notifyBackgroundProcessCompletion: vi.fn(),
+    };
+    const { shellTools, taskId } = newShellTools(daemon);
+    const started = await shellTools.startBackgroundCommand(
+      `${node} -e "setTimeout(() => console.log('finished'), 1500)"`,
+      { cwd: workspacePath, startupWaitMs: 0 },
+    );
+    const input = { process_id: started.process_id };
+    expect((await shellTools.getBackgroundProcessOutput(input)).notify_on_complete).toBeUndefined();
+    expect((await shellTools.getBackgroundProcessOutput(input)).notify_on_complete).toBe(true);
+    await waitUntil(
+      () => daemon.notifyBackgroundProcessCompletion.mock.calls.length === 1,
+      5000,
+      "completion notification",
+    );
+    expect(daemon.notifyBackgroundProcessCompletion).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({ exit_code: 0 }),
+      expect.stringContaining("finished"),
+    );
+  });
+
+  it("authorizes the original trailing ampersand and tracks the actual job", async () => {
+    const { shellTools, daemon } = newShellTools();
+    const started = await shellTools.startBackgroundCommand("sleep 30 &", {
+      cwd: workspacePath,
+      startupWaitMs: 0,
+    });
+    expect(started).toMatchObject({ background: true, running: true });
+    expect(daemon.requestApproval.mock.calls[0][3]).toMatchObject({
+      command: "sleep 30 &",
+      background: true,
+    });
+    expect(
+      (await shellTools.stopBackgroundProcess({ process_id: started.process_id })).status,
+    ).toBe("stopped");
+  });
+
   it("returns promptly with startup output once the server prints a ready line", async () => {
     const { shellTools } = newShellTools();
     const startedAt = Date.now();

@@ -1,0 +1,29 @@
+{
+  "id": "background-job-regressions-2026-10-18",
+  "title": "Tracked background jobs and deferred completion",
+  "source": {
+    "audit": "runtime-review-2026-10-18"
+  },
+  "categories": [
+    {
+      "id": "quiet-job-completion-owned-once",
+      "prompt": "Read a quiet background process twice, let final output drain after exit, then cancel another promoted process before close.",
+      "assertions": {
+        "completionDeliveredOnceAfterStdioClose": true,
+        "cancelledJobDoesNotWakeAgent": true,
+        "finalOutputRedactedAndBounded": true,
+        "executableTest": "src/electron/agent/tools/__tests__/background-processes.test.ts"
+      }
+    },
+    {
+      "id": "paused-job-completion",
+      "prompt": "Let a promoted process exit while its session is paused or blocked; resume it and retry admission concurrently. Also test temporary admission failure and cancellation before resume.",
+      "assertions": {
+        "retainedUntilResume": true,
+        "deliveredOnce": true,
+        "cancelledJobDoesNotWakeAgent": true,
+        "executableTest": "src/electron/agent/__tests__/background-process-notifications.test.ts"
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { enforceResponsibilityToolPolicy } from "../../automation/responsibility-task-policy";
+import { trailingBackgroundCommand } from "./trailing-background-command";
 import { spawn, ChildProcess, execSync } from "child_process";
 import * as path from "path";
 import * as os from "os";
@@ -1452,6 +1453,8 @@ export class ShellTools {
       options,
       true,
     );
+    // Authorize the original spelling (including deny rules) before normalizing it.
+    if (process.platform !== "win32") command = trailingBackgroundCommand(command) ?? command;
     manager.assertCanStart(this.taskId);
     if (options?.signal?.aborted) {
       throw new Error("Command execution cancelled after approval expired");
@@ -1688,7 +1691,23 @@ export class ShellTools {
       tailLines: input.tail_lines,
       maxChars: input.max_chars,
     });
-    return { success: true, ...manager.summary(this.taskId, processId), ...output };
+    const notify =
+      !signal?.aborted &&
+      this.daemon.canReceiveBackgroundProcessCompletion?.(this.taskId) &&
+      manager.observeQuietPoll(this.taskId, processId, output, (summary, finalOutput) =>
+        this.daemon.notifyBackgroundProcessCompletion(this.taskId, summary, finalOutput),
+      );
+    return {
+      success: true,
+      ...manager.summary(this.taskId, processId),
+      ...output,
+      ...(notify
+        ? {
+            notify_on_complete: true,
+            note: "This process is quiet. Its exit code and final output will reach this session automatically. Do not poll or sleep to wait for it again. Do other work, or end this turn with a brief status.",
+          }
+        : {}),
+    };
   }
 
   /** stop_process: stop a background process of this task and its whole tree. */

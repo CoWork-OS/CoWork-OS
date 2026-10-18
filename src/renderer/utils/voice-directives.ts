@@ -111,23 +111,31 @@ export function stripMarkdownForSpeech(text: string): string {
       .replace(/```[\s\S]*?```/g, "")
       // Remove inline code
       .replace(/`[^`]+`/g, "")
-      // Remove links but keep text
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       // Remove images
       .replace(/!\[([^\]]*)\]\([^)]+\)/g, "")
+      // Remove links but keep text
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
       // Remove headers
       .replace(/^#{1,6}\s+/gm, "")
       // Remove bold/italic
       .replace(/\*\*([^*]+)\*\*/g, "$1")
       .replace(/\*([^*]+)\*/g, "$1")
-      .replace(/__([^_]+)__/g, "$1")
-      .replace(/_([^_]+)_/g, "$1")
+      // Underscore emphasis only at word boundaries. A single word in double
+      // underscores is a dunder name (`__init__`), and underscores next to a
+      // path separator belong to a path (`/tmp/_cache_/x`); both are kept.
+      .replace(
+        /(^|[^\p{L}\p{N}_/\\])__([^_\n]*[^\p{L}\p{N}_\n][^_\n]*)__(?=[^\p{L}\p{N}_/\\]|$)/gu,
+        "$1$2",
+      )
+      .replace(/(^|[^\p{L}\p{N}_/\\])_([^_\n]+)_(?=[^\p{L}\p{N}_/\\]|$)/gu, "$1$2")
       // Remove horizontal rules
       .replace(/^[-*_]{3,}$/gm, "")
       // Remove bullet points
       .replace(/^[\s]*[-*+]\s+/gm, "")
       // Remove numbered lists
       .replace(/^[\s]*\d+\.\s+/gm, "")
+      // Collapse spaces left behind by removed elements
+      .replace(/[ \t]{2,}/g, " ")
       // Collapse multiple newlines
       .replace(/\n{3,}/g, "\n\n")
       .trim()

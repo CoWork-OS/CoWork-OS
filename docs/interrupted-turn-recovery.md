@@ -9,3 +9,11 @@ interrupted state and revision and fences resume during cleanup; a stale Discard
 The Desktop acceptance runner also submits Discard against an active turn and verifies
 that the backend refuses it without cancelling the task. Full crash/restart recovery
 is covered by durable-state unit tests; this runner does not force-crash Electron.
+
+After building Electron and the renderer, the same acceptance flow can use built files:
+
+```sh
+COWORK_QA_RENDERER=production node scripts/qa/queued-input-runtime-acceptance.mjs
+```
+
+The default remains `npm run dev`. Both modes use an isolated profile and loopback provider.

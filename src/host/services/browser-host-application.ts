@@ -1,4 +1,7 @@
 import { createBrowserProviderSignIn } from "./browser-provider-sign-in";
+import { agentPublicJwks, getAgentSigningKey } from "../../electron/identity/agent-signing-keys";
+import { agentSignatureDirectory } from "../../electron/security/agent-request-identity";
+import { BrowserSettingsManager } from "../../electron/settings/browser-settings-manager";
 import { createBrowserAwarenessDefinitions } from "./browser-awareness-methods";
 import { getAwarenessService } from "../../electron/awareness/AwarenessService";
 import type Database from "better-sqlite3";
@@ -462,6 +465,13 @@ export function createBrowserHostApplication(
   });
   return new WebApplication({
     enabled: true,
+    // Declared agent identity: the self-hosted key directory, when the user turned it on.
+    getSignatureDirectory: (authority) =>
+      agentSignatureDirectory(authority, {
+        settings: BrowserSettingsManager.loadSettings().declaredAgent,
+        getKey: getAgentSigningKey,
+        getJwks: (key) => agentPublicJwks(key),
+      }) ?? null,
     webDirectory: options.webDirectory,
     deployment: options.deployment,
     getHostIdentity: () => options.identity,

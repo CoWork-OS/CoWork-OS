@@ -11870,6 +11870,14 @@ ${transcript}
               phase: "step",
               targetPaths: undefined,
               followUp: false,
+              ...(attempt
+                ? {
+                    toolAttempt: {
+                      idempotencyKey: attempt.attempt.idempotencyKey,
+                      attemptId: attempt.attempt.id,
+                    },
+                  }
+                : {}),
               toolPolicyContext: this.getToolPolicyContext(),
               signal: toolAbort.signal,
               emitEvent: (type, payload) => this.emitEvent(type, payload),

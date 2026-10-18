@@ -2534,6 +2534,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       success: boolean;
       settings?: BrowserSettingsState;
     }>,
+  getAgentIdentityDirectory: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_IDENTITY_DIRECTORY_GET,
+    ) as Promise<AgentIdentityDirectoryResult>,
+  rotateAgentIdentityKey: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_IDENTITY_KEY_ROTATE,
+    ) as Promise<AgentIdentityDirectoryResult>,
   listBrowserSitePermissions: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, data) as Promise<
       BrowserSitePermissionEntry[]
@@ -6221,6 +6229,8 @@ export interface BrowserWorkbenchUserNavigateResult {
 export type BrowserSettings = import("../shared/browser-settings").BrowserSettings;
 export type BrowserSettingsState = import("../shared/browser-settings").BrowserSettingsState;
 export type BrowserDataType = import("../shared/browser-settings").BrowserDataType;
+export type AgentIdentityDirectoryResult =
+  import("../shared/browser-settings").AgentIdentityDirectoryResult;
 export type BrowserSitePermissionEntry =
   import("../shared/browser-settings").BrowserSitePermissionEntry;
 
@@ -6655,6 +6665,13 @@ export interface ElectronAPI {
   saveBrowserSettings: (
     settings: Partial<BrowserSettings>,
   ) => Promise<{ success: boolean; settings?: BrowserSettingsState }>;
+  /** The public key directory (JWK Set) to host for declared agent identity. */
+  getAgentIdentityDirectory: () => Promise<AgentIdentityDirectoryResult>;
+  /**
+   * Replace the declared-identity key after a native confirmation; null when the user cancels.
+   * The hosted directory must then be updated.
+   */
+  rotateAgentIdentityKey: () => Promise<AgentIdentityDirectoryResult>;
   listBrowserSitePermissions: (data: {
     workspaceId: string;
   }) => Promise<BrowserSitePermissionEntry[]>;

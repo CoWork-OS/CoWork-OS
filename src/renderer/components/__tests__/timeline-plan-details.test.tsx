@@ -8,6 +8,7 @@ describe("historical plan details", () => {
   const event: TaskEvent = {
     id: "historical-plan",
     taskId: "task-1",
+    schemaVersion: 2,
     type: "plan_created",
     timestamp: 1,
     payload: {

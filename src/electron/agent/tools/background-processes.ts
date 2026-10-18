@@ -20,6 +20,12 @@
  * Output is kept in memory only (a bounded tail per process), never written
  * into the workspace. Chunks are normalized and redacted as they arrive and
  * redacted again when read.
+ *
+ * Each process also shows as a read-only tab in the task's terminal panel,
+ * under a short title, so the user can watch it and the agent can link it as
+ * `[title](#terminal/<process_id>)`. The panel reads through `peek` and
+ * `subscribe`, which neither move the agent's read cursor nor count as use
+ * for the idle timeout.
  */
 
 import type { ChildProcess } from "child_process";
@@ -44,6 +50,14 @@ const STOP_GRACE_MS = 2_000;
 const STOP_KILL_WAIT_MS = 3_000;
 const SWEEP_INTERVAL_MS = 60_000;
 const MAX_URLS = 5;
+const MAX_TITLE_CHARS = 40;
+const MAX_VIEW_CHARS = 256 * 1024;
+// Control, invisible and direction-changing characters, and the brackets that would break
+// a `[title](#terminal/id)` link.
+const TITLE_STRIP_PATTERN = new RegExp(
+  "[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff\\[\\]]",
+  "g",
+);
 
 // A line that says a server or watcher is up. Checked against recent output.
 const READY_PATTERN =
@@ -68,6 +82,8 @@ export interface BackgroundProcessLaunch {
 export interface BackgroundProcessStartOptions {
   taskId: string;
   command: string;
+  /** Short name of the process's terminal tab (model input); derived from the command when empty. */
+  title?: unknown;
   cwd: string;
   launch: BackgroundProcessLaunch;
   /** Applied to every output chunk as it arrives (control codes, redaction). */
@@ -79,9 +95,12 @@ export interface BackgroundProcessStartOptions {
 
 export interface BackgroundProcessSummary {
   process_id: string;
+  /** Name of the process's terminal tab. */
+  title: string;
   pid: number | null;
   command: string;
   cwd: string;
+  started_at: number;
   status: BackgroundProcessStatus;
   running: boolean;
   exit_code: number | null;
@@ -101,9 +120,16 @@ export interface BackgroundProcessOutput {
   dropped_chars?: number;
 }
 
+/** What the terminal panel hears about a task's background processes. */
+export type BackgroundProcessChange =
+  | { kind: "output"; taskId: string; processId: string; output: string }
+  | { kind: "status"; taskId: string; process: BackgroundProcessSummary }
+  | { kind: "removed"; taskId: string; processId: string };
+
 interface ProcessRecord {
   id: string;
   taskId: string;
+  title: string;
   command: string;
   cwd: string;
   pid: number | null;
@@ -135,8 +161,18 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
+/** A terminal tab name: one line, no brackets or invisible characters, at most 40 characters. */
+export function normalizeProcessTitle(title: unknown, command: string): string {
+  const clean = (value: string) =>
+    value.replace(TITLE_STRIP_PATTERN, " ").replace(/\s+/g, " ").trim();
+  const fromTitle = typeof title === "string" ? clean(title) : "";
+  const name = fromTitle || clean(command.split("\n")[0] || "") || "process";
+  return name.length > MAX_TITLE_CHARS ? `${name.slice(0, MAX_TITLE_CHARS - 1).trimEnd()}…` : name;
+}
+
 export class BackgroundProcessManager {
   private readonly records = new Map<string, ProcessRecord>();
+  private readonly listeners = new Set<(change: BackgroundProcessChange) => void>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private exitHookInstalled = false;
 
@@ -167,6 +203,7 @@ export class BackgroundProcessManager {
     const record: ProcessRecord = {
       id: `bg-${randomBytes(4).toString("hex")}`,
       taskId: options.taskId,
+      title: normalizeProcessTitle(options.title, options.command),
       command: options.command,
       cwd: options.cwd,
       pid: typeof child.pid === "number" ? child.pid : null,
@@ -194,6 +231,7 @@ export class BackgroundProcessManager {
     this.records.set(record.id, record);
     this.installExitHook();
     this.ensureSweep();
+    this.emitStatus(record);
 
     const onData = (data: Buffer | string) => {
       this.append(record, record.normalizeChunk(data.toString()));
@@ -218,6 +256,7 @@ export class BackgroundProcessManager {
       }
       this.notify(record);
       resolveExited();
+      this.emitStatus(record);
       if (!record.silenced && record.onExit) {
         try {
           record.onExit(this.summarize(record));
@@ -303,6 +342,27 @@ export class BackgroundProcessManager {
     }
   }
 
+  /**
+   * The buffered output (redacted) for the terminal panel. Leaves the agent's read cursor
+   * and the idle clock alone: watching a tab is not the agent using the process.
+   */
+  peek(taskId: string, processId: string): { output: string; truncated: boolean } {
+    const record = this.get(taskId, processId);
+    const text = record.buffer.slice(-MAX_VIEW_CHARS);
+    return {
+      output: record.redact(text),
+      truncated: record.bufferStart > 0 || text.length < record.buffer.length,
+    };
+  }
+
+  /** Hear about started, finished and removed processes and their output, for every task. */
+  subscribe(listener: (change: BackgroundProcessChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
   /** Add a line from CoWork itself (not the process) to the process output. */
   appendNotice(taskId: string, processId: string, text: string): void {
     this.append(this.get(taskId, processId), text);
@@ -341,13 +401,21 @@ export class BackgroundProcessManager {
     return this.summarize(record);
   }
 
+  /** Stop one process if it still runs, then forget it (the user closed its tab). */
+  async remove(taskId: string, processId: string, reason: string): Promise<void> {
+    const record = this.get(taskId, processId);
+    await this.stopRecord(record, reason);
+    this.forget(record);
+    this.stopSweepIfIdle();
+  }
+
   /** Stop and forget every process of a task (task cancelled or deleted). */
   async stopAllForTask(taskId: string, reason: string): Promise<number> {
     const records = Array.from(this.records.values()).filter((record) => record.taskId === taskId);
     const running = records.filter((record) => record.status === "running");
     for (const record of records) record.silenced = true;
     await Promise.all(running.map((record) => this.stopRecord(record, reason)));
-    for (const record of records) this.records.delete(record.id);
+    for (const record of records) this.forget(record);
     this.stopSweepIfIdle();
     if (running.length > 0) {
       log.info(`Stopped ${running.length} background process(es) for task ${taskId} (${reason})`);
@@ -387,7 +455,7 @@ export class BackgroundProcessManager {
         continue;
       }
       if (record.endedAt !== undefined && now - record.endedAt >= FINISHED_RECORD_TTL_MS) {
-        this.records.delete(record.id);
+        this.forget(record);
         continue;
       }
       const finished = finishedByTask.get(record.taskId) || [];
@@ -398,7 +466,7 @@ export class BackgroundProcessManager {
       finished
         .sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0))
         .slice(MAX_FINISHED_RECORDS_PER_TASK)
-        .forEach((record) => this.records.delete(record.id));
+        .forEach((record) => this.forget(record));
     }
     this.stopSweepIfIdle();
   }
@@ -481,6 +549,35 @@ export class BackgroundProcessManager {
       }
     }
     this.notify(record);
+    if (this.listeners.size > 0) {
+      this.emit({
+        kind: "output",
+        taskId: record.taskId,
+        processId: record.id,
+        output: record.redact(text),
+      });
+    }
+  }
+
+  private forget(record: ProcessRecord): void {
+    if (this.records.get(record.id) !== record) return;
+    this.records.delete(record.id);
+    this.emit({ kind: "removed", taskId: record.taskId, processId: record.id });
+  }
+
+  private emitStatus(record: ProcessRecord): void {
+    if (this.listeners.size === 0) return;
+    this.emit({ kind: "status", taskId: record.taskId, process: this.summarize(record) });
+  }
+
+  private emit(change: BackgroundProcessChange): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(change);
+      } catch (error) {
+        log.warn("Background process listener failed", error);
+      }
+    }
   }
 
   private notify(record: ProcessRecord): void {
@@ -512,9 +609,11 @@ export class BackgroundProcessManager {
     const end = record.endedAt ?? this.now();
     return {
       process_id: record.id,
+      title: record.title,
       pid: record.pid,
       command: record.command,
       cwd: record.cwd,
+      started_at: record.startedAt,
       status: record.status,
       running: record.status === "running" && record.endedAt === undefined,
       exit_code: record.exitCode,

@@ -106,6 +106,34 @@ react to what happened. A quiet "Sent the output of …" line marks that message
 - **Output limits**: the panel keeps the last 256 KB of output; the message to the agent keeps the
   head and tail of long output, about 12,000 characters.
 
+## The agent's processes as tabs
+
+A command the agent starts with `run_command` `background: true` (a dev server, a tunnel, a
+watcher) shows as a tab in the task's terminal dock, after the shell tabs. The agent names the tab
+with the tool's `title` argument (for example "dev server" or "https tunnel"), or the tab takes the
+command's first line.
+
+- **Read-only**: the tab shows the process's output as it arrives, with what was printed before
+  the dock opened. Secrets are redacted the same way as in the output the agent reads. The process
+  has no terminal to type into; it runs with the same approval, sandbox and access profile as any
+  `run_command`.
+- **Stop and close**: Stop ends the process and keeps its output; the tab's close button stops the
+  process if it is still running and removes the tab. The agent sees the process as stopped
+  (`stopped_by_user` or `tab_closed_by_user`). Both are recorded in the conversation's audit log.
+- **Lifetime**: unchanged from background processes. They stop when the task is cancelled, after
+  30 minutes without the agent reading their output, or when the app quits. Watching a tab does
+  not keep a process alive.
+- **Scope**: a window sees only the processes of a task it may view. Output reaches only windows
+  that listed that task's tabs.
+
+## Terminal tab links in answers
+
+An answer can point at a terminal tab with a link of the form `[tab title](#terminal/<tab id>)`.
+CoWork shows it as a small terminal chip; clicking it opens the dock on that tab, or says the tab
+is closed. The `run_command` result for a background process includes the ready-made link
+(`terminal_tab.link`) and asks the agent to use it when it mentions the process, so an answer such
+as "the tunnel ([https tunnel](#terminal/bg-1a2b3c4d)) is still running" opens the right tab.
+
 ## Reliability and packaging notes
 
 - `node-pty` native files are unpacked from Electron ASAR so PTY helpers can run in packaged builds.
@@ -145,6 +173,8 @@ Validate these flows on each platform before release:
 - packaged-app launch with node-pty native files available
 - Run a shell code block from an answer: output streams under the block, the agent gets the
   output once it finishes, and Stop interrupts a long-running command
+- Ask the agent to start a dev server: its tab appears with the given title, the answer's chip
+  opens it, Stop ends it, and closing the tab stops it
 
 ## Related docs
 

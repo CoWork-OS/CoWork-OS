@@ -32,4 +32,17 @@ describe("TerminalTabsDock", () => {
     expect(source).toContain("setError(null)");
     expect(source).toContain("Failed to send input.");
   });
+
+  it("shows the agent's background processes as read-only tabs that links can open", () => {
+    const source = readFileSync(componentPath, "utf8");
+
+    expect(source).toContain("window.electronAPI.listAgentTerminalTabs(taskId)");
+    expect(source).toContain("window.electronAPI.onAgentTerminalEvent(");
+    expect(source).toContain("disableStdin: true");
+    // Live output waits for the buffered output, so nothing is written twice.
+    expect(source).toContain("!handle.replaying");
+    expect(source).toContain("That terminal tab is closed.");
+    expect(source).toContain("window.electronAPI.closeAgentTerminalTab(");
+    expect(source).not.toMatch(/writeAgentTerminal/);
+  });
 });

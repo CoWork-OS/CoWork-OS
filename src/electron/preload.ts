@@ -284,6 +284,9 @@ import type {
   TerminalBlockRunRequest,
   TerminalBlockRunResult,
   TerminalBlockOutputEvent,
+  AgentTerminalTab,
+  AgentTerminalTabRequest,
+  AgentTerminalEvent,
   MessageSurfaceOrigin,
   LLMRoutingRuntimeState,
   AgentMailApiKeySummary,
@@ -2307,6 +2310,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_: Any, event: TerminalBlockOutputEvent) => callback(event);
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_BLOCK_OUTPUT, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_BLOCK_OUTPUT, handler);
+  },
+  listAgentTerminalTabs: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_TERMINAL_LIST, { taskId }) as Promise<AgentTerminalTab[]>,
+  readAgentTerminalTab: (data: AgentTerminalTabRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_TERMINAL_READ, data) as Promise<{
+      output: string;
+      truncated: boolean;
+    }>,
+  stopAgentTerminalTab: (data: AgentTerminalTabRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_TERMINAL_STOP, data) as Promise<AgentTerminalTab>,
+  closeAgentTerminalTab: (data: AgentTerminalTabRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.AGENT_TERMINAL_CLOSE, data) as Promise<{ success: boolean }>,
+  onAgentTerminalEvent: (callback: (event: AgentTerminalEvent) => void) => {
+    const handler = (_: Any, event: AgentTerminalEvent) => callback(event);
+    ipcRenderer.on(IPC_CHANNELS.AGENT_TERMINAL_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_TERMINAL_EVENT, handler);
   },
   listLocalPreviewTemplates: () =>
     ipcRenderer.invoke(IPC_CHANNELS.LOCAL_PREVIEW_TEMPLATES) as Promise<
@@ -7293,6 +7312,14 @@ export interface ElectronAPI {
   runTerminalBlock: (data: TerminalBlockRunRequest) => Promise<TerminalBlockRunResult>;
   stopTerminalBlock: (data: { runId: string }) => Promise<{ stopped: boolean }>;
   onTerminalBlockOutput: (callback: (event: TerminalBlockOutputEvent) => void) => () => void;
+  /** The agent's background processes of a task, as read-only terminal panel tabs. */
+  listAgentTerminalTabs: (taskId: string) => Promise<AgentTerminalTab[]>;
+  readAgentTerminalTab: (
+    data: AgentTerminalTabRequest,
+  ) => Promise<{ output: string; truncated: boolean }>;
+  stopAgentTerminalTab: (data: AgentTerminalTabRequest) => Promise<AgentTerminalTab>;
+  closeAgentTerminalTab: (data: AgentTerminalTabRequest) => Promise<{ success: boolean }>;
+  onAgentTerminalEvent: (callback: (event: AgentTerminalEvent) => void) => () => void;
   createWorkspace: (data: Any) => Promise<Workspace>;
   listWorkspaces: () => Promise<Workspace[]>;
   selectWorkspace: (id: string) => Promise<Workspace>;

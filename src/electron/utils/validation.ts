@@ -3286,6 +3286,17 @@ export const TerminalBlockStopRequestSchema = z.object({
   runId: TerminalBlockRunRequestSchema.shape.runId,
 });
 
+/** The task whose agent terminal tabs (background processes) the window lists. */
+export const AgentTerminalListRequestSchema = z.object({
+  taskId: UUIDSchema,
+});
+
+/** One agent terminal tab: the id of a background process of that task. */
+export const AgentTerminalTabRequestSchema = z.object({
+  taskId: UUIDSchema,
+  tabId: z.string().regex(/^bg-[0-9a-f]{8}$/, "Not an agent terminal tab id."),
+});
+
 export function validateInput<T>(schema: z.ZodSchema<T>, input: unknown, context?: string): T {
   const result = schema.safeParse(input);
   if (!result.success) {

@@ -376,6 +376,7 @@ import { GitHubReviewService } from "../git/GitHubReviewService";
 import { TerminalPtyManager } from "../terminal/TerminalPtyManager";
 import { assertTerminalShellAllowed } from "../terminal/terminal-shell-policy";
 import { setupTerminalBlockRunHandlers } from "./terminal-block-run-handlers";
+import { setupAgentTerminalHandlers } from "./agent-terminal-handlers";
 import { normalizeTerminalAttachInput } from "../terminal/terminal-input-policy";
 import { ChannelGateway } from "../gateway";
 import { CHANNEL_TYPES } from "../gateway/channels/types";
@@ -4915,6 +4916,22 @@ export async function setupIpcHandlers(
         "code_block_run",
         metadata.runId,
         { command: metadata.command },
+        authorization.actor.principalId,
+      );
+    },
+  });
+
+  // The agent's background processes, shown as read-only tabs in the terminal panel.
+  setupAgentTerminalHandlers({
+    authorizeTask: (event, taskId, capability) => authorizeTaskForEvent(event, taskId, capability),
+    recordAction: async (event, taskId, action, tabId) => {
+      const authorization = await authorizeTaskForEvent(event, taskId, "manage");
+      await sessionMembershipService.recordTaskAction(
+        taskId,
+        "manage",
+        action,
+        tabId,
+        {},
         authorization.actor.principalId,
       );
     },

@@ -139,7 +139,7 @@ import { createMailboxStatementPort } from "../mailbox/mailbox-statement-port";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import {
   ManagedSessionRequirementCorrectionRequestSchema,
-  SessionHandoffExportRequestSchema,
+  SessionHandoffExportIpcRequestSchema,
 } from "../../shared/managed-session-schemas";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
@@ -7007,7 +7007,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, async (_, request: unknown) => {
     checkRateLimit(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC);
     const validated = validateInput(
-      SessionHandoffExportRequestSchema,
+      SessionHandoffExportIpcRequestSchema,
       request,
       "session handoff export",
     );

@@ -156,8 +156,8 @@ hero:
       text: LLM Wiki
       link: /llm-wiki
     - theme: alt
-      text: Release Notes 0.5.60
-      link: /release-notes-0.5.60
+      text: Release Notes 0.5.61
+      link: /release-notes-0.5.61
     - theme: alt
       text: Heartbeat v3
       link: /heartbeat-v3
@@ -240,6 +240,8 @@ features:
     details: Bundled legal practice packs expose upstream-style slash commands through CoWork's plugin-pack system. Legal workflow selections are editable before launch, and matter-heavy tasks can show structured main-view intake cards such as the dedicated demand-letter intake form.
   - title: Multitask Command
     details: `/multitask [N] <task>` starts a fresh collaborative run, splits the prompt into 2-8 lane-specific child tasks, respects the global task queue, and synthesizes the lane outputs through the existing team orchestration flow.
+  - title: Release 0.5.61
+    details: One-line installs for macOS and Windows, a first task with no API key through OpenRouter sign-in, import from Hermes Agent and OpenClaw, Today, Work and Team in the Calm theme, bots with their own computer, memory and model, a real in-app browser, remote MCP with OAuth, and GLM-5.3 and Kimi K3 model updates.
   - title: Release 0.5.60
     details: The memory folder becomes where CoWork keeps what it knows, with dreaming, sync and team memory. Bots get scheduled responsibilities and a work view, the sidebar becomes an icon rail, database work moves off the main thread, web previews are sandboxed, and new channels, models and security hardening land.
   - title: Release 0.5.54

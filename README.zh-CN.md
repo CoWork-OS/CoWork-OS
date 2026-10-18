@@ -22,23 +22,58 @@
   <a href="README.md">English</a> &middot; <strong>简体中文</strong>
 </p>
 
-CoWork OS 是一款免费、开源的 macOS 和 Windows 桌面应用，帮你完成真正的工作：写代码、操作浏览器、处理文档、整理邮件、运行自动化。每一步都实时显示在任务时间线上。在默认的 **Ask for approval**（需要批准）访问配置下，智能体可以在你的工作区内自由工作，但凡是越出工作区的操作，比如发送消息、访问网络、使用凭据、导出数据或读写工作区以外的文件，都会先停下来等你确认。模型由你选择；你的工作区、记忆、技能和历史记录都保存在你自己的电脑上。模型服务商可能收取费用，并会收到你所运行任务需要的数据。[哪些东西归你](docs/what-you-own.md)
+CoWork OS 是一款免费、开源的 macOS 和 Windows 桌面应用，帮你完成真正的工作：处理文件和文档、操作浏览器、整理邮件、运行定时任务。每一步都实时显示在任务时间线上。在默认的 **Ask for approval**（需要批准）访问配置下，智能体可以在你的工作区内自由工作，但凡是越出工作区的操作，比如发送消息、访问网络、使用凭据、导出数据或读写工作区以外的文件，都会先停下来等你确认。模型由你选择；你的工作区、记忆、技能和历史记录都保存在你自己的电脑上。模型服务商可能收取费用，并会收到你所运行任务需要的数据。[哪些东西归你](docs/what-you-own.md)
 
 > 应用界面目前为英文。下文中的按钮和菜单名称保留英文原文，方便对照。
 
 <p align="center">
-  <img src="resources/branding/images/cowork-os-1.webp" alt="CoWork OS 主页（Calm 风格）" width="700">
+  <img src="resources/branding/images/readme-demo.gif" alt="CoWork OS 中的一次任务：计划逐步展开，运行命令前先征求同意，完成的表格在对话旁打开" width="820">
 </p>
+
+<p align="center"><sub>MIT 协议 · 在你自己的电脑上运行 · 17,000+ 项自动化测试 · <a href="ZeroLeaks-Report-jn70f56art03m4rj7fp4b5k9p180aqfd.pdf">独立安全评估</a> · 欢迎贡献</sub></p>
+
+## 你可以用它做什么
+
+- **把一文件夹的文件变成成品。**“把这些发票整理成表格，按供应商汇总金额”——表格直接在对话旁打开，可以编辑，也可以原地让它继续修改。
+- **处理收件箱，但主动权在你。**它会分拣、总结邮件并起草回复；在你批准之前，什么都不会发出去。
+- **在你看得见的浏览器里做调研。**智能体在一个可见的窗口里浏览，你随时可以接管，最后交给你一份附带来源的报告。
+- **让机器人按计划工作。**一个拥有自己记忆的机器人每天早上把摘要发到 Telegram、Slack 或 Discord，超出授权范围前会先问你。
+- **写代码时每条命令都看得见。**真实的终端标签页、代码改动和测试结果都在时间线里，有风险的操作都需要你批准。
+- **想全部留在本地也可以。**用 Ollama 或 LM Studio 在自己的电脑上运行模型，或者用 OpenRouter 登录，无需复制 API key 即可使用免费模型。
+
+<table>
+  <tr>
+    <td width="33%"><img src="resources/branding/images/readme-today.webp" alt="Today：每个需要你决定的事项一张卡片"></td>
+    <td width="33%"><img src="resources/branding/images/readme-approval.webp" alt="任务进行中出现的批准卡片"></td>
+    <td width="33%"><img src="resources/branding/images/readme-workbench.webp" alt="生成的表格在对话旁打开"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Today：需要你的事，一件一张卡片</sub></td>
+    <td align="center"><sub>每个有风险的步骤都等你回答</sub></td>
+    <td align="center"><sub>结果直接在对话旁打开</sub></td>
+  </tr>
+</table>
 
 | | |
 | --- | --- |
-| **操作可见、可批准** | 每一次工具调用都显示在任务时间线中。访问配置（Ask for approval、Approve for me、Full access、Custom）决定哪些操作需要你确认；硬性限制即使批准也不会放开。[访问配置](docs/access-profiles.md) |
-| **Everything Workbench** | 文档、表格、演示文稿、网页和 PDF 直接在智能体旁边打开，可编辑，可原地继续追问修改。[Everything Workbench](docs/everything-workbench.md) |
-| **收件箱智能体** | 本地优先的邮件分拣、证据检索、草稿与回复，发送前需要你批准。[Inbox Agent](docs/inbox-agent.md) |
-| **内置浏览器** | 智能体在一个你看得见的浏览器里操作，适合调研、填写表单和测试你自己的网站。[Browser Workbench](docs/browser-workbench.md) |
-| **机器人与消息渠道** | 可复用的机器人，拥有各自的记忆和定时职责；网关可以通过 Telegram、Slack、Discord、WhatsApp 等渠道联系你。[Bots](docs/bots-and-conversations.md) · [Channels](docs/channels.md) |
-| **看得懂的记忆** | CoWork 记住的内容以 Markdown 文件形式保存在本地 git 文件夹里，你可以随时编辑、同步或删除。[记忆](docs/features.md#persistent-memory-system) |
-| **模型由你选** | 用 ChatGPT 账号登录、使用本地 Ollama 模型，或填入 Claude、OpenAI、Gemini、OpenRouter、Groq 等服务的 API key，每个对话都可以切换。[模型与接入](docs/providers.md) |
+| **每一步都看得见，有风险的由你批准** | 时间线实时显示每一次读取文件、运行命令和修改。访问配置（Ask for approval、Approve for me、Full access、Custom）决定哪些操作需要等你确认；硬性限制即使批准也不会放开。[访问配置](docs/access-profiles.md) |
+| **拿到的是成品文件，而不只是回答** | 文档、表格、演示文稿、网页和 PDF 在智能体旁边打开，可以编辑，也可以直接要求修改，不必从头再来。[Everything Workbench](docs/everything-workbench.md) |
+| **收件箱帮你起草，发送由你决定** | 本地优先的邮件分拣、跨邮件搜索和回复草稿；发送永远要等你确认。[Inbox Agent](docs/inbox-agent.md) |
+| **一个你能看、能接管的浏览器** | 不会丢失页面的真实标签页、下载与历史记录；只有在你确认后，登录信息才会填入完全匹配的网站。[Browser Workbench](docs/browser-workbench.md) |
+| **在你不在时也能干活的机器人** | 每个机器人有自己的记忆、模型和日程，可以通过 Telegram、Slack、Discord、WhatsApp 等渠道联系你。[Bots](docs/bots-and-conversations.md) · [Channels](docs/channels.md) |
+| **能打开、能修改的记忆** | CoWork 记住的关于你的内容以 Markdown 文件保存在本地 git 文件夹里：可以查看、修改、同步或删除。[记忆](docs/features.md#persistent-memory-system) |
+| **模型由你选，随时可以换** | OpenRouter 登录使用免费模型、ChatGPT 账号登录、本地 Ollama 或 LM Studio，或填入 Claude、OpenAI、Gemini、Groq 等的 API key，每个对话都可以切换。[模型与接入](docs/providers.md) |
+
+## 为什么选择 CoWork OS？
+
+| 如果你在用…… | 在这些情况下可以考虑 CoWork OS…… |
+| --- | --- |
+| 终端里的智能体（Hermes Agent、OpenClaw、Claude Code） | 想要同类智能体的桌面版：批准过程看得见，文件在对话旁打开，记忆可以直接阅读。CoWork 可以导入 Hermes 或 OpenClaw 的配置。 |
+| 托管的桌面助手（ChatGPT、Claude Cowork） | 想要一个开源应用：模型自己选，能跑本地模型，工作区、记忆和历史都留在自己的电脑上。 |
+| 写代码的智能体（Cursor、Codex） | 想在一个工作区里同时处理代码以及周边的一切：文档、邮件、浏览器、机器人和定时任务。 |
+
+这些只是适用场景说明，不是排名；各产品的长处和每页的依据见 [Compare CoWork OS](docs/comparisons/index.md)（英文）。
+
 
 ## 安装
 

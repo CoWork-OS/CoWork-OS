@@ -62,6 +62,7 @@
     "connectors",
     "build",
     "!build/healthkit-bridge/**",
+    "!resources/branding/images/readme-*",
     "deploy",
     "bin",
     "docs",

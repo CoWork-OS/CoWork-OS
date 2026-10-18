@@ -182,8 +182,10 @@ The important behavioral rules are:
 
 The roadmap below records the implemented scope and the deliberate decisions
 made during review. “Implemented” means the current repository contains the
-runtime/UI contract and regression coverage; it does not mean every possible
-provider or deployment mode is supported.
+runtime/UI contract and regression coverage, and the
+[Verification expectations](#verification-expectations) section names that
+coverage; it does not mean every possible provider or deployment mode is
+supported. A phase without a named test or replay fixture is “Planned”.
 
 | Phase | Capability                                                    | Status and acceptance boundary                                                                                                                                                                                                                                                                                                                       |
 | ----- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -192,11 +194,15 @@ provider or deployment mode is supported.
 | 3     | Controlled multi-person/session collaboration                 | Implemented with session membership, owner/reviewer/contributor roles, one-use invites, revocation, presence/audit, and approval attribution. Session membership is separate from workspace membership.                                                                                                                                              |
 | 4     | Safe autonomy and protected credentials                       | Implemented with exact-operation recurring approvals, expiry/revocation, replay resistance, protected credential entry, destination controls, and value-free audit records.                                                                                                                                                                          |
 | 5     | Cloud-mode/Sites parity                                       | Intentionally skipped. Cloud runtime and Sites are outside the current CoWork product boundary.                                                                                                                                                                                                                                                      |
-| 6     | Portable continuity                                           | Implemented as an explicit durable handoff package. Live process transfer is not required for acceptance and is not claimed.                                                                                                                                                                                                                         |
+| 6     | Portable continuity                                           | Planned. The target design is below; no handoff package exists yet, so nothing here is claimed as shipped.                                                                                                                                                                                                                                           |
 | 7     | Local preview/dev-server lifecycle                            | Implemented as opt-in local preview. It is workspace-bound, command-template based, loopback-only, health-checked, logged, cleanable, and registered in the exact browser preview allowlist.                                                                                                                                                         |
 | 8     | Automation and security polish                                | Implemented for stable outcome hashing, per-job deduplication, explicit delivery retry, unattended-run escalation, missed-run policy, timezone visibility, job health, and retry/backoff/audit visibility. Export risk-chain summaries appear in the main approval dialog and browser upload approval card, with controlled Electron smoke coverage. |
 
 ## Phase 6: durable handoff packages
+
+> **Target design — not yet implemented.** This section is the specification for
+> the handoff package. CoWork does not export or import handoff packages yet;
+> today a resumed managed session only records `resumedFromSessionId`.
 
 Handoff is a file-based continuity boundary between local CoWork sessions or
 installations. It is designed to preserve useful context without pretending
@@ -244,9 +250,9 @@ Normal access profiles, approvals, connector policy, and provider settings
 apply to the resumed run. Import never transfers credentials, browser cookies,
 live processes, remote runtime state, or hidden approval grants.
 
-See [Managed Agents — Durable Session Handoffs](managed-agents.md#durable-session-handoffs)
-for the operator-facing workflow and
-`src/electron/managed/ManagedSessionService.ts` for the implementation.
+The implementation will live in `src/electron/managed/ManagedSessionService.ts`;
+the operator workflow will be documented in [Managed Agents](managed-agents.md)
+when it ships.
 
 ## Phase 7: local preview
 
@@ -396,9 +402,10 @@ repository checks. The current implementation has coverage for:
 - canonical automation hashes and per-job scheduled-output delivery;
 - explicit identical-output delivery retry and outbox reconciliation;
 - local-preview health, log redaction, restart, timeout cleanup, and URL
-  revocation;
-- handoff export sanitization, artifact checksum verification, import lineage,
-  and restored artifact registration.
+  revocation.
+
+Handoff export/import (Phase 6) has no coverage yet because it is not
+implemented.
 
 Useful commands:
 

@@ -110,4 +110,6 @@ Some data has no open export format today:
 
 This data lives in the profile database and moves only with a profile export.
 
+A versioned handoff package for an in-progress session is planned.
+
 For encryption details and network destinations, see the [Security Guide](security-guide.md).

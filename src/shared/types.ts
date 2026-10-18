@@ -3615,7 +3615,8 @@ export type WorkSessionReplayFixtureKind =
   | "approval"
   | "credential"
   | "policy_revocation"
-  | "child_session";
+  | "child_session"
+  | "handoff";
 
 export interface WorkSessionReplayFixture {
   id: string;
@@ -6644,6 +6645,24 @@ export interface ManagedSessionCreateInput {
   };
 }
 
+/** Result of exporting a session handoff package (`cowork.session-handoff`). */
+export interface SessionHandoffExportResult {
+  packageId: string;
+  packageDir: string;
+  manifestPath: string;
+  /** Files copied into the package after their checksum still matched the session record. */
+  artifactsCopied: number;
+  warnings: string[];
+}
+
+/** Result of importing a session handoff package into a new managed session. */
+export interface SessionHandoffImportResult {
+  session: ManagedSession;
+  packageId: string;
+  restoredPaths: string[];
+  skipped: string[];
+}
+
 export interface ManagedSessionUserMessageRequest {
   sessionId: string;
   content: ManagedSessionInputContent[];
@@ -6695,7 +6714,9 @@ export type ManagedSessionEventType =
   | "input.requested"
   | "input.received"
   | "session.completed"
-  | "session.failed";
+  | "session.failed"
+  | "handoff.exported"
+  | "handoff.imported";
 
 export interface ManagedSessionEvent {
   id: string;
@@ -8914,6 +8935,7 @@ export const IPC_CHANNELS = {
   MANAGED_SESSION_EVENTS_LIST_IPC: "managedSession:eventsListIpc",
   MANAGED_SESSION_WORKPAPER_GET_IPC: "managedSession:workpaperGetIpc",
   MANAGED_SESSION_GENERATE_AUDIO_SUMMARY: "managedSession:generateAudioSummary",
+  SESSION_HANDOFF_EXPORT_IPC: "sessionHandoff:exportIpc",
   WORK_CONTEXT_LIST_IPC: "workContext:listIpc",
   WORK_CONTEXT_GET_IPC: "workContext:getIpc",
   WORK_CONTEXT_CREATE_IPC: "workContext:createIpc",

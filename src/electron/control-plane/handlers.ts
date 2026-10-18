@@ -3345,12 +3345,14 @@ export function registerTaskAndWorkspaceMethods(
   server.registerMethod(Methods.MANAGED_SESSION_IMPORT_HANDOFF, async (client, params) => {
     requireScope(client, "admin");
     // The service validates the request with SessionHandoffImportRequestSchema; the manifest must
-    // sit inside the target environment's workspace.
+    // sit in the target environment's workspace under .cowork/handoffs/.
     const result = await managedSessions.importHandoff(params ?? {});
-    server.broadcastToOperators(Events.MANAGED_SESSION_CREATED, {
-      sessionId: result.session.id,
-      session: result.session,
-    });
+    if (result.session) {
+      server.broadcastToOperators(Events.MANAGED_SESSION_CREATED, {
+        sessionId: result.session.id,
+        session: result.session,
+      });
+    }
     return result;
   });
 

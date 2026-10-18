@@ -267,6 +267,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await openCommand(ctx);
       case "pact":
         return await pactCommand(ctx);
+      case "handoff":
+        return await handoffCommand(ctx);
       default:
         process.stderr.write(`Unknown command: ${parsed.command}\n\n`);
         usage();
@@ -1289,6 +1291,77 @@ async function providers(ctx: CommandContext): Promise<number> {
   }
 }
 
+/**
+ * `cowork handoff export|import`: move an in-progress session between sessions or installations
+ * as a versioned package under `<workspace>/.cowork/handoffs/`.
+ */
+async function handoffCommand(ctx: CommandContext): Promise<number> {
+  const sub = ctx.parsed.rest[0];
+  const exportUsage =
+    "Usage: cowork handoff export <managedSessionId> | --task <taskId> [--out <dir in workspace>]";
+  const importUsage =
+    "Usage: cowork handoff import <manifest.json or package dir> --environment <environmentId> [--agent <agentId>] [--title <title>] [--message <text>]";
+  if (sub === "export") {
+    const sessionId = ctx.parsed.rest[1];
+    const taskId = getFlag(ctx.parsed, "--task");
+    if (Boolean(sessionId) === Boolean(taskId)) return usageError(exportUsage);
+    const targetDir = getFlag(ctx.parsed, "--out");
+    const client = await connectedClient(ctx);
+    try {
+      const result = (await client.request(Methods.MANAGED_SESSION_EXPORT_HANDOFF, {
+        ...(sessionId ? { sessionId } : { taskId }),
+        ...(targetDir ? { targetDir: path.resolve(targetDir) } : {}),
+      })) as Payload;
+      const warnings = Array.isArray(result.warnings) ? (result.warnings as string[]) : [];
+      printLinesOrJson(ctx, result, [
+        `Exported handoff package ${String(result.packageId)}`,
+        `  manifest: ${String(result.manifestPath)}`,
+        `  files copied: ${String(result.artifactsCopied)}`,
+        ...warnings.map((warning) => `  note: ${warning}`),
+        "Copy the package folder into the target workspace's .cowork/handoffs/ and run:",
+        `  cowork handoff import <path>/${String(result.packageId)} --environment <environmentId>`,
+      ]);
+      return 0;
+    } finally {
+      client.close();
+    }
+  }
+  if (sub === "import") {
+    const manifestPath = ctx.parsed.rest[1];
+    const environmentId = getFlag(ctx.parsed, "--environment");
+    if (!manifestPath || !environmentId) return usageError(importUsage);
+    const agentId = getFlag(ctx.parsed, "--agent");
+    const title = getFlag(ctx.parsed, "--title");
+    const message = getFlag(ctx.parsed, "--message");
+    const client = await connectedClient(ctx);
+    try {
+      const result = (await client.request(Methods.MANAGED_SESSION_IMPORT_HANDOFF, {
+        manifestPath: path.resolve(manifestPath),
+        environmentId,
+        ...(agentId ? { agentId } : {}),
+        ...(title ? { title } : {}),
+        ...(message ? { message } : {}),
+      })) as Payload;
+      const session = (result.session || {}) as Payload;
+      const restored = Array.isArray(result.restoredPaths)
+        ? (result.restoredPaths as string[])
+        : [];
+      const skipped = Array.isArray(result.skipped) ? (result.skipped as string[]) : [];
+      printLinesOrJson(ctx, result, [
+        `Continued handoff ${String(result.packageId)} as managed session ${String(session.id)}`,
+        `  files restored: ${restored.length}`,
+        ...skipped.map((entry) => `  not restored: ${entry}`),
+        "Approvals the earlier session was waiting for were not granted; the new session asks again.",
+      ]);
+      return 0;
+    } finally {
+      client.close();
+    }
+  }
+  process.stderr.write(`${exportUsage}\n${importUsage}\n`);
+  return 1;
+}
+
 async function sessions(ctx: CommandContext): Promise<number> {
   const sub = ctx.parsed.rest[0] || "list";
   if (sub === "list") {
@@ -2059,6 +2132,7 @@ const RESERVED_RUN_PROMPTS = new Set([
   "provider",
   "sessions",
   "session",
+  "handoff",
   "logs",
   "log",
   "tools",
@@ -2120,6 +2194,7 @@ function renderCompletions(shell: string): string {
     "reject",
     "providers",
     "sessions",
+    "handoff",
     "tasks",
     "logs",
     "tools",
@@ -2209,6 +2284,8 @@ function usage(): void {
       "  cowork providers configure <provider> [--api-key <key>] [--model <model>]",
       "  cowork providers fallback list|add|remove",
       "  cowork sessions list|show|export|rename|archive|delete|prune",
+      "  cowork handoff export <managedSessionId> | --task <taskId> [--out <dir>]",
+      "  cowork handoff import <manifest> --environment <environmentId> [--agent <agentId>]",
       "  cowork logs latest|tail|grep",
       "  cowork tools list|info|enable|disable",
       "  cowork mcp list|add|remove|enable|disable|test",

@@ -139,22 +139,22 @@ describe("NativeNotificationCenter", () => {
     warn.mockRestore();
   });
 
-  it("reports asynchronous native delivery failure once so the caller can show a fallback", async () => {
-    const onFailed = vi.fn();
+  it("logs an asynchronous delivery failure instead of drawing a banner of its own", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const center = await loadNotificationCenter();
 
-    const result = center.show(
-      {
-        id: "n1",
-        title: "Task complete",
-        message: "Report finished",
-      },
-      onFailed,
-    );
+    const result = center.show({
+      id: "n1",
+      title: "Task complete",
+      message: "Report finished",
+    });
 
     expect(result).toBe(true);
     mockState.instances[0]?.emit("failed");
-    mockState.instances[0]?.emit("failed");
-    expect(onFailed).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      "[Notifications] The system did not deliver the notification:",
+      undefined,
+    );
+    warn.mockRestore();
   });
 });

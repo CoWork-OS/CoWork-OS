@@ -18,7 +18,6 @@ export {
   DEFAULT_NOTIFICATION_STORE_PATH,
   DEFAULT_NOTIFICATION_DIR,
 } from "./store";
-export { NotificationOverlayManager } from "./NotificationOverlayWindow";
 export { NativeNotificationCenter } from "./NativeNotificationCenter";
 export {
   isLikelyIntegrationAuthError,

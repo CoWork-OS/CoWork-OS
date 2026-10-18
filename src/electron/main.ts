@@ -2950,8 +2950,8 @@ if (isMacSafeStorageMigrationWorker) {
               }
             }
 
-            // Custom overlay notification is shown automatically via
-            // notificationService.add() -> onEvent -> NotificationOverlayManager
+            // The system notification is shown automatically via
+            // notificationService.add() -> onEvent -> showDesktopNotification
           }
         };
 

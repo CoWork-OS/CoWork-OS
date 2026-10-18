@@ -51,8 +51,6 @@ export interface AppearanceSettings {
 }
 
 // Tray (Menu Bar) Settings
-export type DesktopNotificationStyle = "system" | "near-dock";
-
 export interface TraySettings {
   enabled: boolean;
   showDockIcon: boolean;
@@ -60,7 +58,6 @@ export interface TraySettings {
   closeToTray: boolean;
   showNotifications: boolean;
   showApprovalSavedNotifications: boolean;
-  notificationStyle?: DesktopNotificationStyle;
 }
 
 /** One team memory repo: a local folder (a memory repo), optionally for some workspaces only. */

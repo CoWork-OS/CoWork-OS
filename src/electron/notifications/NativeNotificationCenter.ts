@@ -29,7 +29,7 @@ export class NativeNotificationCenter {
     this.onClickCallback = callback;
   }
 
-  show(notification: NativeNotificationInput, onFailed?: () => void): boolean {
+  show(notification: NativeNotificationInput): boolean {
     if (!Notification.isSupported()) {
       return false;
     }
@@ -50,17 +50,6 @@ export class NativeNotificationCenter {
         this.activeNotifications.delete(notification.id);
         this.notificationOrder = this.notificationOrder.filter((id) => id !== notification.id);
       };
-      let failureReported = false;
-      const reportFailure = () => {
-        releaseReference();
-        if (failureReported) return;
-        failureReported = true;
-        try {
-          onFailed?.();
-        } catch (error) {
-          console.warn("[Notifications] Native notification fallback failed:", error);
-        }
-      };
 
       nativeNotification.on("click", () => {
         this.onClickCallback?.(notification.id, notification.taskId);
@@ -68,7 +57,12 @@ export class NativeNotificationCenter {
       });
       // Do not release on "close": macOS fires it when the banner leaves the screen,
       // while the delivered item can still belong in Notification Center.
-      nativeNotification.on("failed", reportFailure);
+      // The system is the only place alerts are drawn, so a failed delivery is
+      // logged and the alert stays in the in-app notification inbox.
+      nativeNotification.on("failed", (_event, error) => {
+        releaseReference();
+        console.warn("[Notifications] The system did not deliver the notification:", error);
+      });
 
       this.activeNotifications.set(notification.id, nativeNotification);
       this.notificationOrder.push(notification.id);

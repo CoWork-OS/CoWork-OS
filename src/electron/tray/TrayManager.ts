@@ -38,7 +38,6 @@ import {
   IPC_CHANNELS,
   Workspace,
   isTempWorkspaceId,
-  DesktopNotificationStyle,
 } from "../../shared/types";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import { getUserDataDir } from "../utils/user-data-dir";
@@ -58,11 +57,7 @@ import {
   ChronicleMemoryService,
   ChronicleSettingsManager,
 } from "../chronicle";
-import { NotificationOverlayManager } from "../notifications";
-import {
-  showDesktopNotification,
-  updateDockNotificationBadge,
-} from "../notifications/desktop-delivery";
+import { showDesktopNotification } from "../notifications/desktop-delivery";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 
@@ -99,7 +94,6 @@ export interface TraySettings {
   closeToTray: boolean;
   showNotifications: boolean;
   showApprovalSavedNotifications: boolean;
-  notificationStyle?: DesktopNotificationStyle;
 }
 
 const DEFAULT_SETTINGS: TraySettings = {
@@ -109,7 +103,6 @@ const DEFAULT_SETTINGS: TraySettings = {
   closeToTray: true,
   showNotifications: true,
   showApprovalSavedNotifications: false,
-  notificationStyle: "system",
 };
 
 /**
@@ -120,7 +113,6 @@ const DEFAULT_SETTINGS: TraySettings = {
 export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefined): TraySettings {
   const merged = { ...DEFAULT_SETTINGS, ...raw };
   return {
-    notificationStyle: merged.notificationStyle === "near-dock" ? "near-dock" : "system",
     enabled: typeof merged.enabled === "boolean" ? merged.enabled : DEFAULT_SETTINGS.enabled,
     showDockIcon:
       typeof merged.showDockIcon === "boolean"
@@ -144,16 +136,6 @@ export function normalizeTraySettings(raw: Partial<TraySettings> | null | undefi
 }
 
 export class TrayManager {
-  private unreadNotificationCount = 0;
-
-  setUnreadNotificationCount(count: number): void {
-    this.unreadNotificationCount = count;
-    this.updateNotificationBadge();
-  }
-
-  private updateNotificationBadge(): void {
-    updateDockNotificationBadge(this.settings, this.unreadNotificationCount);
-  }
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private gateway: ChannelGateway | null = null;
@@ -213,7 +195,6 @@ export class TrayManager {
 
     // Load settings
     this.loadSettings();
-    this.updateNotificationBadge();
 
     // Apply options overrides
     if (options.showDockIcon !== undefined) {
@@ -639,16 +620,6 @@ export class TrayManager {
 
       this.tray = new Tray(icon);
       this.tray.setToolTip("CoWork OS");
-
-      // Supply tray bounds so overlay notifications resolve the correct display (multi-monitor)
-      try {
-        const trayRef = this.tray;
-        NotificationOverlayManager.getInstance().setAnchorBoundsProvider(
-          () => trayRef?.getBounds() ?? null,
-        );
-      } catch {
-        // Overlay fallback can still use the primary display if tray bounds are unavailable.
-      }
 
       // Build and set context menu
       this.updateContextMenu();
@@ -1217,10 +1188,6 @@ export class TrayManager {
       Object.entries(settings).filter(([, v]) => v !== undefined),
     ) as Partial<TraySettings>;
     this.settings = normalizeTraySettings({ ...this.settings, ...patch });
-    this.updateNotificationBadge();
-    if (settings.notificationStyle !== undefined || settings.showNotifications === false) {
-      NotificationOverlayManager.getInstance().dismissAll();
-    }
 
     try {
       if (SecureSettingsRepository.isInitialized()) {
@@ -1268,7 +1235,7 @@ export class TrayManager {
       message: body,
       taskId,
     };
-    showDesktopNotification(notification, this.settings.notificationStyle);
+    showDesktopNotification(notification);
   }
 
   /**

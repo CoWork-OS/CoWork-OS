@@ -288,19 +288,6 @@
   flex: 1;
 }
 
-.tray-settings .tray-notification-style {
-  width: 160px;
-  max-width: 100%;
-  flex: 0 0 160px;
-  margin: 0;
-}
-
-@media (max-width: 760px) {
-  .tray-settings .tray-notification-style {
-    flex-basis: auto;
-  }
-}
-
 .tray-settings-option-title {
   display: block;
   font-size: 13px;

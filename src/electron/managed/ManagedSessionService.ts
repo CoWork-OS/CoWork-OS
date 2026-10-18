@@ -86,6 +86,8 @@ import {
 } from "../../shared/managed-session-schemas";
 import { redactWorkSessionValue } from "../database/WorkSessionProtocolRepository";
 import { TranscriptStore } from "../memory/TranscriptStore";
+import { redactSecrets } from "../memory/sensitive-content";
+import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
 import {
   buildHandoffManifestBody,
   latestCommittedRevisions,
@@ -2155,7 +2157,7 @@ export class ManagedSessionService {
         aggregate: result.aggregate,
         items,
         artifacts,
-        checkpoint: await this.loadHandoffCheckpoint(workspace.path, task.id),
+        checkpoint: await this.loadHandoffCheckpoint(workspace, task.id),
         warnings,
       }),
     );
@@ -2167,7 +2169,7 @@ export class ManagedSessionService {
         type: "handoff.exported",
         payload: {
           packageId,
-          packageDir,
+          packageDir: path.relative(workspace.path, packageDir) || packageDir,
           artifactsCopied: copies.length,
           warningCount: manifest.warnings.length,
         },
@@ -2195,19 +2197,37 @@ export class ManagedSessionService {
     if (!workspace) throw new Error(`Workspace not found: ${environment.config.workspaceId}`);
     await this.assertWorkspacePermission(workspace.id, "canRunAgents");
     const { manifest, packageDir } = readHandoffPackage(workspace, parsed.manifestPath);
+    // Everything that can refuse the import is checked before a file is written.
     const agentId = parsed.agentId || manifest.source.agentId;
     if (!agentId) {
       throw new Error("Choose the managed agent to continue with (agentId)");
     }
-    if (!(await this.managedAgentRepo.findById(agentId))) {
+    const agent = await this.managedAgentRepo.findById(agentId);
+    if (!agent) {
       throw new Error(`Managed agent not found: ${agentId}. Choose an agent on this installation.`);
     }
-    const { restored, skipped } = restoreHandoffArtifacts(workspace, packageDir, manifest);
+    if (agent.status === "suspended" || agent.status === "archived") {
+      throw new Error(`Managed agent is ${agent.status} and cannot be run: ${agent.name}`);
+    }
+    const plan = restoreHandoffArtifacts(workspace, packageDir, manifest, { dryRun: true });
     const sourceSessionId = manifest.source.managedSessionId;
+    const sourceSession = sourceSessionId
+      ? await this.managedSessionRepo.findById(sourceSessionId)
+      : undefined;
+    // Lineage only to a session of the same workspace on this installation.
     const resumedFromSessionId =
-      sourceSessionId && (await this.managedSessionRepo.findById(sourceSessionId))
-        ? sourceSessionId
-        : undefined;
+      sourceSession && sourceSession.workspaceId === workspace.id ? sourceSession.id : undefined;
+    if (parsed.dryRun) {
+      return {
+        packageId: manifest.packageId,
+        restoredPaths: plan.restored.map((artifact) => artifact.relativePath),
+        skipped: plan.skipped,
+        originVerified: false,
+        dryRun: true,
+      };
+    }
+
+    const { restored, skipped } = restoreHandoffArtifacts(workspace, packageDir, manifest);
     const restoredPaths = restored.map((artifact) => artifact.relativePath);
     const text = renderHandoffImportMessage(manifest, {
       now: Date.now(),
@@ -2219,13 +2239,19 @@ export class ManagedSessionService {
       {
         agentId,
         environmentId: environment.id,
-        title: parsed.title || `Continue: ${manifest.source.title}`.slice(0, 500),
+        title: (parsed.title || `Continue: ${manifest.source.title}`).slice(0, 500),
         initialEvent: { type: "user.message", content: [{ type: "text", text }] },
       },
       {
         resumedFromSessionId,
         beforeStart: async (task, created) => {
-          this.seedHandoffContract(task, manifest, restored);
+          try {
+            this.seedHandoffContract(task, manifest, restored);
+          } catch (error) {
+            // The first message already carries the package; a seeding failure loses only the
+            // durable copy of its ledger, so the session still starts.
+            workContextLogger.warn("Could not seed the handoff into the session contract:", error);
+          }
           await this.managedSessionEventRepo.create({
             sessionId: created.id,
             timestamp: Date.now(),
@@ -2234,6 +2260,7 @@ export class ManagedSessionService {
               packageId: manifest.packageId,
               sourceWorkSessionId: manifest.source.workSessionId,
               ...(sourceSessionId ? { sourceManagedSessionId: sourceSessionId } : {}),
+              originVerified: false,
               restoredPaths,
               skipped,
             },
@@ -2241,7 +2268,13 @@ export class ManagedSessionService {
         },
       },
     );
-    return { session, packageId: manifest.packageId, restoredPaths, skipped };
+    return {
+      session,
+      packageId: manifest.packageId,
+      restoredPaths,
+      skipped,
+      originVerified: false,
+    };
   }
 
   private seedHandoffContract(
@@ -2267,7 +2300,7 @@ export class ManagedSessionService {
         sessionId: session.id,
         kind: "constraint",
         key: `handoff-requirement:${requirement.id}`.slice(0, 500),
-        statement: `Earlier requirement (${requirement.status}): ${requirement.description}`,
+        statement: `(imported, unverified) Earlier requirement (${requirement.status}): ${requirement.description}`,
         status:
           requirement.status === "satisfied"
             ? "satisfied"
@@ -2286,7 +2319,7 @@ export class ManagedSessionService {
         // plain constraints so they cannot reopen requirements of the new one.
         kind: entry.kind === "requirement" ? "constraint" : entry.kind,
         key: `handoff:${entry.key}`.slice(0, 500),
-        statement: entry.statement,
+        statement: `(imported, unverified) ${entry.statement}`,
         status: entry.status,
         ...(entry.owner ? { owner: entry.owner } : {}),
         metadata: { importedFrom: { ...importedFrom, entryId: entry.id } },
@@ -2346,17 +2379,29 @@ export class ManagedSessionService {
   }
 
   private async loadHandoffCheckpoint(
-    workspacePath: string,
+    workspace: Workspace,
     taskId: string,
   ): Promise<SessionHandoffManifest["checkpoint"]> {
     try {
-      const checkpoint = await TranscriptStore.loadCheckpoint(workspacePath, taskId);
+      const checkpoint = await TranscriptStore.loadCheckpoint(
+        workspace.path,
+        taskId,
+        (candidate) => {
+          try {
+            assertWorkspaceFilesystemAccess(workspace, candidate, "read", "task checkpoint");
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      );
       if (!checkpoint) return undefined;
       const raw =
         checkpoint.explicitChatSummaryBlock ||
         (checkpoint.structuredSummary ? JSON.stringify(checkpoint.structuredSummary) : "");
       const redacted = redactWorkSessionValue(raw);
-      const summary = typeof redacted === "string" ? redacted.slice(0, 8_000) : "";
+      const summary =
+        typeof redacted === "string" ? redactSecrets(redacted).text.slice(0, 8_000) : "";
       if (!summary || summary === "[redacted]") return undefined;
       return {
         createdAt: Math.max(0, Math.floor(Number(checkpoint.timestamp) || Date.now())),

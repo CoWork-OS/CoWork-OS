@@ -6,10 +6,21 @@
 
 import type Database from "better-sqlite3";
 import { browserPartitionFor, browserProfileKey } from "../../shared/browser-profile";
-import { type BrowserDataType, normalizeBrowserSettings } from "../../shared/browser-settings";
+import {
+  type AgentIdentityDirectoryResult,
+  type BrowserDataType,
+  normalizeBrowserSettings,
+} from "../../shared/browser-settings";
 import { IPC_CHANNELS } from "../../shared/types";
 import { BrowserHistoryRepository } from "../database/repository-facades";
 import { BrowserSettingsManager } from "../settings/browser-settings-manager";
+import {
+  agentPublicJwks,
+  AgentSigningKeyUnavailableError,
+  getAgentSigningKey,
+  rotateAgentSigningKey,
+  type AgentSigningKey,
+} from "../identity/agent-signing-keys";
 import type { BrowserDownloadAction, BrowserDownloadManager } from "./browser-download-manager";
 import type { BrowserTabOwner } from "./browser-session-manager";
 import type { BrowserWorkbenchService } from "./browser-workbench-service";
@@ -24,6 +35,25 @@ export interface BrowserPlatformIpcDeps {
   service: BrowserWorkbenchService;
   downloads: BrowserDownloadManager;
   sessionFromPartition: (partition: string) => Any;
+  /** Native confirmation before the agent identity key is replaced; refused when absent. */
+  confirmAgentKeyRotation?: () => Promise<boolean>;
+}
+
+function agentIdentityDirectoryView(
+  read: () => AgentSigningKey | undefined,
+): AgentIdentityDirectoryResult {
+  try {
+    const key = read();
+    const jwks = agentPublicJwks(key);
+    return key && jwks ? { keyid: key.keyid, directory: JSON.stringify(jwks, null, 2) } : null;
+  } catch (error) {
+    return {
+      error:
+        error instanceof AgentSigningKeyUnavailableError
+          ? error.message
+          : "The agent identity key could not be read.",
+    };
+  }
 }
 
 function readString(value: unknown, max = 200): string | null {
@@ -90,6 +120,18 @@ export function registerBrowserPlatformIpc(deps: BrowserPlatformIpcDeps): void {
     });
     BrowserSettingsManager.saveSettings(merged);
     return { success: true, settings: BrowserSettingsManager.loadSettingsState() };
+  });
+
+  // Declared agent identity: the public key directory to host, and key rotation. Takes no
+  // renderer input; the private key never leaves the main process.
+  ipcMain.handle(IPC_CHANNELS.AGENT_IDENTITY_DIRECTORY_GET, () =>
+    agentIdentityDirectoryView(getAgentSigningKey),
+  );
+  ipcMain.handle(IPC_CHANNELS.AGENT_IDENTITY_KEY_ROTATE, async () => {
+    // Sites stop verifying the new key until its directory is published, so the user confirms in
+    // a main-process dialog: a page or compromised renderer cannot rotate the key on its own.
+    if (!(await deps.confirmAgentKeyRotation?.().catch(() => false))) return null;
+    return agentIdentityDirectoryView(rotateAgentSigningKey);
   });
 
   ipcMain.handle(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, (_event, data: Any) => {

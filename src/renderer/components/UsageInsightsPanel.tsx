@@ -129,6 +129,20 @@ interface AwuMetrics {
   tokensPerAwu: number | null;
   costPerAwu: number | null;
   awuPerDollar: number | null;
+  verifiedCount?: number;
+  verifiedByContractCount?: number;
+  partialCount?: number;
+  needsUserActionCount?: number;
+  costPerVerifiedAwu?: number | null;
+  interventions?: {
+    approvalDecisions: number;
+    inputAnswers: number;
+    steeringMessages: number;
+    humanInterventions: number;
+    providerEscalations: number;
+    reworkRuns: number;
+    perCompletedUnit: number | null;
+  };
   byDay: Array<{
     dateKey: string;
     awuCount: number;
@@ -136,6 +150,8 @@ interface AwuMetrics {
     totalCost: number;
     tokensPerAwu: number | null;
     costPerAwu: number | null;
+    verifiedCount?: number;
+    costPerVerifiedAwu?: number | null;
   }>;
   trend: {
     previousAwuCount: number;
@@ -143,6 +159,7 @@ interface AwuMetrics {
     previousCostPerAwu: number | null;
     tokensPerAwuChange: number | null;
     costPerAwuChange: number | null;
+    costPerVerifiedAwuChange?: number | null;
   };
 }
 
@@ -598,11 +615,12 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
   const maxHourTasks = ap ? Math.max(...ap.tasksByHour, 1) : 1;
   const successRate =
     tm && tm.totalCreated > 0 ? Math.round((tm.completed / tm.totalCreated) * 100) : 0;
-  const awuLineMetricLabel = awuLineMetric === "tokens" ? "Tokens / AWU" : "Cost / AWU";
+  const awuLineMetricLabel = awuLineMetric === "tokens" ? "Tokens / AWU" : "Cost / verified unit";
   const awuDailyRows = (awu?.byDay || []).map((row) => ({
     ...row,
     label: formatDayLabel(row.dateKey),
-    lineValue: awuLineMetric === "tokens" ? row.tokensPerAwu : row.costPerAwu,
+    lineValue:
+      awuLineMetric === "tokens" ? row.tokensPerAwu : (row.costPerVerifiedAwu ?? row.costPerAwu),
   }));
   const activeOverviewData = overviewData?.workspaceId === workspaceId ? overviewData.data : null;
   const overview = activeOverviewData ?? (periodDays >= OVERVIEW_PERIOD_DAYS ? data : null);
@@ -1060,14 +1078,22 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                     onClick={() => setAwuLineMetric("cost")}
                     aria-pressed={awuLineMetric === "cost"}
                   >
-                    Cost/AWU
+                    Cost/verified
                   </button>
                 </div>
               </div>
               <div className="insights-awu-hero">
-                <span className="insights-awu-count">{awu.awuCount}</span>
-                <span className="insights-awu-label">work units</span>
+                <span className="insights-awu-count">{awu.verifiedCount ?? awu.awuCount}</span>
+                <span className="insights-awu-label">
+                  {awu.verifiedCount !== undefined ? "verified work units" : "work units"}
+                </span>
               </div>
+              {awu.verifiedCount !== undefined && (
+                <div className="insights-awu-comparison">
+                  {awu.partialCount ?? 0} partial · {awu.needsUserActionCount ?? 0} needed action ·{" "}
+                  {awu.awuCount} completed in any status
+                </div>
+              )}
               <div className="insights-awu-grid">
                 <div className="insights-awu-metric">
                   <div className="insights-awu-metric-value">
@@ -1076,12 +1102,39 @@ export function UsageInsightsPanel({ workspaceId: initialWorkspaceId }: UsageIns
                   <div className="insights-awu-metric-label">Tokens / AWU</div>
                   <TrendIndicator change={awu.trend.tokensPerAwuChange} invertColor />
                 </div>
-                <div className="insights-awu-metric">
+                <div
+                  className="insights-awu-metric"
+                  title={
+                    awu.costPerAwu !== null
+                      ? `Per completed unit, any status: $${awu.costPerAwu.toFixed(4)}`
+                      : undefined
+                  }
+                >
                   <div className="insights-awu-metric-value">
-                    {awu.costPerAwu !== null ? `$${awu.costPerAwu.toFixed(4)}` : "\u2014"}
+                    {awu.costPerVerifiedAwu !== null && awu.costPerVerifiedAwu !== undefined
+                      ? `$${awu.costPerVerifiedAwu.toFixed(4)}`
+                      : "\u2014"}
                   </div>
-                  <div className="insights-awu-metric-label">Cost / AWU</div>
-                  <TrendIndicator change={awu.trend.costPerAwuChange} invertColor />
+                  <div className="insights-awu-metric-label">
+                    Cost per verified unit (incl. escalations)
+                  </div>
+                  <TrendIndicator change={awu.trend.costPerVerifiedAwuChange ?? null} invertColor />
+                </div>
+                <div
+                  className="insights-awu-metric"
+                  title={
+                    awu.interventions
+                      ? `${awu.interventions.approvalDecisions} approvals, ${awu.interventions.inputAnswers} answers, ${awu.interventions.steeringMessages} follow-up messages; ${awu.interventions.providerEscalations} provider escalations, ${awu.interventions.reworkRuns} re-runs`
+                      : undefined
+                  }
+                >
+                  <div className="insights-awu-metric-value">
+                    {awu.interventions?.perCompletedUnit !== null &&
+                    awu.interventions?.perCompletedUnit !== undefined
+                      ? awu.interventions.perCompletedUnit.toFixed(2)
+                      : "\u2014"}
+                  </div>
+                  <div className="insights-awu-metric-label">Human interventions per task</div>
                 </div>
                 <div className="insights-awu-metric">
                   <div

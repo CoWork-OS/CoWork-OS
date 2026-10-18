@@ -126,7 +126,7 @@ body:
     attributes:
       label: App Version
       description: "Settings → About & Updates in the app, or `cowork --version` for npm installs"
-      placeholder: "0.5.60"
+      placeholder: "0.5.61"
     validations:
       required: true
 

@@ -5,7 +5,7 @@ import {
   terminalTabLabel,
   terminalTabMarkdownLink,
 } from "../../../shared/terminal-tab-links";
-import { TerminalPtyManager } from "../../terminal/TerminalPtyManager";
+import type { TerminalPtyManager } from "../../terminal/TerminalPtyManager";
 import type { AgentDaemon } from "../daemon";
 import type { LLMTool } from "../llm/types";
 import { redactShellOutput } from "./shell-tools";
@@ -25,6 +25,19 @@ export const TERMINAL_TAB_TOOL_NAMES: ReadonlySet<string> = new Set([
   "list_terminal_tabs",
   "read_terminal",
 ]);
+
+/**
+ * The dock's PTY manager, loaded on first use. It imports node-pty, a native module, so loading
+ * it with the tool registry would make every registry import (headless runs, CI without a built
+ * node-pty) depend on it.
+ */
+function getDefaultTerminalTabSource(): TerminalTabSource {
+  // oxlint-disable-next-line typescript/no-require-imports -- lazy load of a native dependency
+  const { TerminalPtyManager: manager } = require("../../terminal/TerminalPtyManager") as {
+    TerminalPtyManager: typeof TerminalPtyManager;
+  };
+  return manager.getInstance();
+}
 
 const DEFAULT_TAIL_LINES = 200;
 const MAX_TAIL_LINES = 2000;
@@ -142,8 +155,12 @@ export class TerminalTabTools {
     private workspace: Workspace,
     private readonly daemon: TerminalReadConsentDaemon,
     private readonly taskId: string,
-    private readonly source: TerminalTabSource = TerminalPtyManager.getInstance(),
+    private readonly sourceOverride?: TerminalTabSource,
   ) {}
+
+  private get source(): TerminalTabSource {
+    return this.sourceOverride ?? getDefaultTerminalTabSource();
+  }
 
   setWorkspace(workspace: Workspace): void {
     if (workspace.id !== this.workspace?.id) this.tabConsents.clear();

@@ -141,7 +141,7 @@ When choosing a self-hosted AI assistant platform, security should be a primary 
 | Token/cost budgets         | Cost control         | Configurable       |
 | Iteration limits           | Loop prevention      | Configurable       |
 | Domain allowlist           | Browser safety       | Optional           |
-| Security tests             | Verification         | 390+ tests         |
+| Security tests             | Verification         | 160+ tests         |
 | Open source                | Auditability         | MIT license        |
 
 ---

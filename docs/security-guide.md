@@ -1080,8 +1080,8 @@ See [Codex Security Scans](codex-security-scans.md) for scan modes and artifact 
 ### Running Security Tests
 
 ```bash
-npm run test                # Full suite (4,932 tests total: 4,854 passed, 78 skipped; includes security)
-npx vitest run tests/security   # Security-focused tests only (135 tests)
+npm run test                # Full suite (17,018 tests: 16,998 passed, 18 skipped, 2 todo; includes security)
+npx vitest run tests/security   # Security-focused tests only (160 tests)
 npm run test:coverage       # With coverage report
 ```
 

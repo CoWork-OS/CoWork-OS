@@ -398,7 +398,7 @@ See [Architecture](architecture.md) for the full technical deep-dive.
 - **Sandbox isolation**: macOS `sandbox-exec` (native), Docker containers, or process-level isolation on Windows
 - **Managed deployment hardening**: Headless Control Plane access is loopback-first and blocks unsafe public binds unless Tailscale, private container context, or an explicit break-glass override is configured
 - **Encrypted storage**: OS keychain + AES-256 fallback
-- **7,913 declared Vitest cases** (**7,911 passing, 2 todo**) across **763 tracked test files**, including **142** security cases under `tests/security/` and **405** control-plane/WebSocket-related cases
+- **17,018 Vitest cases** (**16,998 passing, 18 skipped, 2 todo**) across **1,515 test files**, including **160** security cases under `tests/security/` and **455** control-plane/WebSocket-related cases
 
 See [Security Guide](security-guide.md) and [Security Architecture](security/) for details.
 

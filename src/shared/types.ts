@@ -2032,15 +2032,29 @@ export const CONTEXT_TOOL_RESTRICTIONS: Record<
   group: {
     deniedGroups: ["group:memory"],
     // swarm_note writes the owner's memory folder. It is not in group:memory (read-only
-    // helpers keep it), so shared contexts deny it by name.
-    deniedTools: ["read_clipboard", "write_clipboard", "swarm_note"],
+    // helpers keep it), so shared contexts deny it by name. The owner's terminal tabs are
+    // private to them like the clipboard: an answer in a shared chat must not quote them.
+    deniedTools: [
+      "read_clipboard",
+      "write_clipboard",
+      "swarm_note",
+      "list_terminal_tabs",
+      "read_terminal",
+    ],
     requireApprovalFor: ["delete_file"],
   },
   public: {
     deniedGroups: ["group:memory"],
     // swarm_note writes the owner's memory folder. It is not in group:memory (read-only
-    // helpers keep it), so shared contexts deny it by name.
-    deniedTools: ["read_clipboard", "write_clipboard", "swarm_note"],
+    // helpers keep it), so shared contexts deny it by name. The owner's terminal tabs are
+    // private to them like the clipboard: an answer in a shared chat must not quote them.
+    deniedTools: [
+      "read_clipboard",
+      "write_clipboard",
+      "swarm_note",
+      "list_terminal_tabs",
+      "read_terminal",
+    ],
     requireApprovalFor: ["delete_file"],
   },
 };
@@ -4409,6 +4423,8 @@ export interface TerminalBlockRunRequest {
 export interface TerminalBlockRunResult {
   runId: string;
   tabId: string;
+  /** The tab's working directory when the run finished; the tab is named after its last part. */
+  cwd: string;
   /** Output between the command start and its finish, with terminal escapes kept. */
   output: string;
   /** The output was longer than the capture limit; only its tail is kept. */

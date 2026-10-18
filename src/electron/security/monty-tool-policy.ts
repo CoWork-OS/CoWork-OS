@@ -17,6 +17,38 @@ export type ToolPolicyDecision = {
 /** Stable reason used when a configured workspace policy cannot be evaluated. */
 export const TOOL_POLICY_UNAVAILABLE_REASON = "workspace tool policy unavailable";
 
+/**
+ * Decisions for tools whose default was chosen deliberately, used when the workspace has no
+ * tools.monty. A workspace policy always decides first.
+ *
+ * list_terminal_tabs passes: it returns the user's terminal tabs' names, folders and status,
+ * never their output.
+ *
+ * read_terminal requires approval: a shell tab can hold secrets the redaction patterns miss,
+ * such as a typed password, a pasted token, or another project's output, and reading it sends
+ * that text to the model provider. The registry turns this into one consent per tab for the task
+ * (TerminalTabTools.requestReadConsent, "Allow for this task") that names the tab, rather than
+ * a prompt per read; a tab this task's code block run opened needs none, since the user ran it.
+ * The tool also checks that consent itself, so a tools.monty that passes cannot skip it.
+ */
+const DEFAULT_TOOL_DECISIONS: ReadonlyMap<string, ToolPolicyDecision> = new Map<
+  string,
+  ToolPolicyDecision
+>([
+  ["list_terminal_tabs", { decision: "pass" }],
+  [
+    "read_terminal",
+    {
+      decision: "require_approval",
+      reason: "terminal output can hold secrets that redaction misses",
+    },
+  ],
+]);
+
+function defaultToolDecision(toolName: string): ToolPolicyDecision {
+  return { ...(DEFAULT_TOOL_DECISIONS.get(toolName) ?? { decision: "pass" }) };
+}
+
 const DEFAULT_LIMITS: MontyResourceLimits = {
   maxDurationSecs: 0.3,
   maxAllocations: 150_000,
@@ -87,7 +119,7 @@ export async function evaluateMontyToolPolicy(args: {
   limits?: MontyResourceLimits;
 }): Promise<ToolPolicyDecision> {
   const wsPath = args.workspace?.path;
-  if (!wsPath) return { decision: "pass" };
+  if (!wsPath) return defaultToolDecision(args.toolName);
 
   const unavailable = (): ToolPolicyDecision => ({
     decision: "deny",
@@ -104,7 +136,7 @@ export async function evaluateMontyToolPolicy(args: {
     return unavailable();
   }
 
-  if (!cached) return { decision: "pass" };
+  if (!cached) return defaultToolDecision(args.toolName);
 
   const clamped = clampMontyLimits(args.limits, MAX_LIMITS) || {};
   const limits: MontyResourceLimits = { ...DEFAULT_LIMITS, ...clamped };

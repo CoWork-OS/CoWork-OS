@@ -2015,6 +2015,25 @@ describe("task consent authority snapshots", () => {
     fixture.taskRepo.findById.mockReturnValue({ id: "task", status: "completed" });
     expect(await snapshot()).toBeNull();
   });
+
+  it("keeps terminal read consent under Full access, which still asks for it", async () => {
+    const fixture = {
+      taskRepo: { findById: vi.fn(() => ({ id: "task", status: "executing" })) },
+      getTaskWithTransientAgentConfig: (task: Any) => task,
+      evaluatePermissionRequest: vi.fn(async () => ({
+        evaluation: { decision: "ask" },
+        authorizationKey: "policy-1",
+      })),
+      getEffectiveAccessProfile: vi.fn(() => ({
+        id: "full_access",
+        definition: { approval: "never" },
+      })),
+    } as Any;
+    const snapshot = (tool: string) =>
+      AgentDaemon.prototype.getTaskConsentAuthority.call(fixture, "task", { tool }, "data_export");
+    expect(await snapshot("read_terminal")).toBeTruthy();
+    expect(await snapshot("http_request")).toBeNull();
+  });
 });
 
 it("auto-approves routine app consent only under effective Full access and current allow policy", async () => {

@@ -204,6 +204,9 @@ describe("ToolPolicyPipeline", () => {
     expect((await evaluateVisual(true)).decision).toBe("require_approval");
     expect((await evaluateVisual(false)).decision).toBe("deny");
     expect((await evaluateVisual(true, "read_pdf_visual")).decision).toBe("require_approval");
+    // Reading the user's terminal output asks like visual analysis does.
+    expect((await evaluateVisual(true, "read_terminal")).decision).toBe("require_approval");
+    expect((await evaluateVisual(false, "read_terminal")).decision).toBe("deny");
   });
 
   it("preserves destructive runtime approval semantics for custom tools", async () => {

@@ -216,9 +216,11 @@ export class TerminalBlockRunner {
         this.busyTabs.delete(tabId);
         this.runs.delete(params.runId);
         output = output.replace(PROMPT_SP_PATTERN, "");
+        const finalTab = this.host.listTabs(params.workspaceId).find((t) => t.id === tabId);
         resolve({
           runId: params.runId,
           tabId,
+          cwd: finalTab?.cwd ?? tab.cwd,
           output,
           truncated,
           exitCode,
@@ -372,6 +374,7 @@ export class TerminalBlockRunner {
       workspaceId: params.workspaceId,
       workspacePath: params.workspacePath,
       title: "Code blocks",
+      codeBlockTaskId: params.taskId,
     });
     // A second tab only covers an overlapping run; later runs go back to the task's tab.
     if (!this.taskTabs.has(key) || known?.status === "ended") this.taskTabs.set(key, tab.id);

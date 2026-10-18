@@ -72,6 +72,53 @@ describe("evaluateMontyToolPolicy", () => {
     expect(result).toEqual({ decision: "pass" });
   });
 
+  it("asks before reading the user's terminal output, not before listing the tabs", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-policy-terminal-"));
+
+    await expect(
+      evaluateMontyToolPolicy({
+        workspace: workspaceAt(tmpDir),
+        toolName: "list_terminal_tabs",
+        toolInput: {},
+      }),
+    ).resolves.toEqual({ decision: "pass" });
+    await expect(
+      evaluateMontyToolPolicy({
+        workspace: workspaceAt(tmpDir),
+        toolName: "read_terminal",
+        toolInput: { tab_id: "tab:ws:tab-1" },
+      }),
+    ).resolves.toEqual({
+      decision: "require_approval",
+      reason: "terminal output can hold secrets that redaction misses",
+    });
+  });
+
+  it("lets a workspace policy decide for reading the user's terminal", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-policy-terminal-approval-"));
+    await fs.writeFile(
+      await policyPath(tmpDir),
+      [
+        'out = {"decision": "pass"}',
+        'if input["tool"] == "read_terminal":',
+        '  out = {"decision": "require_approval", "reason": "terminal output may hold secrets"}',
+        "out",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await evaluateMontyToolPolicy({
+      workspace: workspaceAt(tmpDir),
+      toolName: "read_terminal",
+      toolInput: { tab_id: "tab:ws:tab-1" },
+    });
+
+    expect(result).toEqual({
+      decision: "require_approval",
+      reason: "terminal output may hold secrets",
+    });
+  });
+
   it("passes when the configured policy path is not a regular file", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cowork-policy-directory-"));
     await fs.mkdir(await policyPath(tmpDir));

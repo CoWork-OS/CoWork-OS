@@ -24,6 +24,24 @@ describe("terminalOutputToPlainText", () => {
   it("applies backspaces", () => {
     expect(terminalOutputToPlainText("abx\bc")).toBe("abc");
   });
+
+  it("applies line erases, so text deleted at a prompt is gone", () => {
+    expect(terminalOutputToPlainText(`% secret${"\b".repeat(6)}${ESC}[K`)).toBe("%");
+    expect(terminalOutputToPlainText(`abcdef${ESC}[3D${ESC}[0Kxy`)).toBe("abcxy");
+    expect(terminalOutputToPlainText(`abcdef${ESC}[3D${ESC}[1K`)).toBe("    ef");
+    expect(terminalOutputToPlainText(`abcdef${ESC}[2Kxy`)).toBe("      xy");
+  });
+
+  it("applies cursor moves and deleted characters", () => {
+    expect(terminalOutputToPlainText(`abc${ESC}[2DX`)).toBe("aXc");
+    expect(terminalOutputToPlainText(`ab${ESC}[3Cc`)).toBe("ab   c");
+    expect(terminalOutputToPlainText(`abcd${ESC}[3D${ESC}[P`)).toBe("acd");
+  });
+
+  it("drops what came before a clear of the scrollback", () => {
+    expect(terminalOutputToPlainText(`old\r\n${ESC}[H${ESC}[2J${ESC}[3Jnew\r\n`)).toBe("new");
+    expect(terminalOutputToPlainText(`old\r\n${ESC}cnew`)).toBe("new");
+  });
 });
 
 describe("truncateMiddle", () => {
@@ -48,13 +66,18 @@ describe("code block run message", () => {
     expect(parseCodeBlockRunMessage(message)).toEqual({
       command: "git push origin main",
       exitCode: 1,
+      tabId: null,
     });
   });
 
   it("says when nothing was printed and when the status is unknown", () => {
     const message = buildCodeBlockRunMessage({ command: "true", output: "", exitCode: null });
     expect(message).toContain("It printed nothing.");
-    expect(parseCodeBlockRunMessage(message)).toEqual({ command: "true", exitCode: null });
+    expect(parseCodeBlockRunMessage(message)).toEqual({
+      command: "true",
+      exitCode: null,
+      tabId: null,
+    });
   });
 
   it("uses longer fences when the command or output contains one", () => {
@@ -75,6 +98,51 @@ describe("code block run message", () => {
     });
     expect(message).toContain("Output (shortened):");
     expect(message.length).toBeLessThan(CODE_BLOCK_RUN_MESSAGE_OUTPUT_LIMIT + 400);
+  });
+
+  it("names the tab the command ran in as a terminal tab link", () => {
+    const message = buildCodeBlockRunMessage({
+      command: "npm test",
+      output: "1 failed\r\n",
+      exitCode: 1,
+      tab: { id: "tab:ws-1:tab-1760000000-ab12", label: "cowork" },
+    });
+    expect(message.split("\n")[0]).toBe(
+      "I ran this command in my terminal tab [cowork](#terminal/tab%3Aws-1%3Atab-1760000000-ab12) (exit code 1):",
+    );
+    expect(parseCodeBlockRunMessage(message)).toEqual({
+      command: "npm test",
+      exitCode: 1,
+      tabId: "tab:ws-1:tab-1760000000-ab12",
+    });
+  });
+
+  it("keeps a tab label with brackets or line breaks parseable", () => {
+    const message = buildCodeBlockRunMessage({
+      command: "ls",
+      output: "",
+      exitCode: 0,
+      tab: { id: "tab:ws-1:tab-2", label: "odd [dir]\nname" },
+    });
+    expect(message).toContain("tab [odd dir name](#terminal/tab%3Aws-1%3Atab-2) (exit code 0):");
+    expect(parseCodeBlockRunMessage(message)).toMatchObject({ tabId: "tab:ws-1:tab-2" });
+  });
+
+  it("still reads messages from before the tab was named", () => {
+    const message = [
+      "I ran this command in my terminal (exit code 0):",
+      "",
+      "```sh",
+      "git status",
+      "```",
+      "",
+      "It printed nothing.",
+    ].join("\n");
+    expect(parseCodeBlockRunMessage(message)).toEqual({
+      command: "git status",
+      exitCode: 0,
+      tabId: null,
+    });
   });
 
   it("does not parse ordinary messages", () => {

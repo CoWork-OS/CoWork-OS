@@ -964,6 +964,9 @@ export class ToolCallDeduplicator {
       "canvas_push",
       // Polls a running background process; the same call returns new output.
       "process_output",
+      // The user's terminal tabs change as they work; the same call returns their new state.
+      "list_terminal_tabs",
+      "read_terminal",
     ];
     if (statefulTools.includes(canonicalToolName)) {
       return { isDuplicate: false };

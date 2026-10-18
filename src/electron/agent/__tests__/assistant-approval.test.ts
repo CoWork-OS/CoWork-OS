@@ -169,6 +169,24 @@ it("labels native background app permission with the actual task duration", () =
   ]);
 });
 
+it("offers a task-scoped consent for reading one terminal tab", () => {
+  const request = buildAssistantApprovalRequest(
+    "data_export",
+    'Let the agent read the recent output of your terminal tab "cowork" (/Users/almarion/cowork)?',
+    {
+      taskConsentScope:
+        'reading the recent output of your terminal tab "cowork" (/Users/almarion/cowork)',
+      taskConsentLabel: "Allow for this task",
+    },
+  );
+  expect(request.questions[0].question).toContain('terminal tab "cowork"');
+  expect(request.questions[0].question).toContain("until this task ends");
+  expect(request.questions[0].options.map((option) => option.label)).toEqual([
+    "Deny",
+    "Allow for this task",
+  ]);
+});
+
 it("offers a chat-scoped consent for read-only web access in a bot chat", () => {
   const request = buildAssistantApprovalRequest(
     "network_access",

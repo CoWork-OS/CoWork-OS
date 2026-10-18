@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Plus, SquareTerminal, X } from "lucide-react";
 import type { AgentTerminalTab, ShellSessionInfo, Workspace } from "../../shared/types";
+import { terminalTabLabel } from "../../shared/terminal-tab-links";
 import "@xterm/xterm/css/xterm.css";
 import "./terminal-tabs-dock.css";
 
@@ -45,7 +46,8 @@ function uniqueTabs(tabs: ShellSessionInfo[]): ShellSessionInfo[] {
 }
 
 function getTabLabel(tab: ShellSessionInfo, workspace: Workspace): string {
-  return tab.cwd.split(/[\\/]/).filter(Boolean).pop() || workspace.name || "terminal";
+  // The agent's list_terminal_tabs and code block run messages name tabs the same way.
+  return terminalTabLabel(tab.cwd, workspace.name);
 }
 
 function readCssVar(name: string, fallback: string): string {

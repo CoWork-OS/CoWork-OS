@@ -226,7 +226,9 @@ function inferCapabilityTags(toolName: string): RuntimeToolCapabilityTag[] {
     toolName === "run_command" ||
     toolName === "execute_code" ||
     toolName === "process_output" ||
-    toolName === "stop_process"
+    toolName === "stop_process" ||
+    toolName === "list_terminal_tabs" ||
+    toolName === "read_terminal"
   ) {
     tags.add("shell");
   }

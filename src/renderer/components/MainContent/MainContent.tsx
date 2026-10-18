@@ -77,6 +77,7 @@ import {
   buildCodeBlockRunMessage,
   parseCodeBlockRunMessage,
 } from "../../../shared/terminal-output-text";
+import { terminalTabLabel } from "../../../shared/terminal-tab-links";
 import {
   OPEN_TERMINAL_TAB_EVENT,
   type CodeBlockRunTarget,
@@ -7448,6 +7449,7 @@ function MainContentComponent({
           output: result.output,
           exitCode: result.exitCode,
           outputTruncated: result.truncated,
+          tab: { id: result.tabId, label: terminalTabLabel(result.cwd, workspace?.name) },
         }),
         undefined,
         undefined,
@@ -7461,7 +7463,13 @@ function MainContentComponent({
         },
       );
     },
-    [onSendMessage, permissionSettingsLoaded, selectedInteractionMode, taskAccessProfileId],
+    [
+      onSendMessage,
+      permissionSettingsLoaded,
+      selectedInteractionMode,
+      taskAccessProfileId,
+      workspace?.name,
+    ],
   );
   const codeBlockRunTarget = useMemo<CodeBlockRunTarget | undefined>(() => {
     if (!task?.id || !workspace?.id) return undefined;

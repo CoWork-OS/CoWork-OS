@@ -43,7 +43,7 @@ import {
   extractDomainFromUrl,
   extractUrlFromToolInput,
 } from "../security/export-permission-context";
-import { isVisualAnalysisConsentRequest } from "../visual-consent-policy";
+import { isExplicitExportConsentRequest } from "../visual-consent-policy";
 import { isLikelyNetworkShellCommand } from "../../../shared/shell-network";
 import { domainMatches } from "../../security/network-policy";
 import type { MCPToolPolicy } from "../../mcp/tool-policy";
@@ -677,14 +677,11 @@ export class PermissionEngine {
   ): PermissionEvaluationResult {
     const profile = this.getRuntimeAccessProfile(request);
     const never = profile?.approval === "never";
-    // Visual analysis sends file pixels to the selected model provider. Keep
-    // explicit consent, including in Full access: a desktop task can ask the
-    // user, while a headless task without an approval channel remains blocked.
-    const visualAnalysisConsent = isVisualAnalysisConsentRequest(
-      facts.toolName,
-      request.approvalType,
-    );
-    const deniedByNever = never && result.decision === "ask" && !visualAnalysisConsent;
+    // Visual analysis and read_terminal send local content to the selected model
+    // provider. Keep explicit consent, including in Full access: a desktop task can
+    // ask the user, while a headless task without an approval channel remains blocked.
+    const exportConsent = isExplicitExportConsentRequest(facts.toolName, request.approvalType);
+    const deniedByNever = never && result.decision === "ask" && !exportConsent;
     const decision = deniedByNever ? "deny" : result.decision;
     const reason = deniedByNever
       ? {

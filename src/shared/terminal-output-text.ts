@@ -3,6 +3,8 @@
  * output into plain text, and the follow-up message that hands that output to the agent.
  */
 
+import { parseTerminalTabHref, terminalTabMarkdownLink } from "./terminal-tab-links";
+
 /** Longest output, in characters, that the follow-up message carries. */
 export const CODE_BLOCK_RUN_MESSAGE_OUTPUT_LIMIT = 12_000;
 
@@ -15,13 +17,33 @@ const CSI_PATTERN = new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, "g");
 const OTHER_ESCAPE_PATTERN = new RegExp(`${ESC}[@-Z\\\\-_]`, "g");
 // C0 controls other than tab, newline and carriage return.
 const CONTROL_PATTERN = new RegExp("[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]", "g");
+// Erasing and moving along a line change what it shows, so they are applied, not dropped:
+// line editors delete typed text with backspaces and "erase to end of line" (ESC [ K).
+const ERASE_IN_LINE_PATTERN = new RegExp(`${ESC}\\[([012]?)K`, "g");
+const CURSOR_BACK_PATTERN = new RegExp(`${ESC}\\[(\\d*)D`, "g");
+const CURSOR_FORWARD_PATTERN = new RegExp(`${ESC}\\[(\\d*)C`, "g");
+const DELETE_CHARS_PATTERN = new RegExp(`${ESC}\\[(\\d*)P`, "g");
+// `clear` (ESC [ 3 J) and a terminal reset (ESC c) wipe the scrollback: earlier output is gone.
+const CLEAR_HISTORY_PATTERN = new RegExp(`${ESC}\\[3J|${ESC}c`, "g");
+// Stand-ins for those controls while a line is drawn: Unicode noncharacters, which text never
+// holds (private-use code points can be icon-font glyphs in a prompt).
+const ERASE_TO_END = String.fromCharCode(0xfdd0);
+const ERASE_TO_START = String.fromCharCode(0xfdd1);
+const ERASE_LINE = String.fromCharCode(0xfdd2);
+const CURSOR_FORWARD = String.fromCharCode(0xfdd3);
+const DELETE_CHAR = String.fromCharCode(0xfdd4);
+const MAX_CURSOR_REPEAT = 500;
+
+function repeatCount(count: string): number {
+  return Math.min(MAX_CURSOR_REPEAT, Math.max(1, Number(count) || 1));
+}
 
 /** Drop OSC sequences, which never draw anything. */
 export function stripOscSequences(text: string): string {
   return text.replace(OSC_PATTERN, "");
 }
 
-/** Apply backspaces and carriage returns the way a terminal draws one line. */
+/** Apply backspaces, carriage returns and line erases the way a terminal draws one line. */
 export function resolveTerminalLine(line: string): string {
   // A carriage return before the line end is the CRLF pair, not a redraw.
   const trimmed = line.endsWith("\r") ? line.replace(/\r+$/, "") : line;
@@ -32,6 +54,16 @@ export function resolveTerminalLine(line: string): string {
       cursor = 0;
     } else if (char === "\b") {
       cursor = Math.max(0, cursor - 1);
+    } else if (char === ERASE_TO_END) {
+      cells.length = Math.min(cells.length, cursor);
+    } else if (char === ERASE_TO_START) {
+      for (let index = 0; index <= cursor && index < cells.length; index += 1) cells[index] = " ";
+    } else if (char === ERASE_LINE) {
+      cells = [];
+    } else if (char === CURSOR_FORWARD) {
+      cursor += 1;
+    } else if (char === DELETE_CHAR) {
+      cells.splice(cursor, 1);
     } else {
       cells[cursor] = char;
       cursor += 1;
@@ -43,7 +75,21 @@ export function resolveTerminalLine(line: string): string {
 
 /** Raw PTY output as plain text: escapes removed, redraws applied, trailing blank lines cut. */
 export function terminalOutputToPlainText(raw: string): string {
-  const withoutEscapes = stripOscSequences(raw)
+  let lastClearEnd = 0;
+  for (const match of raw.matchAll(CLEAR_HISTORY_PATTERN)) {
+    lastClearEnd = (match.index ?? 0) + match[0].length;
+  }
+  const withoutEscapes = stripOscSequences(raw.slice(lastClearEnd))
+    .replace(ERASE_IN_LINE_PATTERN, (_match, mode: string) =>
+      mode === "1" ? ERASE_TO_START : mode === "2" ? ERASE_LINE : ERASE_TO_END,
+    )
+    .replace(CURSOR_BACK_PATTERN, (_match, count: string) => "\b".repeat(repeatCount(count)))
+    .replace(CURSOR_FORWARD_PATTERN, (_match, count: string) =>
+      CURSOR_FORWARD.repeat(repeatCount(count)),
+    )
+    .replace(DELETE_CHARS_PATTERN, (_match, count: string) =>
+      DELETE_CHAR.repeat(repeatCount(count)),
+    )
     .replace(CSI_PATTERN, "")
     .replace(OTHER_ESCAPE_PATTERN, "");
   const lines = withoutEscapes
@@ -81,22 +127,28 @@ export type CodeBlockRunOutcome = {
   exitCode: number | null;
   /** The runner kept only the tail of the output. */
   outputTruncated?: boolean;
+  /** The terminal tab the command ran in, named in the message as a tab link. */
+  tab?: { id: string; label: string };
 };
 
-const RUN_MESSAGE_INTRO = "I ran this command in my terminal (";
+const RUN_MESSAGE_INTRO = "I ran this command in my terminal ";
+// Messages from before the tab was named have no "tab [label](#terminal/<id>)" part.
+const RUN_MESSAGE_STATUS_PATTERN =
+  /^I ran this command in my terminal (?:tab \[[^\]\n]*\]\((#terminal\/[^)\s]+)\) )?\((?:exit code (-?\d+)|exit status unknown)\):/;
 
-/** The command and exit status of a message built by buildCodeBlockRunMessage. */
+/** The command, exit status and tab of a message built by buildCodeBlockRunMessage. */
 export function parseCodeBlockRunMessage(
   message: string,
-): { command: string; exitCode: number | null } | null {
+): { command: string; exitCode: number | null; tabId: string | null } | null {
   if (!message.startsWith(RUN_MESSAGE_INTRO)) return null;
-  const status =
-    /^I ran this command in my terminal \((?:exit code (-?\d+)|exit status unknown)\):/.exec(
-      message,
-    );
+  const status = RUN_MESSAGE_STATUS_PATTERN.exec(message);
   const fence = /\n\n(`{3,})sh\n([\s\S]*?)\n\1\n/.exec(message);
   if (!status || !fence) return null;
-  return { command: fence[2], exitCode: status[1] === undefined ? null : Number(status[1]) };
+  return {
+    command: fence[2],
+    exitCode: status[2] === undefined ? null : Number(status[2]),
+    tabId: parseTerminalTabHref(status[1]),
+  };
 }
 
 /** The follow-up message that hands a code block run's output to the agent. */
@@ -107,7 +159,10 @@ export function buildCodeBlockRunMessage(outcome: CodeBlockRunOutcome): string {
   const plain = terminalOutputToPlainText(outcome.output);
   const { text, truncated } = truncateMiddle(plain, CODE_BLOCK_RUN_MESSAGE_OUTPUT_LIMIT);
   const commandFence = fenceFor(command);
-  const lines = [`${RUN_MESSAGE_INTRO}${status}):`, "", `${commandFence}sh`];
+  const where = outcome.tab
+    ? `tab ${terminalTabMarkdownLink(outcome.tab.label, outcome.tab.id)} `
+    : "";
+  const lines = [`${RUN_MESSAGE_INTRO}${where}(${status}):`, "", `${commandFence}sh`];
   lines.push(command, commandFence, "");
   if (!text) {
     lines.push("It printed nothing.");

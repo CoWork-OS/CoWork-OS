@@ -194,6 +194,19 @@ function redactSecretKeyArrays(output: string): string {
 }
 
 /**
+ * Redact secrets from command output before it reaches task logs or model context: the
+ * patterns run_command output goes through. read_terminal applies them to the user's tabs.
+ */
+export function redactShellOutput(output: string): string {
+  if (!output) return "";
+  let sanitized = output;
+  for (const { pattern, replacement } of SHELL_OUTPUT_REDACTION_PATTERNS) {
+    sanitized = sanitized.replace(pattern, replacement);
+  }
+  return redactSecretKeyArrays(sanitized);
+}
+
+/**
  * Validate that a PID is a safe positive integer
  * Prevents command injection if PID is somehow not a number
  */
@@ -2634,12 +2647,7 @@ export class ShellTools {
    * Redact sensitive output before it reaches task logs or model context.
    */
   private sanitizeCommandOutput(output: string): string {
-    if (!output) return "";
-    let sanitized = output;
-    for (const { pattern, replacement } of SHELL_OUTPUT_REDACTION_PATTERNS) {
-      sanitized = sanitized.replace(pattern, replacement);
-    }
-    return redactSecretKeyArrays(sanitized);
+    return redactShellOutput(output);
   }
 }
 

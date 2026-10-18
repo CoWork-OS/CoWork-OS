@@ -31,6 +31,19 @@ function createDaemonLike(overrides?: Partial<Any>) {
 }
 
 describe("AgentDaemon.resumeTask", () => {
+  it.each(["interrupted", "paused"])(
+    "restores an executor-less %s task from durable state",
+    async (status) => {
+      const task = { id: "task-1", status, terminalStatus: "resume_available" };
+      const daemon = createDaemonLike({
+        activeTasks: new Map(),
+        taskRepo: { findById: vi.fn(() => task), update: vi.fn() },
+        resumeInterruptedTask: vi.fn().mockResolvedValue(undefined),
+      });
+      expect(await AgentDaemon.prototype.resumeTask.call(daemon, task.id)).toBe(true);
+      expect(daemon.resumeInterruptedTask).toHaveBeenCalledWith({ ...task, status: "interrupted" });
+    },
+  );
   it("fails interrupted resume when the required worktree is missing", async () => {
     const task = {
       id: "task-missing-worktree",
@@ -183,5 +196,50 @@ describe("AgentDaemon.resumeTask", () => {
       status: "interrupted",
     });
     expect(daemonLike.taskRepo.update).toHaveBeenNthCalledWith(2, task.id, { status: "paused" });
+  });
+});
+
+describe("interrupted turn discard fencing", () => {
+  it.each([
+    { status: "executing", updatedAt: 1 },
+    { status: "interrupted", updatedAt: 2 },
+  ])("rejects a stale discard before cleanup ($status, revision $updatedAt)", async (task) => {
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: { findById: () => ({ id: "task-1", ...task }), update: vi.fn() },
+      applicationExecutionService: { cancelForTask: vi.fn() },
+      logEvent: vi.fn(),
+    });
+    await expect(daemon.discardInterruptedTask("task-1", 1)).rejects.toThrow(/changed or resumed/);
+    expect(daemon.taskRepo.update).not.toHaveBeenCalled();
+    expect(daemon.applicationExecutionService.cancelForTask).not.toHaveBeenCalled();
+  });
+  it("claims the interrupted generation before asynchronous cleanup and refuses resume", async () => {
+    let task = { id: "task-1", status: "interrupted", updatedAt: 1 };
+    let release!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const daemon = Object.assign(Object.create(AgentDaemon.prototype), {
+      taskRepo: {
+        findById: () => task,
+        update: (_id: string, updates: Any) => {
+          task = { ...task, ...updates };
+        },
+      },
+      activeTasks: new Map(),
+      pendingContinuationTaskIds: new Set(),
+      applicationExecutionService: { cancelForTask: vi.fn(() => cleanup) },
+      orchestrationGraphEngine: { cancelRunForRootTask: vi.fn(async () => undefined) },
+      queueManager: { cancelQueuedTask: () => false },
+      settleRunningTaskCancellation: vi.fn(async () => undefined),
+      logEvent: vi.fn(),
+    });
+    const discard = daemon.discardInterruptedTask("task-1", 1);
+    expect(daemon.interruptedDiscards.has("task-1")).toBe(true);
+    expect(await daemon.resumeTask("task-1")).toBe(false);
+    release();
+    await discard;
+    expect(daemon.settleRunningTaskCancellation).toHaveBeenCalledTimes(1);
+    expect(daemon.interruptedDiscards.size).toBe(0);
   });
 });

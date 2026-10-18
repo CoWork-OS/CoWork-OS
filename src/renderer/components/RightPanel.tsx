@@ -2516,7 +2516,7 @@ function RightPanelComponent({
 
   return (
     <div className="right-panel cli-panel">
-      {showSessionRecovery ? (
+      {showSessionRecovery && task?.status !== "interrupted" ? (
         <SessionProgressCard task={task} onSelectTask={onSelectTask} refreshKey={events.length} />
       ) : null}
       <SessionDashboardCard

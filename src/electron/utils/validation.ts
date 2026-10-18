@@ -529,6 +529,13 @@ export const TaskModelSelectionSchema = z
   })
   .strict();
 
+export const DiscardInterruptedTaskSchema = z
+  .object({
+    taskId: z.string().uuid(),
+    expectedUpdatedAt: z.number().int().nonnegative(),
+  })
+  .strict();
+
 export const EditQueuedTaskInputSchema = z
   .object({
     taskId: z.string().uuid(),

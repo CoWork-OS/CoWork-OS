@@ -1,0 +1,27 @@
+{
+  "id": "interrupted-turn-regressions-2026-10-18",
+  "title": "Interrupted turn recovery and discard fencing",
+  "source": {
+    "audit": "runtime-review-2026-10-18"
+  },
+  "categories": [
+    {
+      "id": "interrupted-recovery-without-executor",
+      "prompt": "Open an interrupted task after its executor is lost. Show Resume and Discard turn even without a progress projection, and reconstruct durable state on Resume.",
+      "assertions": {
+        "controlsVisibleWithoutProjection": true,
+        "resumeReconstructsExecutor": true,
+        "executableTest": "src/electron/agent/__tests__/daemon-resume.test.ts"
+      }
+    },
+    {
+      "id": "stale-discard-fence",
+      "prompt": "Discard using an older revision or after resume. Then hold cleanup of a valid interrupted discard and attempt concurrent resume.",
+      "assertions": {
+        "staleDiscardHasNoCleanupEffects": true,
+        "resumeRefusedDuringCleanup": true,
+        "executableTest": "src/electron/agent/__tests__/daemon-resume.test.ts"
+      }
+    }
+  ]
+}

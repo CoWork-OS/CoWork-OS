@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, RotateCw } from "lucide-react";
 import type { SessionProgressState, Task } from "../../shared/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -10,6 +10,7 @@ interface SessionProgressCardProps {
 }
 
 function statusLabel(progress: SessionProgressState): string {
+  if (progress.status === "interrupted") return "Turn interrupted";
   if (progress.waiting?.kind === "approval") return "Approval needed";
   if (progress.waiting?.kind === "input") return "Waiting for your answer";
   if (progress.waiting?.kind === "reconnect") return "Reconnect required";
@@ -44,12 +45,19 @@ export function sessionRecoveryDetail(progress: SessionProgressState): string | 
 }
 
 export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionProgressCardProps) {
-  const [progress, setProgress] = useState<SessionProgressState | undefined>();
+  const [loadedProgress, setProgress] = useState<SessionProgressState | undefined>();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const currentTaskId = useRef(task?.id);
+  currentTaskId.current = task?.id;
+  useEffect(() => {
+    setBusy(false);
+    setActionError(null);
+  }, [task?.id]);
 
   useEffect(() => {
     let cancelled = false;
+    setProgress(undefined);
     if (!task?.id || !window.electronAPI?.getSessionProgress) {
       setProgress(undefined);
       return;
@@ -67,6 +75,25 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
     };
   }, [task?.id, task?.updatedAt, refreshKey]);
 
+  // The interrupted task itself is enough to expose recovery, even when its projection is unavailable.
+  const progress: SessionProgressState | undefined =
+    loadedProgress ??
+    (task?.status === "interrupted"
+      ? {
+          schemaVersion: 1,
+          taskId: task.id,
+          status: "interrupted",
+          phase: "paused",
+          headline: "This turn stopped before finishing.",
+          completedSteps: 0,
+          totalSteps: 0,
+          activeAgentCount: 0,
+          pendingApprovals: [],
+          pendingInputRequests: [],
+          connectionState: "stale",
+          updatedAt: task.updatedAt,
+        }
+      : undefined);
   const canResume = canOfferSessionRecovery(progress);
   const canResumeFromCheckpoint = canResume && Boolean(progress?.resumeFromEventId);
 
@@ -82,11 +109,27 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
     try {
       await window.electronAPI.resumeTask(task.id);
       const next = await window.electronAPI.getSessionProgress(task.id);
-      setProgress(next);
+      if (currentTaskId.current === task.id) setProgress(next);
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "Unable to resume this session.");
+      if (currentTaskId.current === task.id)
+        setActionError(cause instanceof Error ? cause.message : "Unable to resume this session.");
     } finally {
-      setBusy(false);
+      if (currentTaskId.current === task.id) setBusy(false);
+    }
+  };
+
+  const discard = async () => {
+    if (busy || task.status !== "interrupted") return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await window.electronAPI.discardInterruptedTask(task.id, task.updatedAt);
+      if (currentTaskId.current === task.id) setProgress(undefined);
+    } catch (cause) {
+      if (currentTaskId.current === task.id)
+        setActionError(cause instanceof Error ? cause.message : "Unable to discard this turn.");
+    } finally {
+      if (currentTaskId.current === task.id) setBusy(false);
     }
   };
 
@@ -122,6 +165,12 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
       <div className="session-progress-card-headline markdown-content">
         <MarkdownRenderer>{progress.headline}</MarkdownRenderer>
       </div>
+      {task.status === "interrupted" && (
+        <div className="session-progress-card-waiting">
+          {task.error || "The runtime stopped before this turn finished."} Progress and saved
+          outputs are preserved.
+        </div>
+      )}
       {detail ? <div className="session-progress-card-waiting">{detail}</div> : null}
       {progress.latestArtifact ? (
         <div className="session-progress-card-artifact" title={progress.latestArtifact.path}>
@@ -135,6 +184,11 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
         </div>
       ) : null}
       <div className="session-progress-card-actions">
+        {task.status === "interrupted" && (
+          <button type="button" disabled={busy} onClick={() => void discard()}>
+            Discard turn
+          </button>
+        )}
         <button type="button" onClick={() => void resume()} disabled={busy}>
           <RotateCw size={12} aria-hidden="true" />
           {busy ? "Resuming…" : "Resume"}

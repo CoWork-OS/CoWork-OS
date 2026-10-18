@@ -185,6 +185,13 @@ try {
     "Reply briefly to this synthetic acceptance message.",
   );
   await until(() => requests.length > 0, "provider holds the active turn");
+  const running = await api("getTask", first.id);
+  await assert.rejects(
+    api("discardInterruptedTask", first.id, running.updatedAt),
+    /changed or resumed/,
+  );
+  assert.notEqual((await api("getTask", first.id)).status, "cancelled");
+  console.log("Real IPC: stale interrupted-turn discard refused without cancelling active work.");
   const queued = await create("Queued input fixture", "ORIGINAL_INITIAL_TEXT");
   await until(
     async () => (await api("getTask", queued.id)).status === "queued",
@@ -242,6 +249,7 @@ try {
           "queued initial prompt",
           "queued follow-up",
           "stale revision",
+          "stale interrupted-turn discard",
           "Desktop inline edit",
           "edited provider payload",
         ],

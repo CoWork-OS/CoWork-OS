@@ -194,15 +194,11 @@ supported. A phase without a named test or replay fixture is “Planned”.
 | 3     | Controlled multi-person/session collaboration                 | Implemented with session membership, owner/reviewer/contributor roles, one-use invites, revocation, presence/audit, and approval attribution. Session membership is separate from workspace membership.                                                                                                                                              |
 | 4     | Safe autonomy and protected credentials                       | Implemented with exact-operation recurring approvals, expiry/revocation, replay resistance, protected credential entry, destination controls, and value-free audit records.                                                                                                                                                                          |
 | 5     | Cloud-mode/Sites parity                                       | Intentionally skipped. Cloud runtime and Sites are outside the current CoWork product boundary.                                                                                                                                                                                                                                                      |
-| 6     | Portable continuity                                           | Planned. The target design is below; no handoff package exists yet, so nothing here is claimed as shipped.                                                                                                                                                                                                                                           |
+| 6     | Portable continuity                                           | Implemented as an explicit durable handoff package: export, verified import, and re-asked approvals. Live process transfer is not claimed.                                                                                                                                                                                                           |
 | 7     | Local preview/dev-server lifecycle                            | Implemented as opt-in local preview. It is workspace-bound, command-template based, loopback-only, health-checked, logged, cleanable, and registered in the exact browser preview allowlist.                                                                                                                                                         |
 | 8     | Automation and security polish                                | Implemented for stable outcome hashing, per-job deduplication, explicit delivery retry, unattended-run escalation, missed-run policy, timezone visibility, job health, and retry/backoff/audit visibility. Export risk-chain summaries appear in the main approval dialog and browser upload approval card, with controlled Electron smoke coverage. |
 
 ## Phase 6: durable handoff packages
-
-> **Target design — not yet implemented.** This section is the specification for
-> the handoff package. CoWork does not export or import handoff packages yet;
-> today a resumed managed session only records `resumedFromSessionId`.
 
 Handoff is a file-based continuity boundary between local CoWork sessions or
 installations. It is designed to preserve useful context without pretending
@@ -227,8 +223,10 @@ The manifest contains:
 - source task, workspace, agent, environment, branch, and status metadata;
 - bounded recent transcript/event data;
 - the latest available checkpoint;
+- the outcome contract, constraint ledger (decisions, assumptions, reversals),
+  pending waits, evidence entries and completed side-effect keys;
 - bounded artifact metadata and copied artifact references;
-- export timestamp and warnings.
+- export timestamp, warnings, and a checksum over the canonical manifest.
 
 Export sanitizes credential-like values and sensitive fields, ignores unsafe
 filenames and symlink escapes, limits transcript/artifact/package sizes, and
@@ -250,9 +248,13 @@ Normal access profiles, approvals, connector policy, and provider settings
 apply to the resumed run. Import never transfers credentials, browser cookies,
 live processes, remote runtime state, or hidden approval grants.
 
-The implementation will live in `src/electron/managed/ManagedSessionService.ts`;
-the operator workflow will be documented in [Managed Agents](managed-agents.md)
-when it ships.
+Pending approvals and input requests become new pending waits on the resumed
+session; an import never grants them.
+
+See [Managed Agents — Durable Session Handoffs](managed-agents.md#durable-session-handoffs)
+for the operator workflow. The implementation is in
+`src/electron/managed/session-handoff.ts`, `src/electron/managed/session-handoff-io.ts`
+and `src/electron/managed/ManagedSessionService.ts`.
 
 ## Phase 7: local preview
 
@@ -402,10 +404,14 @@ repository checks. The current implementation has coverage for:
 - canonical automation hashes and per-job scheduled-output delivery;
 - explicit identical-output delivery retry and outbox reconciliation;
 - local-preview health, log redaction, restart, timeout cleanup, and URL
-  revocation.
-
-Handoff export/import (Phase 6) has no coverage yet because it is not
-implemented.
+  revocation;
+- handoff export redaction and checksums, changed-file exclusion, tampered and
+  symlinked copy rejection, edited-manifest rejection, re-created pending
+  approvals and import lineage
+  (`src/electron/managed/__tests__/ManagedSessionService.handoff.test.ts`), and
+  the `handoff` replay fixture, which continues with the one unsatisfied
+  requirement and flags a repeated completed side effect
+  (`src/electron/sessions/__tests__/WorkSessionPhase5.test.ts`).
 
 Useful commands:
 
@@ -415,6 +421,7 @@ npm run build:electron
 npm run build:react
 npx vitest run src/electron/cron/__tests__/service.test.ts \
   src/electron/managed/__tests__/ManagedSessionService.test.ts \
+  src/electron/managed/__tests__/ManagedSessionService.handoff.test.ts \
   src/electron/preview/__tests__/LocalPreviewProcessService.test.ts \
   src/electron/automation/__tests__/AutomationOutcomeService.test.ts
 npm test -- --run

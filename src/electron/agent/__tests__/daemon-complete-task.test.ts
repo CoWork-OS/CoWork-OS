@@ -145,6 +145,47 @@ describe("application operation completion gate", () => {
   });
 });
 
+describe("unknown tool outcome completion gate", () => {
+  const unknownWrite = {
+    id: "attempt-1",
+    taskId: "task-1",
+    toolName: "write_file",
+    argsHash: "hash",
+    idempotencyKey: "key-1",
+    effect: "write",
+    target: "report.md",
+    status: "unknown",
+    startedAt: 1,
+  };
+
+  it("ends needing the user and names the unverified call", async () => {
+    const daemon = createDaemonLike();
+    daemon.getToolAttemptRepository = () => ({ listForTask: async () => [unknownWrite] });
+    daemon.noteToolOutcomeUnknown("task-1");
+    await daemon.completeTask("task-1", "Report written.");
+    expect(daemon.taskRepo.update).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        terminalStatus: "needs_user_action",
+        resultSummary: expect.stringContaining("Not verified: write_file on report.md"),
+      }),
+    );
+  });
+
+  it("completes normally once the call was read back", async () => {
+    const daemon = createDaemonLike();
+    daemon.getToolAttemptRepository = () => ({
+      listForTask: async () => [{ ...unknownWrite, status: "checked" }],
+    });
+    daemon.noteToolOutcomeUnknown("task-1");
+    await daemon.completeTask("task-1", "Report written.");
+    expect(daemon.taskRepo.update).not.toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ terminalStatus: "needs_user_action" }),
+    );
+  });
+});
+
 describe("AgentDaemon.completeTask", () => {
   it("fails required verification at the depth limit instead of silently skipping it", async () => {
     const daemonLike = createDaemonLike();

@@ -645,9 +645,14 @@ export class WorkSessionContractService {
       for (const wait of this.repository.listWaitStates(this.sessionIdForTask(task), {
         status: "pending",
       })) {
+        // Waits carried over from a handoff package have no live request that could resolve
+        // them, so a terminal task closes them like any other lifecycle wait.
+        const importedFromHandoff = Boolean(wait.payload?.importedFromHandoff);
         if (
           (resumeRequestId && wait.requestId !== resumeRequestId) ||
-          (!resumeRequestId && (wait.kind === "approval" || wait.kind === "input"))
+          (!resumeRequestId &&
+            (wait.kind === "approval" || wait.kind === "input") &&
+            !(importedFromHandoff && type !== "task_resumed"))
         ) {
           continue;
         }

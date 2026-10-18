@@ -707,7 +707,7 @@ function isMutatingGitTool(toolName: string): boolean {
   return toolName.startsWith("git_") && !READONLY_GIT_TOOLS.has(toolName);
 }
 
-function isMutatingTool(toolName: string): boolean {
+export function isMutatingTool(toolName: string): boolean {
   // Canonical taxonomy first, so this classifier cannot disagree with
   // TOOL_GROUPS. ALWAYS_MUTATING and MUTATING_PREFIXES are hand-maintained and
   // missed several group:write tools (organize_folder, compile_latex,

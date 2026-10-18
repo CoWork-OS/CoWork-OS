@@ -199,8 +199,25 @@ export function redactPublishOutput(text, token) {
   return out.length > PUBLISH_OUTPUT_LIMIT ? out.slice(-PUBLISH_OUTPUT_LIMIT) : out;
 }
 
+/**
+ * True when the job can mint a GitHub Actions OIDC token (the workflow grants
+ * `id-token: write`). npm then publishes through trusted publishing, with a
+ * short-lived credential npm exchanges itself, instead of a stored token.
+ */
+export function githubOidcAvailable(env = process.env) {
+  return Boolean(env.ACTIONS_ID_TOKEN_REQUEST_URL && env.ACTIONS_ID_TOKEN_REQUEST_TOKEN);
+}
+
+/** Chooses how `npm publish` authenticates for one registry entry. */
+export function publishAuthMode(entry, token, env = process.env) {
+  if (entry.id === "npm" && githubOidcAvailable(env)) return "oidc";
+  if (token) return "token";
+  return null;
+}
+
 async function defaultPublish({ entry, directory, token, distTag }) {
-  if (!token) fail("A registry publication token is required");
+  const authMode = publishAuthMode(entry, token);
+  if (!authMode) fail("A registry publication token or GitHub OIDC is required");
   const file = join(resolve(directory), entry.filename);
   const args = [
     "publish",
@@ -218,9 +235,8 @@ async function defaultPublish({ entry, directory, token, distTag }) {
   const scopeConfig = entry.name.startsWith("@")
     ? `${entry.name.split("/")[0]}:registry=${entry.registry}\n`
     : "";
-  await writeFile(npmrc, scopeConfig + "//" + host + "/:_authToken=${NODE_AUTH_TOKEN}\n", {
-    mode: 0o600,
-  });
+  const authLine = authMode === "token" ? "//" + host + "/:_authToken=${NODE_AUTH_TOKEN}\n" : "";
+  await writeFile(npmrc, scopeConfig + authLine, { mode: 0o600 });
   try {
     await new Promise((resolvePromise, reject) => {
       const child = spawn("npm", args, {
@@ -231,7 +247,9 @@ async function defaultPublish({ entry, directory, token, distTag }) {
           ...process.env,
           NPM_CONFIG_USERCONFIG: npmrc,
           npm_config_userconfig: npmrc,
-          NODE_AUTH_TOKEN: token,
+          // With OIDC, leave no token for npm to fall back to, so a missing or
+          // misconfigured trusted publisher fails visibly instead of silently.
+          NODE_AUTH_TOKEN: authMode === "token" ? token : "",
         },
       });
       let output = "";

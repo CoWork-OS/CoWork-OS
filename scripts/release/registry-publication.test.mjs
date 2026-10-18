@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   inspectRegistry,
   publishPackage,
+  publishAuthMode,
   redactPublishOutput,
   runCli,
 } from "./registry-publication.mjs";
@@ -593,4 +594,18 @@ test("a failed publish reports npm's error in the final message", async () => {
       /could not be verified: npm publish failed \(exit 1\):\nnpm error code E403/,
     );
   });
+});
+
+test("npm publishes through GitHub OIDC when the job can mint a token", () => {
+  const oidc = {
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://example.invalid/token",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "x",
+  };
+  const github = { ...entry, id: "github", name: "@cowork-os/cowork-os" };
+  assert.equal(publishAuthMode(entry, "npm-token", oidc), "oidc");
+  assert.equal(publishAuthMode(entry, undefined, oidc), "oidc");
+  assert.equal(publishAuthMode(entry, "npm-token", {}), "token");
+  assert.equal(publishAuthMode(entry, undefined, {}), null);
+  // GitHub Packages keeps using its token even when OIDC is available.
+  assert.equal(publishAuthMode(github, "gh-token", oidc), "token");
 });

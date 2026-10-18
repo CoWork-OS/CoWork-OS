@@ -114,7 +114,8 @@ export function buildExportTargetRef(
     typeof obj?.provider === "string" && obj.provider.trim().length > 0
       ? obj.provider.trim()
       : undefined;
-  if (!url && !provider) return undefined;
+  // Uploading a file is an outgoing action even when the active page URL is unavailable.
+  if (!url && !provider && toolName !== "browser_upload_file") return undefined;
   return {
     toolName,
     ...(url ? { url } : {}),

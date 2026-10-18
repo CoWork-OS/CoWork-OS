@@ -44,7 +44,9 @@ function botConversationActivityAt(task: Task): number {
     task.status === "blocked" &&
     task.terminalStatus === "needs_user_action" &&
     (/^No correlated reply arrived from .+ within \d+ seconds\./.test(task.error || "") ||
-      /^No outstanding teammate reply is pending for this conversation\./.test(task.error || ""))
+      (task.error || "").startsWith(
+        "No outstanding teammate reply is pending for this conversation.",
+      ))
   ) {
     return task.completedAt || task.createdAt;
   }

@@ -28,7 +28,7 @@ const brandEmail = process.env.PACT_REFERENCE_BRAND_EMAIL ?? "alex.rivera@exampl
 const brandPassword = process.env.PACT_REFERENCE_BRAND_PASSWORD ?? "skyline";
 
 const nativeSqlite = providerUrl
-  ? await import("better-sqlite3").then((module) => module.default).catch(() => null)
+  ? await import("better-sqlite3").then((module) => module.default)
   : null;
 
 function field(html: string, name: string): string {
@@ -70,7 +70,8 @@ async function approveInBrowser(
   });
 }
 
-describe.skipIf(!providerUrl || !nativeSqlite)(
+describe.skipIf(!providerUrl)(
+  // This suite needs the pinned Provider, Brand login and seeded database from pact-conformance CI.
   "PACT conformance against the reference provider",
   () => {
     const owner = { id: "conformance-owner", kind: "local_owner" as const };
@@ -206,7 +207,9 @@ describe.skipIf(!providerUrl || !nativeSqlite)(
         { cardUrl: `${providerUrl}/a2a/${delegatedCustomer}/.well-known/agent-card.json` },
         context,
       );
-      if (business.profile !== "delegated") return; // Provider started without DELEGATION_ENABLED.
+      expect(business.profile, "Reference provider must start with DELEGATION_ENABLED=1").toBe(
+        "delegated",
+      );
       consentDecision = "allow";
       consentScopes = null;
       const outcome = await runtime.send(
@@ -228,7 +231,9 @@ describe.skipIf(!providerUrl || !nativeSqlite)(
         { cardUrl: `${providerUrl}/a2a/${delegatedCustomer}/.well-known/agent-card.json` },
         context,
       );
-      if (business.profile !== "delegated") return;
+      expect(business.profile, "Reference provider must start with DELEGATION_ENABLED=1").toBe(
+        "delegated",
+      );
       consentDecision = "allow";
       consentScopes = null;
       // Holds flights:upcoming:read from the earlier test; rebooking also needs flights:rebook.
@@ -258,7 +263,9 @@ describe.skipIf(!providerUrl || !nativeSqlite)(
         { cardUrl: `${providerUrl}/a2a/${delegatedCustomer}/.well-known/agent-card.json` },
         context,
       );
-      if (business.profile !== "delegated") return;
+      expect(business.profile, "Reference provider must start with DELEGATION_ENABLED=1").toBe(
+        "delegated",
+      );
       consentDecision = "deny";
       const outcome = await runtime.send(
         owner,

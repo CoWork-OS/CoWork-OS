@@ -143,7 +143,7 @@ export function createImageContent(
  *
  * Without actual image dimensions we use file-size heuristics.
  */
-export function estimateImageTokens(image: LLMImageContent, providerType?: string): number {
+export function estimateImageTokens(image: LLMImageContent, _providerType?: string): number {
   const sizeBytes = image.originalSizeBytes ?? Math.ceil((image.data.length * 3) / 4);
   const sizeMB = sizeBytes / (1024 * 1024);
   if (sizeMB <= 0.5) return 1000;

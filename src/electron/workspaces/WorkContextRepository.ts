@@ -8,8 +8,6 @@ import type {
   WorkContextStatus,
 } from "../../shared/types";
 
-type Any = any;
-
 const DEFAULT_STATE: WorkContextState = { schemaVersion: 1 };
 
 function parseState(value: unknown): WorkContextState {

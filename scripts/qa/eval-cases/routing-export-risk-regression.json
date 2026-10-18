@@ -1,0 +1,48 @@
+{
+  "id": "routing-export-risk-2026-10-17",
+  "title": "Production skill routing and visible export approval context",
+  "source": {
+    "incident": "deep-test-audit-routing-evaluation-and-export-risk-ui-gaps"
+  },
+  "scenarios": [
+    "Evaluate the unchanged bundled routing corpus with the production eligibility, invocation, and ranking implementation",
+    "Prefer a complete requested skill name, reject negated invocations, and retain relevance when confidence scores saturate",
+    "Keep explicit-only, human-only, and disabled skills behind their existing invocation policies",
+    "Render outgoing file, action, and destination in both the main dialog and the browser approval card",
+    "Keep recent untrusted source context separate from the actual outgoing file",
+    "Exclude URL credentials and query values, escape labels, and handle missing or malformed legacy context",
+    "Deny controlled approvals through the real Electron renderer, preload, IPC, and approval store",
+    "Reject nested applicability and explanatory descriptions as explicit CLI invocation while preserving direct conditional commands and later independent requests",
+    "Check every original routing expectation, transferring proven human-only, guideline, and descriptive examples to explicit policy contracts; fail policy drift independently of ranking thresholds",
+    "Route the retired changelog case through the real installed technical-writing pack without exposing uninstalled pack skills to the base catalogue"
+  ],
+  "assertions": {
+    "strictExpectedHitRateMinimum": 0.95,
+    "strictMisfireRateMaximum": 0.02,
+    "corpusAndThresholdsUnchanged": true,
+    "recentReadIsNotAssumedExportedFile": true,
+    "destinationCredentialsVisible": false,
+    "legacyApprovalsRetainControls": true,
+    "liveFixtureSendsExternalData": false,
+    "originalPromptCorpusUnchanged": true,
+    "reviewedExpectationContracts": "resources/skills/_evals/routing-contracts.json",
+    "policyFailuresAllowed": 0,
+    "protectedSkillsExcludedFromAllCandidates": true
+  },
+  "executableCoverage": [
+    "scripts/qa/eval-skills-routing.mjs",
+    "scripts/qa/routing-export-risk-smoke.mjs",
+    "tests/skills-routing-evaluator.test.ts",
+    "src/shared/__tests__/skill-routing.test.ts",
+    "src/electron/agent/__tests__/custom-skill-loader.test.ts",
+    "src/shared/__tests__/export-risk-chain.test.ts",
+    "src/renderer/components/__tests__/export-risk-review.test.ts",
+    "src/electron/agent/tools/__tests__/browser-tools.test.ts",
+    "src/electron/agent/__tests__/executor-skill-routing.test.ts",
+    "src/electron/agent/__tests__/executor-pending-skill-params.test.ts",
+    "tests/skills-routing-policy.test.ts",
+    "src/shared/skill-routing/index.ts",
+    "tests/cli-direct-run-settings.test.ts"
+  ],
+  "notes": "Specification plus executable coverage, not an executed eval itself. Run npm run skills:eval-routing -- --strict, the listed unit tests, and qa:routing-export-risk:smoke. The live smoke uses a synthetic isolated profile and real approval persistence, without a provider call or external send. All original prompts remain covered; explicit reviewed contracts replace proven stale expectations and fail if policy or corpus coverage drifts. Ranking and policy results are reported separately; thresholds remain unchanged."
+}

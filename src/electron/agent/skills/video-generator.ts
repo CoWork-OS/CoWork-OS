@@ -12,7 +12,6 @@ import { coverImageToSize } from "../tools/image-utils";
 import {
   buildLocalVideoArgs,
   cancelLocalVideoJob,
-  getLocalVideoJob,
   resolveLocalVideoConfig,
   waitForLocalVideoJob,
   startLocalVideoJob,

@@ -128,7 +128,9 @@ function contextRequestsBriefAnswer(input: DomainCompletionInput): boolean {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  return lines.some((line) => line.length <= SHORT_FACTUAL_QUESTION_MAX_CHARS && /\?$/.test(line));
+  return lines.some(
+    (line) => line.length <= SHORT_FACTUAL_QUESTION_MAX_CHARS && line.endsWith("?"),
+  );
 }
 
 // Bare acknowledgements answer nothing, even for a short question.

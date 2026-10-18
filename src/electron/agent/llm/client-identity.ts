@@ -11,7 +11,7 @@ const IDENTIFIED_PROVIDERS = new Set<string>(["zai", "glm"]);
 function getAppVersion(): string | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     const version = electron?.app?.getVersion?.();
     if (typeof version === "string" && version.trim()) return version.trim();

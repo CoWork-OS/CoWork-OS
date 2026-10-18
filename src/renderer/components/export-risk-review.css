@@ -1,0 +1,52 @@
+.export-risk-review {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 9px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.export-risk-review h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.export-risk-review dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 12px;
+  margin: 0;
+}
+
+.export-risk-review dt {
+  color: var(--color-text-secondary);
+}
+
+.export-risk-review dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.export-risk-review p {
+  margin: 8px 0 0;
+  color: var(--color-text-secondary);
+}
+
+.browser-workbench-approval:has(.export-risk-review) {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.browser-workbench-approval > .export-risk-review {
+  flex: 1 1 100%;
+  margin: 0;
+  max-height: min(32vh, 240px);
+  overflow-y: auto;
+}

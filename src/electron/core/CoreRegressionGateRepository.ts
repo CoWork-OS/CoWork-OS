@@ -2,8 +2,6 @@ import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import type { CoreRegressionGateResult } from "../../shared/types";
 
-type Any = any;
-
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {

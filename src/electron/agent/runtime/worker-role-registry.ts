@@ -1,9 +1,6 @@
 import type {
   AgentConfig,
-  ConversationMode,
   DelegationWorkerRole,
-  ExecutionMode,
-  LlmProfile,
   VerificationVerdict,
   WorkerPromptContext,
   WorkerRoleKind,

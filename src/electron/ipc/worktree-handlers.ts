@@ -12,7 +12,7 @@ import {
 import { rateLimiter, RATE_LIMIT_CONFIGS } from "../utils/rate-limiter";
 import { createLogger } from "../utils/logger";
 
-const logger = createLogger("Worktree");
+createLogger("Worktree");
 
 function checkRateLimit(channel: string): void {
   if (!rateLimiter.check(channel)) {

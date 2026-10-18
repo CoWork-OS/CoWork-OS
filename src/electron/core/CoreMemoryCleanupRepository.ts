@@ -2,8 +2,6 @@ import type Database from "better-sqlite3";
 import type { CoreMemoryCandidateStatus } from "../../shared/types";
 import { coreCandidateFingerprint, normalizeCandidateSummary } from "./core-memory-hygiene";
 
-type Any = any;
-
 export const CORE_MEMORY_CLEANUP_MARKER = "core-memory-cleanup-v1";
 export const CORE_MEMORY_CLEANUP_V2_MARKER = "core-memory-cleanup-v2";
 /** Proposals from retired keyword heuristics and boilerplate generators. */

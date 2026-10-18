@@ -63,6 +63,21 @@ type LocalPrincipal = ReturnType<SessionMembershipStore["getLocalPrincipal"]>;
  * `principalForClient` and `getLocalPrincipal` stay synchronous.
  */
 export class SessionMembershipService {
+  declare readonly principalDetails: MembershipUnits["principalDetails"];
+  declare readonly ensureOwner: MembershipUnits["ensureOwner"];
+  declare readonly getSnapshot: MembershipUnits["getSnapshot"];
+  declare readonly getSnapshotForTask: MembershipUnits["getSnapshotForTask"];
+  declare readonly listAccessibleContexts: MembershipUnits["listAccessibleContexts"];
+  declare readonly createInvite: MembershipUnits["createInvite"];
+  declare readonly acceptInvite: MembershipUnits["acceptInvite"];
+  declare readonly updateMember: MembershipUnits["updateMember"];
+  declare readonly touchPresence: MembershipUnits["touchPresence"];
+  declare readonly listAudit: MembershipUnits["listAudit"];
+  declare readonly authorizeContextAction: MembershipUnits["authorizeContextAction"];
+  declare readonly authorizeTaskAction: MembershipUnits["authorizeTaskAction"];
+  declare readonly recordTaskAction: MembershipUnits["recordTaskAction"];
+  declare readonly authorizeManagedSessionAction: MembershipUnits["authorizeManagedSessionAction"];
+
   private readonly clientPrincipals = new Map<number, string>();
   private localPrincipal: LocalPrincipal | null = null;
 
@@ -90,7 +105,3 @@ export class SessionMembershipService {
     return this.principalDetails(this.principalForClient(clientId));
   }
 }
-
-// The unit methods are assigned per instance in the constructor.
-// oxlint-disable-next-line typescript/no-unsafe-declaration-merging -- typed unit methods
-export interface SessionMembershipService extends MembershipUnits {}

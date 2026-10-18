@@ -188,6 +188,45 @@ describe("TaskExecutor skill shortlist routing", () => {
     );
   });
 
+  it.each([
+    ["gemini", "Gemini", "Do not use Gemini. The Gemini skill requires a key."],
+    [
+      "codex-cli",
+      "Codex CLI Agent",
+      "Do not use the codex-cli skill. The codex-cli skill is unavailable.",
+    ],
+    [
+      "codex-cli",
+      "Codex CLI Agent",
+      "Do not use codex-cli. The Codex CLI Agent skill requires a key.",
+    ],
+    ["gemini", "Gemini", "Use Gemini to summarize this text. Actually do not use Gemini."],
+    [
+      "codex-cli",
+      "Codex CLI Agent",
+      "Use Codex CLI Agent to summarize this text. Actually do not use codex-cli.",
+    ],
+  ])(
+    "does not auto-apply an excluded skill from a descriptive mention: %s",
+    async (id, name, prompt) => {
+      listSkills.mockReturnValue([{ id, name, enabled: true }]);
+      const executor = createExecutor(prompt);
+
+      const handled = await (
+        TaskExecutor as Any
+      ).prototype.maybeAutoApplyExplicitSkillInvocation.call(
+        executor,
+        prompt,
+        "task",
+        "the explicitly requested task skill",
+      );
+
+      expect(handled).toBe(false);
+      expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
+      expect(executor.appliedSkills).toEqual([]);
+    },
+  );
+
   it("auto-applies explicitly requested skills from plain-English step text", async () => {
     listSkills.mockReturnValue([
       {

@@ -141,6 +141,8 @@ docs/ios-companion-example.swift
 Mission_Control_Comparison_Recommendations.docx
 CoWork OS founder vault/
 AGENTS.md
+# This compiled guide is bundled skill content, not local agent configuration.
+!resources/skills/react-best-practices/AGENTS.md
 /Users/
 /solana-dapp/
 changed-file-set-review-artifact.pdf

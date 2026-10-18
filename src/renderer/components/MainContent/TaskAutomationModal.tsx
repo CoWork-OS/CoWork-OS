@@ -1,15 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
-import { Task, Workspace } from "../../../shared/types";
-import {
-  TASK_AUTOMATION_TEMPLATES,
-  buildTaskAutomationSchedule,
-  buildTaskRoutineCreate,
-  type TaskAutomationRunMode,
-  type TaskAutomationSchedulePreset,
-  type TaskAutomationTemplate,
-  type TaskRoutineTriggerPreset,
-} from "../task-automation-utils";
+export {
+  isTurnThisIntoRoutinePrompt,
+  taskCanBecomeRoutineFromFollowUp,
+} from "./task-routine-intent";
 import {
   Check as CheckIcon,
   ChevronDown,
@@ -20,6 +12,18 @@ import {
   Pin,
   X,
 } from "lucide-react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Task, Workspace } from "../../../shared/types";
+import {
+  TASK_AUTOMATION_TEMPLATES,
+  buildTaskAutomationSchedule,
+  buildTaskRoutineCreate,
+  type TaskAutomationRunMode,
+  type TaskAutomationSchedulePreset,
+  type TaskAutomationTemplate,
+  type TaskRoutineTriggerPreset,
+} from "../task-automation-utils";
 
 export const TASK_AUTOMATION_SCHEDULE_LABEL: Record<TaskAutomationSchedulePreset, string> = {
   every30m: "Every 30m",
@@ -34,19 +38,6 @@ export const TASK_ROUTINE_TRIGGER_LABEL: Record<TaskRoutineTriggerPreset, string
   manual: "Manual",
   ...TASK_AUTOMATION_SCHEDULE_LABEL,
 };
-
-export function isTurnThisIntoRoutinePrompt(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
-  return /^(please\s+)?(turn|make|convert)\s+(this|that|it)\s+into\s+(a\s+)?routine[.!?]?$/.test(
-    normalized,
-  );
-}
-
-export function taskCanBecomeRoutineFromFollowUp(task: Task | null | undefined): boolean {
-  if (!task) return false;
-  if (task.status !== "completed") return false;
-  return !task.terminalStatus || task.terminalStatus === "ok";
-}
 
 interface TaskAutomationModalProps {
   task: Task;

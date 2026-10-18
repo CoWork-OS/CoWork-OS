@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 /**
  * ShortcutGuard — blocks dangerous system shortcuts during CUA sessions.
  *
@@ -15,7 +16,7 @@ import type { GlobalShortcut } from "electron";
 
 function getGlobalShortcut(): GlobalShortcut | null {
   try {
-    const electron = require("electron") as { globalShortcut?: GlobalShortcut };
+    const electron = createRequire(__filename)("electron") as { globalShortcut?: GlobalShortcut };
     return electron.globalShortcut ?? null;
   } catch {
     return null;

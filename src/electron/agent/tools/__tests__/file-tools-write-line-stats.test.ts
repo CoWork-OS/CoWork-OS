@@ -13,8 +13,6 @@ import { FileTools } from "../file-tools";
 
 vi.mock("fs/promises", { spy: true });
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
-
 describe("FileTools write_file line stats", () => {
   let tmpDir: string;
   let fileTools: FileTools;

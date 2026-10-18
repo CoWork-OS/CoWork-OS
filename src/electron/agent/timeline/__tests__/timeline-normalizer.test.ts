@@ -343,19 +343,19 @@ describe("normalizeTaskEvents — approval cards", () => {
     }
   });
 
-  it("approval card becomes 'success' when followed by approval_granted", () => {
+  it("emits a successful resolution card when approval is granted", () => {
     resetSeq();
-    const result = normalizeTaskEvents([
-      makeEvent("approval_requested", { reason: "Deploy" }),
-      makeEvent("approval_granted", {}),
-    ]);
-    // approval_granted is its own card (batch breaker), check status
-    const approval = result.find(
-      (e) => e.kind === "approval" && e.rawEventIds.includes((events) => false),
-    );
-    // Find the first approval card
-    const firstApproval = result[0];
-    expect(firstApproval.kind).toBe("approval");
+    const requested = makeEvent("approval_requested", { reason: "Deploy" });
+    const granted = makeEvent("approval_granted", {});
+    const result = normalizeTaskEvents([requested, granted]);
+    expect(result.find((event) => event.rawEventIds.includes(requested.id))).toMatchObject({
+      kind: "approval",
+      status: "waiting",
+    });
+    expect(result.find((event) => event.rawEventIds.includes(granted.id))).toMatchObject({
+      kind: "approval",
+      status: "success",
+    });
   });
 
   it("infers high risk for destructive commands", () => {

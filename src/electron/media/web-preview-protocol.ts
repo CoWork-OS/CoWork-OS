@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { createHash, randomUUID } from "crypto";
 
 /**
@@ -64,7 +65,7 @@ const previewStore = new Map<string, PreviewRecord>();
 const tokenByContent = new Map<string, string>();
 
 function getElectronProtocol(): typeof import("electron").protocol {
-  return require("electron").protocol as typeof import("electron").protocol;
+  return createRequire(__filename)("electron").protocol as typeof import("electron").protocol;
 }
 
 function dropToken(token: string): void {

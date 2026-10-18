@@ -5,7 +5,6 @@ import {
   LLMResponse,
   LLMSystemBlock,
   LLMTool,
-  LLMToolResult,
 } from "./types";
 import { createHash } from "node:crypto";
 import { imageToTextFallback } from "./image-utils";

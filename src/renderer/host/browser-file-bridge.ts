@@ -758,7 +758,7 @@ export function createBrowserFileBridge(options: BrowserFileBridgeOptions): Brow
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      for (const picker of [...pendingPickers]) {
+      for (const picker of pendingPickers) {
         picker.cleanup();
         picker.reject(new Error("This browser session has ended."));
       }

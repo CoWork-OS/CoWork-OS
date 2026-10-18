@@ -149,12 +149,11 @@ describe("resolveHooksConfig", () => {
 
 describe("HooksServer", () => {
   let server: HooksServer;
-  // Use a random port to avoid conflicts
-  const getTestPort = () => 19877 + Math.floor(Math.random() * 1000);
   let TEST_PORT: number;
 
   beforeEach(() => {
-    TEST_PORT = getTestPort();
+    // Let the OS reserve an unused port rather than racing other test servers.
+    TEST_PORT = 0;
     server = new HooksServer({
       port: TEST_PORT,
       host: "127.0.0.1",
@@ -202,6 +201,7 @@ describe("HooksServer", () => {
         mappings: [],
       });
       await server.start();
+      TEST_PORT = server.getAddress()!.port;
     });
 
     it("should be running after start", () => {

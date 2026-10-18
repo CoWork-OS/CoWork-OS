@@ -159,9 +159,9 @@ function cleanPreview(value: string): string {
 
 function stripMarkdownForOutcome(value: string): string {
   return value
-    .replace(/\\([\\`*_\[\]{}()#+.!~-])/g, "$1")
-    .replace(/!\[([^\]]*)\]\([^\)\n]*\)/g, "$1")
-    .replace(/\[([^\]]+)\]\([^\)\n]*\)/g, "$1")
+    .replace(/\\([\\`*_[\]{}()#+.!~-])/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)\n]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)\n]*\)/g, "$1")
     .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
     .replace(/```[ \t]*[A-Za-z0-9_+-]*[ \t]*(?:\r?\n|$)/g, "")
     .replace(/```/g, "")

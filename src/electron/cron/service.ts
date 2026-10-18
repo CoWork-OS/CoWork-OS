@@ -405,7 +405,7 @@ export class CronService {
     return this.withLock(async () => {
       const store = this.ensureStore();
 
-      let jobs = [...store.jobs];
+      let jobs = store.jobs.slice();
 
       if (!opts?.includeDisabled) {
         jobs = jobs.filter((j) => j.enabled);
@@ -1026,7 +1026,7 @@ export class CronService {
     const store = this.ensureStore();
     this.detachRetiredDeliveries(nowMs);
 
-    for (const job of [...store.jobs]) {
+    for (const job of store.jobs.slice()) {
       if (await this.reconcilePersistedTaskOutcome(job, nowMs)) continue;
 
       // A disabled job does not stop work already in flight. Keep checking a

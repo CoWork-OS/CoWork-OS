@@ -369,7 +369,7 @@ export class TeamsArtifactPipeline {
   }
 
   private async processJobs(): Promise<void> {
-    for (const job of [...this.state.jobs]) {
+    for (const job of this.state.jobs.slice()) {
       if (job.failed || (job.nextAttemptAt && job.nextAttemptAt > this.now())) continue;
       try {
         const artifact = await this.buildArtifact(job);

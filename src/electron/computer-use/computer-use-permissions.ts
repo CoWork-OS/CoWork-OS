@@ -4,11 +4,9 @@
 
 import * as os from "os";
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
-
 function getElectronSystemPreferences(): Any {
   try {
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     return electron?.systemPreferences;
   } catch {

@@ -2090,7 +2090,7 @@ export class MemoryRepoService {
     // One line: a name with line breaks must not add lines (or a marker) to the header.
     const name =
       String(botName ?? "")
-        .replace(/[\u0000-\u001f\u007f\u2028\u2029\[\]]+/g, " ")
+        .replace(/[\u0000-\u001f\u007f\u2028\u2029[\]]+/g, " ")
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 120) || "Bot";

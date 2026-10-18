@@ -333,7 +333,10 @@ import { getAwarenessService } from "../awareness/AwarenessService";
 import { describeSchedule, parseIntervalToMs } from "../cron/types";
 import { buildBestKnownOutcome, mergeBestKnownOutcome } from "./outcome-policy";
 import { QueryOrchestrator } from "./orchestration/QueryOrchestrator";
-import { matchesExplicitSkillInvocationPhrase } from "./skill-invocation-utils";
+import {
+  matchesExplicitSkillInvocationPhrase,
+  normalizeSkillInvocationText,
+} from "./skill-invocation-utils";
 import { createLogger } from "../utils/logger";
 import {
   compactContextWithJev,
@@ -372,8 +375,6 @@ import {
   PRE_COMPACTION_FLUSH_COOLDOWN_MS,
   PRE_COMPACTION_FLUSH_MAX_OUTPUT_TOKENS,
   PRE_COMPACTION_FLUSH_MIN_TOKEN_DELTA,
-  PROACTIVE_COMPACTION_THRESHOLD,
-  PROACTIVE_COMPACTION_TARGET,
   COMPACTION_SUMMARY_MAX_OUTPUT_TOKENS,
   COMPACTION_SUMMARY_MIN_OUTPUT_TOKENS,
   COMPACTION_SUMMARY_MAX_INPUT_CHARS,
@@ -382,7 +383,6 @@ import {
   COMPACTION_ASSISTANT_TEXT_CLAMP,
   COMPACTION_TOOL_USE_CLAMP,
   COMPACTION_TOOL_RESULT_CLAMP,
-  isContextCapacityError,
   isInputDependentError as _isInputDependentError,
   isRecoverablePathDriftError as _isRecoverablePathDriftError,
   getCurrentDateString as _getCurrentDateString,
@@ -685,13 +685,6 @@ const KEEP_LATEST_IMAGE_MESSAGES = 8;
 const MEMORY_STEP_TOOLS: readonly string[] = ["memory_recall", "context_recall", "memory_remember"];
 // Memory synthesis slices (kit/memory/playbook) live in content/prompt-budgets.ts,
 // where the requested synthesizer budget and the memory_context cap share one constant.
-const DEFAULT_PROMPT_SECTION_BUDGETS = {
-  roleContext: 420,
-  awarenessContext: 420,
-  personalityPrompt: 700,
-  guidelinesPrompt: 520,
-  toolDescriptions: 1400,
-} as const;
 
 // 6,800 + 800: memory_context now gets the full 1,820-token synthesizer budget
 // (was capped at 1,200), and design-system context, project guidance and the
@@ -3133,7 +3126,7 @@ export class TaskExecutor {
   ): Promise<ParallelExecutionOutcome[]> {
     if (jobs.length === 0) return [];
     const maxConcurrency = Math.min(Math.max(1, this.toolBatchParallelMax), jobs.length);
-    const outcomes: ParallelExecutionOutcome[] = new Array(jobs.length);
+    const outcomes: ParallelExecutionOutcome[] = [];
     let cursor = 0;
     let peakConcurrency = 0;
     let inFlight = 0;
@@ -3382,7 +3375,7 @@ export class TaskExecutor {
 
     // Reserve budget deterministically in model order before dispatch.
     for (const job of jobs) {
-      this.enforceToolBudget(job.toolName);
+      this.enforceToolBudget();
       this.totalToolCallCount++;
       stepToolCallsExecuted++;
       if (job.toolName === "web_search") {
@@ -9532,7 +9525,6 @@ ${transcript}
     const identityPrompt = PersonalityManager.getIdentityPrompt();
     this.resetMemoryUsedAttribution();
     const memoryDecision = await this.resolveMemoryInjectionForPrompt(message);
-    const awarenessSnapshotBlock = this.buildAwarenessSnapshotBlock(memoryDecision);
     const roleContext = this.getRoleContextPrompt();
     // Chat has no pinned profile block: L0 and query-matched L1 come from the builder, once.
     const chatMemory = await this.buildMemoryLayersForPrompt(memoryDecision, {
@@ -10530,7 +10522,7 @@ ${transcript}
     }
   }
 
-  private enforceToolBudget(toolName: string): void {
+  private enforceToolBudget(): void {
     if (!this.budgetContractsEnabled) return;
     if (this.totalToolCallCount >= this.budgetContract.maxToolCalls) {
       throw new BudgetLimitExceededError(
@@ -12958,8 +12950,6 @@ ${transcript}
 
   /**
    * Detects any explicit read-only constraint in the prompt.
-   * Broader than the old promptIsReadOnlyReviewReport() which required
-   * documentation-review + report-format intent on top of the read-only constraint.
    * A command request does not cancel a separate read-only constraint on files.
    */
   private promptHasReadOnlyConstraint(prompt: string): boolean {
@@ -12975,11 +12965,6 @@ ${transcript}
         lower,
       ) || /\b(?:run|execute)\s+(?:the\s+|a\s+)?[\w-]+(?:\s+[\w-]+){0,3}\s+commands?\b/.test(lower)
     );
-  }
-
-  /** @deprecated Use promptHasReadOnlyConstraint instead */
-  private promptIsReadOnlyReviewReport(prompt: string): boolean {
-    return this.promptHasReadOnlyConstraint(prompt);
   }
 
   /**
@@ -20443,7 +20428,7 @@ ${transcript}
       ])
         always.add(name);
     }
-    const botTeamDelegationRequested = this.hasExplicitBotTeamDelegationRequest(stepText);
+    const botTeamDelegationRequested = this.hasExplicitBotTeamDelegationRequest();
 
     if (this.swarmForTools) {
       // Any step may share a finding with the other agents on the same goal (phase 5 §2).
@@ -20784,7 +20769,7 @@ ${transcript}
     );
   }
 
-  private hasExplicitBotTeamDelegationRequest(context?: string): boolean {
+  private hasExplicitBotTeamDelegationRequest(): boolean {
     if (this.task.agentConfig?.botConversation !== true) return false;
     // The latest user turn supersedes the original prompt. Step descriptions and
     // titles are model-authored or historical and cannot authorize a new handoff.
@@ -21408,7 +21393,7 @@ You are continuing a previous conversation. The context from the previous conver
       this.daemon.getTask(this.task.id)?.agentConfig || this.task.agentConfig;
     const boundedTask = normalizeWorkerRoleTaskConfig({
       ...this.task,
-      agentConfig: { ...(persistedAgentConfig || {}), ...agentConfigOverride },
+      agentConfig: { ...persistedAgentConfig, ...agentConfigOverride },
     }).task;
     this.daemon.setTransientTaskAgentConfig(
       this.task.id,
@@ -29925,10 +29910,7 @@ You are continuing a previous conversation. The context from the previous conver
 
   private normalizeSkillInvocationQuery(query: string): string {
     const sanitized = sanitizeToolCallTextFromAssistant(String(query || "")).text;
-    return sanitized
-      .toLowerCase()
-      .replace(/[-_\s]+/g, " ")
-      .trim();
+    return normalizeSkillInvocationText(sanitized);
   }
 
   private resolveSkillSlashCommandName(commandName: string): string | null {
@@ -30044,10 +30026,17 @@ You are continuing a previous conversation. The context from the previous conver
     return new RegExp(`(?:^|[^a-z0-9])${pattern}(?:$|[^a-z0-9])`, "i").test(normalizedQuery);
   }
 
-  private matchesExplicitSkillInvocationTarget(normalizedQuery: string, phrase: string): boolean {
+  private matchesExplicitSkillInvocationTarget(
+    normalizedQuery: string,
+    phrase: string,
+    exclusionPhrases: readonly string[] = [phrase],
+  ): boolean {
     const normalizedPhrase = this.normalizeSkillInvocationQuery(phrase);
-    return matchesExplicitSkillInvocationPhrase(normalizedQuery, normalizedPhrase, (segment) =>
-      this.escapeSkillInvocationPattern(segment),
+    return matchesExplicitSkillInvocationPhrase(
+      normalizedQuery,
+      normalizedPhrase,
+      (segment) => this.escapeSkillInvocationPattern(segment),
+      exclusionPhrases,
     );
   }
 
@@ -30069,11 +30058,13 @@ You are continuing a previous conversation. The context from the previous conver
     const skillId = String(skill?.id || "").trim();
     const skillName = String(skill?.name || "").trim();
     if (!skillId && !skillName) return false;
+    const exclusionPhrases = [skillId, skillName];
 
     return (
-      (skillId.length > 0 && this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillId)) ||
+      (skillId.length > 0 &&
+        this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillId, exclusionPhrases)) ||
       (skillName.length > 0 &&
-        this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillName))
+        this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillName, exclusionPhrases))
     );
   }
 
@@ -30083,12 +30074,19 @@ You are continuing a previous conversation. The context from the previous conver
 
     const skillId = String(skill?.id || "").trim();
     const skillName = String(skill?.name || "").trim();
+    const exclusionPhrases = [skillId, skillName];
     let score = 0;
 
-    if (skillId && this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillId)) {
+    if (
+      skillId &&
+      this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillId, exclusionPhrases)
+    ) {
       score += 4;
     }
-    if (skillName && this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillName)) {
+    if (
+      skillName &&
+      this.matchesExplicitSkillInvocationTarget(normalizedQuery, skillName, exclusionPhrases)
+    ) {
       score += 3;
     }
     if (/\bskill\b/.test(normalizedQuery)) {
@@ -30837,7 +30835,6 @@ You are continuing a previous conversation. The context from the previous conver
     const identityPrompt = PersonalityManager.getIdentityPrompt();
     this.resetMemoryUsedAttribution();
     const memoryDecision = await this.resolveMemoryInjectionForPrompt(rawPrompt);
-    const awarenessSnapshotBlock = this.buildAwarenessSnapshotBlock(memoryDecision);
     const roleContext = this.getRoleContextPrompt();
     // Companion chat has no pinned profile block: L0 and L1 come from the builder, once.
     const chatMemory = await this.buildMemoryLayersForPrompt(memoryDecision, {
@@ -36900,7 +36897,7 @@ Return ONLY a JSON object:
                       input: content.input,
                       spec: schedulerSpec,
                       onDispatched: () => {
-                        this.enforceToolBudget(content.name);
+                        this.enforceToolBudget();
                         const stepToolCallIndex = stepToolCallCount + 1;
                         dispatchedToolCallIndex = stepToolCallIndex;
                         toolCorrelation = this.buildToolCorrelationMeta({
@@ -37961,1409 +37958,6 @@ Return ONLY a JSON object:
                   (report) => report.batchMode !== "parallel",
                 ).length,
               });
-            }
-
-            if (false) {
-              /*
-          const parallelBatchResult = mutationStarvationToolGateActive
-            ? null
-            : await this.tryExecuteEligibleToolBatchInParallel({
-                phase: "step",
-                stepId: step.id,
-                stepDescription: step.description,
-                responseContent: response.content || [],
-                availableToolNames,
-                forceFinalizeWithoutTools,
-                stepMode: stepContract.mode,
-                targetPaths: stepContract.targetPaths,
-                stepWebSearchCallCount,
-                toolErrors,
-                persistentToolFailures,
-                requiredTools: stepContract.requiredTools,
-                requiredToolsAttempted,
-                requiredToolsSucceeded,
-              });
-
-          if (parallelBatchResult) {
-            toolResults.push(...parallelBatchResult.toolResults);
-            skippedToolCallsByPolicy += parallelBatchResult.skippedToolCallsByPolicy;
-            hasHardToolFailureAttempt =
-              hasHardToolFailureAttempt || parallelBatchResult.hasHardToolFailureAttempt;
-            if (parallelBatchResult.hadRecoverableUnavailableAlternative) {
-              hadRecoverableUnavailableAlternative = true;
-            }
-            hadToolError = hadToolError || parallelBatchResult.hadToolError;
-            if (parallelBatchResult.hadToolSuccessAfterError) {
-              hadToolSuccessAfterError = true;
-            }
-            if ((parallelBatchResult as Any).hadRecoverableVisionFallback) {
-              hadRecoverableVisionFallback = true;
-            }
-            if (parallelBatchResult.hadAnyToolSuccess) {
-              hadAnyToolSuccess = true;
-              this.taskHadAnyToolSuccess = true;
-            }
-            if (!parallelBatchResult.allToolErrorsInputDependent) {
-              allToolErrorsInputDependent = false;
-            }
-            if (parallelBatchResult.lastToolErrorReason) {
-              lastToolErrorReason = parallelBatchResult.lastToolErrorReason;
-            }
-            stepToolCallCount += parallelBatchResult.stepToolCallsExecuted;
-            stepWebSearchCallCount += parallelBatchResult.stepWebSearchCallsExecuted;
-            if (parallelBatchResult.stepHadWebSearchCall) {
-              stepHadWebSearchCall = true;
-            }
-          } else {
-            this.emitEvent("log", {
-              metric: "parallel_fallback_count",
-              phase: "step",
-              stepId: step.id,
-              count: toolUseCount,
-            });
-            for (const content of response.content || []) {
-            if (content.type === "tool_use") {
-            if (forceFinalizeWithoutTools) {
-              skippedToolCallsByPolicy += 1;
-              toolResults.push({
-                type: "tool_result",
-                tool_use_id: content.id,
-                content: JSON.stringify({
-                  error: "Tool call skipped: turn budget reserved for final response.",
-                  blocked: true,
-                  reason: "turn_budget_soft_landing",
-                }),
-                is_error: true,
-              });
-              continue;
-            }
-            const preflight = await this.preflightToolInvocation({
-              content,
-              contextText: `${step.description}\n${this.getExecutionTaskPrompt()}`,
-              stepMode: stepContract.mode,
-              assistantText,
-              stepId: step.id,
-              rewriteReason: "tool_pre_execution",
-            });
-            let canonicalContentName = preflight.canonicalToolName;
-            if (
-              preflight.status === "blocked" &&
-              (preflight.blockedReason === "agent_policy_hook" ||
-                preflight.blockedReason === "source_evidence")
-            ) {
-              this.emitEvent("tool_blocked", {
-                tool: content.name,
-                reason:
-                  preflight.blockedReason === "source_evidence"
-                    ? "source_evidence_validation"
-                    : "agent_policy_hook",
-                message: preflight.blockedMessage,
-              });
-              toolResults.push(preflight.blockedToolResult);
-              continue;
-            }
-            if (preflight.forcedToolAction) {
-              this.emitEvent("log", {
-                metric: "agent_policy_pre_tool_force_action",
-                originalTool: preflight.forcedToolAction.originalToolName,
-                forcedTool: preflight.forcedToolAction.forcedToolName,
-                stepId: step.id,
-              });
-            }
-
-            const mutationSatisfiedAtToolGate =
-              hasRequiredMutationToolContractForIteration
-                ? !hasPendingRequiredMutationToolsForIteration &&
-                  (!requiredMutationToolContractNeedsArtifactEvidenceForIteration ||
-                    stepSucceededWithFileMutation ||
-                    stepSucceededWithCanvasMutation ||
-                    bootstrapMutationSucceeded)
-                : stepSucceededWithFileMutation ||
-                  stepSucceededWithCanvasMutation ||
-                  bootstrapMutationSucceeded;
-            if (
-              mutationStarvationToolGateActive &&
-              stepContract.requiresMutation &&
-              !mutationSatisfiedAtToolGate
-            ) {
-              const requiredMutationGateActive = hasPendingRequiredMutationToolsForIteration;
-              // An equivalent tool (edit_file for a pending write_file) makes
-              // progress on the requirement and must not be blocked.
-              const shouldBlockForRequiredMutation =
-                requiredMutationGateActive &&
-                !pendingRequiredMutationToolSetForIteration.has(canonicalContentName) &&
-                getEquivalentRequiredToolsForCall(
-                  pendingRequiredMutationToolSetForIteration,
-                  canonicalContentName,
-                  content.input,
-                ).length === 0;
-              const shouldBlockForExplorationOnly =
-                !requiredMutationGateActive &&
-                this.isMutationExploratoryTool(canonicalContentName) &&
-                !this.isMutationSatisfyingTool(canonicalContentName);
-              if (!shouldBlockForRequiredMutation && !shouldBlockForExplorationOnly) {
-                // Continue normally for allowed tools.
-              } else {
-              const preferredTarget = this.getPreferredMutationTargetPath(step, stepContract) || ".";
-              skippedToolCallsByPolicy += 1;
-              this.emitEvent("tool_blocked", {
-                tool: content.name,
-                reason: "mutation_starvation_guard",
-                message:
-                  shouldBlockForRequiredMutation
-                    ? "Mutation starvation guard is active: non-required tools are blocked until required mutation tools run."
-                    : "Mutation starvation guard is active: exploration-only tools are temporarily blocked until a write/canvas mutation occurs.",
-              });
-              toolResults.push({
-                type: "tool_result",
-                tool_use_id: content.id,
-                content: JSON.stringify({
-                  error: shouldBlockForRequiredMutation
-                    ? `Mutation starvation guard active: required mutation pending (${describeRequiredToolsForNudge(pendingRequiredMutationToolsForIteration).join("; ")}).`
-                    : "Mutation starvation guard active: perform a mutation now instead of further read/list exploration.",
-                  blocked: true,
-                  reason: "mutation_starvation_guard",
-                  requiredAction: shouldBlockForRequiredMutation
-                    ? `Use ${describeRequiredToolsForNudge(pendingRequiredMutationToolsForIteration).join(" or ")} targeting "${preferredTarget}" now.`
-                    : `Use write_file/edit_file/canvas mutation targeting "${preferredTarget}" now.`,
-                }),
-                is_error: true,
-              });
-              continue;
-              }
-            }
-
-            if (stepContract.requiredTools.has(canonicalContentName)) {
-              requiredToolsAttempted.add(canonicalContentName);
-              this.emitEvent("log", {
-                metric: "required_tool_attempted",
-                stepId: step.id,
-                tool: canonicalContentName,
-              });
-            }
-            for (const equivalentTool of getEquivalentRequiredToolsForCall(
-              stepContract.requiredTools,
-              canonicalContentName,
-              content.input,
-            )) {
-              requiredToolsAttempted.add(equivalentTool);
-            }
-
-            const isExecutionToolCall = this.isExecutionTool(content.name);
-            if (isExecutionToolCall) {
-              stepAttemptedExecutionTool = true;
-              this.executionToolAttemptObserved = true;
-            }
-
-            const policyDecision = evaluateToolPolicy(content.name, this.getToolPolicyContext());
-            if (policyDecision.decision !== "allow") {
-              const reason =
-                policyDecision.reason ||
-                `Tool "${content.name}" blocked by execution mode/domain policy.`;
-              this.emitEvent("mode_gate_blocked", {
-                tool: content.name,
-                mode: policyDecision.mode,
-                domain: policyDecision.domain,
-                reason,
-                stepId: step.id,
-              });
-              this.emitEvent("tool_blocked", {
-                tool: content.name,
-                reason: "mode_domain_policy",
-                message: reason,
-              });
-              toolResults.push({
-                type: "tool_result",
-                tool_use_id: content.id,
-                content: JSON.stringify({
-                  error: reason,
-                  blocked: true,
-                  reason: "mode_domain_policy",
-                  mode: policyDecision.mode,
-                  domain: policyDecision.domain,
-                }),
-                is_error: true,
-              });
-              if (isExecutionToolCall) {
-                this.executionToolLastError = reason;
-              }
-              continue;
-            }
-
-            // Check if this tool has failed too many times across steps
-            {
-              const crossStepToolName = canonicalizeToolNameUtil(content.name);
-              const crossStepCount = this.crossStepToolFailures.get(crossStepToolName) || 0;
-              const crossStepBlockExempt =
-                this.isCrossStepFailureBlockExemptTool(crossStepToolName);
-              if (!crossStepBlockExempt && crossStepCount >= this.CROSS_STEP_FAILURE_THRESHOLD) {
-                logger.info(
-                  `${this.logTag} Tool "${content.name}" blocked by cross-step failure threshold (${crossStepCount} failures across steps)`,
-                );
-                hadToolError = true;
-                toolErrors.add(content.name);
-                persistentToolFailures.set(
-                  content.name,
-                  (persistentToolFailures.get(content.name) || 0) + 1,
-                );
-                lastToolErrorReason = `Tool ${content.name} has failed ${crossStepCount} times across previous steps`;
-                this.emitEvent("tool_error", {
-                  tool: content.name,
-                  error: `Tool blocked: failed ${crossStepCount} times across previous steps`,
-                  crossStepBlock: true,
-                });
-                toolResults.push({
-                  type: "tool_result",
-                  tool_use_id: content.id,
-                  content: JSON.stringify({
-                    error:
-                      `This tool has failed ${crossStepCount} times across previous steps. ` +
-                      `Do NOT retry it. Output your deliverable as text directly in your response. ` +
-                      `The system captures your text output as the final result.`,
-                  }),
-                  is_error: true,
-                });
-                hasHardToolFailureAttempt = true;
-                continue;
-              }
-            }
-
-            // Check if this tool is disabled (circuit breaker tripped)
-            if (this.toolFailureTracker.isDisabled(content.name)) {
-              const lastError = this.toolFailureTracker.getLastError(content.name);
-              logger.info(`${this.logTag} Skipping disabled tool: ${content.name}`);
-              hadToolError = true;
-              allToolErrorsInputDependent = false;
-              toolErrors.add(content.name);
-              persistentToolFailures.set(
-                content.name,
-                (persistentToolFailures.get(content.name) || 0) + 1,
-              );
-              const disabledFailureReason = `Tool ${content.name} failed: ${lastError}`;
-              lastToolErrorReason = disabledFailureReason;
-              this.emitEvent("tool_error", {
-                tool: content.name,
-                error: `Tool disabled due to repeated failures: ${lastError}`,
-                skipped: true,
-              });
-              toolResults.push(
-                buildDisabledToolResultUtil({
-                  toolName: content.name,
-                  toolUseId: content.id,
-                  lastError,
-                }),
-              );
-              hasDisabledToolAttempt = true;
-              hasHardToolFailureAttempt = true;
-              if (isExecutionToolCall) {
-                this.executionToolLastError = `Tool disabled: ${lastError}`;
-              }
-              continue;
-            }
-
-            // Special guard for watch/skip recommendation tasks:
-            // These should return a direct recommendation instead of creating deliverables.
-            if (this.promptIsWatchSkipRecommendationTask()) {
-              const disallowedArtifactTools = new Set(["write_file", "copy_file"]);
-              if (
-                disallowedArtifactTools.has(content.name) ||
-                isArtifactGenerationToolNameUtil(content.name)
-              ) {
-                this.emitEvent("tool_blocked", {
-                  tool: content.name,
-                  reason: "watch_skip_recommendation_task",
-                  message:
-                    `Tool "${content.name}" is not allowed for watch/skip recommendation tasks. ` +
-                    "Provide the transcript-based recommendation directly in a text response instead of creating files.",
-                });
-                toolResults.push(
-                  buildWatchSkipBlockedArtifactToolResultUtil({
-                    toolName: content.name,
-                    toolUseId: content.id,
-                  }),
-                );
-                continue;
-              }
-            }
-
-            // Validate tool availability before attempting any inference
-            if (!availableToolNames.has(content.name)) {
-              logger.info(`${this.logTag} Tool not available in this context: ${content.name}`);
-              const deferredPlanToolHint = this.getDeferredPlanToolHint(content.name);
-              if (deferredPlanToolHint) hadDeferredPlanToolAttempt = true;
-              const expectedRestriction =
-                this.isToolRestrictedByPolicy(content.name) || Boolean(deferredPlanToolHint);
-              const alternatives = this.getUnavailableToolAlternatives(
-                content.name,
-                content.input,
-                availableToolNames,
-              );
-              if (alternatives.length > 0) {
-                hadRecoverableUnavailableAlternative = true;
-              }
-              hadToolError = true;
-              allToolErrorsInputDependent = false;
-              toolErrors.add(content.name);
-              const unavailableFailureReason = `Tool ${content.name} failed: Tool not available`;
-              lastToolErrorReason = unavailableFailureReason;
-              this.emitEvent("tool_error", {
-                tool: content.name,
-                error: "Tool not available in current context or permissions",
-                blocked: true,
-              });
-              const runCommandShellHint =
-                content.name === "run_command" && !this.workspace.permissions.shell
-                  ? "Switch to an access profile that permits command tools (Ask for approval, Approve for me, or Full access), or continue without commands."
-                  : undefined;
-              toolResults.push(
-                buildUnavailableToolResultUtil({
-                  toolName: content.name,
-                  toolUseId: content.id,
-                  hint: deferredPlanToolHint || runCommandShellHint,
-                  alternatives,
-                }),
-              );
-              hasUnavailableToolAttempt = true;
-              if (!expectedRestriction && alternatives.length === 0) {
-                hasHardToolFailureAttempt = true;
-              }
-              if (isExecutionToolCall) {
-                this.executionToolLastError =
-                  "Execution tool not available in current permissions/context.";
-              }
-              continue;
-            }
-
-            const inputValidation = preflight.inputValidation;
-            if (inputValidation.repaired) {
-              this.emitEvent("log", {
-                metric: "tool_input_repaired_count",
-                tool: content.name,
-                input_repair_applied: true,
-                repairable: inputValidation.repairable,
-                repairReason: inputValidation.repairReason,
-              });
-              this.emitEvent("parameter_inference", {
-                tool: content.name,
-                inference:
-                  inputValidation.repairReason ||
-                  "Auto-repaired malformed tool input during preflight validation",
-              });
-            }
-
-            if (preflight.status === "blocked" && preflight.blockedReason === "invalid_input") {
-              const diagInputKeys = content.input ? Object.keys(content.input) : [];
-              logger.info(
-                `${this.logTag}   │ ⚠ Input validation failed for "${content.name}": ${preflight.blockedMessage} | ` +
-                  `inputKeys=[${diagInputKeys.join(",")}] | contentType=${typeof content.input?.content} | ` +
-                  `contentLen=${typeof content.input?.content === "string" ? content.input.content.length : "N/A"}`,
-              );
-              this.emitEvent("tool_warning", {
-                tool: content.name,
-                error: preflight.blockedMessage,
-                input: content.input,
-                errorClass: "tool_input_validation_error",
-                repairable: inputValidation.repairable,
-                input_repair_applied: inputValidation.repaired,
-              });
-              toolResults.push(preflight.blockedToolResult);
-              continue;
-            }
-
-            if (preflight.status === "blocked" && preflight.blockedReason === "task_root_strict_fail") {
-              this.emitEvent("tool_error", {
-                tool: content.name,
-                error: preflight.blockedMessage,
-                blocked: true,
-                reason: "task_root_strict_fail",
-              });
-              toolResults.push(preflight.blockedToolResult);
-              hadToolError = true;
-              toolErrors.add(content.name);
-              lastToolErrorReason = `Tool ${content.name} failed: ${preflight.blockedMessage}`;
-              allToolErrorsInputDependent = false;
-              continue;
-            }
-
-            if (this.blockedLoopFingerprintForWindow) {
-              const toolSignature = this.getToolInputSignature(content.name, content.input);
-              if (toolSignature === this.blockedLoopFingerprintForWindow) {
-                this.emitEvent("tool_blocked", {
-                  tool: content.name,
-                  reason: "loop_critical_threshold",
-                  message:
-                    "Tool path blocked by loop critical threshold. Change tool family or input class.",
-                });
-                toolResults.push({
-                  type: "tool_result",
-                  tool_use_id: content.id,
-                  content: JSON.stringify({
-                    error:
-                      "Blocked by loop critical threshold for repeated fingerprint. Use a different tool or changed input.",
-                    blocked: true,
-                    reason: "loop_critical_threshold",
-                  }),
-                  is_error: true,
-                });
-                hasHardToolFailureAttempt = true;
-                continue;
-              }
-            }
-
-            // Check for duplicate tool calls (prevents stuck loops)
-            const duplicateCheck = this.toolCallDeduplicator.checkDuplicate(
-              content.name,
-              content.input,
-            );
-            if (duplicateCheck.isDuplicate) {
-              const canonicalDuplicateTool = canonicalizeToolNameUtil(content.name);
-              const isMutationToolForBypass =
-                this.isFileMutationTool(canonicalDuplicateTool) ||
-                canonicalDuplicateTool === "canvas_create" ||
-                canonicalDuplicateTool === "canvas_push";
-              const mutationContractActive =
-                stepContract.requiresMutation || stepContract.requiredTools.has(canonicalDuplicateTool);
-              const mutationStillUnsatisfied =
-                mutationContractActive &&
-                !stepSucceededWithFileMutation &&
-                !stepSucceededWithCanvasMutation &&
-                !bootstrapMutationSucceeded;
-              const canBypassDuplicate =
-                this.reliabilityStepMutationDedupeV3Enabled &&
-                isMutationToolForBypass &&
-                mutationStillUnsatisfied &&
-                !mutationDuplicateBypassUsed;
-
-              if (canBypassDuplicate) {
-                mutationDuplicateBypassUsed = true;
-                this.emitEvent("mutation_duplicate_bypass_applied", {
-                  taskId: this.task.id,
-                  stepId: step.id,
-                  tool: canonicalDuplicateTool,
-                  reason: duplicateCheck.reason || "duplicate_call",
-                });
-                this.emitEvent("log", {
-                  metric: "mutation_duplicate_bypass_applied",
-                  taskId: this.task.id,
-                  stepId: step.id,
-                  tool: canonicalDuplicateTool,
-                  reason: duplicateCheck.reason || "duplicate_call",
-                });
-              } else {
-                logger.info(`${this.logTag} Blocking duplicate tool call: ${content.name}`);
-                this.duplicatesBlockedCount += 1;
-                this.emitEvent("tool_blocked", {
-                  tool: content.name,
-                  reason: "duplicate_call",
-                  message: duplicateCheck.reason,
-                });
-
-                const duplicateResult = buildDuplicateToolResultUtil({
-                  toolName: content.name,
-                  toolUseId: content.id,
-                  duplicateCheck,
-                  isIdempotentTool: (toolName) =>
-                    isEffectivelyIdempotentToolCallUtil({
-                      toolName,
-                      input: content.input,
-                      isIdempotentTool: (name) => ToolCallDeduplicator.isIdempotentTool(name),
-                    }),
-                  suggestion:
-                    "This tool was already called with these exact parameters. The previous call succeeded. Please proceed to the next step or try a different approach.",
-                });
-                toolResults.push(duplicateResult.toolResult);
-                if (duplicateResult.hasDuplicateAttempt) {
-                  hasDuplicateToolAttempt = true;
-                }
-                if (isExecutionToolCall) {
-                  this.executionToolLastError =
-                    duplicateCheck.reason || "Duplicate execution tool call blocked.";
-                }
-                continue;
-              }
-            }
-
-            if (
-              this.mutationLoopStopV2Enabled &&
-              stepContract.requiresMutation &&
-              (stepSucceededWithFileMutation || stepSucceededWithCanvasMutation) &&
-              this.isFileMutationTool(content.name)
-            ) {
-              const canonicalToolName = canonicalizeToolNameUtil(content.name);
-              const pendingRequiredTools = Array.from(stepContract.requiredTools.values()).filter(
-                (toolName) => !requiredToolsSucceeded.has(toolName),
-              );
-              const aliases = getAliasesForCanonicalToolUtil(canonicalToolName);
-              const pendingRequiredForThisTool = pendingRequiredTools.some(
-                (toolName) => toolName === canonicalToolName || aliases.includes(toolName),
-              );
-              const mutationGuardKey = this.buildMutationGuardKey(content.name, content.input);
-              const isRepeatedMutationTarget =
-                Boolean(mutationGuardKey) && successfulMutationGuardKeys.has(String(mutationGuardKey));
-              if (!pendingRequiredForThisTool && isRepeatedMutationTarget) {
-                this.emitEvent("tool_blocked", {
-                  tool: content.name,
-                  reason: "mutation_already_satisfied",
-                  message:
-                    "Mutation already satisfied for this target. Move to verification/completion instead of repeating the same artifact write.",
-                });
-                toolResults.push({
-                  type: "tool_result",
-                  tool_use_id: content.id,
-                  content: JSON.stringify({
-                    error:
-                      "This step already has successful mutation evidence for this artifact target. Do not repeat the same write; proceed to verification/completion.",
-                    blocked: true,
-                    reason: "mutation_already_satisfied",
-                  }),
-                  is_error: true,
-                });
-                continue;
-              }
-            }
-
-            // Check for cancellation or completion before executing tool
-            if (this.cancelled || this.taskCompleted) {
-              logger.info(
-                `${this.logTag} Stopping tool execution: cancelled=${this.cancelled}, completed=${this.taskCompleted}`,
-              );
-              toolResults.push(
-                buildCancellationToolResultUtil({
-                  toolUseId: content.id,
-                  cancelled: this.cancelled,
-                }),
-              );
-              break;
-            }
-
-            // Check for redundant file operations
-            const fileOpCheck = this.checkFileOperation(
-              content.name,
-              content.input,
-              batchCreatedPaths,
-            );
-            if (fileOpCheck.blocked) {
-              logger.info(`${this.logTag} Blocking redundant file operation: ${content.name}`);
-              this.emitEvent("tool_blocked", {
-                tool: content.name,
-                reason: "redundant_file_operation",
-                message: fileOpCheck.reason,
-              });
-
-              toolResults.push(
-                buildRedundantFileOperationToolResultUtil({
-                  toolUseId: content.id,
-                  fileOpCheck,
-                }),
-              );
-              continue;
-            }
-
-            const batchExternalPolicyBlock = await this.maybeBlockToolByBatchExternalPolicy(content);
-            if (batchExternalPolicyBlock) {
-              toolResults.push(batchExternalPolicyBlock);
-              if (isExecutionToolCall) {
-                this.executionToolLastError = "Execution blocked by /batch external policy.";
-              }
-              continue;
-            }
-
-            if (content.name === "web_fetch") {
-              const webFetchPolicyCheck = this.evaluateWebFetchPolicy(content.input);
-              if (webFetchPolicyCheck.blocked) {
-                const reason =
-                  webFetchPolicyCheck.reason ||
-                  "web_fetch blocked by current web search policy mode.";
-                hadToolError = true;
-                allToolErrorsInputDependent = false;
-                toolErrors.add(content.name);
-                lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
-                this.emitEvent("tool_error", {
-                  tool: content.name,
-                  error: reason,
-                  blocked: true,
-                  failureClass: webFetchPolicyCheck.failureClass,
-                  scope: webFetchPolicyCheck.scope,
-                });
-                toolResults.push({
-                  type: "tool_result",
-                  tool_use_id: content.id,
-                  content: JSON.stringify({
-                    error: reason,
-                    blocked: true,
-                    reason: "web_fetch_policy_mode",
-                    failureClass: webFetchPolicyCheck.failureClass,
-                  }),
-                  is_error: true,
-                });
-                if (isExecutionToolCall) {
-                  this.executionToolLastError = reason;
-                }
-                continue;
-              }
-            }
-
-            if (content.name === "web_search") {
-              const webSearchBudgetCheck = this.evaluateWebSearchPolicyAndBudget(
-                content.input,
-                stepWebSearchCallCount,
-              );
-              if (webSearchBudgetCheck.blocked) {
-                const reason =
-                  webSearchBudgetCheck.reason || "web_search blocked by web search policy.";
-                hadToolError = true;
-                allToolErrorsInputDependent = false;
-                toolErrors.add(content.name);
-                lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
-                if (webSearchBudgetCheck.failureClass === "budget_exhausted") {
-                  stepBudgetConstrainedByWebSearch = true;
-                  this.emitEvent("log", {
-                    metric: "web_search_budget_hit",
-                    stepId: step.id,
-                    scope: webSearchBudgetCheck.scope,
-                    used: webSearchBudgetCheck.used,
-                    limit: webSearchBudgetCheck.limit,
-                    stepUsed: webSearchBudgetCheck.stepUsed,
-                    stepLimit: webSearchBudgetCheck.stepLimit,
-                  });
-                }
-                this.emitEvent("log", {
-                  metric: "web_search_budget_remaining",
-                  stepId: step.id,
-                  scope: webSearchBudgetCheck.scope || "task",
-                  remaining: webSearchBudgetCheck.remaining,
-                  limit: webSearchBudgetCheck.limit,
-                  used: webSearchBudgetCheck.used,
-                  stepRemaining: webSearchBudgetCheck.stepRemaining,
-                  stepLimit: webSearchBudgetCheck.stepLimit,
-                  stepUsed: webSearchBudgetCheck.stepUsed,
-                });
-                this.emitEvent("tool_error", {
-                  tool: content.name,
-                  error: reason,
-                  blocked: true,
-                  failureClass: webSearchBudgetCheck.failureClass,
-                  scope: webSearchBudgetCheck.scope,
-                });
-                toolResults.push({
-                  type: "tool_result",
-                  tool_use_id: content.id,
-                  content: JSON.stringify({
-                    error: reason,
-                    blocked: true,
-                    reason:
-                      webSearchBudgetCheck.failureClass === "budget_exhausted"
-                        ? "web_search_budget_exhausted"
-                        : "web_search_policy_mode",
-                    failureClass: webSearchBudgetCheck.failureClass,
-                    budget: {
-                      used: webSearchBudgetCheck.used,
-                      limit: webSearchBudgetCheck.limit,
-                      remaining: webSearchBudgetCheck.remaining,
-                      stepUsed: webSearchBudgetCheck.stepUsed,
-                      stepLimit: webSearchBudgetCheck.stepLimit,
-                      stepRemaining: webSearchBudgetCheck.stepRemaining,
-                    },
-                  }),
-                  is_error: true,
-                });
-                if (isExecutionToolCall) {
-                  this.executionToolLastError = reason;
-                }
-                continue;
-              }
-            }
-
-	            this.enforceToolBudget(content.name);
-	            const stepToolCallIndex = stepToolCallCount + 1;
-	            const toolCorrelation = this.buildToolCorrelationMeta({
-	              toolUseId: String(content.id || ""),
-	              toolCallIndex: stepToolCallIndex,
-	              phase: "step",
-	              groupId: this.currentToolBatchGroupId,
-	            });
-	            this.emitEvent(
-	              "tool_call",
-	              this.attachToolCorrelationMetadata(
-	                {
-	                  tool: content.name,
-	                  input: content.input,
-	                },
-	                toolCorrelation,
-	              ),
-	            );
-	            this.emitToolLaneStarted(content.name, toolCorrelation);
-
-	            stepToolCallCount = stepToolCallIndex;
-            if (
-              stepContract.requiresMutation &&
-              (this.isFileMutationTool(content.name) ||
-                content.name === "canvas_create" ||
-                content.name === "canvas_push")
-            ) {
-              mutationAttempted = true;
-            }
-            this.totalToolCallCount++;
-            if (content.name === "web_search") {
-              this.webSearchToolCallCount++;
-              stepHadWebSearchCall = true;
-              stepWebSearchCallCount++;
-              const taskLimit = this.getEffectiveWebSearchTaskLimit(content.input);
-              const stepLimit = this.getEffectiveWebSearchStepLimit(content.input);
-              this.emitEvent("log", {
-                metric: "web_search_budget_remaining",
-                stepId: step.id,
-                scope: "task",
-                remaining: Math.max(0, taskLimit - this.webSearchToolCallCount),
-                used: this.webSearchToolCallCount,
-                limit: taskLimit,
-                stepRemaining: Math.max(0, stepLimit - stepWebSearchCallCount),
-                stepUsed: stepWebSearchCallCount,
-                stepLimit,
-              });
-            }
-            const toolExecStart = Date.now();
-
-            try {
-              // Execute tool with timeout to prevent hanging
-              const toolTimeoutMs = this.getToolTimeoutMs(content.name, content.input);
-              const truncatedInput = formatToolInputForLogUtil(content.input);
-              logger.info(
-                `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" start | ` +
-                  `id=${content.id} | timeout=${toolTimeoutMs}ms | input=${truncatedInput}`,
-              );
-
-              let result: Any;
-              let runtimeEnvelope: Any;
-              let runtimePolicyTrace: Any;
-              try {
-                const coordinated = await this.executeToolWithHeartbeat(
-                  content.name,
-                  content.input,
-                  toolTimeoutMs,
-                );
-                result = coordinated.result;
-                runtimeEnvelope = coordinated.envelope;
-                runtimePolicyTrace = coordinated.policyTrace;
-              } catch (toolError: Any) {
-                const recovery = await this.tryWorkspaceBoundaryRecovery({
-                  toolName: content.name,
-                  input: content.input,
-                  errorMessage: String(toolError?.message || toolError || ""),
-                  toolTimeoutMs,
-                  targetPaths: stepContract.targetPaths,
-                  stepId: step.id,
-                });
-                if (!recovery.recovered) {
-                  throw (recovery.failureHint ? new Error(recovery.failureHint) : toolError);
-                }
-                result = recovery.result;
-                content.input = recovery.input ?? content.input;
-              }
-
-              // Fallback: retry grep without glob if the glob produced an invalid regex
-              if (
-                content.name === "grep" &&
-                result &&
-                result.success === false &&
-                content.input?.glob
-              ) {
-                const errorText = String(result.error || "");
-                if (/invalid regex pattern|nothing to repeat/i.test(errorText)) {
-                  this.emitEvent("tool_fallback", {
-                    tool: "grep",
-                    reason: "invalid_glob_regex",
-                    originalGlob: content.input.glob,
-                  });
-                  const fallbackInput = { ...content.input };
-                  delete (fallbackInput as Any).glob;
-                  try {
-                    const fallbackExecution = await this.executeToolWithHeartbeat(
-                      "grep",
-                      fallbackInput,
-                      toolTimeoutMs,
-                    );
-                    const fallbackResult = fallbackExecution.result;
-                    if (fallbackResult && fallbackResult.success !== false) {
-                      result = fallbackResult;
-                      runtimeEnvelope = fallbackExecution.envelope;
-                      runtimePolicyTrace = fallbackExecution.policyTrace;
-                    }
-                  } catch {
-                    // Keep original error if fallback fails
-                  }
-                }
-              }
-
-              const boundaryRecovery = await this.tryWorkspaceBoundaryRecovery({
-                toolName: content.name,
-                input: content.input,
-                errorMessage: String(result?.error || result?.message || ""),
-                toolTimeoutMs,
-                targetPaths: stepContract.targetPaths,
-                stepId: step.id,
-              });
-              if (boundaryRecovery.recovered) {
-                result = boundaryRecovery.result;
-                content.input = boundaryRecovery.input ?? content.input;
-              } else if (boundaryRecovery.failureHint) {
-                result =
-                  result && typeof result === "object"
-                    ? { ...result, success: false, error: boundaryRecovery.failureHint }
-                    : { success: false, error: boundaryRecovery.failureHint };
-              }
-
-              // Tool succeeded - reset failure counter
-              this.toolFailureTracker.recordSuccess(content.name);
-
-              // Record this call for deduplication
-              const resultStr = JSON.stringify(result);
-              this.toolCallDeduplicator.recordCall(content.name, content.input, resultStr);
-
-              const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
-              const toolSucceeded = !(result && result.success === false);
-              if (toolSucceeded) {
-                this.recordToolUsage(content.name);
-              }
-              logger.info(
-                `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" done | ` +
-                  `duration=${toolExecDuration}s | success=${toolSucceeded} | resultSize=${resultStr.length}`,
-              );
-
-              // Record file operation for tracking
-              this.recordFileOperation(content.name, content.input, result);
-              this.recordCommandExecution(content.name, content.input, result);
-              this.recordQAExecution(content.name, result);
-
-              if (toolSucceeded) {
-                hadAnyToolSuccess = true;
-                this.recordToolResult(content.name, result, content.input);
-                if (
-                  content.name === "browser_navigate" ||
-                  content.name === "browser_go_back" ||
-                  content.name === "browser_go_forward"
-                ) {
-                  foundBrowserNavigationEvidence = true;
-                }
-                if (
-                  content.name === "browser_get_content" ||
-                  content.name === "browser_snapshot" ||
-                  content.name === "browser_screenshot"
-                ) {
-                  foundBrowserInspectionEvidence = true;
-                  const evidenceChunk = this.collectBrowserInspectionEvidenceText(
-                    content.name,
-                    content.input,
-                    result,
-                  );
-                  if (evidenceChunk) {
-                    browserInspectionEvidenceText = `${browserInspectionEvidenceText}\n${evidenceChunk}`
-                      .trim()
-                      .slice(0, 24_000);
-                  }
-                }
-                if (
-                  this.hasCurrentStepTargetInspectionEvidence(
-                    content.name,
-                    content.input,
-                    result,
-                    explicitTargetVerificationTokens,
-                    explicitTargetUniqueBasenames,
-                  )
-                ) {
-                  currentStepTargetVerificationObserved = true;
-                }
-                if (stepContract.verificationMode === "artifact_file") {
-                  const artifactEvidence = this.hasArtifactVerificationToolEvidence(
-                    content.name,
-                    content.input,
-                    result,
-                    requiredArtifactExtensions,
-                    artifactVerificationTargetTokens,
-                    artifactVerificationUniqueBasenames,
-                  );
-                  if (artifactEvidence.matched) {
-                    foundArtifactVerificationEvidence = true;
-                    for (const extension of artifactEvidence.matchedExtensions) {
-                      artifactExtensionsAvailable.add(extension);
-                    }
-                  }
-                }
-                if (this.shouldCollectMutationEvidence(content.name)) {
-                  const evidence = this.collectMutationEvidence({
-                    toolName: content.name,
-                    input: content.input,
-                    result,
-                    stepStartedAt,
-                    toolStartedAt: toolExecStart,
-                    stepContract,
-                  });
-                  const mutationAttemptObserved =
-                    this.isFileMutationTool(content.name) || Boolean(evidence);
-                  if (evidence) {
-                    mutationEvidence.push(evidence);
-                    this.emitEvent("log", {
-                      metric: "mutation_evidence_recorded",
-                      stepId: step.id,
-                      tool: content.name,
-                      canonical_tool: evidence.canonical_tool,
-                      reported_path: evidence.reported_path,
-                      artifact_registered: evidence.artifact_registered,
-                      fs_exists: evidence.fs_exists,
-                      mtime_after_step_start: evidence.mtime_after_step_start,
-                      size_bytes: evidence.size_bytes,
-                      observed_event_type: evidence.observed_event_type,
-                    });
-                    const mutationSatisfiedByEvidence =
-                      !this.isAnalysisScratchMutation(evidence, stepContract) &&
-                      (this.mutationEvidenceV2Enabled
-                        ? this.mutationEvidenceSatisfiesWriteContract(evidence)
-                        : evidence.tool_success);
-                    if (
-                      mutationSatisfiedByEvidence &&
-                      evidence.tool_success &&
-                      content.name !== evidence.canonical_tool
-                    ) {
-                      this.emitEvent("log", {
-                        metric: "artifact_checkpoint_false_positive_avoided",
-                        stepId: step.id,
-                        tool: content.name,
-                        canonical_tool: evidence.canonical_tool,
-                      });
-                    }
-                    if (mutationSatisfiedByEvidence) {
-                      stepSucceededWithFileMutation = true;
-                      this.recordArtifactMutationLedgerEntry(evidence.reported_path, {
-                        stepId: step.id,
-                        tool: content.name,
-                        evidence,
-                      });
-                      if (evidence.reported_path) {
-                        this.maybePinTaskRootFromMutationPath(evidence.reported_path, {
-                          stepId: step.id,
-                          tool: content.name,
-                        });
-                      }
-                      const mutationGuardKey = this.buildMutationGuardKey(
-                        content.name,
-                        content.input,
-                        evidence.reported_path,
-                      );
-                      if (mutationGuardKey) {
-                        successfulMutationGuardKeys.add(mutationGuardKey);
-                      }
-                      for (const bridgedToolName of this.getEquivalentRequiredMutationToolsFromEvidence(
-                        stepContract,
-                        evidence,
-                      )) {
-                        if (requiredToolsSucceeded.has(bridgedToolName)) continue;
-                        requiredToolsSucceeded.add(bridgedToolName);
-                        this.emitEvent("log", {
-                          metric: "required_tool_satisfied_by_equivalent_mutation",
-                          stepId: step.id,
-                          tool: bridgedToolName,
-                          via_tool: content.name,
-                          reported_path: evidence.reported_path,
-                          observed_event_type: evidence.observed_event_type,
-                        });
-                      }
-                    }
-                  } else if (!this.mutationEvidenceV2Enabled && this.isFileMutationTool(content.name)) {
-                    stepSucceededWithFileMutation = true;
-                    const syntheticPath = this.extractMutationPathFromInput(content.input);
-                    if (syntheticPath) {
-                      const syntheticEvidence: MutationEvidence = {
-                        tool_success: true,
-                        canonical_tool: canonicalizeToolNameUtil(content.name),
-                        reported_path: syntheticPath,
-                        artifact_registered: true,
-                        fs_exists: true,
-                        mtime_after_step_start: true,
-                        size_bytes: null,
-                      };
-                      this.recordArtifactMutationLedgerEntry(syntheticPath, {
-                        stepId: step.id,
-                        tool: content.name,
-                        evidence: syntheticEvidence,
-                      });
-                      this.maybePinTaskRootFromMutationPath(syntheticPath, {
-                        stepId: step.id,
-                        tool: content.name,
-                      });
-                    }
-                    const mutationGuardKey = this.buildMutationGuardKey(content.name, content.input);
-                    if (mutationGuardKey) {
-                      successfulMutationGuardKeys.add(mutationGuardKey);
-                    }
-                  }
-                  if (mutationAttemptObserved && !mutationSignalEmitted) {
-                    mutationSignalEmitted = true;
-                    this.emitEvent("log", {
-                      metric: "file_mutation_attempted",
-                      stepId: step.id,
-                      value: true,
-                      tool: content.name,
-                    });
-                  }
-                }
-                if (CANVAS_MUTATION_TOOL_NAMES.has(content.name)) {
-                  stepSucceededWithCanvasMutation = true;
-                  foundCanvasEvidence = true;
-                  this.canvasEvidenceObserved = true;
-                  if (!mutationSignalEmitted) {
-                    mutationSignalEmitted = true;
-                    this.emitEvent("log", {
-                      metric: "file_mutation_attempted",
-                      stepId: step.id,
-                      value: true,
-                      tool: content.name,
-                    });
-                  }
-                }
-                if (content.name === "create_diagram") {
-                  stepSucceededWithCanvasMutation = true;
-                  if (!mutationSignalEmitted) {
-                    mutationSignalEmitted = true;
-                    this.emitEvent("log", {
-                      metric: "file_mutation_attempted",
-                      stepId: step.id,
-                      value: true,
-                      tool: content.name,
-                    });
-                  }
-                }
-                if (stepContract.requiredTools.has(canonicalContentName)) {
-                  requiredToolsSucceeded.add(canonicalContentName);
-                  this.emitEvent("log", {
-                    metric: "required_tool_satisfied",
-                    stepId: step.id,
-                    tool: canonicalContentName,
-                  });
-                }
-                // An equivalent tool satisfies the same requirement (edit_file for
-                // write_file, search_files or `rg` via run_command for grep).
-                for (const equivalentTool of getEquivalentRequiredToolsForCall(
-                  stepContract.requiredTools,
-                  canonicalContentName,
-                  content.input,
-                )) {
-                  if (requiredToolsSucceeded.has(equivalentTool)) continue;
-                  requiredToolsSucceeded.add(equivalentTool);
-                  this.emitEvent("log", {
-                    metric: "required_tool_satisfied_by_equivalent",
-                    stepId: step.id,
-                    tool: equivalentTool,
-                    via_tool: canonicalContentName,
-                  });
-                }
-                // Heal cross-step failure counter: each success offsets one prior failure.
-                // This prevents site-specific errors (e.g. web_fetch 403 on paywalled sites)
-                // from permanently blocking a tool that works fine for other URLs.
-                const currentFailures =
-                  this.crossStepToolFailures.get(canonicalContentName) || 0;
-                if (currentFailures > 0) {
-                  this.crossStepToolFailures.set(canonicalContentName, currentFailures - 1);
-                }
-              }
-
-              if (content.name === "run_command" && !toolSucceeded) {
-                hadRunCommandFailure = true;
-              } else if (hadRunCommandFailure && toolSucceeded) {
-                hadToolSuccessAfterRunCommandFailure = true;
-              }
-
-              if (expectsImageVerification && content.name === "glob" && !foundNewImage) {
-                if (this.hasNewImageFromGlobResult(result, imageVerificationSince)) {
-                  foundNewImage = true;
-                }
-              }
-
-              // Check if the result indicates an error (some tools return error in result)
-              if (result && result.success === false) {
-                this.releaseBatchCreatedPathReservation(
-                  batchCreatedPaths,
-                  content.name,
-                  content.input,
-                );
-                const reason = this.getToolFailureReason(result, "unknown error");
-                const advisoryFailure = isAdvisoryToolFailureResultUtil(result);
-                if (advisoryFailure) {
-                  if (
-                    this.isRecoverableVisionToolConfigurationFailure(
-                      content.name,
-                      reason,
-                    )
-                  ) {
-                    hadRecoverableVisionFallback = true;
-                  }
-                  this.emitEvent("tool_warning", {
-                    ...this.attachToolCorrelationMetadata(
-                      {
-                        tool: content.name,
-                        error: reason,
-                        advisory: true,
-                        recoverableFallback: true,
-                      },
-                      toolCorrelation,
-                    ),
-                  });
-                } else {
-                  hadToolError = true;
-                  toolErrors.add(content.name);
-                  lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
-                  if (
-                    this.isWorkspaceAliasRecoverableTool(content.name) &&
-                    this.isWorkspaceAliasRecoverableFailure(
-                      String(content.input?.path || ""),
-                      String(result?.error || reason || ""),
-                    )
-                  ) {
-                    aliasRecoverableFailureObserved = true;
-                    aliasRecoverableFailureReason = String(result?.error || reason || "");
-                  } else if (
-                    this.isRecoverableTaskRootPathDriftFailure(
-                      content.name,
-                      String(content.input?.path || ""),
-                      String(result?.error || reason || ""),
-                    )
-                  ) {
-                    aliasRecoverableFailureObserved = true;
-                    aliasRecoverableFailureReason = String(result?.error || reason || "");
-                  }
-                  if (!_isInputDependentError(result.error || reason)) {
-                    allToolErrorsInputDependent = false;
-                  }
-                  if (isExecutionToolCall) {
-                    this.executionToolLastError = reason;
-                  }
-
-                  const pauseReason = getUserActionRequiredPauseReason(
-                    content.name,
-                    result.error || reason,
-                  );
-                  if (pauseReason && !pauseAfterNextAssistantMessage) {
-                    pauseAfterNextAssistantMessage = true;
-                    pauseAfterNextAssistantMessageReason = pauseReason;
-                  }
-
-                  const suppressDisableForPathDrift = this.shouldSuppressToolDisableForRecoverablePathDrift({
-                    toolName: content.name,
-                    inputPath: String(content.input?.path || ""),
-                    failureReason: String(result?.error || reason || ""),
-                    stepId: step.id,
-                  });
-                  const failureTracking = recordToolFailureOutcomeUtil({
-                    toolName: content.name,
-                    failureReason: result.error || reason,
-                    result,
-                    persistentToolFailures,
-                    recordFailure: (toolName, error) => {
-                      if (suppressDisableForPathDrift) {
-                        this.emitEvent("tool_disable_suppressed_recoverable_path_drift", {
-                          taskId: this.task?.id || "unknown_task",
-                          stepId: step.id,
-                          tool: toolName,
-                          reason: error,
-                          pinnedRoot: this.taskPinnedRoot,
-                          retryBudget: this.getEffectivePathDriftRetryBudget(),
-                          retryCount: this.getStepScopedPathDriftAttemptCount(step.id),
-                        });
-                        return false;
-                      }
-                      return this.toolFailureTracker.recordFailure(toolName, error);
-                    },
-                    isHardToolFailure: (toolName, toolResult, error) =>
-                      this.isHardToolFailure(toolName, toolResult, error),
-                  });
-                  const canonicalFailureToolName = canonicalizeToolNameUtil(content.name);
-                  this.crossStepToolFailures.set(
-                    canonicalFailureToolName,
-                    (this.crossStepToolFailures.get(canonicalFailureToolName) || 0) + 1,
-                  );
-                  if (failureTracking.shouldDisable) {
-                    const disabledScope =
-                      content.name === "web_search" &&
-                      /tavily|brave|serpapi|google|duckduckgo/i.test(result.error || reason)
-                        ? "provider"
-                        : "global";
-	                    this.emitEvent("tool_error", {
-	                      ...this.attachToolCorrelationMetadata(
-	                        {
-	                          tool: content.name,
-	                          error: result.error || reason,
-	                          disabled: true,
-	                          disabledScope,
-	                        },
-	                        toolCorrelation,
-	                      ),
-	                    });
-	                    hasHardToolFailureAttempt = true;
-	                  } else if (failureTracking.isHardFailure) {
-	                    hasHardToolFailureAttempt = true;
-	                  }
-                }
-              } else {
-                if (isExecutionToolCall) {
-                  this.executionToolRunObserved = true;
-                  this.executionToolLastError = "";
-                }
-                if (hadToolError) {
-                  hadToolSuccessAfterError = true;
-                }
-              }
-
-	              toolResults.push(
-	                this.emitNormalizedToolExecutionResult({
-	                  toolName: content.name,
-	                  toolUseId: content.id,
-	                  result,
-	                  rawResult: resultStr,
-	                  correlation: toolCorrelation,
-                    envelope: runtimeEnvelope,
-                    policyTrace: runtimePolicyTrace,
-	                }),
-	              );
-	            } catch (error: Any) {
-              this.releaseBatchCreatedPathReservation(
-                batchCreatedPaths,
-                content.name,
-                content.input,
-              );
-              const toolExecDuration = ((Date.now() - toolExecStart) / 1000).toFixed(1);
-              logger.error(
-                `${this.logTag}   │ ⚙ Tool #${stepToolCallCount} "${content.name}" EXCEPTION | ` +
-                  `duration=${toolExecDuration}s | error=${error?.message || "unknown"}`,
-              );
-
-              const failureMessage = error?.message || "Tool execution failed";
-              if (isExecutionToolCall) {
-                this.executionToolLastError = failureMessage;
-              }
-
-              hadToolError = true;
-              toolErrors.add(content.name);
-              lastToolErrorReason = `Tool ${content.name} failed: ${failureMessage}`;
-              toolFailureReasons.set(content.name, [
-                ...(toolFailureReasons.get(content.name) || []),
-                failureMessage,
-              ]);
-              if (
-                this.isWorkspaceAliasRecoverableTool(content.name) &&
-                this.isWorkspaceAliasRecoverableFailure(
-                  String(content.input?.path || ""),
-                  failureMessage,
-                )
-              ) {
-                aliasRecoverableFailureObserved = true;
-                aliasRecoverableFailureReason = failureMessage;
-              } else if (
-                this.isRecoverableTaskRootPathDriftFailure(
-                  content.name,
-                  String(content.input?.path || ""),
-                  failureMessage,
-                )
-              ) {
-                aliasRecoverableFailureObserved = true;
-                aliasRecoverableFailureReason = failureMessage;
-              }
-              if (!_isInputDependentError(failureMessage)) {
-                allToolErrorsInputDependent = false;
-              }
-              if (content.name === "run_command") {
-                hadRunCommandFailure = true;
-              }
-
-              const pauseReason = getUserActionRequiredPauseReason(content.name, error.message);
-              if (pauseReason && !pauseAfterNextAssistantMessage) {
-                pauseAfterNextAssistantMessage = true;
-                pauseAfterNextAssistantMessageReason = pauseReason;
-              }
-
-              const suppressDisableForPathDrift = this.shouldSuppressToolDisableForRecoverablePathDrift({
-                toolName: content.name,
-                inputPath: String(content.input?.path || ""),
-                failureReason: failureMessage,
-                stepId: step.id,
-              });
-              const failureTracking = recordToolFailureOutcomeUtil({
-                toolName: content.name,
-                failureReason: failureMessage,
-                result: { error: failureMessage },
-                persistentToolFailures,
-                recordFailure: (toolName, error) => {
-                  if (suppressDisableForPathDrift) {
-                    this.emitEvent("tool_disable_suppressed_recoverable_path_drift", {
-                      taskId: this.task?.id || "unknown_task",
-                      stepId: step.id,
-                      tool: toolName,
-                      reason: error,
-                      pinnedRoot: this.taskPinnedRoot,
-                      retryBudget: this.getEffectivePathDriftRetryBudget(),
-                      retryCount: this.getStepScopedPathDriftAttemptCount(step.id),
-                    });
-                    return false;
-                  }
-                  return this.toolFailureTracker.recordFailure(toolName, error);
-                },
-                isHardToolFailure: (toolName, toolResult, error) =>
-                  this.isHardToolFailure(toolName, toolResult, error),
-              });
-              const canonicalFailureToolName = canonicalizeToolNameUtil(content.name);
-              this.crossStepToolFailures.set(
-                canonicalFailureToolName,
-                (this.crossStepToolFailures.get(canonicalFailureToolName) || 0) + 1,
-              );
-              if (failureTracking.shouldDisable || failureTracking.isHardFailure) {
-                hasHardToolFailureAttempt = true;
-              }
-              if (
-                this.isRecoverableVisionToolConfigurationFailure(
-                  content.name,
-                  failureMessage,
-                )
-              ) {
-                hadRecoverableVisionFallback = true;
-              }
-
-              const disabledScope =
-                failureTracking.shouldDisable &&
-                content.name === "web_search" &&
-                /tavily|brave|serpapi|google|duckduckgo/i.test(failureMessage)
-                  ? "provider"
-                  : "global";
-	              this.emitEvent("tool_error", {
-	                ...this.attachToolCorrelationMetadata(
-	                  {
-	                    tool: content.name,
-	                    error: failureMessage,
-	                    disabled: failureTracking.shouldDisable,
-	                    disabledScope,
-	                  },
-	                  toolCorrelation,
-	                ),
-	              });
-
-	              toolResults.push({
-	                type: "tool_result",
-	                tool_use_id: content.id,
-                content: JSON.stringify({
-                  error: failureMessage,
-                  ...(pauseReason ? { suggestion: pauseReason, action_required: true } : {}),
-                  ...(failureTracking.shouldDisable
-                    ? {
-                        disabled: true,
-                        message: "Tool has been disabled due to repeated failures.",
-                      }
-                    : {}),
-	                }),
-	                is_error: true,
-		              });
-		              this.emitToolLaneFinished(content.name, toolCorrelation, "failed", failureMessage);
-		            }
-		            }
-	          }
-	        }
-          */
             }
           } finally {
             this.currentToolBatchGroupId = null;
@@ -43034,7 +41628,7 @@ Return ONLY a JSON object:
     }
     if (options?.agentConfigOverride) {
       this.updateTaskAgentConfig({
-        ...(this.task.agentConfig || {}),
+        ...this.task.agentConfig,
         ...options.agentConfigOverride,
       });
     }
@@ -43295,7 +41889,7 @@ Return ONLY a JSON object:
         ...persistedTask,
         agentConfig: opts?.agentConfigOverride
           ? {
-              ...(persistedTask.agentConfig || this.task.agentConfig || {}),
+              ...(persistedTask.agentConfig || this.task.agentConfig),
               ...opts.agentConfigOverride,
             }
           : persistedTask.agentConfig || this.task.agentConfig,
@@ -43420,7 +42014,7 @@ Return ONLY a JSON object:
           // task and prevents a reply in one conversation from changing every
           // task that uses the workspace.
           const nextAgentConfig: AgentConfig = {
-            ...(this.task.agentConfig || {}),
+            ...this.task.agentConfig,
             accessProfileId: BUILTIN_ACCESS_PROFILE_IDS.askForApproval,
           };
           this.daemon.updateTask(this.task.id, { agentConfig: nextAgentConfig });

@@ -1,5 +1,5 @@
 import { CoreMemoryCandidateRepository, CoreTraceRepository } from "./core-repository-facades";
-import type { CoreMemoryCandidate, CoreMemoryCandidateType, CoreTrace } from "../../shared/types";
+import type { CoreMemoryCandidate, CoreMemoryCandidateType } from "../../shared/types";
 import type { SubconsciousTargetRef } from "../../shared/subconscious";
 
 import { CoreMemoryScopeResolver } from "./CoreMemoryScopeResolver";

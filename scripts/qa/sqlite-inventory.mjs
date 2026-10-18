@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import ts from "typescript";
 
 export const PATTERNS = {
   prepare: /\.prepare\(/g,
@@ -112,6 +113,108 @@ function matchDeclaration(line) {
   return "";
 }
 
+/** Count Node-created loaders that the direct require/import patterns do not cover. */
+function countCreatedRequireImports(source) {
+  if (!source.includes("createRequire") || !source.includes("better-sqlite3")) return 0;
+  const fileName = "/sqlite-inventory.ts";
+  const ast = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  // Local symbols are sufficient: do not load dependencies or the TypeScript libraries.
+  // Symbol identity keeps a shadowed parameter or an unrelated factory from counting.
+  const checker = ts
+    .createProgram({
+      rootNames: [fileName],
+      options: { noLib: true, noResolve: true },
+      host: {
+        getSourceFile: (name) => (name === fileName ? ast : undefined),
+        getDefaultLibFileName: () => "",
+        writeFile: () => {},
+        getCurrentDirectory: () => "/",
+        getDirectories: () => [],
+        fileExists: (name) => name === fileName,
+        readFile: (name) => (name === fileName ? source : undefined),
+        getCanonicalFileName: (name) => name,
+        useCaseSensitiveFileNames: () => true,
+        getNewLine: () => "\n",
+      },
+    })
+    .getTypeChecker();
+  const factories = new Set();
+  const namespaces = new Set();
+  for (const statement of ast.statements) {
+    if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly) continue;
+    if (!["module", "node:module"].includes(statement.moduleSpecifier.text)) continue;
+    const clause = statement.importClause;
+    if (clause?.name) namespaces.add(checker.getSymbolAtLocation(clause.name));
+    const bindings = clause?.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) {
+      namespaces.add(checker.getSymbolAtLocation(bindings.name));
+    } else if (bindings && ts.isNamedImports(bindings)) {
+      for (const specifier of bindings.elements) {
+        if (
+          !specifier.isTypeOnly &&
+          (specifier.propertyName ?? specifier.name).text === "createRequire"
+        ) {
+          factories.add(checker.getSymbolAtLocation(specifier.name));
+        }
+      }
+    }
+  }
+  const unwrap = (expression) => {
+    while (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isTypeAssertionExpression(expression) ||
+      ts.isNonNullExpression(expression)
+    )
+      expression = expression.expression;
+    return expression;
+  };
+  const isFactoryCall = (expression) => {
+    expression = unwrap(expression);
+    if (!ts.isCallExpression(expression)) return false;
+    const factory = unwrap(expression.expression);
+    return ts.isIdentifier(factory)
+      ? factories.has(checker.getSymbolAtLocation(factory))
+      : ts.isPropertyAccessExpression(factory) &&
+          factory.name.text === "createRequire" &&
+          namespaces.has(checker.getSymbolAtLocation(factory.expression));
+  };
+  const loaders = new Set();
+  const findLoaders = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      isFactoryCall(node.initializer)
+    ) {
+      loaders.add(checker.getSymbolAtLocation(node.name));
+    }
+    ts.forEachChild(node, findLoaders);
+  };
+  findLoaders(ast);
+  let count = 0;
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      node.arguments[0].text === "better-sqlite3"
+    ) {
+      const loader = unwrap(node.expression);
+      if (
+        isFactoryCall(loader) ||
+        (ts.isIdentifier(loader) &&
+          loader.text !== "require" &&
+          loaders.has(checker.getSymbolAtLocation(loader)))
+      )
+        count += 1;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  return count;
+}
+
 /**
  * Best-effort `Class.member` that contains `lineIndex` (0-based), found by
  * walking up through less-indented lines. Returns "(module)" at top level.
@@ -152,6 +255,7 @@ export function scanSource(path, source) {
   for (const key of COUNT_KEYS) {
     counts[key] = (text.match(PATTERNS[key]) ?? []).length;
   }
+  counts.runtimeImport += countCreatedRequireImports(source);
   const lines = text.split("\n");
   const transactions = [];
   for (const match of text.matchAll(PATTERNS.transaction)) {

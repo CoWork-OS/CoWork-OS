@@ -7,7 +7,6 @@ import { RelationshipMemoryService } from "../../../electron/memory/Relationship
 import { UserProfileService } from "../../../electron/memory/UserProfileService";
 import { PermissionSettingsManager } from "../../../electron/security/permission-settings-manager";
 import { GoogleWorkspaceSettingsManager } from "../../../electron/settings/google-workspace-manager";
-import { WebApplicationError } from "../../web/WebApplication";
 import { createBrowserSettingsDefinitions } from "../browser-settings-methods";
 import { createLLMSettingsPatch } from "../../../shared/host-api/llm-settings-patch";
 

@@ -1,6 +1,6 @@
 import { WorkspaceRepository } from "../database/repository-facades";
 import path from "path";
-import * as fs from "fs/promises";
+
 import * as os from "os";
 import { AgentDaemon } from "../agent/daemon";
 import { AgentConfig, Workspace } from "../../shared/types";

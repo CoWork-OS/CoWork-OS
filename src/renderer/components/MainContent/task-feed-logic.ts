@@ -1,5 +1,5 @@
 import type { RefObject, MutableRefObject } from "react";
-import type { TaskEvent, Task, CustomSkill } from "../../../shared/types";
+import type { TaskEvent, Task, CustomSkill, CanvasSession } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { getCompletionSummaryText } from "./task-event-presentation";
 import { sanitizeToolCallTextFromAssistant } from "../../../shared/tool-call-text-sanitizer";
@@ -9,9 +9,36 @@ import {
 } from "../../utils/task-outputs";
 import type { GeneratedImageCard } from "./artifact-logic";
 import type { TurnOutputFile } from "./turn-outputs";
-import type { CommandOutputSession } from "../../utils/task-event-derived";
+import type { BaseTimelineItem, CommandOutputSession } from "../../utils/task-event-derived";
+import type { AgentLifecycleRow } from "../../utils/agent-lifecycle-rows";
 
 export const VIRTUALIZED_FEED_ROW_THRESHOLD = 18;
+
+export type CanvasTimelineItem = {
+  kind: "canvas";
+  session: CanvasSession;
+  timestamp: number;
+  forceSnapshot: boolean;
+};
+
+export type TaskTimelineItem =
+  | BaseTimelineItem
+  | CanvasTimelineItem
+  | { kind: "dispatched-agents"; timestamp: number }
+  | { kind: "agent-lifecycle"; timestamp: number; row: AgentLifecycleRow }
+  | {
+      kind: "cli-agent-frame";
+      timestamp: number;
+      childTask: Task;
+      childTaskEvents: TaskEvent[];
+    };
+
+/** Delivery rows also represent legacy events whose source index was not recorded. */
+type TaskFeedTimelineItem =
+  | TaskTimelineItem
+  | (Omit<Extract<TaskTimelineItem, { kind: "event" }>, "eventIndex"> & {
+      eventIndex?: number;
+    });
 
 export type TaskFeedRow =
   | {
@@ -54,7 +81,7 @@ export type TaskFeedRow =
       key: string;
       estimatedHeight: number;
       timelineIndex: number;
-      item: any;
+      item: TaskFeedTimelineItem;
       revision: string;
       visiblePerfEventId: string | null;
     }
@@ -288,15 +315,14 @@ export function getTaskFeedRowEvents(row: TaskFeedRow): Array<{
   eventOrder: number;
 }> {
   if (row.kind !== "timeline") return [];
-  if (row.item.kind === "event") {
-    return [{ event: row.item.event as TaskEvent, eventIndex: row.item.eventIndex, eventOrder: 0 }];
+  const item = row.item;
+  if (item.kind === "event") {
+    return [{ event: item.event, eventIndex: item.eventIndex, eventOrder: 0 }];
   }
-  if (row.item.kind !== "action_block" || !Array.isArray(row.item.events)) return [];
-  return row.item.events.map((event: TaskEvent, eventOrder: number) => ({
+  if (item.kind !== "action_block" || !Array.isArray(item.events)) return [];
+  return item.events.map((event, eventOrder) => ({
     event,
-    eventIndex: Array.isArray(row.item.eventIndices)
-      ? row.item.eventIndices[eventOrder]
-      : undefined,
+    eventIndex: Array.isArray(item.eventIndices) ? item.eventIndices[eventOrder] : undefined,
     eventOrder,
   }));
 }
@@ -421,6 +447,7 @@ export function createDeliveryEventRow(
       kind: "event",
       event,
       eventIndex,
+      timestamp: event.timestamp,
     },
     revision: `${row.revision}:${event.id}:${eventIndex ?? eventOrder}`,
     visiblePerfEventId: event.id ?? row.visiblePerfEventId,
@@ -726,12 +753,11 @@ export function mergeAdjacentActivityBlockRows(feedRows: TaskFeedRow[]): TaskFee
   const merged: TaskFeedRow[] = [];
   for (const row of feedRows) {
     const previous = merged[merged.length - 1];
-    const isBlock = row.kind === "timeline" && row.item.kind === "action_block";
     if (
-      isBlock &&
+      row.kind === "timeline" &&
+      row.item.kind === "action_block" &&
       previous?.kind === "timeline" &&
-      previous.item.kind === "action_block" &&
-      row.kind === "timeline"
+      previous.item.kind === "action_block"
     ) {
       merged[merged.length - 1] = {
         ...previous,
@@ -935,7 +961,10 @@ export function applyTurnDisclosures(
 }
 
 export function estimateTaskFeedRowHeight(
-  item: any,
+  item:
+    | Pick<Extract<TaskTimelineItem, { kind: "event" }>, "kind" | "event">
+    | Pick<Extract<TaskTimelineItem, { kind: "action_block" }>, "kind" | "blockId" | "events">
+    | Exclude<TaskTimelineItem, BaseTimelineItem>,
   options?: {
     expanded?: boolean;
     visibleEventCount?: number;

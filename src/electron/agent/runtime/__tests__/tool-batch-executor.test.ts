@@ -100,10 +100,10 @@ describe("ToolBatchExecutor", () => {
       { type: "tool_result" as const, tool_use_id: "tool-0", content: "first" },
     ]);
 
-    expect((messages[1]?.content as Any[]).map((result) => result.tool_use_id)).toEqual([
-      "tool-0",
-      "tool-1",
-      "tool-2",
+    expect(messages[1]?.content).toEqual([
+      expect.objectContaining({ tool_use_id: "tool-0" }),
+      expect.objectContaining({ tool_use_id: "tool-1" }),
+      expect.objectContaining({ tool_use_id: "tool-2" }),
     ]);
   });
 });

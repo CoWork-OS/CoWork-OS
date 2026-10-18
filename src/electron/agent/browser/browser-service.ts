@@ -2282,9 +2282,7 @@ export class BrowserService {
     const normalizedScript = normalizeEvaluateScript(script);
 
     try {
-      const result = await this.page!.evaluate((code) => {
-        return (0, eval)(code);
-      }, normalizedScript);
+      const result = await this.page!.evaluate(normalizedScript);
 
       return { success: true, result };
     } catch (error) {

@@ -12,7 +12,6 @@ import { redactDecisionText } from "../decisions";
 const MAX_CANDIDATES = 12;
 const RECENT_MESSAGE_COUNT = 8;
 const MAX_TIMEOUT_MS = 1_200;
-const MIN_CONFIDENCE = 0.55;
 
 export interface JevCompactionCandidate {
   id: string;

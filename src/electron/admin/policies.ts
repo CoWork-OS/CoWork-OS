@@ -244,7 +244,15 @@ function clonePolicies(policies: AdminPolicies): AdminPolicies {
   return JSON.parse(JSON.stringify(policies)) as AdminPolicies;
 }
 
-function normalizePolicies(parsed: any): AdminPolicies {
+type StoredPolicyInput<T> = {
+  [K in keyof T]?: T[K] extends readonly unknown[]
+    ? T[K]
+    : T[K] extends object
+      ? StoredPolicyInput<T[K]>
+      : T[K];
+};
+
+function normalizePolicies(parsed: StoredPolicyInput<AdminPolicies>): AdminPolicies {
   return {
     version: 2,
     updatedAt: parsed.updatedAt || new Date().toISOString(),
@@ -445,7 +453,7 @@ export function savePolicies(policies: AdminPolicies): void {
   policies.updatedAt = new Date().toISOString();
   fs.writeFileSync(policiesPath, JSON.stringify(policies, null, 2), "utf-8");
   lastValidPolicies = clonePolicies(policies);
-  for (const subscriber of [...policyChangeSubscribers]) {
+  for (const subscriber of Array.from(policyChangeSubscribers)) {
     try {
       subscriber();
     } catch (error) {

@@ -220,6 +220,7 @@ const APPROVAL_TYPE_LABELS: Record<ApprovalType, string> = {
   run_command: "Run command",
   risk_gate: "Risk gate",
   computer_use: "Computer use",
+  browser: "Browser action",
   location_access: "Location access",
   protected_credential: "Protected credential",
 };

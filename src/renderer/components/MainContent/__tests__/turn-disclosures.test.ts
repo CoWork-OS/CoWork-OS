@@ -30,7 +30,12 @@ function eventRow(
     key: `event:${id}`,
     estimatedHeight: 40,
     timelineIndex: timestamp,
-    item: { kind: "event", event: makeEvent(id, timestamp, type, payload), eventIndex: timestamp },
+    item: {
+      kind: "event",
+      event: makeEvent(id, timestamp, type, payload),
+      eventIndex: timestamp,
+      timestamp,
+    },
     revision: id,
     visiblePerfEventId: id,
   };
@@ -47,6 +52,7 @@ function blockRow(id: string, events: TaskEvent[]): TaskFeedRow {
       blockId: id,
       events,
       eventIndices: events.map((event) => event.timestamp),
+      timestamp: events[0]?.timestamp ?? 0,
     },
     revision: id,
     visiblePerfEventId: null,
@@ -297,6 +303,8 @@ describe("mergeAdjacentActivityBlockRows", () => {
       "action-block:block-3",
     ]);
     const first = merged[0] as Extract<TaskFeedRow, { kind: "timeline" }>;
+    expect(first.item.kind).toBe("action_block");
+    if (first.item.kind !== "action_block") throw new Error("Expected the merged activity block");
     expect(first.item.blockId).toBe("block-1");
     expect(first.item.events.map((entry: TaskEvent) => entry.id)).toEqual(["call-1", "call-2"]);
     expect(first.item.eventIndices).toEqual([10, 20]);

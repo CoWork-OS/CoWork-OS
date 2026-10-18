@@ -54,7 +54,7 @@ function extractStructuredTitle(value: string): string {
     .filter(Boolean);
   if (lines.length === 0) return "";
 
-  const labeledLine = lines.find((line) => /^(?:title|session name|name)\s*[:\-]/i.test(line));
+  const labeledLine = lines.find((line) => /^(?:title|session name|name)\s*[:-]/i.test(line));
   return labeledLine || lines[0];
 }
 
@@ -77,8 +77,8 @@ export function sanitizeGeneratedTaskTitle(value: unknown): string {
 
   title = title
     .replace(/^[-*•]\s+/, "")
-    .replace(/^(?:title|session name|name)\s*[:\-]\s*/i, "")
-    .replace(/^(?:here(?:'s| is)|the (?:title|name) is)\s*[:\-]?\s*/i, "")
+    .replace(/^(?:title|session name|name)\s*[:-]\s*/i, "")
+    .replace(/^(?:here(?:'s| is)|the (?:title|name) is)\s*[:-]?\s*/i, "")
     .replace(/^["“”'`]+|["“”'`]+$/g, "")
     .replace(/[.!?…]+$/g, "")
     .replace(/\s+/g, " ")

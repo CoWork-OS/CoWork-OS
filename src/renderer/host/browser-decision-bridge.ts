@@ -657,6 +657,6 @@ function isStaleStateError(error: unknown): boolean {
   return isRecord(error) && error.code === "STALE_STATE";
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

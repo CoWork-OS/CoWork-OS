@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import type SQLite from "better-sqlite3";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -124,11 +126,11 @@ function readDatabaseSettings(userDataDir: string): LocalControlPlaneDiscoveryRe
   const dbPath = path.join(userDataDir, "cowork-os.db");
   if (!fs.existsSync(dbPath)) return {};
 
-  let db: Any | undefined;
+  let db: SQLite.Database | undefined;
   try {
     // Loaded dynamically so `cowork --help` and tests do not need SQLite.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Database = require("better-sqlite3");
+    const Database = createRequire(__filename)("better-sqlite3") as typeof SQLite;
     const openedDb = new Database(dbPath, { readonly: true, fileMustExist: true });
     db = openedDb;
     // Every connection sets its own lock wait (DB6); a reader waits, it never fails fast
@@ -321,5 +323,3 @@ function normalizeProfileId(input: string): string {
     .replace(/-+/g, "-");
   return normalized.replace(/^[-_.]+|[-_.]+$/g, "").slice(0, 64);
 }
-
-type Any = Record<string, any>;

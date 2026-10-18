@@ -9,15 +9,12 @@ import type Database from "better-sqlite3";
 import { randomUUID, createHash } from "crypto";
 import { SecureSettingsRepository } from "../database/SecureSettingsRepository";
 import type {
-  SubconsciousBacklogItem,
   SubconsciousDecision,
   SubconsciousRunOutcome,
   SubconsciousRun,
   SubconsciousTargetRef,
   SubconsciousTargetSummary,
 } from "../../shared/subconscious";
-
-type Any = any;
 
 function hasTable(db: Database.Database, name: string): boolean {
   const row = db

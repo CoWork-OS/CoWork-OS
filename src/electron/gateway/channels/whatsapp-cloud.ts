@@ -598,7 +598,7 @@ export class WhatsAppCloudAdapter implements ChannelAdapter {
     const response = await fetch(`${GRAPH_BASE}/${version}${pathAndQuery}`, {
       method,
       headers,
-      body: payload,
+      ...(method === "POST" && payload !== undefined ? { body: payload } : {}),
     });
     const data = (await response.json().catch(() => ({}))) as {
       error?: { message?: string; code?: number; error_data?: { details?: string } };

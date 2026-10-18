@@ -2488,7 +2488,7 @@ export function Settings({
 
   const updateMoaPreset = (presetId: string, updater: (preset: MoaPreset) => MoaPreset) => {
     setSettings((prev) => {
-      const presets = { ...(prev.moa?.presets || {}) };
+      const presets = { ...prev.moa?.presets };
       const existing = presets[presetId];
       if (!existing) return prev;
       const updated = updater(existing);
@@ -2536,7 +2536,7 @@ export function Settings({
         ...prev.moa,
         defaultPreset: id,
         presets: {
-          ...(prev.moa?.presets || {}),
+          ...prev.moa?.presets,
           [id]: preset,
         },
       },
@@ -2545,7 +2545,7 @@ export function Settings({
 
   const handleDeleteMoaPreset = (presetId: string) => {
     setSettings((prev) => {
-      const presets = { ...(prev.moa?.presets || {}) };
+      const presets = { ...prev.moa?.presets };
       delete presets[presetId];
       const nextDefault =
         prev.moa?.defaultPreset === presetId

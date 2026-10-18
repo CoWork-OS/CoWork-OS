@@ -6,7 +6,7 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1782,
+    "prepare": 1654,
     "getDatabase": 128,
     "runtimeImport": 49
   },
@@ -438,7 +438,7 @@
       "prepare": 3
     },
     "src/electron/subconscious/SubconsciousRepositories.ts": {
-      "prepare": 33,
+      "prepare": 31,
       "runtimeImport": 1
     },
     "src/electron/telemetry/pulse-report-sql.ts": {
@@ -476,9 +476,6 @@
     },
     "src/electron/youtube/YouTubeTranscriptStore.ts": {
       "getDatabase": 3
-    },
-    "src/renderer/components/timeline/SemanticTimeline.tsx": {
-      "prepare": 1
     }
   }
 }

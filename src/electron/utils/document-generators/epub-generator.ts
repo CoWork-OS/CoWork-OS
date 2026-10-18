@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import * as path from "path";
+
 import JSZip from "jszip";
 
 export interface EpubChapter {

@@ -1390,7 +1390,7 @@ export class SessionRuntime {
         ? { contextWindowTokens: opts.contextWindowTokens }
         : {}),
       accountingSource: "estimate",
-      ...(opts.extra || {}),
+      ...opts.extra,
     } satisfies ContextCompactionEventPayload;
     // Timeline persistence is best-effort for compaction. A transient event
     // sink or database failure must not skip the actual history replacement
@@ -1514,7 +1514,7 @@ export class SessionRuntime {
         : {}),
       ...(opts.fallbackUsed !== undefined ? { fallbackUsed: opts.fallbackUsed } : {}),
       accountingSource: "estimate",
-      ...(opts.extra || {}),
+      ...opts.extra,
     } satisfies ContextCompactionEventPayload;
     const snapshotSaved = this.saveSnapshot();
     if (snapshotSaved) {
@@ -1567,7 +1567,7 @@ export class SessionRuntime {
       ...(opts.failureStage ? { failureStage: opts.failureStage } : {}),
       ...(opts.errorCode ? { errorCode: opts.errorCode } : {}),
       accountingSource: "estimate",
-      ...(opts.extra || {}),
+      ...opts.extra,
     } satisfies ContextCompactionEventPayload;
     this.saveSnapshot();
     this.emitCompactionEvent("context_compaction_failed", failurePayload);

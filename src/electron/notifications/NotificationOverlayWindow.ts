@@ -203,7 +203,7 @@ export class NotificationOverlayManager {
         win.showInactive();
     });
 
-    win.webContents.on("console-message", (_event, _level, message) => {
+    win.webContents.on("console-message", ({ message }) => {
       if (message === "__CLICK__") {
         if (this.onClickCallback) {
           this.onClickCallback(notification.id, notification.taskId);

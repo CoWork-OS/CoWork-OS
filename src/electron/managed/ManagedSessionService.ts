@@ -74,7 +74,7 @@ import type {
   Task,
   TaskEvent,
 } from "../../shared/types";
-import { deriveCanonicalTaskStatus, isTerminalTaskStatus } from "../../shared/task-status";
+import { deriveCanonicalTaskStatus } from "../../shared/task-status";
 import { ManagedSessionRequirementCorrectionEventSchema } from "../../shared/managed-session-schemas";
 import { ManagedSessionSuccessCriteriaSchema } from "../../shared/managed-session-schemas";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";

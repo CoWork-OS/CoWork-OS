@@ -24,7 +24,12 @@ import {
 } from "../applications/application-task-intent";
 import { enforceResponsibilityTaskStart } from "../automation/responsibility-task-policy";
 import { collectCrossStepEvidence, formatCrossStepEvidence } from "./cross-step-evidence";
-import { buildModelHandoffNote, type ModelHandoff } from "./model-handoff-note";
+import {
+  buildModelHandoffNote,
+  summarizeContractForHandoff,
+  type HandoffContractSummary,
+  type ModelHandoff,
+} from "./model-handoff-note";
 import { effectiveTaskModelConfig } from "./task-model-config";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
@@ -41202,7 +41207,17 @@ Return ONLY a JSON object:
     const handoff = this.pendingModelHandoff;
     if (!handoff) return null;
     this.pendingModelHandoff = null;
-    return buildModelHandoffNote(handoff, this.conversationHistory);
+    let contract: HandoffContractSummary | undefined;
+    try {
+      const aggregate = this.daemon
+        .getWorkSessionContractService?.()
+        ?.getForTask(this.task.id)?.aggregate;
+      if (aggregate) contract = summarizeContractForHandoff(aggregate, Date.now());
+    } catch (error) {
+      // The note is a courtesy; a missing or failing contract record never blocks the turn.
+      logger.debug(`${this.logTag} Handoff note without session contract:`, error);
+    }
+    return buildModelHandoffNote(handoff, this.conversationHistory, contract);
   }
 
   /**

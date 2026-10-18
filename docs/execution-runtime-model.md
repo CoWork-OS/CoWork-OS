@@ -153,7 +153,21 @@ Replay fixtures `unknown-outcome` and `stop-in-flight` in
 outcome never replays as `completed` (finding `false_success:unknown_outcome`) and that a stop
 reports the call in flight.
 
-## Prompt Stack
+## Coverage and Data Time in Tool Results
+
+Search, list and query results can say how much of their scope they covered.
+`deriveToolCoverage` (`src/electron/agent/runtime/tool-outcome.ts`) reads the fields tools already
+return: `truncated` and `truncationReason` (grep, search_files, list_directory, glob, which now also
+returns `scanTruncated`), the domain-policy `metadata.filteredOutCount` of web_search, page tokens
+(`nextPageToken`, `next_page_token`, `nextCursor`, `hasMore`) and an explicit `coverage` object a
+connector returns. Coverage is `partial` with a reason, `complete` only when the tool says it was
+not truncated, and absent otherwise; it is never assumed complete.
+
+`buildToolResultEnvelope` adds `coverage`, `dataAsOf` (when the underlying data was last updated,
+from `dataAsOf`, `lastModified`, `modifiedTime`, `updatedAt` or `modified`) and `queriedAt` (when
+the tool ran) to the envelope. The executor feeds coverage into a `NotCheckedLedger`, which renders
+the summary's "Not checked" block.
+
 
 Execution prompts are assembled from named sections instead of a single monolithic string.
 

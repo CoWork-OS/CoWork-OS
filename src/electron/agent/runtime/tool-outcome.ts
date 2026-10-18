@@ -1,4 +1,8 @@
-import type { ToolAttemptEffect, ToolResultEnvelopeStatus } from "../../../shared/types";
+import type {
+  ToolAttemptEffect,
+  ToolCoverage,
+  ToolResultEnvelopeStatus,
+} from "../../../shared/types";
 
 export type CanonicalToolOutcomeStatus = "success" | "error" | "blocked" | "cancelled" | "unknown";
 
@@ -10,6 +14,11 @@ export interface CanonicalToolOutcome {
   result?: unknown;
   error?: unknown;
   reason?: string;
+  /** How much of the asked-for scope was checked; absent when the tool does not say. */
+  coverage?: ToolCoverage;
+  /** When the underlying data was last updated, separate from the query time. */
+  dataAsOf?: number;
+  queriedAt?: number;
 }
 
 const FAILURE_STATUSES = new Set([
@@ -299,6 +308,89 @@ export function normalizeToolOutcome(
     retryable: sources.some((candidate) => candidate.retryable === true),
     result: nestedResult,
   };
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function textOf(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : undefined;
+}
+
+/**
+ * Coverage of a search, list or query result, from the fields tools already return. `partial`
+ * when part of the scope was not checked (a limit, a time budget, a policy filter, another page);
+ * `complete` only when the tool says it was not truncated; absent when the tool does not say.
+ */
+export function deriveToolCoverage(toolName: string, result: unknown): ToolCoverage | undefined {
+  const record = recordOf(result);
+  if (!record || record.success === false) return undefined;
+  const explicit = recordOf(record.coverage);
+  if (
+    explicit &&
+    (explicit.status === "complete" ||
+      explicit.status === "partial" ||
+      explicit.status === "unknown")
+  ) {
+    return {
+      status: explicit.status,
+      ...(textOf(explicit.reason) ? { reason: textOf(explicit.reason) } : {}),
+    };
+  }
+  if (record.scanTruncated === true) {
+    return {
+      status: "partial",
+      reason: textOf(record.truncationReason) || "the scan stopped before covering everything",
+    };
+  }
+  if (record.truncated === true) {
+    return {
+      status: "partial",
+      reason:
+        textOf(record.truncationReason) ||
+        (toolName === "list_directory"
+          ? "the folder has more entries than were listed"
+          : "results were cut off at the tool's limit"),
+    };
+  }
+  const metadata = recordOf(record.metadata);
+  const filteredOut = Number(metadata?.filteredOutCount ?? record.filteredOutCount);
+  if (Number.isFinite(filteredOut) && filteredOut > 0) {
+    return {
+      status: "partial",
+      reason: `${filteredOut} result${filteredOut === 1 ? " was" : "s were"} removed by the domain policy`,
+    };
+  }
+  for (const key of ["nextPageToken", "next_page_token", "nextCursor"]) {
+    if (textOf(record[key])) {
+      return { status: "partial", reason: "more results are available on another page" };
+    }
+  }
+  if (record.hasMore === true) {
+    return { status: "partial", reason: "more results are available on another page" };
+  }
+  if (record.truncated === false) return { status: "complete" };
+  return undefined;
+}
+
+/** When the data a result describes was last updated, if the tool reports it. */
+export function deriveToolDataAsOf(result: unknown): number | undefined {
+  const record = recordOf(result);
+  if (!record) return undefined;
+  for (const key of ["dataAsOf", "lastModified", "modifiedTime", "updatedAt", "modified"]) {
+    const value = record[key];
+    const time =
+      typeof value === "number"
+        ? value
+        : typeof value === "string"
+          ? Date.parse(value)
+          : Number.NaN;
+    if (Number.isFinite(time) && time > 0) return Math.floor(time);
+  }
+  return undefined;
 }
 
 export function toToolEnvelopeStatus(status: CanonicalToolOutcomeStatus): ToolResultEnvelopeStatus {

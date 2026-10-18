@@ -248,6 +248,12 @@ Browser V2 treats browser side effects as governed workspace actions:
 - Cmd+Shift+B (Ctrl+Shift+B) in a task opens the browser, or switches it between the sidebar and full view.
 - Settings > Browser: search engine, download location, restore tabs, open conversation links in the in-app browser, Chrome-compatible user agent (applies after restart), recording history, CoWork downloads and uploads (ask / allow / block), developer mode, and per-workspace history, remembered site permissions and browsing data. Access profiles and admin policies still decide which sites can be reached; these settings cannot widen them.
 
+- Settings > Browser > Agent identity (off by default): when on, https pages CoWork opens carry a
+  Web Bot Auth signature on the navigation request and each redirect hop if a key directory origin
+  is set; the browser keeps its Chrome-compatible user agent, and reloads and pages you open
+  yourself are never signed. See
+  [How CoWork identifies itself to websites](security-guide.md#how-cowork-identifies-itself-to-websites).
+
 ## Importing Cookies And Saved Logins
 
 Settings > Browser > Import from another browser brings in cookies (to stay signed in) and saved logins for the selected workspace profile. Sources: Chrome, Edge, Brave, Chromium, Vivaldi and Arc (cookies and passwords), Firefox (cookies; export passwords to CSV from Firefox), and a password CSV file (Chrome, Edge, Bitwarden, 1Password, Firefox and similar column names). macOS only for browser import; CSV works everywhere.

@@ -218,14 +218,19 @@ export function buildAssistantApprovalRequest(
   };
 }
 
+/**
+ * The transcript line posted with an inline approval. The card below it explains the decision
+ * in full, so the line only points there: repeating the explanation showed it twice on one
+ * screen. Inline approvals never reach a chat without the card (gateway tasks fail closed).
+ */
 export function buildAssistantApprovalMessage(
   approvalType: string,
   description: string,
   details?: unknown,
 ): string {
   const request = buildAssistantApprovalRequest(approvalType, description, details);
-  const question = request.questions[0];
-  return `I need your decision before I can continue. ${question.question} Choose **Deny** or **${question.options[1].label}** below.`;
+  const [deny, allow] = request.questions[0].options;
+  return `I need your decision before I can continue. Choose **${deny.label}** or **${allow.label}** below.`;
 }
 
 export function isAssistantApprovalInputRequest(request: InputRequest | undefined): boolean {

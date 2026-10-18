@@ -390,6 +390,7 @@ import {
   collectWrittenFilePaths,
   getFinishedTurnAutoOpen,
   isArtifactEventCoveredByFileWrite,
+  stepTurnAutoOpenWatch,
 } from "./turn-outputs";
 import {
   asRecord,
@@ -2442,18 +2443,23 @@ function MainContentComponent({
 
   // Opt-in: when a turn the user watched finishes with exactly one new file that has a
   // side-panel viewer, open it there. Turns already finished on load or loaded with older
-  // history never open, so reopening a task does not pop files.
+  // history never open, so reopening a task does not pop files. A turn paused for an
+  // approval or an answer has not finished: it opens when the task settles.
   const autoOpenEventsRef = useRef(events);
   autoOpenEventsRef.current = events;
-  const sawTurnWorkingRef = useRef(false);
+  // The task whose turn the user watched working, until that turn ends.
+  const sawTurnWorkingRef = useRef<string | null>(null);
   const autoOpenedTurnKeysRef = useRef(new Set<string>());
+  const autoOpenTaskId = task?.id ?? null;
+  const autoOpenTaskStatus = task?.status;
   useEffect(() => {
-    if (isTaskWorking) {
-      sawTurnWorkingRef.current = true;
-      return;
-    }
-    if (!sawTurnWorkingRef.current) return;
-    sawTurnWorkingRef.current = false;
+    const step = stepTurnAutoOpenWatch(sawTurnWorkingRef.current, {
+      id: autoOpenTaskId,
+      working: isTaskWorking,
+      status: autoOpenTaskStatus,
+    });
+    sawTurnWorkingRef.current = step.watching;
+    if (!step.turnEnded) return;
     if (!autoOpenTurnOutput || isReplayMode || !workspace?.path) return;
     const target = getFinishedTurnAutoOpen(
       autoOpenEventsRef.current,
@@ -2462,7 +2468,15 @@ function MainContentComponent({
     if (!target) return;
     autoOpenedTurnKeysRef.current.add(target.turnKey);
     openFileInPanel(target.path);
-  }, [autoOpenTurnOutput, isReplayMode, isTaskWorking, openFileInPanel, workspace?.path]);
+  }, [
+    autoOpenTaskId,
+    autoOpenTaskStatus,
+    autoOpenTurnOutput,
+    isReplayMode,
+    isTaskWorking,
+    openFileInPanel,
+    workspace?.path,
+  ]);
 
   // Reset wrappingUp state when task stops working or task changes
   useEffect(() => {

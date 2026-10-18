@@ -21,6 +21,28 @@ function statusLabel(progress: SessionProgressState): string {
   return progress.phase === "queued" ? "Queued" : "In progress";
 }
 
+/**
+ * Whether the session can be recovered from here. A session waiting on an approval or an
+ * answer is not stuck: the card in the conversation asks for that decision, and Resume would
+ * not answer it.
+ */
+export function canOfferSessionRecovery(progress: SessionProgressState | undefined): boolean {
+  if (!progress) return false;
+  if (progress.waiting?.kind === "approval" || progress.waiting?.kind === "input") return false;
+  return (
+    progress.status === "interrupted" ||
+    progress.status === "paused" ||
+    progress.status === "blocked"
+  );
+}
+
+/** The waiting reason, when it adds to the headline (the headline is often that reason). */
+export function sessionRecoveryDetail(progress: SessionProgressState): string | undefined {
+  const reason = progress.waiting?.reason?.trim();
+  if (!reason) return undefined;
+  return reason === progress.headline.trim() ? undefined : reason;
+}
+
 export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionProgressCardProps) {
   const [progress, setProgress] = useState<SessionProgressState | undefined>();
   const [busy, setBusy] = useState(false);
@@ -45,15 +67,13 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
     };
   }, [task?.id, task?.updatedAt, refreshKey]);
 
-  const canResume =
-    progress?.status === "interrupted" ||
-    progress?.status === "paused" ||
-    progress?.status === "blocked";
+  const canResume = canOfferSessionRecovery(progress);
   const canResumeFromCheckpoint = canResume && Boolean(progress?.resumeFromEventId);
 
   // The composer status strip owns routine live progress. This card is reserved
   // for the exceptional state where the user can actually recover a session.
   if (!task || !progress || !canResume) return null;
+  const detail = sessionRecoveryDetail(progress);
 
   const resume = async () => {
     if (!canResume || busy) return;
@@ -102,9 +122,7 @@ export function SessionProgressCard({ task, onSelectTask, refreshKey }: SessionP
       <div className="session-progress-card-headline markdown-content">
         <MarkdownRenderer>{progress.headline}</MarkdownRenderer>
       </div>
-      {progress.waiting ? (
-        <div className="session-progress-card-waiting">{progress.waiting.reason}</div>
-      ) : null}
+      {detail ? <div className="session-progress-card-waiting">{detail}</div> : null}
       {progress.latestArtifact ? (
         <div className="session-progress-card-artifact" title={progress.latestArtifact.path}>
           <FileText size={12} aria-hidden="true" />

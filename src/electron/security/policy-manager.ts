@@ -554,6 +554,14 @@ export function isToolAllowedQuick(
   if (toolName === "process_output" || toolName === "stop_process") {
     return isToolAllowedQuick("run_command", workspace, gatewayContext);
   }
+  // The user's terminal tabs exist only where command tools are allowed, so reading them is
+  // offered only where run_command is; shared contexts also deny them (below).
+  if (
+    (toolName === "list_terminal_tabs" || toolName === "read_terminal") &&
+    !isToolAllowedQuick("run_command", workspace, gatewayContext)
+  ) {
+    return false;
+  }
   if (
     SecurityPolicyManager.requiresNetworkPermission(toolName) &&
     (!permissions.network || permissions.accessNetworkMode === "disabled")

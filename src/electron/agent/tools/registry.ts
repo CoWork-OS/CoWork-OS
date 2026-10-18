@@ -180,6 +180,7 @@ import { NativeAppTools, NATIVE_APP_TOOL } from "./native-app-tools";
 import { AndroidPhoneTools, ANDROID_PHONE_TOOLS } from "./android-phone-tools";
 import { BatchImageTools } from "./batch-image-tools";
 import { ScratchpadTools } from "./scratchpad-tools";
+import { TERMINAL_TAB_TOOL_NAMES, TerminalTabTools } from "./terminal-tab-tools";
 import { ComputerHandoffTools } from "./computer-handoff-tools";
 import { BotDesktopTools } from "./bot-desktop-tools";
 import { QATools } from "./qa-tools";
@@ -668,6 +669,7 @@ export class ToolRegistry {
   private swarmToolsAvailable = false;
   private documentTools: DocumentTools;
   private scratchpadTools: ScratchpadTools;
+  private terminalTabTools: TerminalTabTools;
   private computerHandoffTools: ComputerHandoffTools;
   private botDesktopTools: BotDesktopTools;
   private qaTools: QATools;
@@ -763,6 +765,7 @@ export class ToolRegistry {
       (tid, filePath, operation) => daemon.consumeExternalFileApproval(tid, filePath, operation),
     );
     this.scratchpadTools = new ScratchpadTools(taskId, workspace);
+    this.terminalTabTools = new TerminalTabTools(workspace, daemon, taskId);
     this.computerHandoffTools = new ComputerHandoffTools(taskId, daemon as Any);
     this.botDesktopTools = new BotDesktopTools(daemon as Any, taskId, () => this.workspace);
     this.qaTools = new QATools(workspace, daemon, taskId);
@@ -1256,6 +1259,7 @@ export class ToolRegistry {
     this.swarmTools.setWorkspace(workspace);
     this.documentTools.setWorkspace(workspace);
     this.scratchpadTools.setWorkspace(workspace);
+    this.terminalTabTools.setWorkspace(workspace);
     // Profile changes cancel remote work before discarding its adapter.
     // The adapter journals and completes its independent cleanup.
     if (codeScopeChanged) {
@@ -1393,11 +1397,23 @@ export class ToolRegistry {
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
     if (this.isBlockedByBotWorksOn(toolName)) return true;
+    if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
       if (tools && tools.includes(toolName)) return true;
     }
     return false;
+  }
+
+  /**
+   * The user's own terminal tabs: never read for someone else's channel message, and only
+   * where this task may run commands (a task-level run_command restriction covers them too).
+   */
+  private isTerminalTabReadDenied(): boolean {
+    return (
+      isThirdPartyGatewayTask(this.daemon.getTask?.(this.taskId)) ||
+      this.isDeniedByTaskRestrictions("run_command")
+    );
   }
 
   isToolAllowed(toolName: string): boolean {
@@ -1406,6 +1422,7 @@ export class ToolRegistry {
       isThirdPartyGatewayTask(this.daemon.getTask?.(this.taskId))
     )
       return false;
+    if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return false;
     if (this.denyAllTools) {
       return false;
     }
@@ -1533,6 +1550,8 @@ export class ToolRegistry {
     // Only add shell tool if workspace has shell permission
     if (this.workspace.permissions.shell) {
       allTools.push(...this.getShellToolDefinitions());
+      // The user's own terminal tabs: read-only, offered with the shell tools (isToolAllowedQuick).
+      allTools.push(...TerminalTabTools.getToolDefinitions());
       // Git tools: available in git repos with shell permission
       allTools.push(...GitTools.getToolDefinitions());
     }
@@ -2159,6 +2178,8 @@ export class ToolRegistry {
     if (canonicalToolName === "analyze_image" || canonicalToolName === "read_pdf_visual") {
       return "data_export";
     }
+    // The user's own terminal output goes to the model; TerminalTabTools asks once per tab.
+    if (canonicalToolName === "read_terminal") return "data_export";
     if (canonicalToolName === "git_commit" || canonicalToolName === "git_merge_to_base") {
       return "risk_gate";
     }
@@ -2727,41 +2748,50 @@ export class ToolRegistry {
             pipeline.approvalSource !== "semantic_review" &&
             pipeline.approvalSource !== "workspace_policy" &&
             !browserUseApproval;
+          // One consent per terminal tab for the task, naming the tab, instead of a prompt per read.
+          const terminalReadConsent =
+            context.request.name === "read_terminal" &&
+            pipeline.approvalSource !== "semantic_review";
           const approved = chatWebConsent
             ? await this.requestChatWebConsent(context.request.name, options.signal)
-            : codexServer
-              ? await this.requestCodexTaskConsent(
-                  `Allow ${codexServer.name} computer-use engine for this task?`,
-                  {
-                    tool: context.request.name,
-                    serverName: codexServer.name,
-                    params: {
-                      serverId: codexServer.id,
-                      configuration: createHash("sha256")
-                        .update(JSON.stringify(codexServer))
-                        .digest("hex"),
-                    },
-                    taskConsentScope:
-                      "calls to this computer-use engine; each app requires separate consent",
-                  },
+            : terminalReadConsent
+              ? await this.terminalTabTools.requestReadConsent(
+                  context.request.input,
                   options.signal,
                 )
-              : typeof authorizer === "function"
-                ? await authorizer.call(this.daemon, this.taskId, {
-                    toolName: context.request.name,
-                    approvalType: effectiveApprovalType || "external_service",
-                    description,
-                    details,
-                    ...options,
-                  })
-                : await requester.call(
-                    this.daemon,
-                    this.taskId,
-                    effectiveApprovalType || "external_service",
-                    description,
-                    details,
-                    options,
-                  );
+              : codexServer
+                ? await this.requestCodexTaskConsent(
+                    `Allow ${codexServer.name} computer-use engine for this task?`,
+                    {
+                      tool: context.request.name,
+                      serverName: codexServer.name,
+                      params: {
+                        serverId: codexServer.id,
+                        configuration: createHash("sha256")
+                          .update(JSON.stringify(codexServer))
+                          .digest("hex"),
+                      },
+                      taskConsentScope:
+                        "calls to this computer-use engine; each app requires separate consent",
+                    },
+                    options.signal,
+                  )
+                : typeof authorizer === "function"
+                  ? await authorizer.call(this.daemon, this.taskId, {
+                      toolName: context.request.name,
+                      approvalType: effectiveApprovalType || "external_service",
+                      description,
+                      details,
+                      ...options,
+                    })
+                  : await requester.call(
+                      this.daemon,
+                      this.taskId,
+                      effectiveApprovalType || "external_service",
+                      description,
+                      details,
+                      options,
+                    );
           if (approved !== true) {
             throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
               policyTrace: pipeline.trace,
@@ -3191,6 +3221,20 @@ export class ToolRegistry {
       "stop_process",
       async ({ request }) => this.shellTools.stopBackgroundProcess(request.input),
       exclusiveSchedulerSpec,
+    );
+    register(
+      "list_terminal_tabs",
+      async () => this.terminalTabTools.listTerminalTabs(),
+      readParallelSchedulerSpec,
+    );
+    register(
+      "read_terminal",
+      async ({ request }) =>
+        this.terminalTabTools.readTerminal(
+          request.input,
+          request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+        ),
+      readParallelSchedulerSpec,
     );
     register("git_status", async () => this.gitTools.gitStatus());
     register("git_diff", async ({ request }) => this.gitTools.gitDiff(request.input));
@@ -4723,7 +4767,9 @@ Web Search (for finding URLs, not reading them):
 Shell Commands:
 - run_command: Execute commands within the active access profile. Use background: true for dev servers and watchers.
 - process_output: Read output and status of a background process
-- stop_process: Stop a background process and everything it started`;
+- stop_process: Stop a background process and everything it started
+- list_terminal_tabs: List the user's own terminal tabs (link one as [label](#terminal/<id>))
+- read_terminal: Read recent output of one of the user's terminal tabs, secrets redacted`;
     }
 
     descriptions += `
@@ -5331,6 +5377,12 @@ ${skillDescriptions}`;
         _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
       );
     if (name === "stop_process") return await this.shellTools.stopBackgroundProcess(input);
+    if (name === "list_terminal_tabs") return this.terminalTabTools.listTerminalTabs();
+    if (name === "read_terminal")
+      return await this.terminalTabTools.readTerminal(
+        input,
+        _runtime?.signal instanceof AbortSignal ? _runtime.signal : undefined,
+      );
 
     // Git tools
     if (name === "git_status") return await this.gitTools.gitStatus();

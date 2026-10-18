@@ -26,6 +26,9 @@ describe("bot computer settings", () => {
     expect(computerToolKind("click")).toBe("host");
     expect(computerToolKind("native_app")).toBe("host");
     expect(computerToolKind("run_applescript")).toBe("host");
+    // The user's own terminal tabs are on this computer, like its clipboard.
+    expect(computerToolKind("read_terminal")).toBe("host");
+    expect(computerToolKind("list_terminal_tabs")).toBe("host");
     expect(computerToolKind("browser_navigate")).toBe("browser");
     expect(computerToolKind("mcp_js", { hostDesktopMcp: true })).toBe("host");
     expect(computerToolKind("read_file")).toBeNull();

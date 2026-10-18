@@ -7,6 +7,12 @@
 const TERMINAL_TAB_HREF_PREFIX = "#terminal/";
 const TERMINAL_TAB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,199}$/;
 
+/** The name a shell tab goes by: the last part of its working directory, as the dock shows it. */
+export function terminalTabLabel(cwd: string, fallback = "terminal"): string {
+  const name = cwd.split(/[\\/]/).filter(Boolean).pop() || fallback || "terminal";
+  return name.replace(/\s+/g, " ").trim() || "terminal";
+}
+
 /** The href for a terminal tab link. */
 export function terminalTabHref(tabId: string): string {
   return `${TERMINAL_TAB_HREF_PREFIX}${encodeURIComponent(tabId)}`;
@@ -14,7 +20,11 @@ export function terminalTabHref(tabId: string): string {
 
 /** A markdown link to a terminal tab, as the agent should write it. */
 export function terminalTabMarkdownLink(title: string, tabId: string): string {
-  const label = title.replace(/[[\]\\]/g, "").trim() || "terminal";
+  const label =
+    title
+      .replace(/[[\]\\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim() || "terminal";
   return `[${label}](${terminalTabHref(tabId)})`;
 }
 

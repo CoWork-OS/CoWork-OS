@@ -1093,6 +1093,84 @@ describe("ToolRegistry tool catalog versioning", () => {
     expect(daemon.requestApproval.mock.calls[0][1]).toBe("run_command");
   });
 
+  it("offers the user's terminal tabs with run_command and asks before reading one", async () => {
+    const daemon = { ...createDaemon(), requestApproval: vi.fn().mockResolvedValue(true) };
+    const registry = new ToolRegistry(createWorkspace(), daemon as Any, "task-terminal-tabs");
+    const names = registry.getTools().map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["list_terminal_tabs", "read_terminal"]));
+    for (const name of ["list_terminal_tabs", "read_terminal"]) {
+      expect(registry.getSchedulerSpec(name, { tab_id: "tab-1" })).toMatchObject({
+        concurrencyClass: "read_parallel",
+        readOnly: true,
+      });
+    }
+    expect((registry as Any).getApprovalTypeForTool("list_terminal_tabs")).toBeNull();
+    expect((registry as Any).getApprovalTypeForTool("read_terminal")).toBe("data_export");
+
+    const internals = registry as Any;
+    const list = vi
+      .spyOn(internals.terminalTabTools, "listTerminalTabs")
+      .mockReturnValue({ success: true, tabs: [] });
+    const consent = vi
+      .spyOn(internals.terminalTabTools, "requestReadConsent")
+      .mockResolvedValue(true);
+    const read = vi
+      .spyOn(internals.terminalTabTools, "readTerminal")
+      .mockResolvedValue({ success: true, output: "" });
+    await registry.executeTool("list_terminal_tabs", {});
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(consent).not.toHaveBeenCalled();
+
+    await registry.executeTool("read_terminal", { tab_id: "tab-1", tail_lines: 20 });
+    // The policy's approval for read_terminal is the per-tab consent, not a generic prompt.
+    expect(consent).toHaveBeenCalledWith({ tab_id: "tab-1", tail_lines: 20 }, undefined);
+    expect(read).toHaveBeenCalledWith({ tab_id: "tab-1", tail_lines: 20 }, undefined);
+    expect(daemon.requestApproval).not.toHaveBeenCalled();
+
+    consent.mockResolvedValueOnce(false);
+    await expect(registry.executeTool("read_terminal", { tab_id: "tab-1" })).rejects.toThrow(
+      /approval denied/,
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+
+    const noShell = createWorkspace();
+    noShell.permissions.shell = false;
+    const noShellNames = new ToolRegistry(noShell, createDaemon(), "task-terminal-tabs-no-shell")
+      .getTools()
+      .map((tool) => tool.name);
+    expect(noShellNames).not.toContain("list_terminal_tabs");
+    expect(noShellNames).not.toContain("read_terminal");
+  });
+
+  it("keeps the user's terminal from tasks that may not run commands or came from someone else", async () => {
+    const restricted = new ToolRegistry(
+      createWorkspace(),
+      createDaemon(),
+      "task-terminal-tabs-restricted",
+      undefined,
+      ["run_command"],
+    );
+    expect(restricted.getTools().map((tool) => tool.name)).not.toContain("read_terminal");
+    expect(restricted.isToolAllowed("list_terminal_tabs")).toBe(false);
+    await expect(restricted.executeTool("read_terminal", { tab_id: "tab-1" })).rejects.toThrow();
+
+    const thirdPartyDaemon = {
+      ...createDaemon(),
+      getTask: () => ({
+        agentConfig: { originChannel: "slack", gatewaySenderIsOwner: false },
+      }),
+    };
+    const thirdParty = new ToolRegistry(
+      createWorkspace(),
+      thirdPartyDaemon as Any,
+      "task-terminal-tabs-third-party",
+      "private",
+    );
+    expect(thirdParty.isToolAllowed("run_command")).toBe(true);
+    expect(thirdParty.isToolAllowed("read_terminal")).toBe(false);
+    await expect(thirdParty.executeTool("read_terminal", { tab_id: "tab-1" })).rejects.toThrow();
+  });
+
   it("prioritizes local channel history for message summarization", () => {
     const definitions = ChannelTools.getToolDefinitions();
     const listChats = definitions.find((tool) => tool.name === "channel_list_chats");

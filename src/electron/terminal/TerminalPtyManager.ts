@@ -29,6 +29,8 @@ type TerminalPtyRuntime = {
   cwdParseBuffer: string;
   /** Secret in this tab's shell-integration marks, so command output cannot fake them. */
   markNonce: string;
+  /** The task whose code block run opened this tab (TerminalBlockRunner), if one did. */
+  codeBlockTaskId?: string;
 };
 
 const MAX_TERMINAL_TABS_PER_WORKSPACE = 12;
@@ -239,6 +241,8 @@ export class TerminalPtyManager {
     title?: string;
     cols?: number;
     rows?: number;
+    /** Set by TerminalBlockRunner: the task whose code block run opens this tab. */
+    codeBlockTaskId?: string;
   }): ShellSessionInfo {
     const existingTabs = this.listTabs(params.workspaceId).sort(
       (a, b) => a.updatedAt - b.updatedAt,
@@ -282,6 +286,7 @@ export class TerminalPtyManager {
       closeRequested: false,
       cwdParseBuffer: "",
       markNonce: crypto.randomBytes(12).toString("hex"),
+      ...(params.codeBlockTaskId ? { codeBlockTaskId: params.codeBlockTaskId } : {}),
     };
     this.tabs.set(info.id, runtime);
     this.spawn(runtime);
@@ -417,6 +422,24 @@ export class TerminalPtyManager {
   /** Total output the tab has produced so far, in UTF-16 code units (see the listener offsets). */
   getOutputOffset(tabId: string): number {
     return this.getRuntime(tabId).outputOffset;
+  }
+
+  /**
+   * The tab's recent raw output, escapes included: the same buffer a new window replays.
+   * startOffset is where it begins in the tab's output stream; above 0, earlier output
+   * was dropped and the first line may be cut.
+   */
+  getRecentOutput(tabId: string): { output: string; startOffset: number } {
+    const runtime = this.getRuntime(tabId);
+    return {
+      output: runtime.buffer,
+      startOffset: runtime.outputOffset - runtime.buffer.length,
+    };
+  }
+
+  /** The task whose code block run opened the tab, or undefined for a tab the user opened. */
+  getCodeBlockTaskId(tabId: string): string | undefined {
+    return this.tabs.get(tabId)?.codeBlockTaskId;
   }
 
   /** Send Ctrl-C to the tab's foreground command, as a user pressing it would. */

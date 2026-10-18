@@ -1184,8 +1184,8 @@ describe("PermissionEngine", () => {
       expect(result.decision).toBe("deny");
     });
 
-    it.each(["analyze_image", "read_pdf_visual"])(
-      "asks for explicit visual-analysis consent even in Full access: %s",
+    it.each(["analyze_image", "read_pdf_visual", "read_terminal"])(
+      "asks for explicit export consent even in Full access: %s",
       (toolName) => {
         const result = evaluate({
           workspace: namedWorkspace({

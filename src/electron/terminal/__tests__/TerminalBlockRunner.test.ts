@@ -73,6 +73,7 @@ describe("TerminalBlockRunner", () => {
 
     await expect(result).resolves.toMatchObject({
       runId: "run-1",
+      cwd: "/tmp",
       output: "On branch main\r\nnothing to commit\r\n",
       exitCode: 0,
       terminationReason: "normal",
@@ -81,6 +82,9 @@ describe("TerminalBlockRunner", () => {
     expect(onOutput.mock.calls.map(([chunk]) => chunk).join("")).toBe(
       "On branch main\r\nnothing to commit\r\n",
     );
+    // The tab is marked as this task's, so the agent may read it without asking again.
+    const [tab] = manager.listTabs("workspace-1");
+    expect(manager.getCodeBlockTaskId(tab.id)).toBe("task-1");
   });
 
   it("reuses the task's tab, ignores its earlier output, and finds marks split across chunks", async () => {

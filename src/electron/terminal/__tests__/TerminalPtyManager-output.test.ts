@@ -49,6 +49,30 @@ describe("TerminalPtyManager output offsets", () => {
     expect(manager.detachTerminalTabOutput(tab.id, "missing")).toBe(false);
   });
 
+  it("hands out the recent output buffer and where it starts in the stream", () => {
+    const tab = manager.createTab({ workspaceId: "workspace-3", workspacePath: "/tmp" });
+    emitOutput?.("first\r\n");
+    expect(manager.getRecentOutput(tab.id)).toEqual({ output: "first\r\n", startOffset: 0 });
+
+    emitOutput?.("y".repeat(MAX_REPLAY_BUFFER_LENGTH));
+    const recent = manager.getRecentOutput(tab.id);
+    expect(recent.output).toBe("y".repeat(MAX_REPLAY_BUFFER_LENGTH));
+    expect(recent.startOffset).toBe("first\r\n".length);
+    expect(() => manager.getRecentOutput("missing")).toThrow("Terminal tab not found.");
+  });
+
+  it("remembers which task's code block run opened a tab", () => {
+    const opened = manager.createTab({ workspaceId: "workspace-4", workspacePath: "/tmp" });
+    const runTab = manager.createTab({
+      workspaceId: "workspace-4",
+      workspacePath: "/tmp",
+      codeBlockTaskId: "task-1",
+    });
+    expect(manager.getCodeBlockTaskId(opened.id)).toBeUndefined();
+    expect(manager.getCodeBlockTaskId(runTab.id)).toBe("task-1");
+    expect(manager.getCodeBlockTaskId("missing")).toBeUndefined();
+  });
+
   it("replays the bounded tail with its absolute offset without splitting a surrogate pair", async () => {
     const tab = manager.createTab({ workspaceId: "workspace-2", workspacePath: "/tmp" });
     const liveListener = vi.fn();

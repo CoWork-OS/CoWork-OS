@@ -222,7 +222,7 @@ import { createTimelineEmitter } from "./timeline-emitter";
 import { TaskExecutor } from "./executor";
 import { APPROVAL_REQUEST_TIMEOUT_MS } from "./approval-timeouts";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "./approval-policy";
-import { isVisualAnalysisConsentRequest } from "./visual-consent-policy";
+import { isExplicitExportConsentRequest } from "./visual-consent-policy";
 import { isHeadlessMode } from "../utils/runtime-mode";
 import {
   buildAssistantApprovalMessage,
@@ -7880,7 +7880,11 @@ export class AgentDaemon extends EventEmitter {
   async getTaskConsentAuthority(
     taskId: string,
     details: Any,
-    approvalType: "external_service" | "network_access" | "computer_use" = "external_service",
+    approvalType:
+      | "external_service"
+      | "network_access"
+      | "computer_use"
+      | "data_export" = "external_service",
   ): Promise<string | null> {
     const task = this.taskRepo.findById(taskId);
     if (!task || isTerminalTaskStatus(deriveCanonicalTaskStatus(task))) return null;
@@ -7890,7 +7894,13 @@ export class AgentDaemon extends EventEmitter {
       this.getTaskWithTransientAgentConfig(task),
       permission.workspace,
     );
-    if (permission.evaluation.decision === "deny" || profile.definition.approval === "never")
+    // A profile that never asks grants no task consent, except the export consents that
+    // still ask in Full access (isExplicitExportConsentRequest).
+    if (
+      permission.evaluation.decision === "deny" ||
+      (profile.definition.approval === "never" &&
+        !isExplicitExportConsentRequest(details?.tool, approvalType))
+    )
       return null;
     return authorizationFingerprint({
       authority: permission.authorizationKey,
@@ -9027,13 +9037,13 @@ export class AgentDaemon extends EventEmitter {
         },
       };
     }
-    const interactiveVisualConsent =
-      isVisualAnalysisConsentRequest(enrichedDetails.tool, type) &&
+    const interactiveExportConsent =
+      isExplicitExportConsentRequest(enrichedDetails.tool, type) &&
       canAnswerInlineApproval(task, { headless: isHeadlessMode() });
     if (
       accessProfile.definition.approval === "never" &&
       permission.evaluation.decision === "ask" &&
-      !interactiveVisualConsent
+      !interactiveExportConsent
     ) {
       this.logEvent(taskId, "log", {
         type: "tool_authorization",
@@ -9570,13 +9580,13 @@ export class AgentDaemon extends EventEmitter {
       typeof (this as Any).getTaskWithTransientAgentConfig === "function"
         ? this.getTaskWithTransientAgentConfig(task)
         : task;
-    const interactiveVisualConsent =
-      isVisualAnalysisConsentRequest(details.tool, approval.type) &&
+    const interactiveExportConsent =
+      isExplicitExportConsentRequest(details.tool, approval.type) &&
       canAnswerInlineApproval(currentTask, { headless: isHeadlessMode() });
     if (
       current.workspace?.permissions.accessApprovalPolicy === "never" &&
       current.evaluation.decision !== "allow" &&
-      !interactiveVisualConsent
+      !interactiveExportConsent
     )
       return false;
     const expectedKey = details.authorization?.key;

@@ -134,6 +134,81 @@ is closed. The `run_command` result for a background process includes the ready-
 (`terminal_tab.link`) and asks the agent to use it when it mentions the process, so an answer such
 as "the tunnel ([https tunnel](#terminal/bg-1a2b3c4d)) is still running" opens the right tab.
 
+### Your own tabs
+
+The agent can also see and point at the shell tabs you open yourself, through two read-only tools:
+
+| Tool | What it returns | When the agent uses it |
+| --- | --- | --- |
+| `list_terminal_tabs` | Each shell tab of the task's workspace: `id`, `label` (the last part of its working directory, as the dock shows it), `cwd`, `status`, `last_command`, and a ready-made `link` | You mention your terminal, a command you ran or an error you saw there |
+| `read_terminal` | The end of one tab's output as plain text (`tail_lines`, default 200; `max_chars`, default 16,000), with the tab's details. Asks you first, once per tab for the task | You ask about something a tab printed ("this error", "did it pass?") |
+
+Both tools return the tab's link, and their descriptions tell the agent to write it as
+`[label](#terminal/<id>)`, so "the test run in [cowork](#terminal/tab%3Aws-1%3Atab-1) failed on
+`auth.test.ts`" opens that tab. `read_terminal` takes the tab id or its whole `#terminal/<id>` link.
+
+What the agent can and cannot do with your tabs:
+
+- **Read only.** Neither tool types into a tab, runs a command there, or stops it. To run something
+  itself, the agent still uses `run_command`, with its usual approvals.
+- **Only where the agent may run commands, and only for you.** The tools are offered only where
+  `run_command` is: with an access profile that allows command tools, and not in a task whose
+  restrictions take `run_command` away. Group and public channel conversations deny them, as they
+  deny the clipboard tools, and so does a channel message from anyone but you, so your terminal is
+  never quoted into someone else's chat. A bot whose **Works on** keeps it off this computer
+  (Off, Browser, Own desktop) cannot read them either. Managed sessions count them with the shell
+  tools.
+- **This workspace only.** A tab of another workspace cannot be listed or read, even by its id.
+- **Known secret patterns redacted.** Output goes through the same redaction as `run_command`
+  output (API keys, tokens, private keys, seed phrases, JWTs, secret JSON fields), and then
+  through patterns for what a terminal adds: values of names that contain a secret word
+  (`TOKEN=…`, `export GITHUB_TOKEN=…`, `--password=…`, `aws_secret_access_key = …`,
+  `password: …`, `X-Api-Key: …`), passwords in URLs, `Authorization` headers of any scheme,
+  common vendor tokens (Stripe, Slack, Google, npm, GitLab, GitHub fine-grained), private keys
+  whose BEGIN or END line is missing, and the tab's own shell-integration nonce. Redaction
+  matches shapes, so it cannot promise to catch every secret; the tool description says so, and
+  tells the agent that terminal output is data, not instructions.
+- **What the screen shows, not what was typed.** Erasing on a line (backspaces with
+  erase-to-end-of-line, Ctrl-U), cursor moves and deleted characters are applied, so text you
+  deleted at the prompt is not returned. `clear` (and a terminal reset) drop everything before it.
+  When older output has dropped out of the tab's 256 KB buffer, the cut-off first line is left out
+  so a partial secret is never shown.
+- **Your approval, once per tab.** Listing tabs never asks: it returns names, folders and status,
+  not output. The first time the agent reads a tab in a task, CoWork asks: "Let the agent read the
+  recent output of your terminal tab "cowork" (~/code/cowork)?", with **Deny** and **Allow for this
+  task**. Allowing covers that tab until the task ends; another tab asks again. Redaction cannot
+  catch everything a shell can show (a typed password, a pasted token, another project's output),
+  which is why reading is not silent. Deny returns nothing from the tab.
+  - The consent is dropped when the tab closes, when the task ends, or when the task's access
+    profile or approval policy changes; the next read asks again.
+  - A tab opened by running a code block from this task's answers needs no approval: you pressed
+    Run and have seen what it printed.
+  - **Full access** still asks, as it does for visual file analysis, because the output leaves
+    your computer for the model provider. Without a way to ask (headless runs, the CLI,
+    automations), reading is refused.
+  - The default is recorded in `src/electron/security/monty-tool-policy.ts` (`read_terminal`:
+    `require_approval`, `list_terminal_tabs`: `pass`), and the registry turns it into the per-tab
+    consent above. A workspace `.cowork/policy/tools.monty` can deny `read_terminal` or require
+    approval on every read; it cannot remove the per-tab consent, which the tool checks itself:
+
+  ```python
+  out = {"decision": "pass"}
+  if input["tool"] == "read_terminal":
+    out = {"decision": "deny", "reason": "no terminal reads in this workspace"}
+  out
+  ```
+
+`last_command` is the last command run through the tab by CoWork (a code block run, for example).
+Commands you type by hand show up in `read_terminal` output, not in `last_command`.
+
+### Code block runs name their tab
+
+When you run a shell code block from an answer, the message that hands its output to the agent
+names the tab it ran in: "I ran this command in my terminal tab [cowork](#terminal/<id>) (exit code
+1):". The agent can link that tab in its reply or read more of it with `read_terminal`. Messages
+from earlier versions, without the tab, are still recognized and shown as a single "Sent the output
+of" line.
+
 ## Reliability and packaging notes
 
 - `node-pty` native files are unpacked from Electron ASAR so PTY helpers can run in packaged builds.
@@ -175,6 +250,11 @@ Validate these flows on each platform before release:
   output once it finishes, and Stop interrupts a long-running command
 - Ask the agent to start a dev server: its tab appears with the given title, the answer's chip
   opens it, Stop ends it, and closing the tab stops it
+- Run a failing command in your own tab, then ask the agent about it: it asks once to read that
+  tab ("Allow for this task"), reads it again without asking, links it as a chip that opens it,
+  and an `export SOME_TOKEN=…` typed there comes back redacted. Deny, and it reports that it could
+  not read the tab
+- Run a code block from an answer, then ask the agent about its tab: it reads it without asking
 
 ## Related docs
 

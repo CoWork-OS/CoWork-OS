@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseTerminalTabHref,
   terminalTabHref,
+  terminalTabLabel,
   terminalTabMarkdownLink,
 } from "../terminal-tab-links";
 
@@ -35,5 +36,16 @@ describe("terminal tab links", () => {
       "[x(y)](#terminal/bg-00ff00ff)",
     );
     expect(terminalTabMarkdownLink("  ", "bg-00ff00ff")).toBe("[terminal](#terminal/bg-00ff00ff)");
+    expect(terminalTabMarkdownLink("two\nlines", "bg-00ff00ff")).toBe(
+      "[two lines](#terminal/bg-00ff00ff)",
+    );
+  });
+
+  it("names a shell tab after the last part of its working directory", () => {
+    expect(terminalTabLabel("/Users/almarion/code/cowork")).toBe("cowork");
+    expect(terminalTabLabel("/Users/almarion/code/cowork/")).toBe("cowork");
+    expect(terminalTabLabel("C:\\Users\\almarion\\api")).toBe("api");
+    expect(terminalTabLabel("/", "My workspace")).toBe("My workspace");
+    expect(terminalTabLabel("")).toBe("terminal");
   });
 });

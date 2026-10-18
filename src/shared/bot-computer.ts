@@ -104,6 +104,9 @@ export const HOST_COMPUTER_TOOL_NAMES: readonly string[] = [
   "run_applescript",
   "read_clipboard",
   "write_clipboard",
+  // The user's own terminal tabs in the terminal dock.
+  "list_terminal_tabs",
+  "read_terminal",
   "application_operation",
   "native_application_create",
   "local_photoshop_create",

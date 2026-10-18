@@ -45,8 +45,11 @@ approval without a standing grant. See [Private browser credentials and checkout
 Full access is still subject to hard guardrails, protected operating-system
 paths, administrator policy, and explicit export/location/credential consent.
 Its `never` approval policy does not open a consent dialog: an operation that
-needs missing authority is denied. Full access is not a promise that every
-native operation will be allowed.
+needs missing authority is denied. Two exports to the model provider are the
+exception and still ask when you can answer in the app: visual file analysis,
+and reading one of your terminal tabs (`read_terminal`, once per tab for the
+task; see [Terminal Tabs](terminal-tabs.md#your-own-tabs)). Full access is not
+a promise that every native operation will be allowed.
 
 Connected MCP tools are available to the agent without mentioning MCP, a server
 name, or an exact tool name. Their approval policy is independent of blanket

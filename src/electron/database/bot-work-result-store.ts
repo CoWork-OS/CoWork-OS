@@ -122,7 +122,7 @@ export class BotWorkResultStore {
       contract && session
         ? (this.db
             .prepare(
-              `SELECT id,SUBSTR(claim,1,512) claim,source_type,captured_at,freshness_expires_at,status,artifact_revision_id FROM work_session_evidence WHERE session_id=? AND contract_id=? AND (artifact_revision_id IS NULL OR artifact_revision_id IN (SELECT id FROM work_session_artifact_revisions WHERE session_id=? AND task_id=?)) ORDER BY captured_at DESC,id DESC LIMIT 33`,
+              `SELECT id,SUBSTR(claim,1,512) claim,source_type,captured_at,freshness_expires_at,status,artifact_revision_id,basis,data_as_of FROM work_session_evidence WHERE session_id=? AND contract_id=? AND (artifact_revision_id IS NULL OR artifact_revision_id IN (SELECT id FROM work_session_artifact_revisions WHERE session_id=? AND task_id=?)) ORDER BY captured_at DESC,id DESC LIMIT 33`,
             )
             .all(session.id, contract.id, session.id, request.taskId) as Array<
             Record<string, unknown>
@@ -184,6 +184,10 @@ export class BotWorkResultStore {
         status: String(e.status),
         artifactRevisionId:
           typeof e.artifact_revision_id === "string" ? e.artifact_revision_id : undefined,
+        ...(e.basis === "observed" || e.basis === "inferred" || e.basis === "unknown"
+          ? { basis: e.basis }
+          : {}),
+        ...(typeof e.data_as_of === "number" ? { dataAsOf: e.data_as_of } : {}),
       })),
       truncated,
       issues,

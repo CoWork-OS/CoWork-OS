@@ -147,6 +147,10 @@ export function resolveTimelineIndicator(
         : typeof payload.legacyType === "string"
           ? payload.legacyType
           : "";
+    // A write that timed out or lost its connection may have taken effect: not a plain failure.
+    if (legacyType === "tool_error" && payload.outcome === "unknown") {
+      return { icon: AlertTriangle, tone: "warning", label: "Outcome unknown" };
+    }
     return {
       icon: AlertTriangle,
       tone: "error",

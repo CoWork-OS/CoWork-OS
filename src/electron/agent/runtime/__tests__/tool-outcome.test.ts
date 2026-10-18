@@ -98,6 +98,22 @@ describe("normalizeToolOutcome", () => {
     ).toMatchObject({ status: "unknown" });
   });
 
+  it("treats a connector's write statuses as success, and its unknown as unknown", () => {
+    for (const status of ["created", "already_exists"]) {
+      expect(normalizeToolOutcome({ status, data: { id: "1" } })).toMatchObject({
+        status: "success",
+        success: true,
+      });
+    }
+    expect(
+      normalizeToolOutcome(
+        undefined,
+        new Error("MCP tool 'jira.create_issue' failed: Outcome unknown: No response from the API"),
+        { effect: "unknown" },
+      ),
+    ).toMatchObject({ status: "unknown" });
+  });
+
   it("keeps the old handling for reads and for definite write failures", () => {
     expect(
       normalizeToolOutcome(undefined, new Error("Tool read_file timed out after 30s"), {

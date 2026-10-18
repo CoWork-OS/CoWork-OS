@@ -3,6 +3,28 @@ import type { ToolRegistry } from "../../tools/registry";
 import { ToolExecutionCoordinator } from "../ToolExecutionCoordinator";
 import { ApplicationNotDispatchedError } from "../../../applications/ApplicationAdapterCatalog";
 
+it("hands the executor's tool attempt to the registry, which forwards it to MCP", async () => {
+  const registry = {
+    executeToolWithRuntime: vi.fn().mockResolvedValue({ result: { success: true } }),
+  } as unknown as ToolRegistry;
+  await new ToolExecutionCoordinator(registry).executeTool(
+    "mcp_jira.create_issue",
+    { projectKey: "OPS" },
+    {
+      taskId: "task",
+      phase: "step",
+      toolAttempt: { idempotencyKey: "a".repeat(32), attemptId: "attempt-1" },
+    },
+  );
+  expect(registry.executeToolWithRuntime).toHaveBeenCalledWith(
+    "mcp_jira.create_issue",
+    { projectKey: "OPS" },
+    expect.objectContaining({
+      toolAttempt: { idempotencyKey: "a".repeat(32), attemptId: "attempt-1" },
+    }),
+  );
+});
+
 it("never uses workspace recovery to work around an application dispatch boundary", async () => {
   const denied = new ApplicationNotDispatchedError("Reconcile the original effect");
   const registry = {

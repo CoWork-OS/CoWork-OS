@@ -212,6 +212,39 @@ Return JSON in a consistent envelope so the agent can reason about results acros
 
 When errors happen, return MCP `isError: true` with a clear error message.
 
+### Idempotent Writes
+
+For every call that can change something, CoWork records a tool attempt with an idempotency key
+derived from the task, step, tool and canonical arguments, so a retry of the same call carries the
+same key. MCP calls send it in the request's `_meta`:
+
+```
+{ "name": "salesforce.create_record", "arguments": { ... },
+  "_meta": { "cowork.idempotencyKey": "<32 hex>", "cowork.attemptId": "<uuid>" } }
+```
+
+Read-only calls carry no `_meta`. A write tool should:
+
+- use the key, or an `idempotencyKey` argument the caller passed, to run the write at most once;
+- pass it on as the API's own idempotency header when the API has one (Resend does);
+- report `status` in the result and in `structuredContent`: `created` (written now),
+  `already_exists` (an earlier attempt with this key made the change; it was not made again) or
+  `unknown` (the API call ended without a response, so the change may or may not exist; return
+  it with `isError: true`).
+
+CoWork treats `already_exists` as success, so the agent does not retry or duplicate, and
+`unknown` as an unknown outcome: the attempt is recorded as such and the agent is told to check
+the target before retrying.
+
+The bundled Salesforce (`create_record`), HubSpot (`create_object`), Jira (`create_issue`) and
+Resend (`send_email`, `create_webhook`) connectors do this with a per-process ledger (24 hours).
+After an attempt that ended without a response they look for what it may have created before
+writing again: Salesforce by `Name` created in the last day, Jira by exact summary in the project
+created in the last day, Resend webhooks by endpoint; Resend email relies on its own
+`Idempotency-Key`, and HubSpot reports a duplicate contact (409) as `already_exists`. The ledger
+does not survive a connector restart. The Linear connector has no write tools. The template in
+`connectors/templates/mcp-connector` shows the pattern.
+
 ### Required Baseline Tools
 
 Every connector should provide:

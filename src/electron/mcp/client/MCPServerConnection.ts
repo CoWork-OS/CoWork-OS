@@ -17,6 +17,8 @@ import {
   MCPCallResult,
   MCPConnectionStatus,
   MCPTransport,
+  MCP_ATTEMPT_META_KEY,
+  MCP_IDEMPOTENCY_META_KEY,
   MCP_METHODS,
   JSONRPCNotification,
   JSONRPCResponse,
@@ -76,6 +78,19 @@ function legacyOnlyServerKey(config: MCPServerConfig): string {
     config.args ?? null,
     config.url ?? null,
   ]);
+}
+
+/**
+ * Request `_meta` for a tool call: the attempt's idempotency key and id, only when the caller
+ * has them (calls that cannot change anything carry none).
+ */
+function toolCallMeta(options: MCPToolCallOptions): Record<string, string> | undefined {
+  const key = options.idempotencyKey?.trim();
+  if (!key) return undefined;
+  return {
+    [MCP_IDEMPOTENCY_META_KEY]: key,
+    ...(options.attemptId?.trim() ? { [MCP_ATTEMPT_META_KEY]: options.attemptId.trim() } : {}),
+  };
 }
 
 export class MCPServerConnection extends EventEmitter {
@@ -284,11 +299,13 @@ export class MCPServerConnection extends EventEmitter {
     logger.debug(`Calling tool ${name} on ${this.config.name}`);
 
     try {
+      const meta = toolCallMeta(options);
       const result = await transport.sendRequest(
         MCP_METHODS.TOOLS_CALL,
         {
           name,
           arguments: args,
+          ...(meta ? { _meta: meta } : {}),
         },
         { beforeSend, signal: options.signal },
       );

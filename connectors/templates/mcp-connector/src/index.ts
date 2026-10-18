@@ -77,10 +77,146 @@ const MCP_ERROR_CODES = {
 
 type ToolProvider = {
   getTools(): MCPTool[];
-  executeTool(name: string, args: Record<string, any>): Promise<any>;
+  executeTool(name: string, args: Record<string, any>, context?: CallContext): Promise<any>;
 };
 
 // ==================== MCP Stdio Server ====================
+
+// ==================== Idempotency ====================
+//
+// CoWork sends one key per tool attempt in the request's `_meta` ("cowork.idempotencyKey"), and a
+// retry of the same call carries the same key. Write tools report a `status`:
+//   created         the write ran now;
+//   already_exists  an earlier attempt with this key made the change, so it was not made again;
+//   unknown         the API call ended without a response: the change may or may not exist.
+// The ledger lives in this connector process for 24 hours. It covers a retry after CoWork lost
+// the response; it does not survive a connector restart.
+
+const IDEMPOTENCY_META_KEY = "cowork.idempotencyKey";
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/;
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const IDEMPOTENCY_MAX_ENTRIES = 1000;
+
+type CallContext = { idempotencyKey?: string };
+type WriteStatus = "created" | "already_exists" | "unknown";
+type WriteOutcome = { status: WriteStatus; result?: any; message?: string };
+
+/** The idempotency key CoWork sent with this call, when it is well formed. */
+function readIdempotency(params: any): CallContext {
+  const key = params?._meta?.[IDEMPOTENCY_META_KEY];
+  return typeof key === "string" && IDEMPOTENCY_KEY_PATTERN.test(key)
+    ? { idempotencyKey: key }
+    : {};
+}
+
+/** A key the caller passed as a tool argument wins over the one in `_meta`. */
+function idempotencyKeyFor(args: Record<string, any>, context: CallContext): string | undefined {
+  const explicit = typeof args.idempotencyKey === "string" ? args.idempotencyKey.trim() : "";
+  return explicit ? explicit.slice(0, 256) : context.idempotencyKey;
+}
+
+/** The request never got an answer from the API, so its effect is unknown. */
+function isNoResponseError(error: any): boolean {
+  const code = String(error?.cause?.code ?? error?.code ?? "");
+  // These fail before the API sees the request: nothing can have changed.
+  if (/^(ENOTFOUND|ECONNREFUSED|EAI_AGAIN|CERT_|ERR_TLS|UNABLE_TO)/.test(code)) return false;
+  return (
+    error?.name === "AbortError" ||
+    /fetch failed|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|other side closed/i.test(
+      `${error?.message ?? ""} ${code}`,
+    )
+  );
+}
+
+class IdempotencyLedger {
+  private entries = new Map<
+    string,
+    { state: "pending" | "done" | "unknown"; result?: any; at: number }
+  >();
+
+  /**
+   * Run `write` at most once per key. `findExisting` is consulted only after an earlier attempt
+   * with this key ended without a response, to find what that attempt may have created.
+   */
+  async run(
+    key: string | undefined,
+    write: () => Promise<any>,
+    findExisting?: () => Promise<any | undefined>,
+  ): Promise<WriteOutcome> {
+    this.prune();
+    const entry = key ? this.entries.get(key) : undefined;
+    if (entry?.state === "done") return { status: "already_exists", result: entry.result };
+    if (entry?.state === "pending") {
+      return { status: "unknown", message: "An earlier attempt of this call is still running." };
+    }
+    if (key && entry?.state === "unknown" && findExisting) {
+      const existing = await findExisting();
+      if (existing !== undefined) {
+        this.entries.set(key, { state: "done", result: existing, at: Date.now() });
+        return { status: "already_exists", result: existing };
+      }
+    }
+    if (key) this.entries.set(key, { state: "pending", at: Date.now() });
+    try {
+      const result = await write();
+      if (key) this.entries.set(key, { state: "done", result, at: Date.now() });
+      return { status: "created", result };
+    } catch (error: any) {
+      if (isNoResponseError(error)) {
+        if (key) this.entries.set(key, { state: "unknown", at: Date.now() });
+        return {
+          status: "unknown",
+          message: `No response from the API (${error?.message || "request failed"}). The change may or may not exist; check before retrying.`,
+        };
+      }
+      if (key) this.entries.delete(key);
+      throw error;
+    }
+  }
+
+  private prune(): void {
+    const cutoff = Date.now() - IDEMPOTENCY_TTL_MS;
+    for (const [key, entry] of this.entries) {
+      if (entry.at < cutoff) this.entries.delete(key);
+    }
+    for (const key of this.entries.keys()) {
+      if (this.entries.size <= IDEMPOTENCY_MAX_ENTRIES) break;
+      this.entries.delete(key);
+    }
+  }
+}
+
+const ledger = new IdempotencyLedger();
+
+/** A write tool's result: the usual envelope plus its `status`. */
+function writeResult(outcome: WriteOutcome, envelope: (result: any) => any): any {
+  if (outcome.status === "unknown") {
+    return { ok: false, status: "unknown", message: outcome.message };
+  }
+  return {
+    ...envelope(outcome.result),
+    status: outcome.status,
+    ...(outcome.status === "already_exists"
+      ? {
+          message:
+            "An earlier attempt of this call already made this change; it was not made again.",
+        }
+      : {}),
+  };
+}
+
+/** `structuredContent` for a write status, so the client can act on it without parsing text. */
+function writeStatusContent(result: any): Record<string, any> {
+  const status = result && typeof result === "object" ? result.status : undefined;
+  if (status !== "created" && status !== "already_exists" && status !== "unknown") return {};
+  return {
+    structuredContent: {
+      status,
+      ...(typeof result.message === "string" ? { message: result.message } : {}),
+    },
+    ...(status === "unknown" ? { isError: true } : {}),
+  };
+}
 
 class StdioMCPServer {
   private initialized = false;
@@ -206,7 +342,7 @@ class StdioMCPServer {
     }
 
     try {
-      const result = await this.toolProvider.executeTool(name, args || {});
+      const result = await this.toolProvider.executeTool(name, args || {}, readIdempotency(params));
 
       if (typeof result === "string") {
         return { content: [{ type: "text", text: result }] };
@@ -216,7 +352,10 @@ class StdioMCPServer {
         if (result.content && Array.isArray(result.content)) {
           return result;
         }
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          ...writeStatusContent(result),
+        };
       }
 
       return { content: [{ type: "text", text: String(result) }] };
@@ -281,6 +420,20 @@ const tools: MCPTool[] = [
     },
   },
   {
+    name: `${CONNECTOR_PREFIX}.create_item`,
+    description:
+      "Create an item (example write tool). A retry of the same call returns the first result " +
+      "with status already_exists instead of creating a second item.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Item title" },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: `${CONNECTOR_PREFIX}.echo`,
     description: "Echo input for testing",
     inputSchema: {
@@ -294,7 +447,9 @@ const tools: MCPTool[] = [
   },
 ];
 
-const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
+type ToolHandler = (args: Record<string, any>, context: CallContext) => Promise<any>;
+
+const handlers: Record<string, ToolHandler> = {
   [`${CONNECTOR_PREFIX}.health`]: async () => ({
     ok: true,
     data: {
@@ -302,6 +457,16 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
       connector: CONNECTOR_PREFIX,
     },
   }),
+  // A write tool: run the API call through the ledger and report its status. Pass the API's own
+  // idempotency key header too when it has one; pass a lookup as the third argument when it does
+  // not, so a retry after an unanswered attempt can find what that attempt created.
+  [`${CONNECTOR_PREFIX}.create_item`]: async (args, context) => {
+    const outcome = await ledger.run(idempotencyKeyFor(args, context), async () => ({
+      id: `item-${Date.now()}`,
+      title: args.title,
+    }));
+    return writeResult(outcome, (result) => ({ ok: true, data: result }));
+  },
   [`${CONNECTOR_PREFIX}.echo`]: async (args) => ({
     ok: true,
     data: {
@@ -312,12 +477,12 @@ const handlers: Record<string, (args: Record<string, any>) => Promise<any>> = {
 
 const toolProvider: ToolProvider = {
   getTools: () => tools,
-  executeTool: async (name, args) => {
+  executeTool: async (name, args, context = {}) => {
     const handler = handlers[name];
     if (!handler) {
       throw new Error(`Unknown tool: ${name}`);
     }
-    return handler(args);
+    return handler(args, context);
   },
 };
 
@@ -330,5 +495,15 @@ const serverInfo: MCPServerInfo = {
   },
 };
 
-const server = new StdioMCPServer(toolProvider, serverInfo);
-server.start();
+export function startExampleMcpServer(): void {
+  new StdioMCPServer(toolProvider, serverInfo).start();
+}
+
+/** Test hook: one `tools/call` request through the server, `_meta` included. */
+export async function callExampleToolForTest(params: any): Promise<any> {
+  return (new StdioMCPServer(toolProvider, serverInfo) as any).handleToolsCall(params);
+}
+
+if (typeof require !== "undefined" && typeof module !== "undefined" && require.main === module) {
+  startExampleMcpServer();
+}

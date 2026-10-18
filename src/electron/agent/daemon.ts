@@ -30,8 +30,10 @@ import {
   ArtifactRepository,
   InputRequestRepository,
   storageStatements,
+  ToolAttemptRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
+import { describeUnverifiedAttempts, unresolvedUnknownAttempts } from "./runtime/tool-attempts";
 import {
   FOLLOW_UP_RECOVERY_TASK_STATUSES,
   hasUnstartedFollowUpReceipt,
@@ -189,6 +191,8 @@ import {
   WorkerRoleKind,
   VerificationVerdict,
   LLMProviderType,
+  InterruptInFlightCall,
+  ToolAttempt,
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
@@ -1109,6 +1113,89 @@ export class AgentDaemon extends EventEmitter {
   /** Return the durable Phase 4 contracts/evidence/lineage service. */
   getWorkSessionContractService(): WorkSessionContractService {
     return this.workSessionContractService;
+  }
+
+  private toolAttemptRepository?: ToolAttemptRepository;
+  /** Tasks with a call whose outcome became unknown; only these read attempts at completion. */
+  private tasksWithUnknownToolOutcomes?: Set<string>;
+
+  noteToolOutcomeUnknown(taskId: string): void {
+    (this.tasksWithUnknownToolOutcomes ??= new Set()).add(taskId);
+  }
+
+  /** Durable attempts of tool calls that write or whose effect is unknown. */
+  getToolAttemptRepository(): ToolAttemptRepository {
+    this.toolAttemptRepository ??= new ToolAttemptRepository(this.getDatabase());
+    return this.toolAttemptRepository;
+  }
+
+  /** Calls a previous process left `started` can no longer report: their outcome is unknown. */
+  private async recoverInterruptedToolAttempts(): Promise<void> {
+    try {
+      const repository = this.getToolAttemptRepository();
+      const running = [...this.activeTasks.keys()];
+      // Each round is bounded; a crash leaves at most a handful of open calls per task.
+      for (let round = 0; round < 20; round += 1) {
+        const taskIds = await repository.recoverStartedAttempts(running, Date.now());
+        if (taskIds.length === 0) break;
+        for (const taskId of taskIds) this.noteToolOutcomeUnknown(taskId);
+      }
+    } catch (error) {
+      log.warn("Could not recover interrupted tool attempts:", error);
+    }
+  }
+
+  /** Write or unknown-effect calls of a task whose outcome is still unknown. */
+  private async findUnverifiedToolAttempts(taskId: string): Promise<ToolAttempt[]> {
+    try {
+      return unresolvedUnknownAttempts(await this.getToolAttemptRepository().listForTask(taskId));
+    } catch (error) {
+      log.warn(`Could not read tool attempts for ${taskId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Calls that were running when a stop was requested. Calls still open become `unknown`:
+   * the executor stopped, so nothing will report their result.
+   */
+  private async collectInFlightToolCalls(
+    taskId: string,
+    requestedAt: number,
+  ): Promise<InterruptInFlightCall[]> {
+    try {
+      const repository = this.getToolAttemptRepository();
+      const closed = await repository.markStartedUnknown(
+        taskId,
+        "stopped_while_running",
+        Date.now(),
+      );
+      if (closed.length > 0) this.noteToolOutcomeUnknown(taskId);
+      const attempts = await repository.listForTask(taskId);
+      return attempts
+        .filter(
+          (attempt) =>
+            attempt.startedAt <= requestedAt &&
+            (attempt.finishedAt === undefined || attempt.finishedAt >= requestedAt),
+        )
+        .slice(-20)
+        .map((attempt) => ({
+          toolName: attempt.toolName,
+          attemptId: attempt.id,
+          idempotencyKey: attempt.idempotencyKey,
+          effect: attempt.effect,
+          outcome:
+            attempt.status === "completed"
+              ? "completed"
+              : attempt.status === "unknown" || attempt.status === "checked"
+                ? "unknown"
+                : "cancelled",
+          ...(attempt.target ? { target: attempt.target } : {}),
+        }));
+    } catch (error) {
+      log.warn(`Could not read in-flight tool calls for ${taskId}:`, error);
+      return [];
+    }
   }
 
   getApplicationExecutionService(): ApplicationExecutionService {
@@ -2431,6 +2518,9 @@ export class AgentDaemon extends EventEmitter {
     // to a task that startup would otherwise treat as finished. The receipt scan
     // runs off the host thread; its tasks are recovered with the delayed resume.
     const followUpRecoveryCandidates = this.scanUnstartedUserFollowUps();
+
+    // Tool calls a previous process left running can no longer report their result.
+    void this.recoverInterruptedToolAttempts();
 
     // Recover stale retry tasks that were incorrectly persisted as executing.
     // These should re-enter the queue on startup so retries can continue.
@@ -6671,9 +6761,17 @@ export class AgentDaemon extends EventEmitter {
     ).catch((error) => {
       log.error(`[cancel] Graph cancellation failed for ${taskId}:`, error);
     });
+    const inFlight = await this.collectInFlightToolCalls(taskId, input.requestedAt);
+    const unverified = inFlight.filter((call) => call.outcome === "unknown");
+    const message =
+      unverified.length > 0
+        ? `${input.message}. ${unverified.length === 1 ? "1 call was" : `${unverified.length} calls were`} in flight and not verified: ${unverified
+            .map((call) => (call.target ? `${call.toolName} on ${call.target}` : call.toolName))
+            .join("; ")}`
+        : input.message;
     // Persist cancellation for running tasks too (important for remote clients querying task status).
-    if (controlAuthority) this.cancelTaskRecord(taskId, input.message, { controlAuthority });
-    else this.cancelTaskRecord(taskId, input.message);
+    if (controlAuthority) this.cancelTaskRecord(taskId, message, { controlAuthority });
+    else this.cancelTaskRecord(taskId, message);
     this.logEvent(taskId, "agent_interrupt_confirmed", {
       taskId,
       reason: "cancel",
@@ -6681,6 +6779,7 @@ export class AgentDaemon extends EventEmitter {
       requestedAt: input.requestedAt,
       confirmedAt: Date.now(),
       status: "cancelled",
+      ...(inFlight.length > 0 ? { inFlight } : {}),
     });
 
     // Always notify queue manager to remove from running set
@@ -15297,6 +15396,27 @@ export class AgentDaemon extends EventEmitter {
           ...metadata,
           terminalStatus: "partial_success",
           failureClass: "contract_error",
+        };
+      }
+    }
+
+    // A write whose outcome stayed unknown (timeout, lost transport) and was never read back or
+    // repeated successfully: the work cannot count as done until someone checks it.
+    const unverifiedToolCalls = this.tasksWithUnknownToolOutcomes?.delete(taskId)
+      ? await this.findUnverifiedToolAttempts(taskId)
+      : [];
+    if (unverifiedToolCalls.length > 0) {
+      const note = describeUnverifiedAttempts(unverifiedToolCalls);
+      resultSummary =
+        typeof resultSummary === "string" && resultSummary.trim()
+          ? `${resultSummary.trim()}\n\n${note}`
+          : note;
+      const current = metadata?.terminalStatus;
+      if (current === undefined || current === "ok" || current === "partial_success") {
+        metadata = {
+          ...metadata,
+          terminalStatus: "needs_user_action",
+          terminalStatusReason: "tool_outcome_unknown",
         };
       }
     }

@@ -228,7 +228,7 @@ Import:
 2. refuses a package whose files add up to more than 64 MB;
 3. restores each copied file after checking its size and sha256. It never creates hidden files
    or folders (`.cowork`, `.git`, `.github`, `.vscode`, `.husky`, `.env` and the like), files under
-   `node_modules`, or agent instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CODEX.md`),
+   `node_modules`, or agent instruction files (`AGENTS.md` and similar),
    because later tasks would load them as instructions or code; those stay readable inside the
    package folder. A mismatching or symlinked copy is skipped, and an existing different file is
    kept, never overwritten;

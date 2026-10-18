@@ -271,6 +271,7 @@ import {
   createBrowserHistoryRecorder,
   registerBrowserPlatformIpc,
 } from "./browser/browser-platform-ipc";
+import { registerLifecycleIpc } from "./lifecycle/lifecycle-ipc";
 import {
   registerBrowserCredentialsIpc,
   shredFileOnDisk,
@@ -5400,6 +5401,12 @@ if (isMacSafeStorageMigrationWorker) {
       service: getBrowserWorkbenchService(),
       downloads: getBrowserDownloadManager(),
       sessionFromPartition: (partition) => session.fromPartition(partition),
+    });
+    registerLifecycleIpc({
+      ipcMain,
+      getDatabase: () => dbManager.getDatabase(),
+      getCronService: () => cronService,
+      getTriggerService: () => eventTriggerService,
     });
     const isVaultOwner = (event: Any) =>
       Boolean(

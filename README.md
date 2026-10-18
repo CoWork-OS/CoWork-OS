@@ -23,6 +23,8 @@
   <strong>English</strong> &middot; <a href="README.zh-CN.md">简体中文</a>
 </p>
 
+> **🇨🇳 Chinese README help wanted** — `README.zh-CN.md` needs review by a native Simplified Chinese speaker. See [#635](https://github.com/CoWork-OS/CoWork-OS/issues/635) to contribute.
+
 CoWork OS is a free, open-source desktop app for macOS and Windows that does real work for you: code, browser tasks, documents, inbox and automations. You watch each step as it happens. With the default **Ask for approval** access profile the agent works freely inside your workspace and stops to ask before anything that crosses it: sending, network access, credentials, exports, or files outside the workspace. Connect the model route you choose; your workspace, memory, skills and history stay on your machine. Model providers may charge for usage and receive the data needed for the tasks you run. [What you own](docs/what-you-own.md)
 
 <p align="center">

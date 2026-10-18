@@ -37,7 +37,7 @@ const TIMEOUT_STATUSES = new Set(["timeout", "timed_out", "timed-out"]);
  * connection or transport, or an abort that arrived while the call was running.
  */
 const OUTCOME_UNKNOWN_FAILURE =
-  /timed out|timeout|etimedout|econnreset|econnaborted|epipe|socket hang up|connection (?:closed|reset|lost)|transport (?:closed|error)|network error|aborted/i;
+  /timed out|timeout|etimedout|econnreset|econnaborted|epipe|socket hang up|connection (?:closed|reset|lost)|transport (?:closed|error)|network error|aborted|outcome unknown/i;
 
 /** What the caller knows about the call beyond its result. */
 export interface ToolOutcomeContext {
@@ -88,7 +88,15 @@ function statusFrom(value: unknown): CanonicalToolOutcomeStatus | null {
   if (CANCELLED_STATUSES.has(normalized)) return "cancelled";
   if (FAILURE_STATUSES.has(normalized)) return "error";
   if (UNKNOWN_STATUSES.has(normalized)) return "unknown";
-  if (normalized === "success" || normalized === "completed" || normalized === "ok") {
+  // `created` and `already_exists` are a connector's write statuses (WP8): already_exists means
+  // an earlier attempt of the same call made the change, so this one succeeded without a duplicate.
+  if (
+    normalized === "success" ||
+    normalized === "completed" ||
+    normalized === "ok" ||
+    normalized === "created" ||
+    normalized === "already_exists"
+  ) {
     return "success";
   }
   return null;

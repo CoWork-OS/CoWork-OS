@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { SIGNATURE_DIRECTORY_PATH } from "../../electron/security/http-message-signature";
 import fs from "fs";
 import http from "http";
 import path from "path";
@@ -68,6 +69,14 @@ export interface WebRpcMethod {
 export interface WebApplicationOptions {
   /** Must be true to expose any browser route. Omission is fail-closed. */
   enabled?: boolean;
+  /**
+   * Public Web Bot Auth key directory (JWK Set and its response signature) for the request's
+   * authority, or null when declared agent identity is off. Served without a session: it holds
+   * only the public key, and verifiers fetch it anonymously.
+   */
+  getSignatureDirectory?: (
+    requestAuthority: string,
+  ) => { body: string; headers: Record<string, string> } | null | undefined;
   webDirectory: string;
   deployment: WebDeploymentPolicy;
   getHostIdentity: () => HostIdentity;
@@ -339,6 +348,7 @@ export class WebApplication {
     res: http.ServerResponse,
   ): Promise<boolean> {
     const url = parseRequestUrl(req.url);
+    if (url.pathname === SIGNATURE_DIRECTORY_PATH) return this.serveSignatureDirectory(req, res);
     if (!isWebApplicationPath(url.pathname)) return Promise.resolve(false);
     const mount = this.mounts.get(audience);
     if (!this.enabled || !mount) {
@@ -362,6 +372,34 @@ export class WebApplication {
       writeError(res, asWebError(error));
       return true;
     });
+  }
+
+  private serveSignatureDirectory(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<boolean> {
+    const authority = String(req.headers.host ?? "")
+      .trim()
+      .toLowerCase();
+    let directory: { body: string; headers: Record<string, string> } | null | undefined;
+    try {
+      directory =
+        this.enabled && authority && /^[a-z0-9.:[\]-]{1,300}$/.test(authority)
+          ? this.options.getSignatureDirectory?.(authority)
+          : undefined;
+    } catch {
+      // An unreadable signing key means no directory is served, not an error page.
+      directory = undefined;
+    }
+    if (!directory) return Promise.resolve(false);
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(405, { Allow: "GET, HEAD" });
+      res.end();
+      return Promise.resolve(true);
+    }
+    res.writeHead(200, { ...directory.headers, "X-Content-Type-Options": "nosniff" });
+    res.end(req.method === "HEAD" ? undefined : directory.body);
+    return Promise.resolve(true);
   }
 
   async handleUpgrade(

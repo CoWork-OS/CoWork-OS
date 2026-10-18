@@ -5400,6 +5400,22 @@ if (isMacSafeStorageMigrationWorker) {
       service: getBrowserWorkbenchService(),
       downloads: getBrowserDownloadManager(),
       sessionFromPartition: (partition) => session.fromPartition(partition),
+      confirmAgentKeyRotation: async () => {
+        const options: Electron.MessageBoxOptions = {
+          type: "warning",
+          buttons: ["Create new key", "Cancel"],
+          defaultId: 1,
+          cancelId: 1,
+          message: "Create a new agent identity key?",
+          detail:
+            "Sites verify CoWork's signatures with the key in your published directory. Publish the new directory before sites see the new key; the old key stays listed for 7 days.",
+        };
+        const result =
+          mainWindow && !mainWindow.isDestroyed()
+            ? await dialog.showMessageBox(mainWindow, options)
+            : await dialog.showMessageBox(options);
+        return result.response === 0;
+      },
     });
     const isVaultOwner = (event: Any) =>
       Boolean(

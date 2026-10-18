@@ -60,6 +60,7 @@ function defaultMockDb(overrides: {
   pricingRows?: unknown[];
   awuCount?: number;
   awuTaskRows?: unknown[];
+  interventionRow?: Record<string, number>;
 }) {
   const {
     llmRows = [],
@@ -75,6 +76,7 @@ function defaultMockDb(overrides: {
     globalLlmErrorResult = { c: 0 },
     pricingRows = [],
     awuCount = 0,
+    interventionRow = {},
     awuTaskRows = Array.from({ length: awuCount }, (_, index) => ({
       completed_at: Date.now() - index * 1000,
     })),
@@ -83,6 +85,12 @@ function defaultMockDb(overrides: {
     prepare: (sql: string) => {
       if (isPricingQuery(sql)) {
         return { all: () => pricingRows, get: () => ({ count: 0 }) };
+      }
+      if (sql.includes(" as outcome")) {
+        return { all: () => awuTaskRows, get: () => ({ count: 0 }) };
+      }
+      if (sql.includes("approval_decisions")) {
+        return { all: () => [], get: () => interventionRow };
       }
       if (sql.includes("FROM jev_call_events")) {
         return { all: () => jevRows, get: () => ({ count: 0 }) };
@@ -169,18 +177,24 @@ describe("UsageInsightsService", () => {
     vi.useRealTimers();
   });
 
-  it("counts legacy completed tasks with NULL terminal_status as AWUs", () => {
+  it("counts legacy completed tasks with NULL terminal_status as AWUs, not as verified", () => {
+    const now = Date.now();
     const db = {
       prepare: (sql: string) => ({
-        all: () => [],
+        all: () => {
+          if (!sql.includes(" as outcome")) return [];
+          expect(sql).toContain("completed_at >= ? AND completed_at <= ?");
+          expect(sql).not.toContain("created_at >= ? AND created_at <= ?");
+          return sql.includes("terminal_status IS NULL")
+            ? [
+                { completed_at: now - 1_000, outcome: "other" },
+                { completed_at: now - 2_000, outcome: "other" },
+              ]
+            : [];
+        },
         get: () => {
           if (isPricingQuery(sql)) return { count: 0 };
           if (isLlmErrorQuery(sql)) return { c: 0 };
-          if (sql.includes("COUNT(*) as count FROM tasks")) {
-            expect(sql).toContain("completed_at >= ? AND completed_at <= ?");
-            expect(sql).not.toContain("created_at >= ? AND created_at <= ?");
-            return { count: sql.includes("terminal_status IS NULL") ? 2 : 1 };
-          }
           return { count: 0 };
         },
       }),
@@ -192,6 +206,55 @@ describe("UsageInsightsService", () => {
     const insights = service.generate("ws-1", 7);
 
     expect(insights.awuMetrics.awuCount).toBe(2);
+    expect(insights.awuMetrics.verifiedCount).toBe(0);
+  });
+
+  it("divides cost by verified units and counts partial and needs-action units apart", () => {
+    const now = Date.now();
+    const db = defaultMockDb({
+      llmRows: [
+        {
+          task_id: "task-ok",
+          timestamp: now - 1_000,
+          payload: JSON.stringify({
+            providerType: "openrouter",
+            modelKey: "gpt-5.4",
+            delta: { inputTokens: 100, outputTokens: 50, cost: 0.3 },
+          }),
+        },
+      ],
+      awuTaskRows: [
+        { completed_at: now - 3_000, outcome: "verified_contract" },
+        { completed_at: now - 2_000, outcome: "partial" },
+        { completed_at: now - 1_000, outcome: "needs_user_action" },
+      ],
+      interventionRow: {
+        approval_decisions: 2,
+        input_answers: 1,
+        steering_messages: 0,
+        provider_escalations: 1,
+        rework_runs: 0,
+      },
+    });
+    const service = new UsageInsightsService(
+      db as ConstructorParameters<typeof UsageInsightsService>[0],
+    );
+    const awu = service.generate("ws-1", 7).awuMetrics;
+
+    expect(awu).toMatchObject({
+      awuCount: 3,
+      verifiedCount: 1,
+      verifiedByContractCount: 1,
+      partialCount: 1,
+      needsUserActionCount: 1,
+    });
+    expect(awu.costPerVerifiedAwu).toBeCloseTo(0.3);
+    expect(awu.costPerAwu).toBeCloseTo(0.1);
+    expect(awu.interventions).toMatchObject({
+      humanInterventions: 3,
+      providerEscalations: 1,
+      perCompletedUnit: 1,
+    });
   });
 
   it("builds a daily AWU efficiency series for the chart", () => {

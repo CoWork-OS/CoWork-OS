@@ -6,7 +6,7 @@
     "runtimeImport"
   ],
   "totals": {
-    "prepare": 1654,
+    "prepare": 1653,
     "getDatabase": 128,
     "runtimeImport": 49
   },
@@ -401,7 +401,7 @@
       "runtimeImport": 1
     },
     "src/electron/reports/UsageInsightsService.ts": {
-      "prepare": 40,
+      "prepare": 39,
       "runtimeImport": 1
     },
     "src/electron/routines/routine-sql.ts": {

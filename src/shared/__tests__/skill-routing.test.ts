@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import type { CustomSkill } from "../types";
 import {
@@ -94,6 +95,83 @@ describe("production skill routing", () => {
       expect(matchesSkillRoutingQuery(skill("gemini"), query)).toBe(false);
     },
   );
+
+  it.each([
+    "Use Gemini in one-shot mode to summarize this text.",
+    "Run Gemini CLI in read-only mode.",
+    "Use Gemini without editing any files.",
+    "Use Gemini as a second reviewer.",
+  ])("retains clear grammatical continuations after an explicit target: %s", (query) => {
+    expect(matchesSkillRoutingQuery(skill("gemini", { name: "Gemini" }), query)).toBe(true);
+  });
+
+  it.each([
+    "Run atlas-cli under the normal sandbox.",
+    "Use atlas-cli against a local fixture.",
+    "Use atlas-cli via the existing authenticated session.",
+  ])("applies grammatical continuations to other skill names too: %s", (query) => {
+    const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(
+      matchesExplicitSkillInvocationPhrase(
+        normalizeSkillInvocationText(query),
+        "atlas cli",
+        escape,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    "Run Gemini init",
+    "Use Gemini browser app to summarize this text.",
+    "Explain how to use Gemini in one-shot mode.",
+    "Use when the user asks to run Gemini in read-only mode.",
+    "Do not use Gemini without a review.",
+    "Do not ever use Gemini in one-shot mode.",
+    "Don't automatically run Gemini CLI in read-only mode.",
+    "Never silently invoke the Gemini skill.",
+    "Use Gemini in one-shot mode. Do not ever use Gemini.",
+  ])("does not admit subcommands, descriptions or negated modifier requests: %s", (query) => {
+    expect(matchesSkillRoutingQuery(skill("gemini", { name: "Gemini" }), query)).toBe(false);
+  });
+
+  it("allows an affirmative request after an adverb-modified prohibition", () => {
+    expect(
+      matchesSkillRoutingQuery(
+        skill("gemini", { name: "Gemini" }),
+        "Do not ever use Gemini for edits. Use Gemini in one-shot mode to summarize this text.",
+      ),
+    ).toBe(true);
+    expect(
+      matchesSkillRoutingQuery(
+        skill("gemini", { name: "Gemini" }),
+        'Use Gemini to summarize the sentence "Do not ever use Gemini".',
+      ),
+    ).toBe(true);
+  });
+
+  it("handles repeated negation modifiers in a bounded child without hiding later invocations", () => {
+    const source = new URL("../skill-routing/index.ts", import.meta.url).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `
+      import { matchesSkillRoutingQuery } from ${JSON.stringify(source)};
+      const skill = { id: "gemini", name: "Gemini" };
+      const prefix = "Do not " + "only ".repeat(30);
+      process.stdout.write(JSON.stringify([
+        matchesSkillRoutingQuery(skill, prefix + "use another tool. Use Gemini to review."),
+        matchesSkillRoutingQuery(skill, prefix + "use Gemini to review.")
+      ]));
+    `,
+      ],
+      { encoding: "utf8", timeout: 1000 },
+    );
+    expect(result.error, result.error?.message).toBeUndefined();
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([true, false]);
+  });
 
   it.each([
     ["gemini", "Gemini", "Do not use Gemini. The Gemini skill requires a key."],

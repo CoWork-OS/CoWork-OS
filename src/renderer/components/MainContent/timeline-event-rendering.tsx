@@ -1329,7 +1329,7 @@ export function renderEventDetails(
         ? planSteps.filter(
             (step: Payload) =>
               !isVerificationStepDescription(
-                typeof step.description === "string" ? step.description : "",
+                typeof step?.description === "string" ? step.description : "",
               ),
           )
         : planSteps;

@@ -112,8 +112,11 @@ export default class ElkWorkerAdapter implements ELK {
   constructor(private readonly options: ELKConstructorArguments = {}) {}
 
   layout(graph: ElkNode, args?: ElkLayoutArguments): Promise<ElkNode> {
-    return this.run(async (elk) => {
+    return this.run(async (elk, isActive) => {
       const result = await elk.layout(workerData(graph) as ElkNode, args);
+      // The RPC client defers replies through setTimeout. Terminating its worker
+      // cannot retract an already queued reply, which must not mutate the input.
+      if (!isActive()) throw new DOMException("ELK worker terminated.", "AbortError");
       // The former bundled fake worker mutated the graph in place. Restore
       // that behavior, retaining functions/DOM metadata which ELK never uses.
       return restoreLayoutData(result, graph) as ElkNode;
@@ -137,7 +140,7 @@ export default class ElkWorkerAdapter implements ELK {
     for (const cancel of this.pending) cancel();
   }
 
-  private run<T>(operation: (elk: ELK) => Promise<T>): Promise<T> {
+  private run<T>(operation: (elk: ELK, isActive: () => boolean) => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       let worker: Worker | undefined;
       let settled = false;
@@ -172,7 +175,7 @@ export default class ElkWorkerAdapter implements ELK {
             return worker;
           },
         });
-        operation(elk).then(
+        operation(elk, () => !settled).then(
           (value) => finish(true, value),
           (error: unknown) => finish(false, error),
         );

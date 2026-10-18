@@ -108,7 +108,7 @@ export function matchesExplicitSkillInvocationPhrase(
   const quotedPhrase = `(?:["'“”‘’])?${phrasePattern}(?:["'“”‘’])?`;
   const commandTarget = `${quotedPhrase}(?:\\s+cli)?`;
   // Following command/subskill words are part of the task, not this shorter name.
-  const endOfTarget = `(?=\\s*(?:$|[.,;:!?]|--?[a-z0-9]|\\b(?:to|for|on|with|and|please|now)\\b))`;
+  const endOfTarget = `(?=\\s*(?:$|[.,;:!?]|--?[a-z0-9]|\\b(?:to|for|on|with|and|please|now|in|without|as|using|under|while|from|against|after|before|via|during)\\b))`;
   const activationPatterns = [
     `(?:^|[^a-z0-9])${EXPLICIT_SKILL_ACTIVATION_CUE}\\s+(?:the\\s+)?${commandTarget}(?:\\s+skill)?${endOfTarget}`,
     `(?:^|[^a-z0-9])${EXPLICIT_SKILL_ACTIVATION_CUE}\\s+(?:the\\s+)?skill\\s+${commandTarget}${endOfTarget}`,
@@ -234,8 +234,9 @@ function isRoutingPhraseExcluded(query: string, phrase: string): boolean {
   if (!phrasePattern) return false;
   const normalized = normalizeRoutingPhrase(query);
   const target = `(?:the\\s+)?(?:skill\\s+)?${phrasePattern}(?:\\s+skill)?`;
+  const modifiers = `(?:(?:ever|even|just|still|yet|always|again|[a-z]+ly)\\s+)*`;
   return [
-    `(?:do\\s+not|don['’]t|never|avoid)\\s+(?:(?:${EXPLICIT_SKILL_ACTIVATION_CUE}|using|running|calling|invoking|activating|applying)\\s+)?${target}`,
+    `(?:do\\s+not|don['’]t|never|avoid)\\s+${modifiers}(?:(?:${EXPLICIT_SKILL_ACTIVATION_CUE}|using|running|calling|invoking|activating|applying)\\s+)?${target}`,
     `outside\\s+${target}(?:['’]s)?\\s+(?:scope|domain)`,
     `outside\\s+(?:the\\s+)?(?:scope|domain)\\s+of\\s+${target}`,
   ].some((pattern) => new RegExp(`(?:^|[^a-z0-9])${pattern}(?:$|[^a-z0-9])`, "i").test(normalized));

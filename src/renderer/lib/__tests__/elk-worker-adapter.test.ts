@@ -181,6 +181,34 @@ describe("ELK worker adapter lifecycle", () => {
     expect(constructor).toHaveBeenCalledOnce();
   });
 
+  it("does not restore an already queued RPC reply into a graph after cancellation", async () => {
+    const callback = () => "render";
+    const metadata = { callback, owner: "original" };
+    const node = { id: "child", width: 40, height: 30, metadata };
+    const graph = { id: "root", width: 100, children: [node], metadata };
+    const { elk, workers } = controlledElk();
+    const pending = elk.layout(graph);
+    const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    // This reaches the real ELK RPC client's onmessage handler, which queues
+    // delivery through setTimeout. Cancel after delivery but before it resolves.
+    workers[0].reply(1, {
+      id: "root",
+      width: 999,
+      children: [{ id: "child", width: 888, metadata: { owner: "stale" } }],
+      metadata: { owner: "stale" },
+    });
+    elk.terminateWorker();
+    await rejection;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(graph.width).toBe(100);
+    expect(graph.children[0]).toBe(node);
+    expect(node.width).toBe(40);
+    expect(graph.metadata).toBe(metadata);
+    expect(node.metadata).toBe(metadata);
+    expect(metadata).toEqual({ callback, owner: "original" });
+    expect(workers[0].terminate).toHaveBeenCalledOnce();
+  });
+
   it("preserves synchronous transport errors and releases the created worker", async () => {
     const worker = new ControlledWorker();
     const failure = new DOMException("Graph is not cloneable", "DataCloneError");

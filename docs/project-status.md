@@ -21,6 +21,19 @@ CoWork OS is a **free, open-source, security-first, GUI-first, CLI-capable AI su
 
 ## What's Built and Working
 
+### Added in 0.5.61
+
+- [x] One-line installs: `curl -fsSL https://coworkosapp.com/install.sh | bash` (macOS) and `irm https://coworkosapp.com/install.ps1 | iex` (Windows, checksum-verified silent per-user install)
+- [x] **Continue with OpenRouter** onboarding: a first task with free models and no API key to copy
+- [x] Import from Hermes Agent and OpenClaw (`cowork import --from hermes|openclaw`, Settings > Import), and a local Hermes as an ACP agent
+- [x] Today, Work and Team in the Calm theme, with one needs-you queue
+- [x] Bots with their own computer, memory and model
+- [x] In-app browser with native tabs, downloads, history, site permissions and private login autofill
+- [x] Remote MCP servers with OAuth, 43 hosted connectors and MCP Events
+- [x] GLM-5.3 and Kimi K3 model routes, and reasoning kept out of replies for Ollama and OpenAI-compatible models
+
+See [Release Notes 0.5.61](release-notes-0.5.61.md).
+
 ### Added in 0.5.60
 
 - [x] Memory folder: what CoWork knows about you and your workspaces as markdown notes in a local git repo (`~/CoWork Memory`), with daily Dreaming, review and undo, private git sync, read-only team memory, and four memory tools (`memory_recall`, `memory_remember`, `memory_forget`, `context_recall`)

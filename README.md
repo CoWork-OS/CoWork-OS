@@ -107,7 +107,7 @@ Use `--from openclaw` for OpenClaw, or **Settings > Import** in the app; first-r
 | [Security Guide](docs/security-guide.md) | Threat model, guardrails, sandboxing, credential storage |
 | [Self-Hosting](docs/self-hosting.md) | Linux server, Docker and remote access |
 | [Development](docs/development.md) | Build from source and run the tests |
-| [All docs](docs/) · [Changelog](CHANGELOG.md) · [Release Notes 0.5.60](docs/release-notes-0.5.60.md) | |
+| [All docs](docs/) · [Changelog](CHANGELOG.md) · [Release Notes 0.5.61](docs/release-notes-0.5.61.md) | |
 
 ## Community
 

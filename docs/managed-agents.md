@@ -70,6 +70,8 @@ Session methods:
 - `managedSession.resume`
 - `managedSession.sendEvent`
 - `managedSession.events.list`
+- `managedSession.exportHandoff`
+- `managedSession.importHandoff`
 
 Managed-session broadcasts:
 
@@ -155,6 +157,81 @@ Managed Agents follows the same security posture as the rest of CoWork, with a f
 - legacy tasks, runs, and team APIs are unchanged for non-managed flows
 
 These rules keep the managed control-plane surface suitable for UI/backend consumption without exposing sensitive linkage or silently broadening tool access.
+
+## Durable Session Handoffs
+
+A handoff package carries an in-progress session to a new managed session, on the same
+installation or another one. It is an open, versioned JSON format that you own. It never carries
+credentials, cookies, live processes or granted approvals.
+
+### What the package contains
+
+Export writes `<workspace>/.cowork/handoffs/<package-id>/`:
+
+```text
+manifest.json          kind "cowork.session-handoff", schemaVersion 1
+artifacts/<path>       copies of the files the session wrote, checked by sha256
+```
+
+`.cowork/handoffs/` gets its own `.gitignore` (`*`) so packages, which contain transcript
+excerpts, are not committed by accident.
+
+| Part                     | What survives                                                                                       |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| Goal and requirements    | The objective and each requirement with its status (pending, satisfied, failed, waived)             |
+| Decisions                | Active decisions, constraints and unverified assumptions, plus reversed (superseded) decisions      |
+| Pending waits            | Approvals and input the session was still waiting for, as reasons only                              |
+| Evidence                 | Claims, sources, capture time, freshness window and status                                         |
+| Files                    | The latest committed revision per path, copied only if its bytes still match the session record    |
+| Completed side effects   | Keys of tool calls the session already completed, so the new session does not repeat them          |
+| Transcript               | Up to 200 recent messages and tool-call names, each at most 2,000 characters                        |
+| Checkpoint               | The latest transcript checkpoint summary, at most 8,000 characters                                 |
+
+Every string is redacted with the WorkSession redaction rules, ledger entries marked
+`secret_redacted` and sensitive transcript items are dropped, and `checksum` is the sha256 of the
+canonical JSON of all other fields. Size limits: 8 MB manifest, 16 MB per file, 64 MB per package.
+
+### Export
+
+- Mission Control: open a task and choose **Export handoff**.
+- CLI: `cowork handoff export <managedSessionId>` or `cowork handoff export --task <taskId>`,
+  optionally `--out <dir inside the workspace>`.
+- Control Plane: `managedSession.exportHandoff` with `{ sessionId }` or `{ taskId }` (admin scope).
+
+A file that changed after the session recorded it is listed with `copied: false` and a warning;
+it is not copied. Files outside the workspace, symlinked paths and unsafe names are skipped.
+
+### Import and resume
+
+Copy the package folder into the target workspace's `.cowork/handoffs/`, then:
+
+- CLI: `cowork handoff import <package dir or manifest.json> --environment <environmentId>`
+  (`--agent <agentId>` when the source agent does not exist on this installation).
+- Control Plane: `managedSession.importHandoff` with `{ manifestPath, environmentId, agentId? }`.
+
+Import:
+
+1. reads the manifest only from inside the target environment's workspace, validates the schema,
+   and rejects it if the checksum does not match (an edited manifest is refused);
+2. restores each copied file after checking its size and sha256; a mismatching or symlinked copy
+   is skipped and reported, and an existing different file is kept, never overwritten;
+3. creates a new managed session whose first message contains the package summary inside a
+   `BEGIN HANDOFF PACKAGE … END HANDOFF PACKAGE` block marked as data, not instructions;
+4. seeds the new session's contract: decisions and constraints (reversals included), earlier
+   requirements with their status, restored files as artifact revisions;
+5. turns each pending approval or input into a new pending wait on the new session. Nothing the
+   earlier session asked for is granted; the new session asks again, and the carried-over wait is
+   closed when the new task finishes;
+6. records lineage: `resumedFromSessionId` when the source session exists on this installation,
+   and a `handoff.imported` session event with the package id and source session ids.
+
+Normal access profiles, approvals, connector policy and provider settings apply to the resumed run.
+
+Implementation: `src/electron/managed/session-handoff.ts` (manifest build, verification, import
+message), `src/electron/managed/session-handoff-io.ts` (containment, copies, restore) and
+`ManagedSessionService.exportHandoff` / `importHandoff`. Tests:
+`src/electron/managed/__tests__/ManagedSessionService.handoff.test.ts` and the `handoff`
+replay fixture in `src/electron/sessions/WorkSessionReplayEvaluationService.ts`.
 
 ## Current UI State
 

@@ -155,7 +155,8 @@ function stableCanonicalize(value: unknown): unknown {
   return value;
 }
 
-function stableChecksum(value: unknown): string {
+/** sha256 of the canonical (key-sorted) JSON of a value. */
+export function stableChecksum(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(stableCanonicalize(value)))
     .digest("hex");

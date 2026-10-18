@@ -79,7 +79,7 @@ Read [Upgrade notes](#upgrade-notes) before upgrading: channel pairings are rese
 
 ## Fixes
 
-Highlights from this release's fixes: provider requests trust the operating system's certificate roots, provider errors and empty replies stay failures with the reason above the composer, saving LLM settings no longer erases stored keys, **Clear memory** no longer fails with `database is locked`, MCP servers that require `initialize` first connect on the first try, startup no longer fails with "Database worker queue is full", and many fixes to verification, document outputs, drafts, the sidebar and the task view found in live workflow runs.
+Highlights from this release's fixes: explicit skill requests route reliably and export-risk approvals explain the risk and keep denials recorded, the renderer bundle loads optional views on demand with no chunk over 500 kB, provider requests trust the operating system's certificate roots, provider errors and empty replies stay failures with the reason above the composer, saving LLM settings no longer erases stored keys, **Clear memory** no longer fails with `database is locked`, MCP servers that require `initialize` first connect on the first try, startup no longer fails with "Database worker queue is full", and many fixes to verification, document outputs, drafts, the sidebar and the task view found in live workflow runs.
 
 The [Changelog](changelog.md) lists every change in this release.
 

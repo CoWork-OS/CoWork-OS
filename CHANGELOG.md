@@ -123,6 +123,8 @@ See [Release Notes 0.5.61](docs/release-notes-0.5.61.md) for the upgrade notes a
 - **Code sandbox JSON helpers**: `json_parse` and `json_dumps` in the code sandbox no longer crash on `undefined`, functions or symbols (they become `null`), large integers keep their digits, and circular values or a failing `toJSON` raise a clear "not JSON serializable" error instead of returning text that looked like `null`. Contributed by @umairnaeem0309 (#628).
 - **LOOM email on IPv6 loopback**: LOOM base URLs such as `http://[::1]:8787` are accepted; the check now uses the app's shared loopback classifier, so every local spelling (`localhost`, `127.0.0.0/8`, `[::1]`, `*.localhost`) is treated the same. Contributed by @umairnaeem0309 (#629).
 - **Voice readout of identifiers and images**: spoken replies keep names like `__init__` and file paths with underscores intact, skip image alt text instead of reading a stray `!`, and no longer leave double spaces where markup was removed. Contributed by @yuefdev (#684).
+- **Skill routing, export-risk cards and diagrams**: explicit skill requests survive modifiers and negations without misfiring on manual-only or retired skills; export-risk approvals explain the risk and a denial stays recorded; unavailable device health is shown as unavailable instead of healthy; Live Canvas keeps all four console severities; Mermaid diagrams no longer leave orphaned error graphics, and large ELK layouts run in a worker that a cancelled diagram can't be changed by (#688).
+- **Smaller renderer bundle**: optional UI and conversation history load on demand, so no built chunk exceeds the 500 kB limit; all Mermaid diagram types and the full ELK layout engine are kept (#688).
 
 ### Security
 

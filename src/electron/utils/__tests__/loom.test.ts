@@ -21,6 +21,13 @@ describe("isLocalhostHost", () => {
     }
   });
 
+  it("agrees with the shared loopback classifier on 127/8, mapped and .localhost", () => {
+    for (const host of ["127.0.0.2", "[::ffff:7f00:1]", "foo.localhost"]) {
+      expect(isLocalhostHost(host)).toBe(true);
+    }
+    expect(isSecureOrLocalLoomUrl("http://[::ffff:127.0.0.1]:8787")).toBe(true);
+  });
+
   it("rejects remote hosts and empty input", () => {
     for (const host of ["example.com", "::2", "10.0.0.1", ""]) {
       expect(isLocalhostHost(host)).toBe(false);

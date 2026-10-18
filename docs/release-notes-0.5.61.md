@@ -58,6 +58,7 @@ Read [Upgrade notes](#upgrade-notes) before upgrading: channel pairings are rese
 - **Mission Control and agents** — The Agents tab is gone; the header link opens Team (Calm) or the Bots page, and an agent's full settings open from **Edit agent** in Team or **More settings** in the Bots page.
 - **Execution overrides** — Saved Analyze, Debug and Verified pins behave as **Do**; **Plan** is the only pin left.
 - **Sub-agents** — The composer strip is replaced by a **Subagents** roster in the right panel, sessions with sub-agents start collapsed in the sidebar, and sub-agent usage stats are opt-in (**Settings > Appearance > Task panel**).
+- **Desktop alerts** — Alerts go only through the system notification center; CoWork's own banner and the **Notification style** setting are gone. If notifications are off for CoWork OS in **System Settings > Notifications**, or the system refuses them, you won't see a desktop banner, but every alert still appears in the in-app inbox.
 - **Calm stays opt-in** — Today, Work and Team are part of the Calm theme; the default theme is unchanged.
 
 ### Removed features

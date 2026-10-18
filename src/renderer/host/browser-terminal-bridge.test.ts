@@ -319,13 +319,13 @@ describe("browser terminal bridge", () => {
     await expect(h.methods.createTerminalTab(request)).rejects.toMatchObject({
       code: "OUTCOME_UNKNOWN",
     });
-    const firstKey = (h.calls[0]?.options as { operationKey: string }).operationKey;
+    const firstKey = (h.calls[0].options as { operationKey: string }).operationKey;
     await expect(
       h.methods.createTerminalTab({ ...request, title: "Changed request" }),
     ).rejects.toThrow("previous terminal action is unconfirmed");
     const created = await h.methods.createTerminalTab(request);
     expect(created.id).toBe("tab-1");
-    const secondKey = (h.calls.at(-1)?.options as { operationKey: string }).operationKey;
+    const secondKey = (h.calls.at(-1)!.options as { operationKey: string }).operationKey;
     expect(secondKey).toBe(firstKey);
     h.bridge.dispose();
   });

@@ -81,7 +81,7 @@ describe("TeamsGraphClient", () => {
     };
     const calls: string[] = [];
     const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      const auth = (init?.headers as Record<string, string>).Authorization;
+      const auth = new Headers(init?.headers).get("Authorization") ?? "";
       calls.push(auth);
       if (auth === "Bearer old")
         return json({ error: { code: "InvalidAuthenticationToken" } }, 401);

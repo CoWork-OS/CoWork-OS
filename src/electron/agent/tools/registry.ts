@@ -197,7 +197,6 @@ import { isThirdPartyGatewayTask } from "../../gateway/gateway-sender-identity";
 import { rememberPreferredNameInFolder } from "../../memory/repo/memory-repo-producers";
 import { createLogger } from "../../utils/logger";
 import { CitationTracker } from "../citation/CitationTracker";
-import { OrchestrationRepository } from "../orchestration-repository-facades";
 import {
   canonicalizeToolName as canonicalizeToolNameUtil,
   getToolSemantics as getToolSemanticsUtil,
@@ -14983,7 +14982,7 @@ ${skillDescriptions}`;
     await agentRoleRepo.updateHeartbeatConfig(role.id, config);
 
     // Notify the HeartbeatService singleton to cancel or reschedule
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const { getHeartbeatService } = require("../../agents/HeartbeatService");
     const heartbeatService = getHeartbeatService();
     if (heartbeatService) {

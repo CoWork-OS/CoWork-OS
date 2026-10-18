@@ -45,6 +45,7 @@ vi.mock("../../../settings/personality-manager", () => ({
 
 // Mock skills storage
 let mockSkills: Map<string, CustomSkill> = new Map();
+const mockSkillStatusEntry = vi.fn().mockResolvedValue(null);
 
 function toRuntimeDescriptor(skill: CustomSkill) {
   return {
@@ -171,7 +172,7 @@ vi.mock("../../custom-skill-loader", () => ({
     getRuntimeSkillDescriptor: vi
       .fn()
       .mockImplementation((skill: CustomSkill) => toRuntimeDescriptor(skill)),
-    getSkillStatusEntry: vi.fn().mockResolvedValue(null),
+    getSkillStatusEntry: mockSkillStatusEntry,
     matchesSkillRoutingQuery: vi
       .fn()
       .mockImplementation((skill: CustomSkill, query: string) =>
@@ -387,6 +388,7 @@ describe("Skill tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSkills.clear();
+    mockSkillStatusEntry.mockReset().mockResolvedValue(null);
     mockPersonalitySettings = {};
 
     mockWorkspace = createMockWorkspace();
@@ -628,6 +630,89 @@ describe("Skill tool", () => {
         }),
       );
     });
+
+    it.each([
+      ["gog", "Use the gog skill for this request."],
+      ["gog", "Help me with gog."],
+      [
+        "gog",
+        "Use when the user asks to use the Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Tasks, Sheets, Docs, or Slides.",
+      ],
+      ["gog", "Gog: provide an actionable result."],
+      ["himalaya", "Use the himalaya skill for this request."],
+      ["himalaya", "Help me with himalaya."],
+      [
+        "himalaya",
+        "Use when the user asks to cLI to manage emails via IMAP/SMTP. Use himalaya to list, read, write, reply, forward, search, and organize emails from the terminal. Supports multiple accounts and message composition with MML MIME Meta Language.",
+      ],
+      ["himalaya", "Himalaya: provide an actionable result."],
+    ])(
+      "keeps automatic triggers blocked but loads actual user-only skill guidance for: %s / %s",
+      async (id, query) => {
+        const actualFs = await vi.importActual<typeof import("fs")>("fs");
+        const skill = JSON.parse(
+          actualFs.readFileSync(path.resolve("resources/skills", `${id}.json`), "utf8"),
+        ) as CustomSkill;
+        mockSkills.set(id, skill);
+        mockDaemon.getTaskById.mockResolvedValue({
+          id: "test-task-123",
+          title: skill.name,
+          prompt: query,
+          rawPrompt: query,
+          userPrompt: query,
+        });
+        const shell = vi
+          .spyOn((registry as Any).shellTools, "runCommand")
+          .mockRejectedValue(new Error("A skill loading test must never execute its CLI"));
+
+        expect(skill.enabled).toBe(true);
+        expect(toRuntimeDescriptor(skill)).toMatchObject({
+          disableModelInvocation: true,
+          userInvocable: true,
+        });
+        for (const trigger of ["model", "planner", "explicit_hint"] as const) {
+          const result = await registry.executeTool("Skill", { skill: id, trigger });
+          expect(result).toMatchObject({ success: false });
+          expect(result.error).toContain("cannot be invoked automatically");
+          expect(result).not.toHaveProperty("skill_invocation_id");
+        }
+        expect(mockSkillStatusEntry).not.toHaveBeenCalled();
+
+        // Represent installed prerequisites without running a binary or contacting an account.
+        mockSkillStatusEntry.mockResolvedValue({
+          ...skill,
+          eligible: true,
+          disabled: false,
+          blockedByAllowlist: false,
+          requirements: {
+            bins: skill.requires?.bins || [],
+            anyBins: [],
+            env: [],
+            config: [],
+            os: [],
+          },
+          missing: { bins: [], anyBins: [], env: [], config: [], os: [] },
+        });
+        vi.spyOn(registry, "getTools").mockReturnValue([
+          ...registry.getTools(),
+          {
+            name: "run_command",
+            description: "Synthetic CLI prerequisite; this test only loads instructions.",
+            input_schema: { type: "object", properties: {} },
+          },
+        ]);
+        const result = await registry.executeTool("Skill", { skill: id, trigger: "slash" });
+        const loaded = takeResolvedSkill(result);
+        expect(result.success).toBe(true);
+        expect(loaded).toMatchObject({
+          skillId: id,
+          trigger: "slash",
+          content: skill.prompt.trim(),
+        });
+        expect(mockSkillStatusEntry).toHaveBeenCalledWith(id);
+        expect(shell).not.toHaveBeenCalled();
+      },
+    );
 
     it("should log skill invocation event", async () => {
       const skill = createTestSkill({ id: "logged-skill" });

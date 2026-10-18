@@ -26,7 +26,6 @@ import {
 } from "../database/repositories";
 import {
   WorkSessionContractRepository,
-  type ArtifactRevisionInput,
   type ChildSessionLinkInput,
   type EvidenceManifestEntryInput,
   type OutcomeContractRequirementInput,

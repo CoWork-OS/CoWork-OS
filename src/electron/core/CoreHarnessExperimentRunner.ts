@@ -144,13 +144,13 @@ export class CoreHarnessExperimentRunner {
       await this.automationProfileRepo.update({
         id: experiment.profileId,
         ...(experiment.proposal as Record<string, unknown>),
-      } as any);
+      });
     } else if (experiment.changeKind === "subconscious_settings") {
       const current = SubconsciousSettingsManager.loadSettings();
       SubconsciousSettingsManager.saveSettings({
         ...current,
         ...(experiment.proposal as Record<string, unknown>),
-      } as any);
+      });
     } else {
       throw new Error("Memory-policy experiments are review-only in the current phase");
     }

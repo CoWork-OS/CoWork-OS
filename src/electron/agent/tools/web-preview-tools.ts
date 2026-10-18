@@ -1,4 +1,6 @@
+import type { Event, WebContentsConsoleMessageEventParams } from "electron";
 import { randomUUID } from "crypto";
+import { createRequire } from "node:module";
 import * as fsSync from "fs";
 import * as path from "path";
 import type { LLMTool } from "../llm/types";
@@ -35,9 +37,12 @@ export type WebPreviewAction =
 
 type ConsoleEntry = { level: "error" | "warning"; message: string; source?: string };
 
+// A synchronous optional dependency: CLI/server distributions do not ship Electron.
+const loadDesktopRuntime = createRequire(__filename);
+
 function requireElectron(): { BrowserWindow: Any; session: Any } {
   try {
-    const runtime = require("electron");
+    const runtime = loadDesktopRuntime("electron");
     if (typeof runtime.BrowserWindow === "function" && runtime.session?.fromPartition) {
       return runtime;
     }
@@ -340,18 +345,15 @@ export class WebPreviewTools {
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
     contents.on("will-navigate", (event: { preventDefault: () => void }) => event.preventDefault());
     contents.on("will-redirect", (event: { preventDefault: () => void }) => event.preventDefault());
-    contents.on(
-      "console-message",
-      (event: { level?: string; message?: string; lineNumber?: number; sourceId?: string }) => {
-        const level = event.level === "error" || event.level === "warning" ? event.level : null;
-        if (!level || consoleMessages.length >= MAX_CONSOLE_MESSAGES) return;
-        consoleMessages.push({
-          level,
-          message: String(event.message ?? "").slice(0, 500),
-          ...(event.sourceId ? { source: `${event.sourceId}:${event.lineNumber ?? 0}` } : {}),
-        });
-      },
-    );
+    contents.on("console-message", (event: Event<WebContentsConsoleMessageEventParams>) => {
+      const level = event.level === "error" || event.level === "warning" ? event.level : null;
+      if (!level || consoleMessages.length >= MAX_CONSOLE_MESSAGES) return;
+      consoleMessages.push({
+        level,
+        message: String(event.message ?? "").slice(0, 500),
+        ...(event.sourceId ? { source: `${event.sourceId}:${event.lineNumber ?? 0}` } : {}),
+      });
+    });
 
     let loadTimer: ReturnType<typeof setTimeout> | undefined;
     try {

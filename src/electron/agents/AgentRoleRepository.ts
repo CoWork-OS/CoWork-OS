@@ -22,7 +22,6 @@ import { normalizeAgentRoleIcon } from "./agent-role-display";
 import { AutomationProfileStore } from "./AutomationProfileRepository";
 import { createLogger } from "../utils/logger";
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
 const logger = createLogger("AgentRoleRepository");
 
 /**
@@ -312,7 +311,7 @@ export class AgentRoleStore {
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
         last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at, works_on,
         desktop_host, desktop_group
-      ) VALUES (${new Array(44).fill("?").join(", ")})
+      ) VALUES (${Array.from({ length: 44 }, () => "?").join(", ")})
     `);
 
     stmt.run(

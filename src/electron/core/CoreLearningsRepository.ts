@@ -2,8 +2,6 @@ import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import type { CoreLearningsEntry, ListCoreLearningsRequest } from "../../shared/types";
 
-type Any = any;
-
 export class CoreLearningsStore {
   constructor(private readonly db: Database.Database) {}
 

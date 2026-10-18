@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import WebSocket from "ws";
+import { isLoopbackHostname } from "../security/address-classes";
 import { createLogger } from "../utils/logger";
 import { McpTunnelForwarder } from "./McpTunnelForwarder";
 import { parseTunnelRelayMessage, serializeTunnelClientMessage } from "./protocol";
@@ -244,7 +245,7 @@ function buildRelayConnectUrl(relayUrl: string, tunnelId: string): string {
   return parsed.toString();
 }
 
-function assertAllowedRelayUrl(relayUrl: string): void {
+export function assertAllowedRelayUrl(relayUrl: string): void {
   const parsed = new URL(relayUrl);
   if (parsed.protocol === "https:") {
     return;
@@ -252,9 +253,7 @@ function assertAllowedRelayUrl(relayUrl: string): void {
   if (parsed.protocol !== "http:") {
     throw new Error("Tunnel relay URL must use HTTPS, or HTTP for loopback development");
   }
-  const hostname = parsed.hostname.toLowerCase();
-  const isLoopback = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-  if (!isLoopback) {
+  if (!isLoopbackHostname(parsed.hostname)) {
     throw new Error("Plain HTTP tunnel relays are only allowed on loopback hosts");
   }
 }

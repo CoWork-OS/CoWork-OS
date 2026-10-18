@@ -232,7 +232,8 @@ function redactUrlQueryCredentials(raw: string): string {
   try {
     const parsed = new URL(raw);
     let changed = false;
-    for (const key of [...parsed.searchParams.keys()]) {
+    // Deleting during live iteration skips adjacent credentials; snapshot the keys.
+    for (const key of Array.from(parsed.searchParams.keys())) {
       if (!isAuthQueryKey(key)) continue;
       parsed.searchParams.delete(key);
       changed = true;
@@ -254,7 +255,8 @@ function hasUrlQueryCredentials(raw: string): boolean {
 function urlTargetWithoutQueryCredentials(raw: string): string | null {
   try {
     const parsed = new URL(raw);
-    for (const key of [...parsed.searchParams.keys()]) {
+    // Deleting during live iteration skips adjacent credentials; snapshot the keys.
+    for (const key of Array.from(parsed.searchParams.keys())) {
       if (isAuthQueryKey(key)) parsed.searchParams.delete(key);
     }
     return parsed.toString();

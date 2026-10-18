@@ -1,4 +1,5 @@
 import { ApprovalDraftReview } from "./ApprovalDraftReview";
+import { ExportRiskReview } from "./ExportRiskReview";
 export { ApprovalDraftPreviewText } from "./ApprovalDraftReview";
 import {
   type ApprovalDraftPreview,
@@ -13,6 +14,7 @@ import type {
   PermissionPromptDetails,
 } from "../../shared/types";
 import { buildApprovalCommandPreview } from "../../shared/approval-command-preview";
+import { sanitizeHistoryUrl } from "../../shared/browser-profile";
 import type { MemoryHubSource } from "../../shared/memory-hub-types";
 import { SOURCE_LABELS } from "./memory/memory-knowledge-model";
 
@@ -145,6 +147,8 @@ function titleForType(type: ApprovalType): string {
       return "Workspace change";
     case "network_access":
       return "Network access";
+    case "data_export":
+      return "Data export";
     case "external_file_access":
       return "External file access";
     case "external_service":
@@ -365,7 +369,11 @@ export function GenericApprovalDialog({
   if (url) {
     rows.push({
       label: "URL",
-      value: <code className="session-approval-code">{url}</code>,
+      value: (
+        <code className="session-approval-code">
+          {sanitizeHistoryUrl(url) ?? "URL not available"}
+        </code>
+      ),
     });
   }
   if (permissionPrompt?.scopePreview) {
@@ -624,6 +632,8 @@ export function GenericApprovalDialog({
             ))}
           </dl>
         )}
+
+        <ExportRiskReview approval={approval} />
 
         <ApprovalDraftReview
           draft={draft}

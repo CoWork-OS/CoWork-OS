@@ -179,7 +179,7 @@ describe("browser host bridge", () => {
     );
     expect(request.mock.calls[1]?.[0]).toBe("git.stage");
     expect(request.mock.calls[1]?.[2]).toMatchObject({ mutation: true });
-    expect((request.mock.calls[1]?.[2] as { operationKey: string }).operationKey).toEqual(
+    expect((request.mock.calls[1][2] as { operationKey: string }).operationKey).toEqual(
       expect.stringMatching(/^[0-9a-f-]{36}$/),
     );
     dispose();
@@ -834,7 +834,7 @@ describe("browser host bridge", () => {
       ],
     });
     const serializedFieldChanges = JSON.stringify(
-      (saveCall?.[1] as { args: [{ set: unknown[] }] }).args[0].set,
+      (saveCall![1] as { args: [{ set: unknown[] }] }).args[0].set,
     );
     expect(serializedFieldChanges).not.toContain("sk-new-provider-secret");
     dispose();

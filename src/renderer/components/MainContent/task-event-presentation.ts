@@ -13,7 +13,7 @@ import { formatTimelineActivityLabel } from "../../../shared/timeline-v2";
 import { formatUserFacingCompletionSummary } from "../../../shared/task-completion";
 import { TASK_TITLE_MAX_LENGTH, TITLE_ELLIPSIS_REGEX } from "./main-content-constants";
 
-type Any = Record<string, any>;
+type Payload = Record<string, unknown>;
 
 // In non-verbose mode, hide verification noise (verification steps are still executed by the agent).
 export const isVerificationNoiseEvent = (event: TaskEvent): boolean => {
@@ -159,7 +159,7 @@ export const isLowSignalPauseMessage = (
   );
 };
 
-export const getPayloadString = (payload: Any, key: string): string => {
+export const getPayloadString = (payload: Payload, key: string): string => {
   const value = payload?.[key];
   return typeof value === "string" ? value.trim() : "";
 };
@@ -176,22 +176,17 @@ export const getFailureEventText = (event: TaskEvent): string => {
   ].find((value) => value.length > 0);
   if (direct) return direct;
 
-  const result = payload.result && typeof payload.result === "object" ? payload.result : null;
-  const resultError =
-    result && typeof (result as Any).error === "string" ? (result as Any).error.trim() : "";
+  const record = (value: unknown): Payload =>
+    value && typeof value === "object" ? (value as Payload) : {};
+  const resultError = getPayloadString(record(payload.result), "error");
   if (resultError) return resultError;
-
-  const input = payload.input && typeof payload.input === "object" ? payload.input : null;
-  const url = input && typeof (input as Any).url === "string" ? (input as Any).url.trim() : "";
-  const path = input && typeof (input as Any).path === "string" ? (input as Any).path.trim() : "";
+  const input = record(payload.input);
+  const url = getPayloadString(input, "url");
+  const path = getPayloadString(input, "path");
   const tool = getPayloadString(payload, "tool");
   if (tool && (url || path)) return `${tool} failed for ${url || path}`;
   if (url || path) return url || path;
-
-  const step = payload.step && typeof payload.step === "object" ? payload.step : null;
-  return step && typeof (step as Any).description === "string"
-    ? (step as Any).description.trim()
-    : "";
+  return getPayloadString(record(payload.step), "description");
 };
 
 export const eventLooksFailed = (event: TaskEvent): boolean => {

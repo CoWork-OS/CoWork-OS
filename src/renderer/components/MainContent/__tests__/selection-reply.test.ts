@@ -1,27 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { createSelectionQuote, getSelectionReplySource } from "../selection-reply";
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
-
 function fakeSource(dataset: Record<string, string> = {}) {
-  return { dataset, nodeType: 1 } as Any;
+  return { dataset, nodeType: 1 } as unknown as HTMLElement;
 }
 
-function fakeTextNode(source: Any) {
-  return { nodeType: 3, parentElement: { closest: () => source } } as Any;
+function fakeTextNode(source: HTMLElement) {
+  return { nodeType: 3, parentElement: { closest: () => source } } as unknown as Node;
 }
 
-function fakeSelection(text: string, start: Any, end: Any, collapsed = false) {
-  const range = { startContainer: start, endContainer: end, cloneRange: () => range };
+function fakeSelection(text: string, start: Node, end: Node, collapsed = false) {
+  const range: Range = {
+    startContainer: start,
+    endContainer: end,
+    cloneRange: () => range,
+  } as unknown as Range;
   return {
     rangeCount: 1,
     isCollapsed: collapsed,
     toString: () => text,
     getRangeAt: () => range,
-  } as Any;
+  } as unknown as Selection;
 }
 
-const container = { contains: () => true } as Any;
+const container = { contains: () => true } as unknown as HTMLElement;
 
 describe("getSelectionReplySource", () => {
   it("returns the message both ends of the selection share", () => {
@@ -49,7 +51,9 @@ describe("getSelectionReplySource", () => {
     expect(getSelectionReplySource(fakeSelection("   ", node, node), container)).toBeNull();
     expect(getSelectionReplySource(fakeSelection("x", node, node, true), container)).toBeNull();
     expect(
-      getSelectionReplySource(fakeSelection("x", node, node), { contains: () => false } as Any),
+      getSelectionReplySource(fakeSelection("x", node, node), {
+        contains: () => false,
+      } as unknown as HTMLElement),
     ).toBeNull();
   });
 });

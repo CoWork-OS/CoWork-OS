@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { Methods } from "../electron/control-plane/protocol";
 import fs from "node:fs/promises";
@@ -46,7 +47,7 @@ import {
 } from "./direct-runtime";
 import { promptMarker, renderWelcomeScreen } from "./terminal-ui";
 
-type Any = Record<string, any>;
+type Payload = Record<string, unknown>;
 
 interface ParsedArgs {
   command: string;
@@ -355,7 +356,7 @@ function getCliVersion(): string {
   ];
   for (const packageJsonPath of candidates) {
     try {
-      const pkg = require(packageJsonPath) as { version?: string };
+      const pkg = JSON.parse(fsSync.readFileSync(packageJsonPath, "utf8")) as { version?: string };
       if (pkg.version) return pkg.version;
     } catch {
       // Try the next layout; source and dist have different __dirname depth.
@@ -706,7 +707,7 @@ async function workspace(ctx: CommandContext): Promise<number> {
       const name = getFlag(ctx.parsed, "--name") || path.basename(resolved) || "Workspace";
       const payload = await client.request(METHODS.WORKSPACE_CREATE, { name, path: resolved });
       printLinesOrJson(ctx, payload, [
-        `Created workspace: ${formatWorkspace((payload as Any).workspace || {})}`,
+        `Created workspace: ${formatWorkspace((payload as Payload).workspace || {})}`,
       ]);
       return 0;
     }
@@ -757,8 +758,8 @@ async function runTask(ctx: CommandContext): Promise<number> {
         : {}),
     };
     const created = await client.request(METHODS.TASK_CREATE, params, 30000);
-    const task = ((created as Any).task || {}) as TaskLike;
-    const taskId = String((created as Any).taskId || task.id || "");
+    const task = ((created as Payload).task || {}) as TaskLike;
+    const taskId = String((created as Payload).taskId || task.id || "");
     if (ctx.json || hasFlag(ctx.parsed, "--no-follow")) {
       printJson(created);
       return 0;
@@ -888,7 +889,7 @@ function resolveDirectRuntime(): DirectRuntime {
   const scriptPath = path.join(__dirname, "direct-run.js");
   const appPath = path.resolve(__dirname, "..", "..", "..");
   try {
-    const electronBinary = require("electron");
+    const electronBinary: unknown = createRequire(__filename)("electron");
     if (typeof electronBinary === "string" && electronBinary.trim()) {
       return { executable: electronBinary, scriptPath, appPath, usesElectron: true };
     }
@@ -1256,7 +1257,8 @@ async function providers(ctx: CommandContext): Promise<number> {
   try {
     if (sub === "list" || sub === "status") {
       const config = await client.request(METHODS.CONFIG_GET);
-      const llm = (config as Any).llm || {};
+      const rawLlm = (config as Payload).llm;
+      const llm = rawLlm && typeof rawLlm === "object" ? (rawLlm as Payload) : {};
       printLinesOrJson(ctx, llm, formatProviders(llm));
       return 0;
     }
@@ -1919,7 +1921,7 @@ async function resolveWorkspaceId(
     name: named || path.basename(cwd) || "Workspace",
     path: cwd,
   });
-  const workspace = (created as Any).workspace as WorkspaceLike | undefined;
+  const workspace = (created as Payload).workspace as WorkspaceLike | undefined;
   if (!workspace?.id)
     throw new Error("Workspace creation succeeded but no workspace id was returned.");
   process.stdout.write(`Created workspace: ${formatWorkspace(workspace)}\n`);
@@ -1987,7 +1989,7 @@ function formatConfigWarnings(config: unknown): string[] {
   return ["- warnings:", ...warnings.map((warning) => `  - ${warning}`)];
 }
 
-function formatProviders(llm: Any): string[] {
+function formatProviders(llm: Payload): string[] {
   const providers = Array.isArray(llm.providers) ? llm.providers : [];
   const lines = [
     `Current provider: ${llm.currentProvider || "unknown"}`,
@@ -2001,12 +2003,6 @@ function formatProviders(llm: Any): string[] {
 
 function parseLimit(ctx: CommandContext, fallback: number, flag = "--limit"): number {
   return sanitizeLimit(Number(getFlag(ctx.parsed, flag) || fallback), fallback);
-}
-
-function parseDays(ctx: CommandContext, fallback: number): number {
-  const value = Number(getFlag(ctx.parsed, "--days") || fallback);
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(1, Math.min(36500, Math.floor(value)));
 }
 
 function sessionPruneDirectArgs(ctx: CommandContext): string[] {

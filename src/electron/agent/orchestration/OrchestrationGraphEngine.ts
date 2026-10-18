@@ -660,7 +660,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       error,
     };
     const metadata = {
-      ...(current.metadata || {}),
+      ...current.metadata,
       cancellation,
     };
     const updated = await this.repo.updateNodeForCancellation(node.id, requestId, dispatchClaimId, {
@@ -853,7 +853,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       current.status === "failed";
     const status = preserveStatus ? current.status : effectBoundaryEntered ? "blocked" : "failed";
     const metadata = {
-      ...(current.metadata || {}),
+      ...current.metadata,
       dispatchClaim: {
         ...claim,
         phase: effectBoundaryEntered ? "unknown" : "identity_persisted",
@@ -906,7 +906,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
       (latestRun?.status === "running" && current.status === "running" ? "running" : "blocked");
     const cancellationRequested = status === "blocked" || latestRun?.status !== "running";
     const metadata = {
-      ...(current.metadata || {}),
+      ...current.metadata,
       dispatchClaim: {
         ...claim,
         phase: "identity_persisted",
@@ -1030,7 +1030,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
         : "blocked";
     const unknown = !knownTerminal && (!identityKnown || interrupted);
     const metadata = {
-      ...(current.metadata || {}),
+      ...current.metadata,
       dispatchClaim: {
         ...claim,
         phase: identityKnown || knownTerminal ? "identity_persisted" : "unknown",
@@ -1238,7 +1238,7 @@ export class OrchestrationGraphEngine extends EventEmitter {
     const currentClaim = dispatchClaimForNode(current);
     if ((currentClaim?.id || undefined) !== (claim?.id || undefined)) return;
     const metadata = {
-      ...(current.metadata || {}),
+      ...current.metadata,
       dispatchOutcome: "unknown",
       dispatchClaim: claim ? { ...claim, phase: "unknown" as const, error: message } : undefined,
     };

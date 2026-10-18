@@ -26,7 +26,8 @@ function inspect(input: BotArtifactCheckInput): Promise<BotWorkResult["outputs"]
       settled = true;
       clearTimeout(timer);
       void worker.terminate();
-      error ? reject(error) : resolve(value!);
+      if (error) reject(error);
+      else resolve(value!);
     };
     worker.once("message", (value) => finish(undefined, value));
     worker.once("error", (error) =>

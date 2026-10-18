@@ -21,7 +21,14 @@ function scriptPath(name: string): string {
   return path.join(process.cwd(), "resources/skills/llm-wiki/scripts", name);
 }
 
-function runJsonScript(name: string, args: string[]): any {
+function runJsonScript<T extends "wiki-import.mjs" | "wiki-search.mjs" | "wiki-render.mjs">(
+  name: T,
+  args: string[],
+): T extends "wiki-search.mjs"
+  ? { results: Array<Record<string, unknown>> }
+  : T extends "wiki-render.mjs"
+    ? { outputPath: string; specOutputPath: string; metadataPath: string }
+    : { kind: string } {
   const output = execFileSync("node", [scriptPath(name), ...args], {
     cwd: process.cwd(),
     encoding: "utf8",

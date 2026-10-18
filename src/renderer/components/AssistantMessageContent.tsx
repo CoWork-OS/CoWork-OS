@@ -1,3 +1,4 @@
+import type { Components } from "react-markdown";
 import { Suspense } from "react";
 import { LazyMarkdownRenderer } from "./lazy-renderers";
 import { InlineHtmlPreview, InlineHtmlSourcePreview } from "./InlineHtmlPreview";
@@ -16,7 +17,7 @@ import { CodeBlockRunScopeContext, type CodeBlockRunTarget } from "../utils/code
 
 type AssistantMessageContentProps = {
   message: string;
-  markdownComponents: Any;
+  markdownComponents: Components;
   workspacePath?: string;
   onOpenViewer?: (path: string) => void;
   /** The task the message belongs to; interactive answer state is saved per task. */
@@ -65,7 +66,7 @@ type MessageSegment =
   | { type: "html_error"; raw: string; error: string }
   | { type: "answer_surface"; source: string; closed: boolean; key: string; raw: string };
 
-function DeferredMarkdown({ children, components }: { children: string; components?: unknown }) {
+function DeferredMarkdown({ children, components }: { children: string; components?: Components }) {
   return (
     <Suspense fallback={<span className="markdown-deferred-text">{children}</span>}>
       <LazyMarkdownRenderer components={components}>{children}</LazyMarkdownRenderer>

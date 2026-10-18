@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { TaskEvent } from "../../../shared/types";
+import type { TaskEvent, Task } from "../../../shared/types";
 import {
   getAgentLifecycleRecapLine,
   renderEventDetails,
@@ -131,7 +131,7 @@ describe("agent message timeline rows", () => {
       message: "Please report the verification result.",
       status: "delivered",
     });
-    const childTask = { id: "child-task", title: "Backend" } as any;
+    const childTask = { id: "child-task", title: "Backend" } as Task;
     const details = renderToStaticMarkup(
       React.createElement(
         React.Fragment,

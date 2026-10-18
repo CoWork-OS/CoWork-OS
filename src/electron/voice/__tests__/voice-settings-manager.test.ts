@@ -47,7 +47,8 @@ vi.mock("../../database/SecureSettingsRepository", () => {
       constructor(_db: Any) {
         mockRepositoryConstructor(_db);
         mockSecureSettingsInitialized = true;
-        mockSecureSettingsInstance = this;
+        mockSecureSettingsInstance = createMockRepositoryInstance();
+        return mockSecureSettingsInstance;
       }
 
       static isInitialized(): boolean {

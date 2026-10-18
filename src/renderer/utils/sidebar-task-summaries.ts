@@ -83,7 +83,7 @@ export function mergeSidebarTaskSummariesWithExisting(
       userPrompt: existing.userPrompt,
       sidebarPromptPreview: summary.sidebarPromptPreview ?? existing.sidebarPromptPreview,
       agentConfig: existing.agentConfig
-        ? { ...existing.agentConfig, ...(summary.agentConfig || {}) }
+        ? { ...existing.agentConfig, ...summary.agentConfig }
         : summary.agentConfig,
       resultSummary: existing.resultSummary ?? summary.resultSummary,
       semanticSummary: existing.semanticSummary ?? summary.semanticSummary,

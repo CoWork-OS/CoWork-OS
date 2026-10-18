@@ -54,7 +54,7 @@ describe("ComputerUseHelperRuntime Windows helper integrity", () => {
 
   it("rewrites the installed helper when its content hash differs from the bundled source", async () => {
     const runtime = ComputerUseHelperRuntime.getInstance();
-    const sourcePath = "/repo/resources/computer-use/bridge.ps1";
+
     const helperPath = runtime.getHelperPath();
 
     existsSyncMock.mockImplementation((target: unknown) => {

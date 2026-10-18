@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Memory, MemorySettings, MemoryType } from "../../database/repositories";
+import type { Memory, MemorySettings } from "../../database/repositories";
 
 const mockProvider = {
   createMessage: vi.fn(async () => ({

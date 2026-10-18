@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildNativeActionLedger } from "../native-app-observation";
+import {
+  buildNativeActionLedger,
+  nativeObservationTarget,
+  summarizeNativeObservation,
+} from "../native-app-observation";
 
 const log = (payload: Record<string, unknown>) => ({
   payload: { kind: "native_app_attempt", ...payload },
@@ -57,5 +61,36 @@ describe("native action ledger", () => {
     expect(moved([10, 14])).toContain("untouched: 1; with an exception: 0");
     expect(moved([10, 10])).toContain("pointer MOVED without physical mouse events");
     expect(moved([10, 10])).toContain("untouched: 0; with an exception: 1");
+  });
+});
+
+describe("native snapshot observation boundary", () => {
+  it("ignores malformed element rows while preserving valid and nonsecure evidence", () => {
+    const snapshot = {
+      pid: 42,
+      windowId: 100,
+      snapshotId: "snapshot",
+      elements: [
+        null,
+        "malformed",
+        { role: "AXWindow", title: "Workspace" },
+        { role: "AXTextField", secure: true, value: "PRIVATE_VALUE" },
+        { role: "AXStaticText", value: "Observed text" },
+      ],
+    };
+    expect(nativeObservationTarget("native_app", snapshot)).toEqual({ pid: 42, windowId: 100 });
+    const summary = summarizeNativeObservation("native_app", snapshot);
+    expect(summary).toContain("Observed text");
+    expect(summary).not.toContain("PRIVATE_VALUE");
+    expect(summary).not.toContain("malformed");
+  });
+  it.each([
+    null,
+    42,
+    { pid: "42", windowId: 100 },
+    { pid: 42, windowId: 100, snapshotId: "s", elements: [null] },
+  ])("rejects invalid snapshot metadata: %s", (result) => {
+    expect(nativeObservationTarget("native_app", result)).toBeUndefined();
+    expect(summarizeNativeObservation("native_app", result)).toBeNull();
   });
 });

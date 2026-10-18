@@ -102,6 +102,23 @@ export function isLoopbackAddress(address: string): boolean {
   return false;
 }
 
+/**
+ * True only for the exact names localhost, 127.0.0.1, and ::1, for decisions
+ * such as whether plain HTTP is acceptable. Accepts the bracketed IPv6 form,
+ * because `new URL("http://[::1]").hostname` is "[::1]".
+ *
+ * Deliberately narrower than isLoopbackAddress: it does not strip a trailing
+ * root dot (`localhost.` is a fully-qualified name a resolver may send to DNS
+ * instead of answering locally), and it does not accept the rest of
+ * 127.0.0.0/8, `*.localhost`, or IPv4-mapped forms.
+ */
+export function isLoopbackHostname(hostname: string): boolean {
+  const lowered = String(hostname || "").toLowerCase();
+  const unwrapped =
+    lowered.startsWith("[") && lowered.endsWith("]") ? lowered.slice(1, -1) : lowered;
+  return unwrapped === "localhost" || unwrapped === "127.0.0.1" || unwrapped === "::1";
+}
+
 export function isPrivateIpv4Address(address: string): boolean {
   const parts = address.split(".").map((p) => Number(p));
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {

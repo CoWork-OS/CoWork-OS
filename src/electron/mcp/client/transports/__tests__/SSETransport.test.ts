@@ -80,7 +80,7 @@ describe("SSETransport credentials", () => {
       ["GET", "/sse", "Bearer secret-token"],
       ["POST", "/message", "Bearer secret-token"],
     ]);
-    const logged = JSON.stringify((console.log as any).mock.calls);
+    const logged = JSON.stringify(vi.mocked(console.log).mock.calls);
     expect(logged).not.toContain("secret-token");
   });
 

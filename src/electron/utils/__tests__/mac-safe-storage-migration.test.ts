@@ -19,14 +19,14 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function row(category: string, plaintext: string): EncryptedSecureSettingRow {
+function row(category: string): EncryptedSecureSettingRow {
   const encrypted_data = `os:${Buffer.from(category).toString("base64")}`;
   return { category, encrypted_data, checksum: sha256(encrypted_data) };
 }
 
 describe("macOS safeStorage legacy migration", () => {
   it("decrypts only checksum-valid os-encrypted object settings", () => {
-    const valid = row("user-profile", JSON.stringify({ facts: [] }));
+    const valid = row("user-profile");
     const invalidChecksum = { ...valid, checksum: "invalid" };
     const nonOs = { ...valid, encrypted_data: "app:legacy" };
     const decryptString = vi.fn((ciphertext: Buffer) => {
@@ -49,7 +49,7 @@ describe("macOS safeStorage legacy migration", () => {
   });
 
   it("does not rewrite settings that are already readable with the current identity", async () => {
-    const rows = [row("user-profile", "{}"), row("appearance", "{}"), row("missing", "{}")];
+    const rows = [row("user-profile"), row("appearance"), row("missing")];
     const recovered: DecryptedSecureSetting[] = rows.map(({ category }) => ({
       category,
       settings: { restored: category },
@@ -70,7 +70,9 @@ describe("macOS safeStorage legacy migration", () => {
       return child;
     });
     const save = vi.fn();
-    const loadWithStatus = vi.fn(({} = {}) => ({ status: "decryption_failed" }));
+    const loadWithStatus = vi
+      .fn<(category: string) => { status: string }>()
+      .mockReturnValue({ status: "decryption_failed" });
     loadWithStatus.mockImplementation((category: string) => ({
       status:
         category === "appearance"

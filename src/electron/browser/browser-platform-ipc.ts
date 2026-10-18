@@ -6,11 +6,7 @@
 
 import type Database from "better-sqlite3";
 import { browserPartitionFor, browserProfileKey } from "../../shared/browser-profile";
-import {
-  type BrowserDataType,
-  type BrowserSettings,
-  normalizeBrowserSettings,
-} from "../../shared/browser-settings";
+import { type BrowserDataType, normalizeBrowserSettings } from "../../shared/browser-settings";
 import { IPC_CHANNELS } from "../../shared/types";
 import { BrowserHistoryRepository } from "../database/repository-facades";
 import { BrowserSettingsManager } from "../settings/browser-settings-manager";

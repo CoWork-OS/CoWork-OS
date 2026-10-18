@@ -176,41 +176,37 @@ describe.skipIf(process.platform !== "darwin")(
       30_000,
     );
 
-    it.skipIf(process.env.COWORK_TEST_NON_LOOPBACK !== "1")(
-      "stops a background server that listens on all interfaces",
-      async () => {
-        const shellTools = newShellTools();
-        const started = await shellTools.startBackgroundCommand(
-          serverCommand("0.0.0.0", workspace.path),
-          {
-            cwd: workspace.path,
-          },
-        );
-        const processId = started.process_id as string;
-        const manager = getBackgroundProcessManager();
-        const deadline = Date.now() + 10_000;
-        let status = await shellTools.getBackgroundProcessOutput({
+    it("stops a background server that listens on all interfaces", async () => {
+      const shellTools = newShellTools();
+      const started = await shellTools.startBackgroundCommand(
+        serverCommand("0.0.0.0", workspace.path),
+        {
+          cwd: workspace.path,
+        },
+      );
+      const processId = started.process_id as string;
+      const manager = getBackgroundProcessManager();
+      const deadline = Date.now() + 10_000;
+      let status = await shellTools.getBackgroundProcessOutput({
+        process_id: processId,
+        since_offset: 0,
+      });
+      while (status.running && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        status = await shellTools.getBackgroundProcessOutput({
           process_id: processId,
           since_offset: 0,
         });
-        while (status.running && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          status = await shellTools.getBackgroundProcessOutput({
-            process_id: processId,
-            since_offset: 0,
-          });
-        }
+      }
 
-        expect(status).toMatchObject({
-          running: false,
-          status: "stopped",
-          stop_reason: "listened_on_non_loopback_address",
-        });
-        expect(status.output).toMatch(/listened on \*\.\d+/);
-        expect(manager.list("nobody")).toEqual([]);
-      },
-      30_000,
-    );
+      expect(status).toMatchObject({
+        running: false,
+        status: "stopped",
+        stop_reason: "listened_on_non_loopback_address",
+      });
+      expect(status.output).toMatch(/listened on \*\.\d+/);
+      expect(manager.list("nobody")).toEqual([]);
+    }, 30_000);
 
     it("lets a foreground test server listen on loopback with networking denied", async () => {
       const shellTools = newShellTools();
@@ -229,25 +225,21 @@ describe.skipIf(process.platform !== "darwin")(
       expect(result.stdout).toContain("got pong");
     }, 30_000);
 
-    it.skipIf(process.env.COWORK_TEST_NON_LOOPBACK !== "1")(
-      "stops a foreground command that listens on all interfaces",
-      async () => {
-        const shellTools = newShellTools();
-        const startedAt = Date.now();
+    it("stops a foreground command that listens on all interfaces", async () => {
+      const shellTools = newShellTools();
+      const startedAt = Date.now();
 
-        const result = await shellTools.runCommand(
-          `${serverCommand("0.0.0.0", workspace.path)}; true`,
-          {
-            cwd: workspace.path,
-            timeout: 20_000,
-          },
-        );
+      const result = await shellTools.runCommand(
+        `${serverCommand("0.0.0.0", workspace.path)}; true`,
+        {
+          cwd: workspace.path,
+          timeout: 20_000,
+        },
+      );
 
-        expect(Date.now() - startedAt).toBeLessThan(10_000);
-        expect(result).toMatchObject({ success: false, terminationReason: "error" });
-        expect(result.stderr).toMatch(/listened on \*\.\d+ .*Bind servers to 127\.0\.0\.1/s);
-      },
-      30_000,
-    );
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+      expect(result).toMatchObject({ success: false, terminationReason: "error" });
+      expect(result.stderr).toMatch(/listened on \*\.\d+ .*Bind servers to 127\.0\.0\.1/s);
+    }, 30_000);
   },
 );

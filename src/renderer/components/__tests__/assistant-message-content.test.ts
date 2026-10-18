@@ -92,7 +92,7 @@ describe("AssistantMessageContent", () => {
       "</html>",
     ].join("\n");
     const segments = parseAssistantMessageSegments(
-      `Sync details:\n\n::frame{title=\"Provider status\" kind=\"progress\" height=\"420\"}\n\`\`\`html\n${html}\n\`\`\`\n\nDone.`,
+      `Sync details:\n\n::frame{title="Provider status" kind="progress" height="420"}\n\`\`\`html\n${html}\n\`\`\`\n\nDone.`,
     );
 
     expect(segments).toHaveLength(3);

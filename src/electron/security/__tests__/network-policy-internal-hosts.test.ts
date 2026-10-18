@@ -11,8 +11,6 @@ vi.mock("../../admin/policies", () => ({
 import { loadPolicies } from "../../admin/policies";
 import { evaluateNetworkPolicy } from "../network-policy";
 
-type Any = any; // oxlint-disable-line typescript-eslint(no-explicit-any)
-
 function policiesWith(allowedInternalHosts: string[] | undefined): Any {
   return {
     runtime: {

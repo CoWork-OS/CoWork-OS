@@ -6475,6 +6475,15 @@ export type {
 };
 
 export interface ElectronAPI {
+  listHubFiles: (
+    options: import("./file-hub/types").FileHubListOptions,
+  ) => Promise<import("./file-hub/types").UnifiedFile[]>;
+  searchHubFiles: (
+    query: string,
+    sources?: import("./file-hub/types").FileHubSource[],
+  ) => Promise<import("./file-hub/types").FileHubSearchResult[]>;
+  getRecentHubFiles: (limit?: number) => Promise<import("./file-hub/types").UnifiedFile[]>;
+  getHubSources: () => Promise<import("./file-hub/types").FileHubSource[]>;
   selectFolder: (defaultPath?: string) => Promise<string | null>;
   selectFiles: (defaultPath?: string) => Promise<
     Array<{

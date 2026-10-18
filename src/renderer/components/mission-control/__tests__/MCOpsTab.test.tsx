@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { MissionControlData } from "../useMissionControlData";
 import { MCOpsTab } from "../MCOpsTab";
 
 afterEach(() => {
@@ -35,7 +36,7 @@ function renderPlannerTab() {
     setDetailPanel: vi.fn(),
     formatRelativeTime: vi.fn(),
     selectedIssueId: null,
-  } as any;
+  } as unknown as MissionControlData;
 
   return renderToStaticMarkup(<MCOpsTab data={data} />);
 }

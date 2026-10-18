@@ -1,3 +1,4 @@
+import type { Components } from "react-markdown";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -51,7 +52,7 @@ describe("MarkdownRenderer file links", () => {
 });
 
 describe("MarkdownRenderer workspace image links", () => {
-  const renderMarkdown = (markdown: string, markdownComponents: unknown = components) =>
+  const renderMarkdown = (markdown: string, markdownComponents: Components = components) =>
     renderToStaticMarkup(
       React.createElement(MarkdownRenderer, {
         children: markdown,

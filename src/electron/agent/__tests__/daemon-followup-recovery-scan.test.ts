@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-type Any = any;
-
 const mocks = vi.hoisted(() => ({
   storageStatements: vi.fn(),
   getReportingReader: vi.fn(),

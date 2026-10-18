@@ -109,7 +109,7 @@ export function parseByteRange(
  */
 function electronProtocol(): Protocol {
   // A static import would load Electron in the headless daemon, where it is not installed.
-  // oxlint-disable-next-line typescript-eslint(no-require-imports)
+  // oxlint-disable-next-line typescript/no-require-imports
   return (require("electron") as typeof import("electron")).protocol;
 }
 

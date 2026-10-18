@@ -25,7 +25,6 @@ import {
   CoreTrace,
   CoreMemoryCandidate,
   CoreMemoryDistillRun,
-  HeartbeatConfig,
   CompanyCommandCenterSummary,
   CompanyEvidenceRef,
   CompanyExecutionMapItem,
@@ -94,7 +93,6 @@ function hasInvalidCoreMemoryCandidateScope(request: unknown): boolean {
     (candidate.workspaceId !== undefined && !UUIDSchema.safeParse(candidate.workspaceId).success)
   );
 }
-type Any = any;
 
 // Get main window for event broadcasting
 let mainWindowGetter: (() => BrowserWindow | null) | null = null;

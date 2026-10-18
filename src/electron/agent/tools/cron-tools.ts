@@ -187,7 +187,7 @@ export class CronTools {
     const taskAgentConfig =
       inheritedLegacyAgentConfig || inheritedCeilings.length > 0
         ? {
-            ...(inheritedLegacyAgentConfig ?? {}),
+            ...inheritedLegacyAgentConfig,
             ...(inheritedCeilings.length > 0
               ? { inheritedAccessCeilingProfileIds: inheritedCeilings }
               : {}),

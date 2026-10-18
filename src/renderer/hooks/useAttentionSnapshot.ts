@@ -16,6 +16,7 @@ import {
   type AttentionSourceName,
 } from "../../shared/attention";
 import type { ProactiveSuggestion } from "../../shared/types";
+import { hasHostMethod } from "../host/browser-capabilities";
 
 /** Fallback poll; changes normally arrive through the queue's change signal. */
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
@@ -85,7 +86,9 @@ async function loadWithoutQueue(): Promise<AttentionSnapshotState> {
 
 async function loadAttention(): Promise<AttentionSnapshotState> {
   const api = window.electronAPI;
-  if (typeof api.listAttention !== "function") return loadWithoutQueue();
+  if (!hasHostMethod("listAttention") || typeof api.listAttention !== "function") {
+    return loadWithoutQueue();
+  }
   const snapshot = await api.listAttention();
   return {
     fromQueue: true,
@@ -143,7 +146,9 @@ export function useAttentionLoader(enabled: boolean): AttentionSnapshotState {
     if (!api) return;
     void refresh();
     const unsubscribe =
-      typeof api.onAttentionChanged === "function" ? api.onAttentionChanged(scheduleReload) : null;
+      hasHostMethod("onAttentionChanged") && typeof api.onAttentionChanged === "function"
+        ? api.onAttentionChanged(scheduleReload)
+        : null;
     window.addEventListener("focus", scheduleReload);
     const poll = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
     return () => {

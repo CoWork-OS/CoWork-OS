@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as http from "node:http";
@@ -549,8 +550,9 @@ export function getLocalPreviewProcessService(): LocalPreviewProcessService {
   if (!localPreviewProcessService) {
     // Imported lazily to keep this service independently testable and avoid a
     // browser-policy initialization cycle during Electron startup.
-    const { getBrowserWorkbenchService } =
-      require("../browser/browser-workbench-service") as typeof import("../browser/browser-workbench-service");
+    const { getBrowserWorkbenchService } = createRequire(__filename)(
+      "../browser/browser-workbench-service",
+    ) as typeof import("../browser/browser-workbench-service");
     localPreviewProcessService = new LocalPreviewProcessService({
       allowLocalPreviewUrl: (url) => getBrowserWorkbenchService().allowLocalPreviewUrl(url),
       revokeLocalPreviewUrl: (url) => getBrowserWorkbenchService().revokeLocalPreviewUrl(url),

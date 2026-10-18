@@ -17,7 +17,6 @@ import {
   ChannelConfigSchema,
   EmailChannelConfigSchema,
   AddEmailChannelSchema,
-  AddDiscordChannelSchema,
   AddBlueBubblesChannelSchema,
   AddGoogleChatChannelSchema,
   AddFeishuChannelSchema,
@@ -532,7 +531,7 @@ describe("GuardrailSettingsSchema", () => {
 
   it("rejects oversized web search domain lists", () => {
     const result = GuardrailSettingsSchema.safeParse({
-      webSearchAllowedDomains: new Array(101).fill("example.com"),
+      webSearchAllowedDomains: Array.from({ length: 101 }, () => "example.com"),
     });
     expect(result.success).toBe(false);
   });

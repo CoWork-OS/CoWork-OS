@@ -43,6 +43,9 @@ import {
 } from "../task-automation-utils";
 
 const mainContentPath = fileURLToPath(new URL("../MainContent/MainContent.tsx", import.meta.url));
+const conversationFlowPath = fileURLToPath(
+  new URL("../MainContent/TaskConversationFlow.tsx", import.meta.url),
+);
 const mainContentStylesPath = fileURLToPath(
   new URL("../MainContent/main-content.css", import.meta.url),
 );
@@ -622,7 +625,8 @@ describe("message-level session forking", () => {
     expect(messageUiSource).toContain("message-fork-btn");
     expect(mainContentSource).toContain("onForkTaskSessionFromEvent");
     expect(mainContentSource).toContain("fromEventId: event.id");
-    expect(mainContentSource).toContain("<MessageForkButton");
+    const conversationFlowSource = readFileSync(conversationFlowPath, "utf8");
+    expect(conversationFlowSource).toContain("<MessageForkButton");
   });
 });
 
@@ -654,8 +658,9 @@ describe("bot transcript surface", () => {
     expect(mainContentSource).toContain("<span>Edit bot</span>");
     // The bot header is just the identity chip; there is no breadcrumb tail.
     expect(mainContentSource).not.toContain("bot-conversation-header-context");
-    expect(mainContentSource).toMatch(/onForkTaskSessionFromEvent &&\s*!isBotConversation/);
-    expect(mainContentSource).toMatch(/onForkTaskSession:\s*isBotConversation/);
+    const conversationFlowSource = readFileSync(conversationFlowPath, "utf8");
+    expect(conversationFlowSource).toMatch(/onForkTaskSessionFromEvent &&\s*!isBotConversation/);
+    expect(conversationFlowSource).toMatch(/onForkTaskSession:\s*isBotConversation/);
     expect(mainContentSource).toContain("<span>New conversation</span>");
     expect(mainContentSource).toContain("<span>Conversation history</span>");
     expect(mainContentSource).toContain("<span>Copy as Markdown</span>");
@@ -666,7 +671,7 @@ describe("bot transcript surface", () => {
   });
 
   it("hides execution-step rows from bot transcripts without hiding messages", () => {
-    const mainContentSource = readFileSync(mainContentPath, "utf8");
+    const mainContentSource = readFileSync(conversationFlowPath, "utf8");
 
     expect(mainContentSource).toContain(
       "const isConversationOnlySurface = isChatTask || isBotConversation;",
@@ -678,11 +683,12 @@ describe("bot transcript surface", () => {
       /isConversationOnlySurface &&\s+!isUserMessage &&\s+!isAssistantMessage &&\s+!isCompletionSummaryMessage/,
     );
     expect(mainContentSource).toContain("isChatTask={isConversationOnlySurface}");
-    expect(mainContentSource).toMatch(/\{!isBotConversation &&\s+\(hasNonConversationEvents/);
+    const mainContentShellSource = readFileSync(mainContentPath, "utf8");
+    expect(mainContentShellSource).toMatch(/\{!isBotConversation &&\s+\(hasNonConversationEvents/);
   });
 
   it("turns raw send-agent protocol JSON into a compact bot receipt", () => {
-    const mainContentSource = readFileSync(mainContentPath, "utf8");
+    const mainContentSource = readFileSync(conversationFlowPath, "utf8");
 
     expect(mainContentSource).toContain("parseAgentMessageProtocolResult(messageText)");
     expect(mainContentSource).toContain("agent-outbound-message-receipt");
@@ -697,7 +703,8 @@ describe("bot transcript surface", () => {
 
     expect(taskContentIndex).toBeGreaterThan(-1);
     expect(collaborationHeaderIndex).toBeGreaterThan(taskContentIndex);
-    expect(mainContentSource).toContain("<BotMessageAvatar mascot={senderMascot} />");
+    const conversationFlowSource = readFileSync(conversationFlowPath, "utf8");
+    expect(conversationFlowSource).toContain("<BotMessageAvatar mascot={senderMascot} />");
     expect(mainContentStyles).toContain(".bot-conversation .chat-bubble.user-bubble");
     expect(mainContentStyles).toContain(
       ".bot-conversation .chat-message.assistant-message .chat-bubble.assistant-bubble",

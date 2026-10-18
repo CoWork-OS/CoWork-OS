@@ -16,8 +16,6 @@ import { writableMemoryRepo } from "../memory/repo/memory-repo-producers";
 import { createBackgroundKitPathGuard } from "../security/background-write-guard";
 import { createLogger } from "../utils/logger";
 
-type Any = any;
-
 type FeedbackEntry = {
   agent: string;
   decision: string;

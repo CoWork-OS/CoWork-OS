@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 /**
  * The live view of a task's computer for the bot's panel, and take-over by the person.
  *
@@ -41,7 +42,7 @@ export interface ComputerViewDeps {
 
 const defaultEncodeFrame = (png: Buffer, maxWidth: number): EncodedFrame | null => {
   // Loaded lazily so the service can be used without Electron in tests.
-  const { nativeImage } = require("electron") as typeof import("electron");
+  const { nativeImage } = createRequire(__filename)("electron") as typeof import("electron");
   let image = nativeImage.createFromBuffer(png);
   if (image.isEmpty()) return null;
   const size = image.getSize();

@@ -102,7 +102,7 @@ describe("extractPdfText", () => {
     const pdfPath = path.join(tmpDir, "noisy.pdf");
     await fs.writeFile(pdfPath, Buffer.from("%PDF-1.7"));
     parsePdfBufferMock.mockResolvedValue({
-      text: new Array(80).fill("A\uFFFDB").join(" "),
+      text: Array.from({ length: 80 }, () => "A\uFFFDB").join(" "),
       numpages: 2,
     });
     extractPdfReviewDataMock.mockResolvedValue({

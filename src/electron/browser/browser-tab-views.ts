@@ -445,14 +445,14 @@ export class BrowserTabViewHost {
 
   /** Close every view of a task (the task was deleted). */
   closeTask(taskId: string): void {
-    for (const record of [...this.records.values()]) {
+    for (const record of Array.from(this.records.values())) {
       if (record.key.taskId === taskId) this.destroy(record);
     }
   }
 
   /** Close every view (the window they live in is gone). */
   closeAll(): void {
-    for (const record of [...this.records.values()]) this.destroy(record);
+    for (const record of Array.from(this.records.values())) this.destroy(record);
   }
 
   private state(record: TabViewRecord, reused: boolean): BrowserTabViewState {
@@ -478,7 +478,7 @@ export class BrowserTabViewHost {
   private evictBeyondCap(): void {
     const max = this.deps.maxLiveViews ?? DEFAULT_MAX_LIVE_VIEWS;
     if (this.records.size <= max) return;
-    const hidden = [...this.records.values()]
+    const hidden = Array.from(this.records.values())
       .filter((record) => !record.visible)
       .sort((a, b) => a.lastUsed - b.lastUsed);
     for (const record of hidden.slice(0, this.records.size - max)) {

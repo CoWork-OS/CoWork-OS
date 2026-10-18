@@ -6,11 +6,37 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import { AgentDaemon, BOT_HANDOFF_REPLY_TIMEOUT_MS } from "../daemon";
 import { DatabaseManager } from "../../database/schema";
-import type { TaskEvent } from "../../../shared/types";
+import type { Task, TaskEvent, Workspace } from "../../../shared/types";
+import type { TaskExecutor } from "../executor";
 import { getOutstandingBotHandoffReply, getPendingBotHandoff } from "../../../shared/bot-handoff";
 import { QueuedAttachmentStore } from "../runtime/queued-attachment-store";
 
-type Any = Record<string, any>;
+const daemonPrototype = AgentDaemon.prototype as unknown as {
+  wakeBotConversationAfterAccepted: AgentDaemon["wakeBotConversationAfterAccepted"];
+  reconcileBotHandoffBeforeCompletion: AgentDaemon["reconcileBotHandoffBeforeCompletion"];
+  expireBotHandoffWait: AgentDaemon["expireBotHandoffWait"];
+  rehydrateBotHandoffTimeoutsOnStartup: AgentDaemon["rehydrateBotHandoffTimeoutsOnStartup"];
+  queueMessageOnly: AgentDaemon["queueMessageOnly"];
+  processOrphanedFollowUps: AgentDaemon["processOrphanedFollowUps"];
+  getDurableTaskFollowUpReceipt: AgentDaemon["getDurableTaskFollowUpReceipt"];
+  getBotConversationMessagingContext: AgentDaemon["getBotConversationMessagingContext"];
+};
+
+function makeTask(overrides: Pick<Task, "id"> & Partial<Task>): Task {
+  return {
+    title: "Messaging fixture",
+    prompt: "Fixture prompt",
+    status: "executing",
+    workspaceId: "workspace-1",
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
+
+function withDaemonPrototype<T extends object>(fixture: T): T {
+  return Object.setPrototypeOf(fixture, AgentDaemon.prototype);
+}
 
 const policyDirectory = mkdtempSync(path.join(tmpdir(), "cowork-agent-message-policy-"));
 const policyDbManager = new DatabaseManager({ dbPath: path.join(policyDirectory, "fixture.db") });
@@ -25,7 +51,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-function makeEvent(id: string, taskId: string, type: TaskEvent["type"], payload: Any): TaskEvent {
+function makeEvent(
+  id: string,
+  taskId: string,
+  type: TaskEvent["type"],
+  payload: Record<string, unknown>,
+): TaskEvent {
   return {
     id,
     taskId,
@@ -44,10 +75,10 @@ describe("AgentDaemon agent-message receipts", () => {
       deliveryMode: "follow_up",
       deliveryStatus: "started",
     });
-    const updatePayloadById = vi.fn((_id: string, payload: Any) => {
+    const updatePayloadById = vi.fn((_id: string, payload: Record<string, unknown>) => {
       event.payload = payload;
     });
-    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+    const daemonLike = withDaemonPrototype({
       eventRepo: {
         findByTaskIdAndTypes: vi.fn().mockReturnValue([event]),
         updatePayloadById,
@@ -125,14 +156,14 @@ describe("AgentDaemon agent-message receipts", () => {
       deliveryStatus: "accepted",
       requestFingerprint,
     });
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
-    const daemonLike = Object.assign(Object.create(AgentDaemon.prototype), {
+    });
+    const daemonLike = withDaemonPrototype({
       shutdownRequested: false,
       taskRepo: { findById: vi.fn().mockReturnValue(task) },
       eventRepo: { findByTaskIdAndTypes: vi.fn().mockReturnValue([event]) },
@@ -194,10 +225,10 @@ describe("AgentDaemon agent-message receipts", () => {
         message: "private follow-up text",
       }),
     );
-    const daemonLike = { getTaskEvents: vi.fn(() => events) } as Any;
+    const daemonLike = { getTaskEvents: vi.fn(() => events) };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    const receipt = (AgentDaemon.prototype as Any).getDurableTaskFollowUpReceipt.call(
+    const receipt = daemonPrototype.getDurableTaskFollowUpReceipt.call(
       daemonLike,
       "task-1",
       "web:control-plane:operation-0",
@@ -227,10 +258,10 @@ describe("AgentDaemon agent-message receipts", () => {
           }),
         ]),
       },
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    const receipt = (AgentDaemon.prototype as Any).getDurableTaskFollowUpReceipt.call(
+    const receipt = daemonPrototype.getDurableTaskFollowUpReceipt.call(
       daemonLike,
       "task-1",
       "shared-id",
@@ -240,50 +271,47 @@ describe("AgentDaemon agent-message receipts", () => {
   });
 
   it("returns the repaired bot-team identity with messaging authorization", () => {
-    const task = {
+    const task = makeTask({
       id: "bot-task",
       agentConfig: { botConversation: true },
-    };
-    const normalizedTask = {
+    });
+    const normalizedTask = makeTask({
       ...task,
       agentConfig: { botConversation: true, botTeamId: "team-1" },
-    };
+    });
     const daemonLike = {
       taskRepo: { findById: vi.fn().mockReturnValue(task) },
       ensureBotTaskTeam: vi.fn().mockReturnValue(normalizedTask),
       getBotTeamContext: vi.fn().mockReturnValue({ team: { id: "team-1" } }),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    expect(
-      (AgentDaemon.prototype as Any).getBotConversationMessagingContext.call(
-        daemonLike,
-        "bot-task",
-      ),
-    ).toEqual({
-      authorized: true,
-      botTeamId: "team-1",
-    });
+    expect(daemonPrototype.getBotConversationMessagingContext.call(daemonLike, "bot-task")).toEqual(
+      {
+        authorized: true,
+        botTeamId: "team-1",
+      },
+    );
   });
 
   it("wakes a dormant bot through the accepted-message drain instead of its seed prompt", () => {
     const executor = { isRunning: false };
     const processOrphanedFollowUps = vi.fn();
     const startTask = vi.fn();
-    const task = {
+    const task = makeTask({
       id: "bot-task",
       status: "pending",
-    };
+    });
     const daemonLike = {
       activeTasks: new Map([[task.id, { executor }]]),
       taskRepo: { findById: vi.fn().mockReturnValue(task) },
       processOrphanedFollowUps,
       startTask,
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    (AgentDaemon.prototype as Any).wakeBotConversationAfterAccepted.call(
+    daemonPrototype.wakeBotConversationAfterAccepted.call(
       daemonLike,
       task,
       "bot-message-1",
@@ -300,7 +328,7 @@ describe("AgentDaemon agent-message receipts", () => {
     const daemonLike = {
       taskRepo: { update },
       logEvent,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const handoffEvents = [
@@ -317,13 +345,13 @@ describe("AgentDaemon agent-message receipts", () => {
     ];
     expect(getPendingBotHandoff(handoffEvents)).not.toBeNull();
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      {
+      makeTask({
         id: "atlas-task",
         status: "executing",
         agentConfig: { botConversation: true },
-      },
+      }),
       handoffEvents,
       "Partial research",
     );
@@ -374,16 +402,16 @@ describe("AgentDaemon agent-message receipts", () => {
       eventRepo: { updatePayloadById },
       emitTaskEvent,
       logEvent,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      {
+      makeTask({
         id: "atlas-task",
         status: "executing",
         agentConfig: { botConversation: true, botTeamId: "team-1" },
-      },
+      }),
       handoffEvents,
       "Partial repository inspection",
     );
@@ -414,13 +442,13 @@ describe("AgentDaemon agent-message receipts", () => {
     const now = Date.now();
     vi.setSystemTime(now);
     try {
-      const task = {
+      const task = makeTask({
         id: "waiting-bot",
         status: "blocked",
         error: "Waiting for Atlas to reply before finishing this conversation.",
         resultSummary: "Partial research",
         agentConfig: { botConversation: true },
-      };
+      });
       const handoff = makeEvent("stale-handoff", task.id, "agent_message", {
         messageId: "stale-handoff",
         senderType: "agent",
@@ -448,10 +476,10 @@ describe("AgentDaemon agent-message receipts", () => {
         botHandoffTimeouts: new Map(),
         logEvent: vi.fn(),
         emitTaskEvent: vi.fn(),
-      } as Any;
+      };
       Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-      (AgentDaemon.prototype as Any).rehydrateBotHandoffTimeoutsOnStartup.call(daemonLike);
+      daemonPrototype.rehydrateBotHandoffTimeoutsOnStartup.call(daemonLike);
       await vi.runOnlyPendingTimersAsync();
 
       expect(updatePayloadById).toHaveBeenCalledWith(
@@ -481,11 +509,11 @@ describe("AgentDaemon agent-message receipts", () => {
     const now = Date.now();
     vi.setSystemTime(now);
     try {
-      const task = {
+      const task = makeTask({
         id: "sender-bot",
         status: "executing",
         agentConfig: { botConversation: true },
-      } as Any;
+      });
       const handoff = makeEvent("fresh-handoff", task.id, "agent_message", {
         messageId: "fresh-handoff",
         senderType: "agent",
@@ -504,17 +532,17 @@ describe("AgentDaemon agent-message receipts", () => {
           findById: vi.fn((id: string) =>
             id === task.id ? task : { id: "receiver-bot", status: "executing" },
           ),
-          update: vi.fn((_id: string, patch: Any) => Object.assign(task, patch)),
+          update: vi.fn((_id: string, patch: Partial<Task>) => Object.assign(task, patch)),
         },
         eventRepo: { findByTaskId: vi.fn().mockReturnValue([handoff]), updatePayloadById },
         botHandoffTimeouts: new Map(),
         logEvent: vi.fn(),
         emitTaskEvent: vi.fn(),
-      } as Any;
+      };
       Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
       expect(
-        (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+        daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
           daemonLike,
           task,
           [handoff],
@@ -536,12 +564,12 @@ describe("AgentDaemon agent-message receipts", () => {
 
   it("does not expire a blocked wait after the correlated reply was delivered", () => {
     const now = Date.now();
-    const task = {
+    const task = makeTask({
       id: "replied-bot",
       status: "blocked",
       error: "Waiting for Atlas to reply before finishing this conversation.",
       agentConfig: { botConversation: true },
-    };
+    });
     const events = [
       makeEvent("answered-handoff", task.id, "agent_message", {
         messageId: "answered-handoff",
@@ -569,35 +597,31 @@ describe("AgentDaemon agent-message receipts", () => {
       taskRepo: { findById: vi.fn().mockReturnValue(task), update },
       eventRepo: { findByTaskId: vi.fn().mockReturnValue(events), updatePayloadById: vi.fn() },
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    (AgentDaemon.prototype as Any).expireBotHandoffWait.call(
-      daemonLike,
-      task.id,
-      "answered-handoff",
-    );
+    daemonPrototype.expireBotHandoffWait.call(daemonLike, task.id, "answered-handoff");
 
     expect(update).not.toHaveBeenCalled();
     expect(daemonLike.eventRepo.updatePayloadById).not.toHaveBeenCalled();
   });
 
   it("repairs a persisted waiting label when no handoff remains pending", () => {
-    const task = {
+    const task = makeTask({
       id: "stale-wait",
       status: "blocked",
       error: "Waiting for Atlas to reply before finishing this conversation.",
       agentConfig: { botConversation: true },
-    };
+    });
     const update = vi.fn();
     const daemonLike = {
       taskRepo: { findByStatus: vi.fn().mockReturnValue([task]), update },
       eventRepo: { findByTaskId: vi.fn().mockReturnValue([]) },
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    (AgentDaemon.prototype as Any).rehydrateBotHandoffTimeoutsOnStartup.call(daemonLike);
+    daemonPrototype.rehydrateBotHandoffTimeoutsOnStartup.call(daemonLike);
 
     expect(update).toHaveBeenCalledWith(
       task.id,
@@ -639,12 +663,12 @@ describe("AgentDaemon agent-message receipts", () => {
       },
       eventRepo: { updatePayloadById },
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      { id: "atlas-task", status: "executing", agentConfig: { botConversation: true } },
+      makeTask({ id: "atlas-task", status: "executing", agentConfig: { botConversation: true } }),
       handoffEvents,
       "Waiting for the delivered result",
     );
@@ -685,16 +709,16 @@ describe("AgentDaemon agent-message receipts", () => {
       eventRepo: { updatePayloadById },
       emitTaskEvent,
       logEvent,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      {
+      makeTask({
         id: "atlas-task",
         status: "executing",
         agentConfig: { botConversation: true, botTeamId: "team-1" },
-      },
+      }),
       handoffEvents,
       "Partial source summary",
     );
@@ -742,16 +766,16 @@ describe("AgentDaemon agent-message receipts", () => {
       eventRepo: { updatePayloadById },
       emitTaskEvent,
       logEvent,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      {
+      makeTask({
         id: "atlas-task",
         status: "executing",
         agentConfig: { botConversation: true, botTeamId: "team-1" },
-      },
+      }),
       handoffEvents,
       "Partial source summary",
     );
@@ -794,7 +818,7 @@ describe("AgentDaemon agent-message receipts", () => {
       queueMessageOnly,
       markBotHandoffReplied,
       logEvent,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const inboundEvents = [
@@ -810,14 +834,14 @@ describe("AgentDaemon agent-message receipts", () => {
     ];
     expect(getOutstandingBotHandoffReply(inboundEvents)).not.toBeNull();
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      {
+      makeTask({
         id: "scribe-task",
         title: "Scribe",
         status: "executing",
         agentConfig: { botConversation: true, botTeamId: "team-1" },
-      },
+      }),
       inboundEvents,
       "No verified sources were produced.",
     );
@@ -855,7 +879,7 @@ describe("AgentDaemon agent-message receipts", () => {
       taskRepo: { findById: vi.fn() },
       queueMessageOnly,
       logEvent,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const events = [
@@ -885,14 +909,14 @@ describe("AgentDaemon agent-message receipts", () => {
       }),
     ];
 
-    const result = (AgentDaemon.prototype as Any).reconcileBotHandoffBeforeCompletion.call(
+    const result = daemonPrototype.reconcileBotHandoffBeforeCompletion.call(
       daemonLike,
-      {
+      makeTask({
         id: "atlas-task",
         title: "Atlas",
         status: "executing",
         agentConfig: { botConversation: true, botTeamId: "team-1" },
-      },
+      }),
       events,
       "Verified findings are ready.",
     );
@@ -932,14 +956,14 @@ describe("AgentDaemon agent-message receipts", () => {
           permissions: { read: true, write: true, delete: false, network: true, shell: false },
         }),
       },
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, workspace: Any) => workspace),
-    } as Any;
+      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Task, workspace: Workspace) => workspace),
+    };
 
-    const result = (AgentDaemon.prototype as Any).queueMessageOnly.call(
+    const result = daemonPrototype.queueMessageOnly.call(
       daemonLike,
-      {
+      makeTask({
         id: "child-task",
-      },
+      }),
       "Please check the migration",
       undefined,
       undefined,
@@ -970,13 +994,13 @@ describe("AgentDaemon agent-message receipts", () => {
     });
     const daemonLike = {
       getTaskEvents: vi.fn().mockReturnValue([prior]),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     expect(() =>
-      AgentDaemon.prototype.queueMessageOnly.call(
+      daemonPrototype.queueMessageOnly.call(
         daemonLike,
-        { id: "child-task" },
+        makeTask({ id: "child-task" }),
         "Different durable content",
         undefined,
         undefined,
@@ -1003,7 +1027,7 @@ describe("AgentDaemon agent-message receipts", () => {
       status: "queued",
       deliveryStatus: "queued",
     });
-    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+    const updatePayloadById = vi.fn((eventId: string, payload: Record<string, unknown>) => {
       if (eventId === targetReceipt.id) targetReceipt.payload = payload;
       if (eventId === parentActivity.id) parentActivity.payload = payload;
     });
@@ -1014,7 +1038,7 @@ describe("AgentDaemon agent-message receipts", () => {
       eventRepo: { updatePayloadById },
       emitTaskEvent: vi.fn(),
       releaseQueuedAttachmentRefs: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     expect(
@@ -1051,7 +1075,7 @@ describe("AgentDaemon agent-message receipts", () => {
       status: "queued",
       deliveryStatus: "queued",
     });
-    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+    const updatePayloadById = vi.fn((eventId: string, payload: Record<string, unknown>) => {
       if (eventId === targetReceipt.id) targetReceipt.payload = payload;
       if (eventId === parentActivity.id) parentActivity.payload = payload;
     });
@@ -1062,7 +1086,7 @@ describe("AgentDaemon agent-message receipts", () => {
       eventRepo: { updatePayloadById },
       emitTaskEvent: vi.fn(),
       releaseQueuedAttachmentRefs: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     expect(
@@ -1105,7 +1129,7 @@ describe("AgentDaemon agent-message receipts", () => {
       status: "queued",
       deliveryStatus: "queued",
     });
-    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+    const updatePayloadById = vi.fn((eventId: string, payload: Record<string, unknown>) => {
       if (eventId === targetReceipt.id) targetReceipt.payload = payload;
       if (eventId === parentActivity.id) parentActivity.payload = payload;
     });
@@ -1115,7 +1139,7 @@ describe("AgentDaemon agent-message receipts", () => {
       ),
       eventRepo: { updatePayloadById },
       emitTaskEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     expect(
@@ -1151,7 +1175,7 @@ describe("AgentDaemon agent-message receipts", () => {
       status: "queued",
       deliveryStatus: "queued",
     });
-    const updatePayloadById = vi.fn((_eventId: string, payload: Any) => {
+    const updatePayloadById = vi.fn((_eventId: string, payload: Record<string, unknown>) => {
       parentActivity.payload = payload;
     });
     const daemonLike = {
@@ -1160,7 +1184,7 @@ describe("AgentDaemon agent-message receipts", () => {
       ),
       eventRepo: { updatePayloadById },
       emitTaskEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     AgentDaemon.prototype.reconcileAgentMessageSenderProjection.call(
@@ -1182,11 +1206,11 @@ describe("AgentDaemon agent-message receipts", () => {
       const store = new QueuedAttachmentStore(path.join(root, "store"));
       const queueFollowUp = vi.fn();
       const logEvent = vi.fn();
-      const task = {
+      const task = makeTask({
         id: "child-task",
         workspaceId: "workspace-1",
         agentConfig: {},
-      };
+      });
       const daemonLike = {
         queuedAttachmentStore: store,
         getTaskEvents: vi.fn().mockReturnValue([]),
@@ -1209,13 +1233,13 @@ describe("AgentDaemon agent-message receipts", () => {
             permissions: { read: true, write: true, delete: false, network: true, shell: false },
           }),
         },
-        applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, workspace: Any) => workspace),
+        applyTaskWorkspaceOverridesForPath: vi.fn((_task: Task, workspace: Workspace) => workspace),
         taskRepo: { touch: vi.fn() },
         logEvent,
-      } as Any;
+      };
       Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-      const result = AgentDaemon.prototype.queueMessageOnly.call(
+      const result = daemonPrototype.queueMessageOnly.call(
         daemonLike,
         task,
         "Inspect the image",
@@ -1229,7 +1253,10 @@ describe("AgentDaemon agent-message receipts", () => {
         messageId: "image-message",
         deliveryStatus: "queued",
       });
-      const receipt = logEvent.mock.calls.find((call: Any[]) => call[1] === "user_message")[2];
+      const receipt = logEvent.mock.calls.find((call) => call[1] === "user_message")?.[2] as Record<
+        string,
+        unknown
+      >;
       expect(receipt.correlationId).toBe("image-message");
       expect(receipt.queuedAttachmentRefs).toEqual([
         expect.objectContaining({
@@ -1279,7 +1306,7 @@ describe("AgentDaemon agent-message receipts", () => {
       ),
       eventRepo: { updatePayloadById },
       emitTaskEvent,
-    } as Any;
+    };
 
     AgentDaemon.prototype.markQueuedAgentMessageDelivered.call(
       daemonLike,
@@ -1325,7 +1352,7 @@ describe("AgentDaemon agent-message receipts", () => {
       inReplyToMessageId: "handoff-1",
       inReplyToTaskId: "atlas-task",
     });
-    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+    const updatePayloadById = vi.fn((eventId: string, payload: Record<string, unknown>) => {
       if (eventId === targetReceipt.id) targetReceipt.payload = payload;
       if (eventId === originalHandoff.id) originalHandoff.payload = payload;
       if (eventId === replyActivity.id) replyActivity.payload = payload;
@@ -1336,7 +1363,7 @@ describe("AgentDaemon agent-message receipts", () => {
       ),
       eventRepo: { updatePayloadById },
       emitTaskEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     expect(originalHandoff.payload).toMatchObject({ replyStatus: "pending" });
@@ -1382,7 +1409,7 @@ describe("AgentDaemon agent-message receipts", () => {
       ),
       eventRepo: { updatePayloadById: vi.fn() },
       emitTaskEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     expect(
@@ -1419,7 +1446,7 @@ describe("AgentDaemon agent-message receipts", () => {
         getTaskEvents: vi.fn().mockReturnValue([receipt]),
         eventRepo: { updatePayloadById: vi.fn() },
         emitTaskEvent: vi.fn(),
-      } as Any;
+      };
       Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
       expect(
@@ -1455,14 +1482,21 @@ describe("AgentDaemon agent-message receipts", () => {
       const daemonLike = {
         queuedAttachmentStore: store,
         getTaskEvents: vi.fn().mockReturnValue([receipt]),
-      } as Any;
+      };
       Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-      const captured = daemonLike.captureQueuedAttachmentRefsForTask("deleted-task");
+      const captured = AgentDaemon.prototype.captureQueuedAttachmentRefsForTask.call(
+        daemonLike,
+        "deleted-task",
+      );
       expect(captured).toHaveLength(1);
       expect(existsSync(persisted.images[0].filePath!)).toBe(true);
 
-      daemonLike.releaseCapturedQueuedAttachmentRefs("deleted-task", captured);
+      AgentDaemon.prototype.releaseCapturedQueuedAttachmentRefs.call(
+        daemonLike,
+        "deleted-task",
+        captured,
+      );
       expect(existsSync(persisted.images[0].filePath!)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -1510,12 +1544,16 @@ describe("AgentDaemon agent-message receipts", () => {
       eventRepo: { updatePayloadById },
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((task: Any) => ({ changed: false, task })),
-      applyAgentRoleOverrides: vi.fn((task: Any) => ({ task })),
-    } as Any;
+      applyTaskFollowUpOverrides: vi.fn((task: Task) => ({ changed: false, task })),
+      applyAgentRoleOverrides: vi.fn((task: Task) => ({ task })),
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    AgentDaemon.prototype.processOrphanedFollowUps.call(daemonLike, "child-task", executor);
+    daemonPrototype.processOrphanedFollowUps.call(
+      daemonLike,
+      "child-task",
+      executor as unknown as TaskExecutor,
+    );
 
     await vi.waitFor(() => expect(requeueFollowUpAtTurnBoundary).toHaveBeenCalledTimes(1));
     expect(requeueFollowUpAtTurnBoundary).toHaveBeenCalledWith(followUp);
@@ -1549,17 +1587,19 @@ describe("AgentDaemon agent-message receipts", () => {
       status: "queued",
       deliveryStatus: "queued",
     });
-    const updatePayloadById = vi.fn((eventId: string, payload: Any) => {
+    const updatePayloadById = vi.fn((eventId: string, payload: Record<string, unknown>) => {
       if (eventId === targetReceipt.id) targetReceipt.payload = payload;
       if (eventId === parentActivity.id) parentActivity.payload = payload;
     });
     const executorCallOrder: string[] = [];
-    const sendMessage = vi.fn().mockImplementation(async (...args: Any[]) => {
-      executorCallOrder.push("executor-start");
-      await args[3]?.onAccepted?.();
-      executorCallOrder.push("accepted");
-      throw new Error("provider failed after handoff");
-    });
+    const sendMessage = vi
+      .fn()
+      .mockImplementation(async (...args: Parameters<TaskExecutor["sendMessage"]>) => {
+        executorCallOrder.push("executor-start");
+        await args[3]?.onAccepted?.();
+        executorCallOrder.push("accepted");
+        throw new Error("provider failed after handoff");
+      });
     const executor = {
       isRunning: false,
       sendMessage,
@@ -1567,13 +1607,13 @@ describe("AgentDaemon agent-message receipts", () => {
       updateTaskAgentConfig: vi.fn(),
       updateWorkspace: vi.fn(),
     };
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -1597,11 +1637,13 @@ describe("AgentDaemon agent-message receipts", () => {
       processOrphanedFollowUps: vi.fn(),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     await expect(
@@ -1632,7 +1674,7 @@ describe("AgentDaemon agent-message receipts", () => {
 
     // Model a retry after a process restart: the durable receipt is the
     // idempotency key, even if a stale runtime snapshot still contains it.
-    const retry = AgentDaemon.prototype.queueMessageOnly.call(
+    const retry = daemonPrototype.queueMessageOnly.call(
       daemonLike,
       task,
       "Continue the migration",
@@ -1655,13 +1697,13 @@ describe("AgentDaemon agent-message receipts", () => {
   });
 
   it("does not install an acceptance callback for an ordinary agent follow-up", async () => {
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -1695,11 +1737,13 @@ describe("AgentDaemon agent-message receipts", () => {
       processOrphanedFollowUps: vi.fn(),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const result = await AgentDaemon.prototype.sendMessage.call(
@@ -1725,13 +1769,13 @@ describe("AgentDaemon agent-message receipts", () => {
   });
 
   it("journals direct browser follow-ups before provider work and tracks dispatch completion", async () => {
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -1754,28 +1798,32 @@ describe("AgentDaemon agent-message receipts", () => {
       findByTaskIdAndTypes: vi.fn((_taskId: string, types: string[]) =>
         events.filter((event) => types.includes(event.type)),
       ),
-      updatePayloadById: vi.fn((eventId: string, payload: Any) => {
+      updatePayloadById: vi.fn((eventId: string, payload: Record<string, unknown>) => {
         const event = events.find((candidate) => candidate.id === eventId);
         if (event) event.payload = payload;
       }),
     };
-    const sendMessage = vi.fn().mockImplementation(async (...args: Any[]) => {
-      order.push("executor");
-      const [event] = events;
-      expect(event?.payload).toMatchObject({
-        message: "Compare these charts",
-        messageId: "direct-follow-up",
-        deliveryMode: "follow_up",
-        deliveryStatus: "started",
-        requestFingerprint: "a".repeat(64),
-        queuedAttachmentRefs: [{ messageId: "direct-follow-up" }],
-        quotedAssistantMessage: { eventId: "assistant-1", message: "Earlier chart context" },
+    const sendMessage = vi
+      .fn()
+      .mockImplementation(async (...args: Parameters<TaskExecutor["sendMessage"]>) => {
+        order.push("executor");
+        const [event] = events;
+        expect(event?.payload).toMatchObject({
+          message: "Compare these charts",
+          messageId: "direct-follow-up",
+          deliveryMode: "follow_up",
+          deliveryStatus: "started",
+          requestFingerprint: "a".repeat(64),
+          queuedAttachmentRefs: [
+            { key: "d9e15b4f-c089-4d23-8362-b143dd1c7783", mimeType: "image/png", sizeBytes: 5 },
+          ],
+          quotedAssistantMessage: { eventId: "assistant-1", message: "Earlier chart context" },
+        });
+        await args[3]?.onAccepted?.();
+        await args[3]?.onProviderDispatchStarted?.();
+        await args[3]?.onProviderDispatchCompleted?.();
+        await args[3]?.onExecutionAccepted?.();
       });
-      await args[3]?.onAccepted?.();
-      await args[3]?.onProviderDispatchStarted?.();
-      await args[3]?.onProviderDispatchCompleted?.();
-      await args[3]?.onExecutionAccepted?.();
-    });
     const executor = {
       isRunning: false,
       sendMessage,
@@ -1796,19 +1844,23 @@ describe("AgentDaemon agent-message receipts", () => {
       processOrphanedFollowUps: vi.fn(),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       buildAnnotationFollowUpContext: vi
         .fn()
         .mockResolvedValue({ message: "Compare these charts", annotations: [] }),
-      logEvent: vi.fn((taskId: string, type: TaskEvent["type"], payload: Any) => {
-        if (type === "user_message") {
-          events.push(makeEvent(`event-${events.length + 1}`, taskId, type, payload));
-        }
-      }),
+      logEvent: vi.fn(
+        (taskId: string, type: TaskEvent["type"], payload: Record<string, unknown>) => {
+          if (type === "user_message") {
+            events.push(makeEvent(`event-${events.length + 1}`, taskId, type, payload));
+          }
+        },
+      ),
       timelineRowsCommitted,
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const resultPromise = AgentDaemon.prototype.sendMessage.call(
@@ -1821,7 +1873,9 @@ describe("AgentDaemon agent-message receipts", () => {
         deliveryMode: "follow_up",
         messageId: "direct-follow-up",
         requestFingerprint: "a".repeat(64),
-        queuedAttachmentRefs: [{ messageId: "direct-follow-up" }],
+        queuedAttachmentRefs: [
+          { key: "d9e15b4f-c089-4d23-8362-b143dd1c7783", mimeType: "image/png", sizeBytes: 5 },
+        ],
         returnOnAccepted: true,
       },
     );
@@ -1856,13 +1910,13 @@ describe("AgentDaemon agent-message receipts", () => {
   });
 
   it("returns ordinary follow-ups at durable admission while execution continues", async () => {
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -1880,11 +1934,13 @@ describe("AgentDaemon agent-message receipts", () => {
     });
     let providerStarted = false;
     let resultSettled = false;
-    const sendMessage = vi.fn().mockImplementation(async (...args: Any[]) => {
-      await args[3]?.onExecutionAccepted?.();
-      providerStarted = true;
-      await executionFinished;
-    });
+    const sendMessage = vi
+      .fn()
+      .mockImplementation(async (...args: Parameters<TaskExecutor["sendMessage"]>) => {
+        await args[3]?.onExecutionAccepted?.();
+        providerStarted = true;
+        await executionFinished;
+      });
     const executor = {
       isRunning: false,
       sendMessage,
@@ -1904,12 +1960,14 @@ describe("AgentDaemon agent-message receipts", () => {
       processOrphanedFollowUps: vi.fn(),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       logEvent: vi.fn(),
       timelineRowsCommitted: vi.fn(() => receiptCommitted),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const resultPromise = AgentDaemon.prototype.sendMessage.call(
@@ -1950,13 +2008,13 @@ describe("AgentDaemon agent-message receipts", () => {
   });
 
   it("commits a busy executor follow-up before enqueue and return", async () => {
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -1994,12 +2052,14 @@ describe("AgentDaemon agent-message receipts", () => {
       ensureBotTaskTeam: vi.fn(),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       logEvent: vi.fn((_taskId: string, type: string) => order.push("event:" + type)),
       timelineRowsCommitted: vi.fn(() => [firstCommit, secondCommit][commitIndex++]),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     const resultPromise = AgentDaemon.prototype.sendMessage.call(
@@ -2036,13 +2096,13 @@ describe("AgentDaemon agent-message receipts", () => {
   });
 
   it("does not acknowledge a follow-up when its timeline receipt cannot commit", async () => {
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -2051,10 +2111,12 @@ describe("AgentDaemon agent-message receipts", () => {
       createdAt: 1,
     };
     let providerStarted = false;
-    const sendMessage = vi.fn().mockImplementation(async (...args: Any[]) => {
-      await args[3]?.onExecutionAccepted?.();
-      providerStarted = true;
-    });
+    const sendMessage = vi
+      .fn()
+      .mockImplementation(async (...args: Parameters<TaskExecutor["sendMessage"]>) => {
+        await args[3]?.onExecutionAccepted?.();
+        providerStarted = true;
+      });
     const executor = {
       isRunning: false,
       sendMessage,
@@ -2075,12 +2137,14 @@ describe("AgentDaemon agent-message receipts", () => {
       ensureBotTaskTeam: vi.fn(),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       logEvent: vi.fn(),
       timelineRowsCommitted: vi.fn().mockRejectedValue(new Error("timeline commit failed")),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
     await expect(
@@ -2122,13 +2186,13 @@ describe("AgentDaemon agent-message receipts", () => {
       updateTaskAgentConfig: vi.fn(),
       updateWorkspace: vi.fn(),
     };
-    const task = {
+    const task = makeTask({
       id: "child-task",
       title: "Child",
       prompt: "Prompt",
       workspaceId: "workspace-1",
       agentConfig: {},
-    };
+    });
     const workspace = {
       id: "workspace-1",
       name: "Workspace",
@@ -2148,14 +2212,20 @@ describe("AgentDaemon agent-message receipts", () => {
       getTaskEvents: vi.fn().mockReturnValue([]),
       isSideChatTask: vi.fn().mockReturnValue(false),
       buildSideChatTurnAgentConfigOverride: vi.fn().mockReturnValue(undefined),
-      applyTaskFollowUpOverrides: vi.fn((nextTask: Any) => ({ changed: false, task: nextTask })),
-      applyAgentRoleOverrides: vi.fn((nextTask: Any) => ({ task: nextTask })),
-      applyTaskWorkspaceOverridesForPath: vi.fn((_task: Any, nextWorkspace: Any) => nextWorkspace),
+      applyTaskFollowUpOverrides: vi.fn((nextTask: Task) => ({ changed: false, task: nextTask })),
+      applyAgentRoleOverrides: vi.fn((nextTask: Task) => ({ task: nextTask })),
+      applyTaskWorkspaceOverridesForPath: vi.fn(
+        (_task: Task, nextWorkspace: Workspace) => nextWorkspace,
+      ),
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    AgentDaemon.prototype.processOrphanedFollowUps.call(daemonLike, "child-task", executor);
+    daemonPrototype.processOrphanedFollowUps.call(
+      daemonLike,
+      "child-task",
+      executor as unknown as TaskExecutor,
+    );
 
     await vi.waitFor(() => expect(requeueFollowUpAtTurnBoundary).toHaveBeenCalledTimes(1));
     expect(requeueFollowUpAtTurnBoundary).toHaveBeenCalledWith(followUp);
@@ -2170,8 +2240,8 @@ describe("AgentDaemon agent-message receipts", () => {
 
   it("rejects queue-only delivery for ACP before writing a receipt", () => {
     const getTaskEvents = vi.fn().mockReturnValue([]);
-    const daemonLike = { getTaskEvents } as Any;
-    const task = {
+    const daemonLike = { getTaskEvents };
+    const task = makeTask({
       id: "acp-task",
       workspaceId: "workspace-1",
       agentConfig: {
@@ -2183,10 +2253,10 @@ describe("AgentDaemon agent-message receipts", () => {
           permissionMode: "approve-reads",
         },
       },
-    };
+    });
 
     expect(() =>
-      (AgentDaemon.prototype as Any).queueMessageOnly.call(
+      daemonPrototype.queueMessageOnly.call(
         daemonLike,
         task,
         "Queue this for ACP",
@@ -2224,10 +2294,14 @@ describe("AgentDaemon agent-message receipts", () => {
       getTaskEvents: vi.fn().mockReturnValue([targetReceipt]),
       sendMessage,
       logEvent: vi.fn(),
-    } as Any;
+    };
     Object.setPrototypeOf(daemonLike, AgentDaemon.prototype);
 
-    AgentDaemon.prototype.processOrphanedFollowUps.call(daemonLike, "child-task", executor);
+    daemonPrototype.processOrphanedFollowUps.call(
+      daemonLike,
+      "child-task",
+      executor as unknown as TaskExecutor,
+    );
 
     await vi.waitFor(() =>
       expect(executor.takeNextFollowUpAtTurnBoundary).toHaveBeenCalledTimes(2),

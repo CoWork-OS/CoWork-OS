@@ -1,3 +1,4 @@
+import type { Components } from "react-markdown";
 import { memo, useState, useRef, useCallback, Suspense, useLayoutEffect } from "react";
 import { Check, Copy, GitFork, LoaderCircle, Quote, Square, Volume2 } from "lucide-react";
 import type {
@@ -103,7 +104,7 @@ export function DeferredMarkdown({
   withBreaks = false,
 }: {
   children: string;
-  components?: unknown;
+  components?: Components;
   withBreaks?: boolean;
 }) {
   return (
@@ -505,7 +506,7 @@ export function UserMessageText({
 }: {
   text: string;
   integrationMentions?: IntegrationMentionSelection[];
-  markdownComponents: Any;
+  markdownComponents: Components;
 }) {
   if (hasRenderableIntegrationMentions(text, integrationMentions)) {
     return <IntegrationMentionText text={text} mentions={integrationMentions} />;

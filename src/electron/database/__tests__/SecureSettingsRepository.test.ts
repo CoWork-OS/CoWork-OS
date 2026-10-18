@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 /**
  * Unit tests for SecureSettingsRepository
  *
@@ -226,8 +227,6 @@ describe("SecureSettingsRepository", () => {
       const previousSettings = { provider: "openai" };
       const previousJson = JSON.stringify(previousSettings);
       const previousCiphertext = `os:${Buffer.from(`encrypted:${previousJson}`).toString("base64")}`;
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
-      const crypto = require("crypto");
       mockStmt.get.mockReturnValue({
         id: "existing-id",
         category: "voice",
@@ -387,8 +386,6 @@ describe("SecureSettingsRepository", () => {
     it("should decrypt and return settings with valid checksum", () => {
       const testData = { provider: "azure", endpoint: "https://test.api" };
       const jsonData = JSON.stringify(testData);
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
-      const crypto = require("crypto");
       const checksum = crypto.createHash("sha256").update(jsonData).digest("hex");
 
       mockStmt.get.mockReturnValue({
@@ -650,7 +647,6 @@ describe("SecureSettingsRepository", () => {
       // the `app:` prefix alone would leave that oracle in place for every
       // safeStorage record — the common case on desktop — because nothing else
       // rewrites a category that is only ever read.
-      const crypto = require("crypto");
       mockIsEncryptionAvailable.mockReturnValue(true);
       (SecureSettingsRepositoryClass as Any).instance = null;
       repository = new SecureSettingsRepositoryClass(mockDb);
@@ -685,7 +681,6 @@ describe("SecureSettingsRepository", () => {
     });
 
     it("leaves a record alone once its checksum already covers the ciphertext", () => {
-      const crypto = require("crypto");
       mockIsEncryptionAvailable.mockReturnValue(true);
       (SecureSettingsRepositoryClass as Any).instance = null;
       repository = new SecureSettingsRepositoryClass(mockDb);
@@ -920,8 +915,6 @@ describe("SecureSettingsRepository", () => {
     it("should return success status with data on successful load", () => {
       const testData = { provider: "azure" };
       const jsonData = JSON.stringify(testData);
-      // oxlint-disable-next-line typescript-eslint(no-require-imports)
-      const crypto = require("crypto");
       const checksum = crypto.createHash("sha256").update(jsonData).digest("hex");
 
       mockStmt.get.mockReturnValue({

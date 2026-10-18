@@ -407,7 +407,7 @@ export class TwilioSmsAdapter implements ChannelAdapter {
         Authorization: this.authHeader(),
         ...(form ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
       },
-      body: form?.toString(),
+      ...(method === "POST" && form ? { body: form.toString() } : {}),
     });
     const data = (await response.json().catch(() => ({}))) as {
       code?: number;
@@ -673,7 +673,7 @@ export class TwilioSmsAdapter implements ChannelAdapter {
     const attachments: MessageAttachment[] = [];
     for (let i = 0; i < count; i++) {
       const url = params[`MediaUrl${i}`];
-      if (!url || !/^https:\/\/api\.twilio\.com\//.test(url)) continue;
+      if (!url || !url.startsWith("https://api.twilio.com/")) continue;
       const mimeType = params[`MediaContentType${i}`];
       const response = await fetch(url, { headers: { Authorization: this.authHeader() } });
       if (!response.ok) throw new Error(`MMS media download returned HTTP ${response.status}`);

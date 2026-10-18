@@ -494,7 +494,7 @@ export class QuickInputWindow {
     });
 
     // Handle click on buttons via console message (since we can't use IPC with data URLs)
-    this.window.webContents.on("console-message", (_event, _level, message) => {
+    this.window.webContents.on("console-message", ({ message }) => {
       if (message === "__QUICK_INPUT_SUBMIT__") {
         this.submitFromWindow();
       } else if (message === "__QUICK_INPUT_CLOSE__") {

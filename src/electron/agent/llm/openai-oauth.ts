@@ -100,7 +100,7 @@ function shouldUseElectronOAuthFetch(input: Parameters<typeof fetch>[0]): boolea
 function getElectronNetFetch(): typeof fetch | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     const netFetch = electron?.net?.fetch;
     return typeof netFetch === "function" ? netFetch.bind(electron.net) : null;
@@ -144,7 +144,7 @@ installElectronOAuthFetchFallback();
 function getElectronShell(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     const shell = electron?.shell;
     if (shell) return shell;
@@ -157,7 +157,7 @@ function getElectronShell(): Any | null {
 function getElectronBrowserWindow(): Any | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     return electron?.BrowserWindow || null;
   } catch {

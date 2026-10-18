@@ -30,7 +30,6 @@ import {
   ArtifactRepository,
   InputRequestRepository,
   storageStatements,
-  TaskSessionMetadataRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
 import {
@@ -79,7 +78,6 @@ import {
   TaskStore,
   TaskEventRepository,
   WorkspaceStore,
-  MemoryType,
   withTaskRowReadScope,
   TaskSessionMetadataStore,
   ApprovalStore,
@@ -268,7 +266,7 @@ import {
   filterTrustedManifestRules,
   loadWorkspacePermissionManifest,
 } from "../security/workspace-permission-manifest";
-import { permissionScopeFingerprint, summarizePermissionScope } from "../security/permission-utils";
+import { permissionScopeFingerprint } from "../security/permission-utils";
 import { buildPermissionSecurityContext } from "./security/export-permission-context";
 import { evaluateNetworkPolicy } from "../security/network-policy";
 import { PlaybookService } from "../memory/PlaybookService";
@@ -751,7 +749,7 @@ interface PendingApprovalEntry {
 function getAllElectronWindows(): Any[] {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     const BrowserWindow = electron?.BrowserWindow;
     if (BrowserWindow?.getAllWindows) {
@@ -1747,7 +1745,7 @@ export class AgentDaemon extends EventEmitter {
       try {
         const stored = this.taskRepo.findById(task.id);
         if (stored) {
-          const storedConfig: AgentConfig = { ...(stored.agentConfig ?? {}) };
+          const storedConfig: AgentConfig = { ...stored.agentConfig };
           if (ceiling) storedConfig.accessCeilingProfileId = ceiling;
           else delete storedConfig.accessCeilingProfileId;
           this.taskRepo.update(task.id, { agentConfig: storedConfig });
@@ -2812,7 +2810,7 @@ export class AgentDaemon extends EventEmitter {
     // Also remove oldest completed executors if we have too many
     if (completedCount > MAX_CACHED_EXECUTORS) {
       const completedTasks = Array.from(this.activeTasks.entries())
-        .filter(([_, cached]) => cached.status === "completed")
+        .filter(([, cached]) => cached.status === "completed")
         .sort((a, b) => a[1].lastAccessed - b[1].lastAccessed);
 
       const excessCount = completedCount - MAX_CACHED_EXECUTORS;
@@ -5696,7 +5694,7 @@ export class AgentDaemon extends EventEmitter {
         // or inherit a broad settings default that the parent had overridden.
         task: {
           agentConfig: {
-            ...(params.agentConfig || {}),
+            ...params.agentConfig,
             ...(mergedPermissionMode ? { permissionMode: mergedPermissionMode } : {}),
           },
         },
@@ -6131,7 +6129,7 @@ export class AgentDaemon extends EventEmitter {
     }
 
     const nextAgentConfig: AgentConfig = {
-      ...(parentTask.agentConfig || {}),
+      ...parentTask.agentConfig,
       collaborativeMode: true,
       childAgentCollaborativeRun: true,
     };
@@ -7925,7 +7923,7 @@ export class AgentDaemon extends EventEmitter {
     },
   ): Promise<boolean> {
     if (request.signal?.aborted) throw new Error("Tool authorization cancelled");
-    const details = { ...(request.details || {}), tool: request.toolName };
+    const details = { ...request.details, tool: request.toolName };
     const permission = await this.evaluateToolPermission(taskId, {
       toolName: request.toolName,
       approvalType: request.approvalType,
@@ -10947,11 +10945,10 @@ export class AgentDaemon extends EventEmitter {
     // Event-driven captures can run after the executor has paused or finished.
     // Resolve the live task profile here so automatic memory mirroring cannot
     // use stale workspace permissions or bypass a newly gated network mode.
-    let effectiveMemoryWorkspace: Workspace | undefined;
     try {
-      effectiveMemoryWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+      this.getEffectiveWorkspaceForTask(taskId);
     } catch {
-      effectiveMemoryWorkspace = undefined;
+      // Capture continues through the existing workspace-specific policy checks.
     }
     const workspace = this.workspaceRepo.findById(task.workspaceId);
     if (!workspace?.path) return;
@@ -12240,11 +12237,10 @@ export class AgentDaemon extends EventEmitter {
     )
       return;
 
-    let effectiveMemoryWorkspace: Workspace | undefined;
     try {
-      effectiveMemoryWorkspace = this.getEffectiveWorkspaceForTask(taskId);
+      this.getEffectiveWorkspaceForTask(taskId);
     } catch {
-      effectiveMemoryWorkspace = undefined;
+      // Capture continues through the existing workspace-specific policy checks.
     }
 
     // Memory retention:
@@ -12902,7 +12898,7 @@ export class AgentDaemon extends EventEmitter {
     return {
       ...task,
       agentConfig: {
-        ...(task.agentConfig || {}),
+        ...task.agentConfig,
         ...override,
       },
     };
@@ -17264,7 +17260,7 @@ export class AgentDaemon extends EventEmitter {
       if (status === "failed") {
         const retryAt = Date.now();
         const retryPayload: Record<string, unknown> = {
-          ...(payload || {}),
+          ...payload,
           status: "queued",
           deliveryStatus: "queued",
           queuedAt: retryAt,
@@ -18026,7 +18022,7 @@ export class AgentDaemon extends EventEmitter {
           : undefined;
         if (senderEvent) {
           const senderPayload = {
-            ...((senderEvent.payload as Record<string, unknown> | undefined) || {}),
+            ...(senderEvent.payload as Record<string, unknown> | undefined),
             status: "delivered",
             deliveryStatus: "delivered",
             deliveredAt,
@@ -18143,7 +18139,7 @@ export class AgentDaemon extends EventEmitter {
         });
       if (!senderEvent) return;
       const senderPayload: Record<string, unknown> = {
-        ...((senderEvent.payload as Record<string, unknown> | undefined) || {}),
+        ...(senderEvent.payload as Record<string, unknown> | undefined),
         status,
         deliveryStatus: status,
         ...(status === "started" ? { startedAt: timestamp } : {}),

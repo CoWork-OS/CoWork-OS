@@ -31,7 +31,7 @@ export interface ImportProcessEnvOptions {
 function getElectronAppPath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    // oxlint-disable-next-line typescript-eslint(no-require-imports)
+    // oxlint-disable-next-line typescript/no-require-imports
     const electron = require("electron") as Any;
     const app = electron?.app;
     if (app && typeof app.getAppPath === "function") {

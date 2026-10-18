@@ -40,8 +40,7 @@ import { getUserDataDir } from "../utils/user-data-dir";
 import { notifyDetectedIntegrationAuthIssue } from "../notifications/integration-auth";
 import { RelationshipMemoryService } from "../memory/RelationshipMemoryService";
 import { buildContactMemoryContext } from "../memory/contact-memory-context";
-import { PlaybookService } from "../memory/PlaybookService";
-import { KnowledgeGraphService } from "../knowledge-graph/KnowledgeGraphService";
+
 import { getHeartbeatService } from "../agents/HeartbeatService";
 import { ControlPlaneCoreService } from "../control-plane/ControlPlaneCoreService";
 import { ContactIdentityService } from "../identity/identity-repository-facades";
@@ -95,7 +94,6 @@ import {
   MailboxComposeDraftPatch,
   MailboxClientSettingsPatch,
   MailboxDomainCategory,
-  MailboxDigest,
   MailboxDigestSnapshot,
   MailboxDraftOptions,
   MailboxDraftAttachmentInput,
@@ -126,8 +124,6 @@ import {
   MailboxProposalStatus,
   MailboxProposalType,
   MailboxProvider,
-  MailboxProviderBackend,
-  MailboxProviderCapability,
   MailboxQueuedAction,
   MailboxSendOutcomeResolution,
   MailboxResearchResult,
@@ -167,13 +163,7 @@ import {
   normalizeMicrosoftEmailReadScopes,
 } from "../../shared/microsoft-email";
 import { isMicrosoftConsumerEmailAddress } from "../../shared/email-provider-support";
-import type {
-  AgentRole,
-  CompanyEvidenceRef,
-  CompanyOutputContract,
-  Issue,
-  Task,
-} from "../../shared/types";
+import type { CompanyEvidenceRef, CompanyOutputContract, Task } from "../../shared/types";
 import { isTempWorkspaceId } from "../../shared/types";
 
 type MailboxAccountRow = {
@@ -1422,192 +1412,6 @@ function uniqueParticipants(participants: MailboxParticipant[]): MailboxParticip
     }
   }
   return Array.from(byEmail.values());
-}
-
-function normalizeClassifierText(subject: string, body: string): string {
-  return `${subject} ${body}`.toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function isAutomatedMailbox(
-  subject: string,
-  body: string,
-  senderEmail?: string,
-  labels: string[] = [],
-): boolean {
-  const text = normalizeClassifierText(subject, body);
-  const labelSet = new Set(labels.map((label) => label.toUpperCase()));
-  const sender = String(senderEmail || "").toLowerCase();
-  return (
-    labelSet.has("CATEGORY_UPDATES") ||
-    /\b(no-?reply|noreply|do not reply|this inbox is not monitored|automated|system generated|unmonitored)\b/.test(
-      `${text} ${sender}`,
-    ) ||
-    /\b(verification code|password reset|2-step verification|2fa|security alert|security code|privacy settings|verify your identity|password has been changed|sign-?in|login|one-time code|otp|account data access attempt)\b/.test(
-      text,
-    ) ||
-    /\b(receipt|invoice|statement|billing|order update|order confirmation|shipment|delivery|tracking|return|refund|trial ending|free trial|new google account|passkey added|your account has been|your account was|recent update to your|revision to your|updated your mobile phone information|identity was successfully verified)\b/.test(
-      text,
-    )
-  );
-}
-
-function isOnboardingMailbox(subject: string, body: string): boolean {
-  const text = normalizeClassifierText(subject, body);
-  return /\b(welcome to|get started|setup guide|onboarding|free trial|trial credits|information about your new)\b/.test(
-    text,
-  );
-}
-
-function hasDirectReplyRequest(text: string): boolean {
-  return (
-    /\b(can you|could you|would you|would you mind|do you mind|are you able to|can we|when can you|what time works|does that work|let me know if you|please let me know|please confirm|please review|please respond|please reply|please share|please provide|please send|please update|please schedule|please check|please take a look|i need you to|we need you to|i'd like you to|we'd like you to)\b/.test(
-      text,
-    ) ||
-    /\b(?:can|could|would|will|are|is|do|does|did|what|when|where|why|how)\b[^?.!]{0,80}\?/i.test(
-      text,
-    )
-  );
-}
-
-function hasBoilerplateNotification(text: string): boolean {
-  return (
-    /\b(should you need to contact us|if you have any questions|if you have questions|if you need anything|please know that|you can always|contact us|thanks for shopping with us|thanks for visiting|per your request|we have successfully|we have updated|we have changed|we have enabled|your account has been|your account was|this inbox is not monitored|this is an automated message)\b/.test(
-      text,
-    ) || /\b(should you need|if you need to|for your reference|just letting you know)\b/.test(text)
-  );
-}
-
-function likelyNeedsReply(params: {
-  direction: "incoming" | "outgoing";
-  subject: string;
-  body: string;
-  senderEmail?: string;
-  labels?: string[];
-  category?: MailboxThreadCategory;
-}): boolean {
-  if (params.direction !== "incoming") return false;
-  const labels = params.labels || [];
-  const text = normalizeClassifierText(params.subject, params.body);
-  if (
-    isAutomatedMailbox(params.subject, params.body, params.senderEmail, labels) ||
-    isOnboardingMailbox(params.subject, params.body) ||
-    params.category === "promotions" ||
-    params.category === "updates"
-  ) {
-    return false;
-  }
-  if (hasBoilerplateNotification(text)) return false;
-  return hasDirectReplyRequest(text);
-}
-
-function deriveCategory(
-  subject: string,
-  labels: string[],
-  body: string,
-  senderEmail?: string,
-): MailboxThreadCategory {
-  const lowerSubject = subject.toLowerCase();
-  const lowerBody = body.toLowerCase();
-  const text = normalizeClassifierText(subject, body);
-  const labelSet = new Set(labels.map((label) => label.toUpperCase()));
-
-  if (
-    labelSet.has("CATEGORY_PROMOTIONS") ||
-    /\bnewsletter|sale|discount|unsubscribe|free trial|upgrade offer|limited time\b/.test(lowerBody)
-  ) {
-    return "promotions";
-  }
-  if (
-    isAutomatedMailbox(subject, body, senderEmail, labels) ||
-    isOnboardingMailbox(subject, body) ||
-    /\breceipt|invoice|notification|alert|verification|password|security|privacy|passkey|account update|account revision|account confirmation|identity verified\b/.test(
-      text,
-    )
-  ) {
-    return "updates";
-  }
-  if (/\bmeet|schedule|calendar|availability|slot\b/.test(`${lowerSubject} ${lowerBody}`)) {
-    return "calendar";
-  }
-  if (/\bfollow up|checking in|circling back|nudge\b/.test(`${lowerSubject} ${lowerBody}`)) {
-    return "follow_up";
-  }
-  if (
-    labelSet.has("IMPORTANT") ||
-    /\burgent|asap|deadline|today|blocking\b/.test(`${lowerSubject} ${lowerBody}`)
-  ) {
-    return "priority";
-  }
-  if (
-    /\b(family|friend|friends|personal|birthday|wedding|party|vacation|holiday|catch up|coffee|lunch|dinner|weekend|invitation|invite|rsvp|congratulations|condolences)\b/.test(
-      text,
-    )
-  ) {
-    return "personal";
-  }
-  return "other";
-}
-
-function computeScores(params: {
-  subject: string;
-  body: string;
-  unreadCount: number;
-  lastMessageAt: number;
-  needsReply: boolean;
-  cleanupCandidate: boolean;
-  category: MailboxThreadCategory;
-}): { priorityScore: number; urgencyScore: number; staleFollowup: boolean; handled: boolean } {
-  const text = `${params.subject} ${params.body}`.toLowerCase();
-  let priorityScore = 20;
-  let urgencyScore = 10;
-
-  if (params.unreadCount > 0) {
-    priorityScore += 18;
-    urgencyScore += 8;
-  }
-  if (params.needsReply) {
-    priorityScore += 14;
-    urgencyScore += 12;
-  }
-  if (/\burgent|asap|critical|today|deadline|immediately|eod\b/.test(text)) {
-    priorityScore += 22;
-    urgencyScore += 24;
-  }
-  if (params.category === "priority") {
-    priorityScore += 16;
-    urgencyScore += 12;
-  }
-  if (params.category === "calendar") {
-    priorityScore += 10;
-    urgencyScore += 18;
-  }
-  if (params.category === "updates") {
-    priorityScore -= 8;
-    urgencyScore -= 6;
-  }
-  if (params.category === "promotions") {
-    priorityScore -= 16;
-    urgencyScore -= 10;
-  }
-  if (params.cleanupCandidate) {
-    priorityScore -= 10;
-    urgencyScore -= 8;
-  }
-
-  const ageHours = Math.max(0, Date.now() - params.lastMessageAt) / (60 * 60 * 1000);
-  const staleFollowup = params.needsReply && ageHours >= 36;
-  if (staleFollowup) {
-    urgencyScore += 18;
-  }
-
-  priorityScore = Math.max(0, Math.min(100, priorityScore));
-  urgencyScore = Math.max(0, Math.min(100, urgencyScore));
-  return {
-    priorityScore,
-    urgencyScore,
-    staleFollowup,
-    handled: !params.needsReply && params.unreadCount === 0,
-  };
 }
 
 function priorityBandFromScore(score: number): MailboxPriorityBand {
@@ -9969,7 +9773,7 @@ export class MailboxService {
       headers: {
         Authorization: `Bearer ${token}`,
         ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(options.headers || {}),
+        ...options.headers,
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });

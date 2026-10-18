@@ -285,7 +285,7 @@ export class PermissionEngine {
       return {
         ...legacy,
         metadata: {
-          ...(legacy.metadata || {}),
+          ...legacy.metadata,
           accessPolicyVersion: "shadow",
           boundaryDecision: boundary.decision,
           boundaryReason: boundary.reason.summary,
@@ -700,7 +700,7 @@ export class PermissionEngine {
       reason,
       ...(result.matchedRule ? { matchedRule: result.matchedRule } : {}),
       metadata: {
-        ...(result.metadata || {}),
+        ...result.metadata,
         ...(request.mcpToolPolicy && decision === "allow" ? { mcpToolPolicyAuthorized: true } : {}),
         ...(profile
           ? {
@@ -768,10 +768,7 @@ export class PermissionEngine {
     if (!this.getRuntimeAccessProfile(request)) return false;
     const rules = request.workspace.permissions.accessDomainRules || [];
     const allows = rules.filter((rule) => rule.access === "allow");
-    return (
-      allows.length > 0 &&
-      allows.some((rule) => domainMatches(facts.normalizedDomain, rule.pattern))
-    );
+    return allows.some((rule) => domainMatches(facts.normalizedDomain, rule.pattern));
   }
 
   private static externalFileCrossesBoundary(

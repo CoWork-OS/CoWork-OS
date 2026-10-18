@@ -8,11 +8,7 @@ import {
 import { requestsCliAnythingApp } from "../../applications/application-task-intent";
 import { IntentRoute } from "./IntentRouter";
 import { hasAffirmativeDelegationAction } from "../../../shared/delegation-intent";
-import type {
-  DirectResponseMode,
-  PreflightGate,
-  TaskStrategySnapshot,
-} from "./TaskStrategySnapshot";
+import type { DirectResponseMode, TaskStrategySnapshot } from "./TaskStrategySnapshot";
 
 export interface DerivedTaskStrategy {
   conversationMode: ConversationMode;
@@ -299,7 +295,6 @@ export class TaskStrategyService {
 
     const base = defaults[route.intent];
     const taskText = `${taskContext?.title || ""}\n${taskContext?.prompt || ""}`.toLowerCase();
-    const simpleImageGenerationTask = this.isSimpleImageGenerationTask(taskText);
     const terminalImageGenerationTask = this.isTerminalImageGenerationTask(taskText);
     const artifactCreationSignal =
       /\b(create|build|make|implement|scaffold|generate|start building|start build)\b/.test(

@@ -1246,7 +1246,7 @@ describe("OpenAIProvider structured errors", () => {
     await new OpenAIProvider(makeConfig()).createMessage(cachedRequest);
 
     expect(completeMock).toHaveBeenCalledTimes(3);
-    expect((completeMock.mock.calls[2]?.[2] as Any).cacheRetention).toBe("none");
+    expect(completeMock.mock.calls[2]?.[2]).toMatchObject({ cacheRetention: "none" });
   });
 
   it("includes turn-only context once when cache prefix splitting is enabled", async () => {

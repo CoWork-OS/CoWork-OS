@@ -4,6 +4,7 @@ import type {
   ToolResultEnvelopeStatus,
   ToolResultEvidence,
 } from "../../../shared/types";
+import { deriveToolCoverage, deriveToolDataAsOf } from "./tool-outcome";
 
 export interface BuildToolResultEnvelopeParams {
   toolUseId: string;
@@ -188,6 +189,8 @@ function buildDefaultEvidence(params: BuildToolResultEnvelopeParams): ToolResult
 }
 
 export function buildToolResultEnvelope(params: BuildToolResultEnvelopeParams): ToolResultEnvelope {
+  const coverage = params.error ? undefined : deriveToolCoverage(params.toolName, params.result);
+  const dataAsOf = params.error ? undefined : deriveToolDataAsOf(params.result);
   return {
     toolUseId: params.toolUseId,
     toolName: params.toolName,
@@ -201,5 +204,8 @@ export function buildToolResultEnvelope(params: BuildToolResultEnvelopeParams): 
     contextMutation: null,
     uiHints: params.uiHints,
     telemetry: params.telemetry,
+    ...(coverage ? { coverage } : {}),
+    ...(dataAsOf !== undefined ? { dataAsOf } : {}),
+    ...(coverage || dataAsOf !== undefined ? { queriedAt: Date.now() } : {}),
   };
 }

@@ -168,6 +168,13 @@ export class GlobTools {
         matches: results,
         totalMatches: matches.length,
         truncated,
+        ...(scanTruncated
+          ? {
+              scanTruncated: true,
+              truncationReason:
+                "The scan stopped before covering every file, so totalMatches is a lower bound and a missing match does not mean the file is absent.",
+            }
+          : {}),
       };
     } catch (error: Any) {
       this.daemon.logEvent(this.taskId, "tool_result", {

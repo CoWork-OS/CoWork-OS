@@ -36,6 +36,8 @@ import {
   type ToolAttemptPersistence,
 } from "./runtime/tool-attempts";
 import { resolveToolEffect } from "./runtime/tool-effect";
+import { deriveToolCoverage } from "./runtime/tool-outcome";
+import { NotCheckedLedger } from "./not-checked-ledger";
 import { effectiveTaskModelConfig } from "./task-model-config";
 import { buildBotTeamContextPrompt, hasBotTeamDelegationRequest } from "../agents/bot-team";
 import { ensureWorkspaceDirectory } from "../utils/workspace-directory";
@@ -7102,6 +7104,7 @@ ${transcript}
   /** Set when a thread moves to another provider; noted once on the next user message. */
   private pendingModelHandoff: ModelHandoff | null = null;
   private toolAttemptTracker?: ToolAttemptTracker;
+  private notCheckedLedgerState?: NotCheckedLedger;
   private providerFailoverRequiresImageInput = false;
   private toolBatchExecutor?: ToolBatchExecutor;
 
@@ -17360,6 +17363,7 @@ ${transcript}
       notesFirst ? completionNotes : summary,
       notesFirst ? summary : completionNotes,
       this.buildUnresolvedTestCommandNote(),
+      this.notCheckedLedger.render(),
       this.fileMutationVerifier?.buildAdvisoryFooter(),
     ]
       .map((part) => String(part || "").trim())
@@ -24871,7 +24875,14 @@ You are continuing a previous conversation. The context from the previous conver
     }
   }
 
+  /** Checks that did not cover their scope, for the summary's "Not checked" block. */
+  private get notCheckedLedger(): NotCheckedLedger {
+    this.notCheckedLedgerState ??= new NotCheckedLedger();
+    return this.notCheckedLedgerState;
+  }
+
   private recordToolResult(toolName: string, result: Any, input?: Any): void {
+    this.notCheckedLedger.recordCoverage(toolName, input, deriveToolCoverage(toolName, result));
     const evidence = collectCrossStepEvidence(toolName, result);
     if (evidence.length) {
       if (!(this.crossStepEvidence instanceof Map)) this.crossStepEvidence = new Map();
@@ -36866,6 +36877,7 @@ Return ONLY a JSON object:
                     if (webSearchBudgetCheck.blocked) {
                       const reason =
                         webSearchBudgetCheck.reason || "web_search blocked by web search policy.";
+                      this.notCheckedLedger.recordBlocked("web_search", content.input, reason);
                       hadToolError = true;
                       allToolErrorsInputDependent = false;
                       toolErrors.add(content.name);

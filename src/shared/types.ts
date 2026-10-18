@@ -1375,6 +1375,19 @@ export interface ToolResultEvidence {
   extra?: Record<string, unknown>;
 }
 
+/**
+ * How much of the asked-for scope a search, list or query result covers. `partial`: some of it
+ * was not checked (a limit, a time budget, a filter, another page), so "nothing found" does not
+ * mean "absent". Absent when the tool does not say.
+ */
+export type ToolCoverageStatus = "complete" | "partial" | "unknown";
+
+export interface ToolCoverage {
+  status: ToolCoverageStatus;
+  reason?: string;
+  window?: { from?: number; to?: number };
+}
+
 export interface ToolResultEnvelope {
   toolUseId: string;
   toolName: string;
@@ -1388,6 +1401,11 @@ export interface ToolResultEnvelope {
   contextMutation?: Record<string, unknown> | null;
   uiHints?: Record<string, unknown>;
   telemetry?: Record<string, unknown>;
+  coverage?: ToolCoverage;
+  /** When the underlying data was last updated, when the tool knows it (not the query time). */
+  dataAsOf?: number;
+  /** When the tool ran the query. */
+  queriedAt?: number;
 }
 
 export interface EvidenceRef {
@@ -3801,6 +3819,11 @@ export type EvidenceManifestSourceType =
   | "task_event"
   | "child_session";
 export type EvidenceManifestEntryStatus = "supporting" | "contradicting" | "neutral" | "stale";
+/**
+ * How the claim was established: `observed` (read or measured directly from the source),
+ * `inferred` (concluded by a model from other material), `unknown` (not recorded).
+ */
+export type EvidenceBasis = "observed" | "inferred" | "unknown";
 
 export interface EvidenceManifestEntry {
   id: string;
@@ -3817,6 +3840,9 @@ export interface EvidenceManifestEntry {
   contradictionGroup?: string;
   itemId?: string;
   artifactRevisionId?: string;
+  basis?: EvidenceBasis;
+  /** When the source data was last updated, separate from `capturedAt` (when it was read). */
+  dataAsOf?: number;
   createdAt: number;
 }
 

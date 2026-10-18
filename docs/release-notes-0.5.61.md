@@ -58,6 +58,7 @@ Read [Upgrade notes](#upgrade-notes) before upgrading: channel pairings are rese
 - **Mission Control and agents** — The Agents tab is gone; the header link opens Team (Calm) or the Bots page, and an agent's full settings open from **Edit agent** in Team or **More settings** in the Bots page.
 - **Execution overrides** — Saved Analyze, Debug and Verified pins behave as **Do**; **Plan** is the only pin left.
 - **Sub-agents** — The composer strip is replaced by a **Subagents** roster in the right panel, sessions with sub-agents start collapsed in the sidebar, and sub-agent usage stats are opt-in (**Settings > Appearance > Task panel**).
+- **Desktop alerts** — Alerts go only through the system notification center; CoWork's own banner and the **Notification style** setting are gone. If notifications are off for CoWork OS in **System Settings > Notifications**, or the system refuses them, you won't see a desktop banner, but every alert still appears in the in-app inbox.
 - **Calm stays opt-in** — Today, Work and Team are part of the Calm theme; the default theme is unchanged.
 
 ### Removed features
@@ -79,7 +80,7 @@ Read [Upgrade notes](#upgrade-notes) before upgrading: channel pairings are rese
 
 ## Fixes
 
-Highlights from this release's fixes: explicit skill requests route reliably and export-risk approvals explain the risk and keep denials recorded, the renderer bundle loads optional views on demand with no chunk over 500 kB, provider requests trust the operating system's certificate roots, provider errors and empty replies stay failures with the reason above the composer, saving LLM settings no longer erases stored keys, **Clear memory** no longer fails with `database is locked`, MCP servers that require `initialize` first connect on the first try, startup no longer fails with "Database worker queue is full", and many fixes to verification, document outputs, drafts, the sidebar and the task view found in live workflow runs.
+Highlights from this release's fixes: an approval shows once, correctly labelled, wherever it is counted, explicit skill requests route reliably and export-risk approvals explain the risk and keep denials recorded, the renderer bundle loads optional views on demand with no chunk over 500 kB, provider requests trust the operating system's certificate roots, provider errors and empty replies stay failures with the reason above the composer, saving LLM settings no longer erases stored keys, **Clear memory** no longer fails with `database is locked`, MCP servers that require `initialize` first connect on the first try, startup no longer fails with "Database worker queue is full", and many fixes to verification, document outputs, drafts, the sidebar and the task view found in live workflow runs.
 
 The [Changelog](changelog.md) lists every change in this release.
 

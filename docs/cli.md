@@ -186,6 +186,8 @@ These command groups are local-first and do not require a Control Plane token:
 - `cowork dashboard` and `cowork open task <taskId>` launch the desktop app/deeplink without using the Control Plane.
 - `cowork pact status|discover|send|grants|disconnect|authorizations|authorization|conversation|receipt` talks to business agents over [PACT](pact.md) as the profile owner. `send` needs `--yes` to confirm a change; a pending sign-in prints the business's own login link.
 
+`cowork handoff export <managedSessionId>` (or `--task <taskId>`) and `cowork handoff import <package> --environment <environmentId>` move an in-progress session as a [handoff package](managed-agents.md#durable-session-handoffs). They go through the desktop Control Plane, so the app must be running. The package must sit inside the target environment's workspace (copy it to `.cowork/handoffs/`); approvals the earlier session was waiting for are asked again, never granted by the import.
+
 Exit codes: `0` success, `1` failure, `3` a person must act (for example a PACT sign-in; resume with `cowork pact authorization wait <id>`), `130` interrupted. `cowork run` keeps waiting for a sign-in in an interactive terminal; pass `--exit-on-input` (or run without a terminal) to stop with code `3` instead.
 
 ## Runtime Model

@@ -43,6 +43,7 @@ import {
 import { ComposerDraftStore } from "./composer-draft-repository";
 import { FollowUpRecoveryStore } from "./follow-up-recovery-sql";
 import { ToolAttemptStore } from "./tool-attempt-sql";
+import { LifecycleMetaStore } from "./lifecycle-meta-sql";
 import { TaskLabelStore } from "./TaskLabelRepository";
 import { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";
@@ -170,6 +171,33 @@ export const STORAGE_UNITS = {
     "recoverStartedAttempts",
     { readonly: false },
   ),
+  lifecycleMeta_recordUse: storeUnit(
+    (db: Database.Database) => new LifecycleMetaStore(db),
+    "recordUse",
+    { readonly: false },
+  ),
+  lifecycleMeta_get: storeUnit((db: Database.Database) => new LifecycleMetaStore(db), "get", {
+    readonly: true,
+  }),
+  lifecycleMeta_list: storeUnit((db: Database.Database) => new LifecycleMetaStore(db), "list", {
+    readonly: true,
+  }),
+  lifecycleMeta_listRetiredIds: storeUnit(
+    (db: Database.Database) => new LifecycleMetaStore(db),
+    "listRetiredIds",
+    { readonly: true },
+  ),
+  lifecycleMeta_setMeta: storeUnit(
+    (db: Database.Database) => new LifecycleMetaStore(db),
+    "setMeta",
+    { readonly: false },
+  ),
+  lifecycleMeta_retire: storeUnit((db: Database.Database) => new LifecycleMetaStore(db), "retire", {
+    readonly: false,
+  }),
+  lifecycleMeta_keep: storeUnit((db: Database.Database) => new LifecycleMetaStore(db), "keep", {
+    readonly: false,
+  }),
   // Startup follow-up recovery: reads every follow-up receipt, so it runs on the reader.
   taskEvent_findUnstartedFollowUpTaskIds: storeUnit(
     (db: Database.Database) => new FollowUpRecoveryStore(db),

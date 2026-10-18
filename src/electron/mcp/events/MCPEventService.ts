@@ -12,7 +12,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { safeStorage } from "electron";
+import { getSafeStorage } from "../../utils/safe-storage";
 import type { MCPClientManager } from "../client/MCPClientManager";
 import { MCPSettingsManager } from "../settings";
 import type { EventTriggerService } from "../../triggers/EventTriggerService";
@@ -617,6 +617,9 @@ export class MCPEventService {
 
   private newEncryptedSecret(): string {
     const secret = `whsec_${randomBytes(32).toString("base64")}`;
+    // Resolved per call: the headless daemon and the Linux server package ship without
+    // Electron, so a module-level import would stop the daemon from starting.
+    const safeStorage = getSafeStorage();
     if (safeStorage?.isEncryptionAvailable?.()) {
       return `os:${safeStorage.encryptString(secret).toString("base64")}`;
     }
@@ -630,6 +633,7 @@ export class MCPEventService {
 
   private decryptSecret(encrypted: string | null): string {
     if (encrypted?.startsWith("os:")) {
+      const safeStorage = getSafeStorage();
       if (!safeStorage?.isEncryptionAvailable?.()) throw new Error("OS encryption is unavailable");
       return safeStorage.decryptString(Buffer.from(encrypted.slice(3), "base64"));
     }

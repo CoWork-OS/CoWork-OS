@@ -16,6 +16,8 @@ import {
   HANDOFF_LIMITS,
   HANDOFF_PACKAGE_DIR,
   HandoffPackageError,
+  handoffRestoreRefusal,
+  isSensitiveArtifact,
   parseHandoffManifest,
   safeRelativeArtifactPath,
 } from "./session-handoff";
@@ -24,6 +26,7 @@ export type HandoffWorkspace = Pick<Workspace, "path" | "permissions">;
 
 export const HANDOFF_MANIFEST_FILE = "manifest.json";
 const HANDOFF_ARTIFACTS_DIR = "artifacts";
+const HANDOFF_PACKAGE_POSIX_DIR = HANDOFF_PACKAGE_DIR.split(path.sep).join("/");
 
 function workspaceRoot(workspace: HandoffWorkspace): string {
   return fs.realpathSync.native(path.resolve(workspace.path));
@@ -42,6 +45,14 @@ function passesThroughSymlink(root: string, target: string): boolean {
     }
   }
   return false;
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  );
 }
 
 /** Absolute path inside the workspace that the policy allows for `operation`. */
@@ -73,6 +84,26 @@ function sha256(data: Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/** Read a regular file through one descriptor that refuses symlinks, up to `maxBytes`. */
+function readBoundedFile(filePath: string, maxBytes: number): Buffer {
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const stats = fs.fstatSync(fd);
+    if (!stats.isFile()) throw new HandoffPackageError("not a regular file");
+    if (stats.size > maxBytes) throw new HandoffPackageError("larger than the size limit");
+    const data = Buffer.alloc(stats.size);
+    let offset = 0;
+    while (offset < stats.size) {
+      const read = fs.readSync(fd, data, offset, stats.size - offset, offset);
+      if (read === 0) break;
+      offset += read;
+    }
+    return data.subarray(0, offset);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export interface HandoffArtifactCopy {
   relativePath: string;
   data: Buffer;
@@ -80,7 +111,8 @@ export interface HandoffArtifactCopy {
 
 /**
  * Hash the latest committed revisions again and keep a copy of each one that still matches what
- * the session recorded. A file that changed afterwards is listed but not copied.
+ * the session recorded. A file that changed afterwards, or that may hold a credential, is listed
+ * but not copied.
  */
 export function collectHandoffArtifacts(
   workspace: HandoffWorkspace,
@@ -100,10 +132,10 @@ export function collectHandoffArtifacts(
       getWorkspaceRelativePosixPath(root, path.resolve(root, revision.path));
     const relativePath = relative ? safeRelativeArtifactPath(relative) : undefined;
     if (!relativePath) {
-      warnings.push(`Skipped a file outside the workspace or with an unsafe name.`);
+      warnings.push("Skipped a file outside the workspace or with an unsafe name.");
       continue;
     }
-    if (relativePath.startsWith(`${HANDOFF_PACKAGE_DIR.split(path.sep).join("/")}/`)) continue;
+    if (relativePath.startsWith(`${HANDOFF_PACKAGE_POSIX_DIR}/`)) continue;
     const entry = {
       path: relativePath,
       sha256: revision.sha256,
@@ -119,6 +151,8 @@ export function collectHandoffArtifacts(
       warnings.push(`${relativePath}: not copied (${snapshot.reason}).`);
     } else if (snapshot.sha256 !== revision.sha256 || !snapshot.data) {
       warnings.push(`${relativePath}: changed after the session recorded it, not copied.`);
+    } else if (isSensitiveArtifact(relativePath, snapshot.data)) {
+      warnings.push(`${relativePath}: may contain a credential, not copied.`);
     } else if (totalBytes + snapshot.data.length > HANDOFF_LIMITS.maxPackageBytes) {
       warnings.push(`${relativePath}: package size limit reached, not copied.`);
     } else {
@@ -143,6 +177,14 @@ export function resolveHandoffPackageRoot(workspace: HandoffWorkspace, targetDir
   );
 }
 
+function writeIgnoreFile(directory: string): void {
+  try {
+    fs.writeFileSync(path.join(directory, ".gitignore"), "*\n", { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+}
+
 /** Write manifest.json and artifacts/ under `<packageRoot>/<packageId>/`; returns that directory. */
 export function writeHandoffPackage(
   workspace: HandoffWorkspace,
@@ -152,14 +194,8 @@ export function writeHandoffPackage(
 ): string {
   const root = workspaceRoot(workspace);
   fs.mkdirSync(packageRoot, { recursive: true });
-  if (path.relative(root, packageRoot) === HANDOFF_PACKAGE_DIR) {
-    // Packages hold transcript excerpts; keep them out of the repository by default.
-    try {
-      fs.writeFileSync(path.join(packageRoot, ".gitignore"), "*\n", { flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    }
-  }
+  // Packages hold transcript excerpts and file copies; keep them out of the repository.
+  if (path.relative(root, packageRoot) === HANDOFF_PACKAGE_DIR) writeIgnoreFile(packageRoot);
   const packageDir = containedPath(
     workspace,
     root,
@@ -168,6 +204,7 @@ export function writeHandoffPackage(
     "handoff package directory",
   );
   fs.mkdirSync(packageDir);
+  writeIgnoreFile(packageDir);
   for (const copy of copies) {
     const target = containedPath(
       workspace,
@@ -187,7 +224,10 @@ export function writeHandoffPackage(
   return packageDir;
 }
 
-/** Read and verify a manifest that sits inside the target workspace. */
+/**
+ * Read and check a manifest from the target workspace's `.cowork/handoffs/`. Packages anywhere
+ * else in the workspace (a cloned repository, node_modules) are not accepted.
+ */
 export function readHandoffPackage(
   workspace: HandoffWorkspace,
   manifestPath: string,
@@ -198,18 +238,21 @@ export function readHandoffPackage(
     path.basename(resolved) === HANDOFF_MANIFEST_FILE
       ? resolved
       : path.join(resolved, HANDOFF_MANIFEST_FILE);
-  let stats: fs.Stats;
+  const packageDir = path.dirname(manifestFile);
+  if (path.dirname(packageDir) !== path.join(root, HANDOFF_PACKAGE_DIR)) {
+    throw new HandoffPackageError(
+      `Copy the package folder into ${HANDOFF_PACKAGE_POSIX_DIR}/ in the target workspace and import it from there`,
+    );
+  }
+  let raw: Buffer;
   try {
-    stats = fs.lstatSync(manifestFile);
-  } catch {
-    throw new HandoffPackageError(`No ${HANDOFF_MANIFEST_FILE} found at ${manifestPath}`);
+    raw = readBoundedFile(manifestFile, HANDOFF_LIMITS.maxManifestBytes);
+  } catch (error) {
+    throw new HandoffPackageError(
+      `Cannot read ${HANDOFF_MANIFEST_FILE} at ${manifestPath}: ${error instanceof Error ? error.message : "unreadable"}`,
+    );
   }
-  if (!stats.isFile()) throw new HandoffPackageError("The handoff manifest is not a regular file");
-  if (stats.size > HANDOFF_LIMITS.maxManifestBytes) {
-    throw new HandoffPackageError("The handoff manifest is larger than the 8 MB limit");
-  }
-  const manifest = parseHandoffManifest(fs.readFileSync(manifestFile, "utf8"));
-  return { manifest, packageDir: path.dirname(manifestFile) };
+  return { manifest: parseHandoffManifest(raw.toString("utf8")), packageDir };
 }
 
 export interface RestoredHandoffArtifact {
@@ -221,36 +264,67 @@ export interface RestoredHandoffArtifact {
   alreadyPresent: boolean;
 }
 
+function existingFileDigest(target: string): string | "not_a_file" | undefined {
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(target);
+  } catch {
+    return undefined;
+  }
+  if (!stats.isFile() || stats.size > HANDOFF_LIMITS.maxArtifactBytes) return "not_a_file";
+  try {
+    return sha256(readBoundedFile(target, HANDOFF_LIMITS.maxArtifactBytes));
+  } catch {
+    return "not_a_file";
+  }
+}
+
 /**
- * Copy verified package files into the workspace. A copy whose bytes do not match the manifest is
- * skipped, and an existing different file is kept rather than overwritten.
+ * Copy verified package files into the workspace. A copy whose bytes do not match the manifest
+ * is skipped, hidden and instruction files are never created, an existing different file is
+ * kept, and the package's total size is checked before anything is written. With `dryRun`,
+ * nothing is written and the result is the plan.
  */
 export function restoreHandoffArtifacts(
   workspace: HandoffWorkspace,
   packageDir: string,
   manifest: SessionHandoffManifest,
+  options: { dryRun?: boolean } = {},
 ): { restored: RestoredHandoffArtifact[]; skipped: string[] } {
   const root = workspaceRoot(workspace);
+  const declaredBytes = manifest.artifacts
+    .filter((artifact) => artifact.copied)
+    .reduce((total, artifact) => total + artifact.size, 0);
+  if (declaredBytes > HANDOFF_LIMITS.maxPackageBytes) {
+    throw new HandoffPackageError("The package's files are larger than the 64 MB limit");
+  }
+  const packageLabel = path.relative(root, packageDir).split(path.sep).join("/");
   const restored: RestoredHandoffArtifact[] = [];
   const skipped: string[] = [];
+  let restoredBytes = 0;
   for (const artifact of manifest.artifacts) {
     const relativePath = safeRelativeArtifactPath(artifact.path);
     if (!relativePath) {
-      skipped.push(`${artifact.path.slice(0, 200)}: unsafe path`);
+      skipped.push("(a file with an unsafe path)");
       continue;
     }
     if (!artifact.copied) {
       skipped.push(`${relativePath}: not included in the package`);
       continue;
     }
+    const refusal = handoffRestoreRefusal(relativePath);
+    if (refusal) {
+      skipped.push(
+        `${relativePath}: ${refusal}; it is in ${packageLabel}/${HANDOFF_ARTIFACTS_DIR}/${relativePath}`,
+      );
+      continue;
+    }
     let data: Buffer;
     try {
       const source = path.join(packageDir, HANDOFF_ARTIFACTS_DIR, ...relativePath.split("/"));
       if (passesThroughSymlink(packageDir, source)) throw new Error("symlink");
-      const stats = fs.lstatSync(source);
-      if (!stats.isFile() || stats.size !== artifact.size) throw new Error("size");
-      if (stats.size > HANDOFF_LIMITS.maxArtifactBytes) throw new Error("size");
-      data = fs.readFileSync(source);
+      data = readBoundedFile(source, Math.min(artifact.size, HANDOFF_LIMITS.maxArtifactBytes));
+      if (data.length !== artifact.size) throw new Error("size");
     } catch {
       skipped.push(`${relativePath}: missing or unreadable in the package`);
       continue;
@@ -258,6 +332,10 @@ export function restoreHandoffArtifacts(
     const digest = sha256(data);
     if (digest !== artifact.sha256) {
       skipped.push(`${relativePath}: checksum mismatch (the copy was changed or corrupted)`);
+      continue;
+    }
+    if (restoredBytes + data.length > HANDOFF_LIMITS.maxPackageBytes) {
+      skipped.push(`${relativePath}: package size limit reached`);
       continue;
     }
     let target: string;
@@ -280,22 +358,31 @@ export function restoreHandoffArtifacts(
       size: data.length,
       mimeType: artifact.mimeType,
     };
-    if (fs.existsSync(target)) {
-      let existingDigest = "";
-      try {
-        existingDigest = sha256(fs.readFileSync(target));
-      } catch {
-        // An unreadable existing file is treated as different and kept.
-      }
-      if (existingDigest === digest) {
-        restored.push({ ...base, alreadyPresent: true });
-      } else {
-        skipped.push(`${relativePath}: kept the existing different file in this workspace`);
-      }
+    const existing = existingFileDigest(target);
+    if (existing !== undefined) {
+      if (existing === digest) restored.push({ ...base, alreadyPresent: true });
+      else skipped.push(`${relativePath}: kept the existing different file in this workspace`);
       continue;
     }
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, data, { flag: "wx" });
+    if (options.dryRun) {
+      restored.push({ ...base, alreadyPresent: false });
+      continue;
+    }
+    try {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, data, { flag: "wx" });
+      // A directory swapped for a symlink between the check and the write lands elsewhere.
+      if (!isWithin(root, fs.realpathSync.native(target))) {
+        fs.rmSync(target, { force: true });
+        throw new Error("the write left the workspace");
+      }
+    } catch (error) {
+      skipped.push(
+        `${relativePath}: could not be written (${error instanceof Error ? error.message : "error"})`,
+      );
+      continue;
+    }
+    restoredBytes += data.length;
     restored.push({ ...base, alreadyPresent: false });
   }
   return { restored, skipped };

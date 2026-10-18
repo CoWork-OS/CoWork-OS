@@ -10,6 +10,7 @@ import type {
 } from "../../shared/browser-settings";
 import { useBrowserSettings } from "../hooks/useBrowserSettings";
 import { BrowserImportPanel } from "./BrowserImportPanel";
+import { DeclaredAgentSettingsGroup } from "./DeclaredAgentSettings";
 
 type HistoryEntry = {
   id: string;
@@ -219,6 +220,11 @@ export function BrowserSettingsPanel({ workspaceId }: { workspaceId?: string }) 
           onChange={(chromeCompatibleUserAgent) => update({ chromeCompatibleUserAgent })}
         />
       </div>
+
+      <DeclaredAgentSettingsGroup
+        value={settings.declaredAgent}
+        onChange={(declaredAgent) => update({ declaredAgent })}
+      />
 
       <div className="settings-group">
         <h3 className="settings-label">Downloads</h3>

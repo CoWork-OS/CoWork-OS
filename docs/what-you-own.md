@@ -110,6 +110,10 @@ CoWork stores your data locally. Running a task sends data to the services that 
   It never sends prompts, files, URLs, model routes or account data. See [CoWork Pulse](cowork-pulse.md).
 - **Skill and pack registries** are downloaded from GitHub when you browse or install skills and
   packs.
+- **Declared agent identity**, when you turn it on (Settings > Browser), tells the sites CoWork
+  visits for you that it is CoWork, and can sign those requests. The key directory you publish
+  holds only public keys and is public by design; the private key stays on your machine,
+  encrypted in the settings store.
 
 ## What CoWork doesn't do
 

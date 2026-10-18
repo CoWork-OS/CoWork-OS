@@ -25,6 +25,8 @@ import {
   resolveKeyDefinition,
 } from "./browser-keyboard";
 import { isLocalHtmlFileUrl, isLoopbackHttpUrl, normalizeWebviewUrl } from "./webview-url-policy";
+import { isAgentIdentityHeader } from "../security/agent-request-identity";
+import { agentNavigationIdentity, type AgentNavigationSignature } from "./browser-agent-identity";
 
 export type BrowserBackendKind = "electron-workbench" | "playwright-local" | "external-cdp";
 
@@ -497,8 +499,61 @@ export class BrowserSessionManager {
   private pageDialogListener: ((event: BrowserPageDialogEvent) => void) | null = null;
   private pageDialogCounter = 0;
   private recentBlocks = new Map<string, number>();
+  /** webContents ids in an agent navigation, with what was signed so far. */
+  private agentNavigations = new Map<
+    number,
+    { deadline: number; signed: AgentNavigationSignature[] }
+  >();
 
   private static readonly LOCAL_PREVIEW_TTL_MS = 5 * 60_000;
+  /** Upper bound on an agent navigation's signing window, should `end` never run. */
+  private static readonly AGENT_NAVIGATION_WINDOW_MS = 60_000;
+
+  /**
+   * Sign this webContents' main-frame requests (the navigation and each redirect hop) until
+   * `end` runs. Only agent-driven navigations call this, so a user's own navigation, reload or
+   * back/forward is never signed.
+   */
+  beginAgentNavigation(webContentsId: number): { end: () => AgentNavigationSignature[] } {
+    const marker = {
+      deadline: Date.now() + BrowserSessionManager.AGENT_NAVIGATION_WINDOW_MS,
+      signed: [] as AgentNavigationSignature[],
+    };
+    this.agentNavigations.set(webContentsId, marker);
+    return {
+      end: () => {
+        if (this.agentNavigations.get(webContentsId) === marker) {
+          this.agentNavigations.delete(webContentsId);
+        }
+        return marker.signed;
+      },
+    };
+  }
+
+  /**
+   * Main-frame request headers with CoWork's identity headers removed, then added back only for
+   * an agent navigation in progress; undefined leaves the request untouched.
+   */
+  private agentIdentityRequestHeaders(details: Any): Record<string, string> | undefined {
+    if (details?.resourceType !== "mainFrame") return undefined;
+    const headers: Record<string, string> = {};
+    let stripped = false;
+    for (const [name, value] of Object.entries(details.requestHeaders ?? {})) {
+      if (isAgentIdentityHeader(name)) {
+        stripped = true;
+        continue;
+      }
+      headers[name] = String(value);
+    }
+    const id = details.webContentsId;
+    const marker = typeof id === "number" ? this.agentNavigations.get(id) : undefined;
+    if (marker && marker.deadline <= Date.now()) this.agentNavigations.delete(id);
+    const identity =
+      marker && marker.deadline > Date.now() ? agentNavigationIdentity(details.url) : undefined;
+    if (identity?.signature) marker?.signed.push(identity.signature);
+    if (!identity && !stripped) return undefined;
+    return { ...headers, ...identity?.headers };
+  }
 
   setAccessPolicy(taskId: string, policy: BrowserSessionAccessPolicy, sessionId?: unknown): void {
     this.accessPolicies.set(sessionKey(taskId, sessionId), {
@@ -2659,6 +2714,24 @@ export class BrowserSessionManager {
         }
       },
     );
+    if (typeof webRequest.onBeforeSendHeaders === "function") {
+      webRequest.onBeforeSendHeaders(
+        { urls: ["<all_urls>"] },
+        (
+          details: Any,
+          callback: (response: { requestHeaders?: Record<string, string> }) => void,
+        ) => {
+          let requestHeaders: Record<string, string> | undefined;
+          try {
+            requestHeaders = this.agentIdentityRequestHeaders(details);
+          } catch {
+            // Signing is additive: a failure sends the request as the page made it.
+            requestHeaders = undefined;
+          }
+          callback(requestHeaders ? { requestHeaders } : {});
+        },
+      );
+    }
   }
 }
 

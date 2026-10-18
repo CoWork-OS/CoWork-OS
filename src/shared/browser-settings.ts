@@ -26,6 +26,27 @@ export interface BrowserSettings {
   developerMode: boolean;
   /** Experimental: native tab views that stay alive when the browser closes. */
   browserEngine: BrowserEngine;
+  /** How CoWork identifies itself on requests it makes for you (web fetch, HTTP, navigation). */
+  declaredAgent: DeclaredAgentSettings;
+}
+
+/**
+ * Declared agent identity (opt-in). When on, web_fetch and http_request send an honest
+ * CoWork-OS user agent instead of a browser's, except to the listed domains, and when a key
+ * directory origin is set every agent request over https carries a Web Bot Auth signature.
+ */
+/** The public key directory to host, why it cannot be shown, or null when there is no key. */
+export type AgentIdentityDirectoryResult =
+  | { keyid: string; directory: string }
+  | { error: string }
+  | null;
+
+export interface DeclaredAgentSettings {
+  enabled: boolean;
+  /** https origin serving /.well-known/http-message-signatures-directory; "" when not set. */
+  signatureAgent: string;
+  /** Domains (and their subdomains) that still get the browser-compatible user agent. */
+  compatibleUserAgentDomains: string[];
 }
 
 /** What the organization's admin policy decides for the in-app browser (read-only for users). */
@@ -50,6 +71,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   agentUploads: "ask",
   developerMode: false,
   browserEngine: "native",
+  declaredAgent: { enabled: false, signatureAgent: "", compatibleUserAgentDomains: [] },
 };
 
 const SEARCH_ENGINES = new Set(["google", "bing", "duckduckgo", "brave", "kagi"]);
@@ -79,7 +101,49 @@ export function normalizeBrowserSettings(value: unknown): BrowserSettings {
     agentUploads: pick<BrowserAgentPermission>("agentUploads", AGENT_PERMISSIONS),
     developerMode: flag("developerMode"),
     browserEngine: pick<BrowserEngine>("browserEngine", BROWSER_ENGINES),
+    declaredAgent: normalizeDeclaredAgentSettings(input.declaredAgent),
   };
+}
+
+const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** An https origin (no path, query or credentials), or "" when the value is not one. */
+export function normalizeHttpsOrigin(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" || url.username || url.password) return "";
+    if ((url.pathname !== "/" && url.pathname !== "") || url.search || url.hash) return "";
+    // Sites fetch the directory from here: a public DNS name, never localhost or an IP literal.
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".localhost") || !DOMAIN_PATTERN.test(host)) {
+      return "";
+    }
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeDeclaredAgentSettings(value: unknown): DeclaredAgentSettings {
+  const input = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const domains = Array.isArray(input.compatibleUserAgentDomains)
+    ? input.compatibleUserAgentDomains
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim().toLowerCase().replace(/^\*\./, ""))
+        .filter((entry) => DOMAIN_PATTERN.test(entry))
+    : [];
+  return {
+    enabled: input.enabled === true,
+    signatureAgent: normalizeHttpsOrigin(input.signatureAgent),
+    compatibleUserAgentDomains: [...new Set(domains)].slice(0, 100),
+  };
+}
+
+/** Whether a host is one of the domains (or a subdomain of one). */
+export function hostMatchesDomains(host: string, domains: readonly string[]): boolean {
+  const normalized = host.toLowerCase().replace(/\.$/, "");
+  return domains.some((domain) => normalized === domain || normalized.endsWith(`.${domain}`));
 }
 
 /** Full DevTools access tools: offered to the agent only in developer mode (Settings > Browser). */

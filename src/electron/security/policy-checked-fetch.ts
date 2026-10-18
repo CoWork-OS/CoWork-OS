@@ -9,6 +9,8 @@
  * - `pinnedFetch` resolves DNS, rejects internal answers and pins the socket;
  * - 303, and 301/302 after POST, become GET without a body (fetch semantics);
  * - a cross-origin hop resets caller headers to `publicHeaders` and refuses to carry a body;
+ * - `hopHeaders` (for example an identity signature bound to the hop's authority) are
+ *   recomputed for every hop and never carried over from the previous one;
  * - at most `maxRedirects` redirects.
  */
 import {
@@ -53,6 +55,8 @@ export interface PolicyCheckedFetchOptions {
   onHop?: (url: string) => void;
   /** Refuse loopback destinations (by literal and by DNS answer) as well as private ones. */
   allowLoopback?: boolean;
+  /** Headers computed for each hop's URL, applied over the caller's headers for that hop only. */
+  hopHeaders?: (url: URL) => Record<string, string> | undefined;
 }
 
 export interface PolicyCheckedFetchResult {
@@ -95,6 +99,24 @@ function buildRedirectInit(init: RequestInit, status: number): RequestInit {
   return { ...init };
 }
 
+function withHeaders(
+  base: RequestInit["headers"],
+  extra: Record<string, string>,
+): Record<string, string> {
+  const merged: Record<string, string> = {};
+  new Headers(base).forEach((value, name) => {
+    merged[name] = value;
+  });
+  // Header names are case-insensitive: drop the caller's spelling before setting ours.
+  for (const [name, value] of Object.entries(extra)) {
+    for (const existing of Object.keys(merged)) {
+      if (existing.toLowerCase() === name.toLowerCase()) delete merged[existing];
+    }
+    merged[name] = value;
+  }
+  return merged;
+}
+
 function isHttpUrl(url: URL): boolean {
   return url.protocol === "http:" || url.protocol === "https:";
 }
@@ -123,12 +145,16 @@ export async function fetchWithPolicyCheckedRedirects(
     if (checkedUrl !== parsedUrl.toString()) assertPolicyAllowsUrl(parsedUrl.toString(), options);
     chain.push(currentUrl);
     options.onHop?.(currentUrl);
+    const extraHeaders = options.hopHeaders?.(parsedUrl);
+    const hopInit: RequestInit = extraHeaders
+      ? { ...currentInit, headers: withHeaders(currentInit.headers, extraHeaders) }
+      : currentInit;
     const response =
       options.allowLoopback === false
-        ? await pinnedFetch(currentUrl, { ...currentInit, redirect: "manual" }, false, {
+        ? await pinnedFetch(currentUrl, { ...hopInit, redirect: "manual" }, false, {
             allowLoopback: false,
           })
-        : await pinnedFetch(currentUrl, { ...currentInit, redirect: "manual" });
+        : await pinnedFetch(currentUrl, { ...hopInit, redirect: "manual" });
 
     if (!followRedirects || !isRedirectStatus(response.status)) {
       return { response, finalUrl: currentUrl, chain };

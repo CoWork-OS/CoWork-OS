@@ -8239,6 +8239,8 @@ export const IPC_CHANNELS = {
   BROWSER_WORKBENCH_CLEAR_DATA: "browserWorkbench:clearData",
   BROWSER_SETTINGS_GET: "browserSettings:get",
   BROWSER_SETTINGS_SAVE: "browserSettings:save",
+  AGENT_IDENTITY_DIRECTORY_GET: "agentIdentity:directoryGet",
+  AGENT_IDENTITY_KEY_ROTATE: "agentIdentity:keyRotate",
   BROWSER_SITE_PERMISSIONS_LIST: "browserSettings:sitePermissionsList",
   BROWSER_SITE_PERMISSIONS_RESET: "browserSettings:sitePermissionsReset",
   BROWSER_SITE_PERMISSIONS_SET: "browserSettings:sitePermissionsSet",

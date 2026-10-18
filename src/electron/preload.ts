@@ -2548,6 +2548,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       success: boolean;
       error?: string;
     }>,
+  getAgentIdentityDirectory: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_IDENTITY_DIRECTORY_GET,
+    ) as Promise<AgentIdentityDirectoryResult>,
+  rotateAgentIdentityKey: () =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.AGENT_IDENTITY_KEY_ROTATE,
+    ) as Promise<AgentIdentityDirectoryResult>,
   listBrowserSitePermissions: (data: { workspaceId: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SITE_PERMISSIONS_LIST, data) as Promise<
       BrowserSitePermissionEntry[]
@@ -6245,6 +6253,8 @@ export type LifecycleMetaInput = {
   evidence?: string | null;
   dependsOn?: import("../shared/types").LifecycleRef[];
 };
+export type AgentIdentityDirectoryResult =
+  import("../shared/browser-settings").AgentIdentityDirectoryResult;
 export type BrowserSitePermissionEntry =
   import("../shared/browser-settings").BrowserSitePermissionEntry;
 
@@ -6689,6 +6699,13 @@ export interface ElectronAPI {
   /** Keep the item: its idle timer restarts. */
   keepLifecycleItem: (data: { kind: LifecycleKind; id: string }) => Promise<{ success: boolean }>;
   setLifecycleMeta: (data: LifecycleMetaInput) => Promise<{ success: boolean; error?: string }>;
+  /** The public key directory (JWK Set) to host for declared agent identity. */
+  getAgentIdentityDirectory: () => Promise<AgentIdentityDirectoryResult>;
+  /**
+   * Replace the declared-identity key after a native confirmation; null when the user cancels.
+   * The hosted directory must then be updated.
+   */
+  rotateAgentIdentityKey: () => Promise<AgentIdentityDirectoryResult>;
   listBrowserSitePermissions: (data: {
     workspaceId: string;
   }) => Promise<BrowserSitePermissionEntry[]>;

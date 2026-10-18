@@ -3357,6 +3357,9 @@ export class DatabaseManager {
 
         CREATE INDEX IF NOT EXISTS idx_work_session_contracts_status
           ON work_session_outcome_contracts(session_id, status, version DESC);
+        -- Verified AWU reads each completed task's latest outcome contract.
+        CREATE INDEX IF NOT EXISTS idx_work_session_outcome_contracts_task
+          ON work_session_outcome_contracts(task_id, version DESC);
 
         CREATE TABLE IF NOT EXISTS work_session_constraints (
           id TEXT PRIMARY KEY,
@@ -6669,6 +6672,15 @@ export class DatabaseManager {
           feedback_accepted INTEGER NOT NULL DEFAULT 0,
           feedback_rejected INTEGER NOT NULL DEFAULT 0,
           awu_completed_ok INTEGER NOT NULL DEFAULT 0,
+          awu_verified_ok INTEGER NOT NULL DEFAULT 0,
+          awu_verified_by_contract INTEGER NOT NULL DEFAULT 0,
+          awu_partial INTEGER NOT NULL DEFAULT 0,
+          awu_needs_user_action INTEGER NOT NULL DEFAULT 0,
+          intervention_approval_decisions INTEGER NOT NULL DEFAULT 0,
+          intervention_input_answers INTEGER NOT NULL DEFAULT 0,
+          intervention_steering_messages INTEGER NOT NULL DEFAULT 0,
+          provider_escalations INTEGER NOT NULL DEFAULT 0,
+          rework_runs INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (workspace_id, date_key),
           FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
         );
@@ -6746,6 +6758,35 @@ export class DatabaseManager {
       `);
     } catch {
       // Usage insights rollup tables already exist, ignore.
+    }
+    try {
+      // Verified AWU and intervention counts (WP7) on profiles created before them. The
+      // projector's schema version bump rebuilds the rollups that fill them.
+      const dayColumns = new Set(
+        (this.db.pragma("table_info(usage_insights_day)") as Array<{ name?: string }>).map(
+          (column) => column.name,
+        ),
+      );
+      for (const column of [
+        "awu_verified_ok",
+        "awu_verified_by_contract",
+        "awu_partial",
+        "awu_needs_user_action",
+        "intervention_approval_decisions",
+        "intervention_input_answers",
+        "intervention_steering_messages",
+        "provider_escalations",
+        "rework_runs",
+      ]) {
+        if (!dayColumns.has(column)) {
+          this.db.exec(
+            `ALTER TABLE usage_insights_day ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
+          );
+        }
+      }
+    } catch (error) {
+      // Reports fall back to the live scan when the rollup cannot be extended.
+      schemaLogger.warn("Could not extend usage_insights_day:", error);
     }
     try {
       this.db.exec(`

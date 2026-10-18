@@ -16,6 +16,18 @@ const outputLabels = {
   unavailable: "Current file could not be checked",
   not_current: "Revision is not current",
 };
+/** "3h ago" for recent times, a date for older ones. */
+function formatAge(time: number, now = Date.now()): string {
+  const minutes = Math.round((now - time) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days <= 30) return `${days}d ago`;
+  return new Date(time).toLocaleDateString();
+}
+
 export function BotWorkResultCard({
   item,
   workspaceId,
@@ -138,7 +150,17 @@ export function BotWorkResultCard({
                     <li key={e.id}>
                       {e.claim}
                       <p className="bot-work-note">
-                        {e.sourceType} · {e.status} · {new Date(e.capturedAt).toLocaleString()}
+                        {[
+                          e.sourceType,
+                          e.status,
+                          e.basis && e.basis !== "unknown" ? e.basis : "",
+                          `captured ${formatAge(e.capturedAt)}`,
+                          e.dataAsOf !== undefined
+                            ? `source data updated ${formatAge(e.dataAsOf)}`
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     </li>
                   ))}

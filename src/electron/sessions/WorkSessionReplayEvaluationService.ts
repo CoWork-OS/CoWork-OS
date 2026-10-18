@@ -397,6 +397,14 @@ export function reduceWorkSessionReplayState(
       }
     }
   }
+  if (type === "handoff_imported") {
+    // Work the exporting session already completed. Repeating any of it in the continued
+    // session is reported as a duplicate side effect.
+    const completed = Array.isArray(payload.completedSideEffects)
+      ? payload.completedSideEffects
+      : [];
+    for (const key of completed) uniquePush(next.sideEffects, text(key));
+  }
 
   const isSideEffect =
     (item.kind === "tool_call" || type === "side_effect") &&
@@ -689,6 +697,23 @@ export function createDeterministicWorkSessionReplayFixtures(): WorkSessionRepla
       ],
       "cancelled",
     ),
+    // A session continued from a handoff package with 2 of 3 requirements satisfied does only
+    // the third; re-running either completed write would be a duplicate_side_effect finding.
+    make("handoff-continuation", "handoff", [
+      fixtureItem("handoff-continuation", 1, "status", "handoff_imported", {
+        packageId: "handoff-fixture-0001",
+        satisfiedRequirements: ["requirement-1", "requirement-2"],
+        completedSideEffects: ["write:requirement-1", "write:requirement-2"],
+      }),
+      fixtureItem("handoff-continuation", 2, "tool_call", "side_effect", {
+        sideEffect: true,
+        sideEffectKey: "write:requirement-3",
+        approved: true,
+      }),
+      fixtureItem("handoff-continuation", 3, "tool_result", "tool_result"),
+      fixtureItem("handoff-continuation", 4, "evidence", "verification_passed"),
+      fixtureItem("handoff-continuation", 5, "status", "task_completed"),
+    ]),
   ];
 }
 

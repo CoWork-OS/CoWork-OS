@@ -10,7 +10,7 @@ import { WorkSessionRolloutService } from "../WorkSessionRolloutService";
 import Database from "better-sqlite3";
 
 describe("WorkSession Phase 5 replay and rollout", () => {
-  it("evaluates deterministic crash, compaction, approval, credential, revocation, child, unknown-outcome and stop fixtures in isolation", () => {
+  it("evaluates deterministic crash, compaction, approval, credential, revocation, child, handoff, unknown-outcome and stop fixtures in isolation", () => {
     const fixtures = createDeterministicWorkSessionReplayFixtures();
     const results = evaluateDeterministicReplayFixtures();
     expect(results).toHaveLength(fixtures.length);
@@ -81,6 +81,36 @@ describe("WorkSession Phase 5 replay and rollout", () => {
     const stopReplay = replayWorkSessionItems(stopped.items);
     expect(stopReplay.status).toBe("cancelled");
     expect(stopReplay.unknownOutcomes).toEqual(["key-stop"]);
+  });
+
+  it("continues a handoff with only the unsatisfied requirement and flags a repeated one", () => {
+    const fixture = createDeterministicWorkSessionReplayFixtures().find(
+      (candidate) => candidate.kind === "handoff",
+    )!;
+    expect(fixture).toBeDefined();
+    const continued = replayWorkSessionItems(fixture.items);
+    const newToolCalls = fixture.items.filter((entry) => entry.kind === "tool_call");
+    expect(newToolCalls).toHaveLength(1);
+    expect(continued.sideEffects).toEqual([
+      "write:requirement-1",
+      "write:requirement-2",
+      "write:requirement-3",
+    ]);
+    expect(evaluateIsolatedReplay(fixture.items, fixture.id).findings).toEqual([]);
+
+    const rerun = fixture.items.map((entry) => ({ ...entry }));
+    rerun.splice(2, 0, {
+      ...fixture.items[1],
+      id: "handoff-continuation:rerun",
+      sequence: 2.5,
+      payload: {
+        eventType: "side_effect",
+        payload: { sideEffect: true, sideEffectKey: "write:requirement-1", approved: true },
+      },
+    });
+    expect(evaluateIsolatedReplay(rerun, fixture.id).findings).toContain(
+      "duplicate_side_effect:write:requirement-1",
+    );
   });
 
   it("represents user-action blockers as waiting and grades their assertion", () => {

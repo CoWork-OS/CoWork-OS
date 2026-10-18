@@ -1,4 +1,15 @@
 import Database from "better-sqlite3";
+import {
+  addAwuOutcome,
+  addInterventionRow,
+  awuCompletedCondition,
+  awuOutcomeExpression,
+  emptyAwuOutcomeCounts,
+  emptyInterventionCounts,
+  interventionCountsSql,
+  type AwuOutcomeCounts,
+  type InterventionCounts,
+} from "./awu-outcomes";
 import { normalizeLlmProviderType } from "../../shared/llmProviderDisplay";
 import { usageLocalDateKey } from "../../shared/usageInsightsDates";
 import { UsageInsightsProjector } from "./UsageInsightsProjector";
@@ -88,6 +99,8 @@ export interface UsageInsightsAwuDay {
   totalCost: number;
   tokensPerAwu: number | null;
   costPerAwu: number | null;
+  verifiedCount: number;
+  costPerVerifiedAwu: number | null;
 }
 
 export interface UsageInsightsProviderSlice {
@@ -196,12 +209,23 @@ export interface UsageInsights {
   };
 
   awuMetrics: {
+    /** Completed work units of any terminal status (the pre-verification count). */
     awuCount: number;
     totalTokens: number;
     totalCost: number;
     tokensPerAwu: number | null;
+    /** Cost per completed unit of any status; shown as a secondary number. */
     costPerAwu: number | null;
     awuPerDollar: number | null;
+    /** Units that ended `ok` without an unmet or partial outcome contract. */
+    verifiedCount: number;
+    /** Verified units whose outcome contract was satisfied by a server-side check. */
+    verifiedByContractCount: number;
+    partialCount: number;
+    needsUserActionCount: number;
+    tokensPerVerifiedAwu: number | null;
+    /** All model cost in the period, retries and provider escalations included, per verified unit. */
+    costPerVerifiedAwu: number | null;
     byDay: UsageInsightsAwuDay[];
     trend: {
       previousAwuCount: number;
@@ -209,6 +233,21 @@ export interface UsageInsights {
       previousCostPerAwu: number | null;
       tokensPerAwuChange: number | null;
       costPerAwuChange: number | null;
+      previousVerifiedCount: number;
+      previousCostPerVerifiedAwu: number | null;
+      costPerVerifiedAwuChange: number | null;
+    };
+    /** How often a person stepped in, and how often work escalated or was re-run. */
+    interventions: {
+      approvalDecisions: number;
+      inputAnswers: number;
+      steeringMessages: number;
+      /** Approval decisions, input answers and steering messages. */
+      humanInterventions: number;
+      providerEscalations: number;
+      reworkRuns: number;
+      /** Human interventions per completed unit of any status. */
+      perCompletedUnit: number | null;
     };
   };
 
@@ -425,9 +464,10 @@ interface PersonaAccumulatorEntry {
   totalCost: number;
 }
 
-interface AwuAccumulator {
-  awuCount: number;
+interface AwuAccumulator extends AwuOutcomeCounts {
   byDay: Map<string, number>;
+  verifiedByDay: Map<string, number>;
+  interventions: InterventionCounts;
 }
 
 interface NonLlmAccumulator {
@@ -489,9 +529,15 @@ function emptyToolAccumulator(): ToolAccumulator {
 
 function emptyAwuAccumulator(): AwuAccumulator {
   return {
-    awuCount: 0,
+    ...emptyAwuOutcomeCounts(),
     byDay: new Map(),
+    verifiedByDay: new Map(),
+    interventions: emptyInterventionCounts(),
   };
+}
+
+function addCount(map: Map<string, number>, key: string, count: number): void {
+  if (count) map.set(key, (map.get(key) || 0) + count);
 }
 
 function emptyNonLlmAccumulator(): NonLlmAccumulator {
@@ -504,6 +550,103 @@ function emptyNonLlmAccumulator(): NonLlmAccumulator {
     feedback: emptyFeedbackAccumulator(),
     tools: emptyToolAccumulator(),
     awu: emptyAwuAccumulator(),
+  };
+}
+
+function mergeAwuInto(target: AwuAccumulator, source: AwuAccumulator): void {
+  target.awuCount += source.awuCount;
+  target.verifiedCount += source.verifiedCount;
+  target.verifiedByContractCount += source.verifiedByContractCount;
+  target.partialCount += source.partialCount;
+  target.needsUserActionCount += source.needsUserActionCount;
+  for (const [dateKey, count] of source.byDay) addCount(target.byDay, dateKey, count);
+  for (const [dateKey, count] of source.verifiedByDay)
+    addCount(target.verifiedByDay, dateKey, count);
+  for (const key of Object.keys(source.interventions) as Array<keyof InterventionCounts>) {
+    target.interventions[key] += source.interventions[key];
+  }
+}
+
+function percentChange(current: number | null, previous: number | null): number | null {
+  return current !== null && previous !== null && previous > 0
+    ? ((current - previous) / previous) * 100
+    : null;
+}
+
+/**
+ * AWU metrics from outcome counts and model usage. Verified cost divides all model cost in the
+ * period (retries and provider escalations included) by verified units only.
+ */
+function composeAwuMetrics(input: {
+  periodStart: number;
+  periodEnd: number;
+  awu: AwuAccumulator;
+  totalTokens: number;
+  totalCost: number;
+  llmByDay: LlmUsageScanResult["byDay"];
+  previousAwu: AwuAccumulator;
+  previousTokens: number;
+  previousCost: number;
+}): UsageInsights["awuMetrics"] {
+  const { awu, totalTokens, totalCost, previousAwu } = input;
+  const per = (value: number, units: number) => (units > 0 ? value / units : null);
+  const tokensPer = (value: number, units: number) =>
+    units > 0 ? Math.round(value / units) : null;
+  const tokensPerAwu = tokensPer(totalTokens, awu.awuCount);
+  const costPerAwu = per(totalCost, awu.awuCount);
+  const costPerVerifiedAwu = per(totalCost, awu.verifiedCount);
+  const previousTokensPerAwu = tokensPer(input.previousTokens, previousAwu.awuCount);
+  const previousCostPerAwu = per(input.previousCost, previousAwu.awuCount);
+  const previousCostPerVerifiedAwu = per(input.previousCost, previousAwu.verifiedCount);
+  const humanInterventions =
+    awu.interventions.approvalDecisions +
+    awu.interventions.inputAnswers +
+    awu.interventions.steeringMessages;
+  return {
+    awuCount: awu.awuCount,
+    totalTokens,
+    totalCost,
+    tokensPerAwu,
+    costPerAwu,
+    awuPerDollar: totalCost > 0 ? awu.awuCount / totalCost : null,
+    verifiedCount: awu.verifiedCount,
+    verifiedByContractCount: awu.verifiedByContractCount,
+    partialCount: awu.partialCount,
+    needsUserActionCount: awu.needsUserActionCount,
+    tokensPerVerifiedAwu: tokensPer(totalTokens, awu.verifiedCount),
+    costPerVerifiedAwu,
+    byDay: collectLocalDateKeysInRange(input.periodStart, input.periodEnd).map((dateKey) => {
+      const dayAwuCount = awu.byDay.get(dateKey) || 0;
+      const dayVerified = awu.verifiedByDay.get(dateKey) || 0;
+      const llmDay = input.llmByDay.get(dateKey);
+      const dayTokens = (llmDay?.inputTokens || 0) + (llmDay?.outputTokens || 0);
+      const dayCost = llmDay?.cost || 0;
+      return {
+        dateKey,
+        awuCount: dayAwuCount,
+        totalTokens: dayTokens,
+        totalCost: dayCost,
+        tokensPerAwu: tokensPer(dayTokens, dayAwuCount),
+        costPerAwu: per(dayCost, dayAwuCount),
+        verifiedCount: dayVerified,
+        costPerVerifiedAwu: per(dayCost, dayVerified),
+      };
+    }),
+    trend: {
+      previousAwuCount: previousAwu.awuCount,
+      previousTokensPerAwu,
+      previousCostPerAwu,
+      tokensPerAwuChange: percentChange(tokensPerAwu, previousTokensPerAwu),
+      costPerAwuChange: percentChange(costPerAwu, previousCostPerAwu),
+      previousVerifiedCount: previousAwu.verifiedCount,
+      previousCostPerVerifiedAwu,
+      costPerVerifiedAwuChange: percentChange(costPerVerifiedAwu, previousCostPerVerifiedAwu),
+    },
+    interventions: {
+      ...awu.interventions,
+      humanInterventions,
+      perCompletedUnit: awu.awuCount > 0 ? humanInterventions / awu.awuCount : null,
+    },
   };
 }
 
@@ -594,8 +737,18 @@ function mergeNonLlmAccumulator(
   }
 
   target.awu.awuCount += source.awu.awuCount;
+  target.awu.verifiedCount += source.awu.verifiedCount;
+  target.awu.verifiedByContractCount += source.awu.verifiedByContractCount;
+  target.awu.partialCount += source.awu.partialCount;
+  target.awu.needsUserActionCount += source.awu.needsUserActionCount;
   for (const [dateKey, count] of source.awu.byDay.entries()) {
     target.awu.byDay.set(dateKey, (target.awu.byDay.get(dateKey) || 0) + count);
+  }
+  for (const [dateKey, count] of source.awu.verifiedByDay.entries()) {
+    addCount(target.awu.verifiedByDay, dateKey, count);
+  }
+  for (const key of Object.keys(source.awu.interventions) as Array<keyof InterventionCounts>) {
+    target.awu.interventions[key] += source.awu.interventions[key];
   }
 
   return target;
@@ -1245,6 +1398,15 @@ export class UsageInsightsService {
       feedback_accepted: number;
       feedback_rejected: number;
       awu_completed_ok: number;
+      awu_verified_ok?: number;
+      awu_verified_by_contract?: number;
+      awu_partial?: number;
+      awu_needs_user_action?: number;
+      intervention_approval_decisions?: number;
+      intervention_input_answers?: number;
+      intervention_steering_messages?: number;
+      provider_escalations?: number;
+      rework_runs?: number;
     }>;
     for (const row of dayRows) {
       acc.taskMetrics.totalCreated += row.task_created_total || 0;
@@ -1264,6 +1426,18 @@ export class UsageInsightsService {
         row.date_key,
         (acc.awu.byDay.get(row.date_key) || 0) + (row.awu_completed_ok || 0),
       );
+      acc.awu.verifiedCount += row.awu_verified_ok || 0;
+      acc.awu.verifiedByContractCount += row.awu_verified_by_contract || 0;
+      acc.awu.partialCount += row.awu_partial || 0;
+      acc.awu.needsUserActionCount += row.awu_needs_user_action || 0;
+      addCount(acc.awu.verifiedByDay, row.date_key, row.awu_verified_ok || 0);
+      addInterventionRow(acc.awu.interventions, {
+        approval_decisions: row.intervention_approval_decisions,
+        input_answers: row.intervention_input_answers,
+        steering_messages: row.intervention_steering_messages,
+        provider_escalations: row.provider_escalations,
+        rework_runs: row.rework_runs,
+      });
     }
 
     const hourRows = this.db
@@ -1689,23 +1863,57 @@ export class UsageInsightsService {
       }
     }
 
-    const awuRows = this.db
-      .prepare(
-        `SELECT completed_at
-         FROM tasks
-         WHERE ${wsTasks.clause}completed_at >= ? AND completed_at <= ?
-           AND status = 'completed'
-           AND (terminal_status IN ('ok', 'partial_success', 'needs_user_action') OR terminal_status IS NULL)`,
-      )
-      .all(...wsTasks.params, periodStart, periodEnd) as Array<{ completed_at: number | null }>;
-    for (const row of awuRows) {
-      if (typeof row.completed_at !== "number" || !Number.isFinite(row.completed_at)) continue;
-      acc.awu.awuCount += 1;
-      const dayKey = usageLocalDateKey(row.completed_at);
-      acc.awu.byDay.set(dayKey, (acc.awu.byDay.get(dayKey) || 0) + 1);
-    }
+    const scanned = this.collectAwuAccumulator(workspaceId, periodStart, periodEnd);
+    mergeAwuInto(acc.awu, scanned);
 
     return acc;
+  }
+
+  /** AWU outcomes and intervention counts for a period, read from tasks and task events. */
+  private collectAwuAccumulator(
+    workspaceId: string | null,
+    periodStart: number,
+    periodEnd: number,
+  ): AwuAccumulator {
+    const awu = emptyAwuAccumulator();
+    try {
+      const wsTasks = wsFilter(workspaceId, "");
+      const rows = this.db
+        .prepare(
+          `SELECT completed_at, ${awuOutcomeExpression()} as outcome
+           FROM tasks
+           WHERE ${wsTasks.clause}completed_at >= ? AND completed_at <= ?
+             AND ${awuCompletedCondition()}`,
+        )
+        .all(...wsTasks.params, periodStart, periodEnd) as Array<{
+        completed_at: number | null;
+        outcome: string;
+      }>;
+      for (const row of rows) {
+        if (typeof row.completed_at !== "number" || !Number.isFinite(row.completed_at)) continue;
+        addAwuOutcome(awu, row.outcome);
+        const dayKey = usageLocalDateKey(row.completed_at);
+        addCount(awu.byDay, dayKey, 1);
+        if (row.outcome === "verified_contract" || row.outcome === "verified_terminal") {
+          addCount(awu.verifiedByDay, dayKey, 1);
+        }
+      }
+      const wsEvents = wsFilter(workspaceId, "t.");
+      const interventionRow = this.db
+        .prepare(
+          `SELECT ${interventionCountsSql("te", "t")}
+           FROM task_events te
+           JOIN tasks t ON te.task_id = t.id
+           WHERE ${wsEvents.clause}te.timestamp >= ? AND te.timestamp <= ?`,
+        )
+        .get(...wsEvents.params, periodStart, periodEnd) as
+        | Record<string, number | null>
+        | undefined;
+      addInterventionRow(awu.interventions, interventionRow);
+    } catch {
+      // An older profile without the contract table reports no AWU rather than failing.
+    }
+    return awu;
   }
 
   private collectCanonicalLlmUsageScan(
@@ -2159,28 +2367,6 @@ export class UsageInsightsService {
     awu: AwuAccumulator,
     llmScan: LlmUsageScanResult,
   ): UsageInsights["awuMetrics"] {
-    const awuCount = awu.awuCount;
-    const totalTokens = llmScan.totalInputTokens + llmScan.totalOutputTokens;
-    const totalCost = llmScan.totalCost;
-    const tokensPerAwu = awuCount > 0 ? Math.round(totalTokens / awuCount) : null;
-    const costPerAwu = awuCount > 0 ? totalCost / awuCount : null;
-    const awuPerDollar = totalCost > 0 ? awuCount / totalCost : null;
-
-    const byDay = collectLocalDateKeysInRange(periodStart, periodEnd).map((dateKey) => {
-      const dayAwuCount = awu.byDay.get(dateKey) || 0;
-      const llmDay = llmScan.byDay.get(dateKey);
-      const dayTokens = (llmDay?.inputTokens || 0) + (llmDay?.outputTokens || 0);
-      const dayCost = llmDay?.cost || 0;
-      return {
-        dateKey,
-        awuCount: dayAwuCount,
-        totalTokens: dayTokens,
-        totalCost: dayCost,
-        tokensPerAwu: dayAwuCount > 0 ? Math.round(dayTokens / dayAwuCount) : null,
-        costPerAwu: dayAwuCount > 0 ? dayCost / dayAwuCount : null,
-      };
-    });
-
     const previousPeriodStart = periodStart - (periodEnd - periodStart);
     const previousPeriodEnd = periodStart;
     const previousAwu = this.readNonLlmAccumulatorFast(
@@ -2193,37 +2379,17 @@ export class UsageInsightsService {
       previousPeriodStart,
       previousPeriodEnd,
     );
-    const previousAwuCount = previousAwu.awuCount;
-    const previousTokens = previousScan.totalInputTokens + previousScan.totalOutputTokens;
-    const previousTokensPerAwu =
-      previousAwuCount > 0 ? Math.round(previousTokens / previousAwuCount) : null;
-    const previousCostPerAwu =
-      previousAwuCount > 0 ? previousScan.totalCost / previousAwuCount : null;
-    const tokensPerAwuChange =
-      tokensPerAwu !== null && previousTokensPerAwu !== null && previousTokensPerAwu > 0
-        ? ((tokensPerAwu - previousTokensPerAwu) / previousTokensPerAwu) * 100
-        : null;
-    const costPerAwuChange =
-      costPerAwu !== null && previousCostPerAwu !== null && previousCostPerAwu > 0
-        ? ((costPerAwu - previousCostPerAwu) / previousCostPerAwu) * 100
-        : null;
-
-    return {
-      awuCount,
-      totalTokens,
-      totalCost,
-      tokensPerAwu,
-      costPerAwu,
-      awuPerDollar,
-      byDay,
-      trend: {
-        previousAwuCount,
-        previousTokensPerAwu,
-        previousCostPerAwu,
-        tokensPerAwuChange,
-        costPerAwuChange,
-      },
-    };
+    return composeAwuMetrics({
+      periodStart,
+      periodEnd,
+      awu,
+      totalTokens: llmScan.totalInputTokens + llmScan.totalOutputTokens,
+      totalCost: llmScan.totalCost,
+      llmByDay: llmScan.byDay,
+      previousAwu,
+      previousTokens: previousScan.totalInputTokens + previousScan.totalOutputTokens,
+      previousCost: previousScan.totalCost,
+    });
   }
 
   private collectLlmUsageScan(
@@ -2993,120 +3159,26 @@ export class UsageInsightsService {
     };
   }
 
-  private countAwus(workspaceId: string | null, periodStart: number, periodEnd: number): number {
-    try {
-      const ws = wsFilter(workspaceId, "");
-      const row = this.db
-        .prepare(
-          `SELECT COUNT(*) as count FROM tasks
-           WHERE ${ws.clause}completed_at >= ? AND completed_at <= ?
-             AND status = 'completed'
-             AND (terminal_status IN ('ok', 'partial_success', 'needs_user_action') OR terminal_status IS NULL)`,
-        )
-        .get(...ws.params, periodStart, periodEnd) as { count: number } | undefined;
-      return row?.count ?? 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  private getAwuCountsByDay(
-    workspaceId: string | null,
-    periodStart: number,
-    periodEnd: number,
-  ): Map<string, number> {
-    const out = new Map<string, number>();
-    try {
-      const ws = wsFilter(workspaceId, "");
-      const rows = this.db
-        .prepare(
-          `SELECT completed_at as completed_at FROM tasks
-           WHERE ${ws.clause}completed_at >= ? AND completed_at <= ?
-             AND status = 'completed'
-             AND (terminal_status IN ('ok', 'partial_success', 'needs_user_action') OR terminal_status IS NULL)`,
-        )
-        .all(...ws.params, periodStart, periodEnd) as Array<{ completed_at: number | null }>;
-
-      for (const row of rows) {
-        if (typeof row?.completed_at !== "number" || !Number.isFinite(row.completed_at)) continue;
-        const dayKey = usageLocalDateKey(row.completed_at);
-        out.set(dayKey, (out.get(dayKey) || 0) + 1);
-      }
-    } catch {
-      return out;
-    }
-    return out;
-  }
-
   private getAwuMetrics(
     workspaceId: string | null,
     periodStart: number,
     periodEnd: number,
     llmScan: LlmUsageScanResult,
   ): UsageInsights["awuMetrics"] {
-    const awuCount = this.countAwus(workspaceId, periodStart, periodEnd);
-
-    const totalTokens = llmScan.totalInputTokens + llmScan.totalOutputTokens;
-    const totalCost = llmScan.totalCost;
-
-    const tokensPerAwu = awuCount > 0 ? Math.round(totalTokens / awuCount) : null;
-    const costPerAwu = awuCount > 0 ? totalCost / awuCount : null;
-    const awuPerDollar = totalCost > 0 ? awuCount / totalCost : null;
-
-    const awuCountsByDay = this.getAwuCountsByDay(workspaceId, periodStart, periodEnd);
-    const byDay = collectLocalDateKeysInRange(periodStart, periodEnd).map((dateKey) => {
-      const dayAwuCount = awuCountsByDay.get(dateKey) || 0;
-      const llmDay = llmScan.byDay.get(dateKey);
-      const dayTokens = (llmDay?.inputTokens || 0) + (llmDay?.outputTokens || 0);
-      const dayCost = llmDay?.cost || 0;
-      return {
-        dateKey,
-        awuCount: dayAwuCount,
-        totalTokens: dayTokens,
-        totalCost: dayCost,
-        tokensPerAwu: dayAwuCount > 0 ? Math.round(dayTokens / dayAwuCount) : null,
-        costPerAwu: dayAwuCount > 0 ? dayCost / dayAwuCount : null,
-      };
-    });
-
-    const periodLengthMs = periodEnd - periodStart;
-    const prevStart = periodStart - periodLengthMs;
+    const prevStart = periodStart - (periodEnd - periodStart);
     const prevEnd = periodStart;
-
-    const previousAwuCount = this.countAwus(workspaceId, prevStart, prevEnd);
     const prevCost = this.getPeriodScanTotals(workspaceId, prevStart, prevEnd);
-    const prevTokens = prevCost.totalInputTokens + prevCost.totalOutputTokens;
-
-    const previousTokensPerAwu =
-      previousAwuCount > 0 ? Math.round(prevTokens / previousAwuCount) : null;
-    const previousCostPerAwu = previousAwuCount > 0 ? prevCost.totalCost / previousAwuCount : null;
-
-    const tokensPerAwuChange =
-      tokensPerAwu !== null && previousTokensPerAwu !== null && previousTokensPerAwu > 0
-        ? ((tokensPerAwu - previousTokensPerAwu) / previousTokensPerAwu) * 100
-        : null;
-
-    const costPerAwuChange =
-      costPerAwu !== null && previousCostPerAwu !== null && previousCostPerAwu > 0
-        ? ((costPerAwu - previousCostPerAwu) / previousCostPerAwu) * 100
-        : null;
-
-    return {
-      awuCount,
-      totalTokens,
-      totalCost,
-      tokensPerAwu,
-      costPerAwu,
-      awuPerDollar,
-      byDay,
-      trend: {
-        previousAwuCount,
-        previousTokensPerAwu,
-        previousCostPerAwu,
-        tokensPerAwuChange,
-        costPerAwuChange,
-      },
-    };
+    return composeAwuMetrics({
+      periodStart,
+      periodEnd,
+      awu: this.collectAwuAccumulator(workspaceId, periodStart, periodEnd),
+      totalTokens: llmScan.totalInputTokens + llmScan.totalOutputTokens,
+      totalCost: llmScan.totalCost,
+      llmByDay: llmScan.byDay,
+      previousAwu: this.collectAwuAccumulator(workspaceId, prevStart, prevEnd),
+      previousTokens: prevCost.totalInputTokens + prevCost.totalOutputTokens,
+      previousCost: prevCost.totalCost,
+    });
   }
 
   private formatReport(
@@ -3242,12 +3314,30 @@ export class UsageInsightsService {
 
     if (awuMetrics.awuCount > 0) {
       lines.push("**Agent Efficiency (AWU):**");
-      lines.push(`- Work units completed: ${awuMetrics.awuCount}`);
+      lines.push(
+        `- Work units: ${awuMetrics.verifiedCount} verified, ${awuMetrics.partialCount} partial, ${awuMetrics.needsUserActionCount} needing action (${awuMetrics.awuCount} completed in any status)`,
+      );
+      if (awuMetrics.costPerVerifiedAwu !== null) {
+        lines.push(
+          `- Cost per verified unit (retries and escalations included): $${awuMetrics.costPerVerifiedAwu.toFixed(4)}`,
+        );
+      }
+      if (awuMetrics.costPerAwu !== null) {
+        lines.push(`- Cost per completed unit (any status): $${awuMetrics.costPerAwu.toFixed(4)}`);
+      }
       if (awuMetrics.tokensPerAwu !== null) {
         lines.push(`- Tokens per AWU: ${formatTokens(awuMetrics.tokensPerAwu)}`);
       }
-      if (awuMetrics.costPerAwu !== null) {
-        lines.push(`- Cost per AWU: $${awuMetrics.costPerAwu.toFixed(4)}`);
+      const interventions = awuMetrics.interventions;
+      if (interventions.perCompletedUnit !== null) {
+        lines.push(
+          `- Human interventions per unit: ${interventions.perCompletedUnit.toFixed(2)} (${interventions.approvalDecisions} approvals, ${interventions.inputAnswers} answers, ${interventions.steeringMessages} follow-up messages)`,
+        );
+      }
+      if (interventions.providerEscalations > 0 || interventions.reworkRuns > 0) {
+        lines.push(
+          `- Provider escalations: ${interventions.providerEscalations}; re-runs: ${interventions.reworkRuns}`,
+        );
       }
       if (awuMetrics.awuPerDollar !== null) {
         lines.push(`- AWUs per dollar: ${awuMetrics.awuPerDollar.toFixed(1)}`);

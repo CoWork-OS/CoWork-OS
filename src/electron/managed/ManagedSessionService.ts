@@ -65,6 +65,8 @@ import type {
   ManagedEnvironment,
   ManagedSession,
   ManagedSessionCreateInput,
+  SessionHandoffExportResult,
+  SessionHandoffImportResult,
   ManagedSessionEvent,
   ManagedSessionInputContent,
   ManagedSessionRequirementCorrectionEvent,
@@ -76,7 +78,31 @@ import type {
 } from "../../shared/types";
 import { deriveCanonicalTaskStatus } from "../../shared/task-status";
 import { ManagedSessionRequirementCorrectionEventSchema } from "../../shared/managed-session-schemas";
-import { ManagedSessionSuccessCriteriaSchema } from "../../shared/managed-session-schemas";
+import {
+  ManagedSessionSuccessCriteriaSchema,
+  SessionHandoffExportRequestSchema,
+  SessionHandoffImportRequestSchema,
+  type SessionHandoffManifest,
+} from "../../shared/managed-session-schemas";
+import { redactWorkSessionValue } from "../database/WorkSessionProtocolRepository";
+import { TranscriptStore } from "../memory/TranscriptStore";
+import { redactSecrets } from "../memory/sensitive-content";
+import { assertWorkspaceFilesystemAccess } from "../security/access-profile-paths";
+import {
+  buildHandoffManifestBody,
+  latestCommittedRevisions,
+  renderHandoffImportMessage,
+  sealHandoffManifest,
+} from "./session-handoff";
+import {
+  collectHandoffArtifacts,
+  HANDOFF_MANIFEST_FILE,
+  readHandoffPackage,
+  resolveHandoffPackageRoot,
+  restoreHandoffArtifacts,
+  writeHandoffPackage,
+  type RestoredHandoffArtifact,
+} from "./session-handoff-io";
 import { isComputerUseToolName } from "../../shared/computer-use-contract";
 import type { AgentDaemon } from "../agent/daemon";
 import type { LLMTool } from "../agent/llm/types";
@@ -370,6 +396,13 @@ export function resolveManagedAllowedMcpTools(
   environmentConfig: Pick<ManagedEnvironment["config"], "allowedMcpServerIds">,
 ): string[] {
   return resolveManagedMcpToolAccess(environmentConfig).allowedTools;
+}
+
+/** Hooks for sessions created by the service itself (handoff import), not by clients. */
+interface ManagedSessionCreateInternalOptions {
+  resumedFromSessionId?: string;
+  /** Runs after the backing task and session exist and before the task starts. */
+  beforeStart?: (task: Task, session: ManagedSession) => Promise<void>;
 }
 
 export interface ManagedMcpToolAccessResolution {
@@ -1842,7 +1875,10 @@ export class ManagedSessionService {
     return this.managedEnvironmentRepo.update(environmentId, { status: "archived" });
   }
 
-  async createSession(input: ManagedSessionCreateInput): Promise<ManagedSession> {
+  async createSession(
+    input: ManagedSessionCreateInput,
+    internal: ManagedSessionCreateInternalOptions = {},
+  ): Promise<ManagedSession> {
     const criteriaResult =
       input.successCriteria === undefined
         ? undefined
@@ -1921,6 +1957,7 @@ export class ManagedSessionService {
         workspaceId: environment.config.workspaceId,
         backingTaskId: task.id,
         backingTeamRunId: teamRunId,
+        resumedFromSessionId: internal.resumedFromSessionId,
         latestSummary: undefined,
         startedAt: now,
       });
@@ -1948,6 +1985,7 @@ export class ManagedSessionService {
         });
       }
       try {
+        await internal.beforeStart?.(task, session);
         await this.agentDaemon.startTask(task);
       } catch (error: Any) {
         const message = error?.message || "Failed to start managed team session";
@@ -1994,6 +2032,7 @@ export class ManagedSessionService {
       surface,
       workspaceId: environment.config.workspaceId,
       backingTaskId: task.id,
+      resumedFromSessionId: internal.resumedFromSessionId,
       latestSummary: undefined,
     });
     await this.managedSessionEventRepo.create({
@@ -2019,6 +2058,7 @@ export class ManagedSessionService {
       });
     }
 
+    await internal.beforeStart?.(task, session);
     await this.agentDaemon.startTask(task);
     return (await this.refreshSession(session.id)) || session;
   }
@@ -2058,6 +2098,323 @@ export class ManagedSessionService {
     return this.agentDaemon
       .getWorkSessionContractService?.()
       .getRequirementEvidenceManifest(session.backingTaskId);
+  }
+
+  /**
+   * Export a versioned, redacted handoff package for a managed session or a plain task: the
+   * contract, decisions, pending waits, evidence, a bounded transcript and verified file copies.
+   */
+  async exportHandoff(request: unknown): Promise<SessionHandoffExportResult> {
+    const parsed = SessionHandoffExportRequestSchema.parse(request);
+    const managedSession = parsed.sessionId
+      ? await this.managedSessionRepo.findById(parsed.sessionId)
+      : undefined;
+    if (parsed.sessionId && !managedSession) {
+      throw new Error(`Managed session not found: ${parsed.sessionId}`);
+    }
+    const taskId = managedSession ? managedSession.backingTaskId : parsed.taskId;
+    if (!taskId) throw new Error("This managed session has no backing task to export");
+    const task = await this.taskRepo.findById(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const workspace = await this.workspaceRepo.findById(task.workspaceId);
+    if (!workspace) throw new Error(`Workspace not found: ${task.workspaceId}`);
+    await this.assertWorkspacePermission(task.workspaceId, "canRunAgents");
+    const contracts = this.agentDaemon.getWorkSessionContractService?.();
+    const result = contracts?.getForTask(task.id);
+    if (!contracts || !result) {
+      throw new Error("The session record for this task is not available");
+    }
+
+    const now = Date.now();
+    const packageId = `handoff-${now.toString(36)}-${randomUUID().slice(0, 8)}`;
+    const packageRoot = resolveHandoffPackageRoot(workspace, parsed.targetDir);
+    const warnings: string[] = [];
+    const { artifacts, copies } = collectHandoffArtifacts(
+      workspace,
+      latestCommittedRevisions(result.aggregate.artifactRevisions),
+      warnings,
+    );
+    const items = contracts.getProtocolService().getRepository().listAllItems(result.session.id);
+    const manifest = sealHandoffManifest(
+      buildHandoffManifestBody({
+        packageId,
+        exportedAt: now,
+        source: {
+          ...(managedSession ? { managedSessionId: managedSession.id } : {}),
+          workSessionId: result.session.id,
+          taskId: task.id,
+          workspaceId: task.workspaceId,
+          ...(managedSession
+            ? {
+                agentId: managedSession.agentId,
+                agentVersion: managedSession.agentVersion,
+                environmentId: managedSession.environmentId,
+              }
+            : {}),
+          status: String(task.terminalStatus || task.status || "unknown").slice(0, 64),
+          title: (managedSession?.title || task.title || "Untitled session").slice(0, 500),
+        },
+        aggregate: result.aggregate,
+        items,
+        artifacts,
+        checkpoint: await this.loadHandoffCheckpoint(workspace, task.id),
+        warnings,
+      }),
+    );
+    const packageDir = writeHandoffPackage(workspace, packageRoot, manifest, copies);
+    if (managedSession) {
+      await this.managedSessionEventRepo.create({
+        sessionId: managedSession.id,
+        timestamp: now,
+        type: "handoff.exported",
+        payload: {
+          packageId,
+          packageDir: path.relative(workspace.path, packageDir) || packageDir,
+          artifactsCopied: copies.length,
+          warningCount: manifest.warnings.length,
+        },
+      });
+    }
+    return {
+      packageId,
+      packageDir,
+      manifestPath: path.join(packageDir, HANDOFF_MANIFEST_FILE),
+      artifactsCopied: copies.length,
+      warnings: manifest.warnings,
+    };
+  }
+
+  /**
+   * Continue an exported session as a new managed session. The package is verified, files are
+   * restored only when their checksum matches, decisions are seeded into the new contract, and
+   * pending approvals become new pending waits: nothing the earlier session asked for is granted.
+   */
+  async importHandoff(request: unknown): Promise<SessionHandoffImportResult> {
+    const parsed = SessionHandoffImportRequestSchema.parse(request);
+    const environment = await this.managedEnvironmentRepo.findById(parsed.environmentId);
+    if (!environment) throw new Error(`Managed environment not found: ${parsed.environmentId}`);
+    const workspace = await this.workspaceRepo.findById(environment.config.workspaceId);
+    if (!workspace) throw new Error(`Workspace not found: ${environment.config.workspaceId}`);
+    await this.assertWorkspacePermission(workspace.id, "canRunAgents");
+    const { manifest, packageDir } = readHandoffPackage(workspace, parsed.manifestPath);
+    // Everything that can refuse the import is checked before a file is written.
+    const agentId = parsed.agentId || manifest.source.agentId;
+    if (!agentId) {
+      throw new Error("Choose the managed agent to continue with (agentId)");
+    }
+    const agent = await this.managedAgentRepo.findById(agentId);
+    if (!agent) {
+      throw new Error(`Managed agent not found: ${agentId}. Choose an agent on this installation.`);
+    }
+    if (agent.status === "suspended" || agent.status === "archived") {
+      throw new Error(`Managed agent is ${agent.status} and cannot be run: ${agent.name}`);
+    }
+    const plan = restoreHandoffArtifacts(workspace, packageDir, manifest, { dryRun: true });
+    const sourceSessionId = manifest.source.managedSessionId;
+    const sourceSession = sourceSessionId
+      ? await this.managedSessionRepo.findById(sourceSessionId)
+      : undefined;
+    // Lineage only to a session of the same workspace on this installation.
+    const resumedFromSessionId =
+      sourceSession && sourceSession.workspaceId === workspace.id ? sourceSession.id : undefined;
+    if (parsed.dryRun) {
+      return {
+        packageId: manifest.packageId,
+        restoredPaths: plan.restored.map((artifact) => artifact.relativePath),
+        skipped: plan.skipped,
+        originVerified: false,
+        dryRun: true,
+      };
+    }
+
+    const { restored, skipped } = restoreHandoffArtifacts(workspace, packageDir, manifest);
+    const restoredPaths = restored.map((artifact) => artifact.relativePath);
+    const text = renderHandoffImportMessage(manifest, {
+      now: Date.now(),
+      restoredPaths,
+      skipped,
+      userMessage: parsed.message,
+    });
+    const session = await this.createSession(
+      {
+        agentId,
+        environmentId: environment.id,
+        title: (parsed.title || `Continue: ${manifest.source.title}`).slice(0, 500),
+        initialEvent: { type: "user.message", content: [{ type: "text", text }] },
+      },
+      {
+        resumedFromSessionId,
+        beforeStart: async (task, created) => {
+          try {
+            this.seedHandoffContract(task, manifest, restored);
+          } catch (error) {
+            // The first message already carries the package; a seeding failure loses only the
+            // durable copy of its ledger, so the session still starts.
+            workContextLogger.warn("Could not seed the handoff into the session contract:", error);
+          }
+          await this.managedSessionEventRepo.create({
+            sessionId: created.id,
+            timestamp: Date.now(),
+            type: "handoff.imported",
+            payload: {
+              packageId: manifest.packageId,
+              sourceWorkSessionId: manifest.source.workSessionId,
+              ...(sourceSessionId ? { sourceManagedSessionId: sourceSessionId } : {}),
+              originVerified: false,
+              restoredPaths,
+              skipped,
+            },
+          });
+        },
+      },
+    );
+    return {
+      session,
+      packageId: manifest.packageId,
+      restoredPaths,
+      skipped,
+      originVerified: false,
+    };
+  }
+
+  private seedHandoffContract(
+    task: Task,
+    manifest: SessionHandoffManifest,
+    restored: RestoredHandoffArtifact[],
+  ): void {
+    const contracts = this.agentDaemon.getWorkSessionContractService?.();
+    if (!contracts) return;
+    const { session } = contracts.ensureForTask(task);
+    const repository = contracts.getRepository();
+    const importedFrom = {
+      packageId: manifest.packageId,
+      sourceWorkSessionId: manifest.source.workSessionId,
+      sourceTaskId: manifest.source.taskId,
+      ...(manifest.source.managedSessionId
+        ? { sourceManagedSessionId: manifest.source.managedSessionId }
+        : {}),
+    };
+    const key = (suffix: string) => `handoff:${manifest.packageId}:${suffix}`;
+    for (const requirement of manifest.contract?.requirements ?? []) {
+      repository.appendConstraint({
+        sessionId: session.id,
+        kind: "constraint",
+        key: `handoff-requirement:${requirement.id}`.slice(0, 500),
+        statement: `(imported, unverified) Earlier requirement (${requirement.status}): ${requirement.description}`,
+        status:
+          requirement.status === "satisfied"
+            ? "satisfied"
+            : requirement.status === "waived"
+              ? "superseded"
+              : "active",
+        owner: "handoff",
+        metadata: { importedFrom, sourceRequirementStatus: requirement.status },
+        idempotencyKey: key(`requirement:${requirement.id}`),
+      });
+    }
+    for (const entry of manifest.constraints) {
+      repository.appendConstraint({
+        sessionId: session.id,
+        // Requirement corrections point at requirement ids of the old contract; carry them as
+        // plain constraints so they cannot reopen requirements of the new one.
+        kind: entry.kind === "requirement" ? "constraint" : entry.kind,
+        key: `handoff:${entry.key}`.slice(0, 500),
+        statement: `(imported, unverified) ${entry.statement}`,
+        status: entry.status,
+        ...(entry.owner ? { owner: entry.owner } : {}),
+        metadata: { importedFrom: { ...importedFrom, entryId: entry.id } },
+        idempotencyKey: key(`constraint:${entry.id}`),
+      });
+    }
+    for (const wait of manifest.waits) {
+      contracts.beginWait(task.id, {
+        kind: wait.kind,
+        requestId: key(`wait:${wait.id}`),
+        reason: `Carried over from the earlier session; ask again: ${wait.reason}`,
+        payload: { importedFromHandoff: { ...importedFrom, waitId: wait.id } },
+        ...(wait.expiresAt ? { expiresAt: wait.expiresAt } : {}),
+        idempotencyKey: key(`wait:${wait.id}`),
+      });
+    }
+    for (const artifact of restored) {
+      repository.createArtifactRevision({
+        sessionId: session.id,
+        taskId: task.id,
+        path: artifact.absolutePath,
+        mimeType: artifact.mimeType,
+        sha256: artifact.sha256,
+        size: artifact.size,
+        createdBy: "handoff",
+        metadata: { importedFrom, alreadyPresent: artifact.alreadyPresent },
+        idempotencyKey: key(`artifact:${artifact.relativePath}`),
+      });
+    }
+    const protocol = contracts.getProtocolService().getRepository();
+    const turn =
+      protocol.getCurrentTurn(session.id) ||
+      protocol.createTurn({
+        sessionId: session.id,
+        taskId: task.id,
+        actor: "system",
+        idempotencyKey: key("turn"),
+      });
+    protocol.appendItem({
+      sessionId: session.id,
+      turnId: turn.id,
+      kind: "status",
+      actor: "system",
+      payload: {
+        eventType: "handoff_imported",
+        payload: {
+          ...importedFrom,
+          satisfiedRequirements: (manifest.contract?.requirements ?? [])
+            .filter((requirement) => requirement.status === "satisfied")
+            .map((requirement) => requirement.id),
+          completedSideEffects: manifest.completedSideEffects,
+          pendingWaits: manifest.waits.length,
+        },
+      },
+      idempotencyKey: key("imported"),
+    });
+  }
+
+  private async loadHandoffCheckpoint(
+    workspace: Workspace,
+    taskId: string,
+  ): Promise<SessionHandoffManifest["checkpoint"]> {
+    try {
+      const checkpoint = await TranscriptStore.loadCheckpoint(
+        workspace.path,
+        taskId,
+        (candidate) => {
+          try {
+            assertWorkspaceFilesystemAccess(workspace, candidate, "read", "task checkpoint");
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      );
+      if (!checkpoint) return undefined;
+      const raw =
+        checkpoint.explicitChatSummaryBlock ||
+        (checkpoint.structuredSummary ? JSON.stringify(checkpoint.structuredSummary) : "");
+      const redacted = redactWorkSessionValue(raw);
+      const summary =
+        typeof redacted === "string" ? redactSecrets(redacted).text.slice(0, 8_000) : "";
+      if (!summary || summary === "[redacted]") return undefined;
+      return {
+        createdAt: Math.max(0, Math.floor(Number(checkpoint.timestamp) || Date.now())),
+        ...(typeof checkpoint.messageCount === "number"
+          ? { messageCount: Math.max(0, Math.floor(checkpoint.messageCount)) }
+          : {}),
+        summary,
+      };
+    } catch (error) {
+      // A checkpoint is optional context; the package is still useful without it.
+      workContextLogger.warn("Handoff export could not read the task checkpoint:", error);
+      return undefined;
+    }
   }
 
   async listSessionEvents(sessionId: string, limit = 500): Promise<ManagedSessionEvent[]> {

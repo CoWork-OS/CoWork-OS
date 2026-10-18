@@ -45,6 +45,8 @@ describe("New Methods constants", () => {
     expect(Methods.MANAGED_SESSION_RESUME).toBe("managedSession.resume");
     expect(Methods.MANAGED_SESSION_SEND_EVENT).toBe("managedSession.sendEvent");
     expect(Methods.MANAGED_SESSION_EVENTS_LIST).toBe("managedSession.events.list");
+    expect(Methods.MANAGED_SESSION_EXPORT_HANDOFF).toBe("managedSession.exportHandoff");
+    expect(Methods.MANAGED_SESSION_IMPORT_HANDOFF).toBe("managedSession.importHandoff");
   });
 
   it("has workspace methods", () => {

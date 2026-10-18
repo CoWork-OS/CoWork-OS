@@ -3336,6 +3336,26 @@ export function registerTaskAndWorkspaceMethods(
     };
   });
 
+  server.registerMethod(Methods.MANAGED_SESSION_EXPORT_HANDOFF, async (client, params) => {
+    requireScope(client, "admin");
+    // The service validates the request with SessionHandoffExportRequestSchema.
+    return managedSessions.exportHandoff(params ?? {});
+  });
+
+  server.registerMethod(Methods.MANAGED_SESSION_IMPORT_HANDOFF, async (client, params) => {
+    requireScope(client, "admin");
+    // The service validates the request with SessionHandoffImportRequestSchema; the manifest must
+    // sit in the target environment's workspace under .cowork/handoffs/.
+    const result = await managedSessions.importHandoff(params ?? {});
+    if (result.session) {
+      server.broadcastToOperators(Events.MANAGED_SESSION_CREATED, {
+        sessionId: result.session.id,
+        session: result.session,
+      });
+    }
+    return result;
+  });
+
   // Tasks
   server.registerMethod(Methods.TASK_CREATE, async (client, params) => {
     requireScope(client, "admin");

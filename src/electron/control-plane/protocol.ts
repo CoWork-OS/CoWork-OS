@@ -332,6 +332,8 @@ export const Methods = {
   MANAGED_SESSION_RESUME: "managedSession.resume",
   MANAGED_SESSION_SEND_EVENT: "managedSession.sendEvent",
   MANAGED_SESSION_EVENTS_LIST: "managedSession.events.list",
+  MANAGED_SESSION_EXPORT_HANDOFF: "managedSession.exportHandoff",
+  MANAGED_SESSION_IMPORT_HANDOFF: "managedSession.importHandoff",
 
   // Agent operations
   AGENT_WAKE: "agent.wake",

@@ -6,6 +6,14 @@ import { createLogger } from "../utils/logger";
 import { providerLogPayloadAt, routingPayloadAt } from "./usage-sql";
 import type { DatabaseClient } from "../database/async/DatabaseClient";
 
+import {
+  addInterventionRow,
+  awuCompletedCondition,
+  awuOutcomeExpression,
+  emptyInterventionCounts,
+  interventionCountsSql,
+} from "./awu-outcomes";
+
 const logger = createLogger("UsageInsightsProjector");
 
 const SCHEMA_VERSION_KEY = "schema_version";
@@ -13,7 +21,9 @@ const BACKFILL_COMPLETE_KEY = "backfill_complete";
 const TASK_WATERMARK_KEY = "task_watermark_ms";
 const EVENT_WATERMARK_KEY = "event_watermark_ms";
 const LLM_WATERMARK_KEY = "llm_watermark_ms";
-const USAGE_INSIGHTS_SCHEMA_VERSION = "1";
+// 2: day rollups split AWU into verified, partial and needs-user-action, and count
+// interventions; bumping it rebuilds every rollup once.
+const USAGE_INSIGHTS_SCHEMA_VERSION = "2";
 /** Legacy usage/error events copied per backfill pass (a few milliseconds each). */
 const LEGACY_TELEMETRY_CHUNK = 1_000;
 /** Workspace-days rebuilt per worker command, so one command stays short. */
@@ -957,15 +967,47 @@ export class UsageInsightsProjector {
 
     const awuRow = this.db
       .prepare(
-        `SELECT COUNT(*) as count
-         FROM tasks
-         WHERE workspace_id = ?
-           AND completed_at >= ?
-           AND completed_at < ?
-           AND status = 'completed'
-           AND (terminal_status IN ('ok', 'partial_success', 'needs_user_action') OR terminal_status IS NULL)`,
+        `SELECT COUNT(*) as count,
+           SUM(CASE WHEN outcome IN ('verified_contract', 'verified_terminal') THEN 1 ELSE 0 END) as verified,
+           SUM(CASE WHEN outcome = 'verified_contract' THEN 1 ELSE 0 END) as verified_by_contract,
+           SUM(CASE WHEN outcome = 'partial' THEN 1 ELSE 0 END) as partial,
+           SUM(CASE WHEN outcome = 'needs_user_action' THEN 1 ELSE 0 END) as needs_user_action
+         FROM (
+           SELECT ${awuOutcomeExpression()} as outcome
+           FROM tasks
+           WHERE workspace_id = ?
+             AND completed_at >= ?
+             AND completed_at < ?
+             AND ${awuCompletedCondition()}
+         )`,
       )
-      .get(workspaceId, start, endExclusive) as { count: number } | undefined;
+      .get(workspaceId, start, endExclusive) as
+      | {
+          count: number;
+          verified: number | null;
+          verified_by_contract: number | null;
+          partial: number | null;
+          needs_user_action: number | null;
+        }
+      | undefined;
+    const interventionRow = this.db
+      .prepare(
+        `SELECT ${interventionCountsSql("te", "t")}
+         FROM task_events te
+         JOIN tasks t ON t.id = te.task_id
+         WHERE t.workspace_id = ?
+           AND te.timestamp >= ?
+           AND te.timestamp < ?`,
+      )
+      .get(workspaceId, start, endExclusive) as Record<string, number | null> | undefined;
+    const interventions = emptyInterventionCounts();
+    addInterventionRow(interventions, interventionRow);
+    const interventionTotal =
+      interventions.approvalDecisions +
+      interventions.inputAnswers +
+      interventions.steeringMessages +
+      interventions.providerEscalations +
+      interventions.reworkRuns;
 
     const feedbackRows = this.db
       .prepare(
@@ -1004,7 +1046,12 @@ export class UsageInsightsProjector {
     }
 
     const feedbackTotal = feedbackAccepted + feedbackRejected;
-    if ((taskRow?.total || 0) > 0 || feedbackTotal > 0 || (awuRow?.count || 0) > 0) {
+    if (
+      (taskRow?.total || 0) > 0 ||
+      feedbackTotal > 0 ||
+      (awuRow?.count || 0) > 0 ||
+      interventionTotal > 0
+    ) {
       this.db
         .prepare(
           `INSERT INTO usage_insights_day (
@@ -1023,8 +1070,17 @@ export class UsageInsightsProjector {
              feedback_total,
              feedback_accepted,
              feedback_rejected,
-             awu_completed_ok
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             awu_completed_ok,
+             awu_verified_ok,
+             awu_verified_by_contract,
+             awu_partial,
+             awu_needs_user_action,
+             intervention_approval_decisions,
+             intervention_input_answers,
+             intervention_steering_messages,
+             provider_escalations,
+             rework_runs
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           workspaceId,
@@ -1043,6 +1099,15 @@ export class UsageInsightsProjector {
           feedbackAccepted,
           feedbackRejected,
           awuRow?.count || 0,
+          awuRow?.verified || 0,
+          awuRow?.verified_by_contract || 0,
+          awuRow?.partial || 0,
+          awuRow?.needs_user_action || 0,
+          interventions.approvalDecisions,
+          interventions.inputAnswers,
+          interventions.steeringMessages,
+          interventions.providerEscalations,
+          interventions.reworkRuns,
         );
     }
 

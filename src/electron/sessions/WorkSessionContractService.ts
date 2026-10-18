@@ -554,9 +554,13 @@ export class WorkSessionContractService {
     if (!result) return undefined;
     const wait = requestId
       ? this.repository.findWaitStateByRequest(result.session.id, kind, requestId)
-      : this.repository
-          .listWaitStates(result.session.id, { status: "pending" })
-          .find((candidate) => candidate.kind === kind && candidate.taskId === taskId);
+      : this.repository.listWaitStates(result.session.id, { status: "pending" }).find(
+          (candidate) =>
+            candidate.kind === kind &&
+            candidate.taskId === taskId &&
+            // A carried-over handoff wait is not answered by a new, unrelated request.
+            !candidate.payload?.importedFromHandoff,
+        );
     return wait
       ? this.repository.resolveWaitState(wait.id, normalizeWaitStatus(status), payload)
       : undefined;
@@ -652,9 +656,14 @@ export class WorkSessionContractService {
       for (const wait of this.repository.listWaitStates(this.sessionIdForTask(task), {
         status: "pending",
       })) {
+        // Waits carried over from a handoff package have no live request that could resolve
+        // them, so a terminal task closes them like any other lifecycle wait.
+        const importedFromHandoff = Boolean(wait.payload?.importedFromHandoff);
         if (
           (resumeRequestId && wait.requestId !== resumeRequestId) ||
-          (!resumeRequestId && (wait.kind === "approval" || wait.kind === "input"))
+          (!resumeRequestId &&
+            (wait.kind === "approval" || wait.kind === "input") &&
+            !(importedFromHandoff && type !== "task_resumed"))
         ) {
           continue;
         }

@@ -37,8 +37,17 @@ vi.mock("../../../utils/bounded-pdf-parser", async (importOriginal) => {
   return { ...actual, parsePdfBufferBounded: vi.fn(actual.parsePdfBufferBounded) };
 });
 
+// Declared agent identity is off unless a test turns it on; then this key signs.
+const signingKey = vi.hoisted(() => ({ current: undefined as Any }));
+vi.mock("../../../identity/agent-signing-keys", () => ({
+  getAgentSigningKey: () => signingKey.current,
+}));
+
 // Import after mocking
+import { generateKeyPairSync } from "node:crypto";
 import { WebFetchTools } from "../web-fetch-tools";
+import { BrowserSettingsManager } from "../../../settings/browser-settings-manager";
+import { ed25519JwkThumbprint, ed25519PublicX } from "../../../security/http-message-signature";
 import { parsePdfBuffer } from "../../../utils/pdf-parser";
 import { PdfParseLimitError, parsePdfBufferBounded } from "../../../utils/bounded-pdf-parser";
 import { Workspace } from "../../../../shared/types";
@@ -950,6 +959,73 @@ describe("WebFetchTools", () => {
         );
         expect(result.body).not.toContain("top-secret");
         expect(result.headers["x-echo"]).toBe("Bearer [REDACTED]");
+      });
+
+      it("drops caller-supplied identity and Host headers when declared identity signs", async () => {
+        const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+        const x = ed25519PublicX(publicKey);
+        signingKey.current = { privateKey, x, keyid: ed25519JwkThumbprint(x), createdAt: 1 };
+        vi.spyOn(BrowserSettingsManager, "loadSettings").mockReturnValue({
+          declaredAgent: {
+            enabled: true,
+            signatureAgent: "https://agent.example",
+            compatibleUserAgentDomains: [],
+          },
+        } as Any);
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: new Map(),
+          text: async () => "OK",
+        });
+
+        try {
+          await webFetchTools.httpRequest({
+            url: "https://api.example.com/items",
+            headers: {
+              Host: "other.example",
+              Signature: "sig=:AAAA:",
+              "Signature-Agent": 'sig="https://evil.example"',
+              "X-Keep": "1",
+            },
+          });
+        } finally {
+          signingKey.current = undefined;
+        }
+
+        const sent = mockFetch.mock.calls[0][1].headers as Record<string, string>;
+        const names = Object.keys(sent).map((name) => name.toLowerCase());
+        expect(names).not.toContain("host");
+        expect(names.filter((name) => name === "signature-agent")).toHaveLength(1);
+        expect(sent["Signature-Agent"]).toBe('sig="https://agent.example"');
+        expect(sent.Signature).not.toBe("sig=:AAAA:");
+        expect(sent["x-keep"]).toBe("1");
+        // Audit lines: what was signed, then the response, never the headers themselves.
+        const metrics = mockDaemon.logEvent.mock.calls
+          .map((call) => call[2]?.metric)
+          .filter(Boolean);
+        expect(metrics).toEqual(["agent_identity_signed", "agent_identity_response"]);
+      });
+
+      it("refuses to put a protected credential in Host or a signature header", async () => {
+        const protectedTools = new WebFetchTools(
+          mockWorkspace,
+          mockDaemon as Any,
+          "test-task-id",
+          mockProtectedCredentialService as Any,
+        );
+        for (const credentialHeader of ["Host", "Signature", "signature-agent"]) {
+          const result = await protectedTools.httpRequest({
+            url: "https://api.example.com/items",
+            credentialId: "credential-1",
+            credentialHeader,
+          });
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("credentialHeader cannot be");
+        }
+        expect(mockProtectedCredentialService.resolveForDestination).not.toHaveBeenCalled();
+        expect(mockFetch).not.toHaveBeenCalled();
       });
 
       it("should include default User-Agent header", async () => {

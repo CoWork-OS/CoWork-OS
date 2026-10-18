@@ -120,14 +120,22 @@ export function stripMarkdownForSpeech(text: string): string {
       // Remove bold/italic
       .replace(/\*\*([^*]+)\*\*/g, "$1")
       .replace(/\*([^*]+)\*/g, "$1")
-      .replace(/(^|[^\p{L}\p{N}_])__([^_\n]+)__(?=[^\p{L}\p{N}_]|$)/gu, "$1$2")
-      .replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?=[^\p{L}\p{N}_]|$)/gu, "$1$2")
+      // Underscore emphasis only at word boundaries. A single word in double
+      // underscores is a dunder name (`__init__`), and underscores next to a
+      // path separator belong to a path (`/tmp/_cache_/x`); both are kept.
+      .replace(
+        /(^|[^\p{L}\p{N}_/\\])__([^_\n]*[^\p{L}\p{N}_\n][^_\n]*)__(?=[^\p{L}\p{N}_/\\]|$)/gu,
+        "$1$2",
+      )
+      .replace(/(^|[^\p{L}\p{N}_/\\])_([^_\n]+)_(?=[^\p{L}\p{N}_/\\]|$)/gu, "$1$2")
       // Remove horizontal rules
       .replace(/^[-*_]{3,}$/gm, "")
       // Remove bullet points
       .replace(/^[\s]*[-*+]\s+/gm, "")
       // Remove numbered lists
       .replace(/^[\s]*\d+\.\s+/gm, "")
+      // Collapse spaces left behind by removed elements
+      .replace(/[ \t]{2,}/g, " ")
       // Collapse multiple newlines
       .replace(/\n{3,}/g, "\n\n")
       .trim()

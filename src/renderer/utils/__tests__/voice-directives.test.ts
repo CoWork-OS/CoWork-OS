@@ -10,7 +10,7 @@ describe("stripMarkdownForSpeech", () => {
   it("removes images before processing links", () => {
     expect(stripMarkdownForSpeech("![a chart](chart.png)")).toBe("");
     expect(stripMarkdownForSpeech("See ![a chart](chart.png) and [the guide](guide.md).")).toBe(
-      "See  and the guide.",
+      "See and the guide.",
     );
     expect(stripMarkdownForSpeech("![](chart.png) [guide](guide.md)")).toBe("guide");
   });
@@ -19,8 +19,14 @@ describe("stripMarkdownForSpeech", () => {
     expect(stripMarkdownForSpeech("Open my_config_file and other__config__file.")).toBe(
       "Open my_config_file and other__config__file.",
     );
-    expect(stripMarkdownForSpeech("_italic_ and (__bold__) and **strong** and *emphasis*.")).toBe(
-      "italic and (bold) and strong and emphasis.",
+    expect(
+      stripMarkdownForSpeech("_italic_ and (__bold text__) and **strong** and *emphasis*."),
+    ).toBe("italic and (bold text) and strong and emphasis.");
+    expect(stripMarkdownForSpeech("See __init__ and __name__ methods.")).toBe(
+      "See __init__ and __name__ methods.",
+    );
+    expect(stripMarkdownForSpeech("path /tmp/_cache_/x and C:\\_tmp_\\y")).toBe(
+      "path /tmp/_cache_/x and C:\\_tmp_\\y",
     );
     expect(stripMarkdownForSpeech("é_config_file _你好_ 日本_語_名")).toBe(
       "é_config_file 你好 日本_語_名",

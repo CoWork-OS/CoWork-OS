@@ -224,6 +224,7 @@ import type {
   ManagedEnvironment,
   ManagedSession,
   ManagedSessionCreateInput,
+  SessionHandoffExportResult,
   ManagedSessionEvent,
   ManagedSessionRequirementCorrectionRequest,
   ManagedSessionUserMessageRequest,
@@ -3736,6 +3737,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.MANAGED_SESSION_CANCEL_IPC, sessionId) as Promise<
       ManagedSession | undefined
     >,
+  exportSessionHandoff: (request: { sessionId?: string; taskId?: string }) =>
+    ipcRenderer.invoke(
+      IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC,
+      request,
+    ) as Promise<SessionHandoffExportResult>,
   listWorkContexts: (params?: {
     workspaceId?: string;
     includeArchived?: boolean;
@@ -7500,6 +7506,11 @@ export interface ElectronAPI {
     sessionId: string,
   ) => Promise<{ resumed: boolean; session?: ManagedSession }>;
   cancelManagedSession: (sessionId: string) => Promise<ManagedSession | undefined>;
+  /** Write a handoff package for a managed session or a task under its workspace. */
+  exportSessionHandoff: (request: {
+    sessionId?: string;
+    taskId?: string;
+  }) => Promise<SessionHandoffExportResult>;
   listWorkContexts: (params?: {
     workspaceId?: string;
     includeArchived?: boolean;

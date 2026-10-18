@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Calendar, Tag, X, Zap } from "lucide-react";
+import { ArrowRight, Calendar, PackageOpen, Tag, X, Zap } from "lucide-react";
 import { ActivityFeed } from "../ActivityFeed";
 import { MentionInput } from "../MentionInput";
 import { MentionList } from "../MentionList";
@@ -100,8 +100,32 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
   const [recallLoading, setRecallLoading] = useState(false);
   const [recallError, setRecallError] = useState<string | null>(null);
   const [labelToAdd, setLabelToAdd] = useState("");
+  const [handoffExporting, setHandoffExporting] = useState(false);
+  const [handoffStatus, setHandoffStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
   const taskWorkspaceId = task?.workspaceId || selectedWorkspaceId || undefined;
+
+  const handleExportHandoff = useCallback(async () => {
+    if (!task?.id || !window.electronAPI?.exportSessionHandoff) return;
+    setHandoffExporting(true);
+    setHandoffStatus(null);
+    try {
+      const result = await window.electronAPI.exportSessionHandoff({ taskId: task.id });
+      const files = result.artifactsCopied === 1 ? "1 file" : `${result.artifactsCopied} files`;
+      const notes = result.warnings.length > 0 ? `, ${result.warnings.length} note(s) inside` : "";
+      setHandoffStatus({
+        ok: true,
+        text: `Handoff saved to ${result.packageDir} (${files}${notes}).`,
+      });
+    } catch (error) {
+      setHandoffStatus({
+        ok: false,
+        text: error instanceof Error ? error.message : "Could not export the handoff.",
+      });
+    } finally {
+      setHandoffExporting(false);
+    }
+  }, [task?.id]);
 
   const loadLearningProgress = useCallback(async () => {
     if (!task?.id || !window.electronAPI?.getTaskLearningProgress) return;
@@ -239,7 +263,24 @@ export function MCTaskDetail({ data, taskId }: MCTaskDetailProps) {
             Due today
           </button>
         )}
+        <button
+          className="mc-v2-task-primary-action"
+          onClick={() => void handleExportHandoff()}
+          disabled={handoffExporting}
+          title="Save the goal, decisions, pending approvals and verified files as a handoff package"
+        >
+          <PackageOpen size={14} />
+          {handoffExporting ? "Exporting…" : "Export handoff"}
+        </button>
       </div>
+      {handoffStatus && (
+        <div
+          className={`mc-v2-task-handoff-status${handoffStatus.ok ? "" : " is-error"}`}
+          role="status"
+        >
+          {handoffStatus.text}
+        </div>
+      )}
 
       <div className="mc-v2-task-summary-grid">
         <div className="mc-v2-task-summary-item">

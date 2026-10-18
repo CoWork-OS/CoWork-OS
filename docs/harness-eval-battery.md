@@ -39,6 +39,10 @@ Windows cleanup is confirmed only when `taskkill /T /F` succeeds and the owned d
 
 A fresh application profile is not an operating-system sandbox. Run untrusted candidates in an appropriately isolated environment. Live provider quality, desktop/browser acceptance, rendered document quality, and head-to-head comparisons require separate evidence.
 
+## Interrupt drill
+
+`cowork drill interrupt <fixture>` stops a task halfway and reports what changed: contract requirements and their status, files changed, calls in flight at the stop with their outcome, open waits, and how to resume (see [CLI](cli.md)). `npm run qa:harness`, and with it the nightly hardening job, runs `src/cli/__tests__/drill-interrupt.test.ts`: it replays `scripts/qa/drills/stop-in-flight.json` through the CLI, checks the report against the fixture's `expected` block, and checks that the replay evaluator agrees (the stopped task replays as `cancelled`, not completed, with no findings). A drill with `--live` needs the app and a model, so it is not part of CI.
+
 ## Memory evals
 
 `npm run qa:memory-evals` runs four deterministic, offline suites over the memory engine. `npm run qa:harness` runs them as its last step, so CI runs them too.

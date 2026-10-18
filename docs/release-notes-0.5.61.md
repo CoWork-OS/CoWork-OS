@@ -22,7 +22,7 @@ Read [Upgrade notes](#upgrade-notes) before upgrading: channel pairings are rese
 - **Builds and sandboxes** — The Build composer has the access picker and can use an explicit checkout, worktree and branch. An opt-in SPACE sandbox pilot runs `run_command` and `execute_code` on an operator-managed server and never falls back to local execution. See [Worktrees](worktrees.md) and [SPACE sandbox](space-sandbox.md).
 - **Faster and quieter** — The window appears about a third sooner, first opens of Settings, Agents and Automations no longer pause, and the question card, approvals, Settings and assistant replies use one minimal style. New releases arrive in a native-style update window, and nothing installs until you choose **Install and Relaunch**.
 - **A smaller app** — Retired features are removed: Everyday Agent, R&D Council, the Twitch and X integrations, the Infrastructure tools, Supermemory, the chief-of-staff engine, Agent Comparison, Multi-LLM judge mode, the Workflow Pipeline and others. See [Removed features](#removed-features) for what happens to their data.
-- **Community** — A Discord server, a Simplified Chinese README reviewed by @YuuGR1337, and a [What You Own](what-you-own.md) page. Thanks to @umairnaeem0309, @Doomguy-BFG9000 and @VyxorDev for their fixes.
+- **Community** — A Discord server, a Simplified Chinese README reviewed by @YuuGR1337, and a [What You Own](what-you-own.md) page. An LM Studio setup guide by @yuefdev. Thanks to @umairnaeem0309, @yuefdev, @Doomguy-BFG9000 and @VyxorDev for their fixes.
 
 ## Upgrade notes
 

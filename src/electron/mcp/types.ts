@@ -374,11 +374,22 @@ export interface MCPElicitationResult {
 export interface MCPToolCallOptions {
   /** Trusted caller gate after queueing, immediately before transport submission. */
   beforeSend?: () => Promise<void>;
+  /**
+   * The tool attempt's idempotency key, stable across retries of the same call. Sent in the
+   * request's `_meta` so a server can return the first result instead of acting twice.
+   */
+  idempotencyKey?: string;
+  /** The tool attempt this call belongs to; sent in `_meta` with the key. */
+  attemptId?: string;
   onElicitation?: (request: MCPElicitationRequest) => Promise<MCPElicitationResult>;
   signal?: AbortSignal;
 }
 
 export type MCPTransportRequestOptions = Pick<MCPToolCallOptions, "beforeSend" | "signal">;
+
+/** `_meta` keys CoWork sends on `tools/call`; a connector reads them to deduplicate writes. */
+export const MCP_IDEMPOTENCY_META_KEY = "cowork.idempotencyKey";
+export const MCP_ATTEMPT_META_KEY = "cowork.attemptId";
 
 // MCP Protocol Methods
 export const MCP_METHODS = {

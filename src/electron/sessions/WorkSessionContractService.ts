@@ -47,6 +47,13 @@ const DURABLE_BLOCKING_EVENT_KINDS: Partial<Record<string, WaitStateKind>> = {
   child_wait: "child",
 };
 
+/** Epoch milliseconds from a number or a date string, when it is a plausible time. */
+function timestampFrom(value: unknown): number | undefined {
+  const time =
+    typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(time) && time > 0 ? Math.floor(time) : undefined;
+}
+
 function eventType(event: TaskEvent): string {
   if (typeof event.legacyType === "string" && event.legacyType.trim()) {
     return event.legacyType.trim();
@@ -720,6 +727,7 @@ export class WorkSessionContractService {
           contractId: contract.id,
           claim: "Task verification report",
           sourceType: "task_event",
+          basis: "inferred",
           sourceRef: `task:${task.id}:verification`,
           snippet: verificationReport,
           confidence:
@@ -748,6 +756,7 @@ export class WorkSessionContractService {
           sessionId: link.parentSessionId,
           claim: "Child session aggregate outcome",
           sourceType: "child_session",
+          basis: "observed",
           sourceRef: link.childSessionId,
           snippet: `${childAggregate.completedCount} complete, ${childAggregate.partialCount} partial, ${childAggregate.failedCount} failed`,
           confidence: 1,
@@ -909,6 +918,7 @@ export class WorkSessionContractService {
               contractId: contract.id,
               claim: "Server recorded a verification failure",
               sourceType: "task_event",
+              basis: "observed",
               sourceRef,
               snippet: "verdict=FAIL; source=server_task_verification_state",
               confidence: 1,
@@ -988,6 +998,7 @@ export class WorkSessionContractService {
               contractId: contract.id,
               claim: "Workspace file is present (existence only)",
               sourceType: "artifact_revision",
+              basis: "observed",
               sourceRef: inspection.path,
               snippet: `sha256=${inspection.sha256}; size=${inspection.size}; verifier=workspace_artifact_inspector`,
               confidence: 1,
@@ -1018,6 +1029,7 @@ export class WorkSessionContractService {
               contractId: contract.id,
               claim: "Workspace file is missing (existence check only)",
               sourceType: "task_event",
+              basis: "observed",
               sourceRef: inspection.path,
               snippet: `result=missing; verifier=workspace_artifact_inspector; requirement=${requirement.id}`,
               confidence: 1,
@@ -1158,7 +1170,9 @@ export class WorkSessionContractService {
       ? payload.citations
       : Array.isArray(payload.evidence)
         ? payload.evidence
-        : [payload];
+        : Array.isArray(payload.evidenceRefs)
+          ? payload.evidenceRefs
+          : [payload];
     rawEntries.slice(0, 100).forEach((entry, index) => {
       const record: Record<string, unknown> =
         entry && typeof entry === "object" ? (entry as Record<string, unknown>) : { value: entry };
@@ -1173,6 +1187,10 @@ export class WorkSessionContractService {
       const canonicalItem = this.protocol
         .getRepository()
         .findItemBySourceEvent(this.sessionIdForTask(task), event.eventId || event.id);
+      const capturedAt = timestampFrom(record.accessedAt ?? record.capturedAt);
+      const dataAsOf = timestampFrom(
+        record.dataAsOf ?? record.publishedDate ?? record.publishDate ?? record.lastModified,
+      );
       this.recordEvidence(task.id, {
         claim,
         sourceType: sourceRef.startsWith("http") ? "url" : "task_event",
@@ -1180,6 +1198,10 @@ export class WorkSessionContractService {
         snippet: text(record.snippet || record.text, 8_000),
         confidence: typeof record.confidence === "number" ? record.confidence : 0.7,
         status: record.contradicting === true ? "contradicting" : "supporting",
+        // The source itself was read; whether it supports the claim is the model's reading.
+        basis: "observed",
+        ...(capturedAt !== undefined ? { capturedAt } : {}),
+        ...(dataAsOf !== undefined ? { dataAsOf } : {}),
         ...(canonicalItem ? { itemId: canonicalItem.id } : {}),
         idempotencyKey: `event:${eventKey}:evidence:${index}`,
       });

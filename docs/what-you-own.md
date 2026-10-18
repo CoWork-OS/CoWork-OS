@@ -73,14 +73,17 @@ To move an unfinished session to another installation or start it fresh with a d
 export a handoff package (Mission Control → task → **Export handoff**, or `cowork handoff export`).
 It is a folder of JSON and file copies under `<workspace>/.cowork/handoffs/`:
 
-| Survives a handoff                                                    | Does not survive                                |
-| --------------------------------------------------------------------- | ----------------------------------------------- |
-| Goal, requirements and their status                                   | Credentials, tokens and cookies                 |
-| Decisions, constraints, assumptions, and reversed decisions           | Approvals already granted                       |
-| Approvals and answers still pending (asked again after import)        | Running processes and open browser sessions     |
-| Evidence with its capture time and freshness                          | Values that look like secrets (redacted)        |
-| Files the session wrote, checked by sha256                            | Files changed after the session recorded them   |
-| Recent transcript excerpts and the latest checkpoint summary          | The full transcript                             |
+| Survives a handoff                                              | Does not survive                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Goal, requirements and their status                             | Cookies, running processes and open browser sessions              |
+| Decisions, constraints, assumptions, and reversed decisions     | Approvals already granted                                         |
+| Approvals and answers still pending (asked again after import)  | Values and files that look like credentials (redacted or left out) |
+| Evidence with its capture time and freshness                    | Files changed after the session recorded them                     |
+| Files the session wrote, checked by sha256                      | Hidden, dependency and agent-instruction files (kept in the package) |
+| Recent transcript excerpts and the latest checkpoint summary    | The full transcript                                               |
+
+Secret redaction is pattern based, so review a package before you share it. The package's
+checksum detects damage but does not prove who exported it.
 
 See [Managed Agents — Durable Session Handoffs](managed-agents.md#durable-session-handoffs).
 

@@ -6657,10 +6657,15 @@ export interface SessionHandoffExportResult {
 
 /** Result of importing a session handoff package into a new managed session. */
 export interface SessionHandoffImportResult {
-  session: ManagedSession;
+  /** Absent for a dry run, which writes nothing and creates no session. */
+  session?: ManagedSession;
   packageId: string;
+  /** Files restored (or, for a dry run, that would be restored). */
   restoredPaths: string[];
   skipped: string[];
+  /** The checksum guards against damage; who exported the package is not verified. */
+  originVerified: false;
+  dryRun?: boolean;
 }
 
 export interface ManagedSessionUserMessageRequest {

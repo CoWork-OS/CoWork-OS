@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSISTANT_APPROVAL_QUESTION_ID,
+  buildAssistantApprovalMessage,
   buildAssistantApprovalRequest,
   isAssistantApprovalInputRequest,
   isHighImpactApprovalDecision,
@@ -141,6 +142,28 @@ describe("assistant mediated approvals", () => {
       }),
     ).toBe(true);
   });
+});
+
+it("points the transcript at the card instead of repeating its explanation", () => {
+  const description =
+    "Approve this shell command and its potential network access for this invocation.";
+  const details = {
+    command: "python3 check_totals.py vendor-totals.xlsx",
+    permissionPrompt: { scopePreview: 'commands starting with "python3 check_totals.py"' },
+  };
+  const message = buildAssistantApprovalMessage("run_command", description, details);
+  const card = buildAssistantApprovalRequest("run_command", description, details).questions[0];
+  expect(card.question).toContain(description);
+  expect(message).not.toContain(description);
+  expect(message).not.toContain("Scope:");
+  expect(message).toBe(
+    "I need your decision before I can continue. Choose **Deny** or **Allow once** below.",
+  );
+  expect(
+    buildAssistantApprovalMessage("external_service", 'Use "Calculator"?', {
+      taskConsentScope: "reading and clicking in Calculator",
+    }),
+  ).toContain("Choose **Deny** or **Allow for this task** below.");
 });
 
 it("makes the duration and app scope explicit while keeping Deny first", () => {

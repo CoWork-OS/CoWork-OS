@@ -11,6 +11,7 @@ import {
   isArtifactEventCoveredByFileWrite,
   isScratchOutputPath,
   pickTurnOutputToAutoOpen,
+  stepTurnAutoOpenWatch,
   type TurnOutputSummary,
 } from "../MainContent/turn-outputs";
 import { TurnOutputsRow, describeTurnOutputs } from "../MainContent/TurnOutputsRow";
@@ -274,5 +275,59 @@ describe("inline code file chips", () => {
     expect(render("Run `npm test`.")).not.toContain("clickable-file-path");
     const linked = render("[`report.docx`](out/report.docx)");
     expect(linked.match(/clickable-file-path"/g)).toHaveLength(1);
+  });
+});
+
+describe("stepTurnAutoOpenWatch", () => {
+  type Seen = Parameters<typeof stepTurnAutoOpenWatch>[1];
+  const run = (states: Seen[]) => {
+    let watching: string | null = null;
+    return states.map((state) => {
+      const step = stepTurnAutoOpenWatch(watching, state);
+      watching = step.watching;
+      return step.turnEnded;
+    });
+  };
+
+  it("waits through a pause for approval and opens when the turn ends", () => {
+    expect(
+      run([
+        { id: "t1", working: true, status: "executing" },
+        // The pause event stops the work before the task's status catches up.
+        { id: "t1", working: false, status: "executing" },
+        { id: "t1", working: false, status: "paused" },
+        { id: "t1", working: true, status: "executing" },
+        { id: "t1", working: false, status: "completed" },
+      ]),
+    ).toEqual([false, false, false, false, true]);
+  });
+
+  it("never opens for a turn still waiting on the user", () => {
+    for (const status of ["paused", "blocked", "interrupted"] as const) {
+      expect(
+        run([
+          { id: "t1", working: true, status: "executing" },
+          { id: "t1", working: false, status },
+        ]),
+      ).toEqual([false, false]);
+    }
+  });
+
+  it("opens once when a watched turn finishes, and not for another task shown later", () => {
+    expect(
+      run([
+        { id: "t1", working: true, status: "executing" },
+        { id: "t1", working: false, status: "completed" },
+        { id: "t1", working: false, status: "completed" },
+      ]),
+    ).toEqual([false, true, false]);
+    expect(
+      run([
+        { id: "t1", working: true, status: "executing" },
+        { id: "t1", working: false, status: "paused" },
+        { id: "t2", working: false, status: "completed" },
+        { id: "t1", working: false, status: "completed" },
+      ]),
+    ).toEqual([false, false, false, false]);
   });
 });

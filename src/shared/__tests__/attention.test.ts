@@ -359,6 +359,69 @@ describe("rankAttention", () => {
     ]);
   });
 
+  describe("inline approvals", () => {
+    const decision = (id: string, taskId = "t1", questionId = "approval_decision") =>
+      attentionFromInputRequest(
+        {
+          id,
+          taskId,
+          status: "pending",
+          requestedAt: NOW - 30_000,
+          questions: [
+            {
+              header: "Permission",
+              id: questionId,
+              question: "Approve this shell command? Do you want CoWork to continue?",
+              options: [
+                { label: "Deny", description: "Stop this operation." },
+                { label: "Allow once", description: "Continue this run_command only once." },
+              ],
+            },
+          ],
+        },
+        task(taskId, { status: "paused" }),
+        context,
+      );
+    const record = (id: string, taskId = "t1") =>
+      attentionFromApproval(approval(id, { taskId }), task(taskId, { status: "paused" }), context);
+
+    it("shows one decision once: the approval, not also its inline question", () => {
+      const items = [decision("r1"), record("a1")];
+      expect(items[0].approvalDecision).toBe(true);
+      const ranked = rankAttention(items);
+      expect(ranked.map((entry) => entry.id)).toEqual(["approval:a1"]);
+      expect(attentionWaitingByTask(ranked).get("t1")).toBe("Approval needed");
+    });
+
+    it("keeps the inline question when its approval record is not in the queue", () => {
+      expect(rankAttention([decision("r1")]).map((entry) => entry.id)).toEqual(["question:r1"]);
+      // Another session's approval does not stand in for it.
+      expect(
+        rankAttention([decision("r1"), record("a2", "t2")])
+          .map((entry) => entry.id)
+          .sort(),
+      ).toEqual(["approval:a2", "question:r1"]);
+    });
+
+    it("pairs each approval with one inline question of the same session", () => {
+      const ranked = rankAttention([
+        decision("r1"),
+        decision("r2"),
+        decision("r3"),
+        record("a1"),
+        record("a2"),
+      ]);
+      expect(ranked.filter((entry) => entry.kind === "approval")).toHaveLength(2);
+      expect(ranked.filter((entry) => entry.kind === "question")).toHaveLength(1);
+    });
+
+    it("never hides an ordinary question behind an approval", () => {
+      const ranked = rankAttention([decision("r1", "t1", "months"), record("a1")]);
+      expect(ranked.map((entry) => entry.id).sort()).toEqual(["approval:a1", "question:r1"]);
+      expect(ranked.find((entry) => entry.kind === "question")?.approvalDecision).toBeUndefined();
+    });
+  });
+
   it("puts calendar conflicts with commitments and calendar offers with the offers, soonest first", () => {
     const ranked = rankAttention([
       item("idea", "suggestion", { urgent: false }),

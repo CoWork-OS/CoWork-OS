@@ -88,6 +88,11 @@ export interface AttentionItem {
    * get choices: they are answered where their full review is shown.
    */
   choices?: { questionId: string; options: Array<{ label: string; description?: string }> };
+  /**
+   * The question is an approval decision asked inline (questions only). The same decision
+   * also has an approval record, so the queue shows it once, as the approval.
+   */
+  approvalDecision?: true;
   /** The calendar proposal itself (calendar items only), for the card to describe. */
   calendar?: CalendarProposal;
   /** A free stretch the user can hold for a suggestion that is about making time. */
@@ -351,11 +356,14 @@ export function attentionFromInputRequest(
   const options = (first?.options ?? []).filter(
     (option) => typeof option?.label === "string" && option.label.trim(),
   );
+  const approvalDecision = request.questions.some((question) =>
+    isApprovalDecisionQuestionId(question.id),
+  );
   const answerable =
     count === 1 &&
     first &&
     !first.preview &&
-    !isApprovalDecisionQuestionId(first.id) &&
+    !approvalDecision &&
     options.length >= 2 &&
     options.length <= 4;
   return {
@@ -372,6 +380,7 @@ export function attentionFromInputRequest(
           },
         }
       : {}),
+    ...(approvalDecision ? { approvalDecision: true as const } : {}),
     kind: "question",
     state: count > 1 ? `${count} questions` : "Question",
     title: clip(first?.question, 200) || "An agent has a question for you",
@@ -717,8 +726,9 @@ const KIND_RANK: Record<AttentionKind, number> = {
 };
 
 /**
- * Drops a session item when an approval or question already stands for the same task, then
- * orders the rest: blocked work first, then waiting sessions, due commitments (soonest first)
+ * Drops a session item when an approval or question already stands for the same task, and an
+ * inline approval question when its approval record stands for the same task (one decision
+ * makes both, and is one card everywhere the queue is counted). Then orders the rest: blocked work first, then waiting sessions, due commitments (soonest first)
  * and calendar conflicts, urgent suggestions, and finally offers (a suggested hold or meeting
  * prep, then other suggestions). Within a group the newest comes first, except calendar
  * items, soonest first.
@@ -729,10 +739,24 @@ export function rankAttention(items: readonly AttentionItem[]): AttentionItem[] 
       .filter((item) => item.kind === "approval" || item.kind === "question")
       .map((item) => item.taskId),
   );
+  // Approval records per task, each standing in for one inline approval question.
+  const approvalsByTask = new Map<string | undefined, number>();
+  for (const item of items) {
+    if (item.kind === "approval") {
+      approvalsByTask.set(item.taskId, (approvalsByTask.get(item.taskId) ?? 0) + 1);
+    }
+  }
   const seen = new Set<string>();
   const kept = items.filter((item) => {
     if (seen.has(item.id)) return false;
     seen.add(item.id);
+    if (item.kind === "question" && item.approvalDecision) {
+      const approvals = approvalsByTask.get(item.taskId) ?? 0;
+      if (approvals > 0) {
+        approvalsByTask.set(item.taskId, approvals - 1);
+        return false;
+      }
+    }
     return !(item.kind === "session" && decided.has(item.taskId));
   });
   const offset = (item: AttentionItem) => {

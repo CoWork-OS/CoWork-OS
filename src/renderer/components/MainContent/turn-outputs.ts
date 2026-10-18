@@ -1,4 +1,4 @@
-import type { TaskEvent } from "../../../shared/types";
+import type { TaskEvent, TaskStatus } from "../../../shared/types";
 import { getEffectiveTaskEventType } from "../../utils/task-event-compat";
 import { dedupeOutputPaths } from "../../utils/task-outputs";
 import { getSidePanelViewerKind } from "../../utils/open-file-in-panel";
@@ -147,6 +147,40 @@ export function pickTurnOutputToAutoOpen(summary: TurnOutputSummary): string | n
     (file) => file.action === "created" && getSidePanelViewerKind(file.path) !== null,
   );
   return candidates.length === 1 ? candidates[0].path : null;
+}
+
+/** Task states in which the turn has not ended: still running, or waiting on the user. */
+const TURN_UNFINISHED_STATUSES = new Set<TaskStatus>([
+  "planning",
+  "executing",
+  "paused",
+  "blocked",
+  "interrupted",
+]);
+
+/**
+ * Whether the task's turn has ended, so its output may open. A task paused for an approval
+ * or an answer stops working without finishing, and the task's status can trail the event
+ * that stopped the work, so the status decides.
+ */
+export function isTurnSettledForAutoOpen(status: TaskStatus | undefined): boolean {
+  return status !== undefined && !TURN_UNFINISHED_STATUSES.has(status);
+}
+
+/**
+ * One step of watching a turn for auto-open. `watching` is the task whose turn the user saw
+ * working (or null). Returns what to watch next, and whether the turn just ended, so its
+ * output may open now.
+ */
+export function stepTurnAutoOpenWatch(
+  watching: string | null,
+  task: { id: string | null; working: boolean; status: TaskStatus | undefined },
+): { watching: string | null; turnEnded: boolean } {
+  if (task.working) return { watching: task.id, turnEnded: false };
+  // Another task is shown now: the watched turn's end is not this task's.
+  if (!watching || watching !== task.id) return { watching: null, turnEnded: false };
+  if (!isTurnSettledForAutoOpen(task.status)) return { watching, turnEnded: false };
+  return { watching: null, turnEnded: true };
 }
 
 /**

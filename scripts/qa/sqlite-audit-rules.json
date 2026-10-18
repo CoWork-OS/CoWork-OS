@@ -23,6 +23,13 @@
       "owner": "agent runtime"
     },
     {
+      "pattern": "^src/electron/database/tool-attempt-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Durable tool attempts: one row written before a write or unknown-effect tool call is dispatched and finished after it, read when a task completes or is stopped, and recovered at startup. Storage-domain units behind the async ToolAttemptRepository facade in repository-facades.ts; nothing calls the store on the host outside a unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "agent runtime"
+    },
+    {
       "pattern": "^src/electron/browser/browser-platform-ipc\\.ts$",
       "domain": "runtime wiring",
       "access": "Browser platform IPC (history, settings, downloads) passes the database handle only to the BrowserHistoryRepository facade.",

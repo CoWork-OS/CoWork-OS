@@ -4,12 +4,13 @@ import {
   createDeterministicWorkSessionReplayFixtures,
   evaluateDeterministicReplayFixtures,
   evaluateIsolatedReplay,
+  replayWorkSessionItems,
 } from "../WorkSessionReplayEvaluationService";
 import { WorkSessionRolloutService } from "../WorkSessionRolloutService";
 import Database from "better-sqlite3";
 
 describe("WorkSession Phase 5 replay and rollout", () => {
-  it("evaluates deterministic crash, compaction, approval, credential, revocation, and child fixtures in isolation", () => {
+  it("evaluates deterministic crash, compaction, approval, credential, revocation, child, unknown-outcome and stop fixtures in isolation", () => {
     const fixtures = createDeterministicWorkSessionReplayFixtures();
     const results = evaluateDeterministicReplayFixtures();
     expect(results).toHaveLength(fixtures.length);
@@ -55,6 +56,31 @@ describe("WorkSession Phase 5 replay and rollout", () => {
         "false_success:pending_wait",
       ]),
     );
+  });
+
+  it("never replays an unresolved unknown write as completed", () => {
+    const fixtures = createDeterministicWorkSessionReplayFixtures();
+    const unknown = fixtures.find((fixture) => fixture.kind === "unknown_outcome")!;
+    const replay = replayWorkSessionItems(unknown.items);
+    expect(replay.status).toBe("waiting");
+    expect(replay.unknownOutcomes).toEqual(["key-report"]);
+    expect(
+      evaluateIsolatedReplay(unknown.items, {
+        assertions: { mustContainAll: ["Not verified: write_file"] },
+      }).findings,
+    ).toEqual([]);
+
+    const claimedDone = unknown.items.map((entry) =>
+      entry.sequence === 3
+        ? { ...entry, payload: { eventType: "task_completed", payload: { terminalStatus: "ok" } } }
+        : entry,
+    );
+    expect(evaluateIsolatedReplay(claimedDone).findings).toContain("false_success:unknown_outcome");
+
+    const stopped = fixtures.find((fixture) => fixture.kind === "stop_in_flight")!;
+    const stopReplay = replayWorkSessionItems(stopped.items);
+    expect(stopReplay.status).toBe("cancelled");
+    expect(stopReplay.unknownOutcomes).toEqual(["key-stop"]);
   });
 
   it("represents user-action blockers as waiting and grades their assertion", () => {

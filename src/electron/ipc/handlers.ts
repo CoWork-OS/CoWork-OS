@@ -137,7 +137,10 @@ import { AgentMailAdminService } from "../agentmail/AgentMailAdminService";
 import { AgentMailRealtimeService } from "../agentmail/AgentMailRealtimeService";
 import { createMailboxStatementPort } from "../mailbox/mailbox-statement-port";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
-import { ManagedSessionRequirementCorrectionRequestSchema } from "../../shared/managed-session-schemas";
+import {
+  ManagedSessionRequirementCorrectionRequestSchema,
+  SessionHandoffExportRequestSchema,
+} from "../../shared/managed-session-schemas";
 import { AgentTemplateService } from "../managed/AgentTemplateService";
 import { AgentBuilderService, type AgentBuilderInventory } from "../managed/AgentBuilderService";
 import { ImageGenProfileService } from "../managed/ImageGenProfileService";
@@ -1193,6 +1196,7 @@ rateLimiter.configure(IPC_CHANNELS.TASK_PIN, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.BOT_METRICS_SUMMARY, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_SET_MODEL, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.TASK_EXPORT_JSON, RATE_LIMIT_CONFIGS.standard);
+rateLimiter.configure(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, RATE_LIMIT_CONFIGS.standard);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_LIST_FOR_WORKSPACES, RATE_LIMIT_CONFIGS.frequent);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_REFRESH, RATE_LIMIT_CONFIGS.standard);
@@ -6999,6 +7003,15 @@ export async function setupIpcHandlers(
   });
   ipcMain.handle(IPC_CHANNELS.MANAGED_SESSION_CANCEL_IPC, async (_, sessionId: string) => {
     return managedSessionService.cancelSession(sessionId);
+  });
+  ipcMain.handle(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC, async (_, request: unknown) => {
+    checkRateLimit(IPC_CHANNELS.SESSION_HANDOFF_EXPORT_IPC);
+    const validated = validateInput(
+      SessionHandoffExportRequestSchema,
+      request,
+      "session handoff export",
+    );
+    return managedSessionService.exportHandoff(validated);
   });
   ipcMain.handle(IPC_CHANNELS.WORK_CONTEXT_LIST_IPC, async (_, params?: Any) => {
     return workContextService.list(params || {});

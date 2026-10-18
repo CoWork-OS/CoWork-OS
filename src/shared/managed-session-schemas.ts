@@ -45,7 +45,8 @@ export const SESSION_HANDOFF_KIND = "cowork.session-handoff";
 export const SESSION_HANDOFF_SCHEMA_VERSION = 1;
 
 const handoffId = z.string().trim().min(1).max(256);
-const handoffTimestamp = z.number().int().nonnegative();
+// Bounded to the range a Date can represent.
+const handoffTimestamp = z.number().int().nonnegative().max(8_640_000_000_000_000);
 const handoffSha256 = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const SessionHandoffManifestSchema = z
@@ -183,6 +184,17 @@ export const SessionHandoffManifestSchema = z
 
 export type SessionHandoffManifest = z.infer<typeof SessionHandoffManifestSchema>;
 
+/** The renderer exports into the default package folder only. */
+export const SessionHandoffExportIpcRequestSchema = z
+  .object({
+    sessionId: handoffId.optional(),
+    taskId: handoffId.optional(),
+  })
+  .strict()
+  .refine((request) => Boolean(request.sessionId) !== Boolean(request.taskId), {
+    message: "Provide exactly one of sessionId or taskId",
+  });
+
 export const SessionHandoffExportRequestSchema = z
   .object({
     sessionId: handoffId.optional(),
@@ -201,5 +213,7 @@ export const SessionHandoffImportRequestSchema = z
     agentId: handoffId.optional(),
     title: z.string().trim().min(1).max(500).optional(),
     message: z.string().trim().max(16_000).optional(),
+    /** Validate and list what would be restored, without writing or starting a session. */
+    dryRun: z.boolean().optional(),
   })
   .strict();

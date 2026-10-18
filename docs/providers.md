@@ -57,6 +57,8 @@ the dedicated [MLX-LM Local Inference guide](mlx-lm.md) for Apple Silicon setup,
 and troubleshooting. See [Atomic Chat inference](atomic-chat.md) for the inference-only local API
 integration.
 
+For LM Studio, see [LM Studio (Local)](#lm-studio-local) below.
+
 ## Built-in Model Routes
 
 | Provider               | Configuration                                                  | Billing                                                                                                            |
@@ -331,6 +333,31 @@ ollama serve
 | `llama3.2`        | 3B   | Quick tasks          |
 | `qwen2.5:14b`     | 14B  | Balanced performance |
 | `deepseek-r1:14b` | 14B  | Coding tasks         |
+
+---
+
+## LM Studio (Local)
+
+Use LM Studio through the **OpenAI-Compatible** provider.
+
+### Setup
+
+1. Download a model in LM Studio and load it with enough context for agent prompts.
+   For example, with the LM Studio CLI installed:
+
+   ```bash
+   lms load <model> -c 32768
+   lms server start --port 1234
+   ```
+
+   You can also load the model and start the server from the app's **Developer** tab.
+2. Open **Settings > AI & Models > More providers > OpenAI-Compatible** in CoWork.
+3. Set the base URL to `http://localhost:1234/v1`. Leave the API key empty unless
+   you have enabled authentication in LM Studio.
+4. Click **Fetch Models**, then select your loaded model.
+
+The server must remain running while CoWork uses the model. A 32,768-token context
+is a useful starting point; choose a context size your model and hardware support.
 
 ---
 

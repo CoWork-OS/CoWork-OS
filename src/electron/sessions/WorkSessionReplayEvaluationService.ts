@@ -101,6 +101,8 @@ export interface WorkSessionReplayState {
   changedPaths: string[];
   observedText: string[];
   credentialLeak: boolean;
+  /** Dispatched writes whose outcome is unknown (timeout, lost transport, stop). */
+  unknownOutcomes: string[];
   findings: string[];
 }
 
@@ -277,6 +279,7 @@ export function createEmptyWorkSessionReplayState(): WorkSessionReplayState {
     changedPaths: [],
     observedText: [],
     credentialLeak: false,
+    unknownOutcomes: [],
     findings: [],
   };
 }
@@ -295,6 +298,7 @@ export function reduceWorkSessionReplayState(
     sideEffects: [...state.sideEffects],
     changedPaths: [...state.changedPaths],
     observedText: [...state.observedText],
+    unknownOutcomes: [...state.unknownOutcomes],
     findings: [...state.findings],
     lastSequence: Math.max(state.lastSequence, item.sequence),
     itemCount: state.itemCount + 1,
@@ -378,6 +382,22 @@ export function reduceWorkSessionReplayState(
     uniquePush(next.failedChildren, childId);
   }
 
+  // A write whose outcome is unknown stays unresolved until the same key completes.
+  if (type === "tool_error" && text(payload.outcome) === "unknown") {
+    uniquePush(next.unknownOutcomes, text(payload.idempotencyKey) || `unknown:${item.sequence}`);
+  }
+  if (type === "agent_interrupt_confirmed" && Array.isArray(payload.inFlight)) {
+    for (const call of payload.inFlight) {
+      const record = call && typeof call === "object" ? (call as Record<string, unknown>) : {};
+      if (text(record.outcome) === "unknown") {
+        uniquePush(
+          next.unknownOutcomes,
+          text(record.idempotencyKey) || text(record.attemptId) || `in_flight:${item.sequence}`,
+        );
+      }
+    }
+  }
+
   const isSideEffect =
     (item.kind === "tool_call" || type === "side_effect") &&
     (payload.sideEffect === true || payload.externalSideEffect === true || type === "side_effect");
@@ -385,6 +405,8 @@ export function reduceWorkSessionReplayState(
     const key = sideEffectKey(payload) || `${type}:${item.sequence}`;
     if (next.sideEffects.includes(key)) uniquePush(next.findings, `duplicate_side_effect:${key}`);
     else uniquePush(next.sideEffects, key);
+    // A completed retry with the same idempotency key settles an unknown outcome.
+    remove(next.unknownOutcomes, key);
     const approved =
       payload.approved === true ||
       payload.authorized === true ||
@@ -402,6 +424,9 @@ export function reduceWorkSessionReplayState(
       if (next.failedChildren.length > 0) uniquePush(next.findings, "false_success:failed_child");
       if (payload.requiredVerification === true && !next.verificationSeen) {
         uniquePush(next.findings, "false_success:verification_missing");
+      }
+      if (next.unknownOutcomes.length > 0) {
+        uniquePush(next.findings, "false_success:unknown_outcome");
       }
     }
   }
@@ -619,6 +644,51 @@ export function createDeterministicWorkSessionReplayFixtures(): WorkSessionRepla
       fixtureItem("child-session-join", 3, "evidence", "verification_passed"),
       fixtureItem("child-session-join", 4, "status", "task_completed"),
     ]),
+    // A write times out after dispatch. The task must not end `completed`: it ends needing the
+    // user, and its summary names the unverified call.
+    make(
+      "unknown-outcome",
+      "unknown_outcome",
+      [
+        fixtureItem("unknown-outcome", 1, "tool_call", "tool_call", { tool: "write_file" }),
+        fixtureItem("unknown-outcome", 2, "error", "tool_error", {
+          tool: "write_file",
+          error: "Outcome unknown: write_file may have completed (Tool write_file timed out)",
+          outcome: "unknown",
+          idempotencyKey: "key-report",
+        }),
+        fixtureItem("unknown-outcome", 3, "status", "task_completed", {
+          terminalStatus: "needs_user_action",
+          resultSummary: "Not verified: write_file on report.md may or may not have taken effect.",
+        }),
+      ],
+      "waiting",
+    ),
+    // Stopped while a write was running: the confirmation lists it with an unknown outcome.
+    make(
+      "stop-in-flight",
+      "stop_in_flight",
+      [
+        fixtureItem("stop-in-flight", 1, "tool_call", "tool_call", { tool: "write_file" }),
+        fixtureItem("stop-in-flight", 2, "status", "agent_interrupt_requested", {
+          reason: "cancel",
+        }),
+        fixtureItem("stop-in-flight", 3, "status", "agent_interrupt_confirmed", {
+          status: "cancelled",
+          inFlight: [
+            {
+              toolName: "write_file",
+              attemptId: "attempt-1",
+              idempotencyKey: "key-stop",
+              effect: "write",
+              outcome: "unknown",
+            },
+          ],
+        }),
+        fixtureItem("stop-in-flight", 4, "status", "task_cancelled"),
+      ],
+      "cancelled",
+    ),
   ];
 }
 

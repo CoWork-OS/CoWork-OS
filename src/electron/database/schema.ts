@@ -3624,6 +3624,29 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_work_session_metrics_workspace_recorded
           ON work_session_operational_metrics(workspace_id, recorded_at DESC);
 
+        -- Durable attempts of tool calls that write or whose effect is unknown (WP4).
+        CREATE TABLE IF NOT EXISTS tool_attempts (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          step_id TEXT,
+          tool_name TEXT NOT NULL,
+          args_hash TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          effect TEXT NOT NULL,
+          target TEXT,
+          status TEXT NOT NULL,
+          reason TEXT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tool_attempts_task
+          ON tool_attempts(task_id, started_at ASC);
+        CREATE INDEX IF NOT EXISTS idx_tool_attempts_status
+          ON tool_attempts(status, task_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_attempts_key
+          ON tool_attempts(task_id, idempotency_key);
+
         CREATE TABLE IF NOT EXISTS work_session_rollout_config (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           enabled INTEGER NOT NULL DEFAULT 1,

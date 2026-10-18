@@ -1300,7 +1300,7 @@ async function handoffCommand(ctx: CommandContext): Promise<number> {
   const exportUsage =
     "Usage: cowork handoff export <managedSessionId> | --task <taskId> [--out <dir in workspace>]";
   const importUsage =
-    "Usage: cowork handoff import <manifest.json or package dir> --environment <environmentId> [--agent <agentId>] [--title <title>] [--message <text>]";
+    "Usage: cowork handoff import <package dir in .cowork/handoffs/> --environment <environmentId> [--agent <agentId>] [--title <title>] [--message <text>] [--dry-run]";
   if (sub === "export") {
     const sessionId = ctx.parsed.rest[1];
     const taskId = getFlag(ctx.parsed, "--task");
@@ -1335,12 +1335,14 @@ async function handoffCommand(ctx: CommandContext): Promise<number> {
     const message = getFlag(ctx.parsed, "--message");
     const client = await connectedClient(ctx);
     try {
+      const dryRun = hasFlag(ctx.parsed, "--dry-run");
       const result = (await client.request(Methods.MANAGED_SESSION_IMPORT_HANDOFF, {
         manifestPath: path.resolve(manifestPath),
         environmentId,
         ...(agentId ? { agentId } : {}),
         ...(title ? { title } : {}),
         ...(message ? { message } : {}),
+        ...(dryRun ? { dryRun: true } : {}),
       })) as Payload;
       const session = (result.session || {}) as Payload;
       const restored = Array.isArray(result.restoredPaths)
@@ -1348,10 +1350,14 @@ async function handoffCommand(ctx: CommandContext): Promise<number> {
         : [];
       const skipped = Array.isArray(result.skipped) ? (result.skipped as string[]) : [];
       printLinesOrJson(ctx, result, [
-        `Continued handoff ${String(result.packageId)} as managed session ${String(session.id)}`,
-        `  files restored: ${restored.length}`,
+        dryRun
+          ? `Dry run of handoff ${String(result.packageId)}: nothing was written`
+          : `Continued handoff ${String(result.packageId)} as managed session ${String(session.id)}`,
+        `  files ${dryRun ? "to restore" : "restored"}: ${restored.length}`,
+        ...restored.map((entry) => `    ${entry}`),
         ...skipped.map((entry) => `  not restored: ${entry}`),
-        "Approvals the earlier session was waiting for were not granted; the new session asks again.",
+        "The checksum only detects damage; who exported the package is not verified.",
+        "Approvals the earlier session was waiting for are not granted; the new session asks again.",
       ]);
       return 0;
     } finally {
@@ -2285,7 +2291,7 @@ function usage(): void {
       "  cowork providers fallback list|add|remove",
       "  cowork sessions list|show|export|rename|archive|delete|prune",
       "  cowork handoff export <managedSessionId> | --task <taskId> [--out <dir>]",
-      "  cowork handoff import <manifest> --environment <environmentId> [--agent <agentId>]",
+      "  cowork handoff import <package> --environment <environmentId> [--agent <agentId>] [--dry-run]",
       "  cowork logs latest|tail|grep",
       "  cowork tools list|info|enable|disable",
       "  cowork mcp list|add|remove|enable|disable|test",

@@ -146,7 +146,8 @@ function more(count: number): string {
   return count > 0 ? ` (+${count} more)` : "";
 }
 
-function renderContractSummary(summary: HandoffContractSummary): string[] {
+/** The contract summary as note lines (one block), or nothing when the record is empty. */
+export function renderHandoffContractSummary(summary: HandoffContractSummary): string[] {
   const lines: string[] = [];
   if (summary.objective) lines.push(`Goal: ${summary.objective}`);
   if (summary.requirements.length > 0) {
@@ -263,7 +264,7 @@ export function buildModelHandoffNote(
       `You are ${handoff.to.providerType}/${handoff.to.modelId}, continuing the same conversation. ` +
       "Treat the earlier turns as your own and build on them instead of starting over.",
   ];
-  if (contract) lines.push(...renderContractSummary(contract));
+  if (contract) lines.push(...renderHandoffContractSummary(contract));
   const activity = summarizeEarlierToolActivity(history);
   if (activity.length > 0) {
     lines.push(`Tools used in earlier turns: ${activity.join("; ")}.`);

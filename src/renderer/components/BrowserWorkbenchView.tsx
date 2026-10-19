@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { browserPartitionForTask } from "../../shared/browser-profile";
+import { ATTACHED_FILES_LIST_HEADER } from "../../shared/attachment-summary";
 import type {
   ApprovalRequest,
   ApprovalResponseAction,
@@ -1289,7 +1290,7 @@ export function BrowserWorkbenchView({
             typedNote ||
             `Please inspect this annotated browser screenshot from ${activeUrlRef.current || activeUrl || "the current page"}.`;
           await onSendMessage(
-            `${note}\n\nAttached files:\n- ${saved.fileName} (${saved.relativePath})`,
+            `${note}\n\n${ATTACHED_FILES_LIST_HEADER}\n- ${saved.fileName} (${saved.relativePath})`,
             [
               {
                 filePath: fullPath,

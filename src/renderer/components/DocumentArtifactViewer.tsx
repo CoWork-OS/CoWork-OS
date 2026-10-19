@@ -36,6 +36,7 @@ import type {
   EditableDocumentRun,
 } from "../../shared/document-preview";
 import { getDocumentFormatLabel } from "../../shared/document-formats";
+import { ATTACHED_FILES_LIST_HEADER } from "../../shared/attachment-summary";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import type { SpreadsheetTurnContext } from "./SpreadsheetArtifactViewer";
@@ -499,7 +500,7 @@ export function DocumentArtifactViewer({
         sizeBytes: attachment.size,
       }));
       return {
-        message: `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`,
+        message: `${base}\n\n${ATTACHED_FILES_LIST_HEADER}\n${attachmentLines.join("\n")}`,
         images: images.length > 0 ? images : undefined,
       };
     },

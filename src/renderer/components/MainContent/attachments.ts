@@ -1,6 +1,9 @@
 import {
+  ATTACHED_FILES_SUMMARY_HEADER,
   ATTACHMENT_CONTENT_END_MARKER,
   ATTACHMENT_CONTENT_START_MARKER,
+} from "../../../shared/attachment-summary";
+import {
   MAX_IMAGE_OCR_CHARS,
   buildImageAttachmentViewerOptions,
   buildPdfAttachmentContent,
@@ -188,7 +191,7 @@ export const composeMessageWithAttachments = async (
   const summary =
     attachmentSummaryLines.length === 0
       ? ""
-      : `Attached files (relative to workspace):\n${attachmentSummaryLines.join("\n\n")}`;
+      : `${ATTACHED_FILES_SUMMARY_HEADER}\n${attachmentSummaryLines.join("\n\n")}`;
   return {
     message: summary ? `${base}\n\n${summary}` : base,
     extractionWarnings,

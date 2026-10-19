@@ -632,6 +632,8 @@ const ALWAYS_MUTATING = new Set([
   "stop_process",
   "run_applescript",
   "schedule_task",
+  // Parks the task and adds a temporary trigger: not for plan or analyze modes.
+  "wait_for_event",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",

@@ -673,3 +673,40 @@ describe("request_takeover exposure", () => {
     ).toBe("allow");
   });
 });
+
+describe("personality prompt tools are explicit-only", () => {
+  it.each(["add_behavioral_rule", "set_expertise"])(
+    "puts %s in the admin lane with its persona siblings",
+    (tool) => {
+      expect(getDefaultRuntimeToolMetadata(tool)).toMatchObject({
+        exposure: "explicit_only",
+        capabilityTags: ["admin"],
+        deferLoad: true,
+      });
+      expect(getDefaultRuntimeToolMetadata(tool).exposure).toBe(
+        getDefaultRuntimeToolMetadata("set_personality").exposure,
+      );
+    },
+  );
+
+  it.each([
+    ["add_behavioral_rule", "Refactor the parser and run the tests."],
+    ["add_behavioral_rule", "Take a screenshot of the clipboard application."],
+    ["set_expertise", "Summarize this TypeScript module."],
+  ])("keeps %s hidden when the user did not ask: %s", (tool, taskText) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    expect(evaluateToolAvailability(tool, { taskText }, metadata)).toMatchObject({
+      decision: "defer",
+      reason: "explicit_admin_intent_required",
+    });
+  });
+
+  it.each([
+    ["add_behavioral_rule", "Add a behavioral rule: never use emojis."],
+    ["add_behavioral_rule", "Add a behaviour rule that you always cite sources."],
+    ["set_expertise", "Set your TypeScript expertise to expert."],
+  ])("exposes %s when the user asks for it: %s", (tool, taskText) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    expect(evaluateToolAvailability(tool, { taskText }, metadata).decision).toBe("allow");
+  });
+});

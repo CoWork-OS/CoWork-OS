@@ -486,6 +486,69 @@ export function isProtectedWorkspacePath(
 }
 
 /**
+ * Workspace locations whose contents decide what the agent does in later tasks. A write or
+ * delete there needs the user's explicit approval (PermissionEngine asks, even in modes that
+ * allow ordinary edits, and an allow rule cannot answer for the user).
+ *
+ * They are deliberately not `PROTECTED_WORKSPACE_SEGMENTS`: the user may ask the agent to
+ * edit, fix or clean up skills, and a hard `protected_path` would refuse that outright,
+ * while an approval lets the user say yes to the edit they asked for.
+ *
+ * - `.cowork/skills`, at any depth: the skill proposals (`proposals/`) and eval reports
+ *   (`evals/`) the user reviews before a proposal becomes a skill. Writing them directly
+ *   could change the draft or forge the evidence behind it. The skill_proposal tool writes
+ *   these records itself, through SkillProposalService, without a file path.
+ * - `skills/` at the workspace root and the `.json` files in it: the workspace skill folder
+ *   CustomSkillLoader reads (setWorkspaceSkillsDir), where approved proposals are saved.
+ *   Other files in that folder are not loaded as skills and stay ordinary workspace files.
+ */
+const APPROVAL_REQUIRED_WORKSPACE_SEGMENTS: string[][] = [[".cowork", "skills"]];
+const WORKSPACE_SKILLS_FOLDER = "skills";
+
+/**
+ * Return true when `absolutePath` is a workspace location that holds skills or the skill
+ * proposals they come from (see `APPROVAL_REQUIRED_WORKSPACE_SEGMENTS`). Both the path as
+ * written and its canonical form are checked, so a symlink or the macOS /var alias cannot
+ * move a write out of the folder. Paths outside the workspace return false.
+ */
+export function isApprovalRequiredWorkspacePath(
+  workspacePath: string,
+  absolutePath: string,
+): boolean {
+  const roots = new Set<string>([nodePath.resolve(workspacePath)]);
+  try {
+    roots.add(canonicalizeAccessPath(workspacePath));
+  } catch {
+    // Workspace root may not exist yet; the lexical root still applies.
+  }
+  const targets = new Set<string>([nodePath.resolve(absolutePath)]);
+  try {
+    targets.add(canonicalizeAccessPath(absolutePath));
+  } catch {
+    // An unreadable prefix leaves the lexical target, which is still checked.
+  }
+
+  for (const root of roots) {
+    for (const target of targets) {
+      const relative = nodePath.relative(root, target);
+      if (!relative || relative.startsWith("..") || nodePath.isAbsolute(relative)) continue;
+      const segments = relative.split(/[\\/]/).map((segment) => segment.toLowerCase());
+      const inSkillRecords = APPROVAL_REQUIRED_WORKSPACE_SEGMENTS.some((required) =>
+        segments.some((_, index) =>
+          required.every((expected, offset) => segments[index + offset] === expected),
+        ),
+      );
+      if (inSkillRecords) return true;
+      if (segments[0] !== WORKSPACE_SKILLS_FOLDER) continue;
+      // The folder itself (create, rename, delete) or a skill file directly inside it.
+      if (segments.length === 1) return true;
+      if (segments.length === 2 && segments[1].endsWith(".json")) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Where a path sits relative to the memory repo roots (design §6.4): the personal memory
  * folder and every team memory repo (docs/memory-repo-phase4-design.md §2, read-only under
  * the same rule). Outside, inside, or inside a root's `.git`. Both the lexical and the

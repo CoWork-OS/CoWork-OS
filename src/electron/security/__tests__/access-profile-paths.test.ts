@@ -8,6 +8,7 @@ import {
   canonicalizeAccessPath,
   evaluateWorkspaceFilesystemAccess,
   isAccessPathWithin,
+  isApprovalRequiredWorkspacePath,
   resolveWorkspaceFilesystemAccessWithApproval,
   resolveWorkspaceFilesystemAccessesWithApproval,
 } from "../access-profile-paths";
@@ -604,5 +605,59 @@ describe("protected in-workspace paths", () => {
           .decision,
       ).toBe("allow");
     }
+  });
+});
+
+describe("approval-required skill storage paths", () => {
+  it("covers skill proposals, eval reports and the workspace skill files", () => {
+    const { path: root } = makeWorkspace();
+    for (const relative of [
+      ".cowork/skills",
+      ".cowork/skills/proposals/proposal-1.json",
+      ".cowork/skills/evals/report.json",
+      "nested/project/.cowork/skills/proposals/p.json",
+      "skills",
+      "skills/my-skill.json",
+      "SKILLS/My-Skill.JSON",
+    ]) {
+      expect(isApprovalRequiredWorkspacePath(root, path.join(root, relative))).toBe(true);
+    }
+  });
+
+  it("leaves other files, nested skill folders and outside paths alone", () => {
+    const { path: root } = makeWorkspace();
+    for (const relative of [
+      ".cowork",
+      ".cowork/policy/tools.monty",
+      "skills/README.md",
+      "skills/sub/nested.json",
+      "docs/skills/example.json",
+      "src/skills.json",
+    ]) {
+      expect(isApprovalRequiredWorkspacePath(root, path.join(root, relative))).toBe(false);
+    }
+    expect(isApprovalRequiredWorkspacePath(root, path.join(os.tmpdir(), "skills", "x.json"))).toBe(
+      false,
+    );
+  });
+
+  it("follows a symlink into the skill folder", () => {
+    const { path: root } = makeWorkspace();
+    fs.mkdirSync(path.join(root, "skills"));
+    fs.symlinkSync(path.join(root, "skills"), path.join(root, "alias"));
+    expect(isApprovalRequiredWorkspacePath(root, path.join(root, "alias", "planted.json"))).toBe(
+      true,
+    );
+  });
+
+  it("is not a hard protected path, so a user-approved skill edit still reaches the file", () => {
+    const workspace = makeWorkspace();
+    expect(
+      evaluateWorkspaceFilesystemAccess(
+        workspace,
+        path.join(workspace.path, ".cowork", "skills", "proposals", "p.json"),
+        "write",
+      ),
+    ).toMatchObject({ decision: "allow", reason: "workspace_path" });
   });
 });

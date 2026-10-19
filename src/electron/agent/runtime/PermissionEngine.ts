@@ -49,6 +49,8 @@ import { domainMatches } from "../../security/network-policy";
 import type { MCPToolPolicy } from "../../mcp/tool-policy";
 import {
   evaluateWorkspaceFilesystemAccess,
+  isApprovalRequiredWorkspacePath,
+  resolveAccessControlledPath,
   type AccessFilesystemOperation,
 } from "../../security/access-profile-paths";
 
@@ -271,6 +273,10 @@ const FILESYSTEM_WRITE_TOOLS = new Set([
 
 export class PermissionEngine {
   static evaluate(request: PermissionEngineRequest): PermissionEvaluationResult {
+    return this.withSkillStorageApproval(request, this.evaluateRequest(request));
+  }
+
+  private static evaluateRequest(request: PermissionEngineRequest): PermissionEvaluationResult {
     const facts = this.buildFacts(request);
     const profile = this.getRuntimeAccessProfile(request);
     const policyVersion = this.getAccessPolicyVersion(request);
@@ -412,6 +418,73 @@ export class PermissionEngine {
         ? { metadata: { accessPolicyVersion: policyVersion, namedBoundary: useNamedBoundary } }
         : {}),
     };
+  }
+
+  /**
+   * Approval on write for skills and skill proposals (isApprovalRequiredWorkspacePath): they
+   * decide what the agent does in later tasks, so changing them is the user's call each
+   * time. A write or delete that the policy above would allow silently (by mode, access
+   * profile or an allow rule, often a broad one saved for ordinary edits) asks instead.
+   * Denials stand: Plan mode, deny rules and hard boundaries still refuse it, and a profile
+   * that never asks denies it, as it does any other explicit consent. The prompt offers
+   * only "once" answers, because a saved "always allow" rule would not answer the next one.
+   */
+  private static withSkillStorageApproval(
+    request: PermissionEngineRequest,
+    result: PermissionEvaluationResult,
+  ): PermissionEvaluationResult {
+    if (result.decision === "deny" || !this.isSkillStorageMutation(request)) return result;
+    const onceOnly = this.buildSuggestions(false, this.buildFacts(request));
+    if (result.decision === "ask") return { ...result, suggestions: onceOnly };
+
+    // The allow rule no longer decides this request, so it is not reported as the match.
+    const allowed: PermissionEvaluationResult = { ...result };
+    delete allowed.matchedRule;
+    const metadata = {
+      ...allowed.metadata,
+      policyReason: "skill_storage_write",
+      originalReason: result.reason.summary,
+    };
+    if (this.getRuntimeAccessProfile(request)?.approval === "never") {
+      return {
+        ...allowed,
+        decision: "deny",
+        reason: {
+          type: "other",
+          summary:
+            "Changing skills or skill proposals requires explicit consent, but the active access profile is set to never ask. Switch to an on-request profile and retry.",
+          metadata,
+        },
+        suggestions: [],
+      };
+    }
+    return {
+      ...allowed,
+      decision: "ask",
+      reason: {
+        type: "other",
+        summary: "Changing skills or skill proposals needs the user's approval each time.",
+        metadata,
+      },
+      suggestions: onceOnly,
+    };
+  }
+
+  private static isSkillStorageMutation(request: PermissionEngineRequest): boolean {
+    const toolName = canonicalizeToolName(String(request.toolName || "").trim());
+    return this.extractFilesystemOperations(request, toolName).some(
+      ({ path: candidate, operation }) => {
+        if (operation === "read") return false;
+        try {
+          return isApprovalRequiredWorkspacePath(
+            request.workspace.path,
+            resolveAccessControlledPath(request.workspace.path, candidate),
+          );
+        } catch {
+          return false;
+        }
+      },
+    );
   }
 
   private static evaluateHardPolicies(
@@ -1020,6 +1093,18 @@ export class PermissionEngine {
             }
           }
         }
+        break;
+      // Skill management tools name a skill, not a file. For a skill in the workspace the
+      // registry passes the file the tool would change as the request path
+      // (getSkillManagementWorkspaceTarget), so the skill-storage approval sees it. An
+      // external skill file keeps the external_file_access handling below.
+      case "skill_create":
+      case "skill_duplicate":
+      case "skill_update":
+        if (request.approvalType !== "external_file_access") add(request.path, "write");
+        break;
+      case "skill_delete":
+        if (request.approvalType !== "external_file_access") add(request.path, "delete");
         break;
       default:
         if (FILESYSTEM_READ_TOOLS.has(toolName)) {

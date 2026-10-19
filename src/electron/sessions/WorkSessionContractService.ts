@@ -720,6 +720,12 @@ export class WorkSessionContractService {
     if (!task) return {};
     const result = this.getForTask(task.id);
     if (!result) return {};
+    // A write refused because another task was changing the file is moot once this task ends.
+    for (const wait of this.repository.listWaitStates(result.session.id, { status: "pending" })) {
+      if (wait.kind === "external" && wait.requestId?.startsWith("resource_conflict:")) {
+        this.repository.resolveWaitState(wait.id, "cancelled", { reason: "task_ended" });
+      }
+    }
     const outcome = taskOutcome(task);
     let contract = result.contract;
     if (contract && outcome) {

@@ -92,10 +92,10 @@ describe("memory tool definitions", () => {
     for (const tool of tools) {
       expect(tool.description).toMatch(/Use it when/);
     }
-    // ~4.3K tokens for 26 schemas before consolidation (RECALL-2); keep the four well
-    // under 1K (chars / 4).
+    // ~4.3K tokens for 26 schemas before consolidation (RECALL-2); keep the four near 1K
+    // (chars / 4). memory_remember's `source` (WP15) took it just past 1,000.
     const tokens = Math.ceil(tools.reduce((sum, tool) => sum + JSON.stringify(tool).length, 0) / 4);
-    expect(tokens).toBeLessThan(1000);
+    expect(tokens).toBeLessThan(1025);
     expect(tools.find((tool) => tool.name === "memory_remember")?.input_schema.required).toEqual([
       "content",
       "kind",

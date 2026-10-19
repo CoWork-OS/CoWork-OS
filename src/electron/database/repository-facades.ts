@@ -284,6 +284,7 @@ export const WorkspacePermissionRuleRepository = repositoryFacade<
 const INPUTREQUEST_METHODS = [
   "create",
   "getApprovalBinding",
+  "findLinkedInputId",
   "resolve",
   "findById",
   "findPendingByTaskId",

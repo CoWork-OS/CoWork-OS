@@ -61,3 +61,7 @@ export function prepareApprovalInputLinkLookup(db: Database.Database) {
     "SELECT approval_id,task_id,revision_hash FROM approval_input_links WHERE input_id = ?",
   );
 }
+
+export function prepareApprovalInputLinkByApproval(db: Database.Database) {
+  return db.prepare("SELECT input_id FROM approval_input_links WHERE approval_id = ?");
+}

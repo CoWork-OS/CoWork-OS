@@ -92,6 +92,7 @@ export default defineConfig({
           { text: "Connector Inventory", link: "/connector-inventory" },
           { text: "PACT Business Agents", link: "/pact" },
           { text: "PACT Signer Contract", link: "/pact-signer" },
+          { text: "CoWork Agent Card", link: "/agent-card" },
           { text: "Meeting Artifacts", link: "/meeting-artifacts" },
           { text: "Secure MCP Tunnels", link: "/secure-mcp-tunnels" },
           { text: "Remote MCP OAuth", link: "/remote-mcp-oauth" },

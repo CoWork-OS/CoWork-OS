@@ -90,6 +90,11 @@ const EXPLICIT_ONLY_TOOLS = new Set([
   "set_user_name",
   "set_response_style",
   "set_quirks",
+  // Both save into the personality prompt of every later task, like the persona tools
+  // above. Without this entry they fell through to the conditional system lane, so the
+  // agent could reach them without the user asking for a rule or an expertise change.
+  "add_behavioral_rule",
+  "set_expertise",
   "set_vibes",
   "update_lore",
   "manage_heartbeat",
@@ -289,8 +294,10 @@ const BUSINESS_INTERACTION_INTENT_PATTERN =
 /** Explicit references, used alone when auto-routing is off. */
 const PACT_EXPLICIT_INTENT_PATTERN =
   /\b(?:pact|business agent|agent card|pact_discover|pact_send_message)\b/i;
+// "behavioral rule" and "expertise" expose add_behavioral_rule and set_expertise, the two
+// admin tools that are named by what the user asks to change rather than by a persona word.
 const ADMIN_INTENT_PATTERN =
-  /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup)\b/i;
+  /\b(personality|persona|agent name|user name|response style|quirks|vibes|lore|heartbeat|integration setup|behaviou?ral rules?|behaviou?r rules?|expertise)\b/i;
 
 function normalizeTaskText(taskText?: string): string {
   return String(taskText || "")

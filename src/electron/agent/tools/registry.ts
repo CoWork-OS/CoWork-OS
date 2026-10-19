@@ -129,6 +129,7 @@ import {
   assertWorkspaceReadableFileAccessWithApproval,
   createWorkspaceFilesystemApprovalHandlers,
   evaluateWorkspaceFilesystemAccess,
+  isApprovalRequiredWorkspacePath,
   resolveWorkspaceFilesystemAccessWithApproval,
 } from "../../security/access-profile-paths";
 import { evaluateNetworkPolicy } from "../../security/network-policy";
@@ -136,7 +137,7 @@ import { BuiltinToolsSettingsManager } from "./builtin-settings";
 import { BrowserSettingsManager } from "../../settings/browser-settings-manager";
 import { DEVELOPER_MODE_BROWSER_TOOLS } from "../../../shared/browser-settings";
 import { getCustomSkillLoader } from "../custom-skill-loader";
-import { SkillProposalService } from "../skills/SkillProposalService";
+import { SkillProposalService, type SkillProposalRecord } from "../skills/SkillProposalService";
 import { SkillEvalService, type SkillEvalCase } from "../skills/SkillEvalService";
 import { PersonalityManager } from "../../settings/personality-manager";
 import {
@@ -2043,7 +2044,8 @@ export class ToolRegistry {
    * workspace skill directory is active. That directory is outside the
    * workspace, so it must use the same exact-path approval contract as the
    * ordinary file tools. Keep this classification input-aware so a workspace
-   * skill mutation remains a normal workspace write.
+   * skill mutation remains a workspace write (one the PermissionEngine asks about,
+   * see getSkillManagementWorkspaceTarget).
    */
   private getSkillManagementFilesystemBoundary(
     toolName: string,
@@ -2054,7 +2056,53 @@ export class ToolRegistry {
     pathOperations: Array<{ path: string; operation: "read" | "write" | "delete" }>;
     operation: "read" | "write" | "delete";
   } | null {
-    if (!SKILL_MUTATION_TOOLS.has(toolName)) return null;
+    const candidates = this.getSkillManagementTargets(toolName, input);
+    if (candidates.length === 0) return null;
+
+    const outside = candidates.filter(({ value, operation }) => {
+      if (typeof value !== "string" || !value.trim()) return false;
+      const decision = evaluateWorkspaceFilesystemAccess(this.workspace, value, operation);
+      return decision.reason !== "workspace_path" && decision.reason !== "profile_filesystem_allow";
+    });
+    if (outside.length === 0) return null;
+
+    const pathOperations = outside
+      .map(({ value, operation }) => ({
+        path: typeof value === "string" ? value.trim() : "",
+        operation,
+      }))
+      .filter((entry) => entry.path.length > 0);
+    if (pathOperations.length === 0) return null;
+    return {
+      path: pathOperations[0].path,
+      paths: pathOperations.map((entry) => entry.path),
+      pathOperations,
+      operation: pathOperations.some((entry) => entry.operation === "delete")
+        ? "delete"
+        : pathOperations.some((entry) => entry.operation === "write")
+          ? "write"
+          : "read",
+    };
+  }
+
+  /**
+   * The workspace skill file a skill management tool would write or delete, when it is one
+   * the PermissionEngine asks about (isApprovalRequiredWorkspacePath). It goes to the
+   * permission check as the request path, because these tools name a skill, not a file.
+   */
+  private getSkillManagementWorkspaceTarget(toolName: string, input?: Any): string | null {
+    for (const { value, operation } of this.getSkillManagementTargets(toolName, input)) {
+      if (operation === "read" || typeof value !== "string" || !value.trim()) continue;
+      if (isApprovalRequiredWorkspacePath(this.workspace.path, value)) return value;
+    }
+    return null;
+  }
+
+  private getSkillManagementTargets(
+    toolName: string,
+    input?: Any,
+  ): Array<{ value: unknown; operation: "read" | "write" | "delete" }> {
+    if (!SKILL_MUTATION_TOOLS.has(toolName)) return [];
 
     const skillLoader = getCustomSkillLoader();
     const candidates: Array<{ value: unknown; operation: "read" | "write" | "delete" }> = [];
@@ -2086,31 +2134,7 @@ export class ToolRegistry {
         });
       }
     }
-
-    const outside = candidates.filter(({ value, operation }) => {
-      if (typeof value !== "string" || !value.trim()) return false;
-      const decision = evaluateWorkspaceFilesystemAccess(this.workspace, value, operation);
-      return decision.reason !== "workspace_path" && decision.reason !== "profile_filesystem_allow";
-    });
-    if (outside.length === 0) return null;
-
-    const pathOperations = outside
-      .map(({ value, operation }) => ({
-        path: typeof value === "string" ? value.trim() : "",
-        operation,
-      }))
-      .filter((entry) => entry.path.length > 0);
-    if (pathOperations.length === 0) return null;
-    return {
-      path: pathOperations[0].path,
-      paths: pathOperations.map((entry) => entry.path),
-      pathOperations,
-      operation: pathOperations.some((entry) => entry.operation === "delete")
-        ? "delete"
-        : pathOperations.some((entry) => entry.operation === "write")
-          ? "write"
-          : "read",
-    };
+    return candidates;
   }
 
   private async assertSkillFilesystemAccess(
@@ -2188,6 +2212,13 @@ export class ToolRegistry {
     // directly for each external input/output path. Advertise that boundary to
     // the executor so the outer tool timeout includes the human response.
     if (canonicalToolName === "batch_image_process") return "external_file_access";
+    // Approving a skill proposal saves a skill that later tasks load. The handler asks the
+    // user itself (requestSkillProposalApproval); advertising risk_gate here makes the
+    // PermissionEngine treat the call as explicit consent (Plan mode denies it, a profile
+    // that never asks denies it) and gives it the approval-gated timeout.
+    if (canonicalToolName === "skill_proposal" && input?.action === "approve") {
+      return "risk_gate";
+    }
     if (TOOL_GROUPS["group:write"].includes(canonicalToolName as Any)) {
       return "workspace_write";
     }
@@ -2380,6 +2411,8 @@ export class ToolRegistry {
       toolName === "voice_call" ||
       // The PACT admission service asks for approval per operation (effect class, scopes).
       toolName === "pact_send_message" ||
+      // skill_proposal approve asks once its checks pass, showing the draft it will save.
+      (toolName === "skill_proposal" && input?.action === "approve") ||
       isComputerUseToolName(toolName)
     );
   }
@@ -2574,9 +2607,15 @@ export class ToolRegistry {
       const mcpApproval = serverName
         ? buildMcpApprovalPresentation(context.request.name, serverName, context.request.input)
         : null;
+      const skillWorkspaceTarget = this.getSkillManagementWorkspaceTarget(
+        context.request.name,
+        context.request.input,
+      );
       const approvalDetails = {
         tool: context.request.name,
         params: context.request.input ?? null,
+        // A workspace skill file the skill tool would change; an external target below wins.
+        ...(skillWorkspaceTarget ? { path: skillWorkspaceTarget } : {}),
         ...(serverName ? { serverName } : {}),
         ...(mcpApproval?.approvalPreview ? { approvalPreview: mcpApproval.approvalPreview } : {}),
         ...browserUseApproval,
@@ -3056,7 +3095,12 @@ export class ToolRegistry {
     register("skill_duplicate", async ({ request }) => this.executeSkillDuplicate(request.input));
     register("skill_update", async ({ request }) => this.executeSkillUpdate(request.input));
     register("skill_delete", async ({ request }) => this.executeSkillDelete(request.input));
-    register("skill_proposal", async ({ request }) => this.executeSkillProposal(request.input));
+    register("skill_proposal", async ({ request }) =>
+      this.executeSkillProposal(
+        request.input,
+        request.runtime?.signal instanceof AbortSignal ? request.runtime.signal : undefined,
+      ),
+    );
     register(
       "glob",
       async ({ request }) => this.globTools.glob(request.input),
@@ -7524,29 +7568,95 @@ ${skillDescriptions}`;
   }
 
   /**
+   * Ask the user to approve one skill proposal before it is saved as a skill. The request
+   * goes through daemon.requestApproval, which evaluates the PermissionEngine first: a deny
+   * rule, Plan mode or a profile that never asks refuses it, and explicit consent keeps an
+   * allow rule or a standing approval from answering for the user. The preview is the draft
+   * exactly as it will be written.
+   */
+  private async requestSkillProposalApproval(
+    proposal: SkillProposalRecord,
+    skillPath: string,
+    replacesSkillId: string | null,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (typeof this.daemon?.requestApproval !== "function" || signal?.aborted) return false;
+    const draft = proposal.draftSkill;
+    const previewLines = [
+      `Name: ${draft.name}`,
+      `ID: ${draft.id}`,
+      `Description: ${draft.description}`,
+      ...(proposal.requiredTools.length > 0
+        ? [`Required tools: ${proposal.requiredTools.join(", ")}`]
+        : []),
+      ...(proposal.riskNote ? [`Risk note: ${proposal.riskNote}`] : []),
+      `Evidence: ${proposal.evidenceStatus}`,
+      ...proposal.evidence.slice(0, 10).map((entry) => `- ${entry}`),
+      ...(Array.isArray(draft.parameters) && draft.parameters.length > 0
+        ? [`Parameters: ${JSON.stringify(draft.parameters)}`]
+        : []),
+      "",
+      "Prompt:",
+      draft.prompt,
+    ];
+    const description = replacesSkillId
+      ? `Replace skill "${replacesSkillId}" with the proposed "${draft.name}"? Later tasks will use it.`
+      : `Save the proposed skill "${draft.name}"? Later tasks will be able to use it.`;
+    try {
+      return (
+        (await this.daemon.requestApproval(
+          this.taskId,
+          "risk_gate",
+          description,
+          {
+            tool: "skill_proposal",
+            params: { action: "approve", proposal_id: proposal.id },
+            proposalId: proposal.id,
+            skillId: draft.id,
+            skillPath,
+            ...(replacesSkillId ? { replacesSkillId } : {}),
+            approvalPreview: { label: "Skill", text: previewLines.join("\n") },
+          },
+          {
+            allowAutoApprove: false,
+            requireExplicitApproval: true,
+            noStandingApproval: true,
+            signal,
+          },
+        )) === true
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Manage approval-gated skill proposals
    */
-  private async executeSkillProposal(input: {
-    action?: "create" | "list" | "approve" | "reject" | "eval";
-    proposal_id?: string;
-    status?: "pending" | "approved" | "rejected" | "all";
-    problem_statement?: string;
-    evidence?: string[];
-    required_tools?: string[];
-    risk_note?: string;
-    draft_skill?: {
-      id?: string;
-      name?: string;
-      description?: string;
-      prompt?: string;
-      icon?: string;
-      category?: string;
-      parameters?: Any[];
-      enabled?: boolean;
-    };
-    eval_cases?: SkillEvalCase[];
-    rejection_reason?: string;
-  }): Promise<Any> {
+  private async executeSkillProposal(
+    input: {
+      action?: "create" | "list" | "approve" | "reject" | "eval";
+      proposal_id?: string;
+      status?: "pending" | "approved" | "rejected" | "all";
+      problem_statement?: string;
+      evidence?: string[];
+      required_tools?: string[];
+      risk_note?: string;
+      draft_skill?: {
+        id?: string;
+        name?: string;
+        description?: string;
+        prompt?: string;
+        icon?: string;
+        category?: string;
+        parameters?: Any[];
+        enabled?: boolean;
+      };
+      eval_cases?: SkillEvalCase[];
+      rejection_reason?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<Any> {
     const action = input.action || "list";
     const proposalsPath = path.join(this.workspace.path, ".cowork", "skills", "proposals");
     const evalsPath = path.join(this.workspace.path, ".cowork", "skills", "evals");
@@ -7724,19 +7834,13 @@ ${skillDescriptions}`;
       }
 
       const skillLoader = getCustomSkillLoader();
-      // Enforce workspace-scoped materialization for approved proposals.
-      skillLoader.setWorkspaceSkillsDir(this.workspace.path);
       const existing = skillLoader.getSkill(proposal.draftSkill.id);
-      const workspaceSkillsDirectory =
-        typeof (skillLoader as Any).getWorkspaceSkillsDir === "function"
-          ? skillLoader.getWorkspaceSkillsDir()
-          : null;
+      // Approved proposals materialize in this workspace's skill folder, the one
+      // setWorkspaceSkillsDir points the loader at. The loader is switched only after the
+      // user approves, so a declined request leaves the loaded skill set unchanged.
       const materializationPath =
         existing?.filePath ||
-        path.join(
-          workspaceSkillsDirectory || path.join(this.workspace.path, "skills"),
-          `${proposal.draftSkill.id}.json`,
-        );
+        path.join(this.workspace.path, "skills", `${proposal.draftSkill.id}.json`);
       try {
         await this.assertSkillFilesystemAccess(
           materializationPath,
@@ -7752,17 +7856,43 @@ ${skillDescriptions}`;
         };
       }
 
+      if (existing?.source === "bundled") {
+        return {
+          success: false,
+          action,
+          message:
+            `Cannot apply proposal to bundled skill '${existing.id}'. ` +
+            "Duplicate the skill first or choose a different id.",
+        };
+      }
+
+      // Only the user approves a proposal, never the agent that drafted it. The checks above
+      // run first so the user is asked only about a proposal that can be applied, and the
+      // draft shown in the request is the in-memory copy materialized below.
+      const userApproved = await this.requestSkillProposalApproval(
+        proposal,
+        materializationPath,
+        existing ? existing.id : null,
+        signal,
+      );
+      if (!userApproved) {
+        this.daemon.logEvent(this.taskId, "log", {
+          message: `Skill proposal '${proposal.id}' was not approved`,
+          proposalId: proposal.id,
+        });
+        return {
+          success: false,
+          action,
+          approval_denied: true,
+          message:
+            "This skill proposal was not approved: the user declined it, or this task cannot ask for approval. No skill was saved and the proposal stays pending; do not retry unless the user asks to review it.",
+        };
+      }
+
+      // Enforce workspace-scoped materialization for approved proposals.
+      skillLoader.setWorkspaceSkillsDir(this.workspace.path);
       let materializedSkill: Any;
       if (existing) {
-        if (existing.source === "bundled") {
-          return {
-            success: false,
-            action,
-            message:
-              `Cannot apply proposal to bundled skill '${existing.id}'. ` +
-              "Duplicate the skill first or choose a different id.",
-          };
-        }
         materializedSkill = await skillLoader.updateSkill(existing.id, {
           name: proposal.draftSkill.name,
           description: proposal.draftSkill.description,
@@ -8773,7 +8903,7 @@ ${skillDescriptions}`;
         name: "skill_proposal",
         description:
           "Manage approval-gated skill proposals. Create proposals for missing capabilities, list pending proposals, evaluate drafts, and approve/reject proposals. " +
-          "Skill mutations happen only after explicit approve.",
+          "approve asks the user to review the draft and saves the skill only if they approve it; a declined proposal stays pending.",
         input_schema: {
           type: "object",
           properties: {

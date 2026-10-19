@@ -250,6 +250,8 @@ vi.mock("../../../settings/personality-manager", () => ({
 vi.mock("../../custom-skill-loader", () => ({
   getCustomSkillLoader: vi.fn().mockReturnValue({
     setWorkspaceSkillsDir: mocks.setWorkspaceSkillsDir,
+    getWorkspaceSkillsDir: vi.fn(() => mocks.skillState.workspaceDir || null),
+    getManagedSkillsDir: vi.fn(() => "/tmp/cowork-managed-skills"),
     getSkill: mocks.getSkill,
     createWorkspaceSkill: mocks.createWorkspaceSkill,
     updateSkill: mocks.updateSkill,
@@ -419,6 +421,35 @@ describe("integration_setup tool", () => {
 });
 
 describe("skill_proposal tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.skillState.workspaceDir = "";
+    mocks.skillState.skills = {};
+  });
+
+  const jiraProposal = {
+    action: "create",
+    problem_statement: "Need a reusable Jira triage flow.",
+    evidence: ["Jira not configured in runtime"],
+    required_tools: [],
+    risk_note: "No side effects",
+    draft_skill: {
+      id: "jira-triage-playbook",
+      name: "Jira Triage Playbook",
+      description: "Triage Jira issues",
+      prompt: "Triage issues and summarize priorities.",
+    },
+  } as const;
+
+  function createRegistry(daemon: Record<string, unknown>) {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-proposal-approve-"));
+    return new ToolRegistry(
+      createWorkspace(workspacePath),
+      { logEvent: vi.fn(), ...daemon } as Any,
+      "task-1",
+    );
+  }
+
   it("create stores a proposal without mutating skills", async () => {
     const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-proposal-create-"));
     const registry = new ToolRegistry(
@@ -446,36 +477,127 @@ describe("skill_proposal tool", () => {
     expect(mocks.createWorkspaceSkill).not.toHaveBeenCalled();
   });
 
-  it("approve materializes a workspace skill", async () => {
-    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-proposal-approve-"));
-    const registry = new ToolRegistry(
-      createWorkspace(workspacePath),
-      { logEvent: vi.fn() } as Any,
-      "task-1",
-    );
+  it("approve asks the user and materializes the workspace skill after a yes", async () => {
+    const requestApproval = vi.fn().mockResolvedValue(true);
+    const registry = createRegistry({ requestApproval });
 
-    const created = await registry.executeTool("skill_proposal", {
-      action: "create",
-      problem_statement: "Need a reusable Jira triage flow.",
-      evidence: ["Jira not configured in runtime"],
-      required_tools: [],
-      risk_note: "No side effects",
-      draft_skill: {
-        id: "jira-triage-playbook",
-        name: "Jira Triage Playbook",
-        description: "Triage Jira issues",
-        prompt: "Triage issues and summarize priorities.",
-      },
-    });
-
+    const created = await registry.executeTool("skill_proposal", jiraProposal);
     const approved = await registry.executeTool("skill_proposal", {
       action: "approve",
       proposal_id: created.proposal.id,
     });
 
     expect(approved.success).toBe(true);
-    expect(mocks.createWorkspaceSkill).toHaveBeenCalledTimes(1);
     expect(approved.skill.id).toBe("jira-triage-playbook");
+    expect(mocks.createWorkspaceSkill).toHaveBeenCalledTimes(1);
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(requestApproval).toHaveBeenCalledWith(
+      "task-1",
+      "risk_gate",
+      expect.stringContaining("Jira Triage Playbook"),
+      expect.objectContaining({
+        tool: "skill_proposal",
+        params: { action: "approve", proposal_id: created.proposal.id },
+        skillId: "jira-triage-playbook",
+        approvalPreview: expect.objectContaining({
+          text: expect.stringContaining("Triage issues and summarize priorities."),
+        }),
+      }),
+      expect.objectContaining({
+        allowAutoApprove: false,
+        requireExplicitApproval: true,
+        noStandingApproval: true,
+      }),
+    );
+    // The loader is pointed at the workspace skill folder only once the user said yes.
+    expect(mocks.setWorkspaceSkillsDir.mock.invocationCallOrder[0]).toBeGreaterThan(
+      requestApproval.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("a declined approval saves nothing and leaves the proposal pending", async () => {
+    const requestApproval = vi.fn().mockResolvedValue(false);
+    const registry = createRegistry({ requestApproval });
+
+    const created = await registry.executeTool("skill_proposal", jiraProposal);
+    const declined = await registry.executeTool("skill_proposal", {
+      action: "approve",
+      proposal_id: created.proposal.id,
+    });
+
+    expect(declined).toMatchObject({ success: false, approval_denied: true });
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(mocks.createWorkspaceSkill).not.toHaveBeenCalled();
+    expect(mocks.updateSkill).not.toHaveBeenCalled();
+    expect(mocks.setWorkspaceSkillsDir).not.toHaveBeenCalled();
+    const pending = await registry.executeTool("skill_proposal", { action: "list" });
+    expect(pending.proposals.map((proposal: Any) => proposal.id)).toContain(created.proposal.id);
+  });
+
+  it("fails closed when no approval channel exists", async () => {
+    const registry = createRegistry({});
+
+    const created = await registry.executeTool("skill_proposal", jiraProposal);
+    const result = await registry.executeTool("skill_proposal", {
+      action: "approve",
+      proposal_id: created.proposal.id,
+    });
+
+    expect(result).toMatchObject({ success: false, approval_denied: true });
+    expect(mocks.createWorkspaceSkill).not.toHaveBeenCalled();
+  });
+
+  it("does not ask about a proposal that cannot be applied", async () => {
+    const requestApproval = vi.fn().mockResolvedValue(true);
+    const registry = createRegistry({ requestApproval });
+
+    const missing = await registry.executeTool("skill_proposal", {
+      action: "approve",
+      proposal_id: "does-not-exist",
+    });
+
+    expect(missing.success).toBe(false);
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
+  it("passes the workspace skill file a skill tool would change to the permission check", async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-skill-update-target-"));
+    const skillFile = path.join(workspacePath, "skills", "existing.json");
+    mocks.skillState.skills.existing = {
+      id: "existing",
+      name: "Existing",
+      source: "workspace",
+      filePath: skillFile,
+    };
+    const evaluateToolPermission = vi.fn().mockResolvedValue({
+      decision: "deny",
+      reason: { type: "other", summary: "stopped by the test" },
+    });
+    const registry = new ToolRegistry(
+      createWorkspace(workspacePath),
+      { logEvent: vi.fn(), evaluateToolPermission } as Any,
+      "task-1",
+    );
+
+    await expect(
+      registry.executeTool("skill_update", { skill_id: "existing", prompt: "Planted rule." }),
+    ).rejects.toThrow(/blocked by policy/);
+    expect(evaluateToolPermission).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({
+        toolName: "skill_update",
+        details: expect.objectContaining({ path: skillFile }),
+      }),
+    );
+    expect(mocks.updateSkill).not.toHaveBeenCalled();
+  });
+
+  it("advertises explicit consent for approve only", () => {
+    const registry = createRegistry({});
+    expect(registry.getApprovalType("skill_proposal", { action: "approve" })).toBe("risk_gate");
+    for (const action of ["create", "list", "eval", "reject"]) {
+      expect(registry.getApprovalType("skill_proposal", { action })).toBeNull();
+    }
   });
 
   it("reject enforces duplicate cooldown for same proposal signature", async () => {

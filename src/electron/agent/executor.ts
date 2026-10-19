@@ -1284,6 +1284,8 @@ export class TaskExecutor {
    */
   private swarmForTools: ResolvedSwarm | null = null;
   private appliedSkills: SkillApplication[] = [];
+  // Skill ids named in the planning hint; null until planning (or a resumed step) computes them.
+  private planningHintedSkillIds: string[] | null = null;
   private taskContextNotes: string[] = [];
   private recoveryRequestActive: boolean = false;
   private capabilityUpgradeRequested: boolean = false;
@@ -8919,6 +8921,7 @@ ${transcript}
         includePrereqBlockedSkills: true,
       });
       const { hints: scored, reason, strength } = selectSkillPlanningHints(ranked);
+      this.planningHintedSkillIds = scored.map(({ skill }) => skill.id);
       this.emitEvent("log", {
         message: `[skill-routing] planning hints: ${reason}`,
         strength,
@@ -20822,7 +20825,10 @@ ${transcript}
     if (hasWebPageInteractionIntent(stepText || "")) {
       for (const toolName of WEB_PAGE_INTERACTION_TOOLS) base.add(toolName);
     }
-    if (this.stepTextInvokesSkill(stepText || "")) {
+    if (
+      this.stepTextInvokesSkill(stepText || "") ||
+      this.stepTextRefersToHintedSkill(stepText || "")
+    ) {
       base.add("Skill");
     }
     if (REPO_STATUS_INTENT_PATTERN.test(String(stepText || ""))) {
@@ -20830,6 +20836,33 @@ ${transcript}
       base.add("git_diff");
     }
     return base;
+  }
+
+  /**
+   * True when the step talks about a skill and planning hinted one. Planners paraphrase
+   * a hinted skill ("Apply the Unity in-app purchases skill"), which the exact id/name
+   * match in stepTextInvokesSkill misses, and the step then has no way to call it.
+   */
+  private stepTextRefersToHintedSkill(stepText: string): boolean {
+    if (!/\bskills?\b/i.test(stepText)) return false;
+    return this.getPlanningHintedSkillIds().length > 0;
+  }
+
+  private getPlanningHintedSkillIds(): string[] {
+    if (this.planningHintedSkillIds) return this.planningHintedSkillIds;
+    // A task resumed after a restart skips planning; rebuild the hint from the same query.
+    try {
+      const ranked = getCustomSkillLoader().rankModelInvocableSkillsForQuery(
+        this.getSkillRoutingQuery(),
+        { includePrereqBlockedSkills: true },
+      );
+      this.planningHintedSkillIds = selectSkillPlanningHints(ranked).hints.map(
+        ({ skill }) => skill.id,
+      );
+    } catch {
+      this.planningHintedSkillIds = [];
+    }
+    return this.planningHintedSkillIds;
   }
 
   /** True when the text explicitly asks to use a model-invocable skill by id or name. */

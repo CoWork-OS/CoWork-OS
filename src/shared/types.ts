@@ -2780,6 +2780,19 @@ export interface Task {
   branchFromEventId?: string; // Specific event to branch from when forking a session
   branchLabel?: string; // Human label for the branch shown in UI/debug surfaces
   resumeStrategy?: "snapshot" | "checkpoint" | "transcript"; // Preferred resume source
+  /**
+   * "user_typed" only when a person typed this task's title and prompt into a composer the
+   * owner signed in to: the desktop app (task create, tray quick task), a remote device's view
+   * or another admin client over the control plane, Web Access, or a channel message from the
+   * verified owner. A fork or side chat keeps its source task's value when it reuses that
+   * task's prompt. Unset for everything else, whatever `source` says: automations, mail, the
+   * strategic planner, orchestration and workflow steps, remote agents, other agents, and
+   * every task created before this field existed. Only "user_typed" prompts can expose the
+   * admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup).
+   * Set by main-process creation paths at create time and never updated; never copied from
+   * renderer or remote-client input.
+   */
+  promptProvenance?: TaskPromptProvenance;
   // Origin source for distinguishing how the task was created
   source?:
     | "manual"
@@ -3481,6 +3494,12 @@ export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceO
  * conversation. There is no other value: unset means CoWork or someone else put the text there.
  */
 export type FollowUpTextProvenance = "user_typed";
+
+/**
+ * Who wrote a task's title and prompt (Task.promptProvenance). "user_typed": a person typed
+ * them. There is no other value: unset means CoWork or someone else wrote them.
+ */
+export type TaskPromptProvenance = "user_typed";
 
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */

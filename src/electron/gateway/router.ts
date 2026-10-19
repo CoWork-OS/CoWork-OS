@@ -137,6 +137,7 @@ import {
 import { normalizeRemoteIncomingCommand } from "./remote-command-normalizer";
 import { gatewaySenderAgentConfig } from "./gateway-sender-identity";
 import { USER_TYPED_FOLLOW_UP } from "../agent/follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT } from "../agent/task-prompt-provenance";
 import {
   createBackgroundKitPathGuard,
   evaluateConfinedInternalWrite,
@@ -6986,12 +6987,22 @@ export class MessageRouter {
       (typeof routedChannel?.config?.defaultAgentRoleId === "string"
         ? routedChannel.config.defaultAgentRoleId
         : undefined);
+    const senderConfig = this.gatewaySenderConfig(
+      adapter,
+      message,
+      contextType === "group",
+      routedChannel,
+    );
 
     const task = await this.taskRepo.create({
       workspaceId: workspace.id,
       title: taskTitle,
       prompt: taskPrompt,
       status: "pending",
+      // Only the verified owner's own message is the user's prompt (gateway-sender-identity.ts);
+      // a paired contact or anyone in a group is someone else, and must not expose the
+      // admin-lane tools (Task.promptProvenance).
+      ...(senderConfig.gatewaySenderIsOwner === true ? USER_TYPED_TASK_PROMPT : {}),
       agentConfig: taskAgentConfigForCreation(
         {
           gatewayContext,
@@ -7001,7 +7012,7 @@ export class MessageRouter {
             ? { channelSpecializationId: securityContext.channelSpecialization.id }
             : {}),
           originChannel: adapter.type,
-          ...this.gatewaySenderConfig(adapter, message, contextType === "group", routedChannel),
+          ...senderConfig,
           ...(securityContext?.researchWorkflowPreset
             ? {
                 researchWorkflow: {
@@ -8775,6 +8786,11 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(", ")}`
     const forkedTask = await this.agentDaemon.forkTaskSession({
       taskId: session.taskId,
       branchLabel: args.join(" ").trim() || undefined,
+      // The label becomes part of the fork's title. Only the verified owner's fork keeps the
+      // source task's prompt provenance; a contact's words must not expose the admin-lane tools.
+      keepPromptProvenance:
+        (await this.channelFollowUpProvenance(adapter, message, message.isGroup === true)) !==
+        undefined,
     });
     await this.sessionManager.linkSessionToTask(sessionId, forkedTask.id);
     await adapter.sendMessage({

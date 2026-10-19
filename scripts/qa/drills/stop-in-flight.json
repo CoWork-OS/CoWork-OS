@@ -1,0 +1,55 @@
+{
+  "id": "stop-in-flight",
+  "description": "A task that writes two files is stopped while the second write is running. The first file changed; the second write's outcome is unknown and must be checked before any retry.",
+  "prompt": "Write a short notes.md with three bullet points about this workspace, then write report.md that summarizes notes.md in one paragraph.",
+  "interruptAfterToolCalls": 2,
+  "taskId": "drill-stop-in-flight",
+  "events": [
+    { "type": "task_started", "payload": {} },
+    { "type": "tool_call", "payload": { "tool": "write_file", "input": { "path": "notes.md" } } },
+    { "type": "tool_result", "payload": { "tool": "write_file", "success": true } },
+    { "type": "file_created", "payload": { "path": "notes.md" } },
+    { "type": "tool_call", "payload": { "tool": "write_file", "input": { "path": "report.md" } } },
+    { "type": "agent_interrupt_requested", "payload": { "reason": "cancel" } },
+    {
+      "type": "agent_interrupt_confirmed",
+      "payload": {
+        "status": "cancelled",
+        "inFlight": [
+          {
+            "toolName": "write_file",
+            "attemptId": "attempt-2",
+            "idempotencyKey": "5f0b6c1e9a2d4e7f8a1b3c5d7e9f0a2b",
+            "effect": "write",
+            "outcome": "unknown",
+            "target": "report.md"
+          }
+        ]
+      }
+    },
+    { "type": "task_cancelled", "payload": {} }
+  ],
+  "requirements": [
+    {
+      "id": "requirement-1",
+      "description": "notes.md exists",
+      "status": "satisfied",
+      "required": true
+    },
+    {
+      "id": "requirement-2",
+      "description": "report.md exists",
+      "status": "pending",
+      "required": true
+    }
+  ],
+  "waits": [],
+  "expected": {
+    "interrupted": true,
+    "status": "cancelled",
+    "filesChanged": ["notes.md"],
+    "inFlight": [{ "toolName": "write_file", "outcome": "unknown", "target": "report.md" }],
+    "pendingWaits": 0,
+    "requirementStatuses": { "requirement-1": "satisfied", "requirement-2": "pending" }
+  }
+}

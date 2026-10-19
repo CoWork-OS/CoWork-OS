@@ -40,6 +40,12 @@ import {
   type WorkspaceLike,
 } from "./format";
 import { discoverLocalControlPlane } from "./local-control-plane-discovery";
+import { loadDrillFixture, replayInterruptDrill, runLiveInterruptDrill } from "./drill";
+import {
+  compareInterruptDrill,
+  renderInterruptDrillReport,
+  type InterruptDrillReport,
+} from "../shared/interrupt-drill";
 import {
   buildDirectRuntimeLaunch,
   resolveChildProcessExitCode,
@@ -83,6 +89,7 @@ const VALUE_FLAGS = new Set([
   "--workspace-id",
   "--workspace",
   "--cwd",
+  "--timeout-ms",
   "--limit",
   "--model",
   "--api-key",
@@ -269,6 +276,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return await pactCommand(ctx);
       case "handoff":
         return await handoffCommand(ctx);
+      case "drill":
+        return await drillCommand(ctx);
       default:
         process.stderr.write(`Unknown command: ${parsed.command}\n\n`);
         usage();
@@ -1292,6 +1301,59 @@ async function providers(ctx: CommandContext): Promise<number> {
 }
 
 /**
+ * `cowork drill interrupt <fixture>`: stop a task halfway and show what actually changed. A
+ * fixture with recorded events replays without a daemon and is checked against its `expected`
+ * block (exit 1 on a difference); `--live` runs its prompt through the control plane.
+ */
+async function drillCommand(ctx: CommandContext): Promise<number> {
+  const usageText =
+    "Usage: cowork drill interrupt <fixture name | path.json> [--live [--workspace <id>] [--timeout-ms <ms>] [--check]] [--json]";
+  const fixtureArg = ctx.parsed.rest[1];
+  if (ctx.parsed.rest[0] !== "interrupt" || !fixtureArg) return usageError(usageText);
+  const fixture = await loadDrillFixture(fixtureArg);
+  const live = hasFlag(ctx.parsed, "--live");
+  let report: InterruptDrillReport;
+  if (live) {
+    const client = await connectedClient(ctx);
+    try {
+      const workspaceId =
+        getFlag(ctx.parsed, "--workspace") ||
+        (await resolveWorkspaceId(
+          client,
+          ctx,
+          path.resolve(getFlag(ctx.parsed, "--cwd") || process.cwd()),
+        ));
+      const timeoutMs = Number(getFlag(ctx.parsed, "--timeout-ms"));
+      report = await runLiveInterruptDrill(client, {
+        workspaceId,
+        fixture,
+        ...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+      });
+    } finally {
+      client.close();
+    }
+  } else {
+    report = replayInterruptDrill(fixture);
+  }
+  // A recorded drill is a check; a live one only when asked, since a model's path varies.
+  const problems =
+    fixture.expected && (!live || hasFlag(ctx.parsed, "--check"))
+      ? compareInterruptDrill(report, fixture.expected)
+      : [];
+  if (ctx.json) {
+    printJson({ fixture: fixture.id, mode: live ? "live" : "replay", report, problems });
+  } else {
+    process.stdout.write(`${renderInterruptDrillReport(report).join("\n")}\n`);
+    if (problems.length > 0) {
+      process.stdout.write(
+        `\nDiffers from fixture ${fixture.id}:\n${problems.map((line) => `  - ${line}`).join("\n")}\n`,
+      );
+    }
+  }
+  return problems.length > 0 ? 1 : 0;
+}
+
+/**
  * `cowork handoff export|import`: move an in-progress session between sessions or installations
  * as a versioned package under `<workspace>/.cowork/handoffs/`.
  */
@@ -2292,6 +2354,7 @@ function usage(): void {
       "  cowork sessions list|show|export|rename|archive|delete|prune",
       "  cowork handoff export <managedSessionId> | --task <taskId> [--out <dir>]",
       "  cowork handoff import <package> --environment <environmentId> [--agent <agentId>] [--dry-run]",
+      "  cowork drill interrupt <fixture> [--live [--workspace <id>] [--check]] [--json]",
       "  cowork logs latest|tail|grep",
       "  cowork tools list|info|enable|disable",
       "  cowork mcp list|add|remove|enable|disable|test",

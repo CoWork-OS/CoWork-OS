@@ -13,6 +13,22 @@ CoWork implements the experimental [MCP Events design](https://github.com/modelc
 
 The connected server validates event names, filter arguments, and access to the watched resource. Event payloads are treated as external data. The agent's actions still pass through its saved access profile and normal tool approvals.
 
+## Wait for an event inside a task
+
+The `wait_for_event` tool parks a task until something happens, instead of polling or sleeping. The agent names a source and up to five conditions:
+
+- `file_change`: a file in this workspace was created, modified or deleted. Fields: `path` (relative to the workspace) and `eventType`. These events come from the desktop app's workspace file monitor, which skips hidden folders, `node_modules` and build output.
+- `github_event`: an event from the GitHub connector. Fields include `eventName`, `action` and `repository`.
+- `webhook`: a call to CoWork's incoming webhook.
+
+It also gives a reason and a timeout (1 minute to 7 days, default 60 minutes). CoWork adds a temporary trigger bound to the task and records an external wait (`event_wait:<trigger id>`). When the agent finishes its turn, the task pauses instead of completing.
+
+When a matching event arrives, the wait ends and the task continues with the event's fields. The fields are marked as external data, not instructions. The trigger fires once.
+
+If nothing arrives before the timeout, the task continues with a note that no event came; timeouts are checked every two minutes. Ending or cancelling the task ends the wait, and the temporary trigger is removed.
+
+MCP events are not a `wait_for_event` source. Use `manage_connector_events`, which can continue the current task on delivery. Push-only `events/stream` remains unsupported until the MCP draft settles.
+
 ## Webhook setup
 
 Webhook delivery needs a public HTTPS callback URL. CoWork's receiver listens on `127.0.0.1:8766` by default; set `COWORK_MCP_EVENTS_PORT` to use another port. Put an HTTPS reverse proxy or tunnel in front of it and forward `/mcp-events/*` to that local port. Enter the public **base URL** in the monitor. CoWork appends `/mcp-events/<trigger-id>` when subscribing. For chat-created monitors, `COWORK_MCP_EVENTS_PUBLIC_URL` can supply the base URL.

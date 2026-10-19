@@ -3434,6 +3434,28 @@ describe("SessionRuntime", () => {
       restored.runtime.state.transcript.lastUserMessage = "Thanks";
       expect(names(restored)).toEqual(["read_file", "kg_create_entity", "web_search"]);
     });
+
+    it("does not keep an admin-lane tool once the user's words stop asking for it", () => {
+      const harness = createHarness();
+      harness.setToolRegistry({
+        getTools: vi.fn(() => [{ name: "read_file" }, { name: "add_behavioral_rule" }]),
+        getDeferredTools: vi.fn(() => []),
+        getToolCatalogVersion: vi.fn(() => "catalog:admin"),
+        cleanup: vi.fn(async () => undefined),
+      });
+      // Stands in for the executor's filter, which reads only text the user typed.
+      harness.deps.applyAdaptiveToolAvailabilityFilter = (tools) =>
+        /behavioral rule/.test(String(harness.runtime.state.transcript.lastUserMessage || ""))
+          ? tools
+          : tools.filter((tool) => tool.name !== "add_behavioral_rule");
+
+      harness.runtime.state.transcript.lastUserMessage = "Add a behavioral rule: be brief.";
+      expect(names(harness)).toEqual(["read_file", "add_behavioral_rule"]);
+
+      // The next turn comes from an automation: the earlier exposure must not carry over.
+      harness.runtime.state.transcript.lastUserMessage = "Heartbeat: check the inbox.";
+      expect(names(harness)).toEqual(["read_file"]);
+    });
   });
 
   it("restores pending slash-skill parameter collection from replay events", () => {

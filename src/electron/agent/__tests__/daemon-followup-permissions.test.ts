@@ -242,6 +242,7 @@ describe("AgentDaemon follow-up permission overrides", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     );
   });
 
@@ -340,6 +341,8 @@ describe("AgentDaemon follow-up permission overrides", () => {
       "follow_up",
       undefined,
       undefined,
+      undefined,
+      // An automation's wake is not the user's words: no text provenance.
       undefined,
     );
   });

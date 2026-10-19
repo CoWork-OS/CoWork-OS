@@ -136,6 +136,7 @@ import {
 } from "./llm/usage-telemetry";
 import type { LlmCallRow } from "../database/llm-call-events";
 import { TaskMutationLedger } from "./task-mutation-ledger";
+import { USER_TYPED_FOLLOW_UP } from "./follow-up-provenance";
 import { LLMProviderFactory } from "./llm/provider-factory";
 import { createConfiguredJevProvider, isJevActiveHarnessEnabled } from "./jev";
 import { routeModelWithJev } from "./jev/model-routing";
@@ -745,6 +746,7 @@ type DaemonFollowUpOptions = Pick<
   | "inReplyToMessageId"
   | "inReplyToTaskId"
   | "surfaceOrigin"
+  | "textProvenance"
 > & {
   /** Return to the renderer once the follow-up is durably admitted, not after provider completion. */
   returnOnAccepted?: boolean;
@@ -4562,7 +4564,14 @@ export class AgentDaemon extends EventEmitter {
     });
     this.logTaskIntentRouted(forkedTask.id, derived);
     if (params.sideChat && initialMessage) {
-      void this.sendMessage(forkedTask.id, initialMessage).catch((error) => {
+      // The user typed the side chat's first message in the desktop app.
+      void this.sendMessage(
+        forkedTask.id,
+        initialMessage,
+        undefined,
+        undefined,
+        USER_TYPED_FOLLOW_UP,
+      ).catch((error) => {
         log.error(`[AgentDaemon] Failed to start sidechat ${forkedTask.id}:`, error);
         this.logEvent(forkedTask.id, "log", {
           message: "Side conversation failed to start",
@@ -8798,7 +8807,8 @@ export class AgentDaemon extends EventEmitter {
       `Reply to your permission request (the operation was not run): ${reply}`,
       undefined,
       undefined,
-      { deliveryMode: "follow_up", messageSource: "user" },
+      // The person answering this task's approval card typed the reply.
+      { deliveryMode: "follow_up", messageSource: "user", ...USER_TYPED_FOLLOW_UP },
     ).catch((error) => {
       log.warn(`Could not deliver the approval reply to task ${taskId}:`, error);
     });
@@ -17416,6 +17426,9 @@ export class AgentDaemon extends EventEmitter {
         effectiveOptions?.inReplyToMessageId,
         effectiveOptions?.inReplyToTaskId,
         effectiveOptions?.surfaceOrigin,
+        // The queued item keeps only the text with annotation context added, which quotes
+        // result text the user did not type; such an item does not carry their provenance.
+        effectiveMessage === message ? effectiveOptions?.textProvenance : undefined,
       );
       // queueFollowUp snapshots the pending item; include that row in the return
       // boundary so the accepted queue item survives an immediate restart.
@@ -17641,6 +17654,9 @@ export class AgentDaemon extends EventEmitter {
           inReplyToMessageId: effectiveOptions?.inReplyToMessageId,
           inReplyToTaskId: effectiveOptions?.inReplyToTaskId,
           surfaceOrigin: effectiveOptions?.surfaceOrigin,
+          textProvenance: effectiveOptions?.textProvenance,
+          // Open annotations add the result text they point at, which the user did not type.
+          typedText: message,
           onAccepted: onAgentMessageAccepted ?? onQueuedUserFollowUpAccepted,
           onProviderDispatchStarted: onQueuedUserFollowUpProviderDispatchStarted,
           onProviderDispatchCompleted: onQueuedUserFollowUpProviderDispatchCompleted,
@@ -19708,6 +19724,7 @@ export class AgentDaemon extends EventEmitter {
               senderLabel: followUp.senderLabel,
               inReplyToMessageId: followUp.inReplyToMessageId,
               inReplyToTaskId: followUp.inReplyToTaskId,
+              textProvenance: followUp.textProvenance,
               requestFingerprint: followUpMessageId
                 ? this.getDurableTaskFollowUpRequestFingerprint(taskId, followUpMessageId)
                 : undefined,

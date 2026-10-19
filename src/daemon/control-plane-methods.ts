@@ -49,6 +49,7 @@ import {
 } from "../electron/utils/runtime-mode";
 import { getUserDataDir } from "../electron/utils/user-data-dir";
 import { sanitizeTaskMessageParams } from "../electron/control-plane/sanitize";
+import { composerFollowUpProvenance } from "../electron/agent/follow-up-provenance";
 import { registerControlPlaneCoreMethods } from "../electron/control-plane/registerControlPlaneCoreMethods";
 import { registerAgentSecurityMethods } from "../electron/control-plane/registerAgentSecurityMethods";
 import { registerStrategicPlannerMethods } from "../electron/control-plane/registerStrategicPlannerMethods";
@@ -1249,6 +1250,7 @@ export function registerControlPlaneMethods(
       accessProfileId,
       shellAccess,
       integrationMentions,
+      surfaceOrigin,
     } = sanitizeTaskMessageParams(params);
     const result = await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
@@ -1260,6 +1262,9 @@ export function registerControlPlaneMethods(
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+      // An admin client is the owner's composer on another device (remote view, web UI):
+      // typed unless an answer surface sent it. Only typed text can expose the admin-lane tools.
+      ...composerFollowUpProvenance(surfaceOrigin),
     });
     return { ok: true, ...result };
   });

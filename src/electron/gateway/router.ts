@@ -136,6 +136,7 @@ import {
 } from "./remote-command-registry";
 import { normalizeRemoteIncomingCommand } from "./remote-command-normalizer";
 import { gatewaySenderAgentConfig } from "./gateway-sender-identity";
+import { USER_TYPED_FOLLOW_UP } from "../agent/follow-up-provenance";
 import {
   createBackgroundKitPathGuard,
   evaluateConfinedInternalWrite,
@@ -1246,6 +1247,25 @@ export class MessageRouter {
         ownerUserIds: (channel?.config as Record<string, unknown> | undefined)?.ownerUserIds,
       },
     );
+  }
+
+  /**
+   * Follow-up provenance for a channel message. Only the verified owner's own words count as
+   * typed by the user (see gateway-sender-identity.ts); a paired or allowlisted contact and
+   * anyone in a group are someone else, and their text must not expose the admin-lane tools.
+   */
+  private async channelFollowUpProvenance(
+    adapter: ChannelAdapter,
+    message: IncomingMessage,
+    isGroup: boolean,
+  ): Promise<typeof USER_TYPED_FOLLOW_UP | undefined> {
+    const sender = this.gatewaySenderConfig(
+      adapter,
+      message,
+      isGroup,
+      await this.getChannelForAdapter(adapter),
+    );
+    return sender.gatewaySenderIsOwner === true ? USER_TYPED_FOLLOW_UP : undefined;
   }
 
   private async getChannelForAdapter(adapter: ChannelAdapter): Promise<Channel | undefined> {
@@ -6893,7 +6913,13 @@ export class MessageRouter {
                 sessionGeneration: this.getRemoteSessionGeneration(sessionId),
               });
 
-              await this.agentDaemon.sendMessage(session!.taskId!, message.text);
+              await this.agentDaemon.sendMessage(
+                session!.taskId!,
+                message.text,
+                undefined,
+                undefined,
+                await this.channelFollowUpProvenance(adapter, message, contextType === "group"),
+              );
             } catch (error) {
               console.error("Error sending follow-up message:", error);
               await this.sendAdapterMessage(adapter, {
@@ -8047,6 +8073,8 @@ export class MessageRouter {
     lastChannelMessageId?: string;
     text: string;
     statusText?: string;
+    /** Set only when the verified owner typed `text` (channelFollowUpProvenance). */
+    provenance?: typeof USER_TYPED_FOLLOW_UP;
   }): Promise<void> {
     if (!this.agentDaemon) {
       await opts.adapter.sendMessage({
@@ -8087,7 +8115,7 @@ export class MessageRouter {
       });
     }
 
-    await this.agentDaemon.sendMessage(opts.taskId, trimmed);
+    await this.agentDaemon.sendMessage(opts.taskId, trimmed, undefined, undefined, opts.provenance);
   }
 
   private async sendCommandFollowupToCurrentTask(
@@ -8142,6 +8170,8 @@ export class MessageRouter {
       lastChannelMessageId: requester.lastChannelMessageId ?? message.messageId,
       statusText,
       text,
+      // /steer and /queue carry the sender's own words.
+      provenance: await this.channelFollowUpProvenance(adapter, message, message.isGroup === true),
     });
     return true;
   }

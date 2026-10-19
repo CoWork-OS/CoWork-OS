@@ -29,21 +29,22 @@ export function rankModelInvocableSkillsForQuery(
 
 // Plain-language requests rarely score above 0.7 even when one skill clearly wins
 // (e.g. 0.61 vs 0.45), so a hint depends on the lead's margin, not on the score alone.
+// Below 0.7 the lexical scores can't tell a right lead from an off-domain one that
+// shares a rare word ("voice chat app for remote teams" vs a game voice-chat skill),
+// so those hints are tentative: the planner is told they may not apply.
 // Calibrated on the bundled catalog plus installed packs; see docs/plugin-packs.md.
 export const SKILL_PLANNING_HINT_FLOOR = 0.5;
 export const SKILL_PLANNING_HINT_MARGIN = 0.1;
 export const SKILL_PLANNING_HINT_STRONG_SCORE = 0.7;
 const SKILL_PLANNING_HINT_LIMIT = 3;
 
-export type SkillPlanningHintReason =
-  | "clear_lead"
-  | "pack_lead"
-  | "strong_lead"
-  | "below_floor"
-  | "contested";
+export type SkillPlanningHintReason = "clear_lead" | "strong_lead" | "below_floor" | "contested";
+export type SkillPlanningHintStrength = "strong" | "tentative" | "none";
 export interface SkillPlanningHintSelection {
   hints: RankedSkillMatch[];
   reason: SkillPlanningHintReason;
+  /** Strong hints ask the planner for a Skill step; tentative ones only suggest it. */
+  strength: SkillPlanningHintStrength;
 }
 
 /**
@@ -52,20 +53,21 @@ export interface SkillPlanningHintSelection {
  */
 export function selectSkillPlanningHints(ranked: RankedSkillMatch[]): SkillPlanningHintSelection {
   const [lead, ...rest] = ranked;
-  if (!lead || lead.score < SKILL_PLANNING_HINT_FLOOR) return { hints: [], reason: "below_floor" };
+  if (!lead || lead.score < SKILL_PLANNING_HINT_FLOOR)
+    return { hints: [], reason: "below_floor", strength: "none" };
   const contenders = rest.filter(({ score }) => lead.score - score < SKILL_PLANNING_HINT_MARGIN);
-  const hints = [
-    lead,
-    ...contenders.filter(({ score }) => score >= SKILL_PLANNING_HINT_FLOOR),
-  ].slice(0, SKILL_PLANNING_HINT_LIMIT);
-  if (contenders.length === 0) return { hints, reason: "clear_lead" };
-  // Close siblings from the lead's own pack still identify the domain; the model
-  // picks between them. Any outside contender means the request is ambiguous.
-  const pack = lead.skill.metadata?.pluginSource;
-  if (pack && contenders.every(({ skill }) => skill.metadata?.pluginSource === pack))
-    return { hints, reason: "pack_lead" };
-  if (lead.score >= SKILL_PLANNING_HINT_STRONG_SCORE) return { hints, reason: "strong_lead" };
-  return { hints: [], reason: "contested" };
+  const strong = lead.score >= SKILL_PLANNING_HINT_STRONG_SCORE;
+  if (contenders.length === 0)
+    return { hints: [lead], reason: "clear_lead", strength: strong ? "strong" : "tentative" };
+  // Below the strong bar any close contender makes the request ambiguous, even one
+  // from the lead's own pack: same-pack siblings also lead off-domain requests that
+  // merely share the pack's vocabulary ("my phone's audio is too quiet").
+  if (!strong) return { hints: [], reason: "contested", strength: "none" };
+  return {
+    hints: [lead, ...contenders].slice(0, SKILL_PLANNING_HINT_LIMIT),
+    reason: "strong_lead",
+    strength: "strong",
+  };
 }
 
 export function isModelInvocableSkill(

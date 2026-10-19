@@ -8918,9 +8918,10 @@ ${transcript}
         availableToolNames,
         includePrereqBlockedSkills: true,
       });
-      const { hints: scored, reason } = selectSkillPlanningHints(ranked);
+      const { hints: scored, reason, strength } = selectSkillPlanningHints(ranked);
       this.emitEvent("log", {
         message: `[skill-routing] planning hints: ${reason}`,
+        strength,
         queryHash: createHash("sha1").update(query).digest("hex").slice(0, 12),
         candidates: ranked.slice(0, 3).map(({ skill, score }) => ({ skillId: skill.id, score })),
         hintedSkillIds: scored.map(({ skill }) => skill.id),
@@ -8932,6 +8933,17 @@ ${transcript}
         (entry) =>
           `- Skill "${entry.skill.id}" (${entry.skill.name}): ${entry.skill.description || ""}`,
       );
+      if (strength === "tentative") {
+        // A tentative lead may share only vocabulary with the request, so the planner
+        // must be free to drop it without a primed example step.
+        return [
+          `Possibly relevant skills (matched on wording only, so they may not apply):`,
+          ...hints,
+          ``,
+          `Add a plan step to invoke one with Skill only if the request is actually about what its description covers. Otherwise ignore this list and plan normally.`,
+          `Treat these as additive helpers. Do not rewrite or replace the original task.`,
+        ].join("\n");
+      }
       return [
         `Relevant skills for this task:`,
         ...hints,

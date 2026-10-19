@@ -328,11 +328,12 @@ describe("planning hint selection", () => {
       score,
     }));
   const select = (...entries: Array<[string, number, string?]>) => {
-    const { hints, reason } = selectSkillPlanningHints(ranked(...entries));
-    return { ids: hints.map(({ skill }) => skill.id), reason };
+    const { hints, reason, strength } = selectSkillPlanningHints(ranked(...entries));
+    return { ids: hints.map(({ skill }) => skill.id), reason, strength };
   };
+  const silent = (reason: string) => ({ ids: [], reason, strength: "none" });
 
-  it("hints a clear lead that scores below the old 0.7 bar", () => {
+  it("hints a clear lead below the old 0.7 bar tentatively", () => {
     // Live scores for "Add in-app purchases so players can buy a coin pack".
     expect(
       select(
@@ -340,18 +341,27 @@ describe("planning hint selection", () => {
         ["employment-legal-investigation-add", 0.45, "employment-legal-pack"],
         ["legal-builder-hub-customize", 0.4, "legal-builder-hub-pack"],
       ),
-    ).toEqual({ ids: ["unity:implement-in-app-purchases"], reason: "clear_lead" });
+    ).toEqual({
+      ids: ["unity:implement-in-app-purchases"],
+      reason: "clear_lead",
+      strength: "tentative",
+    });
+  });
+
+  it("hints a clear lead at or above 0.7 strongly", () => {
+    expect(select(["translate", 0.82], ["summarize", 0.6])).toEqual({
+      ids: ["translate"],
+      reason: "clear_lead",
+      strength: "strong",
+    });
   });
 
   it("stays silent below the floor even with a wide margin", () => {
-    expect(select(["optimize-text-mesh-pro", 0.39], ["other", 0.2])).toEqual({
-      ids: [],
-      reason: "below_floor",
-    });
-    expect(select()).toEqual({ ids: [], reason: "below_floor" });
+    expect(select(["optimize-text-mesh-pro", 0.39], ["other", 0.2])).toEqual(silent("below_floor"));
+    expect(select()).toEqual(silent("below_floor"));
   });
 
-  it("stays silent when a skill from elsewhere is within the margin", () => {
+  it("stays silent when another skill is within the margin", () => {
     // "Set up Stripe checkout for my web store" with the Unity pack installed.
     expect(
       select(
@@ -359,44 +369,32 @@ describe("planning hint selection", () => {
         ["unity:implement-in-app-purchases", 0.56, "unity"],
         ["web-research-plus", 0.52, "web-search-plus"],
       ),
-    ).toEqual({ ids: [], reason: "contested" });
-    expect(select(["translate", 0.6], ["summarize", 0.55])).toEqual({
-      ids: [],
-      reason: "contested",
-    });
+    ).toEqual(silent("contested"));
+    expect(select(["translate", 0.6], ["summarize", 0.55])).toEqual(silent("contested"));
+  });
+
+  it("treats close siblings from the lead's own pack as contenders", () => {
+    // "my phone's audio is too quiet" with the Unity pack installed: an off-domain
+    // request that only shares the pack's vocabulary.
+    expect(
+      select(
+        ["unity:optimize-audio", 0.61, "unity"],
+        ["unity:audio-setup-mixers", 0.54, "unity"],
+        ["voice-memo", 0.47],
+      ),
+    ).toEqual(silent("contested"));
   });
 
   it("checks contenders past the first three ranks", () => {
     expect(
       select(
         ["unity:a", 0.6, "unity"],
-        ["unity:b", 0.58, "unity"],
-        ["unity:c", 0.56, "unity"],
-        ["unity:d", 0.54, "unity"],
+        ["unity:b", 0.55, "unity"],
+        ["unity:c", 0.54, "unity"],
+        ["unity:d", 0.53, "unity"],
         ["outside", 0.51],
       ),
-    ).toEqual({ ids: [], reason: "contested" });
-  });
-
-  it("hints close siblings from the lead's pack together", () => {
-    expect(
-      select(
-        ["unity:setup-multiplayer-services", 0.68, "unity"],
-        ["unity:build-live-game", 0.61, "unity"],
-        ["unity:2d-pixel-perfect", 0.56, "unity"],
-        ["spotify-player", 0.5],
-      ),
-    ).toEqual({
-      ids: ["unity:setup-multiplayer-services", "unity:build-live-game"],
-      reason: "pack_lead",
-    });
-  });
-
-  it("does not treat skills without a pack as one pack", () => {
-    expect(select(["kubernetes-ops", 0.64], ["calendly", 0.58])).toEqual({
-      ids: [],
-      reason: "contested",
-    });
+    ).toEqual(silent("contested"));
   });
 
   it("keeps hinting a strong lead and lists its close contenders", () => {
@@ -406,18 +404,17 @@ describe("planning hint selection", () => {
         ["eng-dependency-audit", 0.64, "engineering-pack"],
         ["project-structure", 0.55],
       ),
-    ).toEqual({ ids: ["dependency-check", "eng-dependency-audit"], reason: "strong_lead" });
+    ).toEqual({
+      ids: ["dependency-check", "eng-dependency-audit"],
+      reason: "strong_lead",
+      strength: "strong",
+    });
   });
 
-  it("lists at most three hints and none below the floor", () => {
+  it("lists at most three hints", () => {
     expect(
-      select(
-        ["unity:a", 0.55, "unity"],
-        ["unity:b", 0.54, "unity"],
-        ["unity:c", 0.53, "unity"],
-        ["unity:d", 0.52, "unity"],
-      ).ids,
+      select(["unity:a", 0.75, "unity"], ["unity:b", 0.74], ["unity:c", 0.73], ["unity:d", 0.72])
+        .ids,
     ).toEqual(["unity:a", "unity:b", "unity:c"]);
-    expect(select(["unity:a", 0.52, "unity"], ["unity:b", 0.45, "unity"]).ids).toEqual(["unity:a"]);
   });
 });

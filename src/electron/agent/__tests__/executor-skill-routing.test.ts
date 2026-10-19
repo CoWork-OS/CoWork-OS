@@ -683,6 +683,10 @@ describe("TaskExecutor skill shortlist routing", () => {
     const clear = hints(executor.task.prompt);
     expect(clear).toContain('- Skill "unity:implement-in-app-purchases"');
     expect(clear).not.toContain("employment-legal-investigation-add");
+    // Below 0.7 the hint is tentative: no primed example step, and an explicit way out.
+    expect(clear).toContain("Possibly relevant skills (matched on wording only");
+    expect(clear).toContain("Otherwise ignore this list and plan normally.");
+    expect(clear).not.toContain("Example step:");
     expect(rankModelInvocableSkillsForQuery).toHaveBeenLastCalledWith(
       executor.task.prompt,
       expect.not.objectContaining({ limit: expect.anything() }),
@@ -691,6 +695,7 @@ describe("TaskExecutor skill shortlist routing", () => {
       "log",
       expect.objectContaining({
         message: "[skill-routing] planning hints: clear_lead",
+        strength: "tentative",
         hintedSkillIds: ["unity:implement-in-app-purchases"],
       }),
     );
@@ -701,6 +706,15 @@ describe("TaskExecutor skill shortlist routing", () => {
       pack("web-research-plus", 0.52, "web-search-plus"),
     ]);
     expect(hints("Set up Stripe checkout for my web store")).toBe("");
+
+    rankModelInvocableSkillsForQuery.mockReturnValue([
+      pack("translate", 0.82),
+      pack("summarize", 0.5),
+    ]);
+    const strong = hints("Translate these release notes into Japanese");
+    expect(strong).toContain("Relevant skills for this task:");
+    expect(strong).toContain(`Example step: "Apply the 'translate' skill`);
+    expect(strong).not.toContain("Possibly relevant skills");
 
     executor.getAvailableTools.mockReturnValue([{ name: "read_file" }]);
     rankModelInvocableSkillsForQuery.mockReturnValue([pack("translate", 0.9)]);

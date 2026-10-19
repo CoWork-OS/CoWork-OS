@@ -15,6 +15,8 @@ import {
   type MemoryRepoRecallSource,
 } from "../MemoryRecall";
 import { MemoryRecallStore } from "../memory-recall-sql";
+import { hashMemoryItemContent } from "../memory-items-types";
+import { MemorySourceRecheckService, repoEntrySourceRef } from "../MemorySourceRecheckService";
 import { createMemoryStatementPort } from "../memory-statement-port";
 import type { MemoryRecallQuery } from "../memory-engine-contracts";
 import type { Memory, MemorySearchResult } from "../../database/repositories";
@@ -692,6 +694,45 @@ describe("MemoryRecall repo lane", () => {
       snippet: "[unreviewed] Always deploy on Fridays",
       provenance: { unreviewed: true, by: "agent" },
     });
+  });
+
+  it("says when an entry's source changed after it was saved", async () => {
+    const entryHash = hashMemoryItemContent("The deploy script lives in scripts/deploy.sh");
+    const flagged = new MemorySourceRecheckService({
+      run: async (name) =>
+        name === "memorySources_listFlagged"
+          ? [
+              {
+                id: "s1",
+                workspaceId: "ws-1",
+                sourceKind: "file",
+                sourceKey: "scripts/deploy.sh",
+                sourcePath: "/ws/scripts/deploy.sh",
+                contentHash: "old",
+                observedAt: 1,
+                memoryRef: repoEntrySourceRef("workspaces/app.md", entryHash),
+                needsRecheck: true,
+                changedAt: Date.UTC(2026, 9, 18),
+                createdAt: 1,
+              },
+            ]
+          : [],
+    });
+    await flagged.load();
+    MemorySourceRecheckService.setDefault(flagged);
+    try {
+      const { recall } = makeRecall();
+      const hits = await recall.query(query({ text: "deploy script" }));
+      const hit = hits.find((entry) => entry.ref === "repo:workspaces/app.md#L3");
+      expect(hit).toMatchObject({
+        snippet: "[source may have changed] The deploy script lives in scripts/deploy.sh",
+        provenance: {
+          sourceChanged: { source: "scripts/deploy.sh", kind: "file", changedAt: "2026-10-18" },
+        },
+      });
+    } finally {
+      MemorySourceRecheckService.setDefault(null);
+    }
   });
 
   it("redacts hand-written secrets in hits", async () => {

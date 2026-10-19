@@ -645,6 +645,33 @@ migration.
   undone fingerprint is never applied again. Log rows that quote an item are deleted when the
   item is really deleted; retention drops log rows after 90 days.
 
+## 5c. Source-tied memories
+
+A memory can name where it was read from: `memory_remember` takes an optional `source`, a
+workspace file path or a connector record's resource URI. The link is stored in
+`memory_sources` (`memory/memory-source-sql.ts`, memory-domain units) with the file's SHA-256
+at that time. It points at a memory folder entry by file and entry hash (so moving the line
+keeps it) or at a `memory_items` row by id. Only existing files inside the task's workspace
+can be linked; a source that cannot be linked never fails the save.
+
+- **A file changes:** the ambient file watcher's `file_change` events are checked against the
+  links (whether or not a trigger is configured). A memory is flagged `needs_recheck` when the
+  file's content differs from the saved hash, including when the file was deleted, and
+  unflagged when the file is back to that content. Files the watcher skips are not checked:
+  it watches common project folders of up to six workspaces and ignores `node_modules`,
+  `dist`, `.git` and similar (`monitoring/AmbientMonitoringService.ts`). The headless daemon
+  has no file watcher.
+- **A connector record changes:** a `resource_updated` connector event for a linked URI flags
+  its memories (desktop and headless).
+- **What a flag does:** recall prefixes the memory with `[source may have changed]` and adds
+  `sourceChanged` (source, kind, day) to its provenance; the prompt's memory folder block and
+  the `memory_items` lines tag it "(source may have changed)", and the folder block's header
+  says to check that source before relying on it.
+- **Clearing it:** saving the memory again from the same source, the source returning to its
+  saved content, or a dream that saw the entry next to its current source
+  ([Dreaming](dreaming.md#source-changes)). A link whose folder entry was rewritten or removed
+  is dropped at the next dream. Flags on `memory_items` rows are not rechecked by dreams.
+
 ## 6. The archive (`memories`) and its future
 
 - **Now (Phase 2):** `memories` stays the episodic store: task outcomes, resolved errors,

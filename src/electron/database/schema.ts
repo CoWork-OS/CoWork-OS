@@ -20,6 +20,7 @@ import { createLogger } from "../utils/logger";
 import { runMemoryPayloadMigration } from "../memory/memory-payload-migration-sql";
 import { ensureMemoryItemsSchema } from "../memory/memory-items-sql";
 import { ensureMemoryCurationSchema } from "../memory/memory-curation-log-sql";
+import { ensureMemorySourcesSchema } from "../memory/memory-source-sql";
 import { ensureKnowledgeGraphQualitySchema } from "../knowledge-graph/knowledge-graph-maintenance-sql";
 import type { DatabaseClient } from "./async/DatabaseClient";
 import { ensureSecureSettingsSchema } from "./secure-settings-sql";
@@ -8328,6 +8329,12 @@ export class DatabaseManager {
       ensureMemoryCurationSchema(this.db);
     } catch (error) {
       schemaLogger.warn("[DatabaseManager] memory curation schema initialization failed:", error);
+    }
+    // WP15: where a memory came from, so a changed source flags it for a recheck.
+    try {
+      ensureMemorySourcesSchema(this.db);
+    } catch (error) {
+      schemaLogger.warn("[DatabaseManager] memory sources schema initialization failed:", error);
     }
   }
 

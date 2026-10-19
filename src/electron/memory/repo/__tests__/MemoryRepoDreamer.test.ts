@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRepoService } from "../MemoryRepoService";
 import { MemoryRepoDreamer, type DreamModelClient } from "../MemoryRepoDreamer";
 import type { DreamTaskInput } from "../memory-repo-dream-plan";
+import type { MemorySourceRow } from "../../memory-source-sql";
 
 function hasGit(): boolean {
   try {
@@ -215,6 +216,56 @@ describeWithGit("MemoryRepoDreamer", () => {
     settings = { enabled: true, dailyTokenBudget: 1_000 };
     expect(await dreamer.run("manual")).toMatchObject({ ran: false, reason: "budget" });
     expect(client.calls).toBe(1);
+  });
+
+  it("rechecks memories whose source changed, then marks them reviewed", async () => {
+    const berlin = (await service.entries("me.md")).find((entry) =>
+      entry.text.includes("Lives in Berlin"),
+    )!;
+    const reviewed = vi.fn(async () => {});
+    const forget = vi.fn(async () => {});
+    const row = (id: string) => ({ id }) as MemorySourceRow;
+    const pending = [
+      {
+        row: row("r1"),
+        file: "me.md",
+        entryHash: berlin.hash,
+        source: "docs/profile.md",
+        changedAt: now - 1_000,
+        excerpt: "Moved to Lisbon in October 2026.",
+      },
+      {
+        row: row("r2"),
+        file: "me.md",
+        entryHash: "no-such-entry",
+        source: "docs/old.md",
+        changedAt: now - 1_000,
+        excerpt: "x",
+      },
+    ];
+    let seen = "";
+    answer = (user) => {
+      seen = user;
+      return JSON.stringify({ summary: "", operations: [] });
+    };
+    const dreamer = new MemoryRepoDreamer({
+      getService: () => service,
+      client,
+      listRecentTasks: async () => [],
+      settings: () => settings,
+      now: () => now,
+      sourceRechecks: { pending: async () => pending, reviewed, forget },
+    });
+    // Nothing else is new: the changed source alone makes the dream run.
+    fs.writeFileSync(path.join(service.root, "inbox.md"), "# Inbox\n");
+    expect((await dreamer.run("daily")).ran).toBe(true);
+
+    expect(seen).toMatch(/L\d+ \[user\] Lives in Berlin \(source changed\)/);
+    expect(seen).toContain("<source_changes>");
+    expect(seen).toContain("docs/profile.md changed on");
+    expect(seen).toContain("Moved to Lisbon in October 2026.");
+    expect(forget).toHaveBeenCalledWith([row("r2")]);
+    expect(reviewed).toHaveBeenCalledWith([row("r1")]);
   });
 
   it("records a failed or malformed model answer without touching the folder", async () => {

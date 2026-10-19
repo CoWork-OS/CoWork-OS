@@ -584,6 +584,31 @@ describeWithSqlite("WorkSessionContractService", () => {
     });
   });
 
+  it("ends a wait_for_event wait with its task, and leaves other waits alone", () => {
+    const task = createTask();
+    service.ensureForTask(task);
+    service.beginWait(task.id, {
+      kind: "external",
+      requestId: "event_wait:trigger-1",
+      reason: "the export file",
+    });
+    service.beginWait(task.id, {
+      kind: "external",
+      requestId: "application_completion:op-1",
+      reason: "application_operations",
+    });
+    taskRepo.update(task.id, { status: "cancelled" });
+
+    service.recordTaskTerminal(task.id);
+    const waits = service.getForTask(task.id)!.aggregate.waitStates;
+    expect(waits.find((wait) => wait.requestId === "event_wait:trigger-1")).toMatchObject({
+      status: "cancelled",
+    });
+    expect(waits.find((wait) => wait.requestId === "application_completion:op-1")).toMatchObject({
+      status: "pending",
+    });
+  });
+
   it("keeps contracts with no criteria pending after task completion", () => {
     const task = createTask();
     service.ensureForTask(task);

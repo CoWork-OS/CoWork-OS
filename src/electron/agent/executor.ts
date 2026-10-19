@@ -219,6 +219,7 @@ import {
   LLMImageContent,
   LLMImageMimeType,
   LLMSystemBlock,
+  LLMTextContent,
   PromptCacheProviderFamily,
   StreamProgressCallback,
 } from "./llm";
@@ -5481,6 +5482,8 @@ export class TaskExecutor {
   /**
    * Replace embedded image blocks in conversation history with compact placeholders.
    * This preserves conversational context while dropping base64 payloads from in-memory history.
+   * Screenshots attached to tool results (`companion_user_content`) are compacted too, since
+   * some providers re-send them from the tool result on every turn.
    */
   private sanitizeConversationMessages(messages: LLMMessage[]): LLMMessage[] {
     return messages.map((message) => {
@@ -5488,34 +5491,50 @@ export class TaskExecutor {
         return message;
       }
 
-      const compactedContent = (message.content as Array<LLMContent>).map((block) => {
-        if (!isLLMImageContent(block)) {
-          return block;
-        }
+      const compactedContent = (message.content as Array<LLMContent | LLMToolResult>).map(
+        (block) => {
+          if (block.type === "tool_result") {
+            if (!Array.isArray(block.companion_user_content)) {
+              return block;
+            }
+            return {
+              ...block,
+              companion_user_content: block.companion_user_content.map((companion) =>
+                isLLMImageContent(companion) ? this.compactImageBlock(companion) : companion,
+              ),
+            };
+          }
 
-        const mimeType =
-          typeof block.mimeType === "string" && block.mimeType.length > 0
-            ? block.mimeType
-            : "unknown";
-        const approxSizeBytes =
-          typeof block.originalSizeBytes === "number" && Number.isFinite(block.originalSizeBytes)
-            ? block.originalSizeBytes
-            : typeof block.data === "string" && block.data.length > 0
-              ? Math.ceil((block.data.length * 3) / 4)
-              : null;
-        const sizeText = approxSizeBytes ? ` (~${Math.ceil(approxSizeBytes / 1024)}KB)` : "";
+          if (!isLLMImageContent(block)) {
+            return block;
+          }
 
-        return {
-          type: "text" as const,
-          text: `[Image attachment removed from conversation memory: ${mimeType}${sizeText}]`,
-        };
-      });
+          return this.compactImageBlock(block);
+        },
+      );
 
       return {
         ...message,
         content: compactedContent as LLMContent[],
       };
     });
+  }
+
+  private compactImageBlock(block: LLMImageContent): LLMTextContent {
+    const mimeType =
+      typeof block.mimeType === "string" && block.mimeType.length > 0 ? block.mimeType : "unknown";
+    const approxSizeBytes =
+      typeof block.originalSizeBytes === "number" && Number.isFinite(block.originalSizeBytes)
+        ? block.originalSizeBytes
+        : typeof block.data === "string" && block.data.length > 0
+          ? Math.ceil((block.data.length * 3) / 4)
+          : null;
+    const sizeText = approxSizeBytes ? ` (~${Math.ceil(approxSizeBytes / 1024)}KB)` : "";
+
+    return {
+      type: "text" as const,
+      text: `[Image attachment removed from conversation memory: ${mimeType}${sizeText}]`,
+    };
   }
 
   private sanitizeConversationHistoryForRuntime(messages: LLMMessage[]): LLMMessage[] {

@@ -338,6 +338,8 @@ describeWithSqlite("Node Control Plane browser parity", () => {
         source: "api",
         taskOverrides: { assignedAgentRoleId: "role-1" },
         boardColumn: "todo",
+        // An admin client is the owner's composer: the prompt is typed by the user.
+        promptProvenance: "user_typed",
         autoStart: false,
         requestIdentity: expect.objectContaining({
           title: "Browser task",
@@ -382,6 +384,9 @@ describeWithSqlite("Node Control Plane browser parity", () => {
     expect(result.taskId).toBeTruthy();
     expect(result.task.status).toBe("pending");
     expect(result).not.toHaveProperty("replayed");
+    expect(new TaskStore(manager.getDatabase()).findById(result.taskId)?.promptProvenance).toBe(
+      "user_typed",
+    );
     expect(startTask).toHaveBeenCalledWith(expect.objectContaining({ id: result.taskId }));
     expect(createTaskIdempotent).not.toHaveBeenCalled();
   });

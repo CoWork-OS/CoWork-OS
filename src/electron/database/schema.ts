@@ -6005,6 +6005,26 @@ export class DatabaseManager {
       }
     }
 
+    // Who wrote the task's title and prompt (Task.promptProvenance). Existing rows stay NULL:
+    // a task created before this column existed does not count its prompt as the user's words,
+    // so only what the user types next can expose the admin-lane tools.
+    for (const statement of ["ALTER TABLE tasks ADD COLUMN prompt_provenance TEXT"]) {
+      try {
+        this.db.exec(statement);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/duplicate column name|already exists/i.test(msg)) {
+          continue; // Expected when column exists
+        }
+        schemaLogger.error(
+          "[DatabaseManager] Migration failed (schema may be inconsistent):",
+          statement,
+          msg,
+        );
+        throw err;
+      }
+    }
+
     // Orchestration runs: DAG-based sub-agent orchestration persistence
     try {
       this.db.exec(`

@@ -287,6 +287,7 @@ describe("TaskExecutor entrypoint guards", () => {
         id: "t",
         title: "Personality",
         prompt: "Make your personality more friendly.",
+        promptProvenance: "user_typed",
       });
       expect(exposed(fromPrompt)).toEqual(tools.map((tool) => tool.name));
 
@@ -419,17 +420,27 @@ describe("TaskExecutor entrypoint guards", () => {
       expect(exposed(createExecutor({ id: "c", source: "cron", ...rulePrompt }))).toEqual([
         "read_file",
       ]);
-      // A channel task started by someone other than the verified owner.
+      // Mail commitments ("manual"), planner issues and workflow steps ("api") carry no marker.
+      expect(exposed(createExecutor({ id: "m", source: "manual", ...rulePrompt }))).toEqual([
+        "read_file",
+      ]);
+      expect(exposed(createExecutor({ id: "a", source: "api", ...rulePrompt }))).toEqual([
+        "read_file",
+      ]);
+      // A channel task started by someone other than the verified owner, even if marked.
       const contact = createExecutor({
         id: "g",
         ...rulePrompt,
+        promptProvenance: "user_typed",
         agentConfig: { originChannel: "telegram", gatewaySenderIsOwner: false },
       });
       expect(exposed(contact)).toEqual(["read_file"]);
 
+      // The router marks the verified owner's own channel message.
       const owner = createExecutor({
         id: "o",
         ...rulePrompt,
+        promptProvenance: "user_typed",
         agentConfig: { originChannel: "telegram", gatewaySenderIsOwner: true },
       });
       expect(exposed(owner)).toEqual(["read_file", "add_behavioral_rule"]);
@@ -437,7 +448,12 @@ describe("TaskExecutor entrypoint guards", () => {
 
     it("ignores follow-up text appended to the task prompt", () => {
       // A follow-up that resumes a paused task is appended to task.prompt, whoever sent it.
-      const executor = createExecutor({ id: "t", title: "Fix the parser", prompt: "Fix it." });
+      const executor = createExecutor({
+        id: "t",
+        title: "Fix the parser",
+        prompt: "Fix it.",
+        promptProvenance: "user_typed",
+      });
       executor.task.prompt = `${executor.task.prompt}\n\nUSER UPDATE:\n${RULE_REQUEST}`;
       expect(exposed(executor)).toEqual(["read_file"]);
     });

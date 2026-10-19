@@ -1058,6 +1058,7 @@ const PARALLEL_TOOL_CALL_EXPLICIT_DENYLIST = new Set<string>([
   "run_command",
   "run_applescript",
   "schedule_task",
+  "wait_for_event",
   "spawn_agent",
   "orchestrate_agents",
   "send_agent_message",

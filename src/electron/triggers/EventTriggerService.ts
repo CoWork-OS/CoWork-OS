@@ -192,6 +192,13 @@ export class EventTriggerService implements EventTriggerRegistry {
     return deleted;
   }
 
+  /** A wait_for_event trigger fires once; the daemon removes it when the wait ends. */
+  private async disableEventWaitTrigger(id: string): Promise<void> {
+    await this.updateTrigger(id, { enabled: false }).catch((error) =>
+      this.log(`[EventTriggerService] Could not disable event wait trigger ${id}:`, error),
+    );
+  }
+
   listTriggers(workspaceId?: string): EventTrigger[] {
     const all = Array.from(this.triggers.values());
     if (!workspaceId) return all;
@@ -600,7 +607,18 @@ export class EventTriggerService implements EventTriggerRegistry {
           const title = prepared
             ? cfg.title || `Trigger: ${trigger.name}`
             : substituteEventVariables(cfg.title || `Trigger: ${trigger.name}`, event);
-          if (cfg.runMode === "thread_follow_up") {
+          if (cfg.eventWait && this.deps.onEventWaitFired) {
+            // A task parked by wait_for_event: hand it the event, then stop this one-shot trigger.
+            await this.deps.onEventWaitFired({
+              taskId: cfg.eventWait.taskId,
+              triggerId: trigger.id,
+              event,
+            });
+            await this.disableEventWaitTrigger(trigger.id);
+            historyEntry.taskId = cfg.eventWait.taskId;
+            historyEntry.actionResult = "event_wait_resumed";
+            receipt = { kind: "event_wait", taskId: cfg.eventWait.taskId };
+          } else if (cfg.runMode === "thread_follow_up") {
             if (!cfg.targetTaskId)
               throw new Error("Thread follow-up trigger is missing a target task");
             if (!this.deps.sendTaskMessage)
@@ -830,7 +848,16 @@ export class EventTriggerService implements EventTriggerRegistry {
           const title = prepared
             ? cfg.title || `Trigger: ${trigger.name}`
             : substituteEventVariables(cfg.title || `Trigger: ${trigger.name}`, event);
-          if (cfg.runMode === "thread_follow_up") {
+          if (cfg.eventWait && this.deps.onEventWaitFired) {
+            await this.deps.onEventWaitFired({
+              taskId: cfg.eventWait.taskId,
+              triggerId: trigger.id,
+              event,
+            });
+            await this.disableEventWaitTrigger(trigger.id);
+            historyEntry.taskId = cfg.eventWait.taskId;
+            historyEntry.actionResult = "event_wait_resumed";
+          } else if (cfg.runMode === "thread_follow_up") {
             if (!cfg.targetTaskId) {
               throw new Error("Thread follow-up trigger is missing a target task");
             }

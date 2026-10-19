@@ -150,9 +150,12 @@ export function createHeadlessBotAutomation(input: {
       getActiveTaskCount: () => agentDaemon.getQueueStatus().runningTaskIds.length,
       log: input.log,
       onTriggerFired: (payload) => routines.recordEventTriggerFire(payload).catch(input.log),
+      onEventWaitFired: (params) => agentDaemon.resumeAfterEventWait(params),
     },
     db,
   );
+  // wait_for_event parks tasks on temporary triggers in this engine.
+  agentDaemon.setEventWaitRegistry?.(triggers);
   const mcpEvents = input.mcpClientManager
     ? new MCPEventService(db, input.mcpClientManager, triggers)
     : null;

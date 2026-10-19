@@ -720,9 +720,15 @@ export class WorkSessionContractService {
     if (!task) return {};
     const result = this.getForTask(task.id);
     if (!result) return {};
-    // A write refused because another task was changing the file is moot once this task ends.
+    // Waits that only make sense while the task runs end with it: a wait_for_event wait (its
+    // temporary trigger is removed by the sweep) and a write refused because another task was
+    // changing the file.
     for (const wait of this.repository.listWaitStates(result.session.id, { status: "pending" })) {
-      if (wait.kind === "external" && wait.requestId?.startsWith("resource_conflict:")) {
+      if (
+        wait.kind === "external" &&
+        (wait.requestId?.startsWith("event_wait:") ||
+          wait.requestId?.startsWith("resource_conflict:"))
+      ) {
         this.repository.resolveWaitState(wait.id, "cancelled", { reason: "task_ended" });
       }
     }

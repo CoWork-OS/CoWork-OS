@@ -584,9 +584,14 @@ describeWithSqlite("WorkSessionContractService", () => {
     });
   });
 
-  it("ends a refused-write conflict wait with its task, and leaves other waits alone", () => {
+  it("ends wait_for_event and refused-write conflict waits with their task, and leaves other waits alone", () => {
     const task = createTask();
     service.ensureForTask(task);
+    service.beginWait(task.id, {
+      kind: "external",
+      requestId: "event_wait:trigger-1",
+      reason: "the export file",
+    });
     service.beginWait(task.id, {
       kind: "external",
       requestId: "resource_conflict:file:src/app.ts",
@@ -603,6 +608,9 @@ describeWithSqlite("WorkSessionContractService", () => {
     const terminal = service.recordTaskTerminal(task.id);
     const waits = service.getForTask(task.id)!.aggregate.waitStates;
     expect(terminal).toBeDefined();
+    expect(waits.find((wait) => wait.requestId === "event_wait:trigger-1")).toMatchObject({
+      status: "cancelled",
+    });
     expect(waits.find((wait) => wait.requestId?.startsWith("resource_conflict:"))).toMatchObject({
       status: "cancelled",
     });

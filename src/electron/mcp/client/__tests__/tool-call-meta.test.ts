@@ -45,4 +45,16 @@ describe("MCP tool call _meta", () => {
     expect(params[1]).not.toHaveProperty("_meta");
     expect(params[2]).not.toHaveProperty("_meta");
   });
+
+  it("sends the preview flag on its own when CoWork asks a tool to describe a write", async () => {
+    const { connection, transport } = connected();
+
+    await connection.callTool("jira.create_issue", { projectKey: "OPS" }, { preview: true });
+
+    expect(transport.sendRequest.mock.calls[0][1]).toEqual({
+      name: "jira.create_issue",
+      arguments: { projectKey: "OPS" },
+      _meta: { "cowork.preview": true },
+    });
+  });
 });

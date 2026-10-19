@@ -95,6 +95,7 @@ import {
   ApplicationTaskToolGateway,
 } from "../applications/daemon-application-execution";
 import type { ApplicationExecutionService } from "../applications/ApplicationExecutionService";
+import type { ApplicationVerification } from "../../shared/application-execution";
 import type {
   EventTrigger,
   TriggerCondition,
@@ -109,6 +110,9 @@ import {
 } from "./event-wait";
 import type { ApplicationToolGateway } from "../applications/ApplicationAdapterCatalog";
 import { APPLICATION_DECISION_PREFIX, resolveApplicationInput } from "./tools/application-tools";
+import { AnnotationResultService } from "../annotations/AnnotationResultService";
+import { RevisionSnapshotStore } from "../annotations/revision-snapshots";
+import { getUserDataDir } from "../utils/user-data-dir";
 import {
   loadSessionRetentionSettings,
   saveSessionRetentionSettings,
@@ -178,6 +182,7 @@ import {
   isTempWorkspaceId,
   ImageAttachment,
   Annotation,
+  AnnotationCreateInput,
   QuotedAssistantMessage,
   TaskFollowUpInput,
   AgentMessageDeliveryStatus,
@@ -874,6 +879,7 @@ export class AgentDaemon extends EventEmitter {
   private applicationExecutionService?: ApplicationExecutionService;
   private applicationTaskTools = new ApplicationTaskToolGateway();
   private annotationRepo: AnnotationRepository;
+  private annotationResults?: AnnotationResultService;
   private activityRepo: ActivityStore;
   private agentRoleRepo: AgentRoleStore;
   private mentionRepo: MentionStore;
@@ -1335,6 +1341,48 @@ export class AgentDaemon extends EventEmitter {
     }
   }
 
+  /**
+   * Record a connector write's receipt as evidence for the task (WP13): what the API returned
+   * and, when the connector read the record back, what it found.
+   */
+  recordToolReceipt(
+    taskId: string,
+    input: {
+      tool: string;
+      serverName?: string;
+      receipt: ApplicationVerification;
+      idempotencyKey?: string;
+    },
+  ): void {
+    const { receipt } = input;
+    try {
+      this.workSessionContractService.recordEvidence(taskId, {
+        claim: receipt.summary,
+        sourceType: "tool_output",
+        sourceRef: `mcp:${input.serverName ?? "connector"}:${input.tool}`,
+        status:
+          receipt.status === "verified"
+            ? "supporting"
+            : receipt.status === "contradicted"
+              ? "contradicting"
+              : "neutral",
+        confidence: receipt.status === "verified" ? 1 : 0,
+        basis: receipt.status === "unavailable" ? "unknown" : "observed",
+        capturedAt: receipt.checkedAt,
+        ...(receipt.expiresAt ? { freshnessExpiresAt: receipt.expiresAt } : {}),
+        snippet: JSON.stringify(receipt.evidence).slice(0, 8_000),
+        idempotencyKey: `mcp_receipt:${input.tool}:${input.idempotencyKey ?? receipt.checkedAt}`,
+      });
+      this.logEvent(taskId, "tool_receipt_recorded", {
+        tool: input.tool,
+        status: receipt.status,
+        summary: receipt.summary.slice(0, 300),
+      });
+    } catch (error) {
+      log.debug(`Could not record the receipt of ${input.tool}:`, error);
+    }
+  }
+
   /** Durable attempts of tool calls that write or whose effect is unknown. */
   getToolAttemptRepository(): ToolAttemptRepository {
     this.toolAttemptRepository ??= new ToolAttemptRepository(this.getDatabase());
@@ -1614,6 +1662,10 @@ export class AgentDaemon extends EventEmitter {
       }
       this.vacuumWhenIdle(500);
       await this.runSessionAutoPrune(repo);
+      const prunedSnapshots = await this.getAnnotationResults().pruneSnapshots();
+      if (prunedSnapshots > 0) {
+        log.info(`DB maintenance: removed ${prunedSnapshots} kept revision copies`);
+      }
     } catch (error) {
       log.error("DB maintenance failed:", error);
     }
@@ -10804,6 +10856,11 @@ export class AgentDaemon extends EventEmitter {
 
   private logEventWithinTaskRowReadScope(taskId: string, type: string, payload: Any): void {
     const timestamp = Date.now();
+    if (type === "task_completed" || type === "follow_up_completed") {
+      // The agent's turn is over: link what it changed to the annotations it was addressing.
+      // Optional call: event logging also runs on partial daemon objects.
+      this.settleAnnotationsSoon?.(taskId);
+    }
     const payloadObj: Record<string, unknown> =
       payload && typeof payload === "object" && !Array.isArray(payload)
         ? ({ ...(payload as Record<string, unknown>) } as Record<string, unknown>)
@@ -16779,6 +16836,67 @@ export class AgentDaemon extends EventEmitter {
     await this.timelineRowsCommitted(taskId);
   }
 
+  /** Point at the result (WP14): annotation revisions, results and undo. */
+  getAnnotationResults(): AnnotationResultService {
+    this.annotationResults ??= new AnnotationResultService({
+      annotations: this.annotationRepo,
+      contract: this.workSessionContractService,
+      snapshots: new RevisionSnapshotStore(path.join(getUserDataDir(), "artifact-revisions")),
+      workspaceRootForTask: async (taskId) => {
+        const task = this.taskRepo.findById(taskId);
+        return task ? this.workspaceRepo.findById(task.workspaceId)?.path : undefined;
+      },
+      logEvent: (taskId, type, payload) => this.logEvent(taskId, type, payload),
+      log: (message, error) => log.warn(message, error),
+    });
+    return this.annotationResults;
+  }
+
+  /** Settle in the background; event logging never waits for it or fails because of it. */
+  private settleAnnotationsSoon(taskId: string): void {
+    let results: AnnotationResultService;
+    try {
+      results = this.getAnnotationResults();
+    } catch (error) {
+      log.debug(`Annotation results are unavailable for ${taskId}:`, error);
+      return;
+    }
+    void results
+      .settle(taskId)
+      .catch((error) => log.warn(`Could not settle annotations for ${taskId}:`, error));
+  }
+
+  /** Record the revision of the file a new annotation points at, so its change can be undone. */
+  async pinAnnotationTarget(annotationId: string): Promise<Annotation | undefined> {
+    return this.getAnnotationResults().pinTarget(annotationId);
+  }
+
+  /** Undo the change that addressed an annotation. */
+  async undoAnnotationChange(annotationId: string, undoToken: string) {
+    return this.getAnnotationResults().undo(annotationId, undoToken);
+  }
+
+  /**
+   * An edit the user started by pointing at part of a file (document editor): the annotation is
+   * recorded on the task doing the edit and is being addressed from the start.
+   */
+  async recordPointedEdit(input: AnnotationCreateInput): Promise<Annotation | undefined> {
+    try {
+      const annotation = await this.annotationRepo.create(input);
+      await this.annotationRepo.markAddressing(input.taskId, [annotation.id]);
+      this.logEvent(input.taskId, "annotation_created", {
+        annotationId: annotation.id,
+        surfaceType: annotation.surfaceType,
+        body: annotation.body,
+        targetRef: annotation.targetRef,
+      });
+      return await this.pinAnnotationTarget(annotation.id);
+    } catch (error) {
+      log.warn(`Could not record the pointed edit for ${input.taskId}:`, error);
+      return undefined;
+    }
+  }
+
   private async buildAnnotationFollowUpContext(
     taskId: string,
     message: string,
@@ -16809,8 +16927,17 @@ export class AgentDaemon extends EventEmitter {
           target?.xpath ? `xpath=${target.xpath}` : "",
           target?.tagName ? `tag=${target.tagName}` : "",
           target?.textQuote ? `text=${JSON.stringify(target.textQuote)}` : "",
+          target?.sheetName ? `sheet=${target.sheetName}` : "",
+          target?.cellRange ? `cells=${target.cellRange}` : "",
+          typeof target?.page === "number" ? `page=${target.page}` : "",
+          target?.blockId ? `block=${target.blockId}` : "",
           rect,
           viewport,
+        ].filter(Boolean);
+        const values = [
+          annotation.intent ? `Intent: ${annotation.intent}` : "",
+          annotation.before ? `Values now: ${JSON.stringify(annotation.before)}` : "",
+          annotation.after ? `Values asked for: ${JSON.stringify(annotation.after)}` : "",
         ].filter(Boolean);
         const stylePatch = annotation.stylePatch
           ? [`Style guidance: ${JSON.stringify(annotation.stylePatch)}`]
@@ -16822,6 +16949,7 @@ export class AgentDaemon extends EventEmitter {
           `Annotation ${index + 1} (${annotation.id}) [${annotation.surfaceType}, ${annotation.status}]`,
           `User request: ${annotation.body}`,
           targetParts.length > 0 ? `Target: ${targetParts.join("; ")}` : "Target: unavailable",
+          ...values,
           ...stylePatch,
           ...screenshot,
           "",

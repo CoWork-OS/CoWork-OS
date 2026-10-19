@@ -45,4 +45,13 @@ CoWork sends a stable key for each tool attempt in the request's `_meta`
 `example.create_item` shows the pattern. When the API has its own idempotency header, send the
 key there too: that also covers a connector restart, which the in-process ledger does not.
 
+## Previews and receipts
+
+- List a write tool with `_meta: PREVIEW_TOOL_META`. When `context.preview` is set, return
+  `previewResult(summary, fields)` before writing anything: CoWork shows it in the approval.
+- After a write, build a receipt with `receiptFor(summary, source, readBack)`. `readBack` reads the
+  record from the API and returns what it found; the receipt is `verified` when it does and
+  `unavailable` when it cannot. Pass it as the third argument of `writeResult`. CoWork records it
+  as evidence on the task.
+
 See `docs/enterprise-connectors.md` for the connector contract and tool naming.

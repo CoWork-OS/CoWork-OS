@@ -37,6 +37,8 @@ type MCPToolProperty = {
 type MCPTool = {
   name: string;
   description?: string;
+  /** `cowork.preview: true` on a write tool: it can describe the write first. */
+  _meta?: Record<string, any>;
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;
@@ -279,17 +281,21 @@ const IDEMPOTENCY_META_KEY = "cowork.idempotencyKey";
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const IDEMPOTENCY_MAX_ENTRIES = 1000;
+const PREVIEW_META_KEY = "cowork.preview";
 
-type CallContext = { idempotencyKey?: string };
+type CallContext = { idempotencyKey?: string; preview?: boolean };
 type WriteStatus = "created" | "already_exists" | "unknown";
 type WriteOutcome = { status: WriteStatus; result?: any; message?: string };
 
-/** The idempotency key CoWork sent with this call, when it is well formed. */
+/** The idempotency key CoWork sent with this call, when well formed, and the preview flag. */
 function readIdempotency(params: any): CallContext {
   const key = params?._meta?.[IDEMPOTENCY_META_KEY];
-  return typeof key === "string" && IDEMPOTENCY_KEY_PATTERN.test(key)
-    ? { idempotencyKey: key }
-    : {};
+  return {
+    ...(typeof key === "string" && IDEMPOTENCY_KEY_PATTERN.test(key)
+      ? { idempotencyKey: key }
+      : {}),
+    ...(params?._meta?.[PREVIEW_META_KEY] === true ? { preview: true } : {}),
+  };
 }
 
 /** A key the caller passed as a tool argument wins over the one in `_meta`. */
@@ -371,14 +377,79 @@ class IdempotencyLedger {
 
 const ledger = new IdempotencyLedger();
 
-/** A write tool's result: the usual envelope plus its `status`. */
-function writeResult(outcome: WriteOutcome, envelope: (result: any) => any): any {
+// ==================== Preview and receipts ====================
+//
+// A write tool that lists `_meta: { "cowork.preview": true }` describes its write when called
+// with `_meta["cowork.preview"]: true` and changes nothing: `status: "preview"` and `prepared`
+// (kind, summary, references, payload.fields as label/value pairs). CoWork shows that in the
+// approval. After a real write the result carries a `receipt`: what the API returned and, when
+// the record could be read back, what was found. CoWork records it as evidence.
+
+const PREVIEW_TOOL_META = { [PREVIEW_META_KEY]: true };
+
+type PreviewField = { label: string; value: string };
+
+/** The answer to a preview call: what the write would do. Nothing is changed. */
+function previewResult(summary: string, fields: PreviewField[], references: string[] = []): any {
+  return {
+    ok: true,
+    status: "preview",
+    prepared: {
+      kind: "preview",
+      summary: summary.slice(0, 8000),
+      references: references.slice(0, 32),
+      payload: {
+        fields: fields
+          .filter((field) => field.value !== "")
+          .slice(0, 40)
+          .map((field) => ({ label: field.label, value: field.value.slice(0, 1000) })),
+      },
+    },
+  };
+}
+
+/** One preview line per argument, for fields a connector does not name itself. */
+function fieldsOf(values: Record<string, any> | undefined, skip: string[] = []): PreviewField[] {
+  return Object.entries(values ?? {})
+    .filter(([key]) => !skip.includes(key))
+    .map(([key, value]) => ({
+      label: key,
+      value: typeof value === "string" ? value : JSON.stringify(value),
+    }));
+}
+
+/** A write's receipt: verified when the record could be read back. */
+async function receiptFor(
+  summary: string,
+  source: string,
+  readBack: () => Promise<string | undefined>,
+): Promise<any> {
+  const checkedAt = Date.now();
+  try {
+    const found = await readBack();
+    if (found) {
+      return { status: "verified", summary, checkedAt, evidence: [{ source, claim: found }] };
+    }
+  } catch {
+    // The write happened; only reading it back failed.
+  }
+  return {
+    status: "unavailable",
+    summary: `${summary}; it could not be read back`,
+    checkedAt,
+    evidence: [{ source, claim: "The API reported the write." }],
+  };
+}
+
+/** A write tool's result: the usual envelope plus its `status`, and its receipt. */
+function writeResult(outcome: WriteOutcome, envelope: (result: any) => any, receipt?: any): any {
   if (outcome.status === "unknown") {
     return { ok: false, status: "unknown", message: outcome.message };
   }
   return {
     ...envelope(outcome.result),
     status: outcome.status,
+    ...(receipt && outcome.status === "created" ? { receipt } : {}),
     ...(outcome.status === "already_exists"
       ? {
           message:
@@ -391,11 +462,13 @@ function writeResult(outcome: WriteOutcome, envelope: (result: any) => any): any
 /** `structuredContent` for a write status, so the client can act on it without parsing text. */
 function writeStatusContent(result: any): Record<string, any> {
   const status = result && typeof result === "object" ? result.status : undefined;
+  if (status === "preview") return { structuredContent: { status, prepared: result.prepared } };
   if (status !== "created" && status !== "already_exists" && status !== "unknown") return {};
   return {
     structuredContent: {
       status,
       ...(typeof result.message === "string" ? { message: result.message } : {}),
+      ...(result.receipt ? { receipt: result.receipt } : {}),
     },
     ...(status === "unknown" ? { isError: true } : {}),
   };
@@ -649,6 +722,7 @@ const tools: MCPTool[] = [
   },
   {
     name: `${CONNECTOR_PREFIX}.create_object`,
+    _meta: PREVIEW_TOOL_META,
     description: "Create a CRM object",
     inputSchema: {
       type: "object",
@@ -710,6 +784,12 @@ const handlers: Record<string, ToolHandler> = {
     return buildEnvelope(result);
   },
   [`${CONNECTOR_PREFIX}.create_object`]: async (args, context) => {
+    if (context.preview) {
+      return previewResult(`Create a ${args.objectType} object in HubSpot`, [
+        { label: "Object type", value: String(args.objectType ?? "") },
+        ...fieldsOf(args.properties),
+      ]);
+    }
     const outcome = await ledger
       .run(idempotencyKeyFor(args, context), async () => {
         try {
@@ -730,7 +810,18 @@ const handlers: Record<string, ToolHandler> = {
           result: { data: error.existing, meta: { durationMs: 0, baseUrl: undefined } },
         };
       });
-    return writeResult(outcome, (result) => buildEnvelope(result));
+    const createdId = outcome.status === "created" ? outcome.result?.data?.id : undefined;
+    const receipt = createdId
+      ? await receiptFor(
+          `Created HubSpot ${args.objectType} ${createdId}`,
+          `hubspot:${args.objectType}:${createdId}`,
+          async () => {
+            const read = await client.getObject(String(args.objectType), String(createdId));
+            return read.data?.id ? `${args.objectType} ${read.data.id} exists` : undefined;
+          },
+        )
+      : undefined;
+    return writeResult(outcome, (result) => buildEnvelope(result), receipt);
   },
   [`${CONNECTOR_PREFIX}.update_object`]: async (args) => {
     const result = await client.updateObject(args.objectType, args.id, args.properties || {});

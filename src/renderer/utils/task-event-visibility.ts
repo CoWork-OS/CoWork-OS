@@ -35,6 +35,9 @@ export const IMPORTANT_EVENT_TYPES: EventType[] = [
   "file_created",
   "file_modified",
   "file_deleted",
+  // What the agent did at a place the user pointed to, with Undo when it changed a file.
+  "annotation_addressed",
+  "annotation_change_undone",
   "artifact_created",
   "diagram_created",
   "citations_collected",

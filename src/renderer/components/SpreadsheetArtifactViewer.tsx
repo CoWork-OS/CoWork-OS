@@ -36,6 +36,7 @@ import { SpreadsheetArtifactCard } from "./SpreadsheetArtifactCard";
 import { FileTypeIcon } from "./FileTypeIcon";
 import "./artifact-viewers.css";
 import { AttachmentTile } from "./AttachmentTile";
+import { buildSpreadsheetPointerAnnotation, spreadsheetRangeAddress } from "./spreadsheet-pointer";
 
 type SpreadsheetArtifactViewerMode = "sidebar" | "fullscreen";
 type SpreadsheetSettingsTab =
@@ -97,6 +98,8 @@ type SpreadsheetArtifactViewerProps = {
   availableModels?: LLMModelInfo[];
   availableProviders?: LLMProviderInfo[];
   workspaceId?: string;
+  /** The task a request about the selected cells goes to. */
+  taskId?: string;
   onModelChange?: (selection: {
     providerType?: LLMProviderType;
     modelKey: string;
@@ -288,6 +291,7 @@ export function SpreadsheetArtifactViewer({
   availableModels = [],
   availableProviders = [],
   workspaceId,
+  taskId,
   onModelChange,
   onOpenSettings,
   turnContext,
@@ -307,6 +311,8 @@ export function SpreadsheetArtifactViewer({
     start: { row: 1, column: 1 },
     end: { row: 1, column: 1 },
   });
+  // True once the user clicks or moves to a cell: the next request points at that selection.
+  const [selectionPointed, setSelectionPointed] = useState(false);
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -349,6 +355,7 @@ export function SpreadsheetArtifactViewer({
     setActiveSheetIndex(0);
     setSelectedCell({ row: 1, column: 1 });
     setSelectedRange({ start: { row: 1, column: 1 }, end: { row: 1, column: 1 } });
+    setSelectionPointed(false);
     setEditingCell(null);
     setDirty(false);
     setSaveMessage("");
@@ -485,6 +492,7 @@ export function SpreadsheetArtifactViewer({
   };
 
   const selectCell = (position: CellPosition, extend = false) => {
+    setSelectionPointed(true);
     setSelectedCell(position);
     setSelectedRange((current) => {
       if (!extend) return { start: position, end: position };
@@ -932,6 +940,17 @@ export function SpreadsheetArtifactViewer({
     [fullscreenAttachments, workspaceId],
   );
 
+  // The cells a request points at: the selection, once the user has chosen one.
+  const pointedRange =
+    mode === "fullscreen" &&
+    selectionPointed &&
+    taskId &&
+    activeSheet &&
+    normalizedSelectedRange &&
+    typeof window.electronAPI?.createAnnotation === "function"
+      ? normalizedSelectedRange
+      : null;
+
   const handleFullscreenSend = async () => {
     const message = fullscreenMessage.trim();
     if ((!message && fullscreenAttachments.length === 0) || !onSendMessage || fullscreenSending)
@@ -943,6 +962,27 @@ export function SpreadsheetArtifactViewer({
     setFullscreenAttachments([]);
     try {
       setAttachmentError("");
+      if (pointedRange && taskId && activeSheet && message) {
+        // Point at the result: the agent gets the cells, their values, and the revision of the
+        // file, and the change it makes can be undone from the task.
+        try {
+          await window.electronAPI.createAnnotation(
+            buildSpreadsheetPointerAnnotation({
+              taskId,
+              workspaceId,
+              filePath: fileData?.path || filePath,
+              sheetName: activeSheet.name,
+              range: pointedRange,
+              cellText: (row, column) =>
+                getCellText(activeSheet.rows[row - 1]?.[column - 1] || null),
+              request: message,
+            }),
+          );
+          setSelectionPointed(false);
+        } catch {
+          // The request still goes out, without the pointed cells.
+        }
+      }
       const payload = await buildMessageWithAttachments(message);
       await onSendMessage(payload.message, payload.images);
     } catch {
@@ -1304,6 +1344,22 @@ export function SpreadsheetArtifactViewer({
             </div>
           )}
           <div className="spreadsheet-viewer-composer">
+            {pointedRange && activeSheet && (
+              <div className="spreadsheet-viewer-pointer">
+                <span>
+                  Asking about {activeSheet.name}!{spreadsheetRangeAddress(pointedRange)}
+                </span>
+                <button
+                  type="button"
+                  className="spreadsheet-viewer-pointer-clear"
+                  onClick={() => setSelectionPointed(false)}
+                  aria-label="Don't point at these cells"
+                  title="Don't point at these cells"
+                >
+                  <X size={12} aria-hidden="true" />
+                </button>
+              </div>
+            )}
             {(fullscreenAttachments.length > 0 || attachmentError || voiceNotice) && (
               <div className="attachment-panel spreadsheet-viewer-attachment-panel">
                 {attachmentError && <div className="attachment-error">{attachmentError}</div>}

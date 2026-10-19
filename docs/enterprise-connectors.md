@@ -245,6 +245,36 @@ created in the last day, Resend webhooks by endpoint; Resend email relies on its
 does not survive a connector restart. The Linear connector has no write tools. The template in
 `connectors/templates/mcp-connector` shows the pattern.
 
+### Write Previews and Receipts
+
+A write tool can say what it would do before the user approves it. It advertises this in its
+`tools/list` entry with `"_meta": { "cowork.preview": true }`. When such a tool needs approval,
+CoWork first calls it with `"_meta": { "cowork.preview": true }` and the same arguments. The tool
+must change nothing and answer with:
+
+```
+"structuredContent": { "status": "preview", "prepared": {
+  "kind": "preview", "summary": "Send the email \"Invoice\" to 2 recipients",
+  "references": [], "payload": { "fields": [ { "label": "To", "value": "a@example.com" } ] } } }
+```
+
+The approval then shows the summary and the fields, labeled "Described by <server>", instead of
+the raw arguments. A preview call carries no idempotency key, so it never
+uses up the key of the real write. CoWork only asks local (stdio) connectors: a remote server
+would receive the arguments before the user approved sending them. If the connector does not
+answer within 15 seconds, or answers with anything else, the approval shows the arguments as
+before. The text is the connector's own description; a connector that advertises previews and
+still writes on a preview call is broken, and CoWork cannot tell.
+
+After a real write, a tool can return a `receipt` in `structuredContent`: `status` (`verified`,
+`contradicted` or `unavailable`), `summary`, `checkedAt` and `evidence`
+(`source` and `claim` pairs). CoWork records it as evidence on the task, so the outcome check sees
+what the connector found rather than only what the agent says. The bundled connectors read the
+record back after creating it: Jira the issue's summary, Salesforce the record, HubSpot the
+object, Resend the email and its last event. When the read-back fails, the receipt is
+`unavailable` and the write still counts as done. A retry that finds an earlier write
+(`already_exists`) carries no receipt. Resend's `create_webhook` has a preview and no receipt.
+
 ### Required Baseline Tools
 
 Every connector should provide:

@@ -10,4 +10,5 @@ export const USAGE_TELEMETRY_UNITS = {
   usageTelemetry_insertLlmCall: storeUnit(make, "insertLlmCall", { readonly: false }),
   usageTelemetry_insertJevCall: storeUnit(make, "insertJevCall", { readonly: false }),
   usageTelemetry_taskCostTotals: storeUnit(make, "taskCostTotals", { readonly: true }),
+  usageTelemetry_taskDurations: storeUnit(make, "taskDurations", { readonly: true }),
 } satisfies UnitCatalog;

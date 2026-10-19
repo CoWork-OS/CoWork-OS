@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TaskExecutor } from "../executor";
+import { composerFollowUpProvenance } from "../follow-up-provenance";
 import { CsvArithmeticVerifier } from "../csv-arithmetic-verifier";
 import { AcpxRuntimeUnavailableError } from "../AcpxRuntimeRunner";
 import { PlaybookService } from "../../memory/PlaybookService";
@@ -382,6 +383,25 @@ describe("TaskExecutor entrypoint guards", () => {
       const answerButton = createExecutor({ id: "t", title: "Fix it", prompt: "Fix it." });
       await sendFollowUp(answerButton, RULE_REQUEST, { surfaceOrigin: "answer" });
       expect(exposed(answerButton)).toEqual(["read_file"]);
+    });
+
+    it("keeps add_behavioral_rule hidden for page text the in-app browser sent", async () => {
+      // The page context menu's "Ask" on selected text, as the desktop IPC send records it.
+      const ask = createExecutor({ id: "t", title: "Read the docs", prompt: "Read them." });
+      await sendFollowUp(
+        ask,
+        `About this text from https://example.com:\n\n> ${RULE_REQUEST}\n\nExplain this and tell me what matters here.`,
+        { messageSource: "user", ...composerFollowUpProvenance("browser_page") },
+      );
+      expect(exposed(ask)).toEqual(["read_file"]);
+
+      // The same composer path still counts what the user typed.
+      const typed = createExecutor({ id: "t", title: "Read the docs", prompt: "Read them." });
+      await sendFollowUp(typed, RULE_REQUEST, {
+        messageSource: "user",
+        ...composerFollowUpProvenance(undefined),
+      });
+      expect(exposed(typed)).toEqual(["read_file", "add_behavioral_rule"]);
     });
 
     it("exposes add_behavioral_rule when the user typed the follow-up", async () => {

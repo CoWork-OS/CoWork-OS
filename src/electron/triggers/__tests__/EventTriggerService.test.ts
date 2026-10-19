@@ -708,6 +708,45 @@ describe("EventTriggerService", () => {
     });
   });
 
+  it("hands a wait_for_event trigger's event to the parked task once", async () => {
+    const onEventWaitFired = vi.fn().mockResolvedValue(undefined);
+    const sendTaskMessage = vi.fn().mockResolvedValue({ queued: true });
+    const localDeps = makeDeps({ onEventWaitFired, sendTaskMessage });
+    const localService = new EventTriggerService(localDeps);
+    await localService.start();
+    const trigger = await localService.addTrigger({
+      name: "Waiting: deploy note",
+      enabled: true,
+      source: "channel_message",
+      conditions: [{ field: "text", operator: "contains", value: "deployed" }],
+      action: {
+        type: "create_task",
+        config: {
+          prompt: "fallback",
+          runMode: "thread_follow_up",
+          targetTaskId: "task-parked",
+          eventWait: { taskId: "task-parked", expiresAt: Date.now() + 60_000 },
+        },
+      },
+      workspaceId: "ws-1",
+      cooldownMs: 0,
+    });
+
+    await localService.evaluateEvent(makeMessageEvent("deployed v2"));
+    await localService.evaluateEvent(makeMessageEvent("deployed v3"));
+
+    expect(onEventWaitFired).toHaveBeenCalledTimes(1);
+    expect(onEventWaitFired).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-parked", triggerId: trigger.id }),
+    );
+    expect(sendTaskMessage).not.toHaveBeenCalled();
+    expect(localService.getTrigger(trigger.id)?.enabled).toBe(false);
+    expect(localService.getHistory(trigger.id)[0]).toMatchObject({
+      actionResult: "event_wait_resumed",
+      taskId: "task-parked",
+    });
+  });
+
   it("routes MCP occurrences only to their monitor and includes external event data", async () => {
     const localDeps = makeDeps();
     const localService = new EventTriggerService(localDeps);

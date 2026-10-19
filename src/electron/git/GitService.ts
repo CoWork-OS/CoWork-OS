@@ -250,6 +250,69 @@ export class GitService {
     return { filesChanged, linesAdded, linesRemoved, diffOutput: stdout };
   }
 
+  /** Files a worktree's commits changed since it left its base (`git diff --name-only`). */
+  static async getChangedFiles(worktreePath: string, baseBranch: string): Promise<string[]> {
+    const { stdout } = await GitService.exec(
+      ["diff", "--name-only", `${baseBranch}..HEAD`],
+      worktreePath,
+    );
+    return stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  /** The commit a local branch points to, or a given commit verified to exist. */
+  static async resolveCommit(
+    repoPath: string,
+    commitOrBranch: { commit?: string; branch?: string },
+  ): Promise<string> {
+    if (commitOrBranch.commit) {
+      if (!/^[0-9a-f]{40}$/i.test(commitOrBranch.commit)) {
+        throw new Error("A base commit must be a full 40-character commit id.");
+      }
+      const { stdout } = await GitService.exec(
+        ["rev-parse", "--verify", `${commitOrBranch.commit}^{commit}`],
+        repoPath,
+      );
+      return stdout.trim();
+    }
+    return GitService.getHeadCommit(repoPath, commitOrBranch.branch);
+  }
+
+  /**
+   * Files that would conflict if both branches were merged, from `git merge-tree --write-tree`
+   * (git 2.38+), which merges in memory and touches no checkout. Empty when they merge cleanly;
+   * null when this git cannot tell.
+   */
+  static async mergeConflicts(
+    repoPath: string,
+    branchA: string,
+    branchB: string,
+  ): Promise<string[] | null> {
+    const result = await GitService.execWithExitCode(
+      [
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        `refs/heads/${branchA}`,
+        `refs/heads/${branchB}`,
+      ],
+      repoPath,
+    );
+    if (result.code === 0) return [];
+    if (result.code !== 1) return null;
+    // First line: the merged tree; then one conflicted file per line until a blank line.
+    const lines = result.stdout.split("\n").slice(1);
+    const files: string[] = [];
+    for (const line of lines) {
+      if (!line.trim()) break;
+      files.push(line.trim());
+    }
+    return [...new Set(files)];
+  }
+
   /**
    * Get full diff output for review.
    */
@@ -519,6 +582,24 @@ export class GitService {
       // Best effort probe only.
     }
     return { success: false, error: "Pull request not found" };
+  }
+
+  /** Run git and return its exit code instead of failing on a non-zero one. */
+  private static execWithExitCode(
+    args: string[],
+    cwd: string,
+  ): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    return new Promise((resolve) => {
+      execFile(
+        "git",
+        args,
+        { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
+        (error, stdout, stderr) => {
+          const code = error ? (typeof error.code === "number" ? error.code : null) : 0;
+          resolve({ code, stdout: stdout || "", stderr: stderr || "" });
+        },
+      );
+    });
   }
 
   private static execExternal(

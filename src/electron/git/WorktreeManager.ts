@@ -145,6 +145,8 @@ export class WorktreeManager {
     workspaceId: string,
     workspacePath: string,
     startingBranch?: string,
+    /** Exact commit to start from (Build Compare pins every variant to one commit). */
+    pinnedBaseCommit?: string,
   ): Promise<WorktreeInfo> {
     const existing = await this.worktreeInfoRepo.findByTaskId(taskId);
     if (existing && existing.status !== "cleaned") {
@@ -174,7 +176,9 @@ export class WorktreeManager {
         `Starting branch "${startingBranch}" is unavailable. Select an existing local branch.`,
       );
     }
-    const baseCommit = await GitService.getHeadCommit(repoPath, startingBranch);
+    const baseCommit = pinnedBaseCommit
+      ? await GitService.resolveCommit(repoPath, { commit: pinnedBaseCommit })
+      : await GitService.getHeadCommit(repoPath, startingBranch);
     const branchName = GitService.generateBranchName(taskTitle, settings.branchPrefix, taskId);
 
     // Place worktrees in a subdirectory that's gitignored

@@ -232,6 +232,35 @@ export class MissionControlRepository {
     transaction();
   }
 
+  /** Remove items whose fingerprint starts with `prefix` and is not in `keep`. */
+  deleteItemsByPrefixNotIn(prefix: string, keep: string[], workspaceId?: string): void {
+    const conditions = ["fingerprint LIKE ? ESCAPE '\\'"];
+    const params: unknown[] = [`${prefix.replace(/[\\%_]/g, "\\$&")}%`];
+    const scope = normalizeScopeId(workspaceId);
+    if (scope) {
+      conditions.push("workspace_id = ?");
+      params.push(scope);
+    }
+    if (keep.length > 0) {
+      conditions.push(`fingerprint NOT IN (${keep.map(() => "?").join(", ")})`);
+      params.push(...keep);
+    }
+    const rows = this.db
+      .prepare(`SELECT id FROM mission_control_items WHERE ${conditions.join(" AND ")}`)
+      .all(...params) as Array<{ id: string }>;
+    if (rows.length === 0) return;
+    const deleteEvidence = this.db.prepare(
+      "DELETE FROM mission_control_item_evidence WHERE item_id = ?",
+    );
+    const deleteItem = this.db.prepare("DELETE FROM mission_control_items WHERE id = ?");
+    this.db.transaction(() => {
+      for (const row of rows) {
+        deleteEvidence.run(row.id);
+        deleteItem.run(row.id);
+      }
+    })();
+  }
+
   private getItemByFingerprint(fingerprint: string): MissionControlItem | undefined {
     const row = this.db
       .prepare(

@@ -3660,6 +3660,107 @@ html.visual-calm .calm-build-recent-dot.tone-error {
   background: var(--color-error, #ef4444);
 }
 
+/* Build Compare check input and Merge review (shared-change coordination). */
+html.visual-calm .calm-build-compare-check {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--calm-border);
+  border-radius: 9px;
+  background: var(--calm-surface);
+  color: var(--calm-text);
+  font: 400 12.5px var(--font-mono);
+}
+
+html.visual-calm .calm-build-review-refresh {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--calm-text-muted);
+  font: 500 11px var(--font-mono);
+  cursor: pointer;
+}
+
+html.visual-calm .calm-build-review-body {
+  padding: 6px 12px 10px;
+}
+
+html.visual-calm .calm-build-review-group + .calm-build-review-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--calm-border);
+}
+
+html.visual-calm .calm-build-review-intent {
+  color: var(--calm-text-secondary);
+  font: 500 12px var(--font-ui);
+  margin-bottom: 4px;
+}
+
+html.visual-calm .calm-build-review-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+html.visual-calm .calm-build-review-task {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+html.visual-calm .calm-build-review-title {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--calm-text);
+  font: 500 13px var(--font-ui);
+  cursor: pointer;
+}
+
+html.visual-calm .calm-build-review-meta,
+html.visual-calm .calm-build-review-check,
+html.visual-calm .calm-build-review-note,
+html.visual-calm .calm-build-review-checks p {
+  color: var(--calm-text-muted);
+  font: 400 11.5px var(--font-mono);
+}
+
+html.visual-calm .calm-build-review-check.tone-done {
+  color: var(--calm-success);
+}
+
+html.visual-calm .calm-build-review-check.tone-error,
+html.visual-calm .calm-build-review-checks p.tone-error {
+  color: var(--color-error, #ef4444);
+}
+
+html.visual-calm .calm-build-review-action {
+  padding: 3px 8px;
+  border: 1px solid var(--calm-border);
+  border-radius: 7px;
+  background: var(--calm-surface);
+  color: var(--calm-text-secondary);
+  font: 500 12px var(--font-ui);
+  cursor: pointer;
+}
+
+html.visual-calm .calm-build-review-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+html.visual-calm .calm-build-review-checks,
+html.visual-calm .calm-build-review-note {
+  margin: 8px 0 0;
+}
+
+html.visual-calm .calm-build-review-checks p {
+  margin: 2px 0;
+}
+
 html.visual-calm .calm-build-recent-state.tone-running {
   color: var(--calm-accent);
 }

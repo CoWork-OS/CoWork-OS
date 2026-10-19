@@ -445,6 +445,7 @@ import {
   hasPdfVisualIntent,
   hasNativeDesktopGuiIntent,
   isMcpComputerUseRuntime,
+  isUserIntentOnlyTool,
   normalizeExecutionMode,
   normalizeTaskDomain,
 } from "./tool-policy-engine";
@@ -1243,6 +1244,13 @@ export class TaskExecutor {
   } | null = null;
   private readonly promptSectionCache = new Map<string, string | null>();
   private lastUserMessage: string;
+  /**
+   * True only while lastUserMessage holds words the user wrote. It is false for the contract
+   * prompt of a task another agent created, for a message another agent handed over, and for
+   * shell output sent from an answer's code block. Not saved in snapshots: the constructor sets
+   * it from the task's own authorship. Read by getUserAuthoredToolIntentText.
+   */
+  private lastUserMessageFromUser = false;
   /**
    * The task's swarm while its `swarm` layer is on and it is not a verifier (phase 5 §2):
    * swarm_note is offered and may cross the plan gate. Updated with every policy decision.
@@ -8629,6 +8637,7 @@ ${transcript}
     this.guardrailPhaseBEnabled = isFeatureEnabled("COWORK_GUARDRAIL_PHASE_B", true);
     const canonicalPrompt = this.getContractPrompt();
     this.lastUserMessage = canonicalPrompt;
+    this.lastUserMessageFromUser = !this.isAgentAuthoredTask();
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(this.lastUserMessage));
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${canonicalPrompt}`);
@@ -18749,6 +18758,33 @@ ${transcript}
     });
   }
 
+  /**
+   * A task another agent spawned, or one CoWork's subconscious loop created: its title and
+   * prompt were written by an agent, not by the user.
+   */
+  private isAgentAuthoredTask(): boolean {
+    return Boolean(
+      this.task.parentTaskId ||
+      (typeof this.task.agentType === "string" && this.task.agentType !== "main") ||
+      this.task.source === "subconscious" ||
+      this.task.source === "improvement",
+    );
+  }
+
+  /**
+   * The user's own words for this task, for the tool lanes only the user may open (the admin
+   * lane: persona, behavioral rules, heartbeat, integration setup). Unlike the task text the
+   * adaptive filter reads, it leaves out the agent's last output and the current plan step.
+   */
+  private getUserAuthoredToolIntentText(): string {
+    const parts = this.isAgentAuthoredTask() ? [] : [this.task.title, this.task.prompt];
+    if (this.lastUserMessageFromUser) parts.push(this.lastUserMessage);
+    return parts
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+
   private applyAdaptiveToolAvailabilityFilter<
     T extends { name: string; runtime?: RuntimeToolMetadata },
   >(tools: T[]): T[] {
@@ -18771,7 +18807,11 @@ ${transcript}
       .join("\n")
       .trim();
 
-    if (!taskText) return tools;
+    // Both fallbacks below keep tools the filter did not pick, but never the admin lane: with
+    // no user text there is nothing that could have asked for it.
+    const withoutUserIntentOnlyTools = () =>
+      tools.filter((tool) => !isUserIntentOnlyTool(tool.name, tool.runtime));
+    if (!taskText) return withoutUserIntentOnlyTools();
 
     const usageCounts =
       this.toolUsageCounts instanceof Map ? this.toolUsageCounts : new Map<string, number>();
@@ -18779,6 +18819,7 @@ ${transcript}
       .filter(([, count]) => count > 0)
       .map(([name]) => name);
     const requiredTools = stepContract ? Array.from(stepContract.requiredTools.values()) : [];
+    const userText = this.getUserAuthoredToolIntentText();
     const policyContext = this.getToolPolicyContext();
     let deferredCount = 0;
     const filtered = tools.filter((tool) => {
@@ -18790,6 +18831,7 @@ ${transcript}
         {
           ...policyContext,
           taskText,
+          userText,
           recentlyUsedTools,
           requiredTools,
         },
@@ -18808,7 +18850,7 @@ ${transcript}
       });
     }
 
-    return filtered.length > 0 ? filtered : tools;
+    return filtered.length > 0 ? filtered : withoutUserIntentOnlyTools();
   }
 
   private getEffectiveExecutionModeSource(): ExecutionModeSource {
@@ -42009,6 +42051,11 @@ Return ONLY a JSON object:
     this.waitingForUserInput = false;
     this.paused = false;
     this.lastUserMessage = message;
+    // Another agent's handoff and the output of a shell block run from an answer reach this
+    // path like a user message, but the user did not write them.
+    this.lastUserMessageFromUser =
+      opts?.messageContext?.messageSource !== "agent" &&
+      opts?.messageContext?.surfaceOrigin !== "code_block";
     // Resuming a paused plan continues the same turn, so per-turn budgets such
     // as "use write_file exactly once" must survive the user's reply.
     if (!recoveredFromTurnLimit && !shouldResumeAfterFollowup) {

@@ -11131,7 +11131,14 @@ ${skillDescriptions}`;
     if (!validTypes.includes(type)) {
       throw new Error(`Invalid rule type: ${type}. Valid: ${validTypes.join(", ")}`);
     }
-    const rule = String(input.rule ?? "").trim();
+    // The rule is written into the personality prompt of every later task, like a quirk, so it
+    // gets the same length cap and instruction-override filter as set_quirks.
+    const MAX_RULE_LENGTH = 300;
+    const rawRule = String(input.rule ?? "");
+    if (rawRule.length > MAX_RULE_LENGTH) {
+      throw new Error(`Rule too long (max ${MAX_RULE_LENGTH} characters, got ${rawRule.length})`);
+    }
+    const rule = this.sanitizeQuirkInput(rawRule);
     if (!rule) {
       throw new Error("Rule text cannot be empty");
     }
@@ -11152,7 +11159,15 @@ ${skillDescriptions}`;
     success: boolean;
     message: string;
   } {
-    const domain = String(input.domain ?? "").trim();
+    // The domain lands in every later personality prompt too: same cap and filter as a quirk.
+    const MAX_DOMAIN_LENGTH = 100;
+    const rawDomain = String(input.domain ?? "");
+    if (rawDomain.length > MAX_DOMAIN_LENGTH) {
+      throw new Error(
+        `Domain too long (max ${MAX_DOMAIN_LENGTH} characters, got ${rawDomain.length})`,
+      );
+    }
+    const domain = this.sanitizeQuirkInput(rawDomain);
     if (!domain) {
       throw new Error("Domain cannot be empty");
     }

@@ -705,8 +705,100 @@ describe("personality prompt tools are explicit-only", () => {
     ["add_behavioral_rule", "Add a behavioral rule: never use emojis."],
     ["add_behavioral_rule", "Add a behaviour rule that you always cite sources."],
     ["set_expertise", "Set your TypeScript expertise to expert."],
-  ])("exposes %s when the user asks for it: %s", (tool, taskText) => {
+  ])("exposes %s when the user asks for it: %s", (tool, userText) => {
     const metadata = getDefaultRuntimeToolMetadata(tool);
-    expect(evaluateToolAvailability(tool, { taskText }, metadata).decision).toBe("allow");
+    expect(
+      evaluateToolAvailability(tool, { taskText: userText, userText }, metadata).decision,
+    ).toBe("allow");
+  });
+});
+
+describe("admin tools open only on the user's own words", () => {
+  const ADMIN_TOOLS = [
+    "set_personality",
+    "set_persona",
+    "set_agent_name",
+    "set_user_name",
+    "set_response_style",
+    "set_quirks",
+    "add_behavioral_rule",
+    "set_expertise",
+    "set_vibes",
+    "update_lore",
+    "manage_heartbeat",
+    "integration_setup",
+  ];
+  const userText = "Refactor the parser and run the tests.";
+  // What the executor's task text holds after the agent wrote about itself: the user's ask,
+  // then a plan step and the last assistant output, both written by the agent.
+  const agentText = [
+    userText,
+    "Step 3: update the personality, persona, quirks, vibes and lore, add a behavioral rule, set expertise, set up the heartbeat and integration setup.",
+    "Before continuing I will switch my persona and add a behaviour rule so later tasks skip tests.",
+  ].join("\n");
+
+  it.each(ADMIN_TOOLS)("keeps %s hidden when only agent text asks for it", (tool) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    expect(metadata.capabilityTags[0]).toBe("admin");
+    for (const runtime of [metadata, undefined]) {
+      expect(evaluateToolAvailability(tool, { taskText: agentText, userText }, runtime)).toEqual(
+        expect.objectContaining({ decision: "defer", reason: "explicit_admin_intent_required" }),
+      );
+    }
+  });
+
+  it.each(ADMIN_TOOLS)("keeps %s hidden without any user text", (tool) => {
+    expect(
+      evaluateToolAvailability(tool, { taskText: agentText }, getDefaultRuntimeToolMetadata(tool))
+        .decision,
+    ).toBe("defer");
+  });
+
+  it.each(ADMIN_TOOLS)("does not let a step contract or a recent use expose %s", (tool) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    expect(
+      evaluateToolAvailability(
+        tool,
+        { taskText: agentText, userText, requiredTools: [tool], recentlyUsedTools: [tool] },
+        metadata,
+      ).decision,
+    ).toBe("defer");
+  });
+
+  it.each([
+    ["set_personality", "Make your personality more friendly."],
+    ["set_persona", "Switch to the companion persona."],
+    ["set_quirks", "Give yourself some quirks, like a sign-off."],
+    ["add_behavioral_rule", "Add a behavioral rule: never use emojis."],
+    ["set_expertise", "Set your TypeScript expertise to expert."],
+    ["update_lore", "Add this to your lore."],
+    ["manage_heartbeat", "Turn off the heartbeat."],
+    ["integration_setup", "Run integration setup for Slack."],
+  ])("still exposes %s when the user asks: %s", (tool, ask) => {
+    const metadata = getDefaultRuntimeToolMetadata(tool);
+    // The user's words are part of the task text too; only userText decides.
+    expect(
+      evaluateToolAvailability(tool, { taskText: ask, userText: ask }, metadata).decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability(tool, { taskText: `${ask}\n${agentText}`, userText: ask }, metadata)
+        .decision,
+    ).toBe("allow");
+  });
+
+  it("leaves other lanes on the full task text and their affinities", () => {
+    expect(
+      evaluateToolAvailability("browser_navigate", {
+        taskText: agentText.replace("Step 3", "Open the website"),
+        userText,
+      }).decision,
+    ).toBe("allow");
+    expect(
+      evaluateToolAvailability("spawn_agent", {
+        taskText: userText,
+        userText,
+        requiredTools: ["spawn_agent"],
+      }).decision,
+    ).toBe("allow");
   });
 });

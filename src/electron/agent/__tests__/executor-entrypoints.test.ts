@@ -251,6 +251,84 @@ describe("TaskExecutor entrypoint guards", () => {
     ).toEqual(["read_file"]);
   });
 
+  describe("admin tools in the adaptive availability filter", () => {
+    const tools = [{ name: "read_file" }, { name: "set_personality" }, { name: "set_quirks" }];
+    const createExecutor = (task: Any) => {
+      const executor = Object.create(TaskExecutor.prototype) as Any;
+      executor.task = task;
+      executor.hasTaskToolAllowlistConfigured = () => false;
+      executor.getToolPolicyContext = () => ({ executionMode: "execute", taskDomain: "auto" });
+      executor.emitEvent = vi.fn();
+      executor.currentStepId = "step-1";
+      executor.plan = {
+        steps: [{ id: "step-1", description: "Update the personality and quirks." }],
+      };
+      // The step contract names the tool, as a plan step the agent wrote would.
+      executor.resolveStepExecutionContract = () => ({
+        requiredTools: new Set(["set_personality"]),
+      });
+      executor.toolUsageCounts = new Map([["set_quirks", 2]]);
+      executor.lastAssistantOutput = "Next I will change my persona and add quirks.";
+      return executor;
+    };
+    const exposed = (executor: Any) =>
+      executor.applyAdaptiveToolAvailabilityFilter(tools).map((tool: Any) => tool.name);
+
+    it("keeps them hidden when only the agent's step, output and past use mention them", () => {
+      const executor = createExecutor({ id: "t", title: "Fix the parser", prompt: "Fix it." });
+      executor.lastUserMessage = "Fix the parser.";
+      executor.lastUserMessageFromUser = true;
+      expect(exposed(executor)).toEqual(["read_file"]);
+    });
+
+    it("exposes them when the user's prompt or latest message asks", () => {
+      const fromPrompt = createExecutor({
+        id: "t",
+        title: "Personality",
+        prompt: "Make your personality more friendly.",
+      });
+      expect(exposed(fromPrompt)).toEqual(tools.map((tool) => tool.name));
+
+      const fromMessage = createExecutor({ id: "t", title: "Fix the parser", prompt: "Fix it." });
+      fromMessage.lastUserMessage = "Also give yourself some quirks.";
+      fromMessage.lastUserMessageFromUser = true;
+      expect(exposed(fromMessage)).toEqual(tools.map((tool) => tool.name));
+    });
+
+    it("does not count another agent's words as the user's", () => {
+      const childTask = createExecutor({
+        id: "child",
+        parentTaskId: "parent",
+        agentType: "sub",
+        title: "Personality update",
+        prompt: "Set the personality to casual.",
+      });
+      childTask.lastUserMessage = "Set the personality to casual.";
+      childTask.lastUserMessageFromUser = false;
+      expect(exposed(childTask)).toEqual(["read_file"]);
+
+      const handoff = createExecutor({ id: "bot", title: "Scribe", prompt: "Write content." });
+      handoff.lastUserMessage = "Change your persona to a pirate.";
+      handoff.lastUserMessageFromUser = false;
+      expect(exposed(handoff)).toEqual(["read_file"]);
+    });
+
+    it("never falls back to admin tools when nothing else is offered", () => {
+      const executor = createExecutor({ id: "t", title: "", prompt: "" });
+      executor.plan = undefined;
+      executor.lastAssistantOutput = null;
+      executor.lastUserMessage = "";
+      expect(exposed(executor)).toEqual(["read_file"]);
+
+      const adminOnly = createExecutor({ id: "t", title: "Fix the parser", prompt: "Fix it." });
+      expect(
+        adminOnly
+          .applyAdaptiveToolAvailabilityFilter([{ name: "set_personality" }])
+          .map((tool: Any) => tool.name),
+      ).toEqual([]);
+    });
+  });
+
   it("does not complete a follow-up cancelled during execution", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.cancelled = true;

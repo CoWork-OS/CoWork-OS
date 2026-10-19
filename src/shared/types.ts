@@ -715,6 +715,7 @@ export type EventType =
   | "worktree_merge_start" // Merge to base branch started
   | "worktree_merged" // Successfully merged to base branch
   | "worktree_conflict" // Merge conflict detected
+  | "resource_conflict" // Another task in the same folder is changing this file (write refused)
   | "worktree_cleaned" // Worktree removed after completion
   // Collaborative Thoughts events (team multi-agent thinking)
   | "agent_thought" // Agent sharing analysis/reasoning with team
@@ -2501,6 +2502,17 @@ export interface AgentConfig {
   /** Existing local branch to base a new isolated checkout on; omit for HEAD. */
   worktreeBaseBranch?: string;
   /**
+   * Exact commit (40-hex SHA) to start the isolated checkout from. Build Compare pins every
+   * variant to the same commit so they differ only in what each task did.
+   */
+  worktreeBaseCommit?: string;
+  /** Build Compare: the variants of one request share this id. */
+  compareGroupId?: string;
+  /** Build Compare: this variant's number, from 1. */
+  compareVariant?: number;
+  /** Build Compare: the check every variant runs before it finishes (a shell command). */
+  compareCheckCommand?: string;
+  /**
    * Optional allow-list of approval types that may be auto-approved when
    * autonomousMode is enabled. Omit to preserve legacy "approve all" behavior.
    */
@@ -2930,6 +2942,60 @@ export interface WorktreeInfo {
   lastCommitSha?: string; // SHA of the last auto-commit
   lastCommitMessage?: string;
   mergeResult?: MergeResult;
+}
+
+/** One task holding a claim on a resource it is changing (shared-change coordination, WP11). */
+export interface ResourceClaimHolder {
+  taskId: string;
+  title: string;
+  /** The task works in its own worktree, so its change meets others only at merge. */
+  isolated: boolean;
+  status: string;
+}
+
+/** A resource two or more tasks are changing. */
+export interface ResourceOverlap {
+  workspaceId: string;
+  resourceKey: string;
+  /** Workspace-relative path for files. */
+  label: string;
+  holders: ResourceClaimHolder[];
+}
+
+export interface MergeReviewTask {
+  taskId: string;
+  title: string;
+  branch: string;
+  status: string;
+  worktreeStatus?: string;
+  /** Build Compare variant number, from 1. */
+  variant?: number;
+  /** The latest result of the task's check command, when it has one. */
+  check?: { passed: boolean; message?: string };
+  diff: { files: number; additions: number; deletions: number };
+  changedFiles: string[];
+}
+
+/** Tasks that want the same thing: one Compare request, or tasks with the same title. */
+export interface MergeReviewGroup {
+  intent: string;
+  compareGroupId?: string;
+  tasks: MergeReviewTask[];
+}
+
+/**
+ * Worktree changes waiting to merge into one workspace, grouped by intent, with checks on
+ * the combined state: files changed by more than one group, and pairs that would conflict.
+ */
+export interface MergeReview {
+  workspaceId: string;
+  groups: MergeReviewGroup[];
+  checks: {
+    overlaps: Array<{ path: string; taskIds: string[] }>;
+    conflicts: Array<{ taskIds: [string, string]; files: string[] }>;
+    /** False when git could not compute merges (git older than 2.38). */
+    conflictCheckAvailable: boolean;
+  };
 }
 
 export interface MergeResult {
@@ -9356,6 +9422,8 @@ export const IPC_CHANNELS = {
   WORKTREE_MERGE: "worktree:merge",
   WORKTREE_CLEANUP: "worktree:cleanup",
   WORKTREE_GET_DIFF: "worktree:getDiff",
+  WORKTREE_RESOLVE_BASE_COMMIT: "worktree:resolveBaseCommit",
+  WORKTREE_MERGE_REVIEW: "worktree:mergeReview",
   WORKTREE_GET_SETTINGS: "worktree:getSettings",
   WORKTREE_SAVE_SETTINGS: "worktree:saveSettings",
 

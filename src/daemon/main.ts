@@ -65,6 +65,7 @@ import {
   prefetchTranscriptUsers,
 } from "../electron/gateway/chat-transcript";
 import { CuratedMemoryService } from "../electron/memory/CuratedMemoryService";
+import { publishedAgentCard } from "../electron/agent-card/collect-agent-card";
 import { MemoryService } from "../electron/memory/MemoryService";
 import { DurableContextService } from "../electron/memory/DurableContextService";
 import { MemoryWriter } from "../electron/memory/MemoryWriter";
@@ -220,6 +221,7 @@ async function startControlPlane(options: {
     }
 
     const server = new ControlPlaneServer({
+      getAgentCard: publishedAgentCard,
       port: settings.port,
       host: settings.host,
       trustProxy: settings.trustProxy,

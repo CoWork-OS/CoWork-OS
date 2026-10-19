@@ -38,6 +38,12 @@ export interface ToolExposureMetadata {
 
 export interface ToolAvailabilityContext extends ToolPolicyContext {
   taskText?: string;
+  /**
+   * Only words the user wrote: the title and prompt they gave the task and their latest
+   * message. Never agent output, plan steps, tool results, or another agent's message. The
+   * admin lane reads this alone, so the agent cannot write its way into its own persona tools.
+   */
+  userText?: string;
   recentlyUsedTools?: Iterable<string>;
   requiredTools?: Iterable<string>;
 }
@@ -449,6 +455,11 @@ export function getToolExposureMetadata(toolName: string): ToolExposureMetadata 
   return inferToolExposureMetadata(String(toolName || "").trim());
 }
 
+/** The admin lane: only the user's own words (`userText`) may expose these tools. */
+export function isUserIntentOnlyTool(toolName: string, runtime?: RuntimeToolMetadata): boolean {
+  return inferToolExposureMetadata(String(toolName || "").trim(), runtime).lane === "admin";
+}
+
 /** Host-classified desktop MCP tools; tags are never taken from server descriptions. */
 export function isMcpComputerUseRuntime(runtime?: RuntimeToolMetadata): boolean {
   return runtime?.capabilityTags[0] === "system" && runtime.capabilityTags.includes("mcp");
@@ -474,6 +485,17 @@ export function evaluateToolAvailability(
     !isMcpComputerUseRuntime(runtime)
   ) {
     return { decision: "allow", metadata };
+  }
+
+  // Admin tools (all explicit-only) save into the system prompt of every later task, so only
+  // the user's own words may expose them. taskText also carries the agent's last output and
+  // its plan step, which the agent (or injected content it repeats) can fill with "persona".
+  // The step contract's requiredTools comes from those agent-written steps, and a recent use
+  // does not show who asked for it, so neither affinity opens this lane either.
+  if (metadata.lane === "admin") {
+    return ADMIN_INTENT_PATTERN.test(normalizeTaskText(ctx.userText))
+      ? { decision: "allow", metadata }
+      : { decision: "defer", reason: "explicit_admin_intent_required", metadata };
   }
 
   if (hasToolAffinity(normalizedToolName, ctx.requiredTools)) {
@@ -542,10 +564,6 @@ export function evaluateToolAvailability(
         BUSINESS_INTERACTION_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }
         : { decision: "defer", reason: "business_interaction_intent_missing", metadata };
-    case "admin":
-      return ADMIN_INTENT_PATTERN.test(taskText)
-        ? { decision: "allow", metadata }
-        : { decision: "defer", reason: "explicit_admin_intent_required", metadata };
     case "orchestration":
       return ORCHESTRATION_INTENT_PATTERN.test(taskText)
         ? { decision: "allow", metadata }

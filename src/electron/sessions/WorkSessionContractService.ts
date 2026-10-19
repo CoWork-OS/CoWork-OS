@@ -501,6 +501,43 @@ export class WorkSessionContractService {
     });
   }
 
+  /**
+   * A revision of a file that is not (or not yet) a task artifact: the file a user pointed at,
+   * the result of addressing that, or a restore.
+   */
+  recordFileRevision(
+    taskId: string,
+    input: {
+      path: string;
+      sha256: string;
+      size: number;
+      mimeType?: string;
+      parentRevisionId?: string;
+      createdBy: "user" | "agent";
+      metadata?: Record<string, unknown>;
+      idempotencyKey: string;
+    },
+  ): ArtifactRevision | undefined {
+    const result = this.getForTask(taskId);
+    if (!result) return undefined;
+    return this.repository.createArtifactRevision({
+      sessionId: result.session.id,
+      taskId,
+      path: input.path,
+      mimeType: input.mimeType || "application/octet-stream",
+      sha256: input.sha256,
+      size: input.size,
+      ...(input.parentRevisionId ? { parentRevisionId: input.parentRevisionId } : {}),
+      createdBy: input.createdBy,
+      metadata: input.metadata,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+
+  getArtifactRevision(revisionId: string): ArtifactRevision | undefined {
+    return this.repository.getArtifactRevisionById(revisionId);
+  }
+
   recordArtifactByPath(
     taskId: string,
     path: string,

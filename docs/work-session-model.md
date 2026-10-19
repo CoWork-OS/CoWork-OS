@@ -320,6 +320,48 @@ delivery audit results.
 See [Task Automations](task-automations.md) for configuration and
 `src/electron/cron/service.ts` for delivery/run-history behavior.
 
+## Point at the result
+
+An annotation is the one shape for "change this, here" across surfaces. Its
+`targetRef` is the anchor: a page element (selector, rect, text) in the Browser
+Workbench, a sheet and cell range in a spreadsheet, or a page and region (PDF)
+or block (DOCX) in the document editor. It also carries `intent` (`change`,
+`comment` or `question`), `before` and `after` values (style properties, text,
+or cell values by A1 address; at most 50 keys), and, for a file:
+
+- `artifactRevisionId`: the revision of the file the user pointed at, recorded
+  when the annotation is created;
+- `resultRevisionId`: the revision the agent's change produced, whose parent is
+  the pointed-at revision;
+- `undoToken`: present while the change can be undone.
+
+Where annotations come from:
+
+- **Browser Workbench Adjust** sends the adjusted properties as `before` and
+  `after` (the page itself is not a file, so there is no revision or undo).
+- **Spreadsheet full view**: once you click a cell or drag a range, the composer
+  shows "Asking about Sheet!B2:C4". Sending a request records it as a `change`
+  annotation with the cells' current values (you can clear the chip first).
+- **Document editor**: a PDF region or DOCX block edit is recorded on the edit
+  task, with the new version file as the expected output.
+
+When the agent's turn ends (`task_completed` or `follow_up_completed`), each
+annotation it was addressing becomes `addressed`. If the file changed, the
+change is recorded as a revision and the transcript shows "Changed <file> ·
+<cells/page/block>" with **Undo**. Undo restores the pointed-at revision and
+records that as a new revision. It refuses when the file changed again after
+the agent's edit, so later work is never overwritten. A document editor edit
+writes a new version and leaves the source untouched, so it has no Undo.
+
+A revision row stores only a hash, so CoWork keeps the bytes of pointed-at and
+changed files in `artifact-revisions/` in the profile folder, by SHA-256: up to
+25 MB a file, removed 30 days after last use. A larger file, or one whose copy
+was removed, can be changed and linked but not undone. Files are only read or
+written inside the task's workspace folder.
+
+Live Canvas does not have a pointing surface yet: it keeps its own checkpoints
+(`canvas_checkpoint` / `canvas_restore`).
+
 ## Security concept
 
 The Electron renderer is a trusted local application component by design. It

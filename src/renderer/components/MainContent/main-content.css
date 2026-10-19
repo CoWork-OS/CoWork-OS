@@ -8888,6 +8888,36 @@ button.collab-timeline-thought-agent:hover {
   margin-left: 4px;
 }
 
+/* Undo for a change made at a place the user pointed to */
+.annotation-undo-btn {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.annotation-undo-btn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.annotation-undo-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.annotation-undo-status,
+.annotation-undo-error {
+  margin-left: 8px;
+  color: var(--color-text-muted, #888);
+  font-size: 0.85em;
+}
+
 /* File References */
 .file-list {
   margin-top: 16px;

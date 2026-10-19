@@ -175,6 +175,7 @@ import type {
   Annotation,
   AnnotationCreateInput,
   AnnotationListQuery,
+  AnnotationUndoResult,
   AnnotationUpdateInput,
   BrowserAnnotationTargetRef,
   BrowserAnnotationTargetResolveResult,
@@ -2678,6 +2679,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) as Promise<Annotation | null>,
   dismissAnnotation: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_DISMISS, { id }) as Promise<Annotation | null>,
+  undoAnnotationChange: (id: string, undoToken: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ANNOTATION_UNDO, {
+      id,
+      undoToken,
+    }) as Promise<AnnotationUndoResult>,
   onBrowserWorkbenchOpenRequest: (callback: (request: BrowserWorkbenchOpenRequest) => void) => {
     const handler = (_: Any, request: BrowserWorkbenchOpenRequest) => callback(request);
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_OPEN_REQUEST, handler);
@@ -6822,6 +6828,7 @@ export interface ElectronAPI {
   updateAnnotation: (id: string, patch: AnnotationUpdateInput) => Promise<Annotation | null>;
   resolveAnnotation: (id: string, resolvedByEventId?: string) => Promise<Annotation | null>;
   dismissAnnotation: (id: string) => Promise<Annotation | null>;
+  undoAnnotationChange: (id: string, undoToken: string) => Promise<AnnotationUndoResult>;
   onBrowserWorkbenchOpenRequest: (
     callback: (request: BrowserWorkbenchOpenRequest) => void,
   ) => () => void;

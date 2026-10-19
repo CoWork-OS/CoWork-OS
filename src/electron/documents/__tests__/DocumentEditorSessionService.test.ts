@@ -121,6 +121,7 @@ describe("DocumentEditorSessionService", () => {
       .fn()
       .mockResolvedValue({ id: "child-1", title: "Edit proposal.pdf" });
     const createTask = vi.fn();
+    const recordPointedEdit = vi.fn();
     const service = new DocumentEditorSessionService(
       {
         findAll: async () => [makeWorkspace(dir)],
@@ -135,7 +136,7 @@ describe("DocumentEditorSessionService", () => {
           createdAt: Date.now(),
         })),
       } as Any,
-      { createChildTask, createTask } as Any,
+      { createChildTask, createTask, recordPointedEdit } as Any,
     );
 
     const session = await service.openSession(original, dir);
@@ -154,6 +155,22 @@ describe("DocumentEditorSessionService", () => {
 
     expect(createChildTask).toHaveBeenCalledOnce();
     expect(createTask).not.toHaveBeenCalled();
+    // The selected block is recorded on the edit task: anchor, instruction, and the new version.
+    expect(recordPointedEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "child-1",
+        surfaceType: "artifact",
+        body: "Rewrite the title",
+        intent: "change",
+        targetRef: expect.objectContaining({
+          surfaceType: "artifact",
+          filePath: expect.stringMatching(/proposal\.docx$/),
+          fileType: "docx",
+          blockId,
+        }),
+        outputPath: expect.stringMatching(/proposal-v\d+\.docx$/),
+      }),
+    );
   });
 
   it("runs PDF edits directly without routing through the agent planner", async () => {

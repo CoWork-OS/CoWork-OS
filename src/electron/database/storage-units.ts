@@ -300,6 +300,19 @@ export const STORAGE_UNITS = {
     "markAddressed",
     { readonly: false },
   ),
+  annotation_setBaseRevision: storeUnit(
+    (db: Database.Database) => new AnnotationStore(db),
+    "setBaseRevision",
+    { readonly: false },
+  ),
+  annotation_recordResult: storeUnit(
+    (db: Database.Database) => new AnnotationStore(db),
+    "recordResult",
+    { readonly: false },
+  ),
+  annotation_clearUndo: storeUnit((db: Database.Database) => new AnnotationStore(db), "clearUndo", {
+    readonly: false,
+  }),
   annotation_findById: storeUnit((db: Database.Database) => new AnnotationStore(db), "findById", {
     readonly: true,
   }),

@@ -68,7 +68,11 @@ import { SavedLoginsMenu } from "./BrowserWorkbench/SavedLoginsMenu";
 import { ToolbarMenu } from "./BrowserWorkbench/ToolbarMenu";
 import { DownloadShelf } from "./BrowserWorkbench/DownloadShelf";
 import { AdjustPanel } from "./BrowserWorkbench/AdjustPanel";
-import { type AdjustChanges, describeAdjustChanges } from "./BrowserWorkbench/adjust-changes";
+import {
+  type AdjustChanges,
+  adjustChangesToAnnotationValues,
+  describeAdjustChanges,
+} from "./BrowserWorkbench/adjust-changes";
 import { ProfileMenu } from "./BrowserWorkbench/ProfileMenu";
 import { useBrowserSettings } from "../hooks/useBrowserSettings";
 import "./artifact-viewers.css";
@@ -1673,6 +1677,9 @@ export function BrowserWorkbenchView({
                 ...(afterPath ? { notes: `After screenshot: ${afterPath}` } : {}),
               }
             : undefined;
+        // The adjustment is the change asked for: the element's values before and after.
+        const adjustedValues =
+          adjusted && adjustChanges ? adjustChangesToAnnotationValues(adjustChanges) : undefined;
         const created = await window.electronAPI.createAnnotation({
           taskId,
           workspaceId,
@@ -1681,6 +1688,7 @@ export function BrowserWorkbenchView({
           body: fullBody,
           targetRef: liveAnnotationTarget,
           screenshotPath,
+          ...(adjustedValues ? { intent: "change" as const, ...adjustedValues } : {}),
           ...(stylePatch ? { stylePatch } : {}),
         });
         await loadBrowserAnnotations();

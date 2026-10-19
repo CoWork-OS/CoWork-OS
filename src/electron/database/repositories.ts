@@ -27,6 +27,11 @@ import {
 import { assertSchedulerFence } from "../automation/scheduler-lease-store";
 import { commitDispatchReservation } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
+import {
+  clearAnnotationUndo,
+  recordAnnotationResult,
+  setAnnotationBaseRevision,
+} from "./annotation-results-sql";
 import { SecureSettingsRepository } from "./SecureSettingsRepository";
 import { v4 as uuidv4 } from "uuid";
 import { buildImportedMemoryFilterSql } from "./fts-utils";
@@ -88,9 +93,11 @@ import {
   Artifact,
   Annotation,
   AnnotationCreateInput,
+  AnnotationIntent,
   AnnotationListQuery,
   AnnotationStatus,
   AnnotationUpdateInput,
+  AnnotationValues,
   Workspace,
   ApprovalRequest,
   PersistedPermissionRule,
@@ -4202,6 +4209,29 @@ const ANNOTATION_STATUSES: AnnotationStatus[] = [
   "dismissed",
 ];
 
+const ANNOTATION_INTENTS: AnnotationIntent[] = ["change", "comment", "question"];
+const MAX_ANNOTATION_VALUE_KEYS = 50;
+const MAX_ANNOTATION_VALUE_LENGTH = 2_000;
+
+/** An annotation's before/after values, bounded: string values only, 50 keys, 2,000 chars each. */
+export function boundAnnotationValues(value: unknown): AnnotationValues | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([key, entry]) => key.trim() && typeof entry === "string")
+    .slice(0, MAX_ANNOTATION_VALUE_KEYS)
+    .map(([key, entry]) => [
+      key.trim().slice(0, 120),
+      (entry as string).slice(0, MAX_ANNOTATION_VALUE_LENGTH),
+    ]);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeAnnotationIntent(value: unknown): AnnotationIntent | undefined {
+  return ANNOTATION_INTENTS.includes(value as AnnotationIntent)
+    ? (value as AnnotationIntent)
+    : undefined;
+}
+
 function normalizeAnnotationStatus(
   value: unknown,
   fallback: AnnotationStatus = "open",
@@ -4231,6 +4261,10 @@ export class AnnotationStore {
       createdBy: input.createdBy || "user",
       createdAt: now,
       updatedAt: now,
+      intent: normalizeAnnotationIntent(input.intent),
+      before: boundAnnotationValues(input.before),
+      after: boundAnnotationValues(input.after),
+      outputPath: input.outputPath?.trim() || undefined,
     };
 
     this.db
@@ -4238,9 +4272,10 @@ export class AnnotationStore {
         INSERT INTO annotations (
           id, task_id, workspace_id, surface_type, surface_id, body, status,
           target_ref_json, style_patch_json, artifact_id, screenshot_path,
-          created_by, created_at, updated_at, resolved_at, resolved_by_event_id
+          created_by, created_at, updated_at, resolved_at, resolved_by_event_id,
+          intent, before_json, after_json, output_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         annotation.id,
@@ -4259,9 +4294,37 @@ export class AnnotationStore {
         annotation.updatedAt,
         null,
         null,
+        annotation.intent || null,
+        annotation.before ? JSON.stringify(annotation.before) : null,
+        annotation.after ? JSON.stringify(annotation.after) : null,
+        annotation.outputPath || null,
       );
 
     return annotation;
+  }
+
+  /** The revision of the target file the user pointed at. */
+  setBaseRevision(id: string, revisionId: string): Annotation | undefined {
+    setAnnotationBaseRevision(this.db, id, revisionId, Date.now());
+    return this.findById(id);
+  }
+
+  /**
+   * An annotation the agent worked on: `addressed`, with the revision that addressed it and,
+   * when the change can be undone, its undo token. Only an annotation still `addressing` moves.
+   */
+  recordResult(
+    id: string,
+    result: { resultRevisionId?: string; undoToken?: string },
+  ): Annotation | undefined {
+    recordAnnotationResult(this.db, id, result, Date.now());
+    return this.findById(id);
+  }
+
+  /** After an undo: the token is spent, and the annotation is dismissed. */
+  clearUndo(id: string): Annotation | undefined {
+    clearAnnotationUndo(this.db, id, Date.now());
+    return this.findById(id);
   }
 
   update(id: string, patch: AnnotationUpdateInput): Annotation | undefined {
@@ -4443,6 +4506,17 @@ export class AnnotationStore {
       updatedAt: row.updated_at,
       resolvedAt: row.resolved_at || undefined,
       resolvedByEventId: row.resolved_by_event_id || undefined,
+      ...(normalizeAnnotationIntent(row.intent) ? { intent: row.intent } : {}),
+      ...(row.before_json
+        ? { before: safeJsonParse(row.before_json, undefined, "annotation.before_json") }
+        : {}),
+      ...(row.after_json
+        ? { after: safeJsonParse(row.after_json, undefined, "annotation.after_json") }
+        : {}),
+      ...(row.output_path ? { outputPath: row.output_path } : {}),
+      ...(row.artifact_revision_id ? { artifactRevisionId: row.artifact_revision_id } : {}),
+      ...(row.result_revision_id ? { resultRevisionId: row.result_revision_id } : {}),
+      ...(row.undo_token ? { undoToken: row.undo_token } : {}),
     };
   }
 }

@@ -27,6 +27,7 @@ import {
   isLongOsascriptCommandText,
 } from "../AssistantMessageContent";
 import { useFileActionMenu } from "../FileActionMenu";
+import { AnnotationUndoButton } from "./AnnotationUndoButton";
 import { InlineDocumentPreview } from "../InlineDocumentPreview";
 import { InlineImagePreview } from "../InlineImagePreview";
 import { InlineVideoPreview } from "../InlineVideoPreview";
@@ -960,6 +961,30 @@ export function renderEventTitle(
     }
     case "file_deleted":
       return `Removed: ${event.payload.path}`;
+    case "annotation_addressed": {
+      const aap = event.payload || {};
+      const anchor =
+        typeof aap.anchor === "string" && aap.anchor ? aap.anchor : "the place you pointed to";
+      return (
+        <span>
+          {aap.changed ? "Changed" : "Addressed"} <span className="event-title-meta">{anchor}</span>
+          {typeof aap.annotationId === "string" && typeof aap.undoToken === "string" ? (
+            <AnnotationUndoButton annotationId={aap.annotationId} undoToken={aap.undoToken} />
+          ) : null}
+        </span>
+      );
+    }
+    case "annotation_change_undone": {
+      const anchor =
+        typeof event.payload?.anchor === "string" && event.payload.anchor
+          ? event.payload.anchor
+          : "the file";
+      return (
+        <span>
+          Undid the change to <span className="event-title-meta">{anchor}</span>
+        </span>
+      );
+    }
     case "artifact_created": {
       const acp = event.payload || {};
       const acPath = typeof acp.path === "string" ? acp.path : "";

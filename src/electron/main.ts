@@ -5783,8 +5783,23 @@ if (isMacSafeStorageMigrationWorker) {
         screenshotPath: typeof data.screenshotPath === "string" ? data.screenshotPath : undefined,
         createdBy:
           data.createdBy === "agent" || data.createdBy === "review" ? data.createdBy : "user",
+        intent:
+          data.intent === "change" || data.intent === "comment" || data.intent === "question"
+            ? data.intent
+            : undefined,
+        // Bounded by the store: string values only, 50 keys.
+        before: data.before && typeof data.before === "object" ? data.before : undefined,
+        after: data.after && typeof data.after === "object" ? data.after : undefined,
       });
       logAnnotationEvent("annotation_created", annotation);
+      // A file target: record the revision the user pointed at, so the change can be undone.
+      if (surfaceType === "file" || surfaceType === "artifact" || surfaceType === "diff") {
+        try {
+          return (await agentDaemon.pinAnnotationTarget(annotation.id)) ?? annotation;
+        } catch (error) {
+          console.warn("[Annotations] Could not record the pointed-at revision:", error);
+        }
+      }
       return annotation;
     });
 
@@ -5821,6 +5836,14 @@ if (isMacSafeStorageMigrationWorker) {
       });
       if (annotation) logAnnotationEvent("annotation_resolved", annotation);
       return annotation || null;
+    });
+
+    ipcMain.handle(IPC_CHANNELS.ANNOTATION_UNDO, async (_event, data: Any) => {
+      const id = typeof data?.id === "string" ? data.id.trim() : "";
+      const undoToken = typeof data?.undoToken === "string" ? data.undoToken.trim() : "";
+      if (!id) throw new Error("Annotation id is required");
+      if (!undoToken) throw new Error("Undo token is required");
+      return await agentDaemon.undoAnnotationChange(id, undoToken);
     });
 
     ipcMain.handle(IPC_CHANNELS.ANNOTATION_DISMISS, async (_event, data: Any) => {

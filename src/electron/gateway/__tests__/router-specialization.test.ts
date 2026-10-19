@@ -344,6 +344,67 @@ describe("MessageRouter follow-up provenance", () => {
     );
   });
 
+  it("marks only the verified owner's new task prompt as typed by the user", async () => {
+    const startTaskFrom = async (userId: string) => {
+      const made = makeFollowUpRouter();
+      const { router } = made;
+      (router as Any).sessionRepo.findById = vi.fn().mockReturnValue({
+        id: "session-1",
+        channelId: "channel-1",
+        workspaceId: "ws-1",
+        taskId: undefined,
+        context: {},
+      });
+      (router as Any).taskRepo.create = vi.fn().mockImplementation((input: Any) => ({
+        id: "task-new",
+        ...input,
+      }));
+      (router as Any).taskRepo.update = vi.fn();
+      (router as Any).sessionManager.linkSessionToTask = vi.fn();
+      (router as Any).sessionManager.updateSessionContext = vi.fn();
+      await (router as Any).forwardToDesktopApp(made.adapter, directMessage(userId), "session-1", {
+        contextType: "dm",
+      });
+      return (router as Any).taskRepo.create.mock.calls[0][0];
+    };
+
+    const owner = await startTaskFrom("owner-1");
+    expect(owner.prompt).toBe(RULE_REQUEST);
+    expect(owner.promptProvenance).toBe("user_typed");
+
+    // A paired contact's message starts a task, but its prompt is not the user's words.
+    const contact = await startTaskFrom("contact-1");
+    expect(contact.prompt).toBe(RULE_REQUEST);
+    expect(contact.promptProvenance).toBeUndefined();
+    expect(contact.agentConfig.gatewaySenderIsOwner).toBe(false);
+  });
+
+  it("lets only the verified owner's /fork keep the task's prompt provenance", async () => {
+    const forkFrom = async (userId: string) => {
+      const made = makeFollowUpRouter();
+      const forkTaskSession = vi.fn().mockResolvedValue({ id: "task-fork", title: "Fork" });
+      (made.agentDaemon as Any).forkTaskSession = forkTaskSession;
+      (made.router as Any).sessionManager.linkSessionToTask = vi.fn();
+      await (made.router as Any).handleForkSessionCommand(
+        made.adapter,
+        directMessage(userId),
+        "session-1",
+        RULE_REQUEST.split(" "),
+      );
+      return forkTaskSession.mock.calls[0][0];
+    };
+
+    expect(await forkFrom("owner-1")).toMatchObject({
+      branchLabel: RULE_REQUEST,
+      keepPromptProvenance: true,
+    });
+    // The label becomes part of the fork's title, so a contact's fork is not the user's words.
+    expect(await forkFrom("contact-1")).toMatchObject({
+      branchLabel: RULE_REQUEST,
+      keepPromptProvenance: false,
+    });
+  });
+
   it("applies the same owner check to /steer", async () => {
     const owner = makeFollowUpRouter();
     await (owner.router as Any).handleSteerCommand(

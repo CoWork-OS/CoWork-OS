@@ -140,6 +140,7 @@ function withSurfaceOriginNote(
 import { hasAnswerSurfaceBlock } from "../../shared/answer-surfaces/blocks";
 import { AnswerSurfaceStateStore } from "../answer-surfaces/AnswerSurfaceStateStore";
 import { buildUserMessageAttachmentMetadata } from "../../shared/user-message-attachments";
+import { textBeforeAttachedFiles } from "../../shared/attachment-summary";
 import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
@@ -456,7 +457,7 @@ import {
   normalizeTaskDomain,
 } from "./tool-policy-engine";
 import { userTypedFollowUpText } from "./follow-up-provenance";
-import { isThirdPartyGatewayTask } from "../gateway/gateway-sender-identity";
+import { isTaskPromptFromUser } from "./task-prompt-provenance";
 
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
 const VALID_LLM_PROVIDER_TYPES = new Set<string>(LLM_PROVIDER_TYPES as readonly string[]);
@@ -1271,8 +1272,9 @@ export class TaskExecutor {
   private lastUserTypedText = "";
   /**
    * The task's title and prompt as the user wrote them, captured when the executor starts, or
-   * "" when someone else wrote them (isTaskPromptFromUser). Not read from task.prompt later: a
-   * follow-up that resumes a paused task is appended there as "USER UPDATE", whoever sent it.
+   * "" when they are not marked as typed by the user (Task.promptProvenance). Not read from
+   * task.prompt later: a follow-up that resumes a paused task is appended there as
+   * "USER UPDATE", whoever sent it.
    */
   private userAuthoredTaskText = "";
   /**
@@ -18834,29 +18836,18 @@ ${transcript}
     });
   }
 
-  /**
-   * Whether the user wrote this task's title and prompt. Not for a task another agent spawned
-   * or CoWork's subconscious loop created, an automation task (schedules are "cron"; heartbeats,
-   * triggers, webhooks and mailbox automations are "hook", and their prompts carry event text),
-   * or a task a channel sender other than the verified owner started.
-   */
-  private isTaskPromptFromUser(): boolean {
-    return !(
-      this.task.parentTaskId ||
-      (typeof this.task.agentType === "string" && this.task.agentType !== "main") ||
-      this.task.source === "subconscious" ||
-      this.task.source === "improvement" ||
-      this.task.source === "cron" ||
-      this.task.source === "hook" ||
-      isThirdPartyGatewayTask(this.task)
-    );
-  }
-
   /** Sets userAuthoredTaskText from the task as it is now; the constructor calls it once. */
   private captureUserAuthoredTaskText(): void {
-    this.userAuthoredTaskText = this.isTaskPromptFromUser()
+    // Positive provenance only (task-prompt-provenance.ts): the task must be marked as typed by
+    // the user where it was created. Mail commitments, planner issues, orchestration and
+    // workflow steps and remote agents create "manual"/"api" tasks from text the user did not
+    // write, so excluding known automation sources let them through. Tasks created before the
+    // marker existed are unmarked and do not count; the user's next typed message still does.
+    // The composer appends the text of attached files to a typed prompt; a document's words are
+    // not the user's, so everything from the attachment block on is dropped.
+    this.userAuthoredTaskText = isTaskPromptFromUser(this.task)
       ? [this.task.title, this.getContractPrompt()]
-          .map((part) => String(part || "").trim())
+          .map((part) => textBeforeAttachedFiles(String(part || "")).trim())
           .filter(Boolean)
           .join("\n")
       : "";

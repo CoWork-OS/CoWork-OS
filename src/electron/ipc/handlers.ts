@@ -6,6 +6,7 @@ import {
 import { closeBrowserTabViewsForTask } from "../browser/browser-tab-views";
 import { ComposerPredictionCoordinator } from "../agent/ComposerPredictionCoordinator";
 import { composerFollowUpProvenance } from "../agent/follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT } from "../agent/task-prompt-provenance";
 import {
   COMPOSER_PREDICTION_CHANNEL,
   COMPOSER_PREDICTION_CANCEL_CHANNEL,
@@ -5179,6 +5180,9 @@ export async function setupIpcHandlers(
       budgetCost,
       agentConfig: normalizedAgentConfig,
       assignedAgentRoleId,
+      // The owner typed this prompt into the desktop composer, so it may expose the admin-lane
+      // tools (Task.promptProvenance). Set here, never read from the renderer's payload.
+      ...USER_TYPED_TASK_PROMPT,
     });
 
     if (generateTitle && !normalizedAgentConfig?.botConversation) {
@@ -6074,6 +6078,9 @@ export async function setupIpcHandlers(
         validated.initialMessage.trim().length > 0
           ? { initialMessage: validated.initialMessage.trim() }
           : {}),
+        // The owner forked this in the desktop app: the fork may keep the source task's prompt
+        // provenance (Task.promptProvenance).
+        keepPromptProvenance: true,
       });
       if (forkedTask) {
         try {

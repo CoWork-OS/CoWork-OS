@@ -130,6 +130,8 @@ Selector inputs remain supported for compatibility, but refs are preferred becau
 
 Snapshot output is treated as untrusted web content. The agent can use it to decide what to click or read, but it should not treat page text, ARIA labels, console output, network metadata, or storage values as instructions.
 
+The workbench sometimes sends page content to the task for you: **Ask CoWork About This**, sending console errors, an answer drawn from a video, an annotation without a typed note, or an **Adjust** change list. That message is tagged as page content (`surfaceOrigin: "browser_page"`). It reaches the task like any message, but it never counts as text you typed, so it cannot open the admin-lane tools (persona, behavioral rules, expertise and similar). See [Agent Self-Modification Gates](security/self-modification-gates.md).
+
 ## Browser Controls
 
 The Browser Workbench header and toolbar are functional, not cosmetic:

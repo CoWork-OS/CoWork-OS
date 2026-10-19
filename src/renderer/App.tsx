@@ -935,6 +935,8 @@ type SelectedTaskWorkspaceViewProps = {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
+      verbatim?: boolean;
+      surfaceOrigin?: MessageSurfaceOrigin;
     },
   ) => Promise<void | boolean>;
   onOpenSideChat?: (request: {
@@ -1349,11 +1351,15 @@ const SelectedTaskWorkspaceView = memo(
       });
     }, [openBrowserWorkbenchSidebar]);
     const sendSpreadsheetFullscreenMessage = useCallback(
-      async (message: string, images?: ImageAttachment[]) => {
+      async (
+        message: string,
+        images?: ImageAttachment[],
+        options?: { verbatim?: boolean; surfaceOrigin?: MessageSurfaceOrigin },
+      ) => {
         const startedAt = Date.now();
         setSpreadsheetTurnStartedAt(startedAt);
         setSpreadsheetOptimisticWorkingStartedAt(startedAt);
-        await onSendMessage(message, images);
+        await onSendMessage(message, images, undefined, options);
       },
       [onSendMessage],
     );

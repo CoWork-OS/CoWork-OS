@@ -2780,6 +2780,19 @@ export interface Task {
   branchFromEventId?: string; // Specific event to branch from when forking a session
   branchLabel?: string; // Human label for the branch shown in UI/debug surfaces
   resumeStrategy?: "snapshot" | "checkpoint" | "transcript"; // Preferred resume source
+  /**
+   * "user_typed" only when a person typed this task's title and prompt into a composer the
+   * owner signed in to: the desktop app (task create, tray quick task), a remote device's view
+   * or another admin client over the control plane, Web Access, or a channel message from the
+   * verified owner. A fork or side chat keeps its source task's value when it reuses that
+   * task's prompt. Unset for everything else, whatever `source` says: automations, mail, the
+   * strategic planner, orchestration and workflow steps, remote agents, other agents, and
+   * every task created before this field existed. Only "user_typed" prompts can expose the
+   * admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup).
+   * Set by main-process creation paths at create time and never updated; never copied from
+   * renderer or remote-client input.
+   */
+  promptProvenance?: TaskPromptProvenance;
   // Origin source for distinguishing how the task was created
   source?:
     | "manual"
@@ -3469,10 +3482,11 @@ export interface QuotedAssistantMessage {
 
 /** Follow-up payload sent to an existing task. */
 /** Where a user message came from when the desktop app sent it on the user's behalf. */
-export type MessageSurfaceOrigin = "answer" | "page" | "code_block";
+export const MESSAGE_SURFACE_ORIGINS = ["answer", "page", "code_block", "browser_page"] as const;
+export type MessageSurfaceOrigin = (typeof MESSAGE_SURFACE_ORIGINS)[number];
 
 export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceOrigin {
-  return value === "answer" || value === "page" || value === "code_block";
+  return (MESSAGE_SURFACE_ORIGINS as readonly unknown[]).includes(value);
 }
 
 /**
@@ -3480,6 +3494,12 @@ export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceO
  * conversation. There is no other value: unset means CoWork or someone else put the text there.
  */
 export type FollowUpTextProvenance = "user_typed";
+
+/**
+ * Who wrote a task's title and prompt (Task.promptProvenance). "user_typed": a person typed
+ * them. There is no other value: unset means CoWork or someone else wrote them.
+ */
+export type TaskPromptProvenance = "user_typed";
 
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
@@ -3519,7 +3539,9 @@ export interface TaskFollowUpInput {
    * The user sent this exact text by approving an action in an interactive answer: a
    * button the model wrote ("answer") or a request from page code in an HTML frame
    * ("page"), or the output of a shell code block the user ran from an answer
-   * ("code_block"). Set only by the desktop app's own send path.
+   * ("code_block"). "browser_page": the user sent it from the in-app browser and it carries
+   * web page content they did not type (a selection, console output, element values, an
+   * answer drawn from a video). Set only by the desktop app's own send path.
    */
   surfaceOrigin?: MessageSurfaceOrigin;
   /**
@@ -3528,8 +3550,9 @@ export interface TaskFollowUpInput {
    * a side chat's first message, a typed reply on this task's approval card, or a channel
    * message from the verified owner (gateway-sender-identity.ts). Unset for everything else:
    * automations, heartbeats, triggers, routines, webhooks, other agents, updates forwarded
-   * from another task, page code and answer buttons. Only "user_typed" text can expose the
-   * admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup).
+   * from another task, page code, answer buttons and in-app browser page content. Only
+   * "user_typed" text can expose the admin-lane tools (persona, behavioral rules, expertise,
+   * heartbeat, integration setup).
    * Set by main-process send paths; never copied from renderer or remote-client input.
    */
   textProvenance?: FollowUpTextProvenance;

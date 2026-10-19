@@ -42,6 +42,8 @@ export interface ToolAvailabilityContext extends ToolPolicyContext {
    * Only words the user wrote: the title and prompt they gave the task and their latest
    * message. Never agent output, plan steps, tool results, or another agent's message. The
    * admin lane reads this alone, so the agent cannot write its way into its own persona tools.
+   * Attached files' text that a composer appends to a typed message is cut off as well
+   * (shared/attachment-summary.ts): a document the user attached did not ask for anything.
    */
   userText?: string;
   recentlyUsedTools?: Iterable<string>;

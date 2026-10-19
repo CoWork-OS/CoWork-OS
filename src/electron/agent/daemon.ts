@@ -140,6 +140,7 @@ import {
 import type { LlmCallRow } from "../database/llm-call-events";
 import { TaskMutationLedger } from "./task-mutation-ledger";
 import { USER_TYPED_FOLLOW_UP } from "./follow-up-provenance";
+import { USER_TYPED_TASK_PROMPT, forkedTaskPromptProvenance } from "./task-prompt-provenance";
 import { LLMProviderFactory } from "./llm/provider-factory";
 import { createConfiguredJevProvider, isJevActiveHarnessEnabled } from "./jev";
 import { routeModelWithJev } from "./jev/model-routing";
@@ -189,6 +190,7 @@ import {
   AnnotationCreateInput,
   QuotedAssistantMessage,
   TaskFollowUpInput,
+  TaskPromptProvenance,
   AgentMessageDeliveryStatus,
   AgentMessageSendResult,
   AgentTeamRun,
@@ -4484,6 +4486,12 @@ export class AgentDaemon extends EventEmitter {
     fromEventId?: string;
     sideChat?: boolean;
     initialMessage?: string;
+    /**
+     * True only when the owner asked for the fork (the desktop app, the verified owner on a
+     * channel): the fork's title carries the caller's branch label, so only then may it keep
+     * the source task's Task.promptProvenance.
+     */
+    keepPromptProvenance?: boolean;
   }): Promise<Task> {
     const sourceTask = this.taskRepo.findById(params.taskId);
     if (!sourceTask) {
@@ -4512,6 +4520,13 @@ export class AgentDaemon extends EventEmitter {
       sourceTask.userPrompt ||
       sourceTask.rawPrompt ||
       sourceTask.prompt;
+    // The fork's title and prompt are the user's only when the owner asked for the fork and it
+    // reuses the source task's own prompt, which the user wrote; a message picked from the
+    // history may have been injected.
+    const forkProvenance = forkedTaskPromptProvenance(
+      sourceTask,
+      params.keepPromptProvenance === true && !explicitPrompt && !forkHistory.prefillPrompt,
+    );
 
     const sideChatAgentConfig: AgentConfig | undefined = params.sideChat
       ? {
@@ -4541,6 +4556,7 @@ export class AgentDaemon extends EventEmitter {
       workspaceId: sourceTask.workspaceId,
       agentConfig: sideChatAgentConfig,
       source: params.sideChat ? "side_chat" : sourceTask.source || "manual",
+      ...forkProvenance,
       taskOverrides: {
         sessionId: crypto.randomUUID(),
         branchFromTaskId: sourceTask.id,
@@ -4896,6 +4912,8 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+    /** Only for a title and prompt a person typed; see Task.promptProvenance. */
+    promptProvenance?: TaskPromptProvenance;
     autoStart?: boolean;
     graphAdmission?: GraphTaskAdmission;
   }): Promise<Task> {
@@ -4925,6 +4943,8 @@ export class AgentDaemon extends EventEmitter {
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
     boardColumn?: Task["boardColumn"];
+    /** Only for a title and prompt a person typed; see Task.promptProvenance. */
+    promptProvenance?: TaskPromptProvenance;
     requestIdentity?: unknown;
     capturedAttachments?: QueuedAttachmentBytes[];
     autoStart?: boolean;
@@ -5089,6 +5109,7 @@ export class AgentDaemon extends EventEmitter {
     budgetCost?: number;
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
+    promptProvenance?: TaskPromptProvenance;
     graphAdmission?: GraphTaskAdmission;
   }) {
     const { input, derived } = this.prepareTaskCreation(params);
@@ -5120,6 +5141,7 @@ export class AgentDaemon extends EventEmitter {
     source?: Task["source"];
     taskOverrides?: Partial<Task>;
     boardColumn?: Task["boardColumn"];
+    promptProvenance?: TaskPromptProvenance;
   }) {
     const botTeamAgentConfig = normalizeBotConversationAgentConfig(params.agentConfig);
     const taskAgentConfig = applyDefaultAccessProfile(
@@ -5171,6 +5193,10 @@ export class AgentDaemon extends EventEmitter {
       ...safeTaskOverrides,
       ...(params.boardColumn ? { boardColumn: params.boardColumn } : {}),
       ...(sessionId ? { sessionId } : {}),
+      // Only the caller's explicit argument marks the prompt as typed: neither taskOverrides
+      // (TASK_OVERRIDE_ALLOWLIST) nor agentConfig can carry it, so a copied config or a
+      // remote client's overrides cannot make someone else's text count as the user's.
+      ...(params.promptProvenance === "user_typed" ? USER_TYPED_TASK_PROMPT : {}),
       resumeStrategy,
     };
     return { input, derived };

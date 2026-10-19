@@ -863,11 +863,14 @@ export class TaskStore {
     ) {
       throw new Error("Task id must be a UUID.");
     }
-    const { id: _id, ...taskInput } = task;
+    const { id: _id, promptProvenance, ...taskInput } = task;
     void _id;
     const normalizedTask = TaskStore.normalizePromptFields(taskInput);
     const newTask: Task = {
       ...normalizedTask,
+      // Who wrote the prompt is fixed here and never updated (it is not an update field). Only
+      // the exact marker is kept: anything else means the user did not write the prompt.
+      ...(promptProvenance === "user_typed" ? { promptProvenance } : {}),
       id: requestedId || uuidv4(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -899,8 +902,8 @@ export class TaskStore {
     }
 
     const stmt = this.db.prepare(`
-      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, verification_verdict, verification_report, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code, assigned_agent_role_id, worker_role, semantic_summary, target_node_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, title, prompt, raw_prompt, user_prompt, status, workspace_id, created_at, updated_at, budget_tokens, budget_cost, success_criteria, max_attempts, current_attempt, parent_task_id, agent_type, agent_config, depth, result_summary, source, strategy_lock, budget_profile, terminal_status, failure_class, verification_verdict, verification_report, best_known_outcome, budget_usage, continuation_count, continuation_window, lifetime_turns_used, last_progress_score, auto_continue_block_reason, compaction_count, last_compaction_at, last_compaction_tokens_before, last_compaction_tokens_after, no_progress_streak, last_loop_fingerprint, risk_level, eval_case_id, eval_run_id, issue_id, heartbeat_run_id, company_id, goal_id, project_id, request_depth, billing_code, assigned_agent_role_id, worker_role, semantic_summary, target_node_id, prompt_provenance)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -961,6 +964,7 @@ export class TaskStore {
       newTask.workerRole || null,
       newTask.semanticSummary || null,
       newTask.targetNodeId || null,
+      newTask.promptProvenance ?? null,
     );
     if (graphAdmission) linkGraphTaskAdmission(this.db, graphAdmission, newTask.id);
     persistResponsibilityTaskRun(this.db, newTask);
@@ -2109,6 +2113,7 @@ export class TaskStore {
       billingCode: row.billing_code || undefined,
       semanticSummary: row.semantic_summary || undefined,
       targetNodeId: row.target_node_id || undefined,
+      promptProvenance: row.prompt_provenance === "user_typed" ? "user_typed" : undefined,
     });
   }
 

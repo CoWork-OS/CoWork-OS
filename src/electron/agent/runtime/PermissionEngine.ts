@@ -271,6 +271,26 @@ const FILESYSTEM_WRITE_TOOLS = new Set([
   "batch_image_process",
 ]);
 
+/** Input keys a file tool may take its write or delete target from (isSkillStorageMutation). */
+const SKILL_STORAGE_TARGET_KEYS = [
+  "path",
+  "file_path",
+  "filePath",
+  "outputPath",
+  "output_path",
+  "outputDir",
+  "output_dir",
+  "exportPath",
+  "filename",
+  "destPath",
+  "dest_path",
+  "newPath",
+  "new_path",
+  "oldPath",
+  "old_path",
+  "targetPath",
+];
+
 export class PermissionEngine {
   static evaluate(request: PermissionEngineRequest): PermissionEvaluationResult {
     return this.withSkillStorageApproval(request, this.evaluateRequest(request));
@@ -472,19 +492,35 @@ export class PermissionEngine {
 
   private static isSkillStorageMutation(request: PermissionEngineRequest): boolean {
     const toolName = canonicalizeToolName(String(request.toolName || "").trim());
-    return this.extractFilesystemOperations(request, toolName).some(
-      ({ path: candidate, operation }) => {
-        if (operation === "read") return false;
-        try {
-          return isApprovalRequiredWorkspacePath(
-            request.workspace.path,
-            resolveAccessControlledPath(request.workspace.path, candidate),
-          );
-        } catch {
-          return false;
-        }
-      },
+    const mutations = this.extractFilesystemOperations(request, toolName).filter(
+      ({ operation }) => operation !== "read",
     );
+    if (mutations.length === 0) return false;
+    // extractFilesystemOperations takes the first path key it finds, but a handler can read
+    // another one (edit_file edits `file_path`, so a decoy `path` would hide the target).
+    // For a call that writes or deletes, every target key it carries is checked.
+    const input =
+      request.toolInput &&
+      typeof request.toolInput === "object" &&
+      !Array.isArray(request.toolInput)
+        ? (request.toolInput as Record<string, unknown>)
+        : {};
+    const candidates = [
+      ...mutations.map(({ path: candidate }) => candidate),
+      ...SKILL_STORAGE_TARGET_KEYS.map((key) => input[key]).filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      ),
+    ];
+    return candidates.some((candidate) => {
+      try {
+        return isApprovalRequiredWorkspacePath(
+          request.workspace.path,
+          resolveAccessControlledPath(request.workspace.path, candidate.trim()),
+        );
+      } catch {
+        return false;
+      }
+    });
   }
 
   private static evaluateHardPolicies(

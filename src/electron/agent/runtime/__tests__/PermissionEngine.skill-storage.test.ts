@@ -62,6 +62,27 @@ describe("PermissionEngine skill storage approval", () => {
     },
   );
 
+  it("checks every target key, so a decoy path cannot hide an edit_file target", () => {
+    const result = evaluate({
+      toolName: "edit_file",
+      approvalType: "workspace_write",
+      toolInput: {
+        path: path.join(workspacePath, "README.md"),
+        file_path: path.join(workspacePath, "skills", "existing.json"),
+        old_string: "a",
+        new_string: "b",
+      },
+    });
+    expect(result.decision).toBe("ask");
+    expect(
+      evaluate({
+        toolName: "edit_file",
+        approvalType: "workspace_write",
+        toolInput: { file_path: path.join(workspacePath, "src", "a.ts"), old_string: "a" },
+      }).decision,
+    ).toBe("allow");
+  });
+
   it("resolves relative paths against the workspace", () => {
     const result = evaluate({
       approvalType: "workspace_write",

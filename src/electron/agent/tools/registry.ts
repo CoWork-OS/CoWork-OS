@@ -7877,7 +7877,7 @@ ${skillDescriptions}`;
       );
       if (!userApproved) {
         this.daemon.logEvent(this.taskId, "log", {
-          message: `Skill proposal '${proposal.id}' was not approved by the user`,
+          message: `Skill proposal '${proposal.id}' was not approved`,
           proposalId: proposal.id,
         });
         return {
@@ -7885,7 +7885,7 @@ ${skillDescriptions}`;
           action,
           approval_denied: true,
           message:
-            "The user did not approve this skill proposal, so no skill was saved. It stays pending; do not ask again unless the user wants to review it.",
+            "This skill proposal was not approved: the user declined it, or this task cannot ask for approval. No skill was saved and the proposal stays pending; do not retry unless the user asks to review it.",
         };
       }
 

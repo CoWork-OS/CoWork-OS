@@ -32,6 +32,7 @@ import {
   storageStatements,
   ToolAttemptRepository,
   LifecycleMetaRepository,
+  ResourceClaimRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
 import { describeUnverifiedAttempts, unresolvedUnknownAttempts } from "./runtime/tool-attempts";
@@ -195,7 +196,13 @@ import {
   InterruptInFlightCall,
   ToolAttempt,
   LifecycleKind,
+  ResourceClaimHolder,
 } from "../../shared/types";
+import {
+  fileResource,
+  RESOURCE_CONFLICT_WAIT_PREFIX,
+  ResourceConflictError,
+} from "./resource-claims";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
@@ -1119,6 +1126,9 @@ export class AgentDaemon extends EventEmitter {
 
   private toolAttemptRepository?: ToolAttemptRepository;
   private lifecycleMetaRepository?: LifecycleMetaRepository;
+  private resourceClaimRepository?: ResourceClaimRepository;
+  /** `taskId\nresourceKey` of writes refused for a conflict, whose wait is still open. */
+  private readonly openResourceConflicts = new Set<string>();
   /** Tasks with a call whose outcome became unknown; only these read attempts at completion. */
   private tasksWithUnknownToolOutcomes?: Set<string>;
 
@@ -3316,6 +3326,7 @@ export class AgentDaemon extends EventEmitter {
             workspace.id,
             workspace.path,
             executionTask.agentConfig?.worktreeBaseBranch,
+            executionTask.agentConfig?.worktreeBaseCommit,
           );
 
           // Create a virtual workspace pointing to the worktree
@@ -4892,7 +4903,14 @@ export class AgentDaemon extends EventEmitter {
       typeof safeTaskOverrides?.sessionId === "string" && safeTaskOverrides.sessionId.trim()
         ? safeTaskOverrides.sessionId.trim()
         : undefined;
+    // Build Compare: every variant runs the same check before it can finish.
+    const compareCheckCommand = derived.agentConfig?.compareGroupId
+      ? derived.agentConfig.compareCheckCommand?.trim()
+      : undefined;
     const input: TaskAdmissionInput = {
+      ...(compareCheckCommand && !safeTaskOverrides?.successCriteria
+        ? { successCriteria: { type: "shell_command" as const, command: compareCheckCommand } }
+        : {}),
       title: params.title,
       prompt: derived.prompt,
       rawPrompt: params.prompt,
@@ -10438,15 +10456,92 @@ export class AgentDaemon extends EventEmitter {
    * Log an event for a task
    */
   async captureTaskMutationBaseline(taskId: string, candidatePath: string): Promise<void> {
-    const ledger = this.taskMutationLedger;
-    if (!ledger) return;
     const task = this.taskRepo.findById(taskId);
     const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
     const workspaceRoot = task?.worktreePath || workspace?.path;
-    if (!workspaceRoot) return;
+    if (!task || !workspaceRoot) return;
+    // Throws when another task in the same folder is changing this file: the write is refused.
+    await this.claimTaskResource(task, workspaceRoot, candidatePath);
+    const ledger = this.taskMutationLedger;
+    if (!ledger) return;
     await ledger.captureBaseline(taskId, workspaceRoot, candidatePath, {
       isolatedWorktree: Boolean(task?.worktreePath),
     });
+  }
+
+  /**
+   * The top task of a task's parent/child tree (bounded, so a cycle cannot hang it). Build
+   * Compare variants are alternatives to each other, so a Compare group is one family.
+   */
+  private taskFamilyRoot(task: Task): string {
+    const compareGroupId = task.agentConfig?.compareGroupId;
+    if (compareGroupId) return `compare:${compareGroupId}`;
+    let current = task;
+    for (let depth = 0; depth < 20 && current.parentTaskId; depth += 1) {
+      const parent = this.taskRepo.findById(current.parentTaskId);
+      if (!parent) break;
+      current = parent;
+    }
+    return current.id;
+  }
+
+  /**
+   * Claim a file before a task writes it (shared-change coordination, WP11). A task in the
+   * shared folder is refused while another task there is changing the same file: the write
+   * fails with a clear message and a conflict wait is recorded until a later write of the file
+   * goes ahead or the task ends. Tasks in worktrees always get their claim; overlapping changes
+   * are shown in Mission Control and in the merge review. A failure to record a claim never
+   * blocks a write.
+   */
+  private async claimTaskResource(
+    task: Task,
+    workspaceRoot: string,
+    candidatePath: string,
+  ): Promise<void> {
+    const resource = fileResource(workspaceRoot, candidatePath);
+    if (!resource) return;
+    let result: { claimed: boolean; others: ResourceClaimHolder[] };
+    try {
+      this.resourceClaimRepository ??= new ResourceClaimRepository(this.getDatabase());
+      result = await this.resourceClaimRepository.claim({
+        id: crypto.randomUUID(),
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        resourceKey: resource.key,
+        label: resource.label,
+        intent: task.title,
+        isolated: Boolean(task.worktreePath),
+        familyRoot: this.taskFamilyRoot(task),
+        at: Date.now(),
+      });
+    } catch (error) {
+      log.debug(`Could not record a claim on ${resource.label}:`, error);
+      return;
+    }
+    const conflictKey = `${task.id}\n${resource.key}`;
+    const requestId = `${RESOURCE_CONFLICT_WAIT_PREFIX}${resource.key}`;
+    if (result.claimed) {
+      if (this.openResourceConflicts.delete(conflictKey)) {
+        this.workSessionContractService.resolveWait(task.id, "external", requestId, "resolved", {
+          reason: "write_went_ahead",
+        });
+      }
+      return;
+    }
+    const other = result.others.find((holder) => !holder.isolated) ?? result.others[0];
+    this.openResourceConflicts.add(conflictKey);
+    this.workSessionContractService.beginWait(task.id, {
+      kind: "external",
+      requestId,
+      reason: `${resource.label} is being changed by "${other.title}" in the same folder`,
+      payload: { conflict: true, resource: resource.label, otherTaskId: other.taskId },
+    });
+    this.logEvent(task.id, "resource_conflict", {
+      path: resource.label,
+      otherTaskId: other.taskId,
+      otherTaskTitle: other.title,
+    });
+    throw new ResourceConflictError(resource.label, other);
   }
 
   private recordTaskMutationImpact(

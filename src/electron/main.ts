@@ -4063,10 +4063,13 @@ if (isMacSafeStorageMigrationWorker) {
                 logger.warn("[EventTriggers] Could not record routine trigger fire:", error);
               });
             },
+            onEventWaitFired: (params) => agentDaemon.resumeAfterEventWait(params),
           },
           db,
         );
         const currentTriggerService = eventTriggerService;
+        // wait_for_event parks tasks on temporary triggers in this engine.
+        agentDaemon.setEventWaitRegistry?.(currentTriggerService);
         const mcpClientManager = MCPClientManager.getInstance();
         const syncMcpTriggerSubscriptions = async (): Promise<void> => {
           const subscriptions = currentTriggerService

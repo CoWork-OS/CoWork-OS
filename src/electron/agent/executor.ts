@@ -16158,6 +16158,7 @@ ${transcript}
     this.availableToolsCacheKey = null;
     this.availableToolsCache = null;
 
+    this.daemon?.recordLifecycleUse?.("skill", normalizedApplication.skillId);
     this.emitEvent("skill_applied", {
       skillId: normalizedApplication.skillId,
       skillName: normalizedApplication.skillName,

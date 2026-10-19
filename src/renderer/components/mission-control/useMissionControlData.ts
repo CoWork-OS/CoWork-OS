@@ -146,7 +146,8 @@ export type OpsSubTab =
   | "execution"
   | "planner"
   | "harness"
-  | "automation";
+  | "automation"
+  | "hygiene";
 export type DetailPanelView =
   | { kind: "task"; taskId: string }
   | { kind: "issue"; issueId: string }

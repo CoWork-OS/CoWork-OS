@@ -31,6 +31,7 @@ import {
   InputRequestRepository,
   storageStatements,
   ToolAttemptRepository,
+  LifecycleMetaRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
 import { describeUnverifiedAttempts, unresolvedUnknownAttempts } from "./runtime/tool-attempts";
@@ -193,6 +194,7 @@ import {
   LLMProviderType,
   InterruptInFlightCall,
   ToolAttempt,
+  LifecycleKind,
 } from "../../shared/types";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
@@ -1116,11 +1118,28 @@ export class AgentDaemon extends EventEmitter {
   }
 
   private toolAttemptRepository?: ToolAttemptRepository;
+  private lifecycleMetaRepository?: LifecycleMetaRepository;
   /** Tasks with a call whose outcome became unknown; only these read attempts at completion. */
   private tasksWithUnknownToolOutcomes?: Set<string>;
 
   noteToolOutcomeUnknown(taskId: string): void {
     (this.tasksWithUnknownToolOutcomes ??= new Set()).add(taskId);
+  }
+
+  /**
+   * Count one use of generated software (a skill applied, a playbook entry recalled) for the
+   * Hygiene tab. Fire-and-forget: it never delays or fails the caller.
+   */
+  recordLifecycleUse(kind: LifecycleKind, id: string): void {
+    if (!id) return;
+    try {
+      this.lifecycleMetaRepository ??= new LifecycleMetaRepository(this.getDatabase());
+      void this.lifecycleMetaRepository
+        .recordUse({ kind, id, at: Date.now() })
+        .catch((error) => log.debug(`Could not record a use of ${kind} ${id}:`, error));
+    } catch (error) {
+      log.debug(`Could not record a use of ${kind} ${id}:`, error);
+    }
   }
 
   /** Durable attempts of tool calls that write or whose effect is unknown. */

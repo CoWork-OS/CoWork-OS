@@ -9,6 +9,7 @@ import type {
 import type { MissionControlData, OpsSubTab } from "./useMissionControlData";
 import { hasHostMethod, hasHostMethods } from "../../host/browser-capabilities";
 import { botIconText } from "../../../shared/bot-mascots";
+import { OpsHygiene } from "./MCOpsHygiene";
 
 interface MCOpsTabProps {
   data: MissionControlData;
@@ -22,6 +23,7 @@ const OPS_TABS: { id: OpsSubTab; label: string }[] = [
   { id: "execution", label: "Execution Map" },
   { id: "planner", label: "Planner" },
   { id: "automation", label: "Automation" },
+  { id: "hygiene", label: "Hygiene" },
 ];
 
 export function MCOpsTab({ data }: MCOpsTabProps) {
@@ -60,7 +62,8 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
     formatRelativeTime,
   } = data;
 
-  if (!selectedCompany && opsSubTab !== "harness") {
+  // Core Harness and Hygiene cover the whole profile, not one company.
+  if (!selectedCompany && opsSubTab !== "harness" && opsSubTab !== "hygiene") {
     return <div className="mc-v2-empty">Loading operations...</div>;
   }
 
@@ -148,6 +151,7 @@ export function MCOpsTab({ data }: MCOpsTabProps) {
             retryAutomationOutcome={retryAutomationOutcome}
           />
         )}
+        {opsSubTab === "hygiene" && <OpsHygiene formatRelativeTime={formatRelativeTime} />}
       </div>
     </div>
   );

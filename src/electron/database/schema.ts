@@ -3652,6 +3652,27 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_tool_attempts_key
           ON tool_attempts(task_id, idempotency_key);
 
+        -- Lifecycle of generated software: owner, use, dependencies, retire/keep (WP9).
+        CREATE TABLE IF NOT EXISTS lifecycle_meta (
+          kind TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          owner TEXT,
+          created_by_task TEXT,
+          last_used_at INTEGER,
+          use_count INTEGER NOT NULL DEFAULT 0,
+          depends_on_json TEXT,
+          protects TEXT,
+          evidence TEXT,
+          retired_at INTEGER,
+          kept_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (kind, item_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_lifecycle_meta_retired
+          ON lifecycle_meta(kind, retired_at);
+
         CREATE TABLE IF NOT EXISTS work_session_rollout_config (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           enabled INTEGER NOT NULL DEFAULT 1,

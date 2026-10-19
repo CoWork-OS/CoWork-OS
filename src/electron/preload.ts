@@ -2534,6 +2534,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
       success: boolean;
       settings?: BrowserSettingsState;
     }>,
+  getHygieneReport: (data?: { includeAll?: boolean }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_HYGIENE_REPORT, data) as Promise<HygieneReport>,
+  retireLifecycleItem: (data: { kind: LifecycleKind; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_RETIRE, data) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
+  keepLifecycleItem: (data: { kind: LifecycleKind; id: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_KEEP, data) as Promise<{ success: boolean }>,
+  setLifecycleMeta: (data: LifecycleMetaInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.LIFECYCLE_SET_META, data) as Promise<{
+      success: boolean;
+      error?: string;
+    }>,
   getAgentIdentityDirectory: () =>
     ipcRenderer.invoke(
       IPC_CHANNELS.AGENT_IDENTITY_DIRECTORY_GET,
@@ -6229,6 +6243,16 @@ export interface BrowserWorkbenchUserNavigateResult {
 export type BrowserSettings = import("../shared/browser-settings").BrowserSettings;
 export type BrowserSettingsState = import("../shared/browser-settings").BrowserSettingsState;
 export type BrowserDataType = import("../shared/browser-settings").BrowserDataType;
+export type HygieneReport = import("../shared/types").HygieneReport;
+export type LifecycleKind = import("../shared/types").LifecycleKind;
+export type LifecycleMetaInput = {
+  kind: LifecycleKind;
+  id: string;
+  owner?: string | null;
+  protects?: string | null;
+  evidence?: string | null;
+  dependsOn?: import("../shared/types").LifecycleRef[];
+};
 export type AgentIdentityDirectoryResult =
   import("../shared/browser-settings").AgentIdentityDirectoryResult;
 export type BrowserSitePermissionEntry =
@@ -6665,6 +6689,16 @@ export interface ElectronAPI {
   saveBrowserSettings: (
     settings: Partial<BrowserSettings>,
   ) => Promise<{ success: boolean; settings?: BrowserSettingsState }>;
+  /** Mission Control > Operations > Hygiene: unused, ownerless and broken generated software. */
+  getHygieneReport: (data?: { includeAll?: boolean }) => Promise<HygieneReport>;
+  /** Archive or disable the item where its store can, and mark it retired. Nothing is deleted. */
+  retireLifecycleItem: (data: {
+    kind: LifecycleKind;
+    id: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  /** Keep the item: its idle timer restarts. */
+  keepLifecycleItem: (data: { kind: LifecycleKind; id: string }) => Promise<{ success: boolean }>;
+  setLifecycleMeta: (data: LifecycleMetaInput) => Promise<{ success: boolean; error?: string }>;
   /** The public key directory (JWK Set) to host for declared agent identity. */
   getAgentIdentityDirectory: () => Promise<AgentIdentityDirectoryResult>;
   /**

@@ -1358,6 +1358,74 @@ export interface ToolAttempt {
   finishedAt?: number;
 }
 
+/**
+ * Generated software whose use, ownership and dependencies are tracked (agent-first roadmap WP9):
+ * user and agent skills, playbook entries, scheduled automations, event triggers and curated rules.
+ */
+export type LifecycleKind = "skill" | "playbook" | "automation" | "trigger" | "rule";
+
+/** Something an item depends on: another tracked item, or the workspace it runs in. */
+export interface LifecycleRef {
+  kind: LifecycleKind | "workspace";
+  id: string;
+}
+
+/** The `lifecycle_meta` row of one item. Usage the item's own store already keeps is not copied. */
+export interface LifecycleMeta {
+  kind: LifecycleKind;
+  id: string;
+  owner?: string;
+  createdByTask?: string;
+  lastUsedAt?: number;
+  useCount: number;
+  dependsOn: LifecycleRef[];
+  /** Rules: the decision the rule protects (a constraint ledger entry id or free text). */
+  protects?: string;
+  /** Rules: the eval case, fixture or task id of the failure the rule prevents. */
+  evidence?: string;
+  retiredAt?: number;
+  /** Set by "Keep": the idle timer counts from here. */
+  keptAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Why an item is listed in Hygiene. `unused_60` / `unused_90`: no use for that many days (an
+ * automation with a next scheduled run never is); `rule_without_evidence`: a rule unused for
+ * 90 days that names no failure it prevents.
+ */
+export type HygieneFlag =
+  | "unused_60"
+  | "unused_90"
+  | "ownerless"
+  | "broken_dependency"
+  | "rule_without_evidence";
+
+export interface HygieneItem {
+  kind: LifecycleKind;
+  id: string;
+  name: string;
+  workspaceId?: string;
+  owner?: string;
+  lastUsedAt?: number;
+  useCount: number;
+  nextRunAt?: number;
+  idleDays?: number;
+  dependsOn: LifecycleRef[];
+  brokenDependencies: LifecycleRef[];
+  protects?: string;
+  evidence?: string;
+  flags: HygieneFlag[];
+}
+
+export interface HygieneReport {
+  generatedAt: number;
+  items: HygieneItem[];
+  /** Items checked, listed or not. */
+  checked: number;
+}
+
 /** A call that was running when a task was stopped (`agent_interrupt_confirmed.inFlight`). */
 export interface InterruptInFlightCall {
   toolName: string;
@@ -8368,6 +8436,11 @@ export const IPC_CHANNELS = {
   MC_COMPANY_LIST: "missionControl:companyList",
   MC_COMPANY_GET: "missionControl:companyGet",
   MC_COMMAND_CENTER_SUMMARY: "missionControl:commandCenterSummary",
+  // Lifecycle hygiene (WP9): list candidates, retire, keep, and edit owner/dependencies/evidence
+  LIFECYCLE_HYGIENE_REPORT: "lifecycle:hygieneReport",
+  LIFECYCLE_RETIRE: "lifecycle:retire",
+  LIFECYCLE_KEEP: "lifecycle:keep",
+  LIFECYCLE_SET_META: "lifecycle:setMeta",
   MC_GOAL_LIST: "missionControl:goalList",
   MC_GOAL_GET: "missionControl:goalGet",
   MC_GOAL_CREATE: "missionControl:goalCreate",

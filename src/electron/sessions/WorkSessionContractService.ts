@@ -720,6 +720,12 @@ export class WorkSessionContractService {
     if (!task) return {};
     const result = this.getForTask(task.id);
     if (!result) return {};
+    // A wait_for_event wait ends with its task; its temporary trigger is removed by the sweep.
+    for (const wait of this.repository.listWaitStates(result.session.id, { status: "pending" })) {
+      if (wait.kind === "external" && wait.requestId?.startsWith("event_wait:")) {
+        this.repository.resolveWaitState(wait.id, "cancelled", { reason: "task_ended" });
+      }
+    }
     const outcome = taskOutcome(task);
     let contract = result.contract;
     if (contract && outcome) {

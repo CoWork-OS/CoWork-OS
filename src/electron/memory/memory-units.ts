@@ -21,6 +21,7 @@ import { LEGACY_MEMORY_RETIREMENT_UNITS } from "./legacy-memory-retirement-sql";
 import { MEMORY_HEALTH_UNITS } from "./memory-health-sql";
 import { MEMORY_COMPRESSION_USAGE_UNITS } from "./memory-compression-usage-sql";
 import { MEMORY_SUMMARY_REINDEX_UNITS } from "./memory-summary-reindex-sql";
+import { MEMORY_SOURCE_UNITS } from "./memory-source-sql";
 
 /**
  * Transaction units of the memory domain (async SQLite migration plan, DB6): each runs
@@ -86,5 +87,6 @@ export const MEMORY_UNITS = {
   ...MEMORY_HEALTH_UNITS,
   ...MEMORY_COMPRESSION_USAGE_UNITS,
   ...MEMORY_SUMMARY_REINDEX_UNITS,
+  ...MEMORY_SOURCE_UNITS,
   tier_promotionPass: tierPromotionPass,
 } satisfies UnitCatalog;

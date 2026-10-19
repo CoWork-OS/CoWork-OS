@@ -5,6 +5,7 @@
  * `memoryRepoEnabled` is on; restarted when the setting or the path changes; stopped by the
  * "memory repo" shutdown step. The CLI and quiet mode start it read-only.
  */
+import { MemorySourceRecheckService } from "../MemorySourceRecheckService";
 import type { MemoryFeaturesSettings } from "../../../shared/types";
 import { setTeamMemoryRepoRoots } from "../../security/memory-repo-access";
 import { memoryRepoRemoteUrlProblem } from "./memory-repo-sync";
@@ -304,6 +305,11 @@ function startDreamer(service: MemoryRepoService, bootOptions: MemoryRepoBootstr
       client: bootOptions.dreamModelClient ?? createProviderDreamModelClient(),
       listRecentTasks,
       onReviewPending: bootOptions.notifyDreamReview,
+      sourceRechecks: {
+        pending: (limit) => MemorySourceRecheckService.getDefault().pendingForDream(limit),
+        reviewed: (rows) => MemorySourceRecheckService.getDefault().markReviewed(rows),
+        forget: (rows) => MemorySourceRecheckService.getDefault().forget(rows),
+      },
       settings: () => {
         const settings = MemoryFeaturesManager.loadSettings();
         return {

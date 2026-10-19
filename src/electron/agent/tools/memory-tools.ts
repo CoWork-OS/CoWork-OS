@@ -31,6 +31,11 @@ import { MemoryService } from "../../memory/MemoryService";
 import { MemoryWriteGate } from "../../memory/MemoryWriteGate";
 import { MemoryWriter, type MemoryWriteResult } from "../../memory/MemoryWriter";
 import { MemoryItemsHubService } from "../../memory/MemoryItemsHubService";
+import {
+  MemorySourceRecheckService,
+  itemSourceRef,
+  repoEntrySourceRef,
+} from "../../memory/MemorySourceRecheckService";
 import { DurableContextService } from "../../memory/DurableContextService";
 import { MemoryFeaturesManager } from "../../settings/memory-features-manager";
 import {
@@ -263,6 +268,11 @@ export interface MemoryRememberToolInput {
   pin?: boolean;
   user_asked?: boolean;
   until?: string;
+  /**
+   * Workspace file (path) or connector record (resource URI) the fact was read from; a change
+   * to it flags the memory (WP15).
+   */
+  source?: string;
 }
 
 export interface MemoryForgetToolInput {
@@ -375,6 +385,10 @@ export class MemoryTools {
             user_asked: {
               type: "boolean",
               description: "true only if the user explicitly asked you to remember this.",
+            },
+            source: {
+              type: "string",
+              description: "File path or connector URI it was read from.",
             },
           },
           required: ["content", "kind"],
@@ -761,6 +775,7 @@ export class MemoryTools {
           pinRequested,
           subjectKey,
           userText,
+          origin: input,
         });
         if (repoResult) return repoResult;
       }
@@ -805,6 +820,7 @@ export class MemoryTools {
           ? { replaced: result.supersededIds.map((id) => `memory:${id}`) }
           : {}),
         ...(result.redactions > 0 ? { redactions: result.redactions } : {}),
+        ...(await this.linkMemorySource(input, { itemId: result.item.id })),
       };
     } catch (error) {
       return fail(String(error instanceof Error ? error.message : error));
@@ -826,6 +842,8 @@ export class MemoryTools {
     pinRequested: boolean;
     subjectKey: string;
     userText: string;
+    /** The tool input, for the source the fact came from. */
+    origin?: MemoryRememberToolInput;
   }): Promise<Record<string, unknown> | null> {
     const repo = MemoryRepoService.get();
     // Only tasks whose memoryRepo layer is on (the access scope the executor sets).
@@ -925,7 +943,58 @@ export class MemoryTools {
         : {}),
       ...(result.replaced ? { replaced: result.replaced } : {}),
       ...(result.redactions > 0 ? { redactions: result.redactions } : {}),
+      ...(input.origin
+        ? await this.linkMemorySource(input.origin, { file: result.path, line: result.line })
+        : {}),
     };
+  }
+
+  /**
+   * Link a saved memory to the workspace file or connector record it was read from (WP15):
+   * when that source changes, recall and the prompt flag the memory and the next dream
+   * rechecks it. Linking never fails the save; the result says what was linked.
+   */
+  private async linkMemorySource(
+    input: MemoryRememberToolInput,
+    target: { file: string; line: number } | { itemId: string },
+  ): Promise<Record<string, unknown>> {
+    const source = asString(input?.source, 2_048);
+    if (!source) return {};
+    // A URI (a scheme of two or more letters) names a connector record; anything else,
+    // a drive letter included, is a workspace path.
+    const isUri = /^[a-z][a-z0-9+.-]+:\S+$/i.test(source);
+    const sourceFile = isUri ? "" : source;
+    const sourceUri = isUri ? source : "";
+    const notLinked = (why: string) => ({ sourceNote: `Source not linked: ${why}` });
+    try {
+      let memoryRef: string;
+      if ("itemId" in target) {
+        memoryRef = itemSourceRef(target.itemId);
+      } else {
+        const entry = await MemoryRepoService.get()?.entryAt(target.file, target.line);
+        if (!entry) return notLinked("the saved entry could not be read back.");
+        memoryRef = repoEntrySourceRef(target.file, entry.hash);
+      }
+      const service = MemorySourceRecheckService.getDefault();
+      const linked: Record<string, unknown> = {};
+      if (sourceFile) {
+        const tracked = await service.trackFile({
+          workspaceId: this.workspace.id,
+          workspaceRoot: this.workspace.path,
+          file: sourceFile,
+          memoryRef,
+        });
+        if (!tracked) return notLinked(`${sourceFile} is not an existing file in this workspace.`);
+        linked.sourceFile = tracked.sourceKey;
+      }
+      if (sourceUri) {
+        await service.trackConnector({ resourceUri: sourceUri, memoryRef });
+        linked.sourceUri = sourceUri;
+      }
+      return linked;
+    } catch {
+      return notLinked("the memory store is not available.");
+    }
   }
 
   private async saveToArchive(

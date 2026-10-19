@@ -49,6 +49,17 @@ describe("renderMemoryRepoFile", () => {
     expect(rendered.hashes[0]).toBe(hashMemoryItemContent("Prefers concise answers"));
   });
 
+  it("tags an entry whose source changed", () => {
+    const changed = hashMemoryItemContent("Uses <b>pnpm</b> for installs");
+    const rendered = renderMemoryRepoFile("MEMORY.md", file, 500, {
+      sourceChanged: (hash) => hash === changed,
+    });
+    expect(rendered.lines).toContain(
+      "- Uses &lt;b&gt;pnpm&lt;/b&gt; for installs (agent, source may have changed)",
+    );
+    expect(rendered.lines).toContain("- Prefers concise answers");
+  });
+
   it("keeps entries within the budget and points to the file for the rest", () => {
     const many = [
       "# Lessons",

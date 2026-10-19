@@ -1782,6 +1782,7 @@ const SelectedTaskWorkspaceView = memo(
           availableModels={availableModels}
           availableProviders={availableProviders}
           workspaceId={workspace.id}
+          taskId={task?.id}
           onModelChange={onModelChange}
           onOpenSettings={onOpenSettings}
           turnContext={spreadsheetTurnContext}

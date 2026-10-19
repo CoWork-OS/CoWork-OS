@@ -26,6 +26,7 @@ import {
   SecureStorage,
   PluginType,
   SkillDirectoryDefinition,
+  SkillDirectoryRouting,
 } from "./types";
 import { createToolFromConnector, validateConnector } from "./declarative-connector-loader";
 import { discoverPlugins, loadPlugin, getPluginDataPath, isPluginCompatible } from "./loader";
@@ -70,6 +71,64 @@ function titleFromSkillId(id: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+type SkillRouting = NonNullable<NonNullable<CustomSkill["metadata"]>["routing"]>;
+
+/** An explicit (even empty) list is kept so the manifest can clear a frontmatter list. */
+function routingStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/** Keep only well-formed routing fields: manifests and SKILL.md files are pack-authored input. */
+function readSkillDirectoryRouting(value: unknown): SkillDirectoryRouting {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const examples =
+    raw.examples && typeof raw.examples === "object" && !Array.isArray(raw.examples)
+      ? (raw.examples as Record<string, unknown>)
+      : {};
+  return {
+    useWhen: frontmatterString(raw, "useWhen"),
+    dontUseWhen: frontmatterString(raw, "dontUseWhen"),
+    keywords: routingStringList(raw.keywords),
+    examples: {
+      positive: routingStringList(examples.positive),
+      negative: routingStringList(examples.negative),
+    },
+  };
+}
+
+/**
+ * Merge manifest routing over SKILL.md frontmatter routing, field by field. Only an explicit
+ * `routing:` block is read from frontmatter, so unrelated top-level `keywords:`/`tags:` in
+ * upstream SKILL.md files never become routing keywords (which hard-gate the skill).
+ * No generic outputs/successCriteria: text shared by every directory skill pulled unrelated
+ * pack skills into shortlists for words like "validate", "artifacts", or "task".
+ */
+function buildDirectorySkillRouting(
+  manifestRouting: unknown,
+  frontmatterRouting: unknown,
+  description: string,
+): SkillRouting {
+  const manifest = readSkillDirectoryRouting(manifestRouting);
+  const frontmatter = readSkillDirectoryRouting(frontmatterRouting);
+  const dontUseWhen = manifest.dontUseWhen ?? frontmatter.dontUseWhen;
+  const keywords = manifest.keywords ?? frontmatter.keywords;
+  const positive = manifest.examples?.positive ?? frontmatter.examples?.positive;
+  const negative = manifest.examples?.negative ?? frontmatter.examples?.negative;
+  return {
+    useWhen: manifest.useWhen ?? frontmatter.useWhen ?? description,
+    ...(dontUseWhen ? { dontUseWhen } : {}),
+    ...(keywords?.length ? { keywords } : {}),
+    ...(positive?.length || negative?.length
+      ? { examples: { positive: positive ?? [], negative: negative ?? [] } }
+      : {}),
+  };
 }
 
 /**
@@ -687,13 +746,7 @@ export class PluginRegistry extends EventEmitter {
       metadata: {
         version: "1.0.0",
         pluginSource: pluginName,
-        routing: {
-          useWhen: description,
-          outputs:
-            "Task-specific result plus any artifacts required by the directory-backed skill.",
-          successCriteria:
-            "Follow the directory-backed skill instructions and satisfy its required artifact and validation contract.",
-        },
+        routing: buildDirectorySkillRouting(definition.routing, frontmatter.routing, description),
       },
     };
   }

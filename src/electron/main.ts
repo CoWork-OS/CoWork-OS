@@ -195,6 +195,7 @@ import { DurableContextService } from "./memory/DurableContextService";
 import { BoxBrainService } from "./memory/BoxBrainService";
 import { MemoryRetentionService } from "./memory/MemoryRetentionService";
 import { CuratedMemoryService } from "./memory/CuratedMemoryService";
+import { MemorySourceRecheckService } from "./memory/MemorySourceRecheckService";
 import { startMemoryEngine } from "./memory/memory-engine-bootstrap";
 import { startMemoryRepo, stopMemoryRepo } from "./memory/repo/memory-repo-bootstrap";
 import { getMemoryRepoDreamer } from "./memory/repo/MemoryRepoDreamer";
@@ -2552,6 +2553,10 @@ if (isMacSafeStorageMigrationWorker) {
         // Quiet mode starts no background jobs: no periodic cleanup or deferred archive cleanup.
         MemoryService.initialize(dbManager, { backgroundJobs: !startupQuietMode });
         CuratedMemoryService.initialize(dbManager);
+        // Memories whose source file or record changed (WP15): flags for recall and prompts.
+        void MemorySourceRecheckService.getDefault()
+          .load()
+          .catch((error) => logger.warn("Could not load memory source flags:", error));
         // Memory engine (docs/memory-engine.md): memory_items is the only store of facts
         // about the user. The retired legacy lanes are copied in once, awaited here, before
         // queue recovery and IPC can read memory.
@@ -4114,6 +4119,12 @@ if (isMacSafeStorageMigrationWorker) {
               .evaluateEvent(triggerEvent)
               .catch((error) => logger.warn("Connector trigger event failed:", error));
           }
+          // A connector record changed: memories saved from it are flagged (WP15).
+          if (event.type === "resource_updated" && event.resourceUri) {
+            void MemorySourceRecheckService.getDefault()
+              .onConnectorRecordChanged(event.resourceUri)
+              .catch((error) => logger.debug("Memory source recheck failed:", error));
+          }
         });
         void syncMcpTriggerSubscriptions();
         setupTriggerHandlers(currentTriggerService, syncMcpTriggerSubscriptions, mcpEventService);
@@ -4318,6 +4329,21 @@ if (isMacSafeStorageMigrationWorker) {
           },
           emitTrigger: (event) => {
             void currentTriggerService.evaluateEvent(event);
+            // A workspace file changed: memories saved from it are flagged (WP15).
+            const workspaceId = String(event.fields.workspaceId ?? "");
+            const relPath = String(event.fields.path ?? "");
+            if (event.source === "file_change" && workspaceId && relPath) {
+              const workspacePath = workspaceRepo.findById(workspaceId)?.path;
+              if (workspacePath) {
+                void MemorySourceRecheckService.getDefault()
+                  .onFileChanged({
+                    workspaceId,
+                    relPath,
+                    absolutePath: path.join(workspacePath, relPath),
+                  })
+                  .catch((error) => logger.debug("Memory source recheck failed:", error));
+              }
+            }
           },
           wakeHeartbeats: ({ text, mode, workspaceId, category }) => {
             void submitHeartbeatSignalForAll({

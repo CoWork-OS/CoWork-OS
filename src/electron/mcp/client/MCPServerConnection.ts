@@ -20,6 +20,7 @@ import {
   MCP_ATTEMPT_META_KEY,
   MCP_IDEMPOTENCY_META_KEY,
   MCP_METHODS,
+  MCP_PREVIEW_META_KEY,
   JSONRPCNotification,
   JSONRPCResponse,
   JSONRPCRequest,
@@ -82,14 +83,18 @@ function legacyOnlyServerKey(config: MCPServerConfig): string {
 
 /**
  * Request `_meta` for a tool call: the attempt's idempotency key and id, only when the caller
- * has them (calls that cannot change anything carry none).
+ * has them (calls that cannot change anything carry none), and the preview flag when CoWork
+ * asks a tool to describe a write instead of doing it.
  */
-function toolCallMeta(options: MCPToolCallOptions): Record<string, string> | undefined {
+function toolCallMeta(options: MCPToolCallOptions): Record<string, string | boolean> | undefined {
   const key = options.idempotencyKey?.trim();
-  if (!key) return undefined;
+  if (!key && !options.preview) return undefined;
   return {
-    [MCP_IDEMPOTENCY_META_KEY]: key,
-    ...(options.attemptId?.trim() ? { [MCP_ATTEMPT_META_KEY]: options.attemptId.trim() } : {}),
+    ...(key ? { [MCP_IDEMPOTENCY_META_KEY]: key } : {}),
+    ...(key && options.attemptId?.trim()
+      ? { [MCP_ATTEMPT_META_KEY]: options.attemptId.trim() }
+      : {}),
+    ...(options.preview ? { [MCP_PREVIEW_META_KEY]: true } : {}),
   };
 }
 

@@ -95,6 +95,7 @@ import {
   ApplicationTaskToolGateway,
 } from "../applications/daemon-application-execution";
 import type { ApplicationExecutionService } from "../applications/ApplicationExecutionService";
+import type { ApplicationVerification } from "../../shared/application-execution";
 import type {
   EventTrigger,
   TriggerCondition,
@@ -1332,6 +1333,48 @@ export class AgentDaemon extends EventEmitter {
         .catch((error) => log.debug(`Could not record a use of ${kind} ${id}:`, error));
     } catch (error) {
       log.debug(`Could not record a use of ${kind} ${id}:`, error);
+    }
+  }
+
+  /**
+   * Record a connector write's receipt as evidence for the task (WP13): what the API returned
+   * and, when the connector read the record back, what it found.
+   */
+  recordToolReceipt(
+    taskId: string,
+    input: {
+      tool: string;
+      serverName?: string;
+      receipt: ApplicationVerification;
+      idempotencyKey?: string;
+    },
+  ): void {
+    const { receipt } = input;
+    try {
+      this.workSessionContractService.recordEvidence(taskId, {
+        claim: receipt.summary,
+        sourceType: "tool_output",
+        sourceRef: `mcp:${input.serverName ?? "connector"}:${input.tool}`,
+        status:
+          receipt.status === "verified"
+            ? "supporting"
+            : receipt.status === "contradicted"
+              ? "contradicting"
+              : "neutral",
+        confidence: receipt.status === "verified" ? 1 : 0,
+        basis: receipt.status === "unavailable" ? "unknown" : "observed",
+        capturedAt: receipt.checkedAt,
+        ...(receipt.expiresAt ? { freshnessExpiresAt: receipt.expiresAt } : {}),
+        snippet: JSON.stringify(receipt.evidence).slice(0, 8_000),
+        idempotencyKey: `mcp_receipt:${input.tool}:${input.idempotencyKey ?? receipt.checkedAt}`,
+      });
+      this.logEvent(taskId, "tool_receipt_recorded", {
+        tool: input.tool,
+        status: receipt.status,
+        summary: receipt.summary.slice(0, 300),
+      });
+    } catch (error) {
+      log.debug(`Could not record the receipt of ${input.tool}:`, error);
     }
   }
 

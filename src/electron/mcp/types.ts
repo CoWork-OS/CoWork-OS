@@ -156,6 +156,8 @@ export interface MCPTool {
     idempotentHint?: boolean;
     openWorldHint?: boolean;
   };
+  /** Tool metadata; `cowork.preview: true` means the tool can describe a write first (WP13). */
+  _meta?: Record<string, unknown>;
   inputSchema: {
     type: "object";
     properties?: Record<string, MCPToolProperty>;
@@ -381,6 +383,11 @@ export interface MCPToolCallOptions {
   idempotencyKey?: string;
   /** The tool attempt this call belongs to; sent in `_meta` with the key. */
   attemptId?: string;
+  /**
+   * Ask the tool to describe the write instead of doing it (`_meta["cowork.preview"]`). Only
+   * for tools that advertise it; the answer is `structuredContent.status === "preview"`.
+   */
+  preview?: boolean;
   onElicitation?: (request: MCPElicitationRequest) => Promise<MCPElicitationResult>;
   signal?: AbortSignal;
 }
@@ -390,6 +397,8 @@ export type MCPTransportRequestOptions = Pick<MCPToolCallOptions, "beforeSend" |
 /** `_meta` keys CoWork sends on `tools/call`; a connector reads them to deduplicate writes. */
 export const MCP_IDEMPOTENCY_META_KEY = "cowork.idempotencyKey";
 export const MCP_ATTEMPT_META_KEY = "cowork.attemptId";
+/** On a tool definition: the tool can describe a write. On a call: describe, do not act. */
+export const MCP_PREVIEW_META_KEY = "cowork.preview";
 
 // MCP Protocol Methods
 export const MCP_METHODS = {

@@ -27,6 +27,11 @@ const noResponse = () => {
   throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
 };
 
+/** The calls that wrote: a successful write is read back with a GET for its receipt. */
+function writes(fetchMock: ReturnType<typeof stubFetch>) {
+  return fetchMock.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
+}
+
 function body(result: Any) {
   return JSON.parse(result.content[0].text);
 }
@@ -58,8 +63,8 @@ describe("connector idempotent writes", () => {
     const first = await call(KEY);
     const retry = await call(KEY);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(first.structuredContent).toEqual({ status: "created" });
+    expect(writes(fetchMock)).toHaveLength(1);
+    expect(first.structuredContent).toMatchObject({ status: "created" });
     expect(body(first)).toMatchObject({ status: "created", data: { key: "OPS-1" } });
     expect(retry.structuredContent).toMatchObject({ status: "already_exists" });
     expect(body(retry)).toMatchObject({ status: "already_exists", data: { key: "OPS-1" } });
@@ -67,7 +72,7 @@ describe("connector idempotent writes", () => {
     // Without a key every call writes, as before.
     await call();
     await call();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(writes(fetchMock)).toHaveLength(3);
   });
 
   it("Jira reports an unanswered create as unknown, then finds the issue it made", async () => {
@@ -132,7 +137,7 @@ describe("connector idempotent writes", () => {
       (await call({ idempotencyKey: "caller-key-1" }, "ffffffffffffffffffffffffffffffff"))
         .structuredContent,
     ).toMatchObject({ status: "already_exists" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(writes(fetchMock)).toHaveLength(2);
   });
 
   it("Salesforce looks up a same-Name record after an unanswered create", async () => {
@@ -177,7 +182,7 @@ describe("connector idempotent writes", () => {
       });
     await call(KEY);
     expect((await call(KEY)).structuredContent).toMatchObject({ status: "already_exists" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(writes(fetchMock)).toHaveLength(1);
 
     stubFetch(() =>
       json(
@@ -206,9 +211,9 @@ describe("connector idempotent writes", () => {
         _meta: meta(),
       });
 
-    expect((await call()).structuredContent).toEqual({ status: "created" });
+    expect((await call()).structuredContent).toMatchObject({ status: "created" });
     expect((await call()).structuredContent).toMatchObject({ status: "already_exists" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(writes(fetchMock)).toHaveLength(1);
     expect((fetchMock.mock.calls[0][1].headers as Record<string, string>)["Idempotency-Key"]).toBe(
       KEY,
     );
@@ -227,7 +232,7 @@ describe("connector idempotent writes", () => {
       });
     await call();
     await call();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(writes(fetchMock)).toHaveLength(2);
     expect(fetchMock.mock.calls[0][1].headers as Record<string, string>).not.toHaveProperty(
       "Idempotency-Key",
     );
@@ -245,7 +250,7 @@ describe("connector idempotent writes", () => {
       });
     const first = await call();
     const retry = await call();
-    expect(first.structuredContent).toEqual({ status: "created" });
+    expect(first.structuredContent).toMatchObject({ status: "created" });
     expect(retry.structuredContent).toMatchObject({ status: "already_exists" });
     expect(body(retry).data.id).toBe(body(first).data.id);
   });

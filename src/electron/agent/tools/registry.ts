@@ -247,6 +247,13 @@ import {
   withToolPromptMetadataList,
 } from "./tool-prompting";
 import { buildBrowserUseDomainApprovalDetails } from "./browser-use-approval-context";
+import {
+  parseWritePreview,
+  parseWriteReceipt,
+  renderWritePreview,
+  supportsWritePreview,
+} from "../../mcp/write-preview";
+import type { ApplicationPreparedChange } from "../../../shared/application-execution";
 import { buildMcpApprovalPresentation } from "./mcp-approval-preview";
 import { getNumbatService } from "../../security/numbat";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
@@ -617,6 +624,8 @@ const registryLogger = createLogger("ToolRegistry");
 
 /** Servers exposing more tools than this load them through tool_search instead of every request. */
 export const MCP_DEFERRED_SERVER_TOOL_THRESHOLD = 25;
+/** A connector's write preview must answer within this, or the approval shows arguments. */
+const MCP_PREVIEW_TIMEOUT_MS = 15_000;
 
 /** The executor's tool attempt from the runtime context, when it is well formed. */
 function readToolAttempt(
@@ -2741,7 +2750,28 @@ export class ToolRegistry {
               : mcpApproval
                 ? mcpApproval.description
                 : `Allow ${context.request.name} to access the requested resource?`;
-          const details = { ...approvalDetails, reason: pipeline.reason || null };
+          // A local connector that can describe its write is asked what it would do, so the
+          // approval shows the effect rather than raw arguments (WP13).
+          const connectorPreview = mcpApproval
+            ? await this.fetchMcpWritePreview(
+                context.request.name,
+                context.request.input,
+                serverName ?? undefined,
+                context.request.runtime?.signal instanceof AbortSignal
+                  ? context.request.runtime.signal
+                  : undefined,
+              )
+            : null;
+          const details = {
+            ...approvalDetails,
+            ...(connectorPreview
+              ? {
+                  approvalPreview: connectorPreview.approvalPreview,
+                  preparedChange: connectorPreview.prepared,
+                }
+              : {}),
+            reason: pipeline.reason || null,
+          };
           const options = {
             allowAutoApprove:
               pipeline.approvalSource === "semantic_review"
@@ -6175,6 +6205,16 @@ ${skillDescriptions}`;
             : "the server could not confirm the write";
         throw new Error(`Outcome unknown: ${detail}`);
       }
+      // A write's receipt (ids, read-back) becomes evidence for the task (WP13).
+      const receipt = parseWriteReceipt(result);
+      if (receipt) {
+        this.daemon.recordToolReceipt?.(this.taskId, {
+          tool: mcpToolName,
+          serverName: routedServer?.name,
+          receipt,
+          ...(toolAttempt ? { idempotencyKey: toolAttempt.idempotencyKey } : {}),
+        });
+      }
       // Format MCP result and process any generated files
       return await this.formatMCPResult(result, mcpToolName, input);
     } catch (error: Any) {
@@ -6202,6 +6242,55 @@ ${skillDescriptions}`;
       }
       // Tool was registered but execution failed - propagate the error with context
       throw new Error(`MCP tool '${mcpToolName}' failed: ${message}`);
+    }
+  }
+
+  /**
+   * Ask a connector what a write would do, before the approval (WP13). Only for tools that
+   * advertise `_meta["cowork.preview"]` on a local (stdio) server: a remote server would receive
+   * the arguments before the user approved sending them. The connector does nothing in this
+   * call, and its answer is its own description, so the approval labels it as such. Any failure
+   * leaves the arguments preview.
+   */
+  private async fetchMcpWritePreview(
+    name: string,
+    input: unknown,
+    serverName: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<{
+    approvalPreview: { label: string; text: string };
+    prepared: ApplicationPreparedChange;
+  } | null> {
+    try {
+      const settings = MCPSettingsManager.loadSettings();
+      const prefix = settings.toolNamePrefix || "mcp_";
+      if (!name.startsWith(prefix)) return null;
+      const mcpManager = MCPClientManager.getInstance();
+      const mcpToolName = name.slice(prefix.length);
+      const tool = mcpManager.getAllTools().find((candidate) => candidate.name === mcpToolName);
+      if (!supportsWritePreview(tool)) return null;
+      const serverId = mcpManager.getServerIdForTool(mcpToolName);
+      const server = settings.servers?.find((candidate) => candidate.id === serverId);
+      if (server?.transport !== "stdio") return null;
+      const result = await Promise.race([
+        mcpManager.callTool(mcpToolName, (input ?? {}) as Record<string, Any>, {
+          preview: true,
+          ...(signal ? { signal } : {}),
+        }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), MCP_PREVIEW_TIMEOUT_MS)),
+      ]);
+      const prepared = parseWritePreview(result);
+      if (!prepared) return null;
+      return {
+        approvalPreview: {
+          // The approval card caps labels at 40 characters.
+          label: `Described by ${serverName || server.name}`,
+          text: renderWritePreview(prepared),
+        },
+        prepared,
+      };
+    } catch {
+      return null;
     }
   }
 

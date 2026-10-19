@@ -3469,10 +3469,11 @@ export interface QuotedAssistantMessage {
 
 /** Follow-up payload sent to an existing task. */
 /** Where a user message came from when the desktop app sent it on the user's behalf. */
-export type MessageSurfaceOrigin = "answer" | "page" | "code_block";
+export const MESSAGE_SURFACE_ORIGINS = ["answer", "page", "code_block", "browser_page"] as const;
+export type MessageSurfaceOrigin = (typeof MESSAGE_SURFACE_ORIGINS)[number];
 
 export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceOrigin {
-  return value === "answer" || value === "page" || value === "code_block";
+  return (MESSAGE_SURFACE_ORIGINS as readonly unknown[]).includes(value);
 }
 
 /**
@@ -3519,7 +3520,9 @@ export interface TaskFollowUpInput {
    * The user sent this exact text by approving an action in an interactive answer: a
    * button the model wrote ("answer") or a request from page code in an HTML frame
    * ("page"), or the output of a shell code block the user ran from an answer
-   * ("code_block"). Set only by the desktop app's own send path.
+   * ("code_block"). "browser_page": the user sent it from the in-app browser and it carries
+   * web page content they did not type (a selection, console output, element values, an
+   * answer drawn from a video). Set only by the desktop app's own send path.
    */
   surfaceOrigin?: MessageSurfaceOrigin;
   /**
@@ -3528,8 +3531,9 @@ export interface TaskFollowUpInput {
    * a side chat's first message, a typed reply on this task's approval card, or a channel
    * message from the verified owner (gateway-sender-identity.ts). Unset for everything else:
    * automations, heartbeats, triggers, routines, webhooks, other agents, updates forwarded
-   * from another task, page code and answer buttons. Only "user_typed" text can expose the
-   * admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup).
+   * from another task, page code, answer buttons and in-app browser page content. Only
+   * "user_typed" text can expose the admin-lane tools (persona, behavioral rules, expertise,
+   * heartbeat, integration setup).
    * Set by main-process send paths; never copied from renderer or remote-client input.
    */
   textProvenance?: FollowUpTextProvenance;

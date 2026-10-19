@@ -23,6 +23,7 @@ import {
   CoreTraceKind,
   CoreTraceStatus,
   LLM_PROVIDER_TYPES,
+  MESSAGE_SURFACE_ORIGINS,
   isTempWorkspaceId,
   PersonalityId,
   TaskStatus,
@@ -557,7 +558,7 @@ export const TaskMessageSchema = z
         truncated: z.boolean().optional(),
       })
       .optional(),
-    surfaceOrigin: z.enum(["answer", "page", "code_block"]).optional(),
+    surfaceOrigin: z.enum(MESSAGE_SURFACE_ORIGINS).optional(),
     permissionMode: PermissionModeSchema.optional(),
     shellAccess: z.boolean().optional(),
     accessProfileId: AccessProfileIdSchema.optional(),

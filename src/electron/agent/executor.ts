@@ -272,6 +272,7 @@ import {
   upsertPinnedContextBlock,
 } from "./pinned-context-blocks";
 import { getCustomSkillLoader } from "./custom-skill-loader";
+import { selectSkillPlanningHints } from "../../shared/skill-routing";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { runWithMemoryRepoAccess } from "../security/memory-repo-access";
@@ -8901,27 +8902,29 @@ ${transcript}
   }
 
   /**
-   * Detect high-confidence skill matches for the given query and return explicit
+   * Detect clear skill matches for the given query and return explicit
    * planning hints so even weaker models route to the correct skill via Skill.
-   * Returns empty string when no skill scores above the threshold.
+   * Returns empty string when no skill clearly leads the ranking.
    */
   private getHighConfidenceSkillHints(query: string): string {
-    // Lower bar than maybeHandleHighConfidenceSkillRouting: hints are informational
-    // (injected into the planning prompt) so a slightly weaker match is acceptable.
-    // The LLM still decides whether to act on them.
-    const HIGH_CONFIDENCE_THRESHOLD = 0.7;
+    // Hints are informational (injected into the planning prompt); the LLM still
+    // decides whether to act on them. See selectSkillPlanningHints for the rule.
     try {
       const skillLoader = getCustomSkillLoader();
       const availableToolNames = this.buildAvailableToolNameSet(this.getAvailableTools());
       if (!availableToolNames.has("Skill")) return "";
 
-      const scored = skillLoader
-        .rankModelInvocableSkillsForQuery(query, {
-          availableToolNames,
-          includePrereqBlockedSkills: true,
-          limit: 3,
-        })
-        .filter((entry) => entry.score >= HIGH_CONFIDENCE_THRESHOLD);
+      const ranked = skillLoader.rankModelInvocableSkillsForQuery(query, {
+        availableToolNames,
+        includePrereqBlockedSkills: true,
+      });
+      const { hints: scored, reason } = selectSkillPlanningHints(ranked);
+      this.emitEvent("log", {
+        message: `[skill-routing] planning hints: ${reason}`,
+        queryHash: createHash("sha1").update(query).digest("hex").slice(0, 12),
+        candidates: ranked.slice(0, 3).map(({ skill, score }) => ({ skillId: skill.id, score })),
+        hintedSkillIds: scored.map(({ skill }) => skill.id),
+      });
 
       if (scored.length === 0) return "";
 

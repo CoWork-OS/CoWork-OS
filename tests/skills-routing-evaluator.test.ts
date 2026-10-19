@@ -536,4 +536,67 @@ describe("production skill routing evaluator", () => {
     expect(drifted).toMatchObject({ expectedHits: 1, installedPackHits: 0, contractFailures: 1 });
     expect(drifted.contractResults[0].reasons).toContain("retired_skill_present");
   });
+
+  it("keeps bundled planning hints on the right skill and silent for generic requests", async () => {
+    const { evaluatePlanningHints, loadSkills } =
+      await import("../scripts/qa/eval-skills-routing.mjs");
+    const report = evaluatePlanningHints(
+      loadSkills(resolve("resources/skills")),
+      resolve("resources/skills/_evals/routing-cases.jsonl"),
+      resolve("resources/skills/_evals/hint-cases.jsonl"),
+    );
+    expect(report.failures).toEqual([]);
+    expect(report.datasetWrong).toBe(0);
+    expect(report.negativeCases).toBeGreaterThanOrEqual(10);
+    expect(report.positiveHinted).toBe(report.positiveCases);
+  });
+
+  it("fails strict evaluation when a no-hint case receives a planning hint", () => {
+    const directory = mkdtempSync(join(tmpdir(), "cowork-skill-hint-eval-"));
+    directories.push(directory);
+    writeFileSync(
+      join(directory, "music.json"),
+      JSON.stringify({
+        id: "music",
+        name: "Music",
+        description: "play jazz music audio recordings albums",
+      }),
+    );
+    writeFileSync(
+      join(directory, "reports.json"),
+      JSON.stringify({ id: "reports", name: "Reports", description: "Compose reports" }),
+    );
+    const dataset = join(directory, "cases.jsonl");
+    writeFileSync(
+      dataset,
+      JSON.stringify({ prompt: "play jazz music", expectedSkillIds: ["music"] }) + "\n",
+    );
+    const run = (hintCase: Record<string, unknown>) => {
+      const hintCases = join(directory, "hints.jsonl");
+      writeFileSync(hintCases, JSON.stringify(hintCase) + "\n");
+      return spawnSync(
+        process.execPath,
+        [
+          evaluator,
+          "--skills-dir",
+          directory,
+          "--dataset",
+          dataset,
+          "--hint-cases",
+          hintCases,
+          "--strict",
+        ],
+        { encoding: "utf8", timeout: 10_000 },
+      );
+    };
+
+    const passing = run({ prompt: "play jazz music", hintSkillIds: ["music"] });
+    expect(passing.status, passing.stdout + passing.stderr).toBe(0);
+    expect(passing.stdout).toContain("hint cases 1/1 passed");
+
+    const misfire = run({ prompt: "play jazz music", hintSkillIds: [] });
+    expect(misfire.status, misfire.stdout + misfire.stderr).toBe(1);
+    expect(misfire.stdout).toContain("1/1 negatives misfired");
+    expect(misfire.stdout).toContain("Strict threshold failure");
+  });
 });

@@ -27,6 +27,47 @@ export function rankModelInvocableSkillsForQuery(
   return ranked.slice(0, limit);
 }
 
+// Plain-language requests rarely score above 0.7 even when one skill clearly wins
+// (e.g. 0.61 vs 0.45), so a hint depends on the lead's margin, not on the score alone.
+// Calibrated on the bundled catalog plus installed packs; see docs/plugin-packs.md.
+export const SKILL_PLANNING_HINT_FLOOR = 0.5;
+export const SKILL_PLANNING_HINT_MARGIN = 0.1;
+export const SKILL_PLANNING_HINT_STRONG_SCORE = 0.7;
+const SKILL_PLANNING_HINT_LIMIT = 3;
+
+export type SkillPlanningHintReason =
+  | "clear_lead"
+  | "pack_lead"
+  | "strong_lead"
+  | "below_floor"
+  | "contested";
+export interface SkillPlanningHintSelection {
+  hints: RankedSkillMatch[];
+  reason: SkillPlanningHintReason;
+}
+
+/**
+ * Choose which ranked skills to suggest in the planning prompt.
+ * `ranked` must be the full descending ranking, so every contender is visible.
+ */
+export function selectSkillPlanningHints(ranked: RankedSkillMatch[]): SkillPlanningHintSelection {
+  const [lead, ...rest] = ranked;
+  if (!lead || lead.score < SKILL_PLANNING_HINT_FLOOR) return { hints: [], reason: "below_floor" };
+  const contenders = rest.filter(({ score }) => lead.score - score < SKILL_PLANNING_HINT_MARGIN);
+  const hints = [
+    lead,
+    ...contenders.filter(({ score }) => score >= SKILL_PLANNING_HINT_FLOOR),
+  ].slice(0, SKILL_PLANNING_HINT_LIMIT);
+  if (contenders.length === 0) return { hints, reason: "clear_lead" };
+  // Close siblings from the lead's own pack still identify the domain; the model
+  // picks between them. Any outside contender means the request is ambiguous.
+  const pack = lead.skill.metadata?.pluginSource;
+  if (pack && contenders.every(({ skill }) => skill.metadata?.pluginSource === pack))
+    return { hints, reason: "pack_lead" };
+  if (lead.score >= SKILL_PLANNING_HINT_STRONG_SCORE) return { hints, reason: "strong_lead" };
+  return { hints: [], reason: "contested" };
+}
+
 export function isModelInvocableSkill(
   skill: CustomSkill,
   options: SkillInvocationContext = {},

@@ -1386,6 +1386,16 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 - Verify skill parameters match the `{{placeholder}}` names in the prompt
 - Check the `"enabled": true` flag on each skill
 
+### Plain-language requests don't pick a pack skill
+
+Before planning, CoWork ranks every model-invocable skill against the request and adds a "Relevant skills for this task" hint to the planning prompt only when one skill clearly leads (`selectSkillPlanningHints` in `src/shared/skill-routing/index.ts`):
+
+- The top skill must score at least 0.5, and no other skill may come within 0.1 of it.
+- Close runners-up from the top skill's own pack don't block the hint. They're listed with it (up to three), and the model picks one.
+- A top skill at 0.7 or more is hinted along with its close runners-up, whatever pack they come from.
+
+Each task logs `[skill-routing] planning hints: <reason>` with the top three scores. `clear_lead`, `pack_lead`, and `strong_lead` mean a hint was added. `below_floor` and `contested` mean no hint was added, and the model picks skills from the shortlist on its own. To get a pack skill over the bar, add routing examples that use the words people actually type. `npm run skills:eval-routing` reports hint coverage for the bundled skills against `resources/skills/_evals/hint-cases.jsonl`.
+
 ### Toggle doesn't persist after restart
 
 - Pack enable/disable states are persisted in `pack-states.json` in the user data directory

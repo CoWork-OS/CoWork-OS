@@ -1,0 +1,18 @@
+{"prompt":"Translate these release notes into Japanese","hintSkillIds":["translate"]}
+{"prompt":"Write a commit message for my staged changes","hintSkillIds":["git-commit"]}
+{"prompt":"Create a Kubernetes deployment and service for this API","hintSkillIds":["kubernetes-ops"]}
+{"prompt":"Explain what this function does line by line","hintSkillIds":["explain-code"]}
+{"prompt":"Rename the variable userId to accountId in this file","hintSkillIds":["rename-symbol"]}
+{"prompt":"Draft a polite reply declining the invitation","hintSkillIds":["usecase-draft-reply"]}
+{"prompt":"Compare these two contracts and list the differences","hintSkillIds":["compare-files"]}
+{"prompt":"What is the capital of Australia?","hintSkillIds":[]}
+{"prompt":"Help me plan my week","hintSkillIds":[]}
+{"prompt":"Write a short poem about autumn","hintSkillIds":[]}
+{"prompt":"List the files in this folder","hintSkillIds":[]}
+{"prompt":"Delete the temp files from this folder","hintSkillIds":[]}
+{"prompt":"Make the submit button bigger","hintSkillIds":[]}
+{"prompt":"Set up Stripe checkout for my web store","hintSkillIds":[]}
+{"prompt":"Create a new branch called feature/login","hintSkillIds":[]}
+{"prompt":"Install the dependencies and start the dev server","hintSkillIds":[]}
+{"prompt":"Thanks, that's all for now","hintSkillIds":[]}
+{"prompt":"What's the difference between TCP and UDP?","hintSkillIds":[]}

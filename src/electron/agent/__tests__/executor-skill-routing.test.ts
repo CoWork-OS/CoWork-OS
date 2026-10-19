@@ -661,4 +661,49 @@ describe("TaskExecutor skill shortlist routing", () => {
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
     expect(executor.appliedSkills).toEqual([]);
   });
+
+  it("injects a planning hint for a clear lead below 0.7 and omits contested ones", () => {
+    const pack = (id: string, score: number, pluginSource?: string) => ({
+      skill: {
+        id,
+        name: id,
+        description: `Handle ${id}.`,
+        metadata: pluginSource ? { pluginSource } : {},
+      },
+      score,
+    });
+    const executor = createExecutor("Add in-app purchases so players can buy a coin pack");
+    const hints = (query: string) =>
+      (TaskExecutor as Any).prototype.getHighConfidenceSkillHints.call(executor, query);
+
+    rankModelInvocableSkillsForQuery.mockReturnValue([
+      pack("unity:implement-in-app-purchases", 0.61, "unity"),
+      pack("employment-legal-investigation-add", 0.45, "employment-legal-pack"),
+    ]);
+    const clear = hints(executor.task.prompt);
+    expect(clear).toContain('- Skill "unity:implement-in-app-purchases"');
+    expect(clear).not.toContain("employment-legal-investigation-add");
+    expect(rankModelInvocableSkillsForQuery).toHaveBeenLastCalledWith(
+      executor.task.prompt,
+      expect.not.objectContaining({ limit: expect.anything() }),
+    );
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        message: "[skill-routing] planning hints: clear_lead",
+        hintedSkillIds: ["unity:implement-in-app-purchases"],
+      }),
+    );
+
+    rankModelInvocableSkillsForQuery.mockReturnValue([
+      pack("unity:optimize-web", 0.57, "unity"),
+      pack("unity:implement-in-app-purchases", 0.56, "unity"),
+      pack("web-research-plus", 0.52, "web-search-plus"),
+    ]);
+    expect(hints("Set up Stripe checkout for my web store")).toBe("");
+
+    executor.getAvailableTools.mockReturnValue([{ name: "read_file" }]);
+    rankModelInvocableSkillsForQuery.mockReturnValue([pack("translate", 0.9)]);
+    expect(hints("Translate this")).toBe("");
+  });
 });

@@ -71,6 +71,7 @@ const CANONICAL_ARTIFACT_EXTENSION_REGEX_GLOBAL = new RegExp(
   `\\.(${CANONICAL_EXTENSION_PATTERN})\\b`,
   "gi",
 );
+const TRAILING_ARTIFACT_EXTENSION_REGEX = new RegExp(`\\.(${CANONICAL_EXTENSION_PATTERN})$`, "i");
 
 export const CANONICAL_ARTIFACT_PATH_REGEX = new RegExp(
   `(?:\\/|\\.{1,2}\\/)?[A-Za-z0-9_./-]+\\.(${CANONICAL_EXTENSION_PATTERN})\\b`,
@@ -83,11 +84,24 @@ const SHELL_OPERATOR_REGEX = /(?:\|\||&&|[|;<>])/;
 const URL_LIKE_REGEX = /^[a-z][a-z0-9+.-]*:\/\//i;
 const ALTERNATE_EXTENSION_PATH_REGEX =
   /((?:\/|\.{1,2}\/)?[A-Za-z0-9_./-]+)\.([A-Za-z0-9]+)\/\.([A-Za-z0-9]+)\b/g;
+const WRITE_VERB_PATTERN =
+  "write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor|patch|adjust|optimi[sz]e|tweak|stabili[sz]e|bump|upgrade|repair|migrate";
 // "change", "correct", "convert" and "resolve" are also nouns/adjectives or
 // read-only verbs ("the change log", "is correct", "resolve the hostname"),
 // so they count only with an object that makes them a remediation.
-const STRONG_WRITE_VERB_REGEX =
-  /\b(write|create|draft|generate|produce|compose|build|save|author|scaffold|bootstrap|initialize|implement|configure|add|edit|update|append|rewrite|delete|remove|rename|move|modify|replace|fix|refactor|patch|adjust|optimi[sz]e|tweak|stabili[sz]e|bump|upgrade|repair|migrate)\b|\b(?:change|correct|convert)\s+(?:it|them|this|that|these|those|the|a|an|all|any|each|every|its|their|our)\b|\bresolve\s+(?:(?:the|all|any|each|every|its|their|our|these|those|remaining|outstanding)\s+)*(?:(?:merge|type|lint|build|test)\s+)?(?:conflicts?|issues?|bugs?|errors?|warnings?|failures?|problems?|it|them)\b/;
+const STRONG_WRITE_VERB_REGEX = new RegExp(
+  String.raw`\b(${WRITE_VERB_PATTERN})\b|\b(?:change|correct|convert)\s+(?:it|them|this|that|these|those|the|a|an|all|any|each|every|its|their|our)\b|\bresolve\s+(?:(?:the|all|any|each|every|its|their|our|these|those|remaining|outstanding)\s+)*(?:(?:merge|type|lint|build|test)\s+)?(?:conflicts?|issues?|bugs?|errors?|warnings?|failures?|problems?|it|them)\b`,
+);
+// A write verb with list commas on both sides is a noun in an enumeration
+// ("purchase, wallet, save, UI, and test code"), not an instruction.
+const LIST_ITEM_WRITE_VERB_REGEX = new RegExp(
+  String.raw`,\s*(?:${WRITE_VERB_PATTERN})\s*(?=,)`,
+  "g",
+);
+// Continue through dots inside filenames ("package.json") so the extension of
+// a protected file does not leak into the positive text.
+const NEGATED_CLAUSE_REGEX =
+  /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b(?:[^,.;!?\n]|\.(?=[A-Za-z0-9_/-]))*/gi;
 const PASSIVE_ARTIFACT_WRITE_CUE_REGEX =
   /\b(saved|written|created|generated|produced|updated|edited|rewritten|appended|stored|placed)\s+(?:as|to|at|in|under)\b/;
 
@@ -234,12 +248,73 @@ export function extractArtifactPathCandidates(text: string): string[] {
       (range) => start >= range.start && start < range.end,
     );
     if (!inCommandSnippet && !inAlternatePath && token) {
-      candidates.add(token);
+      // The bare pattern stops at whitespace, so "/Users/me/Library/Application
+      // Support/app/notes.md" matches only "Support/app/notes.md". That tail is
+      // not a workspace-relative path: report the whole absolute path instead.
+      const absolutePrefix = /^[./~]/.test(token) ? null : spacedAbsolutePathPrefix(source, start);
+      candidates.add(absolutePrefix ? `${absolutePrefix} ${token}` : token);
     }
     bareMatch = barePattern.exec(source);
   }
 
   return Array.from(candidates.values());
+}
+
+// Words that join two separate paths ("compare /tmp/out and docs/a.md") rather
+// than continue one folder name that contains a space.
+const PATH_JOINING_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "by",
+  "for",
+  "from",
+  "in",
+  "inside",
+  "into",
+  "of",
+  "on",
+  "or",
+  "plus",
+  "the",
+  "then",
+  "to",
+  "under",
+  "versus",
+  "via",
+  "vs",
+  "with",
+  "within",
+]);
+
+/**
+ * When the path that ends at `start` began earlier as an absolute path whose
+ * folder names contain single spaces, return the part before the space at
+ * `start - 1` (for example "/Users/me/Library/Application"). Returns null when
+ * the preceding words are not one continuous absolute path.
+ */
+function spacedAbsolutePathPrefix(source: string, start: number): string | null {
+  if (start < 2 || source[start - 1] !== " ") return null;
+  const tokens = source.slice(0, start - 1).split(" ");
+  const parts: string[] = [];
+  for (let index = tokens.length - 1; index >= 0 && parts.length < 6; index -= 1) {
+    const token = tokens[index];
+    // Empty tokens (double spaces), line breaks, and clause punctuation all end
+    // the path; so does a complete file name ("/tmp/a.md docs/b.md").
+    if (!token || /\s/.test(token) || /[,;:!?)\]}>]$/.test(token)) return null;
+    if (TRAILING_ARTIFACT_EXTENSION_REGEX.test(token) || token.includes("://")) return null;
+    const unquoted = token.replace(/^[`'"([{<]+/, "");
+    if (/^(?:~|[A-Za-z]:)?\//.test(unquoted)) {
+      if (unquoted.endsWith("/")) return null;
+      parts.unshift(unquoted);
+      return parts.join(" ");
+    }
+    if (unquoted !== token || PATH_JOINING_WORDS.has(token.toLowerCase())) return null;
+    parts.unshift(token);
+  }
+  return null;
 }
 
 export function extractArtifactPathAlternativeGroups(text: string): string[][] {
@@ -291,9 +366,29 @@ export function descriptionHasWriteIntent(text: string): boolean {
   return prepareArtifactCue;
 }
 
+/**
+ * Remove file paths so words inside them are not read as instructions: the
+ * folder in ".../skills/implement-in-app-purchases/references/pre-check.md"
+ * does not ask the step to implement anything.
+ */
+function removePathTokens(text: string): string {
+  const paths = extractArtifactPathCandidates(text)
+    // A backticked phrase that ends in a filename ("`write notes.md`") is prose.
+    .filter((candidate) => !/\s/.test(candidate) || /^(?:~|[A-Za-z]:)?\//.test(candidate))
+    .sort((a, b) => b.length - a.length);
+  let result = text;
+  for (const candidate of paths) {
+    result = result.split(candidate).join(" ");
+  }
+  return result;
+}
+
+export function stripNegatedClauses(text: string): string {
+  return String(text || "").replace(NEGATED_CLAUSE_REGEX, " ");
+}
+
 export function descriptionHasStrongWriteIntent(text: string): boolean {
-  const desc = String(text || "")
-    .toLowerCase()
+  const desc = removePathTokens(String(text || "").toLowerCase())
     // In inspection steps, "the build scripts" and "or build scripts" name
     // existing files; "build" is not an instruction to produce anything.
     .replace(/\b(?:the|existing|current|and|or)\s+build\s+scripts?\b/g, " ")
@@ -360,13 +455,32 @@ export function isReadOnlyConstraintOnlyStep(text: string): boolean {
   );
 }
 
+const READ_ONLY_VERB_REGEX =
+  /\b(read|search|fetch|retrieve|browse|visit|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look)\b/;
+
 export function descriptionHasReadOnlyIntent(text: string): boolean {
   const desc = String(text || "").toLowerCase();
+  return descriptionHasProtectiveConstraintIntent(desc) || READ_ONLY_VERB_REGEX.test(desc);
+}
+
+/**
+ * A step that only reads or inspects: it says to read/inspect something and
+ * has no write instruction once negated clauses ("without overwriting
+ * uncommitted changes") and list nouns ("wallet, save, UI") are set aside.
+ * Naming existing files ("Inspect ProjectSettings/ProjectVersion.txt") does not
+ * make it a write. A prohibition alone ("Do not modify the file before the
+ * wait") is a guardrail, not an inspection.
+ */
+export function isReadOnlyInspectionStep(text: string): boolean {
+  const instructionText = stripNegatedClauses(String(text || "").toLowerCase()).replace(
+    LIST_ITEM_WRITE_VERB_REGEX,
+    ",",
+  );
+  const prose = removePathTokens(instructionText);
   return (
-    descriptionHasProtectiveConstraintIntent(desc) ||
-    /\b(read|search|fetch|retrieve|browse|visit|analy[sz]e|review|understand|examine|inspect|check|parse|extract|summarize|study|explore|investigate|look)\b/.test(
-      desc,
-    )
+    READ_ONLY_VERB_REGEX.test(prose) &&
+    !descriptionHasWriteIntent(instructionText) &&
+    !descriptionHasScaffoldIntent(prose)
   );
 }
 

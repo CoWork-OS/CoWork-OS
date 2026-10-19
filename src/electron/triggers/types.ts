@@ -63,6 +63,11 @@ export interface TriggerAction {
     runMode?: "new_task" | "thread_follow_up";
     /** Existing task to receive the message when runMode is thread_follow_up */
     targetTaskId?: string;
+    /**
+     * Set by the `wait_for_event` tool: a temporary trigger that resumes a task parked on this
+     * event. It fires once (the runtime disables it), and is removed when the wait ends.
+     */
+    eventWait?: { taskId: string; expiresAt: number; reason?: string };
     /** MCP Events subscription bound to this trigger. */
     mcpEvent?: {
       serverId: string;
@@ -160,4 +165,13 @@ export interface EventTriggerServiceDeps {
     event: TriggerEvent;
     historyEntry: TriggerHistoryEntry;
   }) => void | Promise<void>;
+  /**
+   * A task parked by `wait_for_event` got its event. Without it, the event is sent to the
+   * task as a follow-up message.
+   */
+  onEventWaitFired?: (params: {
+    taskId: string;
+    triggerId: string;
+    event: TriggerEvent;
+  }) => Promise<void>;
 }

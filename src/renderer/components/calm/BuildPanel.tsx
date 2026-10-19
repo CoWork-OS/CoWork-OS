@@ -20,15 +20,24 @@ import { BUILD_INSTRUCTIONS } from "./build-task";
 import { UseCasesGallery } from "../UseCasesGallery";
 import { OPEN_USE_CASES_EVENT } from "../use-cases-events";
 import { AttachmentTile } from "../AttachmentTile";
+import { BuildMergeReview } from "./BuildMergeReview";
+
+/** Where a build runs: its checkout, and for Build Compare the shared commit and check. */
+export type BuildCheckoutOptions = Pick<
+  AgentConfig,
+  | "worktreeMode"
+  | "worktreeBaseBranch"
+  | "worktreeBaseCommit"
+  | "compareGroupId"
+  | "compareVariant"
+  | "compareCheckCommand"
+>;
 
 interface BuildPanelProps {
   onStart: (
     prompt: string,
     attachments?: PendingAttachment[],
-    options?: { accessProfileId?: AccessProfileId } & Pick<
-      AgentConfig,
-      "worktreeMode" | "worktreeBaseBranch"
-    >,
+    options?: { accessProfileId?: AccessProfileId } & BuildCheckoutOptions,
   ) => void | boolean | Promise<void | boolean>;
   /** Folder the new build task will run in. */
   workspace: Workspace | null;
@@ -101,6 +110,50 @@ const BUILD_STARTERS = [
 const COMPOSER_MAX_HEIGHT = 200;
 
 /**
+ * Build Compare: the same request as `count` worktree builds, all started from the commit the
+ * branch points to now and all checked by the same command, to compare and merge one. Stops at
+ * the first variant that is not admitted.
+ */
+export async function submitBuildCompare(
+  onStart: BuildPanelProps["onStart"],
+  text: string,
+  attachments: PendingAttachment[],
+  options: {
+    workspaceId: string;
+    branch?: string;
+    count: number;
+    check: string;
+    accessProfileId?: AccessProfileId;
+    resolveBaseCommit: (input: { workspaceId: string; branch?: string }) => Promise<{
+      commit: string;
+    }>;
+    newGroupId: () => string;
+  },
+): Promise<boolean> {
+  const { commit } = await options.resolveBaseCommit({
+    workspaceId: options.workspaceId,
+    ...(options.branch ? { branch: options.branch } : {}),
+  });
+  const compareGroupId = options.newGroupId();
+  const check = options.check.trim();
+  let admittedAny = false;
+  for (let variant = 1; variant <= Math.min(Math.max(options.count, 2), 3); variant += 1) {
+    const admitted = await submitBuildTask(onStart, text, attachments, {
+      ...(options.accessProfileId ? { accessProfileId: options.accessProfileId } : {}),
+      worktreeMode: "worktree",
+      ...(options.branch ? { worktreeBaseBranch: options.branch } : {}),
+      worktreeBaseCommit: commit,
+      compareGroupId,
+      compareVariant: variant,
+      ...(check ? { compareCheckCommand: check } : {}),
+    });
+    if (!admitted) break;
+    admittedAny = true;
+  }
+  return admittedAny;
+}
+
+/**
  * The unsent prompt and attachments outlive the view, so leaving Build (for
  * Home, a session or settings) and coming back keeps what was typed. Cleared
  * once a build starts.
@@ -110,9 +163,11 @@ const buildDraft: { value: string; attachments: PendingAttachment[] } = {
   attachments: [],
 };
 
+type CheckoutMode = "local" | "worktree" | "compare";
+
 const buildCheckoutDraft: {
   workspaceId?: string;
-  mode: "local" | "worktree";
+  mode: CheckoutMode;
   branch: string;
 } = { mode: "local", branch: "" };
 
@@ -120,10 +175,7 @@ export async function submitBuildTask(
   onStart: BuildPanelProps["onStart"],
   text: string,
   attachments: PendingAttachment[] = [],
-  options?: { accessProfileId?: AccessProfileId } & Pick<
-    AgentConfig,
-    "worktreeMode" | "worktreeBaseBranch"
-  >,
+  options?: { accessProfileId?: AccessProfileId } & BuildCheckoutOptions,
 ): Promise<boolean> {
   const trimmed =
     text.trim() || (attachments.length > 0 ? "Build something from the attached files." : "");
@@ -151,7 +203,7 @@ export function BuildPanel({
 }: BuildPanelProps) {
   const access = useBuildAccessProfile();
   const [value, setValue] = useState(() => buildDraft.value);
-  const [checkoutMode, setCheckoutMode] = useState<"local" | "worktree">(() =>
+  const [checkoutMode, setCheckoutMode] = useState<CheckoutMode>(() =>
     buildCheckoutDraft.workspaceId === workspace?.id ? buildCheckoutDraft.mode : "local",
   );
   const [startingBranch, setStartingBranch] = useState(() =>
@@ -160,6 +212,9 @@ export function BuildPanel({
   const checkoutWorkspaceId = useRef(workspace?.id);
   const [worktreeWorkspace, setWorktreeWorkspace] = useState<WorktreeWorkspaceInfo | null>(null);
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
+  // Build Compare: how many variants, and the check each one runs before it finishes.
+  const [compareCount, setCompareCount] = useState(2);
+  const [compareCheck, setCompareCheck] = useState("");
 
   useEffect(() => {
     let current = true;
@@ -291,17 +346,38 @@ export function BuildPanel({
     !submitting &&
     (checkoutMode === "local" || worktreeAvailable);
 
+  /**
+   * Build Compare: the same request as several worktree builds, all started from one commit
+   * and checked by the same command, to compare and merge one.
+   */
+  const submitCompare = async (text: string): Promise<boolean> => {
+    const resolveBaseCommit = window.electronAPI?.resolveWorktreeBaseCommit;
+    if (!workspace || !resolveBaseCommit) return false;
+    return submitBuildCompare(onStart, text, attachments, {
+      workspaceId: workspace.id,
+      ...(startingBranch ? { branch: startingBranch } : {}),
+      count: compareCount,
+      check: compareCheck,
+      accessProfileId: access.profileId,
+      resolveBaseCommit: (input) => resolveBaseCommit(input),
+      newGroupId: () => crypto.randomUUID(),
+    });
+  };
+
   const submit = async (text: string) => {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const admitted = await submitBuildTask(onStart, text, attachments, {
-        accessProfileId: access.profileId,
-        worktreeMode: checkoutMode,
-        ...(checkoutMode === "worktree" && startingBranch
-          ? { worktreeBaseBranch: startingBranch }
-          : {}),
-      });
+      const admitted =
+        checkoutMode === "compare"
+          ? await submitCompare(text)
+          : await submitBuildTask(onStart, text, attachments, {
+              accessProfileId: access.profileId,
+              worktreeMode: checkoutMode,
+              ...(checkoutMode === "worktree" && startingBranch
+                ? { worktreeBaseBranch: startingBranch }
+                : {}),
+            });
       if (admitted) {
         // Admission can navigate away before another render/effect is committed.
         buildDraft.value = "";
@@ -411,9 +487,11 @@ export function BuildPanel({
             <label
               className="calm-build-checkout"
               title={
-                checkoutMode === "worktree"
-                  ? "Build in a separate Git checkout"
-                  : "Build directly in the selected folder"
+                checkoutMode === "compare"
+                  ? "Build the same request in several checkouts and compare them"
+                  : checkoutMode === "worktree"
+                    ? "Build in a separate Git checkout"
+                    : "Build directly in the selected folder"
               }
             >
               <GitBranch size={14} aria-hidden="true" />
@@ -421,15 +499,30 @@ export function BuildPanel({
                 aria-label="Build location"
                 value={checkoutMode}
                 disabled={submitting}
-                onChange={(event) => setCheckoutMode(event.target.value as "local" | "worktree")}
+                onChange={(event) => setCheckoutMode(event.target.value as CheckoutMode)}
               >
                 <option value="local">Local</option>
                 <option value="worktree" disabled={!worktreeAvailable}>
                   Worktree
                 </option>
+                <option value="compare" disabled={!worktreeAvailable}>
+                  Compare
+                </option>
               </select>
             </label>
-            {checkoutMode === "worktree" && worktreeAvailable && (
+            {checkoutMode === "compare" && worktreeAvailable && (
+              <select
+                className="calm-build-branch"
+                aria-label="Number of variants"
+                value={compareCount}
+                disabled={submitting}
+                onChange={(event) => setCompareCount(Number(event.target.value))}
+              >
+                <option value={2}>2 variants</option>
+                <option value={3}>3 variants</option>
+              </select>
+            )}
+            {checkoutMode !== "local" && worktreeAvailable && (
               <select
                 className="calm-build-branch"
                 aria-label="Starting branch"
@@ -460,12 +553,26 @@ export function BuildPanel({
             <kbd>↵</kbd> to build · <kbd>⇧↵</kbd> new line
           </span>
         </div>
+        {checkoutMode === "compare" && worktreeAvailable && (
+          <input
+            className="calm-build-compare-check"
+            type="text"
+            value={compareCheck}
+            maxLength={500}
+            disabled={submitting}
+            onChange={(event) => setCompareCheck(event.target.value)}
+            placeholder="Check each variant runs before it finishes, e.g. npm test (optional)"
+            aria-label="Check command for every variant"
+          />
+        )}
         <p className="calm-build-location-help" aria-live="polite">
-          {checkoutMode === "worktree" && worktreeAvailable
-            ? "Starts from committed code in a separate checkout. Local uncommitted changes stay in your folder."
-            : !worktreeAvailable
-              ? worktreeReason
-              : "Local builds edit this folder. Choose Worktree to keep changes isolated."}
+          {checkoutMode === "compare" && worktreeAvailable
+            ? "Builds the same request in separate checkouts from one commit. Compare them below and merge one."
+            : checkoutMode === "worktree" && worktreeAvailable
+              ? "Starts from committed code in a separate checkout. Local uncommitted changes stay in your folder."
+              : !worktreeAvailable
+                ? worktreeReason
+                : "Local builds edit this folder. Choose Worktree to keep changes isolated."}
         </p>
 
         <div className="calm-build-starters">
@@ -487,6 +594,10 @@ export function BuildPanel({
             );
           })}
         </div>
+
+        {workspace && worktreeAvailable && (
+          <BuildMergeReview workspaceId={workspace.id} onOpenBuild={onOpenBuild} />
+        )}
 
         {recentBuilds.length > 0 && onOpenBuild && (
           <section className="calm-build-recent" aria-label="Recent builds">

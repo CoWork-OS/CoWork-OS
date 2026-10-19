@@ -84,7 +84,7 @@ import {
 } from "./components/BrowserWorkbench/BrowserApprovalCard";
 import { ApproveAllSessionWarningDialog } from "./components/ApproveAllSessionWarningDialog";
 
-import type { RecentBuild } from "./components/calm/BuildPanel";
+import type { BuildCheckoutOptions, RecentBuild } from "./components/calm/BuildPanel";
 import { isBuildPrompt, isBuildTask } from "./components/calm/build-task";
 import {
   prepareTaskAttachments,
@@ -7226,10 +7226,7 @@ export function App() {
   const handleCreateTaskFromPrompt = async (
     prompt: string,
     attachments: PendingAttachment[] = [],
-    taskOptions?: { accessProfileId?: AccessProfileId } & Pick<
-      AgentConfig,
-      "worktreeMode" | "worktreeBaseBranch"
-    >,
+    taskOptions?: { accessProfileId?: AccessProfileId } & BuildCheckoutOptions,
   ): Promise<boolean> => {
     let workspace = currentWorkspace;
     if (!workspace) {
@@ -7275,6 +7272,14 @@ export function App() {
                 taskOrigin: "build" as const,
                 worktreeMode: taskOptions?.worktreeMode,
                 worktreeBaseBranch: taskOptions?.worktreeBaseBranch,
+                ...(taskOptions?.compareGroupId
+                  ? {
+                      worktreeBaseCommit: taskOptions.worktreeBaseCommit,
+                      compareGroupId: taskOptions.compareGroupId,
+                      compareVariant: taskOptions.compareVariant,
+                      compareCheckCommand: taskOptions.compareCheckCommand,
+                    }
+                  : {}),
               },
             }
           : {}),

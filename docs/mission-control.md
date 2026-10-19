@@ -149,6 +149,14 @@ The **Operations** tab is the company-operations view. It appears when a company
 - **Automation**: recent automation outcomes, each with its task, the next step and **Retry notification**.
 - **Hygiene**: generated software nobody uses, owns, or that depends on something gone (below). It covers the whole profile, so it also works without a company.
 
+### Shared changes
+
+When two or more tasks change the same file, Mission Control shows it. In the same folder it is
+under **Needs attention** (the later task's writes to the file are refused until the other one
+finishes); in separate worktrees it is a review to do in Build's merge review before merging
+either. The item goes away when the tasks finish or their worktrees are merged or removed. See
+[Shared-change coordination](worktrees.md#shared-change-coordination).
+
 ### Hygiene
 
 Hygiene checks the skills you or the agent made (managed and workspace skills; bundled and read-only external skills are not listed), Playbook entries, scheduled automations, event triggers and curated rules. An item is listed when:

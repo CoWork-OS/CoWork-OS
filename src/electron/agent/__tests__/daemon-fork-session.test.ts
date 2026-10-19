@@ -234,7 +234,14 @@ describe("AgentDaemon.forkTaskSession", () => {
         }),
       }),
     );
-    expect(sendMessage).toHaveBeenCalledWith("side-task", "How is it going?");
+    // The user typed the side chat's first question.
+    expect(sendMessage).toHaveBeenCalledWith(
+      "side-task",
+      "How is it going?",
+      undefined,
+      undefined,
+      { textProvenance: "user_typed" },
+    );
   });
 
   it("refreshes sidechat parent context with missing parent events before later turns", () => {

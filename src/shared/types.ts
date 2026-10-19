@@ -3475,6 +3475,12 @@ export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceO
   return value === "answer" || value === "page" || value === "code_block";
 }
 
+/**
+ * Who wrote a follow-up's text. "user_typed": a person typed it into this task's own
+ * conversation. There is no other value: unset means CoWork or someone else put the text there.
+ */
+export type FollowUpTextProvenance = "user_typed";
+
 export interface TaskFollowUpInput {
   /** Captured user preference, applied at a turn boundary. */
   interactionMode?: import("./interaction-mode").InteractionModeSelection;
@@ -3516,6 +3522,17 @@ export interface TaskFollowUpInput {
    * ("code_block"). Set only by the desktop app's own send path.
    */
   surfaceOrigin?: MessageSurfaceOrigin;
+  /**
+   * "user_typed" only when a person typed `message` into this task's own conversation: the
+   * desktop composer (local, or a remote device's view over the control plane), Web Access,
+   * a side chat's first message, a typed reply on this task's approval card, or a channel
+   * message from the verified owner (gateway-sender-identity.ts). Unset for everything else:
+   * automations, heartbeats, triggers, routines, webhooks, other agents, updates forwarded
+   * from another task, page code and answer buttons. Only "user_typed" text can expose the
+   * admin-lane tools (persona, behavioral rules, expertise, heartbeat, integration setup).
+   * Set by main-process send paths; never copied from renderer or remote-client input.
+   */
+  textProvenance?: FollowUpTextProvenance;
 }
 
 export type AgentMessageDeliveryStatus =

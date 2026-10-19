@@ -117,6 +117,7 @@ import {
 import { ManagedAccountManager } from "../accounts/managed-account-manager";
 import { ManagedSessionService } from "../managed/ManagedSessionService";
 import { normalizeImagesForRemote, sanitizeTaskMessageParams } from "./sanitize";
+import { composerFollowUpProvenance } from "../agent/follow-up-provenance";
 import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
@@ -1508,6 +1509,7 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
         accessProfileId,
         shellAccess,
         integrationMentions,
+        surfaceOrigin,
       } = sanitizeTaskMessageParams(params);
       const result = await controlPlaneDeps.agentDaemon.sendMessage(
         taskId,
@@ -1524,6 +1526,9 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
           ...(accessProfileId ? { accessProfileId } : {}),
           ...(shellAccess !== undefined ? { shellAccess } : {}),
           ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+          // The desktop composer's device view of this machine: typed unless an answer
+          // surface sent it. Only typed text can expose the admin-lane tools.
+          ...composerFollowUpProvenance(surfaceOrigin),
         },
       );
       return { ok: true, ...result };
@@ -3605,6 +3610,7 @@ export function registerTaskAndWorkspaceMethods(
       accessProfileId,
       shellAccess,
       integrationMentions,
+      surfaceOrigin,
     } = sanitizeTaskMessageParams(params);
     const result = await agentDaemon.sendMessage(taskId, message, images, quotedAssistantMessage, {
       ...(expectedTurnId ? { expectedTurnId } : {}),
@@ -3616,6 +3622,9 @@ export function registerTaskAndWorkspaceMethods(
       ...(accessProfileId ? { accessProfileId } : {}),
       ...(shellAccess !== undefined ? { shellAccess } : {}),
       ...(integrationMentions !== undefined ? { integrationMentions } : {}),
+      // An admin client is the owner's composer on another device (remote view, web UI):
+      // typed unless an answer surface sent it. Only typed text can expose the admin-lane tools.
+      ...composerFollowUpProvenance(surfaceOrigin),
     });
     return { ok: true, ...result };
   });

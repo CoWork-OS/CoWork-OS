@@ -455,6 +455,8 @@ import {
   normalizeExecutionMode,
   normalizeTaskDomain,
 } from "./tool-policy-engine";
+import { userTypedFollowUpText } from "./follow-up-provenance";
+import { isThirdPartyGatewayTask } from "../gateway/gateway-sender-identity";
 
 const DEFAULT_FAILOVER_PRIMARY_RETRY_COOLDOWN_MS = 60_000;
 const VALID_LLM_PROVIDER_TYPES = new Set<string>(LLM_PROVIDER_TYPES as readonly string[]);
@@ -475,7 +477,13 @@ type TaskExecutorFollowUpOptions = Pick<
   | "inReplyToMessageId"
   | "inReplyToTaskId"
   | "surfaceOrigin"
+  | "textProvenance"
 > & {
+  /**
+   * The part of the message the user typed, when the daemon added text they did not type
+   * (open annotations quote the result they point at). Unset: the whole message.
+   */
+  typedText?: string;
   /** Called after transcript and queue state are durably persisted. */
   onAccepted?: () => void | Promise<void>;
   /** Called once the follow-up is admitted and the task has started processing it. */
@@ -1253,12 +1261,20 @@ export class TaskExecutor {
   private readonly promptSectionCache = new Map<string, string | null>();
   private lastUserMessage: string;
   /**
-   * True only while lastUserMessage holds words the user wrote. It is false for the contract
-   * prompt of a task another agent created, for a message another agent handed over, and for
-   * shell output sent from an answer's code block. Not saved in snapshots: the constructor sets
-   * it from the task's own authorship. Read by getUserAuthoredToolIntentText.
+   * The words the user typed in the latest message to this task, or "" when that message was
+   * injected: an automation, heartbeat, trigger or webhook follow-up, another agent's message,
+   * an update forwarded from another task, page code or an answer button. Set from the
+   * message's textProvenance (follow-up-provenance.ts), never from what the text says. Not
+   * saved in snapshots, so after a restart only the task's own words (userAuthoredTaskText)
+   * count until the user writes again. Read by getUserAuthoredToolIntentText.
    */
-  private lastUserMessageFromUser = false;
+  private lastUserTypedText = "";
+  /**
+   * The task's title and prompt as the user wrote them, captured when the executor starts, or
+   * "" when someone else wrote them (isTaskPromptFromUser). Not read from task.prompt later: a
+   * follow-up that resumes a paused task is appended there as "USER UPDATE", whoever sent it.
+   */
+  private userAuthoredTaskText = "";
   /**
    * The task's swarm while its `swarm` layer is on and it is not a verifier (phase 5 §2):
    * swarm_note is offered and may cross the plan gate. Updated with every policy decision.
@@ -8663,7 +8679,7 @@ ${transcript}
     this.guardrailPhaseBEnabled = isFeatureEnabled("COWORK_GUARDRAIL_PHASE_B", true);
     const canonicalPrompt = this.getContractPrompt();
     this.lastUserMessage = canonicalPrompt;
-    this.lastUserMessageFromUser = !this.isAgentAuthoredTask();
+    this.captureUserAuthoredTaskText();
     this.getSessionRuntime().setRecoveryRequestActive(this.isRecoveryIntent(this.lastUserMessage));
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${canonicalPrompt}`);
@@ -18819,27 +18835,41 @@ ${transcript}
   }
 
   /**
-   * A task another agent spawned, or one CoWork's subconscious loop created: its title and
-   * prompt were written by an agent, not by the user.
+   * Whether the user wrote this task's title and prompt. Not for a task another agent spawned
+   * or CoWork's subconscious loop created, an automation task (schedules are "cron"; heartbeats,
+   * triggers, webhooks and mailbox automations are "hook", and their prompts carry event text),
+   * or a task a channel sender other than the verified owner started.
    */
-  private isAgentAuthoredTask(): boolean {
-    return Boolean(
+  private isTaskPromptFromUser(): boolean {
+    return !(
       this.task.parentTaskId ||
       (typeof this.task.agentType === "string" && this.task.agentType !== "main") ||
       this.task.source === "subconscious" ||
-      this.task.source === "improvement",
+      this.task.source === "improvement" ||
+      this.task.source === "cron" ||
+      this.task.source === "hook" ||
+      isThirdPartyGatewayTask(this.task)
     );
+  }
+
+  /** Sets userAuthoredTaskText from the task as it is now; the constructor calls it once. */
+  private captureUserAuthoredTaskText(): void {
+    this.userAuthoredTaskText = this.isTaskPromptFromUser()
+      ? [this.task.title, this.getContractPrompt()]
+          .map((part) => String(part || "").trim())
+          .filter(Boolean)
+          .join("\n")
+      : "";
   }
 
   /**
    * The user's own words for this task, for the tool lanes only the user may open (the admin
    * lane: persona, behavioral rules, heartbeat, integration setup). Unlike the task text the
-   * adaptive filter reads, it leaves out the agent's last output and the current plan step.
+   * adaptive filter reads, it leaves out the agent's last output, the current plan step, and
+   * every follow-up the user did not type (lastUserTypedText).
    */
   private getUserAuthoredToolIntentText(): string {
-    const parts = this.isAgentAuthoredTask() ? [] : [this.task.title, this.task.prompt];
-    if (this.lastUserMessageFromUser) parts.push(this.lastUserMessage);
-    return parts
+    return [this.userAuthoredTaskText, this.lastUserTypedText]
       .map((part) => String(part || "").trim())
       .filter(Boolean)
       .join("\n");
@@ -18849,7 +18879,18 @@ ${transcript}
     T extends { name: string; runtime?: RuntimeToolMetadata },
   >(tools: T[]): T[] {
     if (tools.length === 0) return tools;
-    if (this.hasTaskToolAllowlistConfigured()) return tools;
+    if (this.hasTaskToolAllowlistConfigured()) {
+      // An allowlist (the caller's, or one a skill supplies) says which tools the task may use,
+      // not that the user asked for the admin lane: its admin tools still need the user's words.
+      const userText = this.getUserAuthoredToolIntentText();
+      const policyContext = this.getToolPolicyContext();
+      return tools.filter(
+        (tool) =>
+          !isUserIntentOnlyTool(tool.name, tool.runtime) ||
+          evaluateToolAvailability(tool.name, { ...policyContext, userText }, tool.runtime)
+            .decision === "allow",
+      );
+    }
 
     const currentStep =
       this.currentStepId && this.plan?.steps
@@ -41222,6 +41263,7 @@ Return ONLY a JSON object:
     inReplyToMessageId?: TaskFollowUpInput["inReplyToMessageId"],
     inReplyToTaskId?: TaskFollowUpInput["inReplyToTaskId"],
     surfaceOrigin?: TaskFollowUpInput["surfaceOrigin"],
+    textProvenance?: TaskFollowUpInput["textProvenance"],
   ): void {
     if (this.shutdownRequested) {
       throw new Error("Task executor is shutting down; follow-up was not queued.");
@@ -41241,6 +41283,7 @@ Return ONLY a JSON object:
       inReplyToMessageId,
       inReplyToTaskId,
       surfaceOrigin,
+      textProvenance,
     );
     logger.info(
       `${this.logTag} Follow-up queued for injection into running execution (queue size: ${this.pendingFollowUps.length})`,
@@ -41998,7 +42041,9 @@ Return ONLY a JSON object:
         | "inReplyToMessageId"
         | "inReplyToTaskId"
         | "surfaceOrigin"
-      >;
+        | "textProvenance"
+      > &
+        Pick<TaskExecutorFollowUpOptions, "typedText">;
       onAccepted?: () => void | Promise<void>;
       onExecutionAccepted?: () => void | Promise<void>;
       onProviderDispatchStarted?: () => void | Promise<void>;
@@ -42113,11 +42158,13 @@ Return ONLY a JSON object:
     this.waitingForUserInput = false;
     this.paused = false;
     this.lastUserMessage = message;
-    // Another agent's handoff and the output of a shell block run from an answer reach this
-    // path like a user message, but the user did not write them.
-    this.lastUserMessageFromUser =
-      opts?.messageContext?.messageSource !== "agent" &&
-      opts?.messageContext?.surfaceOrigin !== "code_block";
+    // Every follow-up arrives here looking like a user message: automation and heartbeat
+    // prompts, another agent's handoff, answer buttons and page code included. Only a message
+    // its send path marked "user_typed" counts as the user's words for the admin lane.
+    this.lastUserTypedText = userTypedFollowUpText(
+      opts?.messageContext?.typedText ?? message,
+      opts?.messageContext,
+    );
     // Resuming a paused plan continues the same turn, so per-turn budgets such
     // as "use write_file exactly once" must survive the user's reply.
     if (!recoveredFromTurnLimit && !shouldResumeAfterFollowup) {

@@ -306,6 +306,16 @@ export const AgentConfigSchema = z
     requireWorktree: z.boolean().optional(),
     worktreeMode: z.enum(["local", "worktree"]).optional(),
     worktreeBaseBranch: z.string().trim().min(1).max(250).optional(),
+    worktreeBaseCommit: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/i)
+      .optional(),
+    compareGroupId: z
+      .string()
+      .regex(/^[A-Za-z0-9-]{8,64}$/)
+      .optional(),
+    compareVariant: z.number().int().min(1).max(8).optional(),
+    compareCheckCommand: z.string().trim().min(1).max(500).optional(),
     autoApproveTypes: z.array(z.string().min(1).max(200)).max(50).optional(),
     allowSharedContextMemory: z.boolean().optional(),
     conversationMode: z.enum(["task", "chat", "hybrid"]).optional(),

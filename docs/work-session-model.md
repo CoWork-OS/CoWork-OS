@@ -98,7 +98,9 @@ expiry, and explicit resolution. Runtime interruption, continuation, safety,
 mode-gate, reconnect, and child-wait events are projected into the corresponding
 pause/external/reconnect/child wait kinds. A generic resume clears lifecycle
 blockers but deliberately leaves approval and structured-input waits pending
-until their explicit response. A terminal task resolves outstanding waits and
+until their explicit response. A file write refused because another task in the same folder
+is changing the file records an `external` wait with request id `resource_conflict:file:<path>`
+(see [Shared-change coordination](worktrees.md#shared-change-coordination)). A terminal task resolves outstanding waits and
 updates its outcome contract before the compatibility timeline is treated as
 complete.
 

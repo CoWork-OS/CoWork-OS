@@ -32,6 +32,7 @@ import {
   storageStatements,
   ToolAttemptRepository,
   LifecycleMetaRepository,
+  ResourceClaimRepository,
   WorkspacePermissionRuleRepository,
 } from "../database/repository-facades";
 import { describeUnverifiedAttempts, unresolvedUnknownAttempts } from "./runtime/tool-attempts";
@@ -95,6 +96,18 @@ import {
 } from "../applications/daemon-application-execution";
 import type { ApplicationExecutionService } from "../applications/ApplicationExecutionService";
 import type { ApplicationVerification } from "../../shared/application-execution";
+import type {
+  EventTrigger,
+  TriggerCondition,
+  TriggerEvent,
+  TriggerSource,
+} from "../triggers/types";
+import {
+  describeArrivedEvent,
+  EVENT_WAIT_FOLLOW_UP,
+  EVENT_WAIT_PREFIX,
+  type EventWaitRegistry,
+} from "./event-wait";
 import type { ApplicationToolGateway } from "../applications/ApplicationAdapterCatalog";
 import { APPLICATION_DECISION_PREFIX, resolveApplicationInput } from "./tools/application-tools";
 import {
@@ -194,9 +207,16 @@ import {
   VerificationVerdict,
   LLMProviderType,
   InterruptInFlightCall,
+  WaitState,
   ToolAttempt,
   LifecycleKind,
+  ResourceClaimHolder,
 } from "../../shared/types";
+import {
+  fileResource,
+  RESOURCE_CONFLICT_WAIT_PREFIX,
+  ResourceConflictError,
+} from "./resource-claims";
 import { parseSpawnAgentCount } from "../../shared/spawn-intent-detection";
 import { isAutomatedTaskLike } from "../../shared/automated-task-detection";
 import { normalizeBotConversationAgentConfig } from "../../shared/bot-conversation-config";
@@ -901,6 +921,9 @@ export class AgentDaemon extends EventEmitter {
   private pactDatabase!: Database.Database;
   private cleanupIntervalHandle?: ReturnType<typeof setInterval>;
   private maintenanceIntervalHandle?: ReturnType<typeof setInterval>;
+  /** The event trigger engine `wait_for_event` adds its temporary triggers to. */
+  private eventWaitRegistry?: EventWaitRegistry;
+  private eventWaitSweepRunning = false;
   private vacuumRetryHandle?: ReturnType<typeof setTimeout>;
   /** Set when timeline projections run in the database worker for this run (DB3). */
   private timelineProjection: TimelineProjectionQueue | null = null;
@@ -1061,7 +1084,11 @@ export class AgentDaemon extends EventEmitter {
     });
 
     // Start periodic cleanup of old executors
-    this.cleanupIntervalHandle = setInterval(() => this.cleanupOldExecutors(), 120_000); // Run every 2 minutes
+    this.cleanupIntervalHandle = setInterval(() => {
+      this.cleanupOldExecutors();
+      // Event waits past their timeout resume here, so a timeout lands within two minutes.
+      void this.sweepEventWaits();
+    }, 120_000); // Run every 2 minutes
 
     // Deferred database maintenance: prune old events and vacuum
     setTimeout(() => {
@@ -1071,6 +1098,169 @@ export class AgentDaemon extends EventEmitter {
         24 * 60 * 60 * 1000,
       );
     }, 60_000);
+  }
+
+  /** Give `wait_for_event` this runtime's event trigger engine. */
+  setEventWaitRegistry(registry: EventWaitRegistry | undefined): void {
+    this.eventWaitRegistry = registry;
+  }
+
+  hasEventWaitSupport(): boolean {
+    return Boolean(this.eventWaitRegistry);
+  }
+
+  /**
+   * Park a task on an event (agent-first roadmap WP12): a temporary one-shot trigger and an
+   * external wait. The task pauses when it next finishes and continues when the event arrives
+   * (with the event's fields) or when the wait times out.
+   */
+  async beginEventWait(
+    taskId: string,
+    input: {
+      source: TriggerSource;
+      conditions: TriggerCondition[];
+      timeoutMs: number;
+      reason: string;
+    },
+  ): Promise<{ triggerId: string; expiresAt: number }> {
+    const registry = this.eventWaitRegistry;
+    if (!registry) throw new Error("Waiting for events is not available in this runtime.");
+    const task = this.taskRepo.findById(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const expiresAt = Date.now() + input.timeoutMs;
+    const trigger: EventTrigger = await registry.addTrigger({
+      name: `Waiting: ${input.reason}`.slice(0, 120),
+      description: "Temporary trigger made by wait_for_event; removed when the wait ends.",
+      enabled: true,
+      source: input.source,
+      conditions: input.conditions,
+      conditionLogic: "all",
+      action: {
+        type: "create_task",
+        config: {
+          runMode: "thread_follow_up",
+          targetTaskId: taskId,
+          prompt: EVENT_WAIT_FOLLOW_UP,
+          eventWait: { taskId, expiresAt, reason: input.reason },
+        },
+      },
+      workspaceId: task.workspaceId,
+      cooldownMs: 0,
+    });
+    this.workSessionContractService.beginWait(taskId, {
+      kind: "external",
+      requestId: `${EVENT_WAIT_PREFIX}${trigger.id}`,
+      reason: input.reason,
+      expiresAt,
+      payload: { triggerId: trigger.id, source: input.source, conditions: input.conditions },
+    });
+    this.logEvent(taskId, "event_wait_started", {
+      triggerId: trigger.id,
+      source: input.source,
+      conditions: input.conditions,
+      expiresAt,
+      reason: input.reason,
+    });
+    return { triggerId: trigger.id, expiresAt };
+  }
+
+  /** The task's event waits that have not ended. */
+  private pendingEventWaits(taskId: string): WaitState[] {
+    const session = this.workSessionContractService.getForTask(taskId)?.session;
+    if (!session) return [];
+    return this.workSessionContractService
+      .getRepository()
+      .listWaitStates(session.id, { status: "pending" })
+      .filter((wait) => wait.kind === "external" && wait.requestId?.startsWith(EVENT_WAIT_PREFIX));
+  }
+
+  /** A task that asked to wait for an event pauses instead of completing. */
+  private parkForEventWait(taskId: string): boolean {
+    let waits: WaitState[];
+    try {
+      waits = this.pendingEventWaits(taskId);
+    } catch {
+      return false;
+    }
+    if (waits.length === 0) return false;
+    this.updateTask(taskId, { status: "paused" });
+    this.logEvent(taskId, "event_wait_parked", {
+      message: "Waiting for an event before continuing.",
+      waits: waits.map((wait) => ({
+        reason: wait.reason,
+        expiresAt: wait.expiresAt,
+        triggerId: wait.payload?.triggerId,
+      })),
+    });
+    this.finishQueueSlot(taskId);
+    return true;
+  }
+
+  /** The event a parked task waited for arrived: end the wait and continue the task with it. */
+  async resumeAfterEventWait(params: {
+    taskId: string;
+    triggerId: string;
+    event: TriggerEvent;
+  }): Promise<void> {
+    const requestId = `${EVENT_WAIT_PREFIX}${params.triggerId}`;
+    if (!this.pendingEventWaits(params.taskId).some((wait) => wait.requestId === requestId)) {
+      return;
+    }
+    this.workSessionContractService.resolveWait(params.taskId, "external", requestId, "resolved", {
+      source: params.event.source,
+      fields: params.event.fields,
+    });
+    this.logEvent(params.taskId, "event_wait_resolved", {
+      triggerId: params.triggerId,
+      source: params.event.source,
+      outcome: "event",
+    });
+    await this.resumeTaskAfterDurableWait(params.taskId, describeArrivedEvent(params.event));
+  }
+
+  /**
+   * Remove spent wait triggers (fired, ended or for a finished task) and resume tasks whose
+   * wait timed out, telling them no event came.
+   */
+  async sweepEventWaits(now = Date.now()): Promise<void> {
+    const registry = this.eventWaitRegistry;
+    if (!registry || this.eventWaitSweepRunning) return;
+    this.eventWaitSweepRunning = true;
+    try {
+      for (const trigger of registry.listTriggers()) {
+        const wait = trigger.action.config.eventWait;
+        if (!wait) continue;
+        const requestId = `${EVENT_WAIT_PREFIX}${trigger.id}`;
+        const task = this.taskRepo.findById(wait.taskId);
+        const pending =
+          task && !isTerminalTaskStatus(deriveCanonicalTaskStatus(task))
+            ? this.pendingEventWaits(wait.taskId).some((entry) => entry.requestId === requestId)
+            : false;
+        if (!pending) {
+          await registry.removeTrigger(trigger.id);
+          continue;
+        }
+        if (wait.expiresAt > now) continue;
+        await registry.removeTrigger(trigger.id);
+        this.workSessionContractService.resolveWait(wait.taskId, "external", requestId, "expired", {
+          reason: "timeout",
+        });
+        this.logEvent(wait.taskId, "event_wait_resolved", {
+          triggerId: trigger.id,
+          source: trigger.source,
+          outcome: "timeout",
+        });
+        await this.resumeTaskAfterDurableWait(
+          wait.taskId,
+          `No matching ${trigger.source} event arrived before the wait timed out` +
+            `${wait.reason ? ` (${wait.reason})` : ""}. Decide how to continue without it.`,
+        );
+      }
+    } catch (error) {
+      log.warn("Event wait sweep failed:", error);
+    } finally {
+      this.eventWaitSweepRunning = false;
+    }
   }
 
   /** Get the worktree manager instance. */
@@ -1120,6 +1310,9 @@ export class AgentDaemon extends EventEmitter {
 
   private toolAttemptRepository?: ToolAttemptRepository;
   private lifecycleMetaRepository?: LifecycleMetaRepository;
+  private resourceClaimRepository?: ResourceClaimRepository;
+  /** `taskId\nresourceKey` of writes refused for a conflict, whose wait is still open. */
+  private readonly openResourceConflicts = new Set<string>();
   /** Tasks with a call whose outcome became unknown; only these read attempts at completion. */
   private tasksWithUnknownToolOutcomes?: Set<string>;
 
@@ -3359,6 +3552,7 @@ export class AgentDaemon extends EventEmitter {
             workspace.id,
             workspace.path,
             executionTask.agentConfig?.worktreeBaseBranch,
+            executionTask.agentConfig?.worktreeBaseCommit,
           );
 
           // Create a virtual workspace pointing to the worktree
@@ -4935,7 +5129,14 @@ export class AgentDaemon extends EventEmitter {
       typeof safeTaskOverrides?.sessionId === "string" && safeTaskOverrides.sessionId.trim()
         ? safeTaskOverrides.sessionId.trim()
         : undefined;
+    // Build Compare: every variant runs the same check before it can finish.
+    const compareCheckCommand = derived.agentConfig?.compareGroupId
+      ? derived.agentConfig.compareCheckCommand?.trim()
+      : undefined;
     const input: TaskAdmissionInput = {
+      ...(compareCheckCommand && !safeTaskOverrides?.successCriteria
+        ? { successCriteria: { type: "shell_command" as const, command: compareCheckCommand } }
+        : {}),
       title: params.title,
       prompt: derived.prompt,
       rawPrompt: params.prompt,
@@ -10481,15 +10682,92 @@ export class AgentDaemon extends EventEmitter {
    * Log an event for a task
    */
   async captureTaskMutationBaseline(taskId: string, candidatePath: string): Promise<void> {
-    const ledger = this.taskMutationLedger;
-    if (!ledger) return;
     const task = this.taskRepo.findById(taskId);
     const workspace = task ? this.workspaceRepo.findById(task.workspaceId) : undefined;
     const workspaceRoot = task?.worktreePath || workspace?.path;
-    if (!workspaceRoot) return;
+    if (!task || !workspaceRoot) return;
+    // Throws when another task in the same folder is changing this file: the write is refused.
+    await this.claimTaskResource(task, workspaceRoot, candidatePath);
+    const ledger = this.taskMutationLedger;
+    if (!ledger) return;
     await ledger.captureBaseline(taskId, workspaceRoot, candidatePath, {
       isolatedWorktree: Boolean(task?.worktreePath),
     });
+  }
+
+  /**
+   * The top task of a task's parent/child tree (bounded, so a cycle cannot hang it). Build
+   * Compare variants are alternatives to each other, so a Compare group is one family.
+   */
+  private taskFamilyRoot(task: Task): string {
+    const compareGroupId = task.agentConfig?.compareGroupId;
+    if (compareGroupId) return `compare:${compareGroupId}`;
+    let current = task;
+    for (let depth = 0; depth < 20 && current.parentTaskId; depth += 1) {
+      const parent = this.taskRepo.findById(current.parentTaskId);
+      if (!parent) break;
+      current = parent;
+    }
+    return current.id;
+  }
+
+  /**
+   * Claim a file before a task writes it (shared-change coordination, WP11). A task in the
+   * shared folder is refused while another task there is changing the same file: the write
+   * fails with a clear message and a conflict wait is recorded until a later write of the file
+   * goes ahead or the task ends. Tasks in worktrees always get their claim; overlapping changes
+   * are shown in Mission Control and in the merge review. A failure to record a claim never
+   * blocks a write.
+   */
+  private async claimTaskResource(
+    task: Task,
+    workspaceRoot: string,
+    candidatePath: string,
+  ): Promise<void> {
+    const resource = fileResource(workspaceRoot, candidatePath);
+    if (!resource) return;
+    let result: { claimed: boolean; others: ResourceClaimHolder[] };
+    try {
+      this.resourceClaimRepository ??= new ResourceClaimRepository(this.getDatabase());
+      result = await this.resourceClaimRepository.claim({
+        id: crypto.randomUUID(),
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        resourceKey: resource.key,
+        label: resource.label,
+        intent: task.title,
+        isolated: Boolean(task.worktreePath),
+        familyRoot: this.taskFamilyRoot(task),
+        at: Date.now(),
+      });
+    } catch (error) {
+      log.debug(`Could not record a claim on ${resource.label}:`, error);
+      return;
+    }
+    const conflictKey = `${task.id}\n${resource.key}`;
+    const requestId = `${RESOURCE_CONFLICT_WAIT_PREFIX}${resource.key}`;
+    if (result.claimed) {
+      if (this.openResourceConflicts.delete(conflictKey)) {
+        this.workSessionContractService.resolveWait(task.id, "external", requestId, "resolved", {
+          reason: "write_went_ahead",
+        });
+      }
+      return;
+    }
+    const other = result.others.find((holder) => !holder.isolated) ?? result.others[0];
+    this.openResourceConflicts.add(conflictKey);
+    this.workSessionContractService.beginWait(task.id, {
+      kind: "external",
+      requestId,
+      reason: `${resource.label} is being changed by "${other.title}" in the same folder`,
+      payload: { conflict: true, resource: resource.label, otherTaskId: other.taskId },
+    });
+    this.logEvent(task.id, "resource_conflict", {
+      path: resource.label,
+      otherTaskId: other.taskId,
+      otherTaskTitle: other.title,
+    });
+    throw new ResourceConflictError(resource.label, other);
   }
 
   private recordTaskMutationImpact(
@@ -15414,6 +15692,8 @@ export class AgentDaemon extends EventEmitter {
       return;
     }
     if (this.reconcilePendingUserUpdateBeforeCompletion(taskId).deferred) return;
+    // wait_for_event: park instead of completing until the event arrives or the wait times out.
+    if (this.parkForEventWait(taskId)) return;
 
     let hasApplicationOperations = false;
     if (this.applicationExecutionService) {

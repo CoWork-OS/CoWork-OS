@@ -71,6 +71,7 @@ import { YouTubeTools } from "./youtube-tools";
 import { MeetingArtifactTools } from "./meeting-artifact-tools";
 import { VisionTools } from "./vision-tools";
 import { SystemTools } from "./system-tools";
+import { EventWaitTools } from "./event-wait-tools";
 import { CronTools } from "./cron-tools";
 import { CanvasTools } from "./canvas-tools";
 import { VisualTools } from "./visual-tools";
@@ -666,6 +667,7 @@ export class ToolRegistry {
   private nativeAppTools: NativeAppTools;
   private batchImageTools: BatchImageTools;
   private cronTools: CronTools;
+  private eventWaitTools: EventWaitTools;
   private canvasTools: CanvasTools;
   private visualTools: VisualTools;
   private mentionTools: MentionTools;
@@ -760,6 +762,7 @@ export class ToolRegistry {
     this.nativeAppTools = new NativeAppTools(this.fileTools, daemon, taskId);
     this.batchImageTools = new BatchImageTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
+    this.eventWaitTools = new EventWaitTools(daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
     this.visualTools = new VisualTools(workspace, daemon, taskId);
     this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
@@ -1647,6 +1650,10 @@ export class ToolRegistry {
 
     // Always add cron/scheduling tools (enables task scheduling)
     allTools.push(...CronTools.getToolDefinitions());
+    // Waiting on an event needs the runtime's event trigger engine.
+    if (this.daemon.hasEventWaitSupport?.()) {
+      allTools.push(...EventWaitTools.getToolDefinitions());
+    }
     if (MCPEventService.getActive()) {
       allTools.push({
         name: "manage_connector_events",
@@ -3639,6 +3646,11 @@ export class ToolRegistry {
     );
     register("schedule_task", async ({ request }) => this.cronTools.executeAction(request.input));
     register(
+      "wait_for_event",
+      async ({ request }) => this.eventWaitTools.waitForEvent(request.input),
+      serialSchedulerSpec,
+    );
+    register(
       "manage_connector_events",
       async ({ request }) => this.manageConnectorEvents(request.input),
       serialSchedulerSpec,
@@ -4916,7 +4928,11 @@ ${
   hasAnyVisibleTools("manage_connector_events")
     ? "- manage_connector_events: Discover connected MCP event types, subscribe with saved instructions, continue this task on delivery, and stop monitoring when asked"
     : ""
-}
+}${
+      hasAnyVisibleTools("wait_for_event")
+        ? "\n- wait_for_event: Pause this task until a workspace file change, GitHub event or webhook arrives, instead of polling or sleeping; then finish the turn"
+        : ""
+    }
 
 ${
   hasAnyVisibleTools(
@@ -5526,6 +5542,7 @@ ${skillDescriptions}`;
 
     // Cron/scheduling tools
     if (name === "schedule_task") return await this.cronTools.executeAction(input);
+    if (name === "wait_for_event") return await this.eventWaitTools.waitForEvent(input);
     if (name === "manage_connector_events") return await this.manageConnectorEvents(input);
 
     // Canvas tools

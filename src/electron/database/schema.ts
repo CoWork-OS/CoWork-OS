@@ -3673,6 +3673,25 @@ export class DatabaseManager {
         CREATE INDEX IF NOT EXISTS idx_lifecycle_meta_retired
           ON lifecycle_meta(kind, retired_at);
 
+        -- Shared-change coordination: which task is changing which file (WP11).
+        CREATE TABLE IF NOT EXISTS resource_claims (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          resource_key TEXT NOT NULL,
+          resource_label TEXT NOT NULL,
+          intent TEXT,
+          isolated INTEGER NOT NULL DEFAULT 0,
+          family_root TEXT NOT NULL,
+          claimed_at INTEGER NOT NULL,
+          UNIQUE (task_id, resource_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_resource_claims_resource
+          ON resource_claims(workspace_id, resource_key);
+        CREATE INDEX IF NOT EXISTS idx_resource_claims_claimed_at
+          ON resource_claims(claimed_at);
+
         CREATE TABLE IF NOT EXISTS work_session_rollout_config (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           enabled INTEGER NOT NULL DEFAULT 1,

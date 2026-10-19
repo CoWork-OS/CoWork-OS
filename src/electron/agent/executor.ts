@@ -273,6 +273,11 @@ import { getCustomSkillLoader } from "./custom-skill-loader";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { runWithMemoryRepoAccess } from "../security/memory-repo-access";
+import {
+  resolveSkillPackReadGrant,
+  runWithSkillPackReadAccess,
+  type SkillPackReadGrant,
+} from "../security/skill-pack-read-access";
 import { DurableContextService } from "../memory/DurableContextService";
 import { PlaybookService, type PlaybookCaptureResult } from "../memory/PlaybookService";
 import { SessionRecallService } from "../memory/SessionRecallService";
@@ -11852,6 +11857,12 @@ ${transcript}
             ?.botFile(this.task.assignedAgentRoleId)
             .catch(() => null)
         : null;
+    // File tools read an applied directory-backed skill's own plugin pack, read-only.
+    const skillPackReadGrants = this.getAppliedSkillPackReadGrants();
+    const runInToolFileScopes = <T>(fn: () => T): T =>
+      runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
+        runWithSkillPackReadAccess(skillPackReadGrants, fn),
+      );
 
     // Written before dispatch, so a timeout, lost transport, stop or crash leaves a record of a
     // call whose effect is unknown instead of nothing.
@@ -11864,7 +11875,7 @@ ${transcript}
     );
     try {
       const coordinated = await withTimeout(
-        runWithMemoryRepoAccess({ readAllowed: memoryRepoReadAllowed, swarmPrefix, botFile }, () =>
+        runInToolFileScopes(() =>
           this.toolExecutionCoordinator.executeTool(
             toolName,
             input as Any,
@@ -15916,6 +15927,25 @@ ${transcript}
       sections.push(appliedSkillContext);
     }
     return sections.filter((section) => String(section || "").trim().length > 0).join("\n\n");
+  }
+
+  /**
+   * Read grants for the plugin packs of this task's applied directory-backed skills. Resolved
+   * against the skill loader on every tool call, so a pack disabled or shadowed since the
+   * skill was applied no longer grants anything.
+   */
+  private getAppliedSkillPackReadGrants(): SkillPackReadGrant[] {
+    const appliedSkills = Array.isArray(this.appliedSkills) ? this.appliedSkills : [];
+    if (appliedSkills.length === 0) return [];
+    try {
+      const loader = getCustomSkillLoader();
+      return appliedSkills
+        .map((application) => resolveSkillPackReadGrant(loader.getSkill(application.skillId)))
+        .filter((grant): grant is SkillPackReadGrant => grant !== null);
+    } catch {
+      // No loader, no grant: the pack stays behind the ordinary boundary.
+      return [];
+    }
   }
 
   private getAppliedSkillApplication(skillId: string): SkillApplication | null {

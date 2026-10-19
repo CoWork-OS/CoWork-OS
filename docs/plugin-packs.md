@@ -722,7 +722,7 @@ For each cowork.plugin.json found:
     │
     ├── Validate manifest (required fields, semver, platform)
     ├── Register inline skills → Custom Skill Loader
-    ├── Register skillDirectories → Custom Skill Loader
+    ├── Register skillDirectories → Custom Skill Loader (+ read-only pack grant)
     ├── Register agent roles → Agent Role Repository
     ├── Register connectors → Tools Map
     └── Set plugin.state = "registered"
@@ -783,6 +783,21 @@ now being registered by "qa-testing". The later registration will take precedenc
 ```
 
 This helps pack authors avoid accidental ID collisions. The later-registered skill wins, but both packs continue to load normally.
+
+### Skill Files Under Access Profiles
+
+Packs live outside the workspace (bundled packs under `resources/plugin-packs/`, personal packs under `~/Library/Application Support/cowork-os/extensions/`), so a directory-backed skill's own `references/`, `scripts/`, and `assets/` would normally stop at the workspace boundary of a named access profile (Ask for approval, Approve for me, or a custom profile).
+
+When a task applies a directory-backed skill — by slash command (`/unity:implement-in-app-purchases`) or when the model invokes the `Skill` tool — the task may **read** that skill's plugin pack folder with the file tools (`read_file`, `list_directory`, `glob`, `grep`, and the other read tools), by absolute path, without an approval prompt:
+
+- **Read-only.** The grant never covers writes or deletes. A write into the pack is evaluated exactly as before: denied, or an ordinary external-file approval where the profile allows one.
+- **Only the applied skill's pack.** Other packs, the extensions folder itself, and every other path stay behind the boundary. A pack's grant does not reach a sibling pack.
+- **Only packs the registry loaded.** The grant is registered when `PluginRegistry` loads the pack's `skillDirectories` and is bound to the exact `SKILL.md` it built the skill from. Disabled, policy-blocked, failed, and quarantined packs (and a skill shadowed by a workspace skill with the same ID) get nothing. Disabling or uninstalling a pack revokes the grant immediately, even for a running task.
+- **No symlink escapes.** The pack root is canonicalized when the pack loads. Both the requested path and its real target must be inside it, so a symlink in the pack that points elsewhere is denied.
+- **Profile deny rules still win**, as does a workspace with reading turned off. Add a `deny` rule for the extensions folder to a custom profile to opt out.
+- **Ends with the task.** The grant is held per tool call from the task's applied skills, so it never carries over to another task, sub-agent, or background service.
+
+Shell commands are not covered: the command sandbox's read rules do not include pack folders, so a skill that runs a bundled script still needs an access profile that lets the command reach it. See [Access Profiles](access-profiles.md#filesystem-behavior).
 
 ### Update Detection
 
@@ -1219,6 +1234,7 @@ window.electronAPI.scaffoldPluginPack({
 - Use `skillDirectories` when a skill needs a full folder, such as `SKILL.md`, `references/`, `scripts/`, `assets/`, or `agents/`.
 - `path` must be relative to the plugin pack root. Absolute paths and parent traversal are rejected.
 - Each directory must contain `SKILL.md`.
+- Tell the agent which files to read relative to `SKILL.md`; while the skill is applied the whole pack folder is readable (read-only) under every access profile. See [Skill Files Under Access Profiles](#skill-files-under-access-profiles).
 - Display metadata resolves in this order: manifest field, `SKILL.md` frontmatter, generated title from skill ID.
 - Per-skill enable/disable state is persisted for both inline `skills` and directory-backed `skillDirectories`.
 - Packaged builds include `resources/plugin-packs/**`, so future non-reference files under a bundled pack are preserved.

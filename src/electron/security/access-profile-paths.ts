@@ -10,6 +10,7 @@ import {
   getTeamMemoryRepoRoots,
   isMemoryRepoReadAllowed,
 } from "./memory-repo-access";
+import { isSkillPackReadAllowed } from "./skill-pack-read-access";
 
 export type AccessFilesystemOperation = "read" | "write" | "delete";
 export type AccessFilesystemDecision = "allow" | "deny" | "unmatched";
@@ -758,6 +759,13 @@ export function evaluateWorkspaceFilesystemAccess(
   ].map((root) => resolveWorkspacePolicyPath(workspace.path, root));
   if (explicitlyAllowedRoots.some((root) => isAccessPathWithin(root, resolvedPath))) {
     return { decision: "allow", path: operationPath, reason: "explicit_file_root" };
+  }
+
+  // A directory-backed skill the task applied may read its own plugin pack (references,
+  // scripts, assets next to its SKILL.md). Read-only and app-loaded packs only; profile deny
+  // rules and a disabled read capability were checked above and still win.
+  if (operation === "read" && isSkillPackReadAllowed(requestedPath, resolvedPath)) {
+    return { decision: "allow", path: operationPath, reason: "applied_skill_pack_read" };
   }
 
   // A named profile with a finite filesystem boundary must not fall through

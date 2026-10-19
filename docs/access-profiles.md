@@ -318,6 +318,31 @@ file approval, a session “Approve all” shortcut, or a legacy permission mode
 expand it. Temporary-workspace scratch-file compatibility is retained only for
 unprofiled legacy tasks.
 
+### Applied skill packs
+
+Plugin packs live outside the workspace. When a task applies a
+directory-backed pack skill (`/pack:skill` or the `Skill` tool), file tools may
+read that skill's pack folder without a prompt under every named profile, so
+the skill can open its `references/`, `scripts/`, and `assets/`:
+
+- the grant is read-only; writes and deletes in the pack are evaluated as for
+  any other outside path;
+- it covers only the pack `PluginRegistry` loaded the applied skill from — not
+  sibling packs, the extensions folder, or anything else;
+- the requested path and its canonical target must both be inside the pack root
+  as canonicalized at load, so symlink escapes are denied;
+- an explicit profile `deny` rule, a workspace with reading turned off, and an
+  unavailable profile still win; this also applies to finite (scoped) profiles,
+  which can exclude packs with a `deny` rule on the extensions folder;
+- disabled, policy-blocked, and quarantined packs never qualify, and disabling a
+  pack revokes the grant at once; and
+- the grant is held per tool call from the task's applied skills, so it ends
+  with the task and never reaches another task or a background service.
+
+The decision reason is `applied_skill_pack_read`. Shell commands are not
+covered by this grant. See
+[Plugin Packs](plugin-packs.md#skill-files-under-access-profiles).
+
 Process backends reject filesystem policies they cannot enforce. In particular,
 macOS commands cannot move or remove host directories around protected descendants;
 Docker rejects writable workspace directory mounts and mounts that would expose
@@ -413,6 +438,8 @@ The shared policy contract lives in:
   compatibility mapping, admin constraints, and workspace projection;
 - `src/electron/security/access-profile-paths.ts` — canonical path and
   profile-filesystem evaluation;
+- `src/electron/security/skill-pack-read-access.ts` — read-only grants for the
+  plugin packs of a task's applied directory-backed skills;
 - `src/electron/security/permission-settings-manager.ts` — validated encrypted
   persistence for defaults and custom profiles;
 - `src/electron/agent/runtime/PermissionEngine.ts` — per-request hard-stop and
@@ -424,6 +451,7 @@ Useful verification commands:
 
 ```bash
 npx vitest run src/shared/__tests__/access-profiles.test.ts src/electron/security/__tests__/access-profile-resolver.test.ts src/electron/security/__tests__/access-profile-paths.test.ts
+npx vitest run src/electron/security/__tests__/skill-pack-read-access.test.ts src/electron/extensions/__tests__/registry-skill-pack-read-access.test.ts src/electron/agent/__tests__/executor-skill-pack-read-scope.test.ts
 npx vitest run tests/tools/shell-tools.test.ts src/electron/agent/runtime/__tests__/PermissionEngine.test.ts
 npm run type-check
 npm run build:electron

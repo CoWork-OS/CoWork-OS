@@ -36,6 +36,7 @@ import { createLogger } from "../utils/logger";
 import { frontmatterString, parseFrontmatterBlock } from "../utils/skill-frontmatter";
 import { isPackAllowed, isPackRequired, loadPoliciesStrict } from "../admin/policies";
 import { writePackStateFile } from "./pack-state-storage";
+import { registerSkillPackRoot, unregisterSkillPackRoot } from "../security/skill-pack-read-access";
 import type { CustomSkill } from "../../shared/types";
 
 // Package version (will be replaced at build time or read from package.json)
@@ -669,6 +670,7 @@ export class PluginRegistry extends EventEmitter {
       `Skill instruction file: ${skillPath}`,
       "",
       "Read and follow the skill instructions below. When they reference relative paths such as ../../references, scripts/, or assets/, resolve them relative to the skill instruction file or plugin root as written. Preserve required artifact contracts, report validation steps, and phase boundaries.",
+      "Open those files with the file tools by their absolute path under the plugin root: while this skill is applied the plugin folder is readable (read-only). Do not modify plugin files.",
       "",
       body.trim(),
     ].join("\n");
@@ -743,6 +745,7 @@ export class PluginRegistry extends EventEmitter {
         const { getCustomSkillLoader } = await import("../agent/custom-skill-loader");
         const loader = getCustomSkillLoader();
         let registered = 0;
+        const skillFiles: string[] = [];
         for (const skillDirectory of manifest.skillDirectories) {
           const skill = this.buildDirectoryBackedSkill(skillDirectory, pluginName, pluginPath);
           if (!skill) continue;
@@ -758,9 +761,21 @@ export class PluginRegistry extends EventEmitter {
           if (typeof loader.registerPluginSkill === "function") {
             loader.registerPluginSkill(skill);
             registered++;
+            if (skill.filePath) skillFiles.push(skill.filePath);
           }
         }
         logger.debug(`Registered ${registered} directory-backed skill(s) from ${pluginName}`);
+
+        // A task that applies one of these skills may read this pack's root (read-only), so
+        // the skill can open its references/scripts/assets under a named access profile.
+        // A pack the security scan quarantined keeps its skills off that grant.
+        if (this.plugins.get(pluginName)?.securityReport?.verdict === "quarantined") {
+          logger.warn(`Not granting skill reads of quarantined pack ${pluginName}`);
+        } else if (skillFiles.length > 0) {
+          if (!registerSkillPackRoot(pluginName, pluginPath, skillFiles)) {
+            logger.warn(`Not granting skill reads of pack ${pluginName}: unsafe pack root`);
+          }
+        }
       } catch (error) {
         logger.error(`Failed to register directory-backed skills from ${pluginName}:`, error);
       }
@@ -1055,6 +1070,8 @@ export class PluginRegistry extends EventEmitter {
    * Remove runtime registrations owned by a plugin without deleting the loaded manifest.
    */
   private async removePluginRuntimeRegistrations(pluginName: string): Promise<void> {
+    // Revoke first: a running task loses its read grant even if skill cleanup fails.
+    unregisterSkillPackRoot(pluginName);
     try {
       const { getCustomSkillLoader } = await import("../agent/custom-skill-loader");
       getCustomSkillLoader().unregisterPluginSkills(pluginName);
@@ -1316,6 +1333,7 @@ export class PluginRegistry extends EventEmitter {
       } catch (error) {
         console.error(`Error unregistering plugin ${name}:`, error);
       }
+      unregisterSkillPackRoot(name);
     }
 
     this.plugins.clear();

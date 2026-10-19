@@ -3532,6 +3532,14 @@ export class DatabaseManager {
     for (const statement of [
       "ALTER TABLE work_session_artifact_revisions ADD COLUMN idempotency_key TEXT",
       "ALTER TABLE work_session_wait_states ADD COLUMN idempotency_key TEXT",
+      // Point at the result: an annotation's intent, values, and the revisions it links.
+      "ALTER TABLE annotations ADD COLUMN intent TEXT",
+      "ALTER TABLE annotations ADD COLUMN before_json TEXT",
+      "ALTER TABLE annotations ADD COLUMN after_json TEXT",
+      "ALTER TABLE annotations ADD COLUMN output_path TEXT",
+      "ALTER TABLE annotations ADD COLUMN artifact_revision_id TEXT",
+      "ALTER TABLE annotations ADD COLUMN result_revision_id TEXT",
+      "ALTER TABLE annotations ADD COLUMN undo_token TEXT",
     ]) {
       try {
         this.db.exec(statement);

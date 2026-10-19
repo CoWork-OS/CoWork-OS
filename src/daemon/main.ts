@@ -65,6 +65,7 @@ import {
   prefetchTranscriptUsers,
 } from "../electron/gateway/chat-transcript";
 import { CuratedMemoryService } from "../electron/memory/CuratedMemoryService";
+import { MemorySourceRecheckService } from "../electron/memory/MemorySourceRecheckService";
 import { MemoryService } from "../electron/memory/MemoryService";
 import { DurableContextService } from "../electron/memory/DurableContextService";
 import { MemoryWriter } from "../electron/memory/MemoryWriter";
@@ -379,6 +380,10 @@ async function main(): Promise<void> {
   try {
     MemoryService.initialize(dbManager);
     CuratedMemoryService.initialize(dbManager);
+    // Memories whose source record changed (WP15): flags for recall and prompts.
+    void MemorySourceRecheckService.getDefault()
+      .load()
+      .catch((error) => console.warn("[Daemon] Could not load memory source flags:", error));
     // Memory engine, as on desktop (docs/memory-engine.md): the MemoryWriter, the one-time
     // lane migration (awaited before anything reads memory), the read-side syncs and the
     // facts snapshot. The migration is claimed in the database, so a desktop app on the

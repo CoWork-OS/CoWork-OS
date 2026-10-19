@@ -41,6 +41,8 @@ The executor builds the user's words (`ToolAvailabilityContext.userText`) from t
 
 Both markers are positive provenance: an unmarked task or message never counts. They are set by main-process creation and send paths only, and never copied from renderer or remote-client input.
 
+**Attached files never count.** Even in a typed prompt or follow-up, only the text before the attached-files block counts (`textBeforeAttachedFiles` in `src/shared/attachment-summary.ts`). That block is the file list and extracted file contents that the composer, the artifact viewers, browser annotations and the gateway append. The cut never resumes after an end marker, so a document can't close the block early with a fake marker. A request typed above the attachments still counts; a file that says "add a behavioral rule" doesn't.
+
 **Task prompts count** when a person typed them into a composer the owner signed in to:
 
 - the desktop app (new task, tray quick task);

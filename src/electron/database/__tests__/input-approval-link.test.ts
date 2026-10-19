@@ -47,6 +47,8 @@ suite("durable inline input to approval binding", () => {
     const f = fixture(),
       input = inputs.create(f.request, f.binding);
     expect(inputs.getApprovalBinding(input.id)).toEqual({ ...f.binding, taskId: "task" });
+    expect(inputs.findLinkedInputId(f.approval.id)).toBe(input.id);
+    expect(inputs.findLinkedInputId("unlinked")).toBeUndefined();
     expect(approvals.findById(f.approval.id)?.status).toBe("pending");
   });
   it.each(["foreign_task", "hash", "expired", "ordinary_question", "approved"])(

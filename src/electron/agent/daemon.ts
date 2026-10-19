@@ -20,7 +20,10 @@ import {
   type ResponsibilityActionReviewOutcome,
   type ResponsibilityActionReviewPayload,
 } from "../automation/responsibility-task-policy";
-import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../shared/approval-draft-presentation";
+import {
+  ASSISTANT_APPROVAL_QUESTION_ID,
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+} from "../../shared/approval-draft-presentation";
 import { isCodexComputerUseServer } from "../mcp/codex-computer-use";
 import { MCPSettingsManager } from "../mcp/settings";
 import { CanvasManager } from "../canvas/canvas-manager";
@@ -10052,6 +10055,25 @@ export class AgentDaemon extends EventEmitter {
     }
 
     try {
+      const findLinkedInputId = (this.inputRequestRepo as Any)?.findLinkedInputId;
+      const linkedInputId: string | undefined =
+        typeof findLinkedInputId === "function"
+          ? await findLinkedInputId.call(this.inputRequestRepo, approvalId)
+          : undefined;
+      if (linkedInputId) {
+        const status = await this.respondToApprovalThroughLinkedInput(
+          approvalId,
+          linkedInputId,
+          requestedAction,
+          attribution,
+          channelResolutionGuard,
+        );
+        // A refused answer changes nothing; a corrected retry must still reach the card.
+        if (status === "handled")
+          approvalIdempotency.complete(idempotencyKey, { success: true, status });
+        else approvalIdempotency.remove(idempotencyKey);
+        return status;
+      }
       const pending = this.pendingApprovals.get(approvalId);
       if (pending && !pending.resolved) {
         const approvalForDecision: ApprovalRequest =
@@ -10391,6 +10413,78 @@ export class AgentDaemon extends EventEmitter {
       approvalIdempotency.fail(idempotencyKey, error);
       throw error;
     }
+  }
+
+  /**
+   * An inline approval keeps its approval row for queue surfaces (`approval.list`,
+   * `cowork approvals`), but the tool waits on the linked input card. Answer that card so the
+   * waiter's own validation records the decision. The restart-recovery path would record a grant
+   * the waiting tool never sees, and the card would then time out as a denial.
+   */
+  private async respondToApprovalThroughLinkedInput(
+    approvalId: string,
+    inputId: string,
+    action: ApprovalResponseAction,
+    attribution?: SessionActionAttribution,
+    channelResolutionGuard?: ChannelDecisionResolutionGuard,
+  ): Promise<"handled" | "duplicate" | "not_found" | "in_progress"> {
+    // Channels answer only the approvals they displayed; inline cards are never sent to one.
+    if (channelResolutionGuard) return "not_found";
+    const [approval, request, binding] = await Promise.all([
+      this.approvalRepo.findById(approvalId),
+      this.inputRequestRepo.findById(inputId),
+      this.inputRequestRepo.getApprovalBinding(inputId),
+    ]);
+    // A card answered, dismissed or timed out elsewhere decided this approval already.
+    if (
+      !approval ||
+      !request ||
+      binding?.approvalId !== approvalId ||
+      binding.taskId !== approval.taskId ||
+      request.taskId !== approval.taskId ||
+      request.status !== "pending" ||
+      approval.status !== "pending" ||
+      binding.revisionHash !== approvalRequestRevisionHash(approval)
+    )
+      return "not_found";
+    const liveWaiter = this.pendingInputRequests.get(inputId);
+    // Without a waiter only a reviewed write can resume (from its card); any other card is stale.
+    if (
+      (!liveWaiter || liveWaiter.resolved) &&
+      !AgentDaemon.isResponsibilityActionReviewApproval(approval)
+    )
+      return "not_found";
+    const question = request.questions.find(
+      (candidate) =>
+        candidate.id === ASSISTANT_APPROVAL_QUESTION_ID ||
+        candidate.id === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+    );
+    const allow = action.startsWith("allow_");
+    // The card offers one allow scope; a broader requested scope is answered with it.
+    const option = question?.options?.find((candidate) =>
+      candidate.label
+        .trim()
+        .toLowerCase()
+        .startsWith(allow ? "allow" : "deny"),
+    );
+    if (!question || !option) return "not_found";
+    const { status } = await this.respondToInputRequest({
+      requestId: inputId,
+      status: "submitted",
+      answers: { [question.id]: { optionLabel: option.label } },
+    });
+    if (status === "handled") {
+      this.logEvent(approval.taskId, "log", {
+        type: "approval_response",
+        approvalId,
+        requestId: inputId,
+        action,
+        answer: option.label,
+        ...(attribution ? { decidedBy: attribution } : {}),
+      });
+    }
+    // "duplicate" means another answer won the card, not this one.
+    return status === "duplicate" ? "not_found" : status;
   }
 
   /**

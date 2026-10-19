@@ -397,6 +397,11 @@ export const STORAGE_UNITS = {
     "getApprovalBinding",
     { readonly: true },
   ),
+  inputRequest_findLinkedInputId: storeUnit(
+    (db: Database.Database) => new InputRequestStore(db),
+    "findLinkedInputId",
+    { readonly: true },
+  ),
   inputRequest_findById: storeUnit(
     (db: Database.Database) => new InputRequestStore(db),
     "findById",

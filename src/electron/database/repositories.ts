@@ -43,6 +43,7 @@ import {
 } from "../memory/memory-retention";
 import { PRUNE_TASK_EVENTS_BATCH_SQL } from "./maintenance-sql";
 import {
+  prepareApprovalInputLinkByApproval,
   prepareApprovalInputLinkInsert,
   prepareApprovalInputLinkLookup,
   prepareApprovalResponsibilityReviewGate,
@@ -5109,6 +5110,12 @@ export class InputRequestStore {
     )
       throw new Error("Invalid persisted inline approval binding");
     return { approvalId: row.approval_id, taskId: row.task_id, revisionHash: row.revision_hash };
+  }
+
+  /** The input card an inline approval was presented as, whatever its status. */
+  findLinkedInputId(approvalId: string): string | undefined {
+    const row = prepareApprovalInputLinkByApproval(this.db).get(approvalId) as Any;
+    return typeof row?.input_id === "string" ? row.input_id : undefined;
   }
 
   resolve(

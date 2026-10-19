@@ -193,6 +193,29 @@ function percentile(sorted: number[], fraction: number): number {
  * a known cost). Returns null when there is too little history to say anything useful.
  * Nothing leaves the machine; this only reads the local llm_call_events table.
  */
+/** Typical wall-clock duration of a task on this model, from the same recent tasks. */
+export async function estimateTaskDuration(
+  modelId: string,
+  minSamples = 3,
+): Promise<{ sampleSize: number; medianMs: number; p90Ms: number } | null> {
+  const db = getDb();
+  const model = String(modelId || "").trim();
+  if (!db || !model) return null;
+  try {
+    const durations = (await serviceStatements(db).unit("usageTelemetry_taskDurations", [model]))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => a - b);
+    if (durations.length < minSamples) return null;
+    return {
+      sampleSize: durations.length,
+      medianMs: percentile(durations, 0.5),
+      p90Ms: percentile(durations, 0.9),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function estimateTaskCost(
   modelId: string,
   minSamples = 3,

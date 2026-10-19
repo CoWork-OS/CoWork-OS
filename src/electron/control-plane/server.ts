@@ -21,6 +21,7 @@ import {
   Events,
   Methods,
 } from "./protocol";
+import { AGENT_CARD_PATH } from "../agent-card/agent-card";
 import { ControlPlaneClient, ClientRegistry, type ClientScope } from "./client";
 import {
   ControlPlaneSettingsManager,
@@ -71,6 +72,11 @@ export interface ControlPlaneConfig {
   onEvent?: (event: ControlPlaneServerEvent) => void;
   /** Optional explicit browser app host. Omission keeps the browser API disabled. */
   webApplication?: WebApplication;
+  /**
+   * CoWork's agent card for `/.well-known/agent-card.json` (WP16); null or omitted answers 404.
+   * Called per request, so turning publishing off takes effect at once.
+   */
+  getAgentCard?: () => Promise<unknown | null> | unknown | null;
 }
 
 /**
@@ -114,7 +120,8 @@ export class ControlPlaneServer {
   private httpServer: http.Server | null = null;
   private wss: WebSocketServer | null = null;
   private clients: ClientRegistry;
-  private config: Required<Omit<ControlPlaneConfig, "webApplication">>;
+  private config: Required<Omit<ControlPlaneConfig, "webApplication" | "getAgentCard">>;
+  private readonly getAgentCard: ControlPlaneConfig["getAgentCard"];
   private methods: Map<string, MethodHandler> = new Map();
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private cleanupInterval: NodeJS.Timeout | null = null;
@@ -127,6 +134,7 @@ export class ControlPlaneServer {
 
   constructor(config: ControlPlaneConfig) {
     this.webApplication = config.webApplication;
+    this.getAgentCard = config.getAgentCard;
     this.config = {
       port: config.port ?? 18789,
       host: config.host ?? "127.0.0.1",
@@ -204,6 +212,29 @@ export class ControlPlaneServer {
             ].join("; "),
           });
           res.end(html);
+          return;
+        }
+
+        // CoWork's agent card (WP16): public metadata, served only while publishing is on.
+        if ((req.url || "").split("?")[0] === AGENT_CARD_PATH) {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            res.writeHead(405, { Allow: "GET, HEAD", "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+          const card = this.getAgentCard ? await this.getAgentCard() : null;
+          if (!card) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "Not found" }));
+            return;
+          }
+          res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "max-age=300",
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+          });
+          res.end(req.method === "HEAD" ? undefined : JSON.stringify(card));
           return;
         }
 

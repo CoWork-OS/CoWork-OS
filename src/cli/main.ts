@@ -252,6 +252,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       case "skills":
       case "skill":
         return await skills(ctx);
+      case "agent-card":
+        return await agentCard(ctx);
       case "models":
       case "model":
         return await models(ctx);
@@ -1534,6 +1536,20 @@ async function tasks(ctx: CommandContext): Promise<number> {
         String(parseLimit(ctx, 100)),
       ]);
     }
+    if (sub === "plan") {
+      // Only the estimate exists: cost and duration from this profile's history (WP16).
+      if (!hasFlag(ctx.parsed, "--estimate")) {
+        return usageError('Usage: cowork tasks plan --estimate "task prompt" [--model <id>]');
+      }
+      const prompt = ctx.parsed.rest.slice(1).join(" ").trim();
+      const model = getFlag(ctx.parsed, "--model");
+      return runDirectCommandProcess(ctx, [
+        "--task-plan-estimate",
+        "--prompt",
+        prompt,
+        ...(model ? ["--model", model] : []),
+      ]);
+    }
     if (sub === "cleanup") {
       return runDirectCommandProcess(ctx, [
         "--tasks-cleanup",
@@ -1543,7 +1559,7 @@ async function tasks(ctx: CommandContext): Promise<number> {
         String(parseLimit(ctx, 1000)),
       ]);
     }
-    return usageError("Usage: cowork tasks list|cancel|attach|stale|cleanup");
+    return usageError("Usage: cowork tasks list|cancel|attach|stale|cleanup|plan");
   }
 
   const client = await connectedClient(ctx);
@@ -1582,6 +1598,20 @@ async function tasks(ctx: CommandContext): Promise<number> {
   } finally {
     client.close();
   }
+}
+
+/** `cowork agent-card [publish on|off]`: print CoWork's agent card, or publish it (WP16). */
+async function agentCard(ctx: CommandContext): Promise<number> {
+  const sub = ctx.parsed.rest[0];
+  if (!sub) return runDirectCommandProcess(ctx, ["--agent-card"]);
+  if (sub === "publish") {
+    const value = ctx.parsed.rest[1];
+    if (value !== "on" && value !== "off") {
+      return usageError("Usage: cowork agent-card publish on|off");
+    }
+    return runDirectCommandProcess(ctx, ["--agent-card-publish", "--name", value]);
+  }
+  return usageError("Usage: cowork agent-card [publish on|off]");
 }
 
 async function logs(ctx: CommandContext): Promise<number> {
@@ -2345,6 +2375,7 @@ function usage(): void {
       "  cowork tasks attach <taskId>",
       "  cowork tasks stale",
       "  cowork tasks cleanup --interrupted-cli --yes",
+      '  cowork tasks plan --estimate "task prompt" [--model <id>]',
       "  cowork approvals",
       "  cowork approve <approvalId> --revision-hash <displayed-hash>",
       "  cowork reject <approvalId> --revision-hash <displayed-hash>",
@@ -2359,6 +2390,7 @@ function usage(): void {
       "  cowork tools list|info|enable|disable",
       "  cowork mcp list|add|remove|enable|disable|test",
       "  cowork skills list|info|audit",
+      "  cowork agent-card [publish on|off]",
       "  cowork models list",
       "  cowork backup create|restore",
       "  cowork import --from hermes|openclaw [--dry-run] [--with-secrets] [--workspace-id <id>]",

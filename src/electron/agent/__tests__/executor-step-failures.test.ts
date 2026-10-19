@@ -915,6 +915,92 @@ describe("TaskExecutor executeStep failure handling", () => {
     expect(Array.from(contract.requiredTools)).not.toContain("edit_file");
   });
 
+  // Live 2026-10-19 (task e17e79b3): the step only read a pack reference outside
+  // the workspace, yet a bootstrap stub appeared at "Support/cowork-os/...".
+  it("keeps a step that reads an absolute path with spaces read-only", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const packFile =
+      "/Users/mesut/Library/Application Support/cowork-os/extensions/unity/skills/implement-in-app-purchases/references/pre-check.md";
+    const step: Any = {
+      id: "read-pack-reference",
+      description: `Read the skill instructions and ${packFile}, check repository status, and scan existing purchasing integrations to resolve the required implementation route before reading other references or changing files.`,
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.requiresMutation).toBe(false);
+    expect(contract.requiresArtifactEvidence).toBe(false);
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+    expect(contract.targetPaths).toEqual([packFile]);
+    expect((executor as Any).shouldPerformDeterministicArtifactBootstrap(contract, step)).toBe(
+      false,
+    );
+  });
+
+  // Live 2026-10-19 (task 34ca9a3e): the contract forced a write and the model
+  // appended a blank line to ProjectSettings/ProjectVersion.txt.
+  it("does not require a write for an inspection step that names project files", () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const step: Any = {
+      id: "inspect-project",
+      description:
+        "Inspect Git status, ProjectSettings/ProjectVersion.txt, Packages/manifest.json, and existing purchase, wallet, save, UI, and test code under Assets to identify the Unity version and integration points without overwriting uncommitted changes.",
+      status: "pending",
+    };
+
+    const contract = (executor as Any).resolveStepExecutionContract(step);
+
+    expect(contract.mode).toBe("analysis_only");
+    expect(contract.requiresMutation).toBe(false);
+    expect(Array.from(contract.requiredTools)).not.toContain("write_file");
+    expect(Array.from(contract.requiredTools)).not.toContain("edit_file");
+
+    const editStep: Any = {
+      ...step,
+      id: "edit-manifest",
+      description:
+        "Inspect ProjectSettings/ProjectVersion.txt and update Packages/manifest.json to add com.unity.purchasing.",
+    };
+    expect((executor as Any).resolveStepExecutionContract(editStep).mode).toBe("mutation_required");
+  });
+
+  it("never bootstraps a stub for a write target outside the workspace", async () => {
+    executor = createExecutorWithStubs([textResponse("OK")], {});
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork-ws-"));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cowork outside-"));
+    // Unrestricted access lets the filesystem policy allow outside writes, so
+    // only the bootstrap's own workspace check keeps the stub out.
+    (executor as Any).workspace.path = workspaceDir;
+    (executor as Any).workspace.permissions.unrestrictedFileAccess = true;
+    const escapedName = `${path.basename(workspaceDir)}-escaped.md`;
+    const escapedFile = path.join(path.dirname(workspaceDir), escapedName);
+    const outsideFile = path.join(outsideDir, "Application Support", "notes.md");
+    const step: Any = {
+      id: "write-outside",
+      description: `Write the findings to ${outsideFile}.`,
+      status: "pending",
+    };
+
+    try {
+      const contract = (executor as Any).resolveStepExecutionContract(step);
+      expect(contract.targetPaths).toEqual([outsideFile]);
+      const bootstrap = await (executor as Any).performDeterministicArtifactBootstrap(step, {
+        ...contract,
+        targetPaths: [...contract.targetPaths, `../${escapedName}`],
+      });
+      expect(bootstrap.succeeded).toBe(false);
+      expect(fs.readdirSync(workspaceDir)).toEqual([]);
+      expect(fs.readdirSync(outsideDir)).toEqual([]);
+      expect(fs.existsSync(escapedFile)).toBe(false);
+    } finally {
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+      fs.rmSync(escapedFile, { force: true });
+    }
+  });
+
   it("does not turn a read-only guardrail step into a required file mutation", () => {
     executor = createExecutorWithStubs([], {});
     const step: Any = {

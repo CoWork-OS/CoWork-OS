@@ -620,6 +620,8 @@ import {
   extractArtifactPathAlternativeGroups,
   hasArtifactExtensionMention,
   isReadOnlyConstraintOnlyStep,
+  isReadOnlyInspectionStep,
+  stripNegatedClauses,
   type StepContractEnforcementLevel,
   type StepContractMode,
 } from "./step-contract";
@@ -14527,17 +14529,24 @@ ${transcript}
       isReadOnlyConstraintOnlyStep(descriptionRaw) ||
       this.promptHasReadOnlyConstraint(`${this.task?.title || ""}\n${this.getContractPrompt()}`);
     const artifactPreparationDeferred = this.isArtifactPreparationDeferredToLaterWrite(step);
+    // "Read X", "Inspect A, B, and C": the files a read-only step names are its
+    // inputs. Forcing a write there made the model touch them or bootstrap a stub.
+    // A tool the step names explicitly (`edit_file`) still applies.
+    const readOnlyInspectionStep =
+      !verificationStep &&
+      isReadOnlyInspectionStep(descriptionRaw) &&
+      !this.isSinglePlanStepForTaskArtifactOutput(step);
+    if (readOnlyInspectionStep) {
+      for (const name of ["write_file", "edit_file", "create_directory"])
+        if (!new RegExp(`\\b${name}\\b`).test(description)) requiredTools.delete(name);
+    }
     // Mutation constraints such as "Do not create or modify the target before
     // the wait" describe when a write must happen, not a separate edit action.
     // Keep those negated clauses out of the direct-edit tool inference so a
     // shell write is not followed by a spurious required edit_file call.
-    const positiveMutationDescription = description.replace(
-      // Continue through dots inside filenames ("package.json") so the
-      // extension of a protected file does not leak into the positive text.
-      /\b(?:do\s+not|don't|must\s+not|should\s+not|never|no\s+need\s+to|without)\b(?:[^,.;!?\n]|\.(?=[A-Za-z0-9_/-]))*/gi,
-      " ",
-    );
+    const positiveMutationDescription = stripNegatedClauses(description);
     const applicationWriteIntent =
+      !readOnlyInspectionStep &&
       !nativePresentation &&
       !nativeUiOperation &&
       hasNativeApplicationOutputIntent(this.getContractPrompt()) &&
@@ -14557,7 +14566,7 @@ ${transcript}
       }
     }
     const requiresArtifactEvidence =
-      hasReadOnlyConstraint || nativeUiOperation
+      hasReadOnlyConstraint || nativeUiOperation || readOnlyInspectionStep
         ? false
         : artifactPreparationDeferred
           ? false
@@ -14568,8 +14577,9 @@ ${transcript}
     const artifactWriteRequired = artifactContractMode === "artifact_write_required";
     const softwareArtifactExtensionMentioned = hasArtifactExtensionMention(description);
     const scaffoldIntent = descriptionHasScaffoldIntent(description);
-    const hasWriteIntent = descriptionHasWriteIntent(description);
+    const hasWriteIntent = !readOnlyInspectionStep && descriptionHasWriteIntent(description);
     const directFileMutationIntent =
+      !readOnlyInspectionStep &&
       !nativePresentation &&
       !nativeUiOperation &&
       !applicationWriteIntent &&
@@ -14801,6 +14811,7 @@ ${transcript}
     const inferredCues = {
       hasWriteIntent: descriptionHasWriteIntent(description),
       hasReadOnlyIntent: descriptionHasReadOnlyIntent(description),
+      readOnlyInspection: isReadOnlyInspectionStep(description),
       hasSummaryCue: descriptionHasSummaryCue(description),
       scaffoldIntent: descriptionHasScaffoldIntent(description),
       hasArtifactCue: descriptionHasArtifactCue(description),
@@ -22981,7 +22992,9 @@ You are continuing a previous conversation. The context from the previous conver
       const resolved = path.isAbsolute(entry.candidate)
         ? path.resolve(entry.candidate)
         : path.resolve(this.workspace.path, entry.candidate);
-      if (path.isAbsolute(entry.candidate) && !this.isPathInsideWorkspace(resolved)) {
+      // Never write a stub outside the workspace, whether the path is absolute
+      // or escapes it ("../notes.md").
+      if (!this.isPathInsideWorkspace(resolved)) {
         continue;
       }
       const likelyDirectory = this.isLikelyDirectoryMutationCandidate(entry.candidate);

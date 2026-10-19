@@ -79,6 +79,7 @@ const VERIFIER_DENY_LIST = [
   "git_commit",
   "git_merge_to_base",
   "schedule_task",
+  "wait_for_event",
   "create_issue",
   "canvas_create",
   "canvas_push",

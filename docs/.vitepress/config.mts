@@ -118,6 +118,7 @@ export default defineConfig({
           { text: "Security Overview", link: "/security/README" },
           { text: "Security Model", link: "/security/security-model" },
           { text: "Trust Boundaries", link: "/security/trust-boundaries" },
+          { text: "Self-Modification Gates", link: "/security/self-modification-gates" },
           { text: "Best Practices", link: "/security/best-practices" },
           { text: "Configuration Guide", link: "/security/configuration-guide" },
           { text: "Security Hardening Record", link: "/security-hardening" },

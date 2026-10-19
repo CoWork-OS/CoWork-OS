@@ -202,6 +202,11 @@ Approval materializes a skill into workspace scope only:
 - blocks mutation if required tools are unavailable
 - validates placeholder integrity (`{{placeholder}}` must match declared parameter names)
 - blocks writes into bundled skills
+- asks the user before anything is saved. Once the checks pass, the tool shows the exact draft in an approval prompt. The prompt is a risk gate with explicit consent: it is never auto-approved, and a standing "always allow" cannot answer it. A declined request, or a task that cannot ask (no one to answer), saves nothing and leaves the proposal `pending`. The skill loader is pointed at the workspace skill folder only after a yes.
+
+The agent can still `create`, `list` and `reject` proposals without asking. It cannot approve one on its own.
+
+Proposal and eval records under `.cowork/skills/**` and the skill files in `<workspace>/skills` also need approval when the agent writes or deletes them with file tools. See [Agent self-modification gates](security/self-modification-gates.md#skill-storage-needs-approval-on-write).
 
 #### `reject`
 
@@ -419,7 +424,7 @@ Use this matrix for release and support verification.
 ### Skill proposals
 
 1. `skill_proposal.create` creates proposal JSON only.
-2. `skill_proposal.approve` materializes workspace skill and updates proposal state.
+2. `skill_proposal.approve` asks the user with the exact draft; on yes it materializes the workspace skill and updates proposal state, and on no (or when no one can answer) it saves nothing and the proposal stays pending.
 3. `skill_proposal.reject` records rejection.
 4. Re-submitting rejected duplicate within 24h returns cooldown block.
 
@@ -440,4 +445,4 @@ Use this matrix for release and support verification.
 - Existing Resend setup payloads remain supported.
 - Existing Settings/UI OAuth flows are unchanged and remain available.
 - New chat integration flow layers on top of current MCP settings and connector registry.
-- Skill auto-mutation remains disabled by default; approval is mandatory through `skill_proposal.approve`.
+- Skill auto-mutation remains disabled by default; approval is mandatory through `skill_proposal.approve`, and that approval is the user's answer to a prompt, not the agent's call.

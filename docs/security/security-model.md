@@ -378,6 +378,16 @@ Post-processes LLM responses to detect potential:
 | **Skill Guidelines**             | Validated and filtered before system prompt injection                                                                     |
 | **Imported Files / Attachments** | Provenance recorded so later export approvals can show what content recently entered from outside the workspace           |
 
+### Self-Modification Gates
+
+Tools that change what the agent does in later tasks can't be opened by injected content or by the agent itself:
+
+- **Admin-lane tools** (persona, behavioral rules, expertise, lore, heartbeat, integration setup) appear only when text a person typed asks for them. That is a task prompt or follow-up marked `user_typed` by the path the person typed into. Agent output, plan steps, tool results, automations, other agents and in-app browser page content never count.
+- **`skill_proposal` approve** asks the user with the exact draft before a skill is saved.
+- **Writes to skill storage** (`.cowork/skills/**` and `<workspace>/skills/*.json`) need approval even where ordinary edits are allowed silently.
+
+See [Agent Self-Modification Gates](self-modification-gates.md).
+
 ### Defense Philosophy
 
 These defenses are layered rather than purely reactive:

@@ -44,6 +44,7 @@ import { ComposerDraftStore } from "./composer-draft-repository";
 import { FollowUpRecoveryStore } from "./follow-up-recovery-sql";
 import { ToolAttemptStore } from "./tool-attempt-sql";
 import { LifecycleMetaStore } from "./lifecycle-meta-sql";
+import { ResourceClaimStore } from "./resource-claims-sql";
 import { TaskLabelStore } from "./TaskLabelRepository";
 import { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import { DeviceProfileStore } from "./DeviceProfileRepository";
@@ -198,6 +199,19 @@ export const STORAGE_UNITS = {
   lifecycleMeta_keep: storeUnit((db: Database.Database) => new LifecycleMetaStore(db), "keep", {
     readonly: false,
   }),
+  resourceClaim_claim: storeUnit((db: Database.Database) => new ResourceClaimStore(db), "claim", {
+    readonly: false,
+  }),
+  resourceClaim_listOverlaps: storeUnit(
+    (db: Database.Database) => new ResourceClaimStore(db),
+    "listOverlaps",
+    { readonly: true },
+  ),
+  resourceClaim_listForTask: storeUnit(
+    (db: Database.Database) => new ResourceClaimStore(db),
+    "listForTask",
+    { readonly: true },
+  ),
   // Startup follow-up recovery: reads every follow-up receipt, so it runs on the reader.
   taskEvent_findUnstartedFollowUpTaskIds: storeUnit(
     (db: Database.Database) => new FollowUpRecoveryStore(db),

@@ -185,6 +185,8 @@ These command groups are local-first and do not require a Control Plane token:
 - `cowork completions zsh|bash|fish` prints shell completion snippets.
 - `cowork dashboard` and `cowork open task <taskId>` launch the desktop app/deeplink without using the Control Plane.
 - `cowork pact status|discover|send|grants|disconnect|authorizations|authorization|conversation|receipt` talks to business agents over [PACT](pact.md) as the profile owner. `send` needs `--yes` to confirm a change; a pending sign-in prints the business's own login link.
+- `cowork agent-card` prints CoWork's own [agent card](agent-card.md) for this profile; `cowork agent-card publish on|off` serves it, or stops serving it, at `/.well-known/agent-card.json` on the Control Plane.
+- `cowork tasks plan --estimate "task prompt" [--model <id>]` estimates a task's cost and duration from this profile's recent tasks on the model, in the prepared-change shape (`kind`, `summary`, `estimatedCost`, `currency`, `estimatedDurationMs`). The prompt is not analysed; with fewer than 3 past tasks it says there is not enough history.
 
 `cowork handoff export <managedSessionId>` (or `--task <taskId>`) and `cowork handoff import <package> --environment <environmentId> [--dry-run]` move an in-progress session as a [handoff package](managed-agents.md#durable-session-handoffs). They go through the desktop Control Plane, so the app must be running. The package must sit in the target environment's workspace under `.cowork/handoffs/`; `--dry-run` lists what would be restored without writing anything. Approvals the earlier session was waiting for are asked again, never granted by the import, and the package's origin is not verified.
 

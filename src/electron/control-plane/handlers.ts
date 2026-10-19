@@ -65,6 +65,7 @@ import type {
 } from "../../shared/types";
 import { presentApprovalRevision } from "../agent/approval-revision";
 import { ControlPlaneServer, ControlPlaneSettingsManager } from "./index";
+import { publishedAgentCard } from "../agent-card/collect-agent-card";
 import { Methods, Events, ErrorCodes } from "./protocol";
 import type { AgentConfig } from "../../shared/types";
 import type { AgentDaemon } from "../agent/daemon";
@@ -2587,6 +2588,7 @@ export async function startControlPlaneFromSettings(
       }
 
       const server = new ControlPlaneServer({
+        getAgentCard: publishedAgentCard,
         port: settings.port,
         host: settings.host,
         trustProxy: settings.trustProxy,
@@ -4183,6 +4185,7 @@ export function setupControlPlaneHandlers(
 
         // Create server instance
         const server = new ControlPlaneServer({
+          getAgentCard: publishedAgentCard,
           port: settings.port,
           host: settings.host,
           trustProxy: settings.trustProxy,
@@ -4363,6 +4366,7 @@ export function setupControlPlaneHandlers(
           const settings = ControlPlaneSettingsManager.loadSettings();
 
           controlPlaneServer = new ControlPlaneServer({
+            getAgentCard: publishedAgentCard,
             port: settings.port,
             host: settings.host,
             trustProxy: settings.trustProxy,
@@ -4442,6 +4446,7 @@ export function setupControlPlaneHandlers(
           const settings = ControlPlaneSettingsManager.loadSettings();
 
           controlPlaneServer = new ControlPlaneServer({
+            getAgentCard: publishedAgentCard,
             port: settings.port,
             host: settings.host,
             trustProxy: settings.trustProxy,

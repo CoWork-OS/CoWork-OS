@@ -242,7 +242,9 @@ describe("PluginRegistry directory-backed skill routing", () => {
       prompt: "Control Spotify.",
       category: "Tools",
       metadata: {
-        routing: { useWhen: "Use when the user asks to control Spotify playback from the terminal." },
+        routing: {
+          useWhen: "Use when the user asks to control Spotify playback from the terminal.",
+        },
       },
     };
     writeSkill(

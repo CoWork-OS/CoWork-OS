@@ -37,6 +37,13 @@
       "owner": "agent runtime"
     },
     {
+      "pattern": "^src/electron/database/annotation-results-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Point at the result: an annotation's pointed-at revision, the revision that addressed it and its undo token, written when an annotation is pinned, when the agent's turn ends and on undo. Called only from AnnotationStore methods that run as annotation storage units behind the async AnnotationRepository facade in repository-facades.ts.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "agent runtime"
+    },
+    {
       "pattern": "^src/electron/database/lifecycle-meta-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Lifecycle metadata of generated software (owner, use count, dependencies, retired and kept marks): a use recorded when a skill is applied or a playbook entry is recalled, and reads and edits from the Mission Control Hygiene tab. Storage-domain units behind the async LifecycleMetaRepository facade in repository-facades.ts; nothing calls the store on the host outside a unit.",

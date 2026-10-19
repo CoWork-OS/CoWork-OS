@@ -673,6 +673,7 @@ export type EventType =
   | "annotation_updated"
   | "annotation_addressing_started"
   | "annotation_addressed"
+  | "annotation_change_undone" // The change that addressed an annotation was reverted
   | "annotation_resolved"
   | "annotation_dismissed"
   | "command_output"
@@ -5021,6 +5022,21 @@ export interface AnnotationStylePatch {
   notes?: string;
 }
 
+/** What the user wants at the place they pointed to. */
+export type AnnotationIntent = "change" | "comment" | "question";
+
+/**
+ * Values at an annotation's anchor, by key: a style property, `text`, or a cell's A1 address.
+ * Bounded when stored (50 keys, 2,000 characters a value).
+ */
+export type AnnotationValues = Record<string, string>;
+
+/**
+ * A user pointing at a result: where (`targetRef`, the anchor), what they want (`intent`,
+ * `body`), the values there and the ones asked for (`before`, `after`), and, for a file, the
+ * revision they pointed at and the revision that addressed it. While `undoToken` is present the
+ * change can be undone by restoring `artifactRevisionId`.
+ */
 export interface Annotation {
   id: string;
   taskId: string;
@@ -5038,6 +5054,17 @@ export interface Annotation {
   updatedAt: number;
   resolvedAt?: number;
   resolvedByEventId?: string;
+  intent?: AnnotationIntent;
+  before?: AnnotationValues;
+  after?: AnnotationValues;
+  /** The file the change is expected in, when it is not the target file (a new version). */
+  outputPath?: string;
+  /** The revision of the target file the user pointed at. */
+  artifactRevisionId?: string;
+  /** The revision that addressed this annotation. */
+  resultRevisionId?: string;
+  /** Present while the change can be undone; required to undo it. */
+  undoToken?: string;
 }
 
 export interface AnnotationCreateInput {
@@ -5051,6 +5078,18 @@ export interface AnnotationCreateInput {
   artifactId?: string;
   screenshotPath?: string;
   createdBy?: Annotation["createdBy"];
+  intent?: AnnotationIntent;
+  before?: AnnotationValues;
+  after?: AnnotationValues;
+  outputPath?: string;
+}
+
+/** The result of undoing the change that addressed an annotation. */
+export interface AnnotationUndoResult {
+  ok: boolean;
+  annotation?: Annotation;
+  /** Why the change could not be undone. */
+  error?: string;
 }
 
 export interface AnnotationListQuery {
@@ -8345,6 +8384,7 @@ export const IPC_CHANNELS = {
   ANNOTATION_UPDATE: "annotation:update",
   ANNOTATION_RESOLVE: "annotation:resolve",
   ANNOTATION_DISMISS: "annotation:dismiss",
+  ANNOTATION_UNDO: "annotation:undo",
   YOUTUBE_INGEST_VIDEO: "youtube:ingestVideo",
   YOUTUBE_ASK_VIDEO: "youtube:askVideo",
   YOUTUBE_SEARCH_SEGMENTS: "youtube:searchSegments",

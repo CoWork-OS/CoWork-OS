@@ -1223,6 +1223,53 @@ window.electronAPI.scaffoldPluginPack({
 - Per-skill enable/disable state is persisted for both inline `skills` and directory-backed `skillDirectories`.
 - Packaged builds include `resources/plugin-packs/**`, so future non-reference files under a bundled pack are preserved.
 
+#### Routing Hints for Directory-Backed Skills
+
+Without routing hints, the skill router only sees a directory skill's ID, name, and description, so plain-language requests that use different words can rank another skill first (for example "make enemies chase the player" losing to `spotify-player` on the word "player"). Add an optional `routing` object to the `skillDirectories` entry, or a `routing:` block to the `SKILL.md` frontmatter:
+
+```json
+{
+  "id": "unity:initialize-ai-navigation",
+  "path": "skills/initialize-ai-navigation",
+  "routing": {
+    "useWhen": "Characters need to find paths, patrol, or avoid obstacles in a 3D level.",
+    "dontUseWhen": "The request is about 2D tile maps or physics collisions.",
+    "examples": {
+      "positive": [
+        "bake a navmesh so my NPCs can walk around the level",
+        "make guards patrol between waypoints and avoid walls"
+      ],
+      "negative": ["paint a level with rule tiles"]
+    }
+  }
+}
+```
+
+```yaml
+---
+name: initialize-ai-navigation
+description: Sets up NavMesh surfaces, agents, obstacles, and links.
+routing:
+  useWhen: Characters need to find paths, patrol, or avoid obstacles in a 3D level.
+  examples:
+    positive:
+      - bake a navmesh so my NPCs can walk around the level
+---
+```
+
+| Field                | Effect                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `useWhen`            | Replaces the description as the "Use when" hint shown to the model and used for ranking. Defaults to the description.         |
+| `dontUseWhen`        | "Don't use when" hint; requests that resemble it are penalized.                                                               |
+| `examples.positive`  | Example requests the skill handles. Raises the skill's ranking for similar requests; a close paraphrase also admits it.        |
+| `examples.negative`  | Example requests the skill must not handle. An exact match excludes the skill; similar requests are penalized.                 |
+| `keywords`           | **Hard gate.** When set, the skill is hidden from plain-language requests that mention none of the keywords (and don't closely match a positive example). Explicit invocation (`/command`, "use the X skill") still works. |
+
+- Prefer `examples` over `keywords`: examples raise ranking without hiding the skill, while keywords hide it from every request that phrases the task differently. Use `keywords` only for skills that should stay out of the way unless named.
+- The manifest wins field by field over `SKILL.md`; `"keywords": []` in the manifest clears frontmatter keywords. `examples.positive` and `examples.negative` are merged separately.
+- Only the `routing:` block is read from frontmatter. Top-level `keywords:` or `tags:` in upstream `SKILL.md` files are ignored, so they never gate a skill by accident.
+- The `routing:` block needs valid YAML frontmatter; files that only parse with the lenient line parser get no routing hints from frontmatter.
+
 ---
 
 ## Use Cases

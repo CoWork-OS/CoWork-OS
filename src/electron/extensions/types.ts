@@ -143,6 +143,28 @@ export interface SkillDirectoryDefinition {
   icon?: string;
   category?: string;
   enabled?: boolean;
+  /**
+   * Optional routing hints for the skill router. Each field overrides the same field in a
+   * `routing:` block in SKILL.md frontmatter.
+   */
+  routing?: SkillDirectoryRouting;
+}
+
+/**
+ * Routing hints for a directory-backed skill; same semantics as CustomSkill.metadata.routing.
+ * Setting `keywords` hard-gates the skill: plain-language requests that mention none of them
+ * (and don't closely match a positive example) never see it. Prefer `examples` to raise
+ * ranking without gating.
+ */
+export interface SkillDirectoryRouting {
+  /** Replaces the description as the "Use when" hint */
+  useWhen?: string;
+  dontUseWhen?: string;
+  keywords?: string[];
+  examples?: {
+    positive?: string[];
+    negative?: string[];
+  };
 }
 
 /**

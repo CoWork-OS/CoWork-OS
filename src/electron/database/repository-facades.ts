@@ -48,6 +48,7 @@ import type { BrowserHistoryStore } from "./BrowserHistoryRepository";
 import type { DeviceProfileStore } from "./DeviceProfileRepository";
 import type { ToolAttemptStore } from "./tool-attempt-sql";
 import type { LifecycleMetaStore } from "./lifecycle-meta-sql";
+import type { ResourceClaimStore } from "./resource-claims-sql";
 import type { WorkSessionProtocolRepository } from "./WorkSessionProtocolRepository";
 import type { STORAGE_UNITS } from "./storage-units";
 
@@ -144,6 +145,17 @@ export const LifecycleMetaRepository = repositoryFacade<
   LifecycleMetaStore,
   (typeof LIFECYCLE_META_METHODS)[number]
 >("lifecycleMeta_", LIFECYCLE_META_METHODS);
+
+const RESOURCE_CLAIM_METHODS = ["claim", "listOverlaps", "listForTask"] as const;
+export type ResourceClaimRepository = AsyncStore<
+  ResourceClaimStore,
+  (typeof RESOURCE_CLAIM_METHODS)[number]
+>;
+/** Which task is changing which file, for shared-change coordination (WP11). */
+export const ResourceClaimRepository = repositoryFacade<
+  ResourceClaimStore,
+  (typeof RESOURCE_CLAIM_METHODS)[number]
+>("resourceClaim_", RESOURCE_CLAIM_METHODS);
 
 const TASK_ADMISSION_METHODS = ["admit", "findByOperationKey"] as const;
 export type TaskAdmissionRepository = AsyncStore<

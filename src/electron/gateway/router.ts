@@ -84,6 +84,7 @@ import {
 import { formatTimelineActivityLabel } from "../../shared/timeline-v2";
 import { DEFAULT_QUIRKS } from "../../shared/types";
 import { botIconText } from "../../shared/bot-mascots";
+import { CHANNEL_ATTACHMENTS_SAVED_HEADER } from "../../shared/attachment-summary";
 import { formatChatTranscriptForPrompt, prefetchTranscriptUsers } from "./chat-transcript";
 import { evaluateWorkspaceRouterRules } from "./router-rules";
 import { applyResearchChatRouting } from "./router-research-routing";
@@ -6834,7 +6835,7 @@ export class MessageRouter {
     const savedAttachments = await this.persistInboundAttachments(adapter.type, message, workspace);
     if (savedAttachments.length > 0) {
       const lines: string[] = [];
-      lines.push("Attachments saved to workspace:");
+      lines.push(CHANNEL_ATTACHMENTS_SAVED_HEADER);
       for (const att of savedAttachments) {
         lines.push(`- ${att.type}: ${att.relPath}`);
       }

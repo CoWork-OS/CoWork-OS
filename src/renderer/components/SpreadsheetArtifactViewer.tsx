@@ -30,6 +30,7 @@ import type {
   SpreadsheetWorkbookSession,
 } from "../../shared/spreadsheet-workbook";
 import { getSpreadsheetFormatLabel } from "../../shared/spreadsheet-formats";
+import { ATTACHED_FILES_LIST_HEADER } from "../../shared/attachment-summary";
 import { useVoiceInput } from "../hooks/useVoiceInput";
 import { ModelDropdown } from "./MainContent";
 import { SpreadsheetArtifactCard } from "./SpreadsheetArtifactCard";
@@ -924,7 +925,7 @@ export function SpreadsheetArtifactViewer({
           : fullscreenAttachments.map((attachment) => `- ${attachment.name} (${attachment.path})`);
 
       const base = message || "Please review the attached files.";
-      const attachedMessage = `${base}\n\nAttached files:\n${attachmentLines.join("\n")}`;
+      const attachedMessage = `${base}\n\n${ATTACHED_FILES_LIST_HEADER}\n${attachmentLines.join("\n")}`;
       const images = fullscreenAttachments.filter(isImageAttachment).map((attachment) => ({
         filePath: attachment.path,
         mimeType: attachment.mimeType as ImageAttachment["mimeType"],

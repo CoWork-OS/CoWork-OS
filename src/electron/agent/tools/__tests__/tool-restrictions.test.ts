@@ -158,10 +158,12 @@ describe("ToolRegistry tool restrictions", () => {
     expect(handler).not.toHaveBeenCalled();
 
     task = { id: "test-task", agentConfig: {} };
+    (registry as Any).botContainedCache = null; // the contained flag is cached briefly
     expect((registry as Any).isDeniedByTaskRestrictions("get_env")).toBe(false);
 
     // An own-desktop bot's contained run runs commands in its desktop, not on this computer.
     task = { id: "test-task", agentConfig: { botContained: true } };
+    (registry as Any).botContainedCache = null; // the contained flag is cached briefly
     let worksOn: Any = "own_desktop";
     registry.setBotWorksOnSource(() => worksOn);
     for (const name of ["run_command", "execute_code", "git_commit", "stop_process"]) {
@@ -172,12 +174,14 @@ describe("ToolRegistry tool restrictions", () => {
     expect((registry as Any).isDeniedByTaskRestrictions("run_command")).toBe(false);
     worksOn = "own_desktop";
     task = { id: "test-task", agentConfig: {} };
+    (registry as Any).botContainedCache = null; // the contained flag is cached briefly
     expect((registry as Any).isDeniedByTaskRestrictions("run_command")).toBe(false);
 
     // A task that cannot be read is treated as contained.
     daemon.getTask = vi.fn(() => {
       throw new Error("task store unavailable");
     });
+    (registry as Any).botContainedCache = null;
     expect((registry as Any).isDeniedByTaskRestrictions("get_env")).toBe(true);
   });
 });

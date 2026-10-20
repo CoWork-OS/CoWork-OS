@@ -6,7 +6,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseFrontmatterBlock } from "../utils/skill-frontmatter";
-import type { ImportProviderId } from "./plan";
+import type { ImportProviderId, LocalModelProviderId } from "./plan";
 
 /** Larger files are not memory or persona text; they are skipped, not truncated. */
 export const MAX_IMPORT_TEXT_BYTES = 512 * 1024;
@@ -107,6 +107,70 @@ export function providerFromName(name: string, baseUrl = ""): ImportProviderId |
   }
   if (hay.includes("moonshot") || /\bkimi\b/.test(hay)) return "kimi";
   if (hay.includes("openai")) return "openai";
+  return null;
+}
+
+/** Where Ollama and LM Studio listen when the source config names no address. */
+export const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434";
+export const LM_STUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1";
+
+const LM_STUDIO_NAMES = new Set(["lmstudio", "lm-studio", "lm_studio"]);
+
+function urlHost(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Loopback, private-range or .local addresses: a model server on the user's own network. */
+function isLocalNetworkUrl(url: string): boolean {
+  const host = urlHost(url);
+  if (!host) return false;
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host === "::1" ||
+    host === "0.0.0.0" ||
+    host.startsWith("127.") ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+  );
+}
+
+/**
+ * Map a local model server from the source config (Ollama, LM Studio, or a vLLM /
+ * llama.cpp / custom endpoint on the user's own network) to CoWork's Ollama or
+ * OpenAI-compatible provider. Null for anything else: cloud providers go through
+ * `providerFromName`, and Ollama Cloud or a remote custom endpoint needs credentials
+ * CoWork does not import.
+ */
+export function localModelEndpoint(
+  name: string,
+  baseUrl = "",
+  api = "",
+): { provider: LocalModelProviderId; baseUrl: string } | null {
+  const key = name.trim().toLowerCase();
+  const url = baseUrl.trim().replace(/\/+$/, "");
+  if (key === "ollama-cloud" || key === "ollama_cloud") return null;
+  if (url && urlHost(url) === "ollama.com") return null;
+
+  const host = url ? urlHost(url) : null;
+  const ollamaUrl = Boolean(url) && (/:11434(\/|$)/.test(url) || Boolean(host?.includes("ollama")));
+  if (key === "ollama" || api.trim().toLowerCase() === "ollama" || ollamaUrl) {
+    // CoWork speaks Ollama's native API; Hermes points at its OpenAI-compatible /v1 path.
+    return {
+      provider: "ollama",
+      baseUrl: url ? url.replace(/\/v1$/, "") : OLLAMA_DEFAULT_BASE_URL,
+    };
+  }
+  if (LM_STUDIO_NAMES.has(key)) {
+    return { provider: "openai-compatible", baseUrl: url || LM_STUDIO_DEFAULT_BASE_URL };
+  }
+  if (url && isLocalNetworkUrl(url)) return { provider: "openai-compatible", baseUrl: url };
   return null;
 }
 

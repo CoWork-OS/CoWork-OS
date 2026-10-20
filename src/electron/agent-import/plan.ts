@@ -38,6 +38,26 @@ export const IMPORT_PROVIDER_LABELS: Record<ImportProviderId, string> = {
   kimi: "Kimi",
 };
 
+/** Local model servers an import can point CoWork at; they need no API key. */
+export const LOCAL_MODEL_PROVIDER_LABELS = {
+  ollama: "Ollama",
+  "openai-compatible": "OpenAI-compatible server",
+} as const;
+export type LocalModelProviderId = keyof typeof LOCAL_MODEL_PROVIDER_LABELS;
+export type ImportModelProviderId = ImportProviderId | LocalModelProviderId;
+
+export function isLocalModelProvider(
+  provider: ImportModelProviderId,
+): provider is LocalModelProviderId {
+  return provider === "ollama" || provider === "openai-compatible";
+}
+
+export function modelProviderLabel(provider: ImportModelProviderId): string {
+  return isLocalModelProvider(provider)
+    ? LOCAL_MODEL_PROVIDER_LABELS[provider]
+    : IMPORT_PROVIDER_LABELS[provider];
+}
+
 export type ImportChannelType = "telegram" | "discord" | "slack";
 
 export type ImportSchedule =
@@ -54,7 +74,13 @@ export type ImportPayload =
   | { kind: "skill"; bundleDir: string; name: string }
   /** `value` is present only when secrets were opted in. */
   | { kind: "provider_key"; provider: ImportProviderId; value?: string }
-  | { kind: "model"; provider: ImportProviderId; model?: string }
+  | {
+      kind: "model";
+      provider: ImportModelProviderId;
+      model?: string;
+      /** The server address, for a local model provider. */
+      baseUrl?: string;
+    }
   | {
       kind: "channel";
       channel: ImportChannelType;

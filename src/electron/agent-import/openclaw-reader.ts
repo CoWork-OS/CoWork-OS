@@ -15,11 +15,13 @@ import * as path from "node:path";
 import JSON5 from "json5";
 import {
   IMPORT_PROVIDER_LABELS,
+  modelProviderLabel,
   readyItem,
   secretItem,
   skippedItem,
   splitIdList,
   type ImportChannelType,
+  type ImportModelProviderId,
   type ImportPlan,
   type ImportProviderId,
   type ImportSchedule,
@@ -32,6 +34,7 @@ import {
   findSkillBundles,
   isDirectory,
   isFile,
+  localModelEndpoint,
   parseEnvText,
   providerFromName,
   readTextIfExists,
@@ -475,6 +478,8 @@ export function readOpenClawHome(
   for (const [name, entryValue] of Object.entries(asRecord(asRecord(config.models).providers))) {
     const entry = asRecord(entryValue);
     if (entry.apiKey === undefined) continue;
+    // A local model server takes no CoWork key; its placeholder key stays behind.
+    if (localModelEndpoint(name, asString(entry.baseUrl), asString(entry.api))) continue;
     const provider =
       asString(entry.api) === "anthropic-messages"
         ? "anthropic"
@@ -546,16 +551,29 @@ export function readOpenClawHome(
   const model = modelFromConfig(config);
   if (model) {
     const [first, ...rest] = model.split("/");
-    const provider = rest.length > 0 ? providerFromName(first) : null;
+    const providerEntry = asRecord(asRecord(asRecord(config.models).providers)[first]);
+    const local =
+      rest.length > 0
+        ? localModelEndpoint(first, asString(providerEntry.baseUrl), asString(providerEntry.api))
+        : null;
+    const provider: ImportModelProviderId | null =
+      local?.provider ?? (rest.length > 0 ? providerFromName(first) : null);
     items.push(
       provider
         ? readyItem(
             "model",
             "model",
             `Model: ${model}`,
-            { kind: "model", provider, model: rest.join("/") },
             {
-              detail: IMPORT_PROVIDER_LABELS[provider],
+              kind: "model",
+              provider,
+              model: rest.join("/"),
+              ...(local ? { baseUrl: local.baseUrl } : {}),
+            },
+            {
+              detail: local
+                ? `${modelProviderLabel(provider)} at ${local.baseUrl}`
+                : modelProviderLabel(provider),
             },
           )
         : skippedItem(

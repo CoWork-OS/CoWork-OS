@@ -16,9 +16,15 @@ import {
 } from "../hermes-reader";
 import { readOpenClawHome, resolveOpenClawHome } from "../openclaw-reader";
 import { toPreview, type ImportPlan, type PlannedImportItem } from "../plan";
-import { commandPrefixFromAllowlistPattern, parseEnvText, WITHHELD_SECRET } from "../source-files";
+import {
+  commandPrefixFromAllowlistPattern,
+  localModelEndpoint,
+  parseEnvText,
+  WITHHELD_SECRET,
+} from "../source-files";
 import { discordApplicationIdFromToken } from "../targets";
 import { detectAgentImports } from "../index";
+import { formatAgentImportResult } from "../../../cli/agent-import-command";
 
 const FIXTURES = path.join(__dirname, "fixtures");
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -402,7 +408,7 @@ function fakeTargets(
         calls.push(["key", provider]);
       },
       active: () => ({ provider: "anthropic", configured: overrides.activeConfigured === true }),
-      selectModel: (provider, model) => calls.push(["model", provider, model]),
+      selectModel: (provider, model, baseUrl) => calls.push(["model", provider, model, baseUrl]),
     },
     channels: {
       exists: async () => false,
@@ -518,5 +524,146 @@ describe("applying a plan", () => {
     });
     expect(result.items.find((item) => item.id === "instructions")?.status).toBe("imported");
     expectNoSecrets(result, OPENCLAW_SECRETS);
+  });
+});
+
+describe("local model servers", () => {
+  const ollamaHome = () => {
+    const home = path.join(base, ".hermes-ollama");
+    fs.cpSync(path.join(FIXTURES, "hermes-home-ollama"), home, { recursive: true });
+    return home;
+  };
+  const hermesModel = (lines: string[]) => {
+    fs.writeFileSync(path.join(hermesHome, "config.yaml"), ["model:", ...lines].join("\n"));
+    return byId(readHermesHome(hermesHome, { withSecrets: false, nowMs: NOW }), "model");
+  };
+
+  it("maps a Hermes Ollama model to CoWork's Ollama provider", () => {
+    const plan = readHermesHome(ollamaHome(), { withSecrets: false, nowMs: NOW });
+    expect(byId(plan, "model")).toMatchObject({
+      status: "ready",
+      label: "Model: qwen3.6:35b",
+      detail: "Ollama at http://127.0.0.1:11434",
+      payload: {
+        kind: "model",
+        provider: "ollama",
+        model: "qwen3.6:35b",
+        baseUrl: "http://127.0.0.1:11434",
+      },
+    });
+  });
+
+  it("selects the Ollama model without a key, and only when no model is set up", async () => {
+    const plan = readHermesHome(ollamaHome(), { withSecrets: false, nowMs: NOW });
+
+    const dry = fakeTargets();
+    const preview = await applyImportPlan(plan, dry.targets, { dryRun: true });
+    expect(dry.calls).toEqual([]);
+    expect(preview.items.find((item) => item.id === "model")).toMatchObject({
+      status: "ready",
+      reason: "Ollama at http://127.0.0.1:11434",
+    });
+    expect(formatAgentImportResult(preview, false)).toContain(
+      "+ Model: qwen3.6:35b  (Ollama at http://127.0.0.1:11434)",
+    );
+
+    const real = fakeTargets();
+    await applyImportPlan(plan, real.targets, { dryRun: false });
+    expect(real.calls).toContainEqual(["model", "ollama", "qwen3.6:35b", "http://127.0.0.1:11434"]);
+
+    const configured = fakeTargets({ activeConfigured: true });
+    const kept = await applyImportPlan(plan, configured.targets, { dryRun: false });
+    expect(kept.items.find((item) => item.id === "model")?.reason).toMatch(
+      /already has a working model/,
+    );
+    expect(configured.calls.some((call) => call[0] === "model")).toBe(false);
+  });
+
+  it("maps LM Studio and local custom endpoints, and skips cloud-only ones", () => {
+    expect(hermesModel(["  default: qwen3-8b", "  provider: lmstudio"]).payload).toEqual({
+      kind: "model",
+      provider: "openai-compatible",
+      model: "qwen3-8b",
+      baseUrl: "http://127.0.0.1:1234/v1",
+    });
+    expect(
+      hermesModel([
+        "  default: llama3.3",
+        "  provider: custom",
+        "  base_url: http://localhost:11434/v1",
+      ]).payload,
+    ).toMatchObject({ provider: "ollama", baseUrl: "http://localhost:11434" });
+    expect(
+      hermesModel([
+        "  default: mistral",
+        "  provider: vllm",
+        "  base_url: http://localhost:8000/v1",
+      ]).payload,
+    ).toMatchObject({ provider: "openai-compatible", baseUrl: "http://localhost:8000/v1" });
+    expect(
+      hermesModel([
+        "  default: gpt-oss:120b",
+        "  provider: custom",
+        "  base_url: https://openrouter.ai/api/v1",
+      ]).payload,
+    ).toMatchObject({ provider: "openrouter" });
+    expect(hermesModel(["  default: gpt-oss:120b", "  provider: ollama-cloud"])).toMatchObject({
+      status: "skipped",
+      reason: expect.stringMatching(/"ollama-cloud" has no CoWork equivalent/),
+    });
+    expect(
+      hermesModel([
+        "  default: house-model",
+        "  provider: custom",
+        "  base_url: https://llm.example.com/v1",
+      ]).status,
+    ).toBe("skipped");
+  });
+
+  it("needs a model name for an OpenAI-compatible server", async () => {
+    hermesModel(["  provider: lmstudio"]);
+    const plan = readHermesHome(hermesHome, { withSecrets: false, nowMs: NOW });
+    const { targets } = fakeTargets();
+    const result = await applyImportPlan(plan, targets, { dryRun: true });
+    expect(result.items.find((item) => item.id === "model")?.reason).toMatch(/No model name/);
+  });
+
+  it("maps an OpenClaw Ollama model and leaves its placeholder key behind", () => {
+    fs.writeFileSync(
+      path.join(openclawHome, "openclaw.json"),
+      JSON.stringify({
+        agents: { defaults: { model: { primary: "ollama/llama3.3:70b" } } },
+        models: {
+          providers: {
+            ollama: { baseUrl: "http://192.168.1.20:11434", apiKey: "ollama-local", api: "ollama" },
+          },
+        },
+      }),
+    );
+    const plan = readOpenClawHome(openclawHome, { withSecrets: true, nowMs: NOW, homedir: base });
+    expect(byId(plan, "model").payload).toEqual({
+      kind: "model",
+      provider: "ollama",
+      model: "llama3.3:70b",
+      baseUrl: "http://192.168.1.20:11434",
+    });
+    expect(plan.items.some((item) => item.id === "key:ollama")).toBe(false);
+  });
+
+  it("recognises local servers by name or address", () => {
+    expect(localModelEndpoint("ollama")).toEqual({
+      provider: "ollama",
+      baseUrl: "http://127.0.0.1:11434",
+    });
+    expect(localModelEndpoint("lm-studio", "http://10.0.0.5:1234/v1/")).toEqual({
+      provider: "openai-compatible",
+      baseUrl: "http://10.0.0.5:1234/v1",
+    });
+    expect(localModelEndpoint("llamacpp", "http://[::1]:8080/v1")).toMatchObject({
+      provider: "openai-compatible",
+    });
+    expect(localModelEndpoint("ollama", "https://ollama.com")).toBeNull();
+    expect(localModelEndpoint("custom")).toBeNull();
+    expect(localModelEndpoint("openrouter")).toBeNull();
   });
 });

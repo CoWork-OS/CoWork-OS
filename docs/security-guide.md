@@ -220,6 +220,23 @@ The rationale is that the policy files decide whether a tool call is allowed, an
 git hooks execute on the next commit outside the tool sandbox, so a tool able to
 write either could rewrite the rules that govern it. Reads are unaffected.
 
+**Credential stores.** File tools never read or write the home folder's
+credential and personal-data stores (`~/.ssh`, `~/.gnupg`, `~/.aws`,
+`~/.config/gcloud`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.npmrc`, Keychains,
+browser profiles, Mail, Messages; the list is `HOME_CREDENTIAL_STORE_PATHS` in
+`src/electron/security/credential-store-paths.ts`). This holds when the workspace
+is the home folder, under Full access, and after a one-shot external approval;
+the evaluator denies with reason `credential_store` and never offers a prompt. The
+only way in is a grant made on the store itself or a folder inside it: a
+workspace there, an extra workspace root, or a profile filesystem rule (a read
+rule opens reads only). The check follows symlinks, including a store that is
+itself a link into a dotfiles folder.
+
+**Bots and outside files.** When a bot runs a task, directly or through a task it
+delegated, reaching a file outside the workspace always waits for a person's
+answer: allow rules, the auto-reviewer and session-wide auto-approve do not
+answer `external_file_access` for it. A bot task nobody can answer is denied.
+
 Relatedly, `copy_file` strips the executable bit from its destination, so copying
 an executable file cannot be used to create a new one.
 
@@ -1049,7 +1066,9 @@ download and build caches (`~/.npm`, `~/Library/Caches/{go-build,pip,uv,...}`,
 and PATH comes from the user's PATH plus known toolchain locations. Credential
 stores (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gcloud`, `~/.docker`,
 `~/.netrc`, `~/.kube`, `~/.npmrc`, Keychains, browser profiles, Mail and
-Messages) are denied after those grants. npm sees a copy of `~/.npmrc` with
+Messages) are denied after those grants, and again after the workspace and
+profile grants, so a workspace at the home folder does not reopen them; only a
+grant on a store itself or a folder inside it does. npm sees a copy of `~/.npmrc` with
 auth lines removed, so registry and script settings apply but tokens never
 enter the sandbox; installs from registries that require authentication must
 run outside it. Writable caches deny Git and policy names (except uv's empty

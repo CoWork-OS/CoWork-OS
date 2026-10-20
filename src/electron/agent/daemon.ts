@@ -846,6 +846,21 @@ const INLINE_APPROVAL_TIMEOUT_MESSAGE =
   "Approval denied: no response to the approval request within " +
   `${Math.round(APPROVAL_REQUEST_TIMEOUT_MS / 60_000)} minutes.`;
 
+/** True when a bot runs this task, directly or through a task it delegated. */
+export function isBotOwnedTask(
+  taskRepo:
+    | { findById(id: string): Pick<Task, "assignedAgentRoleId" | "parentTaskId"> | undefined }
+    | undefined,
+  taskId: string,
+): boolean {
+  let task = taskRepo?.findById(taskId);
+  for (let depth = 0; task && depth < 16; depth += 1) {
+    if (task.assignedAgentRoleId) return true;
+    task = task.parentTaskId ? taskRepo?.findById(task.parentTaskId) : undefined;
+  }
+  return false;
+}
+
 /**
  * AgentDaemon is the core orchestrator that manages task execution
  * It coordinates between the database, task executors, and UI
@@ -9397,9 +9412,14 @@ export class AgentDaemon extends EventEmitter {
       (type !== "workspace_write" || !this.isValidResponsibilityActionReviewDetails(details))
     )
       return false;
-    const allowAutoApprove = isResponsibilityActionReview
-      ? false
-      : opts?.allowAutoApprove !== false;
+    // A bot's tasks often run unattended (gateway, heartbeat), so reaching a
+    // file outside its workspace always waits for a person: no allow rule,
+    // auto-reviewer or session-wide auto-approve answers for them.
+    const allowAutoApprove =
+      isResponsibilityActionReview ||
+      (type === "external_file_access" && isBotOwnedTask(this.taskRepo, taskId))
+        ? false
+        : opts?.allowAutoApprove !== false;
     const enrichedDetails =
       details && typeof details === "object" && !Array.isArray(details)
         ? { ...details }

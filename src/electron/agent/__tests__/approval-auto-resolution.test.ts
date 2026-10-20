@@ -78,6 +78,32 @@ suite("automatic review with the real approval store", () => {
       );
     },
   );
+  it.each([
+    ["the bot's own task", { assignedAgentRoleId: "bot-1" }, undefined],
+    ["a task the bot delegated", { parentTaskId: "bot-parent" }, { assignedAgentRoleId: "bot-1" }],
+  ])("never auto-approves external file access for %s", async (_label, own, parent) => {
+    const f = fixture(true);
+    Object.assign(f.task, own);
+    f.daemon.taskRepo.findById = vi.fn((id: string) =>
+      id === "bot-parent" ? { id, ...parent } : f.task,
+    );
+    const controller = new AbortController();
+    const pending = f.request("external_file_access", controller.signal).catch(() => false);
+    await vi.waitFor(() => expect(f.daemon.evaluatePermissionRequest).toHaveBeenCalled());
+    controller.abort();
+
+    expect(await pending).toBe(false);
+    expect(f.daemon.evaluatePermissionRequest.mock.calls[0][3]).toBe(false);
+    expect(f.daemon.canAutoReviewApprove).not.toHaveBeenCalled();
+    expect(f.recordPermissionSuccess).not.toHaveBeenCalled();
+    expect(f.daemon.grantExternalFileApprovalsFromDetails).not.toHaveBeenCalled();
+  });
+  it("still auto-reviews a bot's other approval types", async () => {
+    const f = fixture(false);
+    Object.assign(f.task, { assignedAgentRoleId: "bot-1" });
+    expect(await f.request()).toBe(true);
+    expect(f.daemon.evaluatePermissionRequest.mock.calls[0][3]).toBe(true);
+  });
   it("a losing decision cannot record success or issue grants", async () => {
     const f = fixture(false);
     vi.spyOn(f.approvalRepo, "resolvePending").mockImplementation((id) => {

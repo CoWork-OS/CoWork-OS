@@ -451,7 +451,8 @@ export class MacOSSandbox implements ISandbox {
     if (
       access.reason === "profile_filesystem_denied" ||
       access.reason === "profile_filesystem_outside" ||
-      access.reason === "protected_path"
+      access.reason === "protected_path" ||
+      access.reason === "credential_store"
     ) {
       return false;
     }
@@ -819,6 +820,8 @@ ${ownSockets}
       }
     }
 
+    profile += this.credentialStoreFinalDenyRules(toolchain.deniedPaths, allowedPaths);
+
     // Allow essential mach services
     profile += `
 ; Allow essential mach services. trustd.agent evaluates TLS certificates for
@@ -846,6 +849,46 @@ ${ownSockets}
         { writableCaches: toolchain.writeDirs, gitMarkerCaches: toolchain.gitMarkerCaches },
       )
     );
+  }
+
+  /**
+   * The toolchain block denies credential stores before the workspace grant,
+   * so on its own a workspace that contains one (the home folder) would win.
+   * Repeat the denials after every grant; only a grant made on a store itself
+   * or on a folder inside it keeps that store open.
+   */
+  private credentialStoreFinalDenyRules(
+    deniedPaths: readonly string[],
+    allowedPaths: readonly string[],
+  ): string {
+    const permissions = this.workspace.permissions;
+    const rules = permissions.accessFilesystemRules || [];
+    const resolve = (paths: readonly string[]) => paths.map((p) => this.resolvePolicyPath(p));
+    const fullGrants = resolve([
+      this.workspace.path,
+      ...(permissions.accessWorkspaceRoots || []),
+      ...allowedPaths,
+      ...rules.filter((rule) => rule.access === "write").map((rule) => rule.path),
+    ]);
+    // A read rule on a store opens it for reads only.
+    const readGrants = resolve(
+      rules.filter((rule) => rule.access === "read").map((rule) => rule.path),
+    );
+    const grantedWithin = (store: string, grants: readonly string[]) =>
+      grants.some((grant) => isAccessPathWithin(store, grant));
+    let profileRules = "";
+    for (const store of deniedPaths) {
+      if (grantedWithin(store, fullGrants)) continue;
+      const operations = grantedWithin(store, readGrants)
+        ? "file-write*"
+        : "file-read* file-write*";
+      for (const alias of this.getMacOSPathAliases(store)) {
+        profileRules += `(deny ${operations} (subpath "${escapeSandboxProfileString(alias)}"))\n`;
+      }
+    }
+    return profileRules
+      ? `\n; Credential stores stay denied under a workspace or root that contains them\n${profileRules}`
+      : "";
   }
 
   private resolvePolicyPath(rawPath: string): string {

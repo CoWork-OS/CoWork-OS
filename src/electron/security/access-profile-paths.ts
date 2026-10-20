@@ -10,6 +10,7 @@ import {
   getTeamMemoryRepoRoots,
   isMemoryRepoReadAllowed,
 } from "./memory-repo-access";
+import { HOME_CREDENTIAL_STORE_PATHS } from "./credential-store-paths";
 import { isSkillPackReadAllowed } from "./skill-pack-read-access";
 
 export type AccessFilesystemOperation = "read" | "write" | "delete";
@@ -645,6 +646,85 @@ function resolveWorkspacePolicyPath(workspacePath: string, value: string): strin
   );
 }
 
+interface CredentialStoreLocation {
+  lexical: string;
+  canonical: string;
+}
+
+const CREDENTIAL_STORE_CACHE_MS = 5_000;
+let credentialStoreCache:
+  | { home: string; at: number; stores: readonly CredentialStoreLocation[] }
+  | undefined;
+
+/**
+ * The home folder's credential stores, both as spelled and canonicalized (a
+ * dotfiles manager may make ~/.ssh a link). Cached briefly because the
+ * evaluator runs for every path a search tool visits.
+ */
+function credentialStoreLocations(): readonly CredentialStoreLocation[] {
+  const home = nodePath.resolve(nodeOs.homedir());
+  const now = Date.now();
+  if (
+    credentialStoreCache &&
+    credentialStoreCache.home === home &&
+    now - credentialStoreCache.at < CREDENTIAL_STORE_CACHE_MS
+  ) {
+    return credentialStoreCache.stores;
+  }
+  const stores = HOME_CREDENTIAL_STORE_PATHS.map((relative) => {
+    const lexical = nodePath.join(home, relative);
+    return { lexical, canonical: canonicalizeAccessPath(lexical) };
+  });
+  credentialStoreCache = { home, at: now, stores };
+  return stores;
+}
+
+/** Plain containment on already-resolved paths, case-insensitive where the filesystem usually is. */
+function isResolvedPathWithin(parentPath: string, candidatePath: string): boolean {
+  const fold = (value: string) => (process.platform === "linux" ? value : value.toLowerCase());
+  const relative = nodePath.relative(fold(parentPath), fold(candidatePath));
+  return (
+    relative === "" ||
+    (relative !== ".." &&
+      !relative.startsWith(`..${nodePath.sep}`) &&
+      !nodePath.isAbsolute(relative))
+  );
+}
+
+/**
+ * The credential store (~/.ssh, ~/.aws, Keychains, browser profiles, ...)
+ * holding a path, checked on both its spelling and its canonical target.
+ */
+export function findCredentialStore(
+  requestedPath: string,
+  resolvedPath: string,
+): string | undefined {
+  for (const store of credentialStoreLocations()) {
+    if (
+      isResolvedPathWithin(store.canonical, resolvedPath) ||
+      isResolvedPathWithin(store.lexical, requestedPath)
+    ) {
+      return store.canonical;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A credential store opens only to a grant made on the store itself or on a
+ * folder inside it, and only for paths under that grant. A grant that merely
+ * contains the store, such as a workspace at the home folder, does not count.
+ */
+function isCredentialPathExplicitlyGranted(
+  store: string,
+  resolvedPath: string,
+  grants: readonly string[],
+): boolean {
+  return grants.some(
+    (grant) => isAccessPathWithin(store, grant) && isAccessPathWithin(grant, resolvedPath),
+  );
+}
+
 function normalizeMacPathAlias(value: string): string {
   return value
     .replace(/^\/private\/var(?=\/|$)/, "/var")
@@ -787,6 +867,27 @@ export function evaluateWorkspaceFilesystemAccess(
       path: operationPath,
       reason: `workspace_${requiredPermission}_disabled`,
     };
+  }
+
+  // Credential stores are a hard boundary too: a workspace at the home folder,
+  // Full access, a broad profile rule or a one-shot external approval does not
+  // open ~/.ssh or a keychain. Only a grant on the store itself does.
+  const credentialStore = findCredentialStore(requestedPath, resolvedPath);
+  if (credentialStore) {
+    const grants = [
+      workspace.path,
+      ...(permissions.accessWorkspaceRoots || []),
+      ...(filesystemScoped ? [] : permissions.allowedPaths || []),
+      // A read rule on the store opens it for reads only.
+      ...rules
+        .filter(
+          (rule) => rule.access === "write" || (rule.access === "read" && operation === "read"),
+        )
+        .map((rule) => rule.path),
+    ].map((grant) => resolveWorkspacePolicyPath(workspace.path, grant));
+    if (!isCredentialPathExplicitlyGranted(credentialStore, resolvedPath, grants)) {
+      return { decision: "deny", path: operationPath, reason: "credential_store" };
+    }
   }
 
   if (ruleDecision === "allow") {

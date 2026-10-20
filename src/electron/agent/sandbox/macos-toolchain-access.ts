@@ -24,6 +24,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { isAccessPathWithin, isProtectedFilesystemPath } from "../../security/access-profile-paths";
+import { HOME_CREDENTIAL_STORE_PATHS } from "../../security/credential-store-paths";
 import { collectPolicyPathEntries } from "./policy-paths";
 import { escapeSandboxProfileString, validatePathForSandboxProfile } from "./security-utils";
 
@@ -114,52 +115,6 @@ const CARGO_HOME_WRITE_FILES = [
   ".global-cache-journal",
   ".global-cache-wal",
   ".global-cache-shm",
-];
-
-/**
- * Credential and personal-data stores. Denied for read and write after the
- * toolchain grants so no derived grant can reach them.
- */
-const HOME_SECRET_PATHS = [
-  ".ssh",
-  ".gnupg",
-  ".aws",
-  ".azure",
-  ".config/gcloud",
-  ".config/gh",
-  ".config/hub",
-  ".config/op",
-  ".config/git/credentials",
-  ".docker",
-  ".kube",
-  ".netrc",
-  ".git-credentials",
-  ".npmrc",
-  ".yarnrc",
-  ".yarnrc.yml",
-  ".pypirc",
-  ".cargo/credentials",
-  ".cargo/credentials.toml",
-  ".gradle/gradle.properties",
-  ".m2/settings.xml",
-  ".m2/settings-security.xml",
-  ".vault-token",
-  ".password-store",
-  ".terraform.d",
-  ".cache/huggingface",
-  ".local/share/keyrings",
-  "Library/Keychains",
-  "Library/Cookies",
-  "Library/Messages",
-  "Library/Mail",
-  "Library/Safari",
-  "Library/Application Support/Google/Chrome",
-  "Library/Application Support/Chromium",
-  "Library/Application Support/BraveSoftware",
-  "Library/Application Support/Microsoft Edge",
-  "Library/Application Support/Firefox",
-  "Library/Application Support/Arc",
-  "Library/Application Support/com.apple.TCC",
 ];
 
 /** Toolchain bin directories added to PATH when they exist. */
@@ -390,7 +345,7 @@ export function resolveMacOSToolchainAccess(
   const npmrcSource = env.NPM_CONFIG_USERCONFIG || env.npm_config_userconfig;
   const deniedPaths = [
     ...new Set([
-      ...HOME_SECRET_PATHS.map((relative) => path.join(home, relative)),
+      ...HOME_CREDENTIAL_STORE_PATHS.map((relative) => path.join(home, relative)),
       ...(npmrcSource && path.isAbsolute(npmrcSource) ? [path.resolve(npmrcSource)] : []),
     ]),
   ];

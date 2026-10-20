@@ -4532,6 +4532,8 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN desktop_group TEXT",
       // Which files unattended runs work on (own_folder, workspace; null = own_folder).
       "ALTER TABLE agent_roles ADD COLUMN file_access TEXT",
+      // For "Its own desktop": what it may reach on the network (internet, off; null = internet).
+      "ALTER TABLE agent_roles ADD COLUMN desktop_network TEXT",
     ];
 
     for (const sql of missionControlColumns) {

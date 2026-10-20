@@ -1719,6 +1719,8 @@ interface AgentRoleData {
   desktopGroup?: string;
   /** Which files runs nobody started by hand work on; unset means its own folder. */
   fileAccess?: import("../shared/bot-containment").BotFileAccess;
+  /** What its own desktop may reach on the network; unset means internet only. */
+  desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1764,6 +1766,7 @@ interface CreateAgentRoleRequest {
   desktopHost?: string;
   desktopGroup?: string;
   fileAccess?: import("../shared/bot-containment").BotFileAccess;
+  desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1800,6 +1803,7 @@ interface UpdateAgentRoleRequest {
   desktopHost?: string | null;
   desktopGroup?: string | null;
   fileAccess?: import("../shared/bot-containment").BotFileAccess | null;
+  desktopNetwork?: import("../shared/bot-computer").BotDesktopNetwork | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];

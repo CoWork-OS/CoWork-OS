@@ -447,6 +447,7 @@ import {
   AgentRoleDesktopHostSchema,
   AgentRoleDesktopGroupSchema,
   AgentRoleFileAccessSchema,
+  AgentRoleDesktopNetworkSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -1634,6 +1635,7 @@ export async function setupIpcHandlers(
     resourcesDir: findBotDesktopResources,
     desktopHostFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopHost,
     desktopGroupFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopGroup,
+    desktopNetworkFor: (botId) => agentDaemon.getAgentRoleById(botId)?.desktopNetwork,
     desktopHosts: () =>
       agentDaemon
         .getActiveAgentRoles()
@@ -10086,6 +10088,11 @@ export async function setupIpcHandlers(
       request.fileAccess =
         validateInput(AgentRoleFileAccessSchema, request.fileAccess, "files") ?? undefined;
     }
+    if (request.desktopNetwork !== undefined) {
+      request.desktopNetwork =
+        validateInput(AgentRoleDesktopNetworkSchema, request.desktopNetwork, "desktop network") ??
+        undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -10150,6 +10157,13 @@ export async function setupIpcHandlers(
         AgentRoleFileAccessSchema,
         normalizedRequest.fileAccess,
         "files",
+      );
+    }
+    if (normalizedRequest.desktopNetwork !== undefined) {
+      normalizedRequest.desktopNetwork = validateInput(
+        AgentRoleDesktopNetworkSchema,
+        normalizedRequest.desktopNetwork,
+        "desktop network",
       );
     }
     const result = await agentRoleRepo.update(normalizedRequest);

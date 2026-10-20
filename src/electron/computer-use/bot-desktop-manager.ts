@@ -20,7 +20,12 @@ import { createHash, randomBytes } from "crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import * as net from "net";
 import * as path from "path";
-import { isValidDesktopGroup, isValidDesktopHost } from "../../shared/bot-computer";
+import {
+  isValidDesktopGroup,
+  isValidDesktopHost,
+  normalizeBotDesktopNetwork,
+  type BotDesktopNetwork,
+} from "../../shared/bot-computer";
 
 export type ContainerRuntimeName = "docker" | "podman";
 
@@ -50,6 +55,8 @@ export interface BotDesktopDeps {
   desktopHostFor?: (botId: string) => string | undefined;
   /** The shared desktop a bot uses with other bots, or undefined for a desktop of its own. */
   desktopGroupFor?: (botId: string) => string | undefined;
+  /** What a bot's desktop may reach on the network; unset means internet only. */
+  desktopNetworkFor?: (botId: string) => unknown;
   /** Opens an SSH tunnel from a local port to a port on the server's loopback. */
   openTunnel?: (host: string, localPort: number, remotePort: number) => ChildProcess;
   /** Every server bots' desktops are set to run on, so leftovers there are stopped too. */
@@ -153,7 +160,14 @@ export interface BotDesktopStatus {
 const CONTAINER_PREFIX = "cowork-desktop-";
 const IMAGE_NAME = "cowork-bot-desktop";
 /** The files the desktop image is built from; its tag follows their contents. */
-const BOT_DESKTOP_IMAGE_FILES = ["Dockerfile", "start-desktop.sh", "cowork-teach.py"];
+const BOT_DESKTOP_IMAGE_FILES = [
+  "Dockerfile",
+  "start-desktop.sh",
+  "cowork-teach.py",
+  "cowork-network.sh",
+];
+/** Applies the network limit; see resources/bot-desktop/cowork-network.sh. */
+const NETWORK_LIMIT_PROGRAM = "/usr/local/bin/cowork-network";
 const VIEWER_PORT = 6080;
 const DEFAULT_IDLE_STOP_MS = 60 * 60 * 1000;
 const DEFAULT_WAIT_MS = 2 * 60 * 1000;
@@ -262,6 +276,8 @@ interface DesktopRecord {
   lastUsedAt: number;
   /** When the container was last seen running. */
   checkedAt?: number;
+  /** The network limit applied when it started. */
+  network?: BotDesktopNetwork;
 }
 
 /** One bot's running desktop, handed to a task while it holds its turn. */
@@ -344,7 +360,25 @@ export class BotDesktopManager {
     if (!isValidDesktopGroup(group)) return botId;
     const key = `shared:${group}${host ? `@${host}` : ""}`;
     this.keyHosts.set(key, host);
+    const members = this.keyMembers.get(key) ?? new Set<string>();
+    members.add(botId);
+    this.keyMembers.set(key, members);
     return key;
+  }
+
+  /** The bots seen using each shared desktop, so its network limit is the narrowest of theirs. */
+  private readonly keyMembers = new Map<string, Set<string>>();
+
+  /**
+   * What a desktop may reach: the bot's setting, or for a shared desktop the narrowest setting
+   * of the bots using it.
+   */
+  networkFor(key: string): BotDesktopNetwork {
+    const members = this.keyMembers.get(key) ?? new Set([key]);
+    for (const botId of members) {
+      if (normalizeBotDesktopNetwork(this.deps.desktopNetworkFor?.(botId)) === "off") return "off";
+    }
+    return "internet";
   }
 
   /**
@@ -865,8 +899,12 @@ export class BotDesktopManager {
 
   private async ensureRunning(botId: string, onStarting?: () => void): Promise<void> {
     const record = this.records.get(botId);
-    // Moved to another place (this computer or a server): stop it where it was.
-    if (record && record.host !== this.desktopHost(botId)) {
+    // Moved to another place (this computer or a server), or its network setting changed: stop
+    // it, so it starts again where and how it is now set.
+    if (
+      record &&
+      (record.host !== this.desktopHost(botId) || record.network !== this.networkFor(botId))
+    ) {
       await this.stop(botId);
     } else if (record) {
       if (this.now() - (record.checkedAt ?? 0) < RUNNING_CHECK_MS) return;
@@ -937,7 +975,19 @@ export class BotDesktopManager {
       ],
       { timeoutMs: 2 * 60 * 1000 },
     );
-    this.records.set(botId, { password, viewPassword, host, lastUsedAt: this.now() });
+    const network = this.networkFor(botId);
+    this.records.set(botId, { password, viewPassword, host, lastUsedAt: this.now(), network });
+    try {
+      await this.limitNetwork(botId, host, image, network);
+    } catch (error) {
+      this.records.delete(botId);
+      await this.container(host, ["rm", "--force", name]).catch(() => undefined);
+      throw new Error(
+        `Could not limit this bot desktop's network, so it was not started: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
     // The viewer passwords go in over stdin after start, so they are in no environment and
     // not in the container's config (docker inspect); start-desktop waits for the file.
     const writePasswords = [
@@ -951,6 +1001,50 @@ export class BotDesktopManager {
     await this.waitUntilReady(botId);
     const record = this.records.get(botId);
     if (record) record.checkedAt = this.now();
+  }
+
+  /**
+   * Applies the network limit from a short-lived helper container that shares the desktop's
+   * network namespace and alone holds NET_ADMIN; the desktop keeps no capabilities. With
+   * internet, DNS goes only to the resolvers the desktop was given.
+   */
+  private async limitNetwork(
+    botId: string,
+    host: string | undefined,
+    image: string,
+    network: BotDesktopNetwork,
+  ): Promise<void> {
+    let resolvers: string[] = [];
+    if (network === "internet") {
+      const resolvConf = await this.session(botId).exec(["cat", "/etc/resolv.conf"], {
+        timeoutMs: 15_000,
+      });
+      resolvers = parseResolvers(resolvConf.stdout.toString("utf8"));
+      if (resolvers.length === 0) throw new Error("the desktop has no IPv4 DNS resolver");
+    }
+    await this.container(
+      host,
+      [
+        "run",
+        "--rm",
+        "--network",
+        `container:${this.containerName(botId)}`,
+        "--cap-drop",
+        "ALL",
+        "--cap-add",
+        "NET_ADMIN",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        "0",
+        "--entrypoint",
+        NETWORK_LIMIT_PROGRAM,
+        image,
+        network,
+        ...resolvers,
+      ],
+      { timeoutMs: 60_000 },
+    );
   }
 
   private async waitUntilReady(botId: string): Promise<void> {
@@ -1036,6 +1130,16 @@ export class BotDesktopManager {
     }
     return tag;
   }
+}
+
+/** The IPv4 nameservers in a resolv.conf; anything else (IPv6, options, junk) is left out. */
+export function parseResolvers(resolvConf: string): string[] {
+  const resolvers = new Set<string>();
+  for (const line of resolvConf.split("\n")) {
+    const match = /^\s*nameserver\s+(\S+)\s*$/.exec(line);
+    if (match && net.isIPv4(match[1])) resolvers.add(match[1]);
+  }
+  return [...resolvers];
 }
 
 /** Where the desktop's Dockerfile ships: app resources when packaged, the repo in development. */

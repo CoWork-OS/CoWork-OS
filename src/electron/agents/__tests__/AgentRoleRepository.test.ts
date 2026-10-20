@@ -176,6 +176,12 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
       "workspace",
     );
     expect(agentRoleRepo.update({ id: created.id, fileAccess: null })?.fileAccess).toBeUndefined();
+    expect(agentRoleRepo.update({ id: created.id, desktopNetwork: "off" })?.desktopNetwork).toBe(
+      "off",
+    );
+    expect(
+      agentRoleRepo.update({ id: created.id, desktopNetwork: null })?.desktopNetwork,
+    ).toBeUndefined();
 
     // Its own folder's workspace row stays out of every workspace list.
     const { WorkspaceStore } = await import("../../database/repositories");

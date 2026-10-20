@@ -5592,14 +5592,36 @@ export async function setupIpcHandlers(
     if (requestedSize > COMPOSER_DRAFT_MAX_ATTACHMENT_SIZE) {
       throw new Error("Draft attachment exceeds the 25 MB limit.");
     }
-    const ref = await composerDraftAttachmentStore.put({
-      draftKey: owner.draftKey,
-      workspaceId: owner.workspaceId,
-      name: requireString(value.name, "name"),
-      ...(optionalString(value.mimeType) ? { mimeType: optionalString(value.mimeType) } : {}),
-      ...(optionalString(value.dataBase64) ? { dataBase64: optionalString(value.dataBase64) } : {}),
-      ...(optionalString(value.sourcePath) ? { sourcePath: optionalString(value.sourcePath) } : {}),
-    });
+    let copied: import("../../shared/composer-drafts").DraftAttachmentRef | null = null;
+    if (value.copyFrom) {
+      // Both drafts must be owned by real workspaces/tasks; the bytes never
+      // leave the store, so no file-picker approval is involved.
+      const source = validateComposerDraftOwner(value.copyFrom);
+      await assertComposerDraftOwner(source);
+      copied = await composerDraftAttachmentStore.copy(
+        {
+          draftKey: source.draftKey,
+          workspaceId: source.workspaceId,
+          refId: requireString(value.copyFrom.refId, "refId"),
+        },
+        { draftKey: owner.draftKey, workspaceId: owner.workspaceId },
+      );
+      if (!copied) return null;
+    }
+    const ref =
+      copied ??
+      (await composerDraftAttachmentStore.put({
+        draftKey: owner.draftKey,
+        workspaceId: owner.workspaceId,
+        name: requireString(value.name, "name"),
+        ...(optionalString(value.mimeType) ? { mimeType: optionalString(value.mimeType) } : {}),
+        ...(optionalString(value.dataBase64)
+          ? { dataBase64: optionalString(value.dataBase64) }
+          : {}),
+        ...(optionalString(value.sourcePath)
+          ? { sourcePath: optionalString(value.sourcePath) }
+          : {}),
+      }));
     if (usage.bytes + ref.size > COMPOSER_DRAFT_MAX_ATTACHMENT_TOTAL_BYTES) {
       await composerDraftAttachmentStore.release(owner.draftKey, owner.workspaceId, ref.refId);
       throw new Error("Draft attachments exceed the 100 MB per-draft limit.");

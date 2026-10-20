@@ -109,6 +109,65 @@ describe("ComposerDraftStore", () => {
     expect(restored.get(next.draftKey)?.text).toBe("keep me");
   });
 
+  it("carries an unsent new-session draft to another folder and clears the source", async () => {
+    const clear = vi.fn(async () => ({ cleared: true, releasedAttachments: 1 }));
+    const putAttachment = vi.fn(async () => ({
+      refId: "copied-ref",
+      name: "image.png",
+      mimeType: "image/png",
+      size: 9,
+      sha256: "abc",
+      status: "available" as const,
+    }));
+    const store = new ComposerDraftStore({ transport: { clear, putAttachment }, now: () => 100 });
+    const from = { scope: "local" as const, workspaceId: "scratch", taskId: null };
+    const to = { scope: "local" as const, workspaceId: "project", taskId: null };
+    const source = store.update(from, {
+      text: "fix this",
+      attachments: [
+        {
+          refId: "source-ref",
+          name: "image.png",
+          mimeType: "image/png",
+          size: 9,
+          sha256: "abc",
+          status: "available",
+        },
+      ],
+    });
+
+    await expect(store.carry(from, to)).resolves.toBe(true);
+
+    expect(putAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftKey: "local:project:new:main",
+        workspaceId: "project",
+        copyFrom: expect.objectContaining({
+          draftKey: source.draftKey,
+          workspaceId: "scratch",
+          refId: "source-ref",
+        }),
+      }),
+    );
+    expect(store.get("local:project:new:main")).toMatchObject({
+      text: "fix this",
+      attachments: [expect.objectContaining({ refId: "copied-ref" })],
+    });
+    expect(clear).toHaveBeenCalledWith(expect.objectContaining({ draftKey: source.draftKey }));
+    expect(store.get(source.draftKey)).toBeNull();
+  });
+
+  it("leaves the destination draft alone when the source is empty", async () => {
+    const store = new ComposerDraftStore({ now: () => 100 });
+    const from = { scope: "local" as const, workspaceId: "scratch", taskId: null };
+    const to = { scope: "local" as const, workspaceId: "project", taskId: null };
+    store.update(from, { text: "  " });
+    store.update(to, { text: "keep" });
+
+    await expect(store.carry(from, to)).resolves.toBe(false);
+    expect(store.get("local:project:new:main")?.text).toBe("keep");
+  });
+
   it("ignores a stale load after a newer load for the same key", async () => {
     const resolvers: Array<(draft: ReturnType<typeof createEmptyComposerDraft>) => void> = [];
     const store = new ComposerDraftStore({
@@ -187,6 +246,73 @@ describe("ComposerDraftStore", () => {
     );
     expect(store.get(submitted.draftKey)).toBeNull();
     expect(store.get("local:w:new-task:main")?.text).toBe("new task draft");
+  });
+
+  it("clears an accepted draft after an automatic patch moved its revision", async () => {
+    const clear = vi.fn(async () => ({ cleared: true, releasedAttachments: 1 }));
+    const store = new ComposerDraftStore({ transport: { clear } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: null };
+    const image = {
+      refId: "image-ref",
+      name: "image.png",
+      size: 9,
+      sha256: "abc",
+      status: "available" as const,
+    };
+    const submitted = store.update(input, { text: "sent with an image", attachments: [image] });
+    // e.g. the restore path marking the attachment unavailable after the send.
+    const patched = store.update(input, { attachments: [{ ...image, status: "unavailable" }] });
+
+    expect(await store.clearAfterAcceptedDraft(submitted, submitted.revision)).toBe(true);
+    expect(clear).toHaveBeenCalledWith(expect.objectContaining({ revision: patched.revision }));
+    expect(store.get(submitted.draftKey)).toBeNull();
+  });
+
+  it("does not resurrect an accepted draft patched during its durable clear", async () => {
+    let resolveClear: (() => void) | undefined;
+    const clear = vi.fn(
+      () =>
+        new Promise<{ cleared: boolean; releasedAttachments: number }>((resolve) => {
+          resolveClear = () => resolve({ cleared: true, releasedAttachments: 0 });
+        }),
+    );
+    const store = new ComposerDraftStore({ transport: { clear } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: null };
+    const submitted = store.update(input, { text: "accepted" });
+    const clearing = store.clearAfterAcceptedDraft(submitted, submitted.revision);
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledOnce());
+
+    store.update(input, { mentions: [] });
+    resolveClear?.();
+
+    await expect(clearing).resolves.toBe(true);
+    expect(store.get(submitted.draftKey)).toBeNull();
+  });
+
+  it("keeps only new typing, without the sent attachments, after an accepted send", async () => {
+    let resolveClear: (() => void) | undefined;
+    const clear = vi.fn(
+      () =>
+        new Promise<{ cleared: boolean; releasedAttachments: number }>((resolve) => {
+          resolveClear = () => resolve({ cleared: true, releasedAttachments: 1 });
+        }),
+    );
+    const store = new ComposerDraftStore({ transport: { clear } });
+    const input = { scope: "local" as const, workspaceId: "w", taskId: null };
+    const submitted = store.update(input, {
+      text: "first",
+      attachments: [
+        { refId: "sent-ref", name: "a.png", size: 1, sha256: "x", status: "available" },
+      ],
+    });
+    const clearing = store.clearAfterAcceptedDraft(submitted, submitted.revision);
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledOnce());
+
+    store.update(input, { text: "second" });
+    resolveClear?.();
+
+    await expect(clearing).resolves.toBe(false);
+    expect(store.get(submitted.draftKey)).toMatchObject({ text: "second", attachments: [] });
   });
 
   it("does not let a late persisted load overwrite local typing", async () => {

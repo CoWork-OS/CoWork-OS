@@ -1,4 +1,5 @@
 import * as path from "path";
+import type { BrowserColorScheme } from "../../shared/browser-settings";
 import {
   createBrowserNetworkProxy,
   type BrowserNetworkProxy,
@@ -2334,6 +2335,19 @@ export class BrowserSessionManager {
     await this.sendCommand(contents, "Log.enable").catch(() => undefined);
     await this.sendCommand(contents, "Network.enable").catch(() => undefined);
     await this.sendCommand(contents, "Page.enable").catch(() => undefined);
+  }
+
+  /** Target-scoped browser appearance; never changes Electron's global nativeTheme. */
+  async setContentsColorScheme(
+    contents: Any,
+    colorScheme: BrowserColorScheme | null,
+  ): Promise<void> {
+    const session = this.findSessionByWebContentsId(contents.id);
+    if (session) await this.ensureDebugger(session, contents);
+    else await this.ensureDebuggerForContents(contents);
+    await this.sendCommand(contents, "Emulation.setEmulatedMedia", {
+      features: colorScheme ? [{ name: "prefers-color-scheme", value: colorScheme }] : [],
+    });
   }
 
   private async ensureDebuggerForContents(contents: Any): Promise<void> {

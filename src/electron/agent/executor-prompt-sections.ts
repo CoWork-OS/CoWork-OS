@@ -250,7 +250,7 @@ export function composePromptSections(
   }
 
   if (totalTokens > totalBudgetTokens && working.length > 0) {
-    const lastSection = working.findLast((section) => !section.preserveWhole);
+    const lastSection = [...working].reverse().find((section) => !section.preserveWhole);
     if (!lastSection) {
       const prompt = working
         .map((section) => section.text)

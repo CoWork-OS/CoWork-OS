@@ -661,4 +661,131 @@ describe("TaskExecutor skill shortlist routing", () => {
     expect(executor.toolRegistry.executeTool).not.toHaveBeenCalled();
     expect(executor.appliedSkills).toEqual([]);
   });
+
+  it("injects a planning hint for a clear lead below 0.7 and omits contested ones", () => {
+    const pack = (id: string, score: number, pluginSource?: string) => ({
+      skill: {
+        id,
+        name: id,
+        description: `Handle ${id}.`,
+        metadata: pluginSource ? { pluginSource } : {},
+      },
+      score,
+    });
+    const executor = createExecutor("Add in-app purchases so players can buy a coin pack");
+    const hints = (query: string) =>
+      (TaskExecutor as Any).prototype.getHighConfidenceSkillHints.call(executor, query);
+
+    rankModelInvocableSkillsForQuery.mockReturnValue([
+      pack("unity:implement-in-app-purchases", 0.61, "unity"),
+      pack("employment-legal-investigation-add", 0.45, "employment-legal-pack"),
+    ]);
+    const clear = hints(executor.task.prompt);
+    expect(clear).toContain('- Skill "unity:implement-in-app-purchases"');
+    expect(clear).not.toContain("employment-legal-investigation-add");
+    // Below 0.7 the hint is tentative: no primed example step, and an explicit way out.
+    expect(clear).toContain("Possibly relevant skills (matched on wording only");
+    expect(clear).toContain("Otherwise ignore this list and plan normally.");
+    expect(clear).not.toContain("Example step:");
+    expect(rankModelInvocableSkillsForQuery).toHaveBeenLastCalledWith(
+      executor.task.prompt,
+      expect.not.objectContaining({ limit: expect.anything() }),
+    );
+    expect(executor.emitEvent).toHaveBeenCalledWith(
+      "log",
+      expect.objectContaining({
+        message: "[skill-routing] planning hints: clear_lead",
+        strength: "tentative",
+        hintedSkillIds: ["unity:implement-in-app-purchases"],
+      }),
+    );
+
+    rankModelInvocableSkillsForQuery.mockReturnValue([
+      pack("unity:optimize-web", 0.57, "unity"),
+      pack("unity:implement-in-app-purchases", 0.56, "unity"),
+      pack("web-research-plus", 0.52, "web-search-plus"),
+    ]);
+    expect(hints("Set up Stripe checkout for my web store")).toBe("");
+
+    rankModelInvocableSkillsForQuery.mockReturnValue([
+      pack("translate", 0.82),
+      pack("summarize", 0.5),
+    ]);
+    const strong = hints("Translate these release notes into Japanese");
+    expect(strong).toContain("Relevant skills for this task:");
+    expect(strong).toContain(`Example step: "Apply the 'translate' skill`);
+    expect(strong).not.toContain("Possibly relevant skills");
+
+    executor.getAvailableTools.mockReturnValue([{ name: "read_file" }]);
+    rankModelInvocableSkillsForQuery.mockReturnValue([pack("translate", 0.9)]);
+    expect(hints("Translate this")).toBe("");
+  });
+
+  describe("step tools for a paraphrased hinted skill", () => {
+    const prompt = "Add in-app purchases so players can buy a coin pack";
+    const paraphrased =
+      "Apply the Unity in-app purchases skill to determine the supported purchasing API.";
+    const match = (id: string, score: number, pluginSource?: string) => ({
+      skill: {
+        id,
+        name: id,
+        description: `Handle ${id}.`,
+        metadata: pluginSource ? { pluginSource } : {},
+      },
+      score,
+    });
+    const clearLead = [
+      match("unity:implement-in-app-purchases", 0.61, "unity"),
+      match("employment-legal-investigation-add", 0.45, "employment-legal-pack"),
+    ];
+    const stepTools = (executor: Any, stepText: string) =>
+      (TaskExecutor as Any).prototype.buildStepToolAllowlist.call(
+        executor,
+        { requiredTools: new Set() },
+        "analysis",
+        "code",
+        stepText,
+      ) as Set<string>;
+    const plan = (executor: Any) =>
+      (TaskExecutor as Any).prototype.getHighConfidenceSkillHints.call(executor, prompt);
+
+    it("offers Skill to the step that applies the hinted skill, not to other steps", () => {
+      const executor = createExecutor(prompt);
+      executor.getEffectiveExecutionMode = vi.fn(() => "execute");
+      rankModelInvocableSkillsForQuery.mockReturnValue(clearLead);
+      expect(plan(executor)).toContain('- Skill "unity:implement-in-app-purchases"');
+
+      expect(stepTools(executor, paraphrased).has("Skill")).toBe(true);
+      expect(stepTools(executor, "Implement the coin-pack purchase service.").has("Skill")).toBe(
+        false,
+      );
+    });
+
+    it("keeps Skill out of skill-worded steps when planning gave no hint", () => {
+      const executor = createExecutor("Set up Stripe checkout for my web store");
+      executor.getEffectiveExecutionMode = vi.fn(() => "execute");
+      rankModelInvocableSkillsForQuery.mockReturnValue([
+        match("unity:optimize-web", 0.57, "unity"),
+        match("unity:implement-in-app-purchases", 0.56, "unity"),
+        match("web-research-plus", 0.52, "web-search-plus"),
+      ]);
+      expect(plan(executor)).toBe("");
+
+      expect(stepTools(executor, "Apply the checkout skill to the store.").has("Skill")).toBe(
+        false,
+      );
+    });
+
+    it("rebuilds the hint for a step that runs without planning, e.g. after a restart", () => {
+      const executor = createExecutor(prompt);
+      executor.getEffectiveExecutionMode = vi.fn(() => "execute");
+      rankModelInvocableSkillsForQuery.mockReturnValue(clearLead);
+
+      expect(stepTools(executor, paraphrased).has("Skill")).toBe(true);
+      expect(rankModelInvocableSkillsForQuery).toHaveBeenCalledWith(
+        `Routing test\n${prompt}`,
+        expect.objectContaining({ includePrereqBlockedSkills: true }),
+      );
+    });
+  });
 });

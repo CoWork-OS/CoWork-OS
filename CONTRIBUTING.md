@@ -60,7 +60,7 @@ Install [gitleaks](https://github.com/gitleaks/gitleaks#installing) so the pre-c
    npm run build:react      # renderer
    npm run type-check
    npm run lint
-   npm run test             # runs skills:check first
+   npm run test             # skill checks, Node suites, then Vitest
    ```
 
 5. Open the PR using the template. Link the issue, say how you tested it (untested, lightly tested, fully tested), and add screenshots for UI changes.

@@ -1,8 +1,8 @@
 {
   "parserVersion": "2.0.1",
-  "mermaidVersion": "12.1.0",
+  "mermaidVersion": "12.2.0",
   "langiumVersion": "4.4.0",
-  "upstreamRef": "mermaid@12.1.0",
+  "upstreamRef": "mermaid@12.2.0",
   "sources": {
     "src/index.ts": "0041234c3df5deea890dbeaecee0fa3e243e07b955710174d0d24b0836482031",
     "src/language/architecture/index.ts": "4f3d69ed8605bc053a96d6cd87523a2a527e63a61d62d10b28819a57ecf2d26b",

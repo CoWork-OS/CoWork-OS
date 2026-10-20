@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # CoWork OS headless/server image.
-# Note: CoWork OS currently runs in the Electron main process (even in headless mode),
-# so we install Electron runtime deps. A future "coworkd" (Node-only) daemon would simplify this.
+# This variant runs the Electron headless entrypoint and installs its runtime deps.
+# Dockerfile.node provides the separate Node daemon entrypoint without Xvfb.
 
 FROM node:24-bookworm-slim
 
@@ -51,11 +51,15 @@ WORKDIR /app
 
 # Install JS deps first for better layer caching.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 # Copy the repo and build the Electron main process + bundled connectors.
 # Renderer build is not required for headless operation, so we skip it to keep images faster.
 COPY . .
+# The dependency layer does not execute lifecycle scripts. Download the pinned
+# Electron binary and prepare only the addons loaded by its runtime, for its ABI.
+RUN node node_modules/electron/install.js \
+  && node node_modules/@electron/rebuild/lib/cli.js --force --only better-sqlite3,node-pty --sequential
 RUN npm run build:electron && npm run build:connectors
 
 # Default persistent data directory inside the container. Mount a volume here.

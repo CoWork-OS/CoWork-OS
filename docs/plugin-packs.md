@@ -1386,6 +1386,17 @@ CoWork OS plugin packs offer capabilities beyond typical AI assistant plugins:
 - Verify skill parameters match the `{{placeholder}}` names in the prompt
 - Check the `"enabled": true` flag on each skill
 
+### Plain-language requests don't pick a pack skill
+
+Before planning, CoWork ranks every model-invocable skill against the request and adds a skill hint to the planning prompt only when one skill clearly leads (`selectSkillPlanningHints` in `src/shared/skill-routing/index.ts`):
+
+- The top skill must score at least 0.5, and no other skill may come within 0.1 of it. Close runners-up from the same pack count too: below 0.7 they made off-domain requests that only share the pack's vocabulary look like a lead.
+- A clear lead below 0.7 gets a **tentative** hint ("Possibly relevant skills… may not apply"): the planner adds a Skill step only if the request is really about that skill. Lexical scores in this range can't tell a right lead from an off-domain one that shares a rare word, such as "voice chat app for remote teams" and a game voice-chat skill.
+- A top skill at 0.7 or more gets a **strong** hint ("Relevant skills for this task" with an example Skill step), listing its close runners-up (up to three) whatever pack they come from.
+- When a skill was hinted (strong or tentative), any plan step that mentions a skill can use the `Skill` tool, even if the step paraphrases the skill ("Apply the Unity in-app purchases skill") instead of naming its ID.
+
+Each task logs `[skill-routing] planning hints: <reason>` with the hint strength and the top three scores. `clear_lead` and `strong_lead` mean a hint was added. `below_floor` and `contested` mean no hint was added, and the model picks skills from the shortlist on its own. To get a pack skill over the bar, add routing examples that use the words people actually type. `npm run skills:eval-routing` reports hint coverage for the bundled skills against `resources/skills/_evals/hint-cases.jsonl`.
+
 ### Toggle doesn't persist after restart
 
 - Pack enable/disable states are persisted in `pack-states.json` in the user data directory

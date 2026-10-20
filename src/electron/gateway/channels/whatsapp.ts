@@ -27,7 +27,7 @@ import {
   type WAMessage,
   type AnyMessageContent,
   type ConnectionState,
-  type proto,
+  proto,
   type DownloadableMessage,
 } from "baileys";
 import * as fs from "fs";
@@ -54,6 +54,7 @@ import {
 import { notifyDetectedIntegrationAuthIssue } from "../../notifications/integration-auth";
 import { createLogger } from "../../utils/logger";
 import { formatChannelReplyContext } from "../../../shared/channel-reply-context";
+import { installWhatsAppProtobufDepthLimit } from "./whatsapp-protobuf-limits";
 
 const log = createLogger("WhatsApp");
 const WHATSAPP_USER_JID_RE = /^(\d+)(?::\d+)?@s\.whatsapp\.net$/i;
@@ -287,6 +288,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
 
     try {
+      // Install before any socket can process server-supplied protobuf bytes.
+      installWhatsAppProtobufDepthLimit(proto);
+
       // Ensure auth directory exists
       await this.ensureDir(this.authDir);
 

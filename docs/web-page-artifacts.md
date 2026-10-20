@@ -140,7 +140,7 @@ See [Browser Workbench](browser-workbench.md) for live-browser behavior and [Bro
 - `src/renderer/components/WebArtifactViewer.tsx`: sidebar/fullscreen web viewer, iframe preview, actions, and fullscreen composer integration.
 - `src/renderer/components/BrowserWorkbenchView.tsx`: visible Browser V2 workbench for live URL testing, browser automation, tabs, diagnostics, snapshot overlay, and screenshot annotation.
 - `src/renderer/App.tsx`: shared artifact sidebar/fullscreen state, persisted sidebar width, and follow-up refresh behavior.
-- `src/renderer/components/MainContent.tsx`: generated-output detection and inline web artifact card rendering.
+- `src/renderer/components/MainContent/MainContent.tsx`: generated-output detection and inline web artifact card rendering.
 - `src/renderer/styles/index.css`: artifact card/viewer and web preview styling.
 
 ## Verification

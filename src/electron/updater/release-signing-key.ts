@@ -6,7 +6,7 @@
  *
  * To turn it on, once:
  *
- *   node scripts/release/generate-signing-key.mjs
+ *   Follow the local key-generation instructions in docs/release-signing.md.
  *
  * That prints a public key (paste it below, commit it) and a private key
  * (store it as the `RELEASE_SIGNING_PRIVATE_KEY` GitHub Actions secret, never

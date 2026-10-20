@@ -1,4 +1,4 @@
-# Node-only daemon image (no Electron/Xvfb). Multi-stage to keep runtime small.
+# Runs the Node daemon without launching Electron or Xvfb.
 
 FROM node:24-bookworm-slim AS build
 
@@ -12,18 +12,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY package.json package-lock.json ./
 
-# Install all deps to build TypeScript, then prune dev deps for runtime.
-RUN npm ci
+# Only the manifests are present here; keep lifecycle scripts disabled until the
+# source exists and prepare the required native addons explicitly below.
+RUN npm ci --ignore-scripts
 
 COPY . .
 
 RUN npm run build:daemon && npm run build:connectors
 
-# Ensure better-sqlite3 is built for the current Node ABI (postinstall may have rebuilt for Electron on some setups).
-RUN npm rebuild better-sqlite3
+# Prepare only these native addons for Node. COPY also brings in .npmrc, whose
+# ignore-scripts policy must remain enabled for every other dependency.
+RUN npm rebuild --ignore-scripts=false better-sqlite3 node-pty
 
-# Remove dev deps (Electron, build tooling) from the final node_modules.
-RUN npm prune --omit=dev
+# Remove development tooling. Shared production dependencies, including Electron,
+# remain installed; this image starts the Node daemon rather than Electron.
+RUN npm prune --omit=dev --ignore-scripts
 
 
 FROM node:24-bookworm-slim AS runtime

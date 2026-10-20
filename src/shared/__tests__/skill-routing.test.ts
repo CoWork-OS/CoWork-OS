@@ -7,6 +7,8 @@ import {
   rankModelInvocableSkillsForQuery,
   matchesExplicitSkillInvocationPhrase,
   normalizeSkillInvocationText,
+  selectSkillPlanningHints,
+  type RankedSkillMatch,
 } from "../skill-routing";
 
 const skill = (id: string, overrides: Partial<CustomSkill> = {}): CustomSkill => ({
@@ -316,5 +318,103 @@ describe("production skill routing", () => {
     expect(
       matchesSkillRoutingQuery(browser, "Use browser to inspect an account sign-in page."),
     ).toBe(true);
+  });
+});
+
+describe("planning hint selection", () => {
+  const ranked = (...entries: Array<[string, number, string?]>): RankedSkillMatch[] =>
+    entries.map(([id, score, pack]) => ({
+      skill: skill(id, pack ? { metadata: { pluginSource: pack } } : {}),
+      score,
+    }));
+  const select = (...entries: Array<[string, number, string?]>) => {
+    const { hints, reason, strength } = selectSkillPlanningHints(ranked(...entries));
+    return { ids: hints.map(({ skill }) => skill.id), reason, strength };
+  };
+  const silent = (reason: string) => ({ ids: [], reason, strength: "none" });
+
+  it("hints a clear lead below the old 0.7 bar tentatively", () => {
+    // Live scores for "Add in-app purchases so players can buy a coin pack".
+    expect(
+      select(
+        ["unity:implement-in-app-purchases", 0.61, "unity"],
+        ["employment-legal-investigation-add", 0.45, "employment-legal-pack"],
+        ["legal-builder-hub-customize", 0.4, "legal-builder-hub-pack"],
+      ),
+    ).toEqual({
+      ids: ["unity:implement-in-app-purchases"],
+      reason: "clear_lead",
+      strength: "tentative",
+    });
+  });
+
+  it("hints a clear lead at or above 0.7 strongly", () => {
+    expect(select(["translate", 0.82], ["summarize", 0.6])).toEqual({
+      ids: ["translate"],
+      reason: "clear_lead",
+      strength: "strong",
+    });
+  });
+
+  it("stays silent below the floor even with a wide margin", () => {
+    expect(select(["optimize-text-mesh-pro", 0.39], ["other", 0.2])).toEqual(silent("below_floor"));
+    expect(select()).toEqual(silent("below_floor"));
+  });
+
+  it("stays silent when another skill is within the margin", () => {
+    // "Set up Stripe checkout for my web store" with the Unity pack installed.
+    expect(
+      select(
+        ["unity:optimize-web", 0.57, "unity"],
+        ["unity:implement-in-app-purchases", 0.56, "unity"],
+        ["web-research-plus", 0.52, "web-search-plus"],
+      ),
+    ).toEqual(silent("contested"));
+    expect(select(["translate", 0.6], ["summarize", 0.55])).toEqual(silent("contested"));
+  });
+
+  it("treats close siblings from the lead's own pack as contenders", () => {
+    // "my phone's audio is too quiet" with the Unity pack installed: an off-domain
+    // request that only shares the pack's vocabulary.
+    expect(
+      select(
+        ["unity:optimize-audio", 0.61, "unity"],
+        ["unity:audio-setup-mixers", 0.54, "unity"],
+        ["voice-memo", 0.47],
+      ),
+    ).toEqual(silent("contested"));
+  });
+
+  it("checks contenders past the first three ranks", () => {
+    expect(
+      select(
+        ["unity:a", 0.6, "unity"],
+        ["unity:b", 0.55, "unity"],
+        ["unity:c", 0.54, "unity"],
+        ["unity:d", 0.53, "unity"],
+        ["outside", 0.51],
+      ),
+    ).toEqual(silent("contested"));
+  });
+
+  it("keeps hinting a strong lead and lists its close contenders", () => {
+    expect(
+      select(
+        ["dependency-check", 0.73],
+        ["eng-dependency-audit", 0.64, "engineering-pack"],
+        ["project-structure", 0.55],
+      ),
+    ).toEqual({
+      ids: ["dependency-check", "eng-dependency-audit"],
+      reason: "strong_lead",
+      strength: "strong",
+    });
+  });
+
+  it("lists at most three hints", () => {
+    expect(
+      select(["unity:a", 0.75, "unity"], ["unity:b", 0.74], ["unity:c", 0.73], ["unity:d", 0.72])
+        .ids,
+    ).toEqual(["unity:a", "unity:b", "unity:c"]);
   });
 });

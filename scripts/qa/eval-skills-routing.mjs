@@ -10,12 +10,14 @@ import {
   sanitizeRoutingQuery,
   matchesSkillRoutingQuery,
   rankModelInvocableSkillsForQuery,
+  selectSkillPlanningHints,
 } from "../../src/shared/skill-routing/index.ts";
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLED_SKILLS_DIR = path.join(PROJECT_ROOT, "resources", "skills");
 const BUNDLED_DATASET = path.join(BUNDLED_SKILLS_DIR, "_evals", "routing-cases.jsonl");
 const BUNDLED_CONTRACTS = path.join(BUNDLED_SKILLS_DIR, "_evals", "routing-contracts.json");
+const BUNDLED_HINT_CASES = path.join(BUNDLED_SKILLS_DIR, "_evals", "hint-cases.jsonl");
 
 function parseArgs(argv) {
   const args = {
@@ -25,17 +27,19 @@ function parseArgs(argv) {
     liveModel: false,
     reportPath: null,
     contractsPath: null,
+    hintCasesPath: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (["--skills-dir", "--dataset", "--report", "--contracts"].includes(arg)) {
+    if (["--skills-dir", "--dataset", "--report", "--contracts", "--hint-cases"].includes(arg)) {
       if (!argv[i + 1] || argv[i + 1].startsWith("--")) throw new Error(`${arg} requires a path`);
       const key = {
         "--skills-dir": "skillsDir",
         "--dataset": "datasetPath",
         "--report": "reportPath",
         "--contracts": "contractsPath",
+        "--hint-cases": "hintCasesPath",
       }[arg];
       args[key] = path.resolve(argv[++i]);
       continue;
@@ -416,6 +420,95 @@ export function evaluateRouting(skills, datasetPath, { contracts } = {}) {
   };
 }
 
+function loadHintCases(hintCasesPath) {
+  if (!fs.existsSync(hintCasesPath)) throw new Error(`Hint cases not found: ${hintCasesPath}`);
+  return fs
+    .readFileSync(hintCasesPath, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        const row = JSON.parse(line);
+        if (
+          typeof row.prompt !== "string" ||
+          !row.prompt.trim() ||
+          !Array.isArray(row.hintSkillIds) ||
+          !row.hintSkillIds.every((id) => typeof id === "string" && id.trim())
+        )
+          throw new Error("A hint case requires a prompt and hintSkillIds ([] = no hint)");
+        return row;
+      } catch (error) {
+        throw new Error(`Invalid hint case at ${hintCasesPath}:${index + 1}`, { cause: error });
+      }
+    });
+}
+
+/**
+ * Score the planning-hint rule the executor applies to the same ranking.
+ * Routing dataset rows only count wrong hints; hint cases also require the hint
+ * to fire (hintSkillIds) or to stay silent ([]).
+ */
+export function evaluatePlanningHints(skills, datasetPath, hintCasesPath) {
+  const hintsFor = (prompt) =>
+    selectSkillPlanningHints(
+      rankModelInvocableSkillsForQuery(
+        skills.map((item) => item.skill),
+        prompt,
+      ),
+    ).hints.map(({ skill, score }) => ({ id: skill.id, score }));
+  const report = {
+    datasetTotal: 0,
+    datasetHinted: 0,
+    datasetWrong: 0,
+    casesTotal: 0,
+    casesPassed: 0,
+    positiveCases: 0,
+    positiveHinted: 0,
+    negativeCases: 0,
+    negativeMisfires: 0,
+    failures: [],
+  };
+  for (const row of loadDataset(datasetPath)) {
+    if (!row.expectedSkillIds?.length) continue;
+    report.datasetTotal += 1;
+    const hints = hintsFor(row.prompt);
+    if (!hints.length) continue;
+    report.datasetHinted += 1;
+    if (!row.expectedSkillIds.includes(hints[0].id)) {
+      report.datasetWrong += 1;
+      report.failures.push({
+        source: "dataset",
+        prompt: row.prompt,
+        expected: row.expectedSkillIds,
+        hints,
+      });
+    }
+  }
+  for (const row of hintCasesPath ? loadHintCases(hintCasesPath) : []) {
+    report.casesTotal += 1;
+    const hints = hintsFor(row.prompt);
+    const expectHint = row.hintSkillIds.length > 0;
+    if (expectHint) report.positiveCases += 1;
+    else report.negativeCases += 1;
+    if (expectHint && hints.length && row.hintSkillIds.includes(hints[0].id)) {
+      report.positiveHinted += 1;
+      report.casesPassed += 1;
+    } else if (!expectHint && !hints.length) {
+      report.casesPassed += 1;
+    } else {
+      if (!expectHint) report.negativeMisfires += 1;
+      report.failures.push({
+        source: "hint_case",
+        prompt: row.prompt,
+        expected: row.hintSkillIds,
+        hints,
+      });
+    }
+  }
+  return report;
+}
+
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const skills = loadSkills(args.skillsDir);
@@ -436,6 +529,9 @@ export function main(argv = process.argv.slice(2)) {
     }
   }
   const report = evaluateRouting(skills, args.datasetPath, { contracts });
+  const hintCasesPath = args.hintCasesPath || (isBundled ? BUNDLED_HINT_CASES : null);
+  const hints = evaluatePlanningHints(skills, args.datasetPath, hintCasesPath);
+  report.planningHints = hints;
   console.log(`[skills-eval-routing] Skills: ${skills.length}`);
   console.log(
     "[skills-eval-routing] Mode: production deterministic routing (shared runtime scorer and gates)",
@@ -452,6 +548,13 @@ export function main(argv = process.argv.slice(2)) {
   console.log(
     `[skills-eval-routing] Preserved expected obligations: ${report.baseExpectedTotal} base + ${report.installedPackTotal} installed + ${report.policyTotal} policy = ${report.originalExpectedTotal}; contract failures: ${report.contractFailures}`,
   );
+  console.log(
+    `[skills-eval-routing] Planning hints: dataset ${hints.datasetHinted}/${hints.datasetTotal} hinted, ${hints.datasetWrong} wrong; hint cases ${hints.casesPassed}/${hints.casesTotal} passed (${hints.positiveHinted}/${hints.positiveCases} hinted, ${hints.negativeMisfires}/${hints.negativeCases} negatives misfired)`,
+  );
+  for (const failure of hints.failures)
+    console.log(
+      `[skills-eval-routing]   hint ${failure.source} failure: "${failure.prompt}" expected [${failure.expected.join(", ")}], hinted [${failure.hints.map(({ id }) => id).join(", ")}]`,
+    );
   if (args.reportPath) {
     fs.mkdirSync(path.dirname(args.reportPath), { recursive: true });
     fs.writeFileSync(args.reportPath, JSON.stringify(report, null, 2) + "\n");
@@ -461,7 +564,8 @@ export function main(argv = process.argv.slice(2)) {
     args.strict &&
     (report.contractFailures > 0 ||
       report.expectedHitRate < 0.95 ||
-      report.forbiddenMisfireRate > 0.02)
+      report.forbiddenMisfireRate > 0.02 ||
+      hints.failures.length > 0)
   ) {
     console.log("[skills-eval-routing] Strict threshold failure");
     return 1;

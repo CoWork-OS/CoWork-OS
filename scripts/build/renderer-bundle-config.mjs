@@ -25,6 +25,17 @@ export const rendererVendorAliases = [
   },
 ];
 
+// The dev dependency optimizer applies aliases too, so pre-bundling Mermaid
+// would inline the adapter, whose `?url` worker import only Vite's own asset
+// pipeline can load. Leave the aliased import external to the pre-bundle; the
+// dev server then resolves it to the adapter like any other source module.
+// The import scan cannot see the adapter's CommonJS ELK client behind the
+// alias; include it up front so the first ELK diagram does not reload the page.
+export const rendererOptimizeDeps = {
+  exclude: ["elkjs/lib/elk.bundled.js"],
+  include: ["elkjs/lib/elk-api.js"],
+};
+
 /** Record actual emitted chunks, separately from assets such as worker engines. */
 export function rendererBundleReport(target) {
   let emitted;

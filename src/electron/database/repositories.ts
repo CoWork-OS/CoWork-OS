@@ -1337,12 +1337,18 @@ export class TaskStore {
 
   search(
     query: string,
-    options?: { workspaceId?: string; limit?: number; includeArchivedSessions?: boolean },
+    options?: {
+      workspaceId?: string;
+      limit?: number;
+      offset?: number;
+      includeArchivedSessions?: boolean;
+    },
   ): Task[] {
     const normalizedQuery = typeof query === "string" ? query.trim().slice(0, 120) : "";
     if (!normalizedQuery) return [];
 
     const limit = Math.min(100, Math.max(1, Math.floor(options?.limit || 20)));
+    const offset = Math.max(0, Math.floor(options?.offset || 0));
     const escapedQuery = normalizedQuery.replace(/[\\%_]/g, (character) => `\\${character}`);
     const like = `%${escapedQuery}%`;
     const conditions = [
@@ -1366,9 +1372,9 @@ export class TaskStore {
         `SELECT * FROM tasks
          WHERE ${conditions.join(" AND ")}
          ORDER BY COALESCE(updated_at, created_at) DESC, created_at DESC, id DESC
-         LIMIT ?`,
+         LIMIT ? OFFSET ?`,
       )
-      .all(...args, limit) as Any[];
+      .all(...args, limit, offset) as Any[];
     return rows.map((row) => this.mapRowToTask(row));
   }
 
@@ -4092,6 +4098,7 @@ export class TaskTraceRepository {
 
   listTaskTraceRuns(
     request: import("../../shared/types").ListTaskTraceRunsRequest = {},
+    visibleTasks?: Task[],
   ): TaskTraceRunSummary[] {
     const limit =
       typeof request.limit === "number" && Number.isFinite(request.limit)
@@ -4103,9 +4110,12 @@ export class TaskTraceRepository {
         ? request.workspaceId.trim()
         : "";
 
-    const tasks = workspaceId
-      ? this.taskRepo.findByWorkspace(workspaceId, scanLimit, 0)
-      : this.taskRepo.findAll(scanLimit, 0);
+    const tasks =
+      visibleTasks !== undefined
+        ? visibleTasks.filter((task) => !workspaceId || task.workspaceId === workspaceId)
+        : workspaceId
+          ? this.taskRepo.findByWorkspace(workspaceId, scanLimit, 0)
+          : this.taskRepo.findAll(scanLimit, 0);
 
     return buildTaskTraceRunSummaries(tasks, { ...request, limit });
   }

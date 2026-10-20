@@ -271,6 +271,7 @@ import {
   upsertPinnedContextBlock,
 } from "./pinned-context-blocks";
 import { getCustomSkillLoader } from "./custom-skill-loader";
+import { selectSkillPlanningHints } from "../../shared/skill-routing";
 import { MemoryService } from "../memory/MemoryService";
 import { taskDisablesMemoryCapture } from "../memory/no-memory-directive";
 import { runWithMemoryRepoAccess } from "../security/memory-repo-access";
@@ -1283,6 +1284,8 @@ export class TaskExecutor {
    */
   private swarmForTools: ResolvedSwarm | null = null;
   private appliedSkills: SkillApplication[] = [];
+  // Skill ids named in the planning hint; null until planning (or a resumed step) computes them.
+  private planningHintedSkillIds: string[] | null = null;
   private taskContextNotes: string[] = [];
   private recoveryRequestActive: boolean = false;
   private capabilityUpgradeRequested: boolean = false;
@@ -8901,27 +8904,31 @@ ${transcript}
   }
 
   /**
-   * Detect high-confidence skill matches for the given query and return explicit
+   * Detect clear skill matches for the given query and return explicit
    * planning hints so even weaker models route to the correct skill via Skill.
-   * Returns empty string when no skill scores above the threshold.
+   * Returns empty string when no skill clearly leads the ranking.
    */
   private getHighConfidenceSkillHints(query: string): string {
-    // Lower bar than maybeHandleHighConfidenceSkillRouting: hints are informational
-    // (injected into the planning prompt) so a slightly weaker match is acceptable.
-    // The LLM still decides whether to act on them.
-    const HIGH_CONFIDENCE_THRESHOLD = 0.7;
+    // Hints are informational (injected into the planning prompt); the LLM still
+    // decides whether to act on them. See selectSkillPlanningHints for the rule.
     try {
       const skillLoader = getCustomSkillLoader();
       const availableToolNames = this.buildAvailableToolNameSet(this.getAvailableTools());
       if (!availableToolNames.has("Skill")) return "";
 
-      const scored = skillLoader
-        .rankModelInvocableSkillsForQuery(query, {
-          availableToolNames,
-          includePrereqBlockedSkills: true,
-          limit: 3,
-        })
-        .filter((entry) => entry.score >= HIGH_CONFIDENCE_THRESHOLD);
+      const ranked = skillLoader.rankModelInvocableSkillsForQuery(query, {
+        availableToolNames,
+        includePrereqBlockedSkills: true,
+      });
+      const { hints: scored, reason, strength } = selectSkillPlanningHints(ranked);
+      this.planningHintedSkillIds = scored.map(({ skill }) => skill.id);
+      this.emitEvent("log", {
+        message: `[skill-routing] planning hints: ${reason}`,
+        strength,
+        queryHash: createHash("sha1").update(query).digest("hex").slice(0, 12),
+        candidates: ranked.slice(0, 3).map(({ skill, score }) => ({ skillId: skill.id, score })),
+        hintedSkillIds: scored.map(({ skill }) => skill.id),
+      });
 
       if (scored.length === 0) return "";
 
@@ -8929,6 +8936,17 @@ ${transcript}
         (entry) =>
           `- Skill "${entry.skill.id}" (${entry.skill.name}): ${entry.skill.description || ""}`,
       );
+      if (strength === "tentative") {
+        // A tentative lead may share only vocabulary with the request, so the planner
+        // must be free to drop it without a primed example step.
+        return [
+          `Possibly relevant skills (matched on wording only, so they may not apply):`,
+          ...hints,
+          ``,
+          `Add a plan step to invoke one with Skill only if the request is actually about what its description covers. Otherwise ignore this list and plan normally.`,
+          `Treat these as additive helpers. Do not rewrite or replace the original task.`,
+        ].join("\n");
+      }
       return [
         `Relevant skills for this task:`,
         ...hints,
@@ -20806,7 +20824,10 @@ ${transcript}
     if (hasWebPageInteractionIntent(stepText || "")) {
       for (const toolName of WEB_PAGE_INTERACTION_TOOLS) base.add(toolName);
     }
-    if (this.stepTextInvokesSkill(stepText || "")) {
+    if (
+      this.stepTextInvokesSkill(stepText || "") ||
+      this.stepTextRefersToHintedSkill(stepText || "")
+    ) {
       base.add("Skill");
     }
     if (REPO_STATUS_INTENT_PATTERN.test(String(stepText || ""))) {
@@ -20814,6 +20835,33 @@ ${transcript}
       base.add("git_diff");
     }
     return base;
+  }
+
+  /**
+   * True when the step talks about a skill and planning hinted one. Planners paraphrase
+   * a hinted skill ("Apply the Unity in-app purchases skill"), which the exact id/name
+   * match in stepTextInvokesSkill misses, and the step then has no way to call it.
+   */
+  private stepTextRefersToHintedSkill(stepText: string): boolean {
+    if (!/\bskills?\b/i.test(stepText)) return false;
+    return this.getPlanningHintedSkillIds().length > 0;
+  }
+
+  private getPlanningHintedSkillIds(): string[] {
+    if (this.planningHintedSkillIds) return this.planningHintedSkillIds;
+    // A task resumed after a restart skips planning; rebuild the hint from the same query.
+    try {
+      const ranked = getCustomSkillLoader().rankModelInvocableSkillsForQuery(
+        this.getSkillRoutingQuery(),
+        { includePrereqBlockedSkills: true },
+      );
+      this.planningHintedSkillIds = selectSkillPlanningHints(ranked).hints.map(
+        ({ skill }) => skill.id,
+      );
+    } catch {
+      this.planningHintedSkillIds = [];
+    }
+    return this.planningHintedSkillIds;
   }
 
   /** True when the text explicitly asks to use a model-invocable skill by id or name. */

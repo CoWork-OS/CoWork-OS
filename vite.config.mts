@@ -6,8 +6,8 @@ import {
   rendererBundleReport,
   mermaidParserPlugin,
   rendererCodeSplitting,
-  rendererVendorAliases,
   rendererOptimizeDeps,
+  rendererVendorAliases,
 } from "./scripts/build/renderer-bundle-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -19,7 +19,6 @@ export default defineConfig({
   root: path.resolve(import.meta.dirname, "src/renderer"),
   base: "./",
   publicDir: path.resolve(import.meta.dirname, "src/renderer/public"),
-  optimizeDeps: rendererOptimizeDeps,
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/renderer"),
     emptyOutDir: true,
@@ -32,6 +31,7 @@ export default defineConfig({
       { find: "@shared", replacement: path.resolve(import.meta.dirname, "./src/shared") },
     ],
   },
+  optimizeDeps: rendererOptimizeDeps,
   server: {
     host: "127.0.0.1",
     port: Number(process.env.COWORK_DEV_SERVER_PORT || 5173),

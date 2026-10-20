@@ -2041,6 +2041,7 @@ export function BrowserWorkbenchView({
             <span>Annotate</span>
           </button>
           <ToolbarMenu
+            nativeMenu={nativeEngine}
             hasPage={Boolean(activeUrl)}
             viewports={VIEWPORT_PRESETS}
             activeViewport={

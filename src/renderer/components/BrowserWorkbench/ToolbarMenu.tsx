@@ -28,6 +28,7 @@ export function ToolbarMenu({
   activeViewport,
   snapshotOverlay,
   diagnosticsOpen,
+  nativeMenu = false,
   onAnnotateScreenshot,
   onScreenshot,
   onOpenExternal,
@@ -41,6 +42,8 @@ export function ToolbarMenu({
   activeViewport: string | null;
   snapshotOverlay: boolean;
   diagnosticsOpen: boolean;
+  /** Native pages stay live underneath an OS popup; DOM menus require a screenshot handoff. */
+  nativeMenu?: boolean;
   onAnnotateScreenshot: () => void;
   onScreenshot: () => void;
   onOpenExternal: () => void;
@@ -51,9 +54,10 @@ export function ToolbarMenu({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const useNativeMenu = nativeMenu && Boolean(window.electronAPI?.popupBrowserToolbarMenu);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || useNativeMenu) return;
     const close = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -66,7 +70,59 @@ export function ToolbarMenu({
       window.removeEventListener("pointerdown", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, useNativeMenu]);
+
+  const toggleMenu = async () => {
+    if (!useNativeMenu) {
+      setOpen((current) => !current);
+      return;
+    }
+    if (open) return;
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setOpen(true);
+    try {
+      const action = await window.electronAPI.popupBrowserToolbarMenu({
+        x: rect.left,
+        y: rect.bottom,
+        hasPage,
+        viewports: viewports.map(({ label, width, height }) => ({ label, width, height })),
+        activeViewport,
+        snapshotOverlay,
+        diagnosticsOpen,
+      });
+      switch (action) {
+        case "annotate":
+          onAnnotateScreenshot();
+          break;
+        case "screenshot":
+          onScreenshot();
+          break;
+        case "external":
+          onOpenExternal();
+          break;
+        case "fit":
+          onViewport(null);
+          break;
+        case "outlines":
+          onToggleSnapshotOverlay();
+          break;
+        case "diagnostics":
+          onToggleDiagnostics();
+          break;
+        default: {
+          if (action?.startsWith("viewport:")) {
+            const viewport = viewports[Number(action.slice("viewport:".length))];
+            if (viewport) onViewport(viewport);
+          }
+        }
+      }
+    } catch {
+      // A closing window can cancel the popup IPC; leave the live page intact.
+    } finally {
+      setOpen(false);
+    }
+  };
 
   const run = (action: () => void) => () => {
     setOpen(false);
@@ -103,11 +159,11 @@ export function ToolbarMenu({
         aria-label="More"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => void toggleMenu()}
       >
         <Ellipsis size={17} strokeWidth={2} aria-hidden="true" />
       </button>
-      {open && (
+      {open && !useNativeMenu && (
         <div className="browser-workbench-tab-menu browser-workbench-toolbar-popover" role="menu">
           {item("Annotate screenshot", ImagePlus, onAnnotateScreenshot, { disabled: !hasPage })}
           {item("Save screenshot", Camera, onScreenshot, { disabled: !hasPage })}

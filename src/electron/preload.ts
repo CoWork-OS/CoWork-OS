@@ -1,5 +1,10 @@
 import type { ComputerViewState } from "../shared/computer-view";
 import {
+  BROWSER_TOOLBAR_MENU_POPUP,
+  type BrowserToolbarMenuAction,
+  type BrowserToolbarMenuRequest,
+} from "../shared/browser-toolbar-menu";
+import {
   BROWSER_VAULT_IPC,
   type BrowserVaultItem,
   type BrowserVaultAnswer,
@@ -2712,6 +2717,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_WORKBENCH_TAB_COMMAND, handler);
   },
+  popupBrowserToolbarMenu: (data: BrowserToolbarMenuRequest) =>
+    ipcRenderer.invoke(
+      BROWSER_TOOLBAR_MENU_POPUP,
+      data,
+    ) as Promise<BrowserToolbarMenuAction | null>,
   // Native tab views (browser engine "native"): the main process owns each tab's page.
   openBrowserTabView: (data: {
     taskId: string;
@@ -6851,6 +6861,9 @@ export interface ElectronAPI {
     callback: (event: BrowserWorkbenchNavigationBlockedEvent) => void,
   ) => () => void;
   /** A page asks to share a screen or window: the picker's choices. */
+  popupBrowserToolbarMenu: (
+    data: BrowserToolbarMenuRequest,
+  ) => Promise<BrowserToolbarMenuAction | null>;
   /** Native tab views (browser engine "native"); see src/electron/browser/browser-tab-views.ts. */
   openBrowserTabView: (data: {
     taskId: string;

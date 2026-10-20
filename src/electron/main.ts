@@ -268,6 +268,8 @@ import { attachBrowserGuest } from "./browser/browser-guest-attach";
 import { BrowserUnloadGuard } from "./browser/browser-unload-guard";
 import { BrowserScreenShare } from "./browser/browser-screen-share";
 import { BrowserTabViewHost, setBrowserTabViewHost } from "./browser/browser-tab-views";
+import { popupBrowserToolbarMenu } from "./browser/browser-toolbar-menu";
+import { BROWSER_TOOLBAR_MENU_POPUP } from "../shared/browser-toolbar-menu";
 import { applyBrowserUserAgent } from "./browser/browser-user-agent";
 import { BrowserDownloadManager } from "./browser/browser-download-manager";
 import {
@@ -5366,6 +5368,10 @@ if (isMacSafeStorageMigrationWorker) {
         tabId,
         bounds: tabId ? readBounds(data.bounds) : null,
       });
+    });
+    ipcMain.handle(BROWSER_TOOLBAR_MENU_POPUP, (event, data: Any) => {
+      if (!mainWindow || event.sender.id !== mainWindow.webContents.id || !data) return null;
+      return popupBrowserToolbarMenu(mainWindow, data);
     });
     ipcMain.handle(IPC_CHANNELS.BROWSER_TAB_VIEW_CAPTURE, async (event, data: Any) => {
       const key = readTabViewKey(event, data);

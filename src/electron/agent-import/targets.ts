@@ -35,7 +35,7 @@ import type {
   ImportedScheduledTask,
   TargetOutcome,
 } from "./apply";
-import type { ImportChannelType, ImportProviderId } from "./plan";
+import type { ImportChannelType, ImportModelProviderId } from "./plan";
 
 const SOURCE_LABELS: Record<AgentImportSource, string> = {
   hermes: "Hermes",
@@ -248,13 +248,16 @@ export function createDefaultImportTargets(deps: DefaultImportTargetDeps): Agent
         );
         return { provider: status.currentProvider, configured: current?.configured === true };
       },
-      selectModel: (provider: ImportProviderId, model?: string) => {
+      selectModel: (provider: ImportModelProviderId, model?: string, baseUrl?: string) => {
         const settings = LLMProviderFactory.loadSettings() as unknown as Record<string, unknown>;
         settings.providerType = provider;
+        const node = () =>
+          settingsNode(settings, provider === "openai-compatible" ? "openaiCompatible" : provider);
+        if (baseUrl) node().baseUrl = baseUrl;
         // Anthropic models use CoWork's own model keys; keep its default there.
         if (model && provider !== "anthropic") {
           settings.modelKey = model;
-          settingsNode(settings, provider).model = model;
+          node().model = model;
         }
         LLMProviderFactory.saveSettings(
           settings as unknown as ReturnType<typeof LLMProviderFactory.loadSettings>,

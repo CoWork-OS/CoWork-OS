@@ -1,5 +1,11 @@
 import { narrowestBotWorksOn } from "../../shared/bot-computer";
 import {
+  botWorkspaceId,
+  isBotWorkspaceId,
+  normalizeBotFileAccess,
+  shouldContainBotRun,
+} from "../../shared/bot-containment";
+import {
   collaborativeExecutionLanes,
   isCollaborativeExecutionTask,
 } from "../agents/collaborative-execution";
@@ -2017,6 +2023,72 @@ export class AgentDaemon extends EventEmitter {
    * - Merge denied tools into AgentConfig.toolRestrictions (deny-wins)
    * - Apply provider/model/personality defaults
    */
+  /**
+   * Moves a bot's run into the bot's own folder when nobody started it by hand
+   * (shouldContainBotRun), and marks every task working in a bot's folder as contained so it
+   * runs under the sandboxed access limit and cannot switch workspaces. Returns the task as it
+   * should run; the move and the mark are persisted.
+   */
+  private containBotTask(task: Task): Task {
+    let workspaceId = task.workspaceId;
+    if (!isBotWorkspaceId(workspaceId) && task.assignedAgentRoleId) {
+      const role = this.agentRoleRepo.findById(task.assignedAgentRoleId);
+      if (
+        role &&
+        shouldContainBotRun(
+          this.getTaskAncestorChain(task),
+          normalizeBotFileAccess(role.fileAccess),
+        )
+      ) {
+        workspaceId = this.ensureBotWorkspace(role).id;
+      }
+    }
+    if (!isBotWorkspaceId(workspaceId)) return task;
+    if (workspaceId === task.workspaceId && task.agentConfig?.botContained === true) return task;
+
+    const agentConfig: AgentConfig = { ...task.agentConfig, botContained: true };
+    this.taskRepo.update(task.id, { agentConfig });
+    if (workspaceId !== task.workspaceId) this.updateTaskWorkspace(task.id, workspaceId);
+    return { ...task, workspaceId, agentConfig };
+  }
+
+  /** The task followed by its ancestors, nearest first (bounded, so a cycle cannot hang). */
+  private getTaskAncestorChain(task: Task): Task[] {
+    const chain = [task];
+    let current: Task | undefined = task;
+    while (current?.parentTaskId && chain.length < 16) {
+      current = this.taskRepo.findById(current.parentTaskId);
+      if (current) chain.push(current);
+    }
+    return chain;
+  }
+
+  /** The bot's own folder and its hidden workspace row, created on first use. */
+  private ensureBotWorkspace(role: AgentRole): Workspace {
+    const id = botWorkspaceId(role.id);
+    const folder = path.join(getUserDataDir(), "bots", role.id, "work");
+    fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    const existing = this.workspaceRepo.findById(id);
+    if (existing?.path === folder) return existing;
+    const now = Date.now();
+    this.workspaceRepo.upsertWithId({
+      id,
+      name: `${role.displayName || role.name} (own folder)`,
+      path: folder,
+      createdAt: existing?.createdAt ?? now,
+      lastUsedAt: now,
+      permissions: {
+        ...DEFAULT_WORKSPACE_PERMISSIONS,
+        shell: true,
+        unrestrictedFileAccess: false,
+        allowedPaths: [],
+      },
+    });
+    const created = this.workspaceRepo.findById(id);
+    if (!created) throw new Error(`Bot folder workspace ${id} was not created`);
+    return created;
+  }
+
   private applyAgentRoleOverrides(task: Task): { task: Task; changed: boolean } {
     const roleId = task.assignedAgentRoleId;
     if (!roleId) return { task, changed: false };
@@ -3384,8 +3456,9 @@ export class AgentDaemon extends EventEmitter {
       // created so the current turn gets the hybrid/execute team contract and
       // can see the bot handoff tool.
       const teamNormalizedTask = this.ensureBotTaskTeam(task);
-      const { task: effectiveTask, changed: roleOverridesChanged } =
+      const { task: roleAdjustedTask, changed: roleOverridesChanged } =
         this.applyAgentRoleOverrides(teamNormalizedTask);
+      const effectiveTask = this.containBotTask(roleAdjustedTask);
       if (roleOverridesChanged) {
         try {
           this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
@@ -17309,7 +17382,9 @@ export class AgentDaemon extends EventEmitter {
       this.taskRepo.update(taskId, { agentConfig: overrideResult.task.agentConfig });
     }
     const { task: roleAdjustedTask } = this.applyAgentRoleOverrides(overrideResult.task);
-    const persistentWorkerRoleBoundary = normalizeWorkerRoleTaskConfig(roleAdjustedTask);
+    const persistentWorkerRoleBoundary = normalizeWorkerRoleTaskConfig(
+      this.containBotTask(roleAdjustedTask),
+    );
     const taskWithFollowUpOverride = effectiveOptions?.agentConfigOverride
       ? {
           ...persistentWorkerRoleBoundary.task,
@@ -17321,6 +17396,8 @@ export class AgentDaemon extends EventEmitter {
               persistentWorkerRoleBoundary.task.agentConfig?.accessCeilingProfileId,
             // Nor the "Works on" limit inherited from a delegating bot.
             inheritedBotWorksOn: persistentWorkerRoleBoundary.task.agentConfig?.inheritedBotWorksOn,
+            // Nor the bot's-own-folder limit.
+            botContained: persistentWorkerRoleBoundary.task.agentConfig?.botContained,
           },
         }
       : persistentWorkerRoleBoundary.task;

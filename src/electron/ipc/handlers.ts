@@ -446,6 +446,7 @@ import {
   AgentRoleWorksOnSchema,
   AgentRoleDesktopHostSchema,
   AgentRoleDesktopGroupSchema,
+  AgentRoleFileAccessSchema,
   MCPConnectorOAuthSchema,
   ChatGPTImportSchema,
   TextMemoryImportSchema,
@@ -10181,6 +10182,10 @@ export async function setupIpcHandlers(
         validateInput(AgentRoleDesktopGroupSchema, request.desktopGroup, "shared desktop") ??
         undefined;
     }
+    if (request.fileAccess !== undefined) {
+      request.fileAccess =
+        validateInput(AgentRoleFileAccessSchema, request.fileAccess, "files") ?? undefined;
+    }
     return agentRoleRepo.create(request);
   });
 
@@ -10238,6 +10243,13 @@ export async function setupIpcHandlers(
         AgentRoleDesktopGroupSchema,
         normalizedRequest.desktopGroup,
         "shared desktop",
+      );
+    }
+    if (normalizedRequest.fileAccess !== undefined) {
+      normalizedRequest.fileAccess = validateInput(
+        AgentRoleFileAccessSchema,
+        normalizedRequest.fileAccess,
+        "files",
       );
     }
     const result = await agentRoleRepo.update(normalizedRequest);

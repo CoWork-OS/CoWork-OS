@@ -27,6 +27,7 @@ import {
 import { assertSchedulerFence } from "../automation/scheduler-lease-store";
 import { commitDispatchReservation } from "../automation/dispatch-budget-store";
 import Database from "better-sqlite3";
+import { isBotWorkspaceId } from "../../shared/bot-containment";
 import {
   clearAnnotationUndo,
   recordAnnotationResult,
@@ -299,6 +300,7 @@ export class WorkspaceStore {
     return row ? this.mapRowToWorkspace(row) : undefined;
   }
 
+  /** Every workspace except bots' own folders, which only their bots' tasks use. */
   findAll(): Workspace[] {
     const stmt = this.db.prepare(`
       SELECT *
@@ -306,7 +308,9 @@ export class WorkspaceStore {
       ORDER BY COALESCE(last_used_at, created_at) DESC
     `);
     const rows = stmt.all() as Any[];
-    return rows.map((row) => this.mapRowToWorkspace(row));
+    return rows
+      .filter((row) => !isBotWorkspaceId(row.id))
+      .map((row) => this.mapRowToWorkspace(row));
   }
 
   /**

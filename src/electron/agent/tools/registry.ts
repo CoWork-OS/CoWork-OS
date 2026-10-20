@@ -11,6 +11,7 @@ import {
   isComputerToolBlocked,
   type BotWorksOn,
 } from "../../../shared/bot-computer";
+import { BOT_CONTAINED_DENIED_TOOL_NAMES } from "../../../shared/bot-containment";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -1483,10 +1484,20 @@ export class ToolRegistry {
     return isComputerToolBlocked(worksOn, kind);
   }
 
+  /** A run in a bot's own folder; fails closed if the task cannot be read. */
+  private isBotContainedTask(): boolean {
+    try {
+      return this.daemon.getTask?.(this.taskId)?.agentConfig?.botContained === true;
+    } catch {
+      return true;
+    }
+  }
+
   /** Denied by this task's own restrictions (agent config, skills or the task's wording). */
   private isDeniedByTaskRestrictions(toolName: string): boolean {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
     if (this.isBlockedByBotWorksOn(toolName)) return true;
+    if (BOT_CONTAINED_DENIED_TOOL_NAMES.has(toolName) && this.isBotContainedTask()) return true;
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;
@@ -4343,12 +4354,19 @@ export class ToolRegistry {
    * Callback for handling workspace switches (set by executor)
    */
   private workspaceSwitchHandler?: (newWorkspace: Workspace) => Promise<void>;
+  /** Why this task may not switch workspaces at all, checked before any lookup or creation. */
+  private workspaceSwitchRefusal?: () => string | undefined;
 
   /**
-   * Set the callback for handling workspace switches
+   * Set the callback for handling workspace switches, and optionally a check that refuses any
+   * switch for this task (a bot working in its own folder).
    */
-  setWorkspaceSwitchHandler(handler: (newWorkspace: Workspace) => Promise<void>): void {
+  setWorkspaceSwitchHandler(
+    handler: (newWorkspace: Workspace) => Promise<void>,
+    refusal?: () => string | undefined,
+  ): void {
     this.workspaceSwitchHandler = handler;
+    this.workspaceSwitchRefusal = refusal;
   }
 
   /**
@@ -4375,6 +4393,8 @@ export class ToolRegistry {
         error: "Workspace switching is not available in this context",
       };
     }
+    const refusal = this.workspaceSwitchRefusal?.();
+    if (refusal) return { success: false, error: refusal };
 
     try {
       // Look up the workspace

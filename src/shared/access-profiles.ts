@@ -6,6 +6,8 @@
  * safe to run, but it must never widen the sandbox boundary.
  */
 
+import { BOT_CONTAINED_ACCESS_CEILING } from "./bot-containment";
+
 export type AccessSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type AccessApprovalPolicy = "untrusted" | "on-request" | "never";
 export type AccessReviewer = "user" | "auto-review" | "none";
@@ -413,7 +415,9 @@ export function resolveAccessProfileDefinitionWithStatus(
       ]),
   );
   const getProfile = (id: AccessProfileId): AccessProfileDefinition | undefined =>
-    getBuiltinAccessProfile(id) || customById.get(id);
+    getBuiltinAccessProfile(id) ||
+    (id === BOT_CONTAINED_ACCESS_CEILING.id ? { ...BOT_CONTAINED_ACCESS_CEILING } : undefined) ||
+    customById.get(id);
 
   const resolve = (
     id: AccessProfileId,
@@ -746,22 +750,28 @@ export function narrowAccessProfileToCeiling(
 }
 
 /**
- * Every access limit a task works under: its own agent's, then those inherited from the
- * sessions that started it. A malformed entry is kept as is so the resolver fails closed.
+ * Every access limit a task works under: its own agent's, the bot's-own-folder limit when the
+ * task runs there, then those inherited from the sessions that started it. A malformed entry is
+ * kept as is so the resolver fails closed.
  */
 export function accessCeilingsOf(
   config:
-    | { accessCeilingProfileId?: unknown; inheritedAccessCeilingProfileIds?: unknown }
+    | {
+        accessCeilingProfileId?: unknown;
+        inheritedAccessCeilingProfileIds?: unknown;
+        botContained?: unknown;
+      }
     | undefined,
 ): unknown[] {
   if (!config) return [];
   const own = config.accessCeilingProfileId === undefined ? [] : [config.accessCeilingProfileId];
+  const contained = config.botContained === true ? [BOT_CONTAINED_ACCESS_CEILING.id] : [];
   const inherited = Array.isArray(config.inheritedAccessCeilingProfileIds)
     ? config.inheritedAccessCeilingProfileIds
     : config.inheritedAccessCeilingProfileIds === undefined
       ? []
       : [config.inheritedAccessCeilingProfileIds];
-  return [...own, ...inherited];
+  return [...own, ...contained, ...inherited];
 }
 
 /** Stands in for a malformed limit; the resolver never resolves it, so it fails closed. */
@@ -770,7 +780,11 @@ export const INVALID_ACCESS_LIMIT_ID = "invalid-access-limit";
 /** The well-formed limits a child or scheduled task inherits from the task that started it. */
 export function inheritableAccessCeilings(
   config:
-    | { accessCeilingProfileId?: unknown; inheritedAccessCeilingProfileIds?: unknown }
+    | {
+        accessCeilingProfileId?: unknown;
+        inheritedAccessCeilingProfileIds?: unknown;
+        botContained?: unknown;
+      }
     | undefined,
 ): string[] {
   const ids = accessCeilingsOf(config).map((value) =>

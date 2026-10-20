@@ -1717,6 +1717,8 @@ interface AgentRoleData {
   worksOn?: import("../shared/bot-computer").BotWorksOn;
   desktopHost?: string;
   desktopGroup?: string;
+  /** Which files runs nobody started by hand work on; unset means its own folder. */
+  fileAccess?: import("../shared/bot-containment").BotFileAccess;
   soul?: string;
   heartbeatPolicy?: import("../shared/types").HeartbeatPolicy;
   heartbeatEnabled?: boolean;
@@ -1761,6 +1763,7 @@ interface CreateAgentRoleRequest {
   worksOn?: import("../shared/bot-computer").BotWorksOn;
   desktopHost?: string;
   desktopGroup?: string;
+  fileAccess?: import("../shared/bot-containment").BotFileAccess;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];
@@ -1796,6 +1799,7 @@ interface UpdateAgentRoleRequest {
   worksOn?: import("../shared/bot-computer").BotWorksOn | null;
   desktopHost?: string | null;
   desktopGroup?: string | null;
+  fileAccess?: import("../shared/bot-containment").BotFileAccess | null;
   soul?: string;
   operatorMandate?: string;
   allowedLoopTypes?: import("../shared/types").CompanyLoopType[];

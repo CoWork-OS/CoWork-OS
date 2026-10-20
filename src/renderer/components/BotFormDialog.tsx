@@ -15,6 +15,7 @@ import {
   isValidDesktopHost,
   type BotWorksOn,
 } from "../../shared/bot-computer";
+import { BOT_FILE_ACCESS_OPTIONS, type BotFileAccess } from "../../shared/bot-containment";
 import "./bot-form.css";
 
 export interface BotFormValues {
@@ -32,6 +33,8 @@ export interface BotFormValues {
   desktopHost: string;
   /** For its own desktop: a shared desktop's name; empty means a desktop of its own. */
   desktopGroup: string;
+  /** Which files runs nobody started by hand work on. */
+  fileAccess: BotFileAccess;
 }
 
 /** Why the Runs on value can't be saved, or null when it can. */
@@ -294,6 +297,24 @@ export function BotFormDialog({
                   </small>
                 </label>
               ) : null}
+              <label className="bot-form-field">
+                <span>Files</span>
+                <select
+                  className="bot-form-file-access"
+                  value={values.fileAccess}
+                  onChange={(event) => set({ fileAccess: event.target.value as BotFileAccess })}
+                >
+                  {BOT_FILE_ACCESS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <small className="bot-form-hint">
+                  {BOT_FILE_ACCESS_OPTIONS.find((option) => option.value === values.fileAccess)
+                    ?.description ?? ""}
+                </small>
+              </label>
             </>
           )}
           {error ? (

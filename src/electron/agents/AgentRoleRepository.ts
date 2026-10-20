@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { isBotWorksOn, isValidDesktopGroup, isValidDesktopHost } from "../../shared/bot-computer";
+import { isBotFileAccess } from "../../shared/bot-containment";
 import { v4 as uuidv4 } from "uuid";
 import {
   AgentRole,
@@ -296,6 +297,7 @@ export class AgentRoleStore {
       worksOn: isBotWorksOn(request.worksOn) ? request.worksOn : undefined,
       desktopHost: isValidDesktopHost(request.desktopHost) ? request.desktopHost : undefined,
       desktopGroup: isValidDesktopGroup(request.desktopGroup) ? request.desktopGroup : undefined,
+      fileAccess: isBotFileAccess(request.fileAccess) ? request.fileAccess : undefined,
     };
 
     const stmt = this.db.prepare(`
@@ -310,8 +312,8 @@ export class AgentRoleStore {
         heartbeat_profile, heartbeat_active_hours, heartbeat_status, operator_mandate, allowed_loop_types,
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
         last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at, works_on,
-        desktop_host, desktop_group
-      ) VALUES (${Array.from({ length: 44 }, () => "?").join(", ")})
+        desktop_host, desktop_group, file_access
+      ) VALUES (${Array.from({ length: 45 }, () => "?").join(", ")})
     `);
 
     stmt.run(
@@ -359,6 +361,7 @@ export class AgentRoleStore {
       role.worksOn ?? null,
       role.desktopHost ?? null,
       role.desktopGroup ?? null,
+      role.fileAccess ?? null,
     );
 
     const shouldPersistAutomationProfile =
@@ -624,6 +627,10 @@ export class AgentRoleStore {
     if (request.desktopGroup !== undefined) {
       fields.push("desktop_group = ?");
       values.push(isValidDesktopGroup(request.desktopGroup) ? request.desktopGroup : null);
+    }
+    if (request.fileAccess !== undefined) {
+      fields.push("file_access = ?");
+      values.push(isBotFileAccess(request.fileAccess) ? request.fileAccess : null);
     }
     if (request.soul !== undefined) {
       fields.push("soul = ?");
@@ -971,6 +978,7 @@ export class AgentRoleStore {
       worksOn: isBotWorksOn(row.works_on) ? row.works_on : undefined,
       desktopHost: isValidDesktopHost(row.desktop_host) ? row.desktop_host : undefined,
       desktopGroup: isValidDesktopGroup(row.desktop_group) ? row.desktop_group : undefined,
+      fileAccess: isBotFileAccess(row.file_access) ? row.file_access : undefined,
       soul: row.soul || undefined,
       heartbeatEnabled: row.heartbeat_enabled === 1,
       heartbeatIntervalMinutes: row.heartbeat_interval_minutes || 15,

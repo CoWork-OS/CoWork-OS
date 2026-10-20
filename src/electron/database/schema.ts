@@ -4530,6 +4530,8 @@ export class DatabaseManager {
       "ALTER TABLE agent_roles ADD COLUMN desktop_host TEXT",
       // For "Its own desktop": a shared desktop's name (null = a desktop of its own).
       "ALTER TABLE agent_roles ADD COLUMN desktop_group TEXT",
+      // Which files unattended runs work on (own_folder, workspace; null = own_folder).
+      "ALTER TABLE agent_roles ADD COLUMN file_access TEXT",
     ];
 
     for (const sql of missionControlColumns) {

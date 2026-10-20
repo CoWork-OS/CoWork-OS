@@ -145,30 +145,30 @@ result.
 
 CoWork OS includes configurable guardrails in **Settings > System & Security > Safety Limits** to limit what the agent can do:
 
-| Guardrail              | Description                                                        | Default            |
-| ---------------------- | ------------------------------------------------------------------ | ------------------ |
+| Guardrail              | Description                                                                                                                                                                     | Default             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
 | **Token Budget**       | Max tokens (input + output) per user turn (each follow-up message starts a new count); a task's own budget counts the whole task, always applies, and can only lower this limit | 2,000,000 (enabled) |
-| **Cost Budget**        | Max estimated cost (USD) per task; a task's own budget always applies but can only lower this limit | $10.00 (enabled)   |
-| **Iteration Limit**    | Max LLM calls per continuation window; reaching it auto-continues within the continuation caps | 500 (enabled)      |
-| **Dangerous Commands** | Block dangerous command-tool commands matching patterns            | Enabled            |
-| **File Size Limit**    | Max file size the agent can write                                  | 50 MB (enabled)    |
-| **Domain Rules**       | Profile- and administrator-controlled destination allow/deny rules | Profile-controlled |
+| **Cost Budget**        | Max estimated cost (USD) per task; a task's own budget always applies but can only lower this limit                                                                             | $10.00 (enabled)    |
+| **Iteration Limit**    | Max LLM calls per continuation window; reaching it auto-continues within the continuation caps                                                                                  | 500 (enabled)       |
+| **Dangerous Commands** | Block dangerous command-tool commands matching patterns                                                                                                                         | Enabled             |
+| **File Size Limit**    | Max file size the agent can write                                                                                                                                               | 50 MB (enabled)     |
+| **Domain Rules**       | Profile- and administrator-controlled destination allow/deny rules                                                                                                              | Profile-controlled  |
 
 #### Dangerous Command Blocking
 
 The following command patterns are blocked by default:
 
-| Pattern                  | Risk                  |
+| Pattern | Risk |
 | ------------------------ | --------------------- | ---------------- |
-| `sudo`                   | Elevated privileges   |
-| `rm -rf /` or `rm -rf ~` | Mass deletion         |
-| `mkfs`                   | Filesystem formatting |
-| `dd if=`                 | Direct disk writes    |
-| Fork bombs               | Process exhaustion    |
+| `sudo` | Elevated privileges |
+| `rm -rf /` or `rm -rf ~` | Mass deletion |
+| `mkfs` | Filesystem formatting |
+| `dd if=` | Direct disk writes |
+| Fork bombs | Process exhaustion |
 | `curl\|bash`, `wget\|sh` | Remote code execution |
-| `chmod 777`              | Overly permissive     |
-| `> /dev/sd`              | Direct device writes  |
-| `:(){ :                  | :& };:`               | Fork bomb syntax |
+| `chmod 777` | Overly permissive |
+| `> /dev/sd` | Direct device writes |
+| `:(){ :                  | :& };:` | Fork bomb syntax |
 
 Commands are blocked **before** reaching the approval dialog. You can add custom patterns in Settings.
 
@@ -232,6 +232,28 @@ workspace there, an extra workspace root, or a profile filesystem rule (a read
 rule opens reads only). The check follows symlinks, including a store that is
 itself a link into a dotfiles folder.
 
+**Bots work in their own folder.** A bot run that nobody started by hand
+(heartbeat, Slack and other channels, schedules, hooks, routines, bot-to-bot work
+outside a chat) moves into the bot's own folder,
+`<userData>/bots/<bot id>/work`, before it starts. That includes a message from
+the owner through a channel. The folder's workspace row never appears in
+workspace lists. A run there:
+
+- works under a limit that caps the sandbox at workspace-write, so shell commands
+  and code stay sandboxed even under Full access (approvals and network are
+  unchanged);
+- cannot switch to another workspace (`switch_workspace` and the automatic
+  switch are refused);
+- loses `get_env` and the macOS process and login-item tools;
+- passes all of this to the tasks it starts.
+
+Runs a person starts in the app keep the workspace they were started in: a bot
+chat, a team peer, or a task typed and assigned in a project, including the
+tasks those start. A bot's **Files** setting can be changed to **Your
+workspace**, which turns containment off for that bot. The decision is
+`shouldContainBotRun` in `src/shared/bot-containment.ts`; the move is
+`AgentDaemon.containBotTask`.
+
 **Bots and outside files.** When a bot runs a task, directly or through a task it
 delegated, reaching a file outside the workspace always waits for a person's
 answer: allow rules, the auto-reviewer and session-wide auto-approve do not
@@ -263,13 +285,13 @@ especially for tasks using a broad access profile.
 
 When command tools are exposed by the active access profile:
 
-| Aspect                | Implementation                                                |
-| --------------------- | ------------------------------------------------------------- |
-| Working directory     | Restricted to the active workspace and profile-approved roots |
+| Aspect                | Implementation                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Working directory     | Restricted to the active workspace and profile-approved roots                                                                                               |
 | Environment variables | Minimal set (PATH, HOME, USER, SHELL, LANG, TERM, TMPDIR) plus toolchain configuration (proxies without credentials, CA bundles, relocated toolchain homes) |
-| API keys              | **Never passed** to subprocesses                              |
-| Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget |
-| Output limit          | 100KB (truncated if exceeded)                                 |
+| API keys              | **Never passed** to subprocesses                                                                                                                            |
+| Timeout               | 2 minutes by default (5 for installs, builds and tests); a command may ask for up to 30 minutes, capped by the current step's time budget                   |
+| Output limit          | 100KB (truncated if exceeded)                                                                                                                               |
 
 **Security note**: Your API keys and secrets are never exposed to shell commands. The app creates a minimal, safe environment for each command.
 
@@ -291,13 +313,13 @@ requires network permission. Code runs for up to 300 seconds (30 by default).
 
 The app includes Playwright for web automation:
 
-| Capability         | Details                         |
-| ------------------ | ------------------------------- |
+| Capability         | Details                                                       |
+| ------------------ | ------------------------------------------------------------- |
 | Navigate to URLs   | Destinations allowed by task and administrator network policy |
-| Fill forms         | As directed by task             |
-| Take screenshots   | Saved to workspace              |
-| Execute JavaScript | Within page context only        |
-| Mode               | Headless by default             |
+| Fill forms         | As directed by task                                           |
+| Take screenshots   | Saved to workspace                                            |
+| Execute JavaScript | Within page context only                                      |
+| Mode               | Headless by default                                           |
 
 **User agent**: `CoWork OS Browser Automation`
 

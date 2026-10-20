@@ -9,6 +9,7 @@ import {
   DESKTOP_GROUP_PATTERN,
   DESKTOP_HOST_PATTERN,
 } from "../../shared/bot-computer";
+import { BOT_FILE_ACCESS_VALUES } from "../../shared/bot-containment";
 import { z } from "zod";
 import { isSpaceRelativePath, isSpaceTemplate } from "../../shared/space-sandbox";
 import {
@@ -106,6 +107,8 @@ export const AgentRoleDesktopHostSchema = z
   })
   .transform((value) => value || null)
   .nullable();
+/** Which files a bot's unattended runs work on; null resets it to its own folder. */
+export const AgentRoleFileAccessSchema = z.enum(BOT_FILE_ACCESS_VALUES).nullable();
 /** A shared desktop's name; null or empty means a desktop of its own. */
 export const AgentRoleDesktopGroupSchema = z
   .string()

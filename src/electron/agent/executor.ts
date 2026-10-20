@@ -7259,9 +7259,15 @@ ${transcript}
     registry.setPlanRevisionHandler((newSteps, reason, clearRemaining) => {
       this.requestPlanRevision(newSteps, reason, clearRemaining);
     });
-    registry.setWorkspaceSwitchHandler(async (newWorkspace) => {
-      await this.handleWorkspaceSwitch(newWorkspace);
-    });
+    registry.setWorkspaceSwitchHandler(
+      async (newWorkspace) => {
+        await this.handleWorkspaceSwitch(newWorkspace);
+      },
+      () =>
+        this.task.agentConfig?.botContained === true
+          ? "This bot works in its own folder for this run and cannot switch workspaces. To work in a project, start the chat there or set the bot's Files to Your workspace."
+          : undefined,
+    );
     return registry;
   }
 
@@ -21634,9 +21640,16 @@ You are continuing a previous conversation. The context from the previous conver
     }
     // Queued overrides must not grant the orchestrator-only team lane marker.
     agentConfigOverride = stripTeamWorkItemLaneOverride(agentConfigOverride);
-    // Nor drop the "Works on" limit inherited from a delegating bot.
-    if (Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn")) {
-      const { inheritedBotWorksOn: _inherited, ...rest } = agentConfigOverride;
+    // Nor drop the "Works on" limit inherited from a delegating bot, or the bot's-own-folder limit.
+    if (
+      Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn") ||
+      Object.prototype.hasOwnProperty.call(agentConfigOverride, "botContained")
+    ) {
+      const {
+        inheritedBotWorksOn: _inherited,
+        botContained: _contained,
+        ...rest
+      } = agentConfigOverride;
       agentConfigOverride = rest;
     }
     const persistedAgentConfig =
@@ -24452,6 +24465,8 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private tryAutoSwitchToPreferredWorkspaceForAmbiguousTask(reason: string): boolean {
+    // A bot's own folder is where this run belongs, not an ambiguous scratch workspace.
+    if (this.task.agentConfig?.botContained === true) return false;
     return tryAutoSwitchToPreferredWorkspaceForAmbiguousTaskUtil({
       reason,
       currentWorkspace: this.workspace,

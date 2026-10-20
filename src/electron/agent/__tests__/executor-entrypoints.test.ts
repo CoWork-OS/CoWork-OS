@@ -57,6 +57,23 @@ describe("TaskExecutor entrypoint guards", () => {
     expect(savedTask.agentConfig.permissionMode).toBe("bypass_permissions");
   });
 
+  it("never lets a queued override lift the bot's-own-folder limit", () => {
+    const executor = Object.create(TaskExecutor.prototype) as Any;
+    const savedTask = { id: "contained-bot-run", agentConfig: { botContained: true } };
+    executor.task = savedTask;
+    executor.daemon = {
+      getTask: () => savedTask,
+      setTransientTaskAgentConfig: vi.fn(),
+      clearTransientTaskAgentConfig: vi.fn(),
+      getEffectiveWorkspaceForTask: () => undefined,
+    };
+    executor.applyQueuedAgentConfigOverride({ botContained: false, modelKey: "turn-only-model" });
+    // The override is layered over the stored config, so leaving the key out keeps the limit.
+    const forwarded = executor.daemon.setTransientTaskAgentConfig.mock.calls[0][1];
+    expect(forwarded.modelKey).toBe("turn-only-model");
+    expect(Object.prototype.hasOwnProperty.call(forwarded, "botContained")).toBe(false);
+  });
+
   it("catches saved CSV arithmetic through real mutation/read hooks and prevents clean completion", () => {
     const executor = Object.create(TaskExecutor.prototype) as Any;
     executor.workspace = { path: "/workspace" };

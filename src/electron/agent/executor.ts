@@ -21588,9 +21588,16 @@ You are continuing a previous conversation. The context from the previous conver
     }
     // Queued overrides must not grant the orchestrator-only team lane marker.
     agentConfigOverride = stripTeamWorkItemLaneOverride(agentConfigOverride);
-    // Nor drop the "Works on" limit inherited from a delegating bot.
-    if (Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn")) {
-      const { inheritedBotWorksOn: _inherited, ...rest } = agentConfigOverride;
+    // Nor drop the "Works on" limit inherited from a delegating bot, or the bot's-own-folder limit.
+    if (
+      Object.prototype.hasOwnProperty.call(agentConfigOverride, "inheritedBotWorksOn") ||
+      Object.prototype.hasOwnProperty.call(agentConfigOverride, "botContained")
+    ) {
+      const {
+        inheritedBotWorksOn: _inherited,
+        botContained: _contained,
+        ...rest
+      } = agentConfigOverride;
       agentConfigOverride = rest;
     }
     const persistedAgentConfig =

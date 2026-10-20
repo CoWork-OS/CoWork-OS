@@ -606,12 +606,16 @@ SkillHub includes multiple security measures to prevent attacks via malicious sk
 ### Running Security Tests
 
 ```bash
-npm run test                # Full suite (17,018 tests: 16,998 passed, 18 skipped, 2 todo; includes security)
-npx vitest run tests/security   # Security-focused tests only (160 tests)
+npm run test                # Skill checks, Node suites, and the full Vitest suite
+npx vitest run tests/security src/electron/security src/shared/security
 npm run test:coverage       # With coverage report
 ```
 
-Test files:
+The focused command covers security suites in each named directory. Test totals and
+prerequisite-dependent skips are reported by the current run; they are not fixed
+release acceptance results.
+
+Example test files:
 
 - `tests/security/tool-groups.test.ts` - Tool categorization tests
 - `tests/security/policy-manager.test.ts` - Policy evaluation tests

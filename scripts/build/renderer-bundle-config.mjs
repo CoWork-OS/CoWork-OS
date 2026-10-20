@@ -25,6 +25,12 @@ export const rendererVendorAliases = [
   },
 ];
 
+// The ELK alias is application source with a Vite ?url worker import. Keep it
+// outside dependency prebundling so Vite's normal asset pipeline handles it.
+export const rendererOptimizeDeps = {
+  exclude: ["elkjs/lib/elk.bundled.js"],
+};
+
 /** Record actual emitted chunks, separately from assets such as worker engines. */
 export function rendererBundleReport(target) {
   let emitted;

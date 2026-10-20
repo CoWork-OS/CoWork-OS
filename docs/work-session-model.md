@@ -279,7 +279,7 @@ The preview service provides:
 The service does not infer consent from a project file. It does not install
 dependencies, run arbitrary package scripts, or launch a server merely because
 it detects React, Vite, Next, or another web framework. See
-[Web Page Artifacts — Optional Local Preview Server](web-page-artifacts.md#optional-local-preview-server).
+[Web Page Artifacts — Preview Model](web-page-artifacts.md#preview-model).
 
 ## Phase 8: automation semantics
 

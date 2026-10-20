@@ -7,6 +7,7 @@ import {
   mermaidParserPlugin,
   rendererCodeSplitting,
   rendererVendorAliases,
+  rendererOptimizeDeps,
 } from "./scripts/build/renderer-bundle-config.mjs";
 
 const require = createRequire(import.meta.url);
@@ -18,6 +19,7 @@ export default defineConfig({
   root: path.resolve(import.meta.dirname, "src/renderer"),
   base: "./",
   publicDir: path.resolve(import.meta.dirname, "src/renderer/public"),
+  optimizeDeps: rendererOptimizeDeps,
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/renderer"),
     emptyOutDir: true,

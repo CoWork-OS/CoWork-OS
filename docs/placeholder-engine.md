@@ -18,7 +18,7 @@ Cold start (new user)  -->  Persona-detected  -->  Fully personalised
 
 ```
 src/renderer/utils/placeholderEngine.ts   -- Pure logic, no React
-src/renderer/components/MainContent.tsx   -- Consumer (useEffect)
+src/renderer/components/MainContent/MainContent.tsx   -- Consumer (useEffect)
 src/renderer/styles/index.css             -- .cli-rotating-placeholder
 ```
 

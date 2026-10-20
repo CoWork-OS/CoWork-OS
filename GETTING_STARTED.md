@@ -29,7 +29,7 @@ This will:
    - **Anthropic** - Claude models (requires API key from [console.anthropic.com](https://console.anthropic.com))
    - **Google Gemini** - Gemini models (requires API key from [aistudio.google.com](https://aistudio.google.com/apikey))
    - **OpenRouter** - Multiple models (requires API key from [openrouter.ai](https://openrouter.ai/keys))
-   - **OpenAI** - GPT-4o, o1 models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
+   - **OpenAI** - Select an available model using an API key from [platform.openai.com](https://platform.openai.com/api-keys), or sign in with ChatGPT where supported
    - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
    - **Ollama** - Local models (free, requires [Ollama](https://ollama.ai) installed)
 3. Enter your API key
@@ -52,8 +52,8 @@ This will:
    - This will be your workspace (e.g., `~/Documents/test-workspace`)
 
 2. **Initialize the Workspace Kit (Optional, Recommended)**
-   - Open **Settings** > **Memory Hub**
-   - Under **Workspace Kit**, click **Initialize**
+   - Open **Settings** > **Memory**, select the workspace, and open its **Settings** tab
+   - Expand **Advanced**, then under **Workspace kit**, click **Initialize**
    - This creates a `.cowork/` directory in your workspace for durable context, prompt injection, and project scaffolding
    - The root kit can include shared workspace files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `IDENTITY.md`, `RULES.md`, `SOUL.md`, `VIBES.md`, and `LORE.md`
    - `BOOTSTRAP.md` is a one-time onboarding checklist; once you complete onboarding, removing it marks onboarding complete and CoWork OS tracks that state in `.cowork/workspace-state.json`
@@ -74,7 +74,7 @@ This will:
    - Show real-time progress in the timeline
    - Request approval before destructive changes
 
-### Step 5: Validate Relationship-Agent Behavior
+### Step 5: Validate Replies and Memory
 
 Use this acceptance check after setup:
 
@@ -86,11 +86,11 @@ Use this acceptance check after setup:
    - Task should end in `completed` with a usable final answer.
 4. Confirm timeout handling:
    - If a step times out, the task should still produce a best-effort final answer.
-5. Confirm memory continuity:
-   - Send: `Call me almarion. I prefer concise responses. Remind me to send investor update tomorrow.`
-   - Open **Settings** > **Memory System** and confirm relationship memory + commitments are visible.
+5. Confirm memory continuity with workspace memory enabled:
+   - Send: `Call me almarion. I prefer concise responses.`
+   - Open **Settings** > **Memory**, select the workspace, and inspect **What CoWork knows** for the saved facts.
 6. Confirm memory controls:
-   - Edit a relationship item, mark a commitment done/reopen, and forget one item.
+   - Edit or delete a disposable fact using its available controls.
    - Restart app and verify changes persist.
 
 ## Example Tasks to Try
@@ -173,22 +173,16 @@ Description: Navigate to https://example.com and take a screenshot. Save it as e
   - Files created/modified
   - Errors
 
-### Memory System (Relationship Controls)
+### Memory
 
-In **Settings** > **Memory System**:
+In **Settings** > **Memory**, select the workspace and use:
 
-- **User Memory Facts**: curated profile facts (existing functionality).
-- **Relationship Memory**: layered continuity memory:
-  - identity
-  - preferences
-  - context
-  - history
-  - commitments
-- **Commitment controls**:
-  - Mark done/reopen
-  - Edit text
-  - Forget item
-  - View due-soon reminders
+- **What CoWork knows** to inspect saved facts and edit or delete entries where supported.
+- **Review** to inspect changes awaiting review.
+- **Sources** and **Health** to inspect provenance and memory diagnostics.
+- **Settings** to manage workspace memory, its memory folder, imports, and advanced controls.
+
+See the [Memory Engine guide](docs/memory-engine.md) for the storage and capture rules.
 
 ### Approval Dialogs
 

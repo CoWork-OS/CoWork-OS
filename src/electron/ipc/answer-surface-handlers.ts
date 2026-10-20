@@ -15,8 +15,12 @@ import { RATE_LIMIT_CONFIGS, rateLimiter } from "../utils/rate-limiter";
 
 export function setupAnswerSurfaceHandlers(
   deps: AnswerSurfaceIpcDeps & {
-    /** Throws unless the caller may view the task (session membership). */
-    authorizeTaskView?: (event: IpcMainInvokeEvent, taskId: string) => void;
+    /** Checks the existing session capability before a task operation. */
+    authorizeTask: (
+      event: IpcMainInvokeEvent,
+      taskId: string,
+      capability: "view" | "contribute",
+    ) => void | Promise<unknown>;
   },
 ): void {
   // Every surface in view reads its state once; saves are debounced control changes.
@@ -26,19 +30,23 @@ export function setupAnswerSurfaceHandlers(
   rateLimiter.configure(IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA, RATE_LIMIT_CONFIGS.standard);
   const handlers = createAnswerSurfaceIpcHandlers(deps);
   for (const [channel, handle] of Object.entries(handlers)) {
-    if (channel === IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA) {
-      // Reads workspace files: only the top-level app frame, for a task it may view.
-      ipcMain.handle(channel, (event, raw: unknown) => {
+    ipcMain.handle(channel, async (event, raw: unknown) => {
+      if (channel === IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA) {
+        // Reads workspace files: only the top-level app frame, for a task it may view.
         if (!event.senderFrame || event.senderFrame.parent !== null) {
           throw new Error("Answer data is only available to the app window");
         }
-        const taskId = (raw as { taskId?: unknown } | null)?.taskId;
-        if (typeof taskId === "string") deps.authorizeTaskView?.(event, taskId);
-        return handle(raw);
-      });
-      continue;
-    }
-    ipcMain.handle(channel, (_event, raw: unknown) => handle(raw));
+      }
+      const taskId = (raw as { taskId?: unknown } | null)?.taskId;
+      if (typeof taskId === "string") {
+        await deps.authorizeTask(
+          event,
+          taskId,
+          channel === IPC_CHANNELS.ANSWER_SURFACE_SAVE_STATE ? "contribute" : "view",
+        );
+      }
+      return handle(raw);
+    });
   }
 
   // Desktop only: the browser host has no cowork-preview:// origin, so its renderer keeps

@@ -102,7 +102,7 @@ Core implementation files:
 - `src/electron/integrations/integration-mention-options.ts`: local option resolver
 - `src/electron/ipc/handlers.ts` and `src/electron/preload.ts`: `listIntegrationMentionOptions()`
 - `src/renderer/components/PromptComposerInput.tsx`: rich inline mention editing
-- `src/renderer/components/MainContent.tsx`: grouped autocomplete, task submission, history restoration, and `@Inbox` routing
+- `src/renderer/components/MainContent/MainContent.tsx`: grouped autocomplete, task submission, history restoration, and `@Inbox` routing
 - `src/renderer/components/InboxAgentPanel.tsx`: Ask Inbox sidebar tab, launcher behavior, live step transcript, and matched evidence rows
 - `src/electron/mailbox/MailboxAgentSearchService.ts`: hybrid mailbox retrieval for Ask Inbox
 - `src/renderer/components/IntegrationMentionText.tsx`: user-message bubble rendering

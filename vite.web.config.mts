@@ -8,6 +8,7 @@ import {
   mermaidParserPlugin,
   rendererCodeSplitting,
   rendererVendorAliases,
+  rendererOptimizeDeps,
 } from "./scripts/build/renderer-bundle-config.mjs";
 
 // Keep this build artifact version explicit; the host refuses assets whose
@@ -49,6 +50,7 @@ export default defineConfig({
   root: path.resolve(import.meta.dirname, "src/renderer-web"),
   base: "./",
   publicDir: path.resolve(import.meta.dirname, "src/renderer/public"),
+  optimizeDeps: rendererOptimizeDeps,
   build: {
     outDir: WEB_OUTPUT_DIR,
     emptyOutDir: true,

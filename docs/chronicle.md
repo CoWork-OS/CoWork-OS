@@ -184,9 +184,9 @@ Chronicle should be treated as **context evidence**, not as an authority overrid
 | Runtime visibility / unified recall           | `src/electron/agent/RuntimeVisibilityService.ts`                                                                            |
 | IPC handlers                                  | `src/electron/ipc/handlers.ts`, `src/electron/preload.ts`                                                                   |
 | Settings UI                                   | `src/renderer/components/ChronicleSettings.tsx`, `src/renderer/components/MemoryHubSettings.tsx`                            |
-| Observation management UI                     | `src/renderer/components/MemorySettings.tsx`                                                                                |
+| Observation management UI                     | `src/renderer/components/memory/MemorySourcesLists.tsx`                                                                                |
 | Tray controls                                 | `src/electron/tray/TrayManager.ts`                                                                                          |
-| Task-level toggles                            | `src/renderer/components/MainContent.tsx`, `src/renderer/components/DevicesPanel.tsx`, `src/renderer/App.tsx`               |
+| Task-level toggles                            | `src/renderer/components/MainContent/MainContent.tsx`, `src/renderer/components/DevicesPanel.tsx`, `src/renderer/App.tsx`               |
 
 ## Related docs
 

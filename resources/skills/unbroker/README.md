@@ -119,13 +119,18 @@ The underlying CLI (run via CoWork shell/run_command, as `python3 scripts/pdd.py
 
 ## Tests
 
-85 hermetic tests (no network, browser, or email; SMTP and IMAP are exercised through injected
-fakes):
+In a CoWork source checkout, run the dependency-free CLI smoke tests from this skill's directory:
 
 ```bash
-scripts/run_tests.sh tests/skills/test_unbroker_skill.py           # CI-parity harness
-python3 tests/skills/test_unbroker_skill.py                        # dependency-free fallback runner
+python3 -m unittest discover -s tests -v
 ```
+
+These tests use synthetic subjects in temporary directories and cover consent-gated
+planning, opaque subject IDs, and ledger transitions. They do not send email, launch a
+browser, or contact brokers. The upstream Hermes `tests/skills/test_unbroker_skill.py`
+suite and its `scripts/run_tests.sh` harness are not included in this port; this smoke
+suite does not establish the upstream suite's SMTP/IMAP or live-removal coverage.
+Test sources are excluded from installed release packages.
 
 ## Safety and ethics
 

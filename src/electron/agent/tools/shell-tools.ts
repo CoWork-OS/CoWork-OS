@@ -1963,6 +1963,8 @@ export class ShellTools {
           approvalMode,
           bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
           network: networkCommand || networkRequiresApproval,
+          // The card shows exactly what will run, so the user can review it before approving.
+          approvalPreview: { label: "Command", text: command },
         },
         // The daemon's auto-approve path matches trusted rules by bare command
         // prefix, so `git status; rm -rf ~/Documents` matches `git` and is
@@ -2032,6 +2034,7 @@ export class ShellTools {
             approvalMode,
             bundleScope: bundleEligible ? "safe_commands_in_this_task" : undefined,
             network: networkCommand || networkRequiresApproval,
+            approvalPreview: { label: "Command", text: command },
           },
           {
             signal: options?.signal,

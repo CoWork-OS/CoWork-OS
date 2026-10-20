@@ -1,6 +1,9 @@
 import { InlineApprovalDraftReview } from "../ApprovalDraftReview";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID } from "../../../shared/approval-draft-presentation";
+import {
+  ASSISTANT_APPROVAL_QUESTION_ID,
+  RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
+} from "../../../shared/approval-draft-presentation";
 import type { InputRequest } from "../../../shared/types";
 
 export type InputRequestAnswers = Record<string, { optionLabel?: string; otherText?: string }>;
@@ -30,6 +33,47 @@ export function responsibilityActionReviewOptionDisabled(
   );
 }
 
+export interface ApprovalQuestionParts {
+  title: string;
+  detail: string;
+  scope: string;
+}
+
+/**
+ * Lays an approval question out for the compact card: the first sentence is the title, the rest
+ * is detail, and the rule scope gets its own line. Nothing is dropped except the closing
+ * "Do you want CoWork to continue?", which the Deny and Allow buttons already ask.
+ */
+export function splitApprovalQuestion(question: string): ApprovalQuestionParts {
+  let text = question.replace(/\s*Do you want CoWork to continue\?\s*$/, "").trim();
+  let scope = "";
+  const scopeMatch = /(?:^|\s)Scope: (.+?)\.(?=\s|$)/.exec(text);
+  if (scopeMatch) {
+    scope = scopeMatch[1].trim();
+    text =
+      `${text.slice(0, scopeMatch.index)} ${text.slice(scopeMatch.index + scopeMatch[0].length)}`
+        .replace(/\s+/g, " ")
+        .trim();
+  }
+  const sentence = /^(.+?[.?!])\s+(.+)$/s.exec(text);
+  return sentence
+    ? { title: sentence[1], detail: sentence[2].trim(), scope }
+    : { title: text || question, detail: "", scope };
+}
+
+/** Renders quoted parts of a scope ("commands starting with "wc -l"") as inline code. */
+function renderApprovalScope(scope: string) {
+  return scope
+    .split(/"([^"]+)"/)
+    .map((part, index) =>
+      index % 2 === 1 ? (
+        <code key={index}>{part}</code>
+      ) : part ? (
+        <span key={index}>{part}</span>
+      ) : null,
+    );
+}
+
 interface StructuredInputPromptCardProps {
   request: InputRequest;
   onSubmit: (answers: InputRequestAnswers) => void;
@@ -53,6 +97,7 @@ export function StructuredInputPromptCard({
   );
   const [otherTextByQuestion, setOtherTextByQuestion] = useState<Record<string, string>>({});
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+  const [approvalDetailsOpen, setApprovalDetailsOpen] = useState(false);
   const reviewRequestKey = `${request.taskId}:${request.id}:${request.requestedAt}:${request.status}:${JSON.stringify(request.questions)}`;
   const [responsibilityReviewState, setResponsibilityReviewState] = useState<{
     key: string;
@@ -83,6 +128,7 @@ export function StructuredInputPromptCard({
     setSelectedOptionByQuestion(nextSelected);
     setOtherTextByQuestion({});
     setActiveQuestionIndex(0);
+    setApprovalDetailsOpen(false);
   }, [request.id, questions]);
 
   const updateSelection = useCallback((questionId: string, nextIndex: number) => {
@@ -310,6 +356,164 @@ export function StructuredInputPromptCard({
   const optionShortcutCount = Math.min(4, getActiveOptionCount());
   const isLastQuestion = activeQuestionIndex >= questions.length - 1;
 
+  const preview = activeQuestion.preview ? (
+    <figure className="input-request-preview">
+      <figcaption className="input-request-preview-label">
+        {activeQuestion.preview.label}
+      </figcaption>
+      <pre className="input-request-preview-text" tabIndex={0}>
+        <code>{activeQuestion.preview.text}</code>
+      </pre>
+      {activeQuestion.preview.omittedChars ? (
+        <p className="input-request-preview-note">
+          {activeQuestion.preview.omittedChars.toLocaleString()} more characters are not shown. Deny
+          if you need to see all of it.
+        </p>
+      ) : null}
+    </figure>
+  ) : null;
+
+  const otherField = activeOtherSelected ? (
+    <textarea
+      className="input-request-other"
+      placeholder="Type your answer…"
+      aria-label="Your answer"
+      rows={2}
+      autoFocus
+      value={otherTextByQuestion[activeQuestion.id] || ""}
+      onChange={(event) =>
+        setOtherTextByQuestion((prev) => ({
+          ...prev,
+          [activeQuestion.id]: event.target.value,
+        }))
+      }
+    />
+  ) : null;
+
+  // Ordinary approvals get a one-row decision card: what will run, one quiet line, and Deny /
+  // Allow as the actions themselves. The full approval text is one click away under Details.
+  // The marked exact-write review keeps the full layout below, which carries its review gate.
+  if (questions.length === 1 && activeQuestion.id === ASSISTANT_APPROVAL_QUESTION_ID) {
+    const parts = splitApprovalQuestion(activeQuestion.question);
+    const command =
+      activeQuestion.preview?.label === "Command" && !activeQuestion.preview.omittedChars
+        ? activeQuestion.preview.text
+        : "";
+    const summary = command
+      ? [
+          "Shell command",
+          /\bnetwork\b/i.test(activeQuestion.question) ? "may use the network" : "",
+          /\bin the background\b/i.test(activeQuestion.question) ? "keeps running" : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : parts.detail;
+    const submitOption = (optionIndex: number) =>
+      onSubmit({ [activeQuestion.id]: { optionLabel: activeOptions[optionIndex]?.label } });
+    return (
+      <div
+        className="input-request-composer-shell"
+        role="region"
+        aria-label="Structured input required"
+      >
+        <div className="input-request-card input-request-card-inline input-request-card-approval">
+          <InlineApprovalDraftReview
+            request={request}
+            onResponsibilityActionReviewStateChange={onResponsibilityActionReviewStateChange}
+          />
+          <div className="input-request-approval-row">
+            <div className="input-request-approval-subject">
+              {command ? (
+                <pre className="input-request-approval-command" tabIndex={0}>
+                  <code>{command}</code>
+                </pre>
+              ) : (
+                <div className="input-request-approval-title">{parts.title}</div>
+              )}
+              <div className="input-request-approval-meta">
+                {summary && <span className="input-request-approval-summary">{summary}</span>}
+                <button
+                  type="button"
+                  className="input-request-link"
+                  aria-expanded={approvalDetailsOpen}
+                  onClick={() => setApprovalDetailsOpen((open) => !open)}
+                >
+                  {approvalDetailsOpen ? "Hide details" : "Details"}
+                </button>
+              </div>
+            </div>
+            <div className="input-request-approval-actions" role="group" aria-label={parts.title}>
+              {activeOtherSelected ? (
+                <>
+                  <button
+                    type="button"
+                    className="input-request-dismiss"
+                    onClick={() =>
+                      updateSelection(activeQuestion.id, visibleOptions[0]?.optionIndex ?? 0)
+                    }
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    className="input-request-submit"
+                    onClick={submitIfAllowed}
+                    disabled={!canSubmit}
+                  >
+                    Send
+                  </button>
+                </>
+              ) : (
+                visibleOptions.map(({ option, optionIndex }, displayIndex) => (
+                  <button
+                    key={`${activeQuestion.id}-option-${optionIndex}`}
+                    type="button"
+                    title={
+                      option.description ? `${option.description} (${displayIndex + 1})` : undefined
+                    }
+                    data-selected={activeSelected === optionIndex ? "true" : undefined}
+                    className={
+                      option.label.trim().toLowerCase().startsWith("allow")
+                        ? "input-request-submit"
+                        : "input-request-dismiss"
+                    }
+                    onClick={() => submitOption(optionIndex)}
+                  >
+                    {option.label}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+          {!command && preview}
+          {approvalDetailsOpen && (
+            <div className="input-request-approval-details">
+              <p>{parts.detail ? `${parts.title} ${parts.detail}` : parts.title}</p>
+              {parts.scope && (
+                <p className="input-request-scope">
+                  <span className="input-request-scope-label">Scope</span>
+                  <span className="input-request-scope-value">
+                    {renderApprovalScope(parts.scope)}
+                  </span>
+                </p>
+              )}
+              {!activeOtherSelected && (
+                <button
+                  type="button"
+                  className="input-request-link"
+                  onClick={() => updateSelection(activeQuestion.id, activeOptions.length)}
+                >
+                  Reply instead
+                </button>
+              )}
+            </div>
+          )}
+          {otherField}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="input-request-composer-shell"
@@ -340,22 +544,7 @@ export function StructuredInputPromptCard({
           onResponsibilityActionReviewStateChange={onResponsibilityActionReviewStateChange}
         />
         <div className="input-request-title">{activeQuestion.question}</div>
-        {activeQuestion.preview && (
-          <figure className="input-request-preview">
-            <figcaption className="input-request-preview-label">
-              {activeQuestion.preview.label}
-            </figcaption>
-            <pre className="input-request-preview-text" tabIndex={0}>
-              <code>{activeQuestion.preview.text}</code>
-            </pre>
-            {activeQuestion.preview.omittedChars ? (
-              <p className="input-request-preview-note">
-                {activeQuestion.preview.omittedChars.toLocaleString()} more characters are not
-                shown. Deny if you need to see all of it.
-              </p>
-            ) : null}
-          </figure>
-        )}
+        {preview}
         <div
           className="input-request-options"
           role="radiogroup"
@@ -407,22 +596,7 @@ export function StructuredInputPromptCard({
               </span>
             </button>
           )}
-          {activeOtherSelected && (
-            <textarea
-              className="input-request-other"
-              placeholder="Type your answer…"
-              aria-label="Your answer"
-              rows={2}
-              autoFocus
-              value={otherTextByQuestion[activeQuestion.id] || ""}
-              onChange={(event) =>
-                setOtherTextByQuestion((prev) => ({
-                  ...prev,
-                  [activeQuestion.id]: event.target.value,
-                }))
-              }
-            />
-          )}
+          {otherField}
         </div>
         <div className="input-request-actions">
           <span className="input-request-keys" aria-hidden="true">

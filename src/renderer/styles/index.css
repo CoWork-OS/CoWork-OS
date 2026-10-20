@@ -3433,6 +3433,195 @@ a,
   }
 }
 
+/* Approval decision: one row (what will run + Deny / Allow), one quiet line, details on demand. */
+.input-request-card.input-request-card-approval {
+  padding: 10px 10px 10px 14px;
+  border-color: var(--color-border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.input-request-approval-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.input-request-approval-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+/* Scoped to the card so it outranks the theme's .theme-light pre / code fill. */
+.input-request-card-approval .input-request-approval-command,
+.input-request-card-approval .input-request-approval-command code {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.input-request-approval-command {
+  margin: 0;
+  max-height: 120px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.input-request-approval-command code::before {
+  content: "$ ";
+  color: var(--color-text-muted);
+}
+
+.input-request-approval-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--color-text-primary);
+  text-wrap: pretty;
+}
+
+.input-request-approval-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.input-request-approval-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-request-approval-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.input-request-card-approval .input-request-preview {
+  margin: 10px 0 0;
+  border: none;
+  background: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+}
+
+.input-request-card-approval .input-request-preview-label {
+  padding: 7px 10px 0;
+  border-bottom: none;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.input-request-card-approval .input-request-preview-note {
+  padding-top: 0;
+  border-top: none;
+}
+
+.input-request-approval-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.input-request-approval-details > p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.input-request-scope {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--color-text-secondary);
+}
+
+.input-request-scope-label {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.input-request-scope-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.input-request-scope-value code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.input-request-card-approval .input-request-other {
+  width: 100%;
+  margin: 10px 0 0;
+}
+
+.input-request-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    text-decoration-color 0.12s ease;
+}
+
+.input-request-link:hover {
+  color: var(--color-text-primary);
+  text-decoration-color: currentColor;
+}
+
+/* The decision Enter would send (1 / 2 pick it; Enter sends it). */
+.input-request-approval-actions .input-request-dismiss[data-selected="true"] {
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.input-request-approval-actions .input-request-submit[data-selected="true"] {
+  box-shadow:
+    0 0 0 2px var(--color-bg-elevated),
+    0 0 0 3px color-mix(in srgb, var(--color-text-primary) 35%, transparent);
+}
+
+@media (max-width: 560px) {
+  .input-request-approval-row {
+    flex-wrap: wrap;
+  }
+
+  .input-request-approval-actions {
+    margin-left: auto;
+  }
+}
+
 /* PACT business sign-in card (PactAuthorizationCard.tsx); the scope list is shared with PactSettings. */
 .pact-authorization-purpose {
   margin: -6px 0 12px;

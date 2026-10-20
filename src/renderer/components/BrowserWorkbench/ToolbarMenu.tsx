@@ -61,10 +61,6 @@ export function ToolbarMenu({
   onViewport: (viewport: ToolbarViewportOption | null) => void;
   onToggleSnapshotOverlay: () => void;
   onToggleDiagnostics: () => void;
-} & {
-  /** Appearance controls are supplied by clients with browser theme settings. */
-  colorScheme?: "light" | "dark" | null;
-  onColorScheme?: (colorScheme: "light" | "dark" | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);

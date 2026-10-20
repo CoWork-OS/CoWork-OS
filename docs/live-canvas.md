@@ -101,7 +101,7 @@ While a build runs, its live preview opens next to the session automatically. Th
 
 ## Build Mode
 
-Build Mode is a dedicated "idea → working prototype" workflow layered on top of Live Canvas. It guides the agent through four structured phases, each producing a named checkpoint that you can revert to or diff against.
+Build Mode is a built-in skill for an "idea → working prototype" workflow layered on top of Live Canvas. Its prompt guides the agent through four phases and asks it to save named checkpoints with the Canvas tools.
 
 ### Phases
 
@@ -122,16 +122,20 @@ Build Mode is available as a built-in skill (`build-mode`). You can activate it 
 
 ### Phase Checkpoints
 
-Each phase creates a named checkpoint (e.g., `build:concept`, `build:plan`, `build:scaffold`, `build:iterate`). You can:
+The skill asks the agent to save checkpoints named `Phase 1 — Concept`, `Phase 2 — Plan`, `Phase 3 — Scaffold`, and `Phase 4 — Complete`. You can ask the agent to:
 
-- **View timeline**: See all phases with their checkpoint IDs and timestamps
-- **Revert to phase**: Roll back to any previous phase's checkpoint
-- **Diff between phases**: Compare file-level changes between any two phase checkpoints (added, removed, modified files)
+- **List saved phases**: Use `canvas_checkpoints` to retrieve the checkpoint IDs, labels, and timestamps saved in the current session
+- **Revert to a saved phase**: Use `canvas_restore` with the chosen checkpoint ID
+
+Checkpoint history is held in memory for the running app session. Phase advancement depends on the agent following the skill prompt. Automatic phase tracking and a phase-diff control are not connected to the running app.
 
 ### Implementation Files
 
-- `src/electron/canvas/build-mode-orchestrator.ts` — Phase management, checkpoint mapping, revert/diff logic
+- `src/electron/agent/tools/canvas-tools.ts` — Agent checkpoint save, list, and restore operations
+- `src/electron/canvas/canvas-manager.ts` — Checkpoint storage and file restoration
 - `resources/skills/build-mode.json` — Skill definition with phase prompts and parameters
+
+`src/electron/canvas/build-mode-orchestrator.ts` is a retained phase-coordination prototype with no production caller. The skill uses the Canvas tools directly.
 
 ---
 
@@ -148,6 +152,8 @@ Canvas sessions support named checkpoints for saving, restoring, and comparing c
 | `canvas_checkpoints` | List all checkpoints for a session        |
 
 ### Advanced Checkpoint Methods
+
+These internal `CanvasManager` helpers have no agent-tool or IPC entry point:
 
 | Method                                     | Description                                                           |
 | ------------------------------------------ | --------------------------------------------------------------------- |
@@ -609,6 +615,6 @@ See the following files for implementation details:
 - `src/electron/canvas/canvas-protocol.ts` - URL protocol handler
 - `src/electron/agent/tools/canvas-tools.ts` - Agent tool definitions
 - `src/electron/ipc/canvas-handlers.ts` - IPC handlers
-- `src/electron/canvas/build-mode-orchestrator.ts` - Build Mode phase management
+- `resources/skills/build-mode.json` - Build Mode phase prompts and checkpoint instructions
 - `src/renderer/components/CanvasPreview.tsx` - In-app preview component
-- `src/renderer/components/MainContent.tsx` - Canvas session integration
+- `src/renderer/components/MainContent/MainContent.tsx` - Canvas session integration

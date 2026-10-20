@@ -62,6 +62,12 @@ export class PrincipalCapabilityMiddleware {
     return this.memberships.authorizeTaskAction(taskId, capability, principalId);
   }
 
+  /** Local reads retain their existing missing-task behavior and avoid extra storage work. */
+  async authorizeTaskRead(taskId: string, principalId: string): Promise<void> {
+    if (principalId === this.memberships.getLocalPrincipal().principalId) return;
+    await this.authorizeTask(taskId, "view", principalId);
+  }
+
   async authorizeContext(
     contextId: string,
     capability: SessionHumanCapability,
@@ -158,7 +164,7 @@ export class PrincipalCapabilityMiddleware {
    * unchanged.
    */
   async filterAndPaginateTasks<T extends { id: string }>(
-    loadPage: (limit: number, offset: number) => T[],
+    loadPage: (limit: number, offset: number) => T[] | Promise<T[]>,
     capability: SessionHumanCapability,
     principalId: string,
     limit: number,
@@ -172,7 +178,7 @@ export class PrincipalCapabilityMiddleware {
     // already governed by the desktop process and do not reveal another
     // principal's private tasks.
     if (principalId === local) {
-      return { tasks: loadPage(safeLimit, safeOffset) };
+      return { tasks: await loadPage(safeLimit, safeOffset) };
     }
 
     const pageSize = Math.max(100, Math.min(500, safeLimit));
@@ -181,7 +187,7 @@ export class PrincipalCapabilityMiddleware {
     let scanOffset = 0;
 
     while (true) {
-      const page = loadPage(pageSize, scanOffset);
+      const page = await loadPage(pageSize, scanOffset);
       if (page.length === 0) break;
 
       let newRows = 0;

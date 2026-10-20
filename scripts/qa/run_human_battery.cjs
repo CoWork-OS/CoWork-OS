@@ -2,8 +2,8 @@
 /**
  * Human Prompt QA Battery
  *
- * Runs a set of "non-technical user" prompts against the local Cowork OS hooks server,
- * then inspects the SQLite DB and cron store to verify outcomes.
+ * Historical runner retained until its unique scenarios are migrated. Its raw
+ * event queries and blanket approval loop do not support the canonical runtime.
  *
  * Usage:
  *   node scripts/qa/run_human_battery.cjs
@@ -12,6 +12,19 @@
  *   COWORK_HOOKS_ORIGIN, COWORK_HOOKS_TOKEN, COWORK_DB_PATH, COWORK_CRON_STORE_PATH
  *   COWORK_QA_WORKSPACE_ID
  */
+
+if (require.main === module) {
+  const helpOnly = process.argv.length === 3 && ["--help", "-h"].includes(process.argv[2]);
+  const message = [
+    "[human-battery] Unsupported legacy runner for the canonical runtime.",
+    "[human-battery] Current runtime coverage: not_executed. No scenarios, hooks, database reads, or approvals were run.",
+    "[human-battery] Run node scripts/qa/run_battery.cjs --fixtures-only for maintained disposable runner checks.",
+    "[human-battery] Reminder, memory, history, and integration scenarios below are not migrated; the maintained battery does not establish their coverage.",
+    "[human-battery] See docs/harness-eval-battery.md for explicit owned-runtime live prerequisites.",
+  ].join("\n");
+  console[helpOnly ? "log" : "error"](message);
+  process.exit(helpOnly ? 0 : 1);
+}
 
 const fs = require("fs");
 const path = require("path");
@@ -554,7 +567,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("[human-battery] fatal:", err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("[human-battery] fatal:", err);
+    process.exit(1);
+  });
+}

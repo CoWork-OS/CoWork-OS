@@ -1,13 +1,13 @@
 # Memory Engine — design and Phase 2 foundation
 
-**Status.** Implemented (updated 2026-10-05): the Phase 2 foundation with the Phase 3 additions, the legacy
-retirement, the producer routing and the archive summary and compression fixes (§6a) noted inline. The write
-side described here is implemented: the `memory_items` store, `MemoryWriter`, the one-time lane
-migration and purge/retention. `memory_items` is the only store of facts about the user: the
-legacy lanes are retired as stores (§5: no dual writes, no mirror, no legacy read paths), and
-their data is exported and dropped by the data retirement migration (§5, "Data retirement"). On the read side,
-`MemoryRecall` and the consolidated agent memory tools are implemented (§4b); see §4a for the
-prompt read path.
+**Status.** Implemented storage foundation, with the current memory-folder routing described
+in [Memory Repo Phase 3](memory-repo-phase3-design.md) and §7a below. The memory folder is on
+by default and is the primary store for ordinary global/workspace facts. `memory_items`
+continues to hold commitments, contact/task/private facts, and fallback facts when the folder
+is off or unavailable. `MemoryWriter` remains the write boundary for that SQLite store.
+Legacy SecureSettings/curated lanes are retired and their data has a guarded export and
+retirement path (§5). Earlier Phase 2 producer mappings below are superseded where the
+Phase 3 routing is stated; they do not make `memory_items` the sole current fact store.
 
 **Embeddings: decision (2026-10-03).** A real local embedding model (audit DATA-6, roadmap
 Phase 3 item 2) is skipped by decision. Recall stays lexical: one Unicode FTS query builder
@@ -21,7 +21,8 @@ this file as the contract. File references are relative to `src/electron/memory/
 
 | Knowledge | Store | Notes |
 |---|---|---|
-| Semantic facts about the user, workspace and contacts: preferences, identity, rules, project facts, decisions, commitments, corrections, insights | **`memory_items`** (this document) | One row per fact revision. Written only through `MemoryWriter`. |
+| Ordinary global/workspace facts, lessons and corrections | **Memory folder** (default on; §7a) | Written through the memory-folder producers; files and changes are inspectable. |
+| Commitments, contact/task/private facts, and fallback facts when the folder is unavailable | **`memory_items`** (this document) | One row per fact revision. Written only through `MemoryWriter`. |
 | Episodic history: task outcomes, resolved errors, feedback, explicit `memory_remember` notes (`outcome`, `error`, `note`) | `memories` (the archive) + `memory_observation_metadata` + FTS | Unchanged in Phase 2. See §6. |
 | Raw conversation | `task_events` + the conversation index | Owned by the conversation-index consolidation, not this engine. |
 | Playbook entries, proactive suggestions | Their own tables (`playbook_entries`, `suggestions`) | Moved out of `memories` by a parallel Phase 2 change. |
@@ -29,20 +30,25 @@ this file as the contract. File references are relative to `src/electron/memory/
 
 ### Producers and their write path
 
-Every producer that writes memory goes through the same hygiene: the salience gate
+Within the SQLite lane, producers apply the salience gate
 (`memoryTextSalience`, shared by `MemoryWriter` and the archive), secret redaction
 (`sensitive-content.ts`), policy (`<no-memory>`, scope and privacy, workspace memory
-settings) and dedupe. Facts go through `MemoryWriter.ingest` (§3); archive rows through
+settings) and dedupe. SQLite facts go through `MemoryWriter.ingest` (§3); archive rows through
 `MemoryService` (`capture`, the gated import API `openImportSession`, source sync
 `replaceMemory`). The source guard `__tests__/memory-writers-sanctioned.test.ts` fails when
 any other runtime module inserts into `memories` or `memory_items` or reaches their
 low-level writers (`insertCapturedMemory`, the `memory.capture` worker command,
-`MemoryRepository`, `MemoryItemsRepository`, the `memoryItems_ingest` unit).
+`MemoryRepository`, `MemoryItemsRepository`, the `memoryItems_ingest` unit). Folder-backed
+fact producers use the memory-repo service and policy boundary (§7a), rather than inserting
+ordinary global/workspace facts into SQLite.
 
 | Producer | Route | Notes |
 |---|---|---|
-| `memory_remember`, Memory Hub, awareness, adaptive style, `set_user_name` / `set_response_style`, mailbox, Dreaming promotions | `MemoryWriter` | §3, §4b, §5, §5b. |
-| Core memory candidates (`CoreMemoryDistiller`) | Facts → `MemoryWriter` as `inferred`; events → `MemoryService.capture` | Fact types: preference → `preference`, correction → `correction`, project_state → `project_fact`, pattern → `insight`, constraint → `rule`. An inferred `rule` is L0 on every turn, so a constraint is a fact only when the user accepted the candidate (not the hot-path auto-accept) or `autoPromoteToCuratedMemoryEnabled` is on; otherwise it is an archive event. Scope: `global` for a global core scope, else `workspace` (the candidate's workspace governs policy). `source_ref = { store: "core_candidate", id: <candidate id>, traceId, profileId, candidateType, scopeKind, scopeRef }`. Open loops, watch items and recurring-workflow hints are archive events (capture dedupe); their provenance is the candidate, marked `applied` with the archive row id (capture options carry no trace or candidate ids). `ignored_noise` is a runtime signal: never written. Lifecycle: written or reinforced → `applied`; dropped for good (no workspace, low salience, secret only, `<no-memory>`, outranked, runtime signal) → `skipped` with the reason; refused by settings (memory or capture off) → stays `accepted` and is retried. Without a running writer (CLI) facts fall back to the archive. The former curated promotion (`upsertDistilledEntry`) is no longer used by the distiller. |
+| `memory_remember`, Memory Hub, user-profile facts | Memory folder when writable; `MemoryWriter` for operational/fallback items | Current routing: §7a and [Phase 3](memory-repo-phase3-design.md). |
+| Name and response style | PersonalityManager | The name is also mirrored to the memory folder; explicit style choices prevent inferred adaptation. |
+| Awareness beliefs | Awareness signal state | Signals no longer write automatic user facts. |
+| Mailbox contact facts and commitments | `MemoryWriter` | Private operational items remain in `memory_items`. |
+| Core memory candidates (`CoreMemoryDistiller`) | `MemoryService.captureCoreMemory`, archive events only | Direct fact promotion was retired. Memory-folder dreaming reviews sessions for facts worth retaining. |
 | Chronicle (`ChronicleMemoryService`) | `MemoryService.capture`, archive only | One private `screen_context` row per promoted observation, the task's `<no-memory>` passed as `noMemory`. Screen text is third-party content and never becomes a `memory_items` fact; Dreaming does not auto-promote screen-captured evidence. |
 | Imports: ChatGPT export, pasted memory exports (`importFromText`) | `MemoryService.openImportSession` | One session per import. Opening it refuses when memory is off or privacy mode is `disabled`; strict privacy or `forcePrivate` make the rows private (private imports stay in their workspace). Auto-capture does not apply (an explicit act). Per entry: `<no-memory>`, input sanitization, inline `<private>`, redaction (secret-only entries dropped), salience, excluded patterns, then dedupe against every imported row visible in the workspace (own rows and non-private imports of any workspace, so a re-import or an import into a second workspace adds nothing) and the capture's content-hash dedupe; the row is written with its embedding (also into the cross-workspace imported-embedding cache) and observation sidecar (`origin: import`) in one capture; `finish` applies the storage cap. ChatGPT `observation` entries (facts about the user) are also written as `import` items (trust 0.6, never `user_stated`) in the workspace scope with `source_ref = { store: "import", id: <archive row id>, importer, conversationId }`; deleting the row (Inspector delete, delete imported entry, Delete imported, Clear All Memories) deletes the fact, and ignoring the row for prompt recall archives it (un-ignoring writes it again). A fact another source also holds (alias only) is left alone. ChatGPT conversations already imported and visible in the workspace are skipped before the LLM call; a conversation imported only into another workspace (privately there) is imported again from its stored entries (type and distilled text, rows whose observation is suppressed or redacted excluded) without a new LLM call, through the same session; a failed distillation counts as an error, not as processed. |
 | Box Brain | `MemoryService.capture` / `replaceMemory` | Private source rows (`origin: import`, `forceCapture`). |
@@ -301,28 +307,17 @@ it used. The browser host serves the same attribution as `getMemoryUsedForTask`
 (`host/services/browser-memory-methods.ts`, workspace read authority, task bound to the
 workspace).
 
-**Read-side syncs (`memory-read-side.ts`)**, installed by `startMemoryEngine` after the startup
-lane migration. PersonalityManager's user name and response style are mirrors of `memory_items`:
+**Name and style authority (`memory-read-side.ts`).** PersonalityManager is the source of
+truth; name and response style are no longer mirrored from `memory_items`. The memory
+folder's profile view reads `me.md` and `MEMORY.md`, with PersonalityManager supplying the
+preferred name. When the folder is off or unavailable, the profile can still read fallback
+facts from `memory_items`.
 
-- PersonalityManager's user name follows the active `preferred_name` item: `set_user_name`
-  (`user_stated`) wins over inferred names, and a newer statement supersedes. A deleted item
-  clears the name. After the migration, the live PersonalityManager name is adopted once as
-  `user_stated`, so the migration never reverts it.
-- The active `response_style` item carries its structured style in `source_ref.style`; the
-  read side applies it to PersonalityManager's live style after every write (an adaptation, a
-  style set in Settings, `set_response_style`). An item without `source_ref.style` (copied from
-  the retired adaptive-style lane) changes nothing. `AdaptiveStyleEngine` only writes the item
-  (`inferred`); it keeps its observations, rate limits and history in its own settings, and
-  does not adapt without a MemoryWriter.
-- `AdaptiveStyleEngine` does not adapt while a `user_stated` / `user_confirmed`
-  `response_style` item exists. Feedback received meanwhile is dropped. A response style
-  changed in Settings is written as that item (`withSettingsResponseStyleMirror`); a save
-  that leaves the style unchanged writes nothing, so an adapted style is not turned into a
-  user choice by an unrelated settings save. A stale form copy is not a choice either: the
-  Personality settings form sends the style it loaded (`responseStyleBaseline`); when the
-  saved style equals it, nothing is recorded and the newer (adapted) style is kept. Callers
-  without a baseline (onboarding, import, browser host) skip the record when the save exactly
-  undoes the engine's latest adaptation of every changed dimension.
+An explicit response-style choice in Settings or `set_response_style` sets
+`responseStyleExplicit`, and `AdaptiveStyleEngine` stops adapting while it is set. The
+Settings form includes `responseStyleBaseline` so an unchanged or stale form does not undo
+a newer learned style. The engine writes an accepted adaptation directly to
+PersonalityManager and keeps its observations/rate limits/history in its own settings.
 
 ### 4b. Recall and the agent tool surface (implemented)
 
@@ -480,16 +475,16 @@ active commitments, loaded at startup, refreshed after every writer change and, 
 30 s, on the next read (changes made by the other process on the profile). Services that write
 await a refresh before they return, so callers read their own writes.
 
-| Service / producer | Now |
+| Service / producer | Current route, including SQLite fallback behavior |
 |---|---|
-| `UserProfileService` | `getProfile()` (sync): active, non-private global items except commitments, as `UserFact` (id = item id; category from `source_ref.category`, a goal belief, or the kind). `addFact` (async) writes `userFactCandidate`; `deleteFact` (async) tombstones the item and its revisions. No update API: facts are edited in the Memory Hub. |
+| `UserProfileService` | Reads `me.md` / `MEMORY.md` through `UserProfileFolderModel`, plus the PersonalityManager name. Add/delete target guarded folder entries while writable. With the folder unavailable, reads use the non-private global-item snapshot and writes/deletes use `MemoryWriter`. |
 | `RelationshipMemoryService` | Commitments are `commitment` items: open = `active`, done = `archived`, due date = `source_ref.dueAt`. `listOpenCommitments` / `listDueSoonCommitments` (sync, snapshot) feed Awareness, the briefing and suggestions; `listItems`, `updateItem` (text, confidence, done/reopen, due date; a new revision of the same record) and `deleteItem` are async. Mailbox insights are private contact-scope `third_party` items (`store: "mailbox"`, record id derived from contact and text, so a repeat updates the due date). `recordTaskCompletion` only closes commitments the summary reports as done; task history is not stored. |
 | Mailbox reply drafts | `buildContactMemoryContext` (`contact-memory-context.ts`): the contact's (then its company's) active contact-scope items, sanitized, under a header that marks them as the contact's words. |
 | `CuratedMemoryService` | The workspace scope of `memory_items`. `list` / `getPromptEntries` map items to `CuratedMemoryEntry` (id = item id; lane from `source_ref.target` or the kind; prompt entries skip private items). `curate` add → `curated` item; replace → a new revision of the same record (a superseded id follows its record to the active revision); remove → `archived`. Items the user stated or confirmed are refused (Memory Hub only). `upsertDistilledEntry` → `inferred` item. Without a writer it reports memory as unavailable. |
-| Awareness beliefs | `beliefCandidate`, written by `AwarenessService` directly (`user_confirmed` when confirmed or learned from feedback; `preferred_name` / `response_length` single-valued). |
-| `AdaptiveStyleEngine` | `response_style`, `inferred`, with `source_ref.style`; PersonalityManager mirrors it (§4a). |
-| `set_user_name` / `set_response_style` tools, a style set in Settings | `preferred_name` / `response_style`, `user_stated` (`writeInBackground`). |
-| Core memory candidates | Fact candidates through `MemoryWriter` as `inferred` items (§1); the distiller no longer promotes into the curated lane. |
+| Awareness beliefs | Signals only; automatic belief-to-fact writes were retired in Phase 3. |
+| `AdaptiveStyleEngine` | Updates PersonalityManager directly; explicit user choices block adaptation (§4a). |
+| `set_user_name` / `set_response_style` tools, a style set in Settings | PersonalityManager is authoritative; name is mirrored into the folder and explicit style sets `responseStyleExplicit`. |
+| Core memory candidates | Archive events only (§1); memory-folder dreaming owns later fact promotion. |
 | Imports | Imported facts as `import` items through the gated import API (§1). |
 | Approval-gated `memory_remember` | Staged with `MemoryWriteGate` (target `curated`, action `remember`) as the candidate itself (kind, scope, source, subject, record id) and replayed through `MemoryWriter` after approval, without a curated-lane conversion. |
 
@@ -674,21 +669,22 @@ can be linked; a source that cannot be linked never fails the save.
 
 ## 6. The archive (`memories`) and its future
 
-- **Now (Phase 2):** `memories` stays the episodic store: task outcomes, resolved errors,
+- **Current archive:** `memories` stays the episodic store: task outcomes, resolved errors,
   feedback, corrections as events, explicit `memory_remember` notes, core-candidate events,
   Chronicle and imports. It keeps its own capture path (the shared salience gate, redaction,
   settings and content-hash dedupe, §1), retention (`retention_days`), privacy states and
-  FTS. `memory_items` is the semantic fact store. Facts link back to archive rows in two ways:
-  Dreaming promotions list their evidence as `source_ref.aliases` (`archive:<id>`), and
+  FTS. The memory folder is the primary global/workspace fact store; `memory_items` holds
+  operational and fallback facts. Existing fact provenance can link back to archive rows:
+  historical Dreaming promotions list their evidence as `source_ref.aliases` (`archive:<id>`), and
   imported facts name their imported row as the primary ref (`{ store: "import", id }`), so
   the fact follows the row's delete and ignore. (The import store is distinct from
   `archive` so that deleting one piece of Dreaming evidence never deletes a promoted fact.)
-- **Phase 3 (unification):** Dreaming promotes recurring archive outcomes into `memory_items`
+- **Historical unification proposal (superseded by the memory-folder decisions):** the earlier plan proposed promoting recurring archive outcomes into `memory_items`
   facts (`source: inferred`, `source_ref.aliases` listing the supporting archive rows), and
   `MemoryRecall` fuses both lanes. The archive then becomes the `outcome`/`decision` event lane
-  of the same engine: either `memory_items` gains episodic kinds and the archive rows migrate in
-  with `kind = outcome`, or the archive is kept as an evidence log behind the facts. That choice
-  is deferred until recall telemetry shows how often episodic rows are recalled directly.
+  of the same engine. This was a proposed storage direction, not the current implementation.
+  Current fact routing and memory-folder dreaming are described in §7a and
+  [Memory Repo Phase 3](memory-repo-phase3-design.md); archive rows remain the evidence/event lane.
 
 ## 6a. Archive capture, summaries and compression
 
@@ -812,17 +808,25 @@ reindexes summary changes. The marker stores `scanned`, `summariesRewritten`,
   same runtime the first one keeps it. Each new owner's writers rebuild from the database, so
   tasks the non-owner ran reach the files when ownership changes, not live.
 
-## 7a. The memory repo (Phase 1, opt-in)
+## 7a. The memory repo (current default-on fact store)
 
-With **Settings > Memory > Memory folder** (`memoryRepoEnabled`) on, facts the agent or the
-user saves with `memory_remember` go to a local git repo of markdown files in the Agent
-Memory Repo format instead of `memory_items`, and `MEMORY.md` plus the workspace's file are
-in every private prompt as `<cowork_memory_repo>`. Contact, task, private and strict-privacy
-facts stay in `memory_items`, as do the other producers. See
-[memory-repo-phase1-design.md](memory-repo-phase1-design.md). The folder has its own dreaming
-(an AI pass over the folder and recent tasks; safe changes as an undoable commit, the rest on
-a review branch): [memory-repo-phase2-design.md](memory-repo-phase2-design.md). The heuristic
-curator in §5b keeps curating `memory_items`.
+The memory folder (`memoryRepoEnabled`) defaults on for new and existing profiles, with a
+one-time default migration. A later explicit user choice to turn it off is respected.
+Ordinary global/workspace facts written by the agent, Memory Hub, onboarding and supported
+imports go to its local git repo of Markdown files. `MEMORY.md` plus the workspace's file
+are included in eligible private prompts as `<cowork_memory_repo>`.
+
+Commitments, contact/task/private and strict-privacy facts remain in `memory_items`; the
+SQLite write path also remains the fallback while the folder is off or unavailable.
+PersonalityManager owns name/style, awareness produces signals, and core-memory distillation
+captures archive events. Generated `USER.md`/`MEMORY.md` kit blocks, topic packs, daily
+summaries and the heuristic `memory_items` curator are retired. Commitment expiry remains
+operational (§5b).
+
+The folder has its own dreaming: an AI pass over the folder and recent tasks, with safe
+changes committed and other changes held for review. See
+[Phase 1](memory-repo-phase1-design.md), [Phase 2](memory-repo-phase2-design.md), and the
+[Phase 3 routing and retirement decisions](memory-repo-phase3-design.md).
 
 **Sync and team memory.** The folder can sync with a private git remote the user owns
 (`memoryRepoRemoteUrl`, only after the "private and mine" confirmation; the user's own git

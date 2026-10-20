@@ -289,7 +289,7 @@ Key files for this model:
 - `src/electron/agent/custom-skill-loader.ts`
 - `src/electron/database/repositories.ts`
 - `src/electron/control-plane/handlers.ts`
-- `src/renderer/components/MainContent.tsx`
+- `src/renderer/components/MainContent/MainContent.tsx`
 - `src/renderer/App.tsx`
 
 If the skill system changes again, update this document in the same PR.

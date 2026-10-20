@@ -1,11 +1,13 @@
 import csv
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "trading_foundation.py"
@@ -40,7 +42,10 @@ class TradingFoundationCliTests(unittest.TestCase):
     @classmethod
     def _run_cli(cls, args, expect_success: bool = True):
         cmd = [sys.executable, str(SCRIPT_PATH), *args]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        # Tests use the selected interpreter's real dependencies. Missing packages
+        # must fail visibly without installing into or mutating the bundled skill.
+        env = {**os.environ, "TRADING_FOUNDATION_BOOTSTRAPPED": "1"}
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if proc.returncode != 0 and expect_success:
             raise AssertionError(
                 f"Command failed with code {proc.returncode}: {proc.stdout}\\n{proc.stderr}"
@@ -193,6 +198,17 @@ class TradingFoundationCliTests(unittest.TestCase):
             self.assertTrue(output["success"])
             self.assertEqual(output["mode"], "portfolio-run")
             self.assertEqual(output["metrics"]["strategy_mode"], "stat-arb")
+            self.assertEqual(output["metrics"]["statarb"]["pair_symbol"], "BTC/ETH")
+            self.assertEqual(output["metrics"]["statarb"]["statarb_window"], 30)
+
+    def test_human_prompt_handles_quoted_csv_paths_and_numeric_controls(self):
+        with tempfile.TemporaryDirectory(prefix="trading inputs ") as tmpdir:
+            base_path = self._make_dataset(Path(tmpdir), "primary data")
+            output = self._run_cli(
+                [f'"{base_path}" --initial-cash 12345 --strategy-mode adaptive --position-size 0.03']
+            )
+            self.assertTrue(output["success"])
+            self.assertEqual(output["metrics"]["initial_equity"], 12345)
 
     def test_statarb_tolerates_timestamp_skew(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -284,6 +300,13 @@ class TradingFoundationCliTests(unittest.TestCase):
             self.assertTrue(risk_controls["drawdown_circuit_enabled"])
             self.assertAlmostEqual(risk_controls["drawdown_circuit_level"], 0.10)
             self.assertEqual(risk_controls["strategy_correlation_cap"], 0.85)
+
+
+class CliBootstrapIsolationTests(unittest.TestCase):
+    def test_cli_tests_disable_dependency_installation(self):
+        with patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as run:
+            TradingFoundationCliTests._run_cli(["--help"])
+        self.assertEqual(run.call_args.kwargs["env"]["TRADING_FOUNDATION_BOOTSTRAPPED"], "1")
 
 
 if __name__ == "__main__":

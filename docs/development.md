@@ -294,7 +294,7 @@ Current bundle-splitting rules:
 - Keep the in-app browser workbench renderer-owned. `BrowserWorkbenchView` registers its Electron webview `webContentsId` with the main process, and browser tools route visible actions through `BrowserWorkbenchService` into `BrowserSessionManager`. Browser V2 automation should be CDP-backed through Electron `webContents.debugger` for snapshots, ref-aware actions, dialogs, diagnostics, downloads/uploads, emulation, traces, and screenshots; renderer DOM scripts are compatibility fallback, not the primary control plane. Browser Workbench IPC also carries open requests, status updates, screenshot capture, annotation handoff, diagnostics state, cursor events for visible agent movement, and viewport events so `browser_emulate` can resize the shared webview for responsive QA. Do not replace generated web artifact iframes with this live browser path; artifact previews and live website testing are separate surfaces. See [Browser Workbench](browser-workbench.md) and [Browser V2 Architecture](browser-v2-architecture.md).
 - Keep Browser Use Cloud as an explicit backend, not a default fallback. The Browser Use client lives in `src/electron/agent/browser/browser-use-cloud-client.ts`, uses `BROWSER_USE_API_KEY` or encrypted `browser-use` settings, and connects through the existing Playwright CDP path. Preserve the private/local target block, API error redaction, stale-session retry, and pending-stop behavior when changing browser routing. Focused checks: `npx vitest run src/electron/agent/browser/__tests__/browser-use-cloud-client.test.ts src/electron/agent/tools/__tests__/browser-tools.test.ts src/electron/security/__tests__/network-policy.test.ts tests/tools/shell-tools.test.ts`.
 - Keep CSS split by surface. `src/renderer/styles/index.css` is for app-wide tokens/layout plus the
-  small critical composer startup block needed before lazy chunks hydrate. `src/renderer/components/main-content.css`
+  small critical composer startup block needed before lazy chunks hydrate. `src/renderer/components/MainContent/main-content.css`
   owns the heavier task surface, welcome view, remote file picker, workspace/permission dropdowns, and
   skills menu. Do not move task composer rules into `right-panel.css`; otherwise the center view can
   restart with unstyled native controls before the right panel chunk loads.
@@ -363,7 +363,7 @@ Task view supports `... > Add automation...`, a renderer-side shortcut that crea
 
 Implementation contract:
 
-- The task title/three-dot menu lives in `src/renderer/components/MainContent.tsx`.
+- The task title/three-dot menu lives in `src/renderer/components/MainContent/MainContent.tsx`.
 - The modal is `TaskAutomationModal` in the same file so task-derived defaults stay local to task view.
 - Saving must call `window.electronAPI.createRoutine` with `buildTaskRoutineCreate`; do not create a parallel automation store for this flow.
 - Default target mode is `Continue thread`, which stores the selected task as `targetTaskId` and compiles schedule triggers to cron jobs with `runMode: "thread_follow_up"`.
@@ -760,7 +760,7 @@ Implementation boundaries:
 - `src/electron/integrations/integration-mention-options.ts` builds integration mention options from local configured state only. It must stay fast and must not run network checks while the user types.
 - `src/electron/ipc/handlers.ts` and `src/electron/preload.ts` expose `listIntegrationMentionOptions()`.
 - `src/renderer/components/PromptComposerInput.tsx` owns rich inline mention editing. It keeps clean text serialization such as `@Gmail`, renders icon+label chips, and treats each chip as one removable unit for Backspace/Delete.
-- `src/renderer/components/MainContent.tsx` owns grouped menu filtering, section order, task/follow-up submission metadata, user message rendering, and `@Inbox` main-composer routing.
+- `src/renderer/components/MainContent/MainContent.tsx` owns grouped menu filtering, section order, task/follow-up submission metadata, user message rendering, and `@Inbox` main-composer routing.
 - `src/renderer/components/IntegrationMentionText.tsx` renders integration chips in sent user messages and restored session history.
 - `src/electron/agent/executor.ts` turns `agentConfig.integrationMentions` into a soft routing guidance block. Do not convert mentions into `allowedTools`.
 
@@ -811,7 +811,7 @@ Implementation boundaries:
 - `src/shared/message-shortcuts.ts` owns the deterministic app command catalog and parser for `/schedule`, `/clear`, `/plan`, `/cost`, `/compact`, `/doctor`, and `/undo`.
 - `src/shared/multitask-command.ts` owns `/multitask [N] <task>` parsing because it is a task-creation command that strips its prefix before persistence and adds collaborative multitask task metadata.
 - `src/renderer/utils/message-slash-options.ts` owns picker option ordering, filtering, app-vs-skill display, optional/required parameter classification, invalid-token filtering, and keyboard selected-index clamping.
-- `src/renderer/components/MainContent.tsx` owns composer detection, selection behavior, slash-token insertion, app command task creation, legal workflow intake cards, and `/schedule` target selection for standalone tasks versus same-thread follow-ups.
+- `src/renderer/components/MainContent/MainContent.tsx` owns composer detection, selection behavior, slash-token insertion, app command task creation, legal workflow intake cards, and `/schedule` target selection for standalone tasks versus same-thread follow-ups.
 - `src/renderer/utils/legal-demand-intake.ts` owns Claude-for-Legal slash detection, demand-intake prefill/serialization, generic legal workflow context serialization, and the allow/deny filter for legal commands that should show matter-context UI.
 - `src/electron/agents/MultitaskLanePlanner.ts` plans `/multitask` lanes from explicit list items, LLM JSON output, or deterministic fallback lanes.
 - `src/renderer/App.tsx` owns the safe `/clear` task-view reset. `/clear` must not delete task history or switch workspaces.

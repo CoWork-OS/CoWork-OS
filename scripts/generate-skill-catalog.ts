@@ -1,4 +1,4 @@
-#!/usr/bin/env ts-node
+#!/usr/bin/env node
 /**
  * Generate SkillHub Catalog
  *
@@ -6,11 +6,13 @@
  * registry catalog at registry/catalog.json for the GitHub-based
  * SkillHub community registry.
  *
- * Usage: npx ts-node scripts/generate-skill-catalog.ts
+ * Usage: node scripts/generate-skill-catalog.ts (Node 24 or later)
  */
 
-import * as fs from "fs";
-import * as path from "path";
+// Keep this standalone authoring script CommonJS, matching the repository's
+// package type while Node strips its TypeScript annotations.
+const fs: typeof import("node:fs") = require("node:fs");
+const path: typeof import("node:path") = require("node:path");
 
 interface SkillRegistryEntry {
   id: string;

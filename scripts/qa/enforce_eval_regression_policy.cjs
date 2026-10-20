@@ -19,7 +19,8 @@ function runGit(args) {
 
 function getChangedFiles(base, head) {
   const range = base && head ? `${base}...${head}` : "HEAD~1..HEAD";
-  const out = runGit(["diff", "--name-only", range]);
+  // Removed specifications cannot provide a regression case for the incident fix.
+  const out = runGit(["diff", "--name-only", "--diff-filter=d", range]);
   return out
     .split("\n")
     .map((line) => line.trim())

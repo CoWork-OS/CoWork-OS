@@ -1,10 +1,10 @@
 # Evolving Agent Intelligence
 
-> **Retired (memory repo Phase 3).** Daily summaries, topic packs and the heuristic Dreaming curator described below were removed; the memory folder and its dreaming replace them. See [memory-repo-phase3-design.md](memory-repo-phase3-design.md).
+> **Memory routing update (Phase 3).** The memory folder is now the default fact store. Daily summaries, topic packs and the old heuristic curator are retired; their historical design is marked below. Name and response style belong to PersonalityManager. See [memory-repo-phase3-design.md](memory-repo-phase3-design.md) and [Memory Engine](memory-engine.md#7a-the-memory-repo-current-default-on-fact-store).
 
 CoWork OS has a layered memory runtime, a full personality engine, 15+ channels, and a playbook system that auto-captures what worked. The **Evolving Agent Intelligence** layer connects these systems so the agent visibly improves over time — reducing correction overhead, aligning to communication preferences, and surfacing quantifiable ROI metrics.
 
-All improvements are opt-in (admin-toggleable), rate-limited, and governed by the existing guardrail system. No changes to the security or local-first architecture.
+Background learning features use explicit settings, rate limits, and the existing guardrail system. The memory folder has its own default-on setting and can be turned off by the user.
 
 Learning signals, playbook reinforcement, and trusted-pattern promotion do not
 grant runtime access. Each resulting task still resolves an [access profile](access-profiles.md)
@@ -49,7 +49,9 @@ The old monolithic synthesized-memory block mixed durable facts, broad archive r
 
 ### Solution
 
-Facts about the user and workspace live in `memory_items` (written through `MemoryWriter`). One policy, `MemoryInjectionPolicy`, decides per task and turn which memory layers a prompt may receive (private gateway, retained memory, workspace memory switch, `<no-memory>`, sub-agents and verifiers). One builder, `MemoryContextBuilder`, renders them within one budget:
+Ordinary global/workspace facts live in the memory folder by default. `memory_items` holds operational contact/task/private facts, commitments, and fallback facts when the folder is unavailable. `MemoryInjectionPolicy` gates these layers by task, gateway privacy, workspace memory settings, `<no-memory>`, sub-agent and verifier status. `MemoryContextBuilder` renders SQLite-backed items within its budget, while the memory-folder context has its own `<cowork_memory_repo>` block.
+
+The earlier Phase 2 layered design below is retained as historical context; its daily-summary/topic-pack producers and generated-kit sync are superseded by the current routing above:
 
 1. **L0** (identity, rules, pinned and user-stated preferences, open commitments, curated facts) as the pinned `<cowork_user_profile>` block on step and follow-up turns, or `<cowork_hot_memory>` in the planning and chat system prompts. Cached per session and rebuilt when memory changes. `memory_items` is the only source: the one-time lane migration runs at startup before anything reads memory, and the legacy stores are retired.
 2. **L1** (memory items relevant to the request) as `<cowork_relevant_memory>`, or on plan steps inside the memory context section, where `MemorySynthesizer` adds:
@@ -92,7 +94,7 @@ A rule (a curated `constraint` or `workflow_rule`, memory kind `rule`) can recor
 
 Both are stored in `lifecycle_meta` next to the rule's owner. A rule unused for 90 days that names no evidence is listed in Hygiene as a retirement candidate; retiring archives it and nothing is deleted. A rule with evidence is still listed when unused, without the "no evidence" mark.
 
-### Dreaming curation
+### Historical heuristic Dreaming curation (retired)
 
 Dreaming is the curator of `memory_items`. It merges duplicates, flags conflicts, promotes archive outcomes that recur in two or more tasks into inferred facts, decays unused inferences and closes finished commitments. Safe operations on inferred facts are applied through `MemoryWriter` (each one logged and undoable); everything else, and anything the user stated or confirmed, waits in the Memory Hub Review tab. Curation changes `L0` and `L1` only through the facts it writes. See [Dreaming](dreaming.md).
 
@@ -106,7 +108,7 @@ Dreaming is the curator of `memory_items`. It merges duplicates, flags conflicts
 | **L3 Deep Recall**     | `memory_recall`, `context_recall`                                                                                 |
 | **Dreaming Evidence**  | active `memory_items`, archive outcomes of the last 30 days, conversation-index done signals                      |
 
-`daily_summary` fragments come from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files written by `MemoryConsolidator` through `DailyLogSummarizer` (see [Daily Summaries](#6-daily-summaries)).
+Historically, `daily_summary` fragments came from `.cowork/memory/summaries/<YYYY-MM-DD>.md` files written by `MemoryConsolidator` through `DailyLogSummarizer` (see [Daily Summaries](#6-daily-summaries-retired)). These producers are retired.
 
 ### Output format
 
@@ -140,7 +142,7 @@ On plan steps the L1 block sits in the memory context section together with the 
 
 ### Solution
 
-`AdaptiveStyleEngine` observes every user message and feedback signal, then gradually shifts the response style within configurable rate limits. It writes the style as an `inferred` `response_style` item in `memory_items`, which `PersonalityManager` mirrors. It does not adapt while the user has set a style (in Settings or with `set_response_style`), and messages from channel senders other than the workspace owner are not observed (see [Memory Engine](memory-engine.md) §3, §4a).
+`AdaptiveStyleEngine` observes eligible user messages and feedback signals, then gradually shifts the response style within configurable rate limits. It updates PersonalityManager directly and keeps only observations, rate limits and adaptation history in its own settings. An explicit user style choice sets `responseStyleExplicit`, which blocks adaptation. Messages from channel senders other than the workspace owner are not observed (see [Memory Engine](memory-engine.md) §4a).
 
 **Signals observed:**
 | Signal | How detected | Effect |
@@ -337,9 +339,9 @@ Agent Evolution (Day 45, 123 tasks completed):
 
 ---
 
-## 6. Daily Summaries
+## 6. Daily Summaries (retired)
 
-**Files:** `src/electron/memory/DailyLogSummarizer.ts` (read and write), `src/electron/memory/MemoryConsolidator.ts` (writer)
+**Historical files, removed in Phase 3:** `src/electron/memory/DailyLogSummarizer.ts` (read and write), `src/electron/memory/MemoryConsolidator.ts` (writer). The following describes the retired implementation; current dreaming operates on the memory folder and sessions.
 
 ### Purpose
 
@@ -424,7 +426,7 @@ All improvements respect CoWork OS's security-first positioning:
 | Playbook-to-Skill      | —                                                                                             | Always active (post-task hook)                 | 10 min cooldown, max 1/check               | Full proposal review workflow                         |
 | Channel Persona        | `channelPersonaEnabled`                                                                       | Off                                            | —                                          | Visible in system prompt                              |
 | Evolution Metrics      | —                                                                                             | Computed on-demand                             | —                                          | Read-only, no mutations                               |
-| Daily Summaries        | `backgroundConsolidationEnabled` (writer)                                                     | Off; read when summary files exist             | 40 lines per day; token budget (ranked)    | Summary files in `.cowork/memory/summaries/`          |
+| Daily Summaries (retired) | Historical `backgroundConsolidationEnabled` writer                                          | Removed in Phase 3                            | Historical 40-line cap                    | Retained here as migration context                  |
 | Message Feedback       | —                                                                                             | Always visible on completed messages           | IPC: `limited` tier                        | `user_feedback` task event                            |
 
 ---
@@ -435,9 +437,9 @@ All improvements respect CoWork OS's security-first positioning:
 | ------------------------- | ----------------------------------------------------------------- |
 | MemorySynthesizer         | `src/electron/memory/__tests__/MemorySynthesizer.test.ts`         |
 | CuratedMemoryService      | `src/electron/memory/__tests__/CuratedMemoryService.test.ts`      |
-| DreamingService           | `src/electron/memory/__tests__/DreamingService.test.ts`           |
+| Memory-folder dreaming    | `src/electron/memory/repo/__tests__/MemoryRepoDreamer.test.ts`      |
 | SessionRecallService      | `src/electron/memory/__tests__/SessionRecallService.test.ts`      |
-| LayeredMemoryIndexService | `src/electron/memory/__tests__/LayeredMemoryIndexService.test.ts` |
+| Prompt memory builder     | `src/electron/memory/__tests__/MemoryContextBuilder.test.ts`        |
 | AdaptiveStyleEngine       | `src/electron/memory/__tests__/AdaptiveStyleEngine.test.ts`       |
 | PlaybookSkillPromoter     | `src/electron/memory/__tests__/PlaybookSkillPromoter.test.ts`     |
 | ChannelPersonaAdapter     | `src/electron/memory/__tests__/ChannelPersonaAdapter.test.ts`     |

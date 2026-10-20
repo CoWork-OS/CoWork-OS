@@ -499,6 +499,8 @@ import {
   upsertGoogleWorkspaceAccount,
 } from "../../shared/google-workspace";
 import { setupTaskTraceHandlers } from "./task-trace-handlers";
+import { createTaskReadHandler } from "./task-read-authorization";
+import { PrincipalCapabilityMiddleware } from "../security/PrincipalCapabilityMiddleware";
 import { buildVideoPreviewTranscodeArgs } from "./video-preview-transcode";
 import {
   YouTubeIngestionService,
@@ -1972,6 +1974,11 @@ export async function setupIpcHandlers(
   const inputRequestRepo = new InputRequestRepository(db);
   const workContextService = new WorkContextService(db);
   const sessionMembershipService = new SessionMembershipService(db);
+  const principalCapabilities = new PrincipalCapabilityMiddleware(db, sessionMembershipService);
+  const handleTaskRead = <Args extends unknown[], Result>(
+    channel: string,
+    read: (event: IpcMainInvokeEvent, ...args: Args) => Result,
+  ) => ipcMain.handle(channel, createTaskReadHandler(principalCapabilities, read));
   const recurringApprovalService = new RecurringApprovalService(db);
   const protectedCredentialService = new ProtectedCredentialService(db);
   const localPreviewService = getLocalPreviewProcessService();
@@ -2123,7 +2130,31 @@ export async function setupIpcHandlers(
 
   // Seed default agent roles if none exist
   await agentRoleRepo.seedDefaults();
-  setupTaskTraceHandlers({ taskTraceRepo });
+  setupTaskTraceHandlers({
+    taskTraceRepo,
+    authorizeTaskView: (event, taskId) =>
+      principalCapabilities.authorizeTaskRead(taskId, principalForEvent(event)),
+    listVisibleTasks: async (event, request) => {
+      const principalId = principalForEvent(event);
+      if (principalId === sessionMembershipService.getLocalPrincipal().principalId)
+        return undefined;
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (limit, offset) =>
+          request.workspaceId
+            ? taskRepo.findByWorkspace(request.workspaceId, limit, offset)
+            : taskRepo.findAll(limit, offset),
+        "view",
+        principalId,
+        Number.MAX_SAFE_INTEGER,
+        0,
+      );
+      return tasks;
+    },
+    filterVisibleTaskIds: (event, ids) =>
+      principalForEvent(event) === sessionMembershipService.getLocalPrincipal().principalId
+        ? Promise.resolve(ids)
+        : principalCapabilities.authorizeTaskIds(ids, "view", principalForEvent(event)),
+  });
 
   // Helper to validate path is within workspace (prevent path traversal attacks).
   // Sibling handlers such as FILE_IMPORT_TO_WORKSPACE resolve the root from the
@@ -5414,7 +5445,7 @@ export async function setupIpcHandlers(
     return task;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_GET, async (_, id: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_GET, async (_, id: string) => {
     const startedAt = Date.now();
     const task = await taskRepo.findById(id);
     const dbMs = Date.now() - startedAt;
@@ -5599,7 +5630,7 @@ export async function setupIpcHandlers(
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_PROGRESS_GET, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.SESSION_PROGRESS_GET, async (_, taskId: string) => {
     const normalizedTaskId = typeof taskId === "string" ? taskId.trim() : "";
     if (!normalizedTaskId || normalizedTaskId.length > 128) return undefined;
     // Progress is projected state; give pending projections a moment, then read anyway.
@@ -5609,7 +5640,7 @@ export async function setupIpcHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.SESSION_SEARCH,
-    async (_, request?: { query?: string; workspaceId?: string; limit?: number }) => {
+    async (event, request?: { query?: string; workspaceId?: string; limit?: number }) => {
       const query = typeof request?.query === "string" ? request.query.trim().slice(0, 120) : "";
       if (query.length < 2) return [];
       const workspaceId =
@@ -5618,14 +5649,33 @@ export async function setupIpcHandlers(
         typeof request?.limit === "number" && Number.isFinite(request.limit)
           ? Math.min(50, Math.max(1, Math.floor(request.limit)))
           : 20;
-      return agentDaemon.searchSessions(query, workspaceId || undefined, limit);
+      const principalId = principalForEvent(event);
+      if (principalId === sessionMembershipService.getLocalPrincipal().principalId) {
+        return agentDaemon.searchSessions(query, workspaceId || undefined, limit);
+      }
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) =>
+          taskRepo.search(query, {
+            workspaceId: workspaceId || undefined,
+            limit: pageLimit,
+            offset: pageOffset,
+          }),
+        "view",
+        principalId,
+        limit,
+        0,
+      );
+      return tasks.flatMap((task) => {
+        const progress = agentDaemon.getSessionProgress(task.id);
+        return progress ? [{ task, progress }] : [];
+      });
     },
   );
 
   ipcMain.handle(
     IPC_CHANNELS.TASK_LIST,
     async (
-      _,
+      event,
       opts?: {
         limit?: number;
         offset?: number;
@@ -5656,13 +5706,20 @@ export async function setupIpcHandlers(
               "bot conversation filter",
             );
       const startedAt = Date.now();
-      const tasks = await taskRepo.findAll(limit, offset, {
-        prioritizeSidebar: opts?.prioritizeSidebar === true,
-        includeArchivedSessions: opts?.includeArchivedSessions !== false,
-        botConversation,
-        excludeSources: opts?.excludeSources,
-        cursor: opts?.cursor,
-      });
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) =>
+          taskRepo.findAll(pageLimit, pageOffset, {
+            prioritizeSidebar: opts?.prioritizeSidebar === true,
+            includeArchivedSessions: opts?.includeArchivedSessions !== false,
+            botConversation,
+            excludeSources: opts?.excludeSources,
+            cursor: opts?.cursor,
+          }),
+        "view",
+        principalForEvent(event),
+        limit,
+        offset,
+      );
       const dbMs = Date.now() - startedAt;
       const jsonStartedAt = Date.now();
       const serializedBytes = getSerializedByteSize(tasks);
@@ -5681,7 +5738,7 @@ export async function setupIpcHandlers(
   ipcMain.handle(
     IPC_CHANNELS.TASK_LIST_SIDEBAR,
     async (
-      _,
+      event,
       opts?: {
         limit?: number;
         offset?: number;
@@ -5708,14 +5765,21 @@ export async function setupIpcHandlers(
           ? undefined
           : validateInput(WorkspaceIdSchema, opts.workspaceId, "sidebar workspace filter");
       const startedAt = Date.now();
-      const tasks = await taskRepo.findSidebarSummaries(limit, offset, {
-        prioritizeSidebar: opts?.prioritizeSidebar === true,
-        includeArchivedSessions: opts?.includeArchivedSessions === true,
-        excludeBotConversations: opts?.excludeBotConversations !== false,
-        excludeSources: opts?.excludeSources,
-        workspaceId,
-        cursor: opts?.cursor,
-      });
+      const { tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) =>
+          taskRepo.findSidebarSummaries(pageLimit, pageOffset, {
+            prioritizeSidebar: opts?.prioritizeSidebar === true,
+            includeArchivedSessions: opts?.includeArchivedSessions === true,
+            excludeBotConversations: opts?.excludeBotConversations !== false,
+            excludeSources: opts?.excludeSources,
+            workspaceId,
+            cursor: opts?.cursor,
+          }),
+        "view",
+        principalForEvent(event),
+        limit,
+        offset,
+      );
       const dbMs = Date.now() - startedAt;
       const jsonStartedAt = Date.now();
       const serializedBytes = getSerializedByteSize(tasks);
@@ -5893,7 +5957,7 @@ export async function setupIpcHandlers(
   );
 
   // Export task summaries as a structured JSON blob (prompt-free by design)
-  ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (_, rawQuery?: TaskExportQuery) => {
+  ipcMain.handle(IPC_CHANNELS.TASK_EXPORT_JSON, async (event, rawQuery?: TaskExportQuery) => {
     checkRateLimit(IPC_CHANNELS.TASK_EXPORT_JSON);
 
     const query: TaskExportQuery = {
@@ -5926,10 +5990,19 @@ export async function setupIpcHandlers(
       );
     } else if (query.workspaceId) {
       const all = await taskRepo.findByWorkspace(query.workspaceId);
-      tasks = all.slice(offset, offset + limit);
+      tasks = (
+        await principalCapabilities.filterTasks(all, "view", principalForEvent(event))
+      ).slice(offset, offset + limit);
     } else {
-      tasks = await taskRepo.findAll(limit, offset);
+      ({ tasks } = await principalCapabilities.filterAndPaginateTasks(
+        (pageLimit, pageOffset) => taskRepo.findAll(pageLimit, pageOffset),
+        "view",
+        principalForEvent(event),
+        limit,
+        offset,
+      ));
     }
+    tasks = await principalCapabilities.filterTasks(tasks, "view", principalForEvent(event));
 
     const taskIds = tasks.map((task) => task.id);
     const events =
@@ -6254,14 +6327,22 @@ export async function setupIpcHandlers(
   // ============ Sub-Agent / Parallel Agent Handlers ============
 
   // Get child tasks for a parent task
-  ipcMain.handle(IPC_CHANNELS.AGENT_GET_CHILDREN, async (_, parentTaskId: string) => {
-    return agentDaemon.getChildTasks(parentTaskId);
+  handleTaskRead(IPC_CHANNELS.AGENT_GET_CHILDREN, async (event, parentTaskId: string) => {
+    return principalCapabilities.filterTasks(
+      await agentDaemon.getChildTasks(parentTaskId),
+      "view",
+      principalForEvent(event),
+    );
   });
 
   // Get status of specific agents
-  ipcMain.handle(IPC_CHANNELS.AGENT_GET_STATUS, async (_, taskIds: string[]) => {
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_STATUS, async (event, taskIds: string[]) => {
     const tasks = [];
-    for (const id of taskIds) {
+    const ids =
+      principalForEvent(event) === sessionMembershipService.getLocalPrincipal().principalId
+        ? taskIds
+        : await principalCapabilities.authorizeTaskIds(taskIds, "view", principalForEvent(event));
+    for (const id of ids) {
       const task = await agentDaemon.getTaskById(id);
       if (task) {
         tasks.push({
@@ -6279,7 +6360,7 @@ export async function setupIpcHandlers(
 
   // Task events handler - get historical events from database
   // For collaborative root tasks, also include file events from child tasks.
-  ipcMain.handle(IPC_CHANNELS.TASK_EVENTS, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_EVENTS, async (event, taskId: string) => {
     const startedAt = Date.now();
     const maxEvents = 600;
     const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
@@ -6287,7 +6368,11 @@ export async function setupIpcHandlers(
     // Include child task file events for collaborative roots
     const task = await taskRepo.findById(taskId);
     if (task?.agentConfig?.collaborativeMode) {
-      const childTasks = await taskRepo.findByParent(taskId);
+      const childTasks = await principalCapabilities.filterTasks(
+        await taskRepo.findByParent(taskId),
+        "view",
+        principalForEvent(event),
+      );
       if (childTasks.length > 0) {
         const childIds = childTasks.map((c) => c.id);
         const fileTypes = ["file_created", "file_modified", "file_deleted", "artifact_created"];
@@ -6323,63 +6408,78 @@ export async function setupIpcHandlers(
     return result;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_TIMELINE_PAGE, async (_, request: TaskTimelinePageRequest) => {
-    const startedAt = Date.now();
-    const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
-    const task = taskId ? await taskRepo.findById(taskId) : undefined;
-    const childTaskIds = task?.agentConfig?.collaborativeMode
-      ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
-      : [];
-    const page = taskEventRepo.findTimelinePage({
-      taskId,
-      cursor: request?.cursor ?? null,
-      limit: request?.limit,
-      byteLimit: request?.byteLimit,
-      singleEventByteLimit: request?.singleEventByteLimit,
-      ...(childTaskIds.length > 0
-        ? {
-            additionalTaskIds: childTaskIds,
-            additionalTaskEventTypes: [...COLLABORATIVE_CHILD_TIMELINE_EVENT_TYPES],
-          }
-        : {}),
-    });
-    const dbMs = Date.now() - startedAt;
-    const jsonStartedAt = Date.now();
-    const serializedBytes = getSerializedByteSize(page);
-    const jsonMs = Date.now() - jsonStartedAt;
-    logIpcPerf(IPC_CHANNELS.TASK_TIMELINE_PAGE, {
-      taskId: page.taskId,
-      rowCount: page.events.length,
-      hasMoreHistory: page.hasMoreHistory,
-      dbMs,
-      jsonMs,
-      mapMs: dbMs,
-      payloadBytes: page.summary.payloadBytes,
-      largestEventPayloadBytes: page.summary.largestEventPayloadBytes,
-      truncatedEventCount: page.summary.truncatedEventCount,
-      serializedBytes,
-    });
-    if (page.warnings?.length) {
-      logger.warn(
-        `[IpcPayloadWarning] ${JSON.stringify({
-          channel: IPC_CHANNELS.TASK_TIMELINE_PAGE,
-          taskId: page.taskId,
-          warnings: page.warnings,
-        })}`,
-      );
-    }
-    return page;
-  });
+  handleTaskRead(
+    IPC_CHANNELS.TASK_TIMELINE_PAGE,
+    async (event, request: TaskTimelinePageRequest) => {
+      const startedAt = Date.now();
+      const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
+      const task = taskId ? await taskRepo.findById(taskId) : undefined;
+      const childTaskIds = task?.agentConfig?.collaborativeMode
+        ? (
+            await principalCapabilities.filterTasks(
+              await taskRepo.findByParent(taskId),
+              "view",
+              principalForEvent(event),
+            )
+          ).map((child) => child.id)
+        : [];
+      const page = taskEventRepo.findTimelinePage({
+        taskId,
+        cursor: request?.cursor ?? null,
+        limit: request?.limit,
+        byteLimit: request?.byteLimit,
+        singleEventByteLimit: request?.singleEventByteLimit,
+        ...(childTaskIds.length > 0
+          ? {
+              additionalTaskIds: childTaskIds,
+              additionalTaskEventTypes: [...COLLABORATIVE_CHILD_TIMELINE_EVENT_TYPES],
+            }
+          : {}),
+      });
+      const dbMs = Date.now() - startedAt;
+      const jsonStartedAt = Date.now();
+      const serializedBytes = getSerializedByteSize(page);
+      const jsonMs = Date.now() - jsonStartedAt;
+      logIpcPerf(IPC_CHANNELS.TASK_TIMELINE_PAGE, {
+        taskId: page.taskId,
+        rowCount: page.events.length,
+        hasMoreHistory: page.hasMoreHistory,
+        dbMs,
+        jsonMs,
+        mapMs: dbMs,
+        payloadBytes: page.summary.payloadBytes,
+        largestEventPayloadBytes: page.summary.largestEventPayloadBytes,
+        truncatedEventCount: page.summary.truncatedEventCount,
+        serializedBytes,
+      });
+      if (page.warnings?.length) {
+        logger.warn(
+          `[IpcPayloadWarning] ${JSON.stringify({
+            channel: IPC_CHANNELS.TASK_TIMELINE_PAGE,
+            taskId: page.taskId,
+            warnings: page.warnings,
+          })}`,
+        );
+      }
+      return page;
+    },
+  );
 
-  ipcMain.handle(
+  handleTaskRead(
     IPC_CHANNELS.TASK_EVENT_DETAIL,
-    async (_, request: TaskEventDetailRequest): Promise<TaskEventDetailResult> => {
+    async (event, request: TaskEventDetailRequest): Promise<TaskEventDetailResult> => {
       const startedAt = Date.now();
       const taskId = typeof request?.taskId === "string" ? request.taskId.trim() : "";
       const eventId = typeof request?.eventId === "string" ? request.eventId.trim() : "";
       const task = taskId ? await taskRepo.findById(taskId) : undefined;
       const childTaskIds = task?.agentConfig?.collaborativeMode
-        ? (await taskRepo.findByParent(taskId)).map((child) => child.id)
+        ? (
+            await principalCapabilities.filterTasks(
+              await taskRepo.findByParent(taskId),
+              "view",
+              principalForEvent(event),
+            )
+          ).map((child) => child.id)
         : [];
       const result = taskEventRepo.findEventDetailById(eventId, {
         taskId,
@@ -6418,7 +6518,7 @@ export async function setupIpcHandlers(
   );
 
   // Semantic timeline projection — normalizer runs on the read path, no DB changes needed
-  ipcMain.handle(IPC_CHANNELS.TASK_SEMANTIC_TIMELINE, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_SEMANTIC_TIMELINE, async (_, taskId: string) => {
     const startedAt = Date.now();
     const maxEvents = 1200;
     const events = taskEventRepo.findRecentByTaskId(taskId, maxEvents);
@@ -6450,7 +6550,7 @@ export async function setupIpcHandlers(
     return timeline;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TASK_LEARNING_PROGRESS, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.TASK_LEARNING_PROGRESS, async (_, taskId: string) => {
     const events = taskEventRepo.findByTaskId(taskId);
     const learningEvents = events
       .filter(
@@ -6720,7 +6820,7 @@ export async function setupIpcHandlers(
   });
 
   // Artifact handlers
-  ipcMain.handle(IPC_CHANNELS.ARTIFACT_LIST, async (_, taskId: string) => {
+  handleTaskRead(IPC_CHANNELS.ARTIFACT_LIST, async (_, taskId: string) => {
     return artifactRepo.findByTaskId(taskId);
   });
 
@@ -11850,9 +11950,10 @@ export async function setupIpcHandlers(
         truncated: row.table.truncated || row.table.rows.length > limit,
       };
     },
-    authorizeTaskView: (event, taskId) => {
-      authorizeTaskForEvent(event, taskId, "view");
-    },
+    authorizeTask: (event, taskId, capability) =>
+      capability === "view"
+        ? principalCapabilities.authorizeTaskRead(taskId, principalForEvent(event))
+        : authorizeTaskForEvent(event, taskId, capability),
     // Answer data: exactly the named file in the task's own workspace (no fallbacks), after
     // symlinks, outside hidden folders and the app's data folder, and allowed by the
     // workspace's read policy, the same rules the agent's file tools follow.

@@ -44,7 +44,15 @@ an unverified file to `quitAndInstall`.
 ### 1. Generate the keypair (once, locally)
 
 ```sh
-node scripts/release/generate-signing-key.mjs
+node --input-type=module <<'NODE'
+import { generateKeyPairSync } from "node:crypto";
+const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+console.log(publicKey);
+console.log(privateKey);
+NODE
 ```
 
 This prints an Ed25519 keypair. Run it locally, not in CI — it writes the private

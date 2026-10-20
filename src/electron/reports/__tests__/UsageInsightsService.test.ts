@@ -867,7 +867,6 @@ describe("UsageInsightsService", () => {
   });
 
   it("aggregates persona metrics with per-persona cost", () => {
-    const ts = Date.now();
     const db = defaultMockDb({
       personaRows: [
         {

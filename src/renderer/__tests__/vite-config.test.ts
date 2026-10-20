@@ -1,9 +1,11 @@
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 import { describe, expect, it } from "vitest";
-import { loadConfigFromFile } from "vite";
+import { createLogger, loadConfigFromFile, optimizeDeps, resolveConfig } from "vite";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const viteConfigPath = path.join(repositoryRoot, "vite.config.mts");
@@ -58,3 +60,41 @@ describe("browser Vite configuration", () => {
     expect(loaded?.config.build?.emptyOutDir).toBe(true);
   });
 });
+
+describe.each([viteConfigPath, webViteConfigPath])(
+  "ELK development dependencies in %s",
+  (configFile) => {
+    it("optimizes a dependency importing the ELK alias without bundling its worker URL", async () => {
+      const fixtureRoot = mkdtempSync(path.join(tmpdir(), "cowork-elk-dependency-test-"));
+      const packageRoot = path.join(fixtureRoot, "node_modules/elk-optimizer-fixture");
+      try {
+        mkdirSync(packageRoot, { recursive: true });
+        writeFileSync(
+          path.join(packageRoot, "package.json"),
+          JSON.stringify({ name: "elk-optimizer-fixture", type: "module", main: "index.js" }),
+        );
+        writeFileSync(
+          path.join(packageRoot, "index.js"),
+          'export { default } from "elkjs/lib/elk.bundled.js";',
+        );
+        const config = await resolveConfig(
+          {
+            configFile,
+            root: fixtureRoot,
+            cacheDir: path.join(fixtureRoot, "cache"),
+            customLogger: createLogger("silent"),
+            optimizeDeps: { include: ["elk-optimizer-fixture"], noDiscovery: true },
+          },
+          "serve",
+        );
+
+        const optimized = await optimizeDeps(config, true);
+        const fixture = optimized.optimized["elk-optimizer-fixture"];
+        expect(fixture).toBeDefined();
+        expect(readFileSync(fixture.file, "utf8")).toContain("elkjs/lib/elk.bundled.js");
+      } finally {
+        rmSync(fixtureRoot, { recursive: true, force: true });
+      }
+    });
+  },
+);

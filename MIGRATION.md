@@ -90,10 +90,14 @@ Moving to CoWork OS provides several advantages:
 
 | Aspect           | CoWork OS                         |
 | ---------------- | --------------------------------- |
-| **Default mode** | Pairing (most restrictive)        |
-| **Sandbox**      | Workspace boundaries (VM planned) |
-| **Approval**     | GUI dialogs                       |
+| **Task access**  | Selected task access profile      |
+| **Sandbox**      | Profile-enforcing execution backend |
+| **Approval**     | Profile policy and inline approval cards |
 | **Guardrails**   | Configurable in Settings UI       |
+
+Channel pairing and allowlists control who can submit work; task access profiles
+control what that work can do. See [Access Profiles](docs/access-profiles.md) and
+the [Security Guide](docs/security-guide.md) for supported boundaries.
 
 ---
 

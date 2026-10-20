@@ -26,14 +26,20 @@ function runPolicy({ body = "", title = "Improve a local UI flow", evalCase = fa
   try {
     git("init", "--quiet");
     fs.writeFileSync(path.join(cwd, "sample.txt"), "before\n");
+    const caseFile = path.join(cwd, "scripts", "qa", "eval-cases", "regression.json");
+    if (evalCase === "deleted" || evalCase === "updated") {
+      fs.mkdirSync(path.dirname(caseFile), { recursive: true });
+      fs.writeFileSync(caseFile, '{"id":"existing-case"}\n');
+    }
     git("add", ".");
     commit();
     const base = git("rev-parse", "HEAD");
     fs.writeFileSync(path.join(cwd, "sample.txt"), "after\n");
-    if (evalCase) {
-      const folder = path.join(cwd, "scripts", "qa", "eval-cases");
-      fs.mkdirSync(folder, { recursive: true });
-      fs.writeFileSync(path.join(folder, "regression.json"), '{"id":"fixture"}\n');
+    if (evalCase === "deleted") {
+      fs.unlinkSync(caseFile);
+    } else if (evalCase) {
+      fs.mkdirSync(path.dirname(caseFile), { recursive: true });
+      fs.writeFileSync(caseFile, '{"id":"fixture"}\n');
     }
     git("add", ".");
     commit();
@@ -86,6 +92,18 @@ test("incident prose remains enforced alongside an unchecked template marker", (
 
 test("a production incident with a changed eval case passes", () => {
   const result = runPolicy({ title: "Repair a production incident", evalCase: true });
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /eval case updated: yes/);
+});
+
+test("deleting an eval case does not satisfy the production incident gate", () => {
+  const result = runPolicy({ title: "Repair a production incident", evalCase: "deleted" });
+  assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /eval case updated: no/);
+});
+
+test("updating an existing eval case satisfies the production incident gate", () => {
+  const result = runPolicy({ title: "Repair a production incident", evalCase: "updated" });
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /eval case updated: yes/);
 });

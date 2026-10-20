@@ -194,7 +194,9 @@ export class MemoryRepoDreamer {
     if (trigger === "daily" && tasks.length === 0 && inboxEntries === 0 && rechecks.length === 0) {
       return { ran: false, reason: "nothing_new" };
     }
-    const workspaceFiles = files.keys().filter((file) => file.startsWith("workspaces/"));
+    const workspaceFiles = Array.from(files.keys()).filter((file) =>
+      file.startsWith("workspaces/"),
+    );
     const input = buildDreamInput({
       files,
       tasks,

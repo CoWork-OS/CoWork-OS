@@ -37,9 +37,16 @@ async function body(request: IncomingMessage) {
 // global agents or inherit the developer's real proxy configuration.
 const child = String.raw`
 const http = require('node:http');
+const assert = require('node:assert/strict');
+const { createRequire } = require('node:module');
+const logs = [];
 const get = require(process.argv[1]);
+const fromGet = createRequire(process.argv[1]);
+const fromAgent = createRequire(fromGet.resolve('global-agent'));
+fromAgent('roarr').ROARR.write = line => logs.push(JSON.parse(line));
 get.initializeProxy();
 const origin = new URL(process.argv[2]);
+function finish(responses) { console.log(JSON.stringify({ responses, logs })); }
 function send(destination, options, text) {
   return new Promise((resolve, reject) => {
     const callback = response => {
@@ -57,13 +64,19 @@ function send(destination, options, text) {
 }
 (async () => {
   const mode = process.argv[3];
-  if (mode === 'custom-agent') {
+  if (mode === 'request-error') {
+    await assert.rejects(
+      send(new URL('/reset', origin), {}, ''),
+      { code: 'ECONNRESET' }
+    );
+    finish([]);
+  } else if (mode === 'custom-agent') {
     const agent = new http.Agent({ keepAlive: false });
     try {
       const result = await send(new URL('/custom-agent', origin), {
         method: 'PATCH', agent, headers: { 'x-fixture': 'custom-agent' }
       }, 'custom-body');
-      console.log(JSON.stringify([result]));
+      finish([result]);
     } finally { agent.destroy(); }
   } else {
     const proxied = await send(new URL('/through-proxy?marker=1', origin), {
@@ -73,12 +86,17 @@ function send(destination, options, text) {
       hostname: 'localhost', family: 4, port: origin.port, path: '/bypassed',
       method: 'PUT', headers: { 'x-fixture': 'bypassed' }
     }, 'direct-body');
-    console.log(JSON.stringify([proxied, bypassed]));
+    finish([proxied, bypassed]);
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `;
 
-async function runBootstrap(origin: string, proxy: string, customAgent = false) {
+async function runBootstrap(
+  origin: string,
+  proxy: string,
+  mode: "proxy" | "custom-agent" | "request-error" = "proxy",
+  logging = false,
+) {
   const builderRequire = createRequire(require.resolve("app-builder-lib"));
   const electronGet = builderRequire.resolve("@electron/get");
   const env = { ...process.env };
@@ -92,20 +110,26 @@ async function runBootstrap(origin: string, proxy: string, customAgent = false) 
   }
   env.GLOBAL_AGENT_HTTP_PROXY = proxy;
   env.GLOBAL_AGENT_NO_PROXY = "localhost";
-  if (customAgent) env.GLOBAL_AGENT_FORCE_GLOBAL_AGENT = "false";
-  const { stdout } = await execute(
-    process.execPath,
-    ["-e", child, electronGet, origin, customAgent ? "custom-agent" : "proxy"],
-    {
-      env,
-      timeout: 5000,
-      maxBuffer: 64 * 1024,
-    },
-  );
-  return JSON.parse(stdout.trim()) as Array<{
-    status: number;
-    body: { method: string; url: string; marker: string; body: string };
-  }>;
+  if (mode === "custom-agent") env.GLOBAL_AGENT_FORCE_GLOBAL_AGENT = "false";
+  env.ROARR_LOG = String(logging);
+  const { stdout } = await execute(process.execPath, ["-e", child, electronGet, origin, mode], {
+    env,
+    timeout: 5000,
+    maxBuffer: 64 * 1024,
+  });
+  return JSON.parse(stdout.trim()) as {
+    responses: Array<{
+      status: number;
+      body: { method: string; url: string; marker: string; body: string };
+    }>;
+    logs: Array<{
+      message: string;
+      context: Record<string, unknown>;
+      sequence: number;
+      time: number;
+      version: string;
+    }>;
+  };
 }
 
 async function proxyFixture() {
@@ -114,7 +138,10 @@ async function proxyFixture() {
     createServer((request, response) => {
       body(request)
         .then((text) => {
-          response.writeHead(200, { "content-type": "application/json" });
+          response.writeHead(200, {
+            "content-type": "application/json",
+            "x-fixture-format": "%.1000000f",
+          });
           response.end(
             JSON.stringify({
               method: request.method,
@@ -136,6 +163,10 @@ async function proxyFixture() {
         response.end("Unexpected proxy target");
         return;
       }
+      if (target.pathname === "/reset") {
+        request.socket.destroy();
+        return;
+      }
       seen.push(target.href);
       const forward = httpRequest(
         target,
@@ -155,7 +186,9 @@ async function proxyFixture() {
 describe("electron/get scoped proxy bootstrap compatibility", () => {
   it("honors GLOBAL_AGENT proxy/no-proxy and preserves URL/options request overloads, methods, headers and bodies", async () => {
     const fixture = await proxyFixture();
-    expect(await runBootstrap(fixture.origin, fixture.proxy)).toEqual([
+    const result = await runBootstrap(fixture.origin, fixture.proxy);
+    expect(result.logs).toEqual([]);
+    expect(result.responses).toEqual([
       {
         status: 200,
         body: {
@@ -175,7 +208,7 @@ describe("electron/get scoped proxy bootstrap compatibility", () => {
 
   it("preserves an explicit custom HTTP agent when GLOBAL_AGENT_FORCE_GLOBAL_AGENT is false", async () => {
     const fixture = await proxyFixture();
-    expect(await runBootstrap(fixture.origin, fixture.proxy, true)).toEqual([
+    expect((await runBootstrap(fixture.origin, fixture.proxy, "custom-agent")).responses).toEqual([
       {
         status: 200,
         body: {
@@ -187,5 +220,54 @@ describe("electron/get scoped proxy bootstrap compatibility", () => {
       },
     ]);
     expect(fixture.seen).toEqual([]);
+  });
+
+  it("preserves enabled proxy diagnostics and treats response format specifiers as context data", async () => {
+    const fixture = await proxyFixture();
+    const start = Date.now();
+    const result = await runBootstrap(fixture.origin, fixture.proxy, "proxy", true);
+    expect(result.responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: "global agent has been initialized" }),
+        expect.objectContaining({
+          message: "proxying request",
+          context: expect.objectContaining({
+            destination: `${fixture.origin}/through-proxy?marker=1`,
+          }),
+        }),
+        expect.objectContaining({
+          message: "proxying response",
+          context: expect.objectContaining({
+            headers: expect.objectContaining({ "x-fixture-format": "%.1000000f" }),
+            statusCode: 200,
+          }),
+        }),
+      ]),
+    );
+    for (const [index, entry] of result.logs.entries()) {
+      expect(entry.context.package).toBe("global-agent");
+      expect(entry.version).toBe("1.0.0");
+      expect(Number.isInteger(entry.time)).toBe(true);
+      expect(entry.time).toBeGreaterThanOrEqual(start - 1000);
+      expect(entry.time).toBeLessThanOrEqual(Date.now());
+      if (index) expect(entry.sequence).toBeGreaterThan(result.logs[index - 1].sequence);
+    }
+  });
+
+  it("retains structured request-error diagnostics without swallowing transport failures", async () => {
+    const fixture = await proxyFixture();
+    const result = await runBootstrap(fixture.origin, fixture.proxy, "request-error", true);
+    expect(result.responses).toEqual([]);
+    expect(result.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "request error",
+          context: expect.objectContaining({
+            error: expect.objectContaining({ code: "ECONNRESET", message: "socket hang up" }),
+          }),
+        }),
+      ]),
+    );
   });
 });

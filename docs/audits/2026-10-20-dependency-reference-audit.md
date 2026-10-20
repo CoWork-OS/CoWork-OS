@@ -125,6 +125,44 @@ type check, lint, formatting and clean-install/packed-consumer checks. Focused
 reruns of all three failed cases pass with unchanged assertions and default
 timeouts after contention subsides; the full run is not claimed as green.
 
+The residual-advisory continuation rejected two additional candidates based on
+execution evidence. Scoping Roarr 3.3.0 beneath `global-agent` 3 removes seven
+registry entries, but its replacement `fast-printf` formatter still throws the
+same out-of-range precision errors (`%.101f` and `%.1000000f`); this is not a
+complete security fix. Argparse 2 supports Mammoth's legacy API aliases but
+introduces deprecation warnings: a normal DOCX CLI conversion that succeeds with
+the current dependency fails with `--throw-deprecation` after substitution.
+Both candidates were reverted. The original 11 entries remain explicit.
+
+The HTTP cache maintainer also disputes the advisory's premise and closed the
+[upstream report](https://github.com/kornelski/http-cache-semantics/issues/56)
+without a patch. The product's default downloader leaves Got's HTTP cache
+disabled; explicitly enabling shared caching remains a separate configuration
+boundary. Updating outside the registry range alone is not proof of a fix.
+
+Additional proxy tests retain disabled logging, enabled structured diagnostics,
+transport errors and response headers containing format-like text. That text
+remains context data, not an attacker-controlled format string. Local HTTPS
+CONNECT acceptance retains custom CA handling and rejects untrusted certificates
+and proxy denial.
+
+A fresh build and type check found existing collection and test-promise APIs
+outside the declared ES2022 compiler libraries. Equivalent reverse search, array
+filtering and deferred test promises compile under the existing settings. Tests
+preserve newest-user-turn selection, timeline order, the latest follow-up plan
+boundary, prompt section order, protected policy text and attachment rekey/rollback
+races; no compiler strictness, assertions or timeout budgets were relaxed.
+
+The completed rerun passes all 121 Node tests and 17,826 Vitest tests across
+1,581 passing files, with 12 existing skips in three files and zero failures.
+It uses the unchanged four-worker configuration and default timeout budgets.
+A process-tree monitor waits for other build/test work to finish and records no
+competing workload during this run. Build, type check, lint, formatting and
+documentation checks pass on the corrected source. A local control through the
+actual Electron build downloader also makes two fresh origin requests despite
+large `max-stale` headers and synthetic `Set-Cookie` responses, confirming that
+the default path does not enable the disputed shared HTTP cache behavior.
+
 Docker-dependent filesystem tests, full container-image acceptance and Harbor runtime
 acceptance require an available Docker daemon. The earlier passing Docker cases do
 not substitute for a fresh image or Harbor runtime result.

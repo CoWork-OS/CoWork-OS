@@ -149,7 +149,10 @@ import { createHash, randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { AgentDaemon } from "./daemon";
-import { APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS } from "./approval-timeouts";
+import {
+  APPROVAL_GATED_TOOL_TIMEOUT_MS as APPROVAL_GATED_TOOL_TIMEOUT_BUDGET_MS,
+  APPROVAL_WAIT_MAX_PAUSE_MS,
+} from "./approval-timeouts";
 import {
   RUN_COMMAND_DEFAULT_TIMEOUT_MS,
   RUN_COMMAND_HEAVY_TIMEOUT_MS,
@@ -11985,9 +11988,10 @@ ${transcript}
         {
           // A tool can reach an approval prompt that its static approval type does
           // not predict (the permission engine asks for canvas tools, for example).
-          // Time a person spends on that prompt does not count against the tool.
+          // Time a person spends on that prompt does not count against the tool,
+          // for as long as the request stays answerable.
           isPaused: () => this.hasPendingUserDecisionForTask(),
-          maxPauseMs: TaskExecutor.APPROVAL_GATED_TOOL_TIMEOUT_MS,
+          maxPauseMs: APPROVAL_WAIT_MAX_PAUSE_MS,
         },
       );
       if (coordinated.error) {

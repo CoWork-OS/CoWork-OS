@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelDecisionService } from "../ChannelDecisionService";
 import { ChannelDecisionStore } from "../ChannelDecisionStore";
+import { APPROVAL_REQUEST_TIMEOUT_MS } from "../../agent/approval-timeouts";
 import { ChannelDecisionRepository } from "../ChannelDecisionRepository";
 import { ApprovalStore } from "../../database/repositories";
 import { nativeSqliteAvailable } from "../../memory/__tests__/memory-items-test-db";
@@ -105,7 +106,7 @@ suite("authorized durable decision service", () => {
     expect(route.botId).toBe("custom-bot");
     expect(f.adapter.sendDecision).toHaveBeenCalledWith(
       expect.objectContaining({
-        expiresAt: f.request.requestedAt + 300000,
+        expiresAt: f.request.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS,
         routeId: route.id,
         summary: f.request.description,
       }),

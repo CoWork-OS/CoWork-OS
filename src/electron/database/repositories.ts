@@ -12,7 +12,7 @@ import {
   type ChannelDecisionResolutionGuard,
 } from "../gateway/ChannelDecisionStore";
 import { approvalRequestRevisionHash } from "../agent/approval-revision";
-import { APPROVAL_REQUEST_TIMEOUT_MS } from "../agent/approval-timeouts";
+import { APPROVAL_REQUEST_TIMEOUT_MS, approvalGrantUsable } from "../agent/approval-timeouts";
 import { assertBotFutureAdmission } from "../automation/BotWorkControlStore";
 import {
   assertGraphTaskAdmission,
@@ -4588,8 +4588,7 @@ export class ApprovalStore {
       if (
         !approval ||
         approval.status !== "approved" ||
-        !Number.isSafeInteger(approval.requestedAt) ||
-        Date.now() >= approval.requestedAt + APPROVAL_REQUEST_TIMEOUT_MS ||
+        !approvalGrantUsable(approval.requestedAt, approval.resolvedAt) ||
         approvalRequestRevisionHash(approval) !== revisionHash
       )
         return false;

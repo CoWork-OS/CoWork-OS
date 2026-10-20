@@ -7,6 +7,7 @@ import {
   rendererBundleReport,
   mermaidParserPlugin,
   rendererCodeSplitting,
+  rendererOptimizeDeps,
   rendererVendorAliases,
 } from "./scripts/build/renderer-bundle-config.mjs";
 
@@ -61,6 +62,7 @@ export default defineConfig({
       { find: "@shared", replacement: path.resolve(import.meta.dirname, "src/shared") },
     ],
   },
+  optimizeDeps: rendererOptimizeDeps,
   define: {
     __WEB_BUILD_ID__: JSON.stringify(webBuildId),
   },

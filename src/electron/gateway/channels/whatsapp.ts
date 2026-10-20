@@ -1667,7 +1667,10 @@ export class WhatsAppAdapter implements ChannelAdapter {
     body?: string;
   }): string | undefined {
     // The shared format lets the admin lane leave the quoted text out of the owner's words.
-    return formatChannelReplyContext(context.senderName || context.senderE164 || "", context.body || "");
+    return formatChannelReplyContext(
+      context.senderName || context.senderE164 || "",
+      context.body || "",
+    );
   }
 
   private truncateTextForReplyContext(value: string, maxLength: number): string {

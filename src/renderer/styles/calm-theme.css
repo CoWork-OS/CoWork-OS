@@ -2997,10 +2997,10 @@ html.visual-calm .input-request-approval-actions .input-request-submit[data-sele
     0 0 0 3px color-mix(in srgb, var(--calm-ink) 35%, transparent);
 }
 
-/* Browser-use approval. */
-html.visual-calm .browser-use-approval-allow {
-  background: var(--calm-ink);
-  color: var(--calm-ink-contrast);
+/* Approval dialogs. */
+html.visual-calm .session-approval-card--minimal {
+  border-color: var(--calm-border);
+  background: var(--calm-surface);
 }
 
 /* First-run disclaimer: the base styles read the shared tokens calm maps,

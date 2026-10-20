@@ -146,20 +146,11 @@ export function BrowserUseApprovalDialog({ approval, onRespond }: BrowserUseAppr
       role="dialog"
       aria-modal="true"
     >
-      <div className="browser-use-approval-card">
-        <div className="browser-use-approval-header">
-          <span className="browser-use-approval-glyph" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-          </span>
-          <span className="browser-use-approval-name">Browser Use</span>
-        </div>
+      <div className="session-approval-card session-approval-card--minimal">
+        <h3 className="session-approval-title">Allow Browser Use to access {targetLabel}?</h3>
+        <p className="session-approval-meta">Browser Use · stays allowed for this task</p>
 
-        <h3 className="browser-use-approval-title">Allow Browser Use to access {targetLabel}?</h3>
-
-        <div className="browser-use-approval-footer">
+        <div className="session-approval-actions session-approval-actions--scoped">
           <label className="browser-use-approval-checkbox">
             <input
               type="checkbox"
@@ -168,17 +159,23 @@ export function BrowserUseApprovalDialog({ approval, onRespond }: BrowserUseAppr
             />
             <span>Always allow</span>
           </label>
-
-          <div className="browser-use-approval-actions">
-            <button type="button" className="browser-use-approval-cancel" onClick={cancel}>
-              <span>Cancel</span>
-              <kbd>Esc</kbd>
-            </button>
-            <button type="button" className="browser-use-approval-allow" onClick={allow} autoFocus>
-              <span>Allow</span>
-              <kbd>Enter</kbd>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="session-approval-btn-deny"
+            onClick={cancel}
+            title="Cancel (Esc)"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="session-approval-btn-allow"
+            onClick={allow}
+            title="Allow (Enter)"
+            autoFocus
+          >
+            Allow
+          </button>
         </div>
       </div>
     </div>

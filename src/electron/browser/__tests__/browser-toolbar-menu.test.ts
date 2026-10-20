@@ -64,6 +64,31 @@ describe("native browser toolbar menu", () => {
     ]);
   });
 
+  it.each([
+    [null, "Match app", "appearance:app"],
+    ["light", "Light", "appearance:light"],
+    ["dark", "Dark", "appearance:dark"],
+  ] as const)(
+    "preserves the local %s appearance choice and action",
+    async (colorScheme, label, action) => {
+      const window = {
+        webContents: { getZoomFactor: () => 1 },
+        getContentBounds: () => ({ width: 800, height: 600 }),
+      } as BrowserWindow;
+      const result = popupBrowserToolbarMenu(window, { ...request, colorScheme });
+      const template = mock.build.mock.calls[0][0] as MenuItemConstructorOptions[];
+      const appearance = template.filter((entry) =>
+        ["Match app", "Light", "Dark"].includes(entry.label || ""),
+      );
+      expect(appearance.filter((entry) => entry.checked).map((entry) => entry.label)).toEqual([
+        label,
+      ]);
+      appearance.find((entry) => entry.label === label)!.click!(undefined!, undefined!, undefined!);
+      (mock.popup.mock.calls[0][0] as PopupOptions).callback!();
+      expect(await result).toBe(action);
+    },
+  );
+
   it("disables page actions on a new tab", () => {
     void popupBrowserToolbarMenu(
       {

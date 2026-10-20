@@ -1,10 +1,13 @@
 /** Settings > Browser: preferences of the in-app browser. */
 
+import type { ThemeMode } from "./types";
+
 export type BrowserSearchEngine = "google" | "bing" | "duckduckgo" | "brave" | "kagi";
 export type BrowserDownloadLocation = "system" | "workspace" | "ask";
 export type BrowserAgentPermission = "ask" | "allow" | "block";
 /** "webview": tabs are <webview> elements in the app window; "native": main-process WebContentsViews. */
 export type BrowserEngine = "webview" | "native";
+export type BrowserColorScheme = "light" | "dark";
 
 export interface BrowserSettings {
   searchEngine: BrowserSearchEngine;
@@ -28,6 +31,8 @@ export interface BrowserSettings {
   browserEngine: BrowserEngine;
   /** How CoWork identifies itself on requests it makes for you (web fetch, HTTP, navigation). */
   declaredAgent: DeclaredAgentSettings;
+  /** null follows the app's light/dark theme until the user explicitly chooses one. */
+  colorScheme: BrowserColorScheme | null;
 }
 
 /**
@@ -72,6 +77,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   developerMode: false,
   browserEngine: "native",
   declaredAgent: { enabled: false, signatureAgent: "", compatibleUserAgentDomains: [] },
+  colorScheme: null,
 };
 
 const SEARCH_ENGINES = new Set(["google", "bing", "duckduckgo", "brave", "kagi"]);
@@ -102,7 +108,21 @@ export function normalizeBrowserSettings(value: unknown): BrowserSettings {
     developerMode: flag("developerMode"),
     browserEngine: pick<BrowserEngine>("browserEngine", BROWSER_ENGINES),
     declaredAgent: normalizeDeclaredAgentSettings(input.declaredAgent),
+    colorScheme:
+      input.colorScheme === "light" || input.colorScheme === "dark" ? input.colorScheme : null,
   };
+}
+
+/**
+ * The color scheme browser pages get: the user's browser choice, else the app's own theme.
+ * null (the app on "system") needs no override, since pages already follow the OS like the app.
+ */
+export function resolveBrowserColorScheme(
+  choice: BrowserColorScheme | null,
+  appThemeMode: ThemeMode,
+): BrowserColorScheme | null {
+  if (choice) return choice;
+  return appThemeMode === "light" || appThemeMode === "dark" ? appThemeMode : null;
 }
 
 const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;

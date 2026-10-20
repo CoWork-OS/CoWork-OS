@@ -1,3 +1,4 @@
+import "./file-discovery-test-worker";
 /**
  * Tests for GlobTools - pattern-based file search
  */

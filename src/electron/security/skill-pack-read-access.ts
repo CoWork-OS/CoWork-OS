@@ -151,10 +151,15 @@ export function runWithSkillPackReadAccess<T>(
 
 /** Pack roots the current tool call may read (still registered, unchanged since granted). */
 export function getSkillPackReadRoots(): string[] {
-  const grants = accessScope.getStore() || [];
-  return grants
-    .filter((grant) => registeredPacks.get(grant.pluginName)?.canonicalRoot === grant.canonicalRoot)
-    .map((grant) => grant.canonicalRoot);
+  return getSkillPackReadSnapshot().map((grant) => grant.canonicalRoot);
+}
+
+/** Current tool-call grants, including the lexical root needed across worker boundaries. */
+export function getSkillPackReadSnapshot(): Array<SkillPackReadGrant & { root: string }> {
+  return (accessScope.getStore() || []).flatMap((grant) => {
+    const pack = registeredPacks.get(grant.pluginName);
+    return pack?.canonicalRoot === grant.canonicalRoot ? [{ ...grant, root: pack.root }] : [];
+  });
 }
 
 /**

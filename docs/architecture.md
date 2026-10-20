@@ -46,6 +46,7 @@ CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, eve
   - `PermissionEngine` turns silent allows for writes to `.cowork/skills/**` and `<workspace>/skills/*.json` into once-only asks.
 
   See [Agent Self-Modification Gates](security/self-modification-gates.md).
+
 - **Runtime visibility surfaces**: the task runtime emits learning progression, unified recall, persistent shell, live terminal tabs, routing events, semantic tool-batch summaries, curated external progress relays for text-first channels, session-checklist events, and follow-up completion events into Mission Control and the renderer so operator state stays visible instead of hidden in services
 - **Everything Workbench artifact surfaces**: completion cards, timeline details, and Files panels share output metadata so generated docs, sheets, decks, web pages, PDFs, previews, and live browser sessions stay attached to the task that produced or used them. Spreadsheet outputs render as compact cards; editable workbook/CSV/TSV files open into a sidebar/fullscreen artifact workbench with editable grid state, persisted sidebar width, and fullscreen follow-up context, while native app formats keep external-app/folder actions. Word-style document outputs render as compact cards; DOCX opens into a direct-edit sidebar/fullscreen document workbench with Google Docs-style controls, save/copy actions, persisted sidebar width, fullscreen follow-up context, and preview refresh after follow-up edits, while non-editable document formats keep best-effort preview and external-app/folder actions. Presentation outputs render as compact cards; PPTX opens into a sidebar/fullscreen presentation workbench with thumbnails, navigation, zoom, speaker notes, cached slide rendering, persisted sidebar width, and deferred refresh after follow-up completion, while legacy PowerPoint formats keep external actions. Web page outputs render as compact cards; generated HTML/HTM and built React output open into a sandboxed sidebar/fullscreen iframe workbench with browser/folder/copy actions, persisted sidebar width, and deferred refresh after follow-up completion, while React-style projects without build output show a build-output-needed state instead of starting a dev server. Sidebar widths are clamped by one shared constraint helper (`src/renderer/utils/resizable-sidebar-layout.ts`, mirrored in CSS) so the main conversation column always keeps its minimum width and the sidebar minimum shrinks in narrow windows. Live website testing opens a browser workbench in the same right-sidebar/fullscreen model so the agent can interact with a visible page and validate responsive breakpoints without launching an external browser. LaTeX PDFs compiled through `compile_latex` carry `sourcePath` metadata so the renderer can pair the editable `.tex` source with the generated PDF in one artifact workbench.
 - **Lifecycle reconciliation**: completion persists terminal task state before emitting terminal events, and resume paths re-derive canonical persisted status before writing `executing`, so late approval or follow-up resumes cannot reopen completed tasks
@@ -53,6 +54,33 @@ CoWork OS is a free, open-source, GUI-first, CLI-capable local AI super app, eve
 - **Outcome classification**: ACP (acpx) prompt results pass through one classifier (`src/electron/agent/runtime/acp-prompt-outcome.ts`) shared by initial prompts and follow-ups. A stop reason is not success: `end_turn` completes only with a final response or a reported file that exists in the workspace, limits become budget-exhausted partial success, refusals and missing/unknown reasons fail, and externally reported cancellation is persisted through the daemon's shared cancellation cleanup. A local cancellation always wins, and ACP completion never records learning success
 - **Scheduled-run accounting**: each cron job keeps versioned per-category outcome counts (`src/shared/cron-outcomes.ts`, `src/electron/cron/outcome-counts.ts`) recorded together with each run's history entry. Run success is `ok / classified attempts`; partial, needs-attention, failed, cancelled, skipped, and unknown-outcome runs are reported separately, follow-ups are classified from the thread's durable result, and legacy aggregates keep their old semantics for existing callers
 - **Learning evidence**: Playbook promotion and success context read the `playbook_success_evidence` ledger (`src/electron/memory/PlaybookEvidenceStore.ts`) instead of searching memory text. Outcomes are `playbook_entries` rows, not archive memories, written only when memory settings allow (privacy redaction applied); only terminal-ok executions with a durably recorded entry create success evidence; one row per task; the ledger holds no text, so readable fields come from the source entry and private entries are never served; reinforcement is a durable link that requires a deterministic relevance gate plus a matching approach key; corrections and deleted/edited source entries invalidate dependent evidence. Playbook outcomes never reach generic prompt recall or archive synthesis, and skill proposals carry evidence provenance (legacy auto-proposals are `unverified` and cannot be approved until revalidated)
+
+## File discovery workers
+
+`glob` and grep candidate discovery run in short-lived Node workers, through
+`src/electron/agent/tools/file-discovery-client.ts`, rather than walking directories
+on the Electron or daemon event loop. The shared service allows two active scans
+and sixteen queued requests, with separate 30-second queue and worker deadlines.
+Workers are terminated after success, failure or timeout. The worker entry point is
+emitted in the desktop, daemon and CLI distributions.
+
+`read_files` batches include and exclude patterns into one traversal, retaining
+individual pattern result limits and warnings. Fixed directory prefixes and
+root-qualified `./` patterns prune unrelated branches. Directory listings are
+reused within a request, and identical in-flight requests with the same filesystem
+policy and task read context coalesce. Completed results are not cached, so later
+searches observe file changes.
+
+The worker receives only the workspace filesystem policy and the current tool
+call's memory and applied-skill read grants. The existing access evaluator still
+checks deny rules, credential stores, symlinks and memory boundaries. Grep retains
+its project access checks and hardened git-ignore discovery. Results are rejected
+if the captured task grants or workspace policy change before delivery.
+
+Run `npm run qa:files:worker-smoke` to build all three distributions and exercise
+their worker paths with disposable profiles. Its standalone hidden Electron window
+also checks renderer IPC and host heartbeat responsiveness; it never starts the
+normal application entry point or opens the user's database.
 
 ## Renderer loading and diagram execution
 

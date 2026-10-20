@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
+import type { BrowserColorScheme } from "../../../shared/browser-settings";
 import {
   Activity,
   Camera,
@@ -8,7 +9,10 @@ import {
   ExternalLink,
   ImagePlus,
   Maximize,
+  Moon,
   ScanLine,
+  Sun,
+  SunMoon,
 } from "lucide-react";
 
 export type ToolbarViewportOption = {
@@ -24,6 +28,8 @@ export type ToolbarViewportOption = {
  */
 export function ToolbarMenu({
   hasPage,
+  colorScheme,
+  onColorScheme,
   viewports,
   activeViewport,
   snapshotOverlay,
@@ -36,6 +42,10 @@ export function ToolbarMenu({
   onToggleDiagnostics,
 }: {
   hasPage: boolean;
+  /** The saved browser choice; null follows the app's theme. */
+  colorScheme: BrowserColorScheme | null;
+  /** null clears the saved choice so pages follow the app's theme again. */
+  onColorScheme: (colorScheme: BrowserColorScheme | null) => void;
   viewports: ToolbarViewportOption[];
   /** Label of the forced page size, or null for the automatic size. */
   activeViewport: string | null;
@@ -112,6 +122,17 @@ export function ToolbarMenu({
           {item("Annotate screenshot", ImagePlus, onAnnotateScreenshot, { disabled: !hasPage })}
           {item("Save screenshot", Camera, onScreenshot, { disabled: !hasPage })}
           {item("Open in system browser", ExternalLink, onOpenExternal, { disabled: !hasPage })}
+          <div className="browser-workbench-tab-menu-separator" />
+          <div className="browser-workbench-menu-heading">Appearance</div>
+          {item("Match app", SunMoon, () => onColorScheme(null), {
+            checked: colorScheme === null,
+          })}
+          {item("Light", Sun, () => onColorScheme("light"), {
+            checked: colorScheme === "light",
+          })}
+          {item("Dark", Moon, () => onColorScheme("dark"), {
+            checked: colorScheme === "dark",
+          })}
           <div className="browser-workbench-tab-menu-separator" />
           <div className="browser-workbench-menu-heading">Page size</div>
           {item("Fit to panel", Maximize, () => onViewport(null), {

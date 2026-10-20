@@ -143,6 +143,7 @@ The Browser Workbench header and toolbar are functional, not cosmetic:
   - **Annotate screenshot** captures the page, opens an annotation layer, and can save the marked-up image or send it to the agent as an image attachment.
   - **Save screenshot** captures the current visible browser page into the workspace.
   - **Open in system browser** opens the page outside CoWork.
+  - **Appearance** (Match app, Light, Dark) sets the light or dark scheme pages see, for every tab. Match app, the default, follows the app's theme; Light or Dark is saved in browser settings and kept until changed. It never changes the app's own theme.
   - **Page size** (Fit to panel, Desktop, Tablet, Mobile) resizes the visible webview for responsive checks. A forced size shows as a chip next to the address bar; click it to fit the panel again.
   - **Element outlines** draws the boxes and refs of CoWork's latest snapshot of the tab.
   - **Diagnostics** opens a compact browser panel for console, network, downloads, storage, and trace context.

@@ -2042,6 +2042,12 @@ export function BrowserWorkbenchView({
           </button>
           <ToolbarMenu
             hasPage={Boolean(activeUrl)}
+            colorScheme={browserSettings.colorScheme}
+            onColorScheme={(colorScheme) => {
+              void saveBrowserSettings({ colorScheme }).catch(() =>
+                setToolbarNotice("Could not save browser appearance"),
+              );
+            }}
             viewports={VIEWPORT_PRESETS}
             activeViewport={
               controlledViewport

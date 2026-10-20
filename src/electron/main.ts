@@ -265,6 +265,8 @@ import { getBrowserWorkbenchService } from "./browser/browser-workbench-service"
 import { getLocalPreviewProcessService } from "./preview/LocalPreviewProcessService";
 import { getBrowserSessionManager } from "./browser/browser-session-manager";
 import { attachBrowserGuest } from "./browser/browser-guest-attach";
+import { attachBrowserColorScheme } from "./browser/browser-color-scheme";
+import { resolveBrowserColorScheme } from "../shared/browser-settings";
 import { BrowserUnloadGuard } from "./browser/browser-unload-guard";
 import { BrowserScreenShare } from "./browser/browser-screen-share";
 import { BrowserTabViewHost, setBrowserTabViewHost } from "./browser/browser-tab-views";
@@ -727,6 +729,22 @@ function prepareBrowserWorkbenchPartition(partition: string): Electron.Session {
 
 /** Guest handling for an in-app browser page: the same for a <webview> tab and a native tab view. */
 function attachBrowserWorkbenchGuest(guest: Electron.WebContents, partition: string): void {
+  attachBrowserColorScheme(guest, {
+    getPreference: () =>
+      resolveBrowserColorScheme(
+        BrowserSettingsManager.loadSettings().colorScheme,
+        AppearanceManager.loadSettings().themeMode,
+      ),
+    subscribe: (listener) => {
+      const stopBrowser = BrowserSettingsManager.onChange(listener);
+      const stopAppearance = AppearanceManager.onChange(listener);
+      return () => {
+        stopBrowser();
+        stopAppearance();
+      };
+    },
+    apply: (colorScheme) => getBrowserSessionManager().setContentsColorScheme(guest, colorScheme),
+  });
   const profileKey = browserProfileKeyFromPartition(partition) || "default";
   attachBrowserGuest(guest, {
     service: getBrowserWorkbenchService(),

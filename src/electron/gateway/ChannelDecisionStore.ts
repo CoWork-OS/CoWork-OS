@@ -2,7 +2,7 @@ import { assertApprovalDraftsCurrent } from "../database/approval-drafts";
 import type Database from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import { approvalRequestRevisionHash } from "../agent/approval-revision";
-import { APPROVAL_REQUEST_TIMEOUT_MS } from "../agent/approval-timeouts";
+import { APPROVAL_REQUEST_TIMEOUT_MS, approvalGrantUsable } from "../agent/approval-timeouts";
 import { CHANNEL_DECISION_SCHEMA } from "./channel-decision-schema";
 
 export { CHANNEL_DECISION_SCHEMA };
@@ -116,11 +116,18 @@ export class ChannelDecisionStore {
           details: string;
           status: string;
           requested_at: number;
+          resolved_at: number | null;
         }
       | undefined;
     if (!approval || approval.status !== status) throw new Error("Approval is no longer " + status);
     const expiresAt = approval.requested_at + APPROVAL_REQUEST_TIMEOUT_MS;
     if (!Number.isSafeInteger(expiresAt) || now >= expiresAt) throw new Error("Approval expired");
+    // A granted approval is consumed promptly or not at all; the long window is for deciding.
+    if (
+      status === "approved" &&
+      !approvalGrantUsable(approval.requested_at, approval.resolved_at, now)
+    )
+      throw new Error("Approval expired");
     const task = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(approval.task_id) as
       | {
           id: string;

@@ -4,6 +4,7 @@ import {
   APPROVAL_GRANT_TTL_MS,
   APPROVAL_REQUEST_TIMEOUT_MS,
   APPROVAL_WAIT_MAX_PAUSE_MS,
+  approvalGrantUsable,
   formatApprovalWindow,
 } from "../approval-timeouts";
 import { withTimeout } from "../executor-helpers";
@@ -21,6 +22,35 @@ describe("approval answer window", () => {
     expect(formatApprovalWindow()).toBe("24 hours");
     expect(formatApprovalWindow(60 * 60 * 1000)).toBe("1 hour");
     expect(formatApprovalWindow(5 * 60 * 1000)).toBe("5 minutes");
+  });
+});
+
+describe("approved requests are used promptly", () => {
+  const requestedAt = 1_000_000;
+  const hour = 60 * 60 * 1000;
+
+  it("is usable shortly after the person decides, even hours after the request", () => {
+    const decidedAt = requestedAt + 6 * hour;
+    expect(approvalGrantUsable(requestedAt, decidedAt, decidedAt + 60_000)).toBe(true);
+  });
+
+  it("lapses five minutes after the decision", () => {
+    const decidedAt = requestedAt + 60_000;
+    expect(approvalGrantUsable(requestedAt, decidedAt, decidedAt + APPROVAL_GRANT_TTL_MS)).toBe(
+      false,
+    );
+    expect(approvalGrantUsable(requestedAt, decidedAt, requestedAt + 23 * hour)).toBe(false);
+  });
+
+  it("counts from the request when no decision time is recorded", () => {
+    expect(approvalGrantUsable(requestedAt, null, requestedAt + 60_000)).toBe(true);
+    expect(approvalGrantUsable(requestedAt, null, requestedAt + APPROVAL_GRANT_TTL_MS)).toBe(false);
+  });
+
+  it("is never usable past the request window or with a bad request time", () => {
+    const late = requestedAt + APPROVAL_REQUEST_TIMEOUT_MS;
+    expect(approvalGrantUsable(requestedAt, late - 1_000, late)).toBe(false);
+    expect(approvalGrantUsable("x", requestedAt, requestedAt)).toBe(false);
   });
 });
 

@@ -25,6 +25,25 @@ export const APPROVAL_GATED_TOOL_TIMEOUT_MS = 5 * 60 * 1000 + APPROVAL_TIMEOUT_G
  */
 export const APPROVAL_WAIT_MAX_PAUSE_MS = APPROVAL_REQUEST_TIMEOUT_MS + APPROVAL_TIMEOUT_GRACE_MS;
 
+/**
+ * Whether an approved request may still be used. A grant is short-lived from the
+ * moment the person decided (rows without a decision time count from the request),
+ * and nothing is usable once the request window itself has passed.
+ */
+export function approvalGrantUsable(
+  requestedAt: unknown,
+  resolvedAt: unknown,
+  now: number = Date.now(),
+): boolean {
+  if (typeof requestedAt !== "number" || !Number.isSafeInteger(requestedAt)) return false;
+  if (now >= requestedAt + APPROVAL_REQUEST_TIMEOUT_MS) return false;
+  const decidedAt =
+    typeof resolvedAt === "number" && Number.isSafeInteger(resolvedAt) && resolvedAt >= requestedAt
+      ? resolvedAt
+      : requestedAt;
+  return now < decidedAt + APPROVAL_GRANT_TTL_MS;
+}
+
 /** "24 hours", "90 minutes": the answer window in words for messages. */
 export function formatApprovalWindow(ms: number = APPROVAL_REQUEST_TIMEOUT_MS): string {
   const hours = ms / (60 * 60 * 1000);

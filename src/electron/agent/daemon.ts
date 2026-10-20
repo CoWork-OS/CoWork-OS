@@ -13544,7 +13544,7 @@ export class AgentDaemon extends EventEmitter {
     operation: AccessFilesystemOperation = "write",
   ): void {
     const key = this.getExternalFileApprovalKey(taskId, rawPath, operation);
-    if (key) this.externalFileApprovalGrants.set(key, Date.now() + 5 * 60 * 1000);
+    if (key) this.externalFileApprovalGrants.set(key, Date.now() + APPROVAL_GRANT_TTL_MS);
   }
 
   consumeExternalFileApproval(

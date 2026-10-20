@@ -64,4 +64,12 @@ describe("TaskQueueManager watchdog and pending decisions", () => {
     await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
     expect(onTaskTimeout).toHaveBeenCalledWith("task-1");
   });
+
+  it("frees the slot of a card nobody ever answers once the answer window has passed", async () => {
+    waiting = true;
+    await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000);
+    expect(onTaskTimeout).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+    expect(onTaskTimeout).toHaveBeenCalledWith("task-1");
+  });
 });

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ApprovalStore } from "../repositories";
+import { APPROVAL_REQUEST_TIMEOUT_MS } from "../../agent/approval-timeouts";
 import { DatabaseManager } from "../schema";
 import { nativeSqliteAvailable } from "../../memory/__tests__/memory-items-test-db";
 const suite = nativeSqliteAvailable ? describe : describe.skip;
@@ -73,7 +74,7 @@ suite("atomic pending approval resolution", () => {
     },
   );
   it("an expired request cannot be approved, but can be denied", () => {
-    const request = pending(Date.now() - 300001),
+    const request = pending(Date.now() - APPROVAL_REQUEST_TIMEOUT_MS - 1),
       store = new ApprovalStore(second);
     expect(store.resolvePending(request.id, "approved", request)).toBe(false);
     expect(store.resolvePending(request.id, "denied", request)).toBe(true);

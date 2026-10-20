@@ -994,7 +994,7 @@ describe("AgentDaemon.requestApproval auto-approve controls", () => {
     const rejection = expect(approvalPromise).rejects.toThrow(
       "Approval request timed out after task completion",
     );
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(APPROVAL_REQUEST_TIMEOUT_MS);
 
     await rejection;
     expect(approvalRepo.update).toHaveBeenCalledWith("approval-timeout", "denied");

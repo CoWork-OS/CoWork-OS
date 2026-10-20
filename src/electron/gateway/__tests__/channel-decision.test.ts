@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import { ChannelDecisionStore, type ChannelDecisionCallback } from "../ChannelDecisionStore";
+import { APPROVAL_REQUEST_TIMEOUT_MS } from "../../agent/approval-timeouts";
 import { nativeSqliteAvailable } from "../../memory/__tests__/memory-items-test-db";
 const suite = nativeSqliteAvailable ? describe : describe.skip;
 suite("durable channel decision bindings", () => {
@@ -59,7 +60,7 @@ suite("durable channel decision bindings", () => {
       workspaceId: "ws",
       actorId: "actor",
       state: "queued",
-      expiresAt: now + 300_000,
+      expiresAt: now + APPROVAL_REQUEST_TIMEOUT_MS,
     });
     expect(create().id).toBe(route.id);
     expect(JSON.stringify(route)).not.toContain("draft.md");

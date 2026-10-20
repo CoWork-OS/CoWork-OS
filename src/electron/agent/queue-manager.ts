@@ -45,6 +45,8 @@ type DaemonCallbacks = {
   getTaskById: (taskId: string) => Task | undefined;
   updateTaskStatus: (taskId: string, status: TaskStatus) => void;
   onTaskTimeout: (taskId: string) => Promise<void>; // Called when a task times out
+  /** True while the task is paused on a person's decision; that time does not count. */
+  isWaitingForUser?: (taskId: string) => boolean;
 };
 
 export class TaskQueueManager {
@@ -56,6 +58,7 @@ export class TaskQueueManager {
   private callbacks: DaemonCallbacks;
   private initialized: boolean = false;
   private timeoutCheckInterval?: ReturnType<typeof setInterval>;
+  private lastTimeoutCheckAt?: number;
   private static migrationCompleted = false;
 
   constructor(callbacks: DaemonCallbacks) {
@@ -467,9 +470,23 @@ export class TaskQueueManager {
     const now = Date.now();
     const timeoutMs = this.settings.taskTimeoutMinutes * 60 * 1000;
     const timedOutTasks: string[] = [];
+    const sinceLastCheck =
+      this.lastTimeoutCheckAt === undefined ? 0 : now - this.lastTimeoutCheckAt;
+    this.lastTimeoutCheckAt = now;
 
     // Find tasks that have exceeded the timeout
     for (const [taskId, startTime] of this.taskStartTimes) {
+      let waiting = false;
+      try {
+        waiting = this.callbacks.isWaitingForUser?.(taskId) === true;
+      } catch {
+        waiting = false;
+      }
+      if (waiting) {
+        // A task waiting on a person is not stuck: move its start forward by the waited time.
+        this.taskStartTimes.set(taskId, startTime + sinceLastCheck);
+        continue;
+      }
       const elapsed = now - startTime;
       if (elapsed > timeoutMs) {
         const elapsedMinutes = Math.round(elapsed / 60000);

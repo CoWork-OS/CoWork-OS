@@ -145,6 +145,7 @@ import {
 } from "../security/background-write-guard";
 import { writeKitFileWithSnapshot } from "../context/kit-revisions";
 import { approvalRequestRevisionHash, approvalRevisionMatches } from "../agent/approval-revision";
+import { formatApprovalWindow } from "../agent/approval-timeouts";
 export type { RouterConfig } from "./router-helpers";
 
 function quoteSkillSlashValue(value: string): string {
@@ -7958,7 +7959,7 @@ export class MessageRouter {
       message += `Requested by: *${route.requestingUserName}*\n\n`;
     }
 
-    message += `⏳ _Expires in 5 minutes_`;
+    message += `⏳ _Expires in ${formatApprovalWindow()}_`;
 
     // WhatsApp/iMessage don't support inline keyboards - use text commands
     if (route.adapter.type === "whatsapp" || route.adapter.type === "imessage") {

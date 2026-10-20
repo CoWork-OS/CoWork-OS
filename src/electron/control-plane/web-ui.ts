@@ -157,7 +157,7 @@ export function getControlPlaneWebUIHtml(): string {
             <span class="muted small" id="approvalCount"></span>
           </div>
           <div id="approvals"></div>
-          <div class="hint">Approvals are log-only until you approve/deny. They auto-timeout after ~5 minutes.</div>
+          <div class="hint">Approvals are log-only until you approve/deny. Unanswered requests lapse after 24 hours.</div>
         </div>
 
         <div class="card">

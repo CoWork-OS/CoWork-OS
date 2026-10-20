@@ -88,13 +88,43 @@ recreate those external services. Docker remains unavailable for fresh verificat
 The earlier audit also exercised the running Electron task-read/answer-state flow,
 Numbat, a disposable Android emulator and the pinned PACT reference services.
 
-Registry advisory results are an inventory, not proof of exploitability. The root
-lock reports 43 package entries: two critical, 17 high, 20 moderate and four low.
+Registry advisory results are an inventory, not proof of exploitability. Before
+the subsequent security remediation, the root lock reported 43 package entries:
+two critical, 17 high, 20 moderate and four low.
 All three connector locks report zero. The critical entries belong to `protobufjs`
 (Baileys/libsignal and the PI AI/Google SDK path) and `proxy-addr` (Slack Bolt/Express).
 Dependency ownership does not establish that the advisory trigger is reachable.
 Unresolved advisories and their owning paths remain explicit in the local QA reports;
 no blanket audit-fix, major upgrade or crypto-library substitution was used to suppress them.
+
+The follow-up remediation reduces the root inventory to 11 entries (one high,
+ten moderate, zero critical). Patched dependency versions cover both protobuf
+consumers; Baileys' older generated decoders additionally receive a shared nesting
+limit before socket creation. The libsignal pin advances to an upstream manifest
+change with identical cryptographic runtime source. A scoped `image-size`
+override preserves the owning document workflow.
+
+Remaining entries are `http-cache-semantics` through the build downloader,
+`sprintf-js` and its inherited Electron build dependencies, plus `argparse` and
+`mammoth` through Mammoth's CLI formatter dependency.
+The cache advisory has no confirmed upstream fix; a scanner-range-only update
+does not establish corrected cache behavior. Mammoth's library conversion path
+does not load that CLI formatter. Neither an unsafe downloader migration nor a
+Mammoth downgrade is justified merely to clear these entries. An attempted scoped
+`global-agent` 4.1.3 upgrade was reverted after a local HTTPS CONNECT test proved
+it drops per-request custom CA options that version 3 forwards. This legitimate
+enterprise proxy workflow must remain intact before clearing its formatter chain.
+New regression tests exercise malicious inputs and legitimate crypto, transport, document and
+proxy behavior; no meaningful coverage was removed.
+
+The follow-up full run passes all 121 Node tests and 17,817 Vitest tests, with
+three timeout failures and 12 skips. The failures are live LuaLaTeX, the Pi SDK
+import and the npm sandbox fixture; their default timeout budgets and assertions
+remain unchanged. All 35 new dependency tests pass, as do the complete build,
+type check, lint, formatting and clean-install/packed-consumer checks. Focused
+reruns of all three failed cases pass with unchanged assertions and default
+timeouts after contention subsides; the full run is not claimed as green.
+
 Docker-dependent filesystem tests, full container-image acceptance and Harbor runtime
 acceptance require an available Docker daemon. The earlier passing Docker cases do
 not substitute for a fresh image or Harbor runtime result.

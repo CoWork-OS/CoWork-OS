@@ -234,15 +234,15 @@
     "elkjs": "0.9.3",
     "eventsource": "^5.1.1",
     "exceljs": "npm:devextreme-exceljs-fork@4.4.13",
-    "form-data": "4.0.5",
+    "form-data": "4.0.6",
     "grammy": "^1.39.3",
     "highlight.js": "^11.11.1",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.2",
     "json5": "^2.2.3",
     "jszip": "^3.10.1",
     "lucide-react": "^1.47.0",
     "mammoth": "^1.11.0",
-    "mermaid": "^12.0.0",
+    "mermaid": "^12.2.0",
     "mime-types": "^3.0.2",
     "node-fetch": "npm:node-fetch-native@1.6.7",
     "node-pty": "^1.1.0",
@@ -304,23 +304,23 @@
   ],
   "overrides": {
     "@azure/msal-node": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "baileys": {
-      "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67",
+      "libsignal": "https://codeload.github.com/WhiskeySockets/libsignal-node/tar.gz/d779768cb90a71b3a747de096257530a75815796",
       "@whiskeysockets/eslint-config": "1.0.0"
     },
     "botbuilder": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "botbuilder-core": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "botframework-schema": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "botframework-streaming": {
-      "uuid": "11.1.0"
+      "uuid": "11.1.1"
     },
     "electron-updater": {
       "lodash.isequal": "npm:@lodash-modularized/isequal@1.0.1"
@@ -329,7 +329,11 @@
     "node-fetch@2": {
       "whatwg-url": "^14.2.0"
     },
-    "node-fetch@3": "$node-fetch"
+    "node-fetch@3": "$node-fetch",
+    "protobufjs": "7.6.5",
+    "pptxgenjs": {
+      "image-size": "2.0.4"
+    }
   },
   "engines": {
     "node": ">=24.0.0"

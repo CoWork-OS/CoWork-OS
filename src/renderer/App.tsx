@@ -7063,6 +7063,8 @@ export function App() {
       accessProfileId?: AccessProfileId;
       integrationMentions?: IntegrationMentionSelection[];
       returnOnAccepted?: boolean;
+      deliveryMode?: "message" | "follow_up";
+      messageId?: string;
       /** Send exactly this text (an approved answer action), never a rewritten reply. */
       verbatim?: boolean;
       /** Where an approved answer action came from; shown to the model and in the timeline. */

@@ -60,6 +60,7 @@ import {
 import { resolveBotMascot } from "../../../shared/bot-mascots";
 import { isCliAgentChildTask } from "../../../shared/cli-agent-detection";
 import type { ComposerDraft, DraftAttachmentRef } from "../../../shared/composer-drafts";
+import { createComposerSubmissionAcceptance } from "../../utils/composer-submission-acceptance";
 import { predictionRevision } from "../../../shared/composer-predictions";
 import {
   buildPersistentGoalAgentConfig,
@@ -1054,7 +1055,11 @@ function MainContentComponent({
     taskId: string;
     fingerprint: string;
     messageId: string;
+    acceptance: ReturnType<typeof createComposerSubmissionAcceptance>;
   } | null>(null);
+  useEffect(() => {
+    pendingFollowUpSubmissionRef.current?.acceptance.observe(rawEvents);
+  }, [rawEvents]);
   const [agentRoles, setAgentRoles] = useState<AgentRoleData[]>([]);
   const [integrationMentionOptions, setIntegrationMentionOptions] = useState<
     IntegrationMentionOption[]
@@ -5384,10 +5389,15 @@ function MainContentComponent({
           globalThis.crypto?.randomUUID?.() ||
           `ui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         submittedFollowUpMessageId = messageId;
+        const acceptance = createComposerSubmissionAcceptance(
+          submittedTaskId || task?.id || "",
+          messageId,
+        );
         pendingFollowUpSubmissionRef.current = {
           taskId: submittedTaskId || task?.id || "",
           fingerprint: message.trim().replace(/\s+/g, " ").toLowerCase(),
           messageId,
+          acceptance,
         };
         // @Browser opens the visible in-app browser for this task right away.
         if (
@@ -5406,11 +5416,15 @@ function MainContentComponent({
             interactionMode: selectedInteractionMode,
             integrationMentions: selectedIntegrationMentions,
             returnOnAccepted: true,
+            deliveryMode: "follow_up",
             messageId,
             ...(taskAccessProfileId ? { accessProfileId: taskAccessProfileId } : {}),
           },
         );
-        submissionResult = submission;
+        // The journal may acknowledge the message before IPC returns. Clear at
+        // either durable acknowledgement, without waiting for the provider turn.
+        acceptance.observe(rawEvents);
+        submissionResult = acceptance.waitFor(submission);
         shouldDeferComposerClear = true;
         // IPC can remain pending for the full turn. Keep the composer available
         // for steering, but restore a failed draft if the user has not moved on.
@@ -5418,6 +5432,7 @@ function MainContentComponent({
           .then(async (sent) => {
             if (
               sent === false &&
+              !acceptance.hasReceipt() &&
               activeModeDraftKeyRef.current === modeDraftKey &&
               modeSubmissionRevisionRef.current === submissionRevision
             ) {
@@ -5425,10 +5440,12 @@ function MainContentComponent({
               setPendingAttachments((current) => (current.length ? current : pendingAttachments));
             }
             if (pendingFollowUpSubmissionRef.current?.messageId === messageId) {
-              if (sent === false) pendingFollowUpSubmissionRef.current = null;
+              if (sent === false && !acceptance.hasReceipt())
+                pendingFollowUpSubmissionRef.current = null;
             }
           })
           .catch((error) => {
+            if (acceptance.hasReceipt()) return;
             if (
               activeModeDraftKeyRef.current === modeDraftKey &&
               modeSubmissionRevisionRef.current === submissionRevision

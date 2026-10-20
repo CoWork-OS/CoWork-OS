@@ -102,6 +102,24 @@ describe("LoomEmailClient", () => {
     expect(calledUrl).toContain("/v1/gateway/imap/folders/INBOX%2FWork/messages");
   });
 
+  it("keeps the base URL path prefix on requests", async () => {
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(createMockResponse({ body: { threads: [] } }));
+
+    const client = new LoomEmailClient({
+      baseUrl: "https://loom.example.com/loom/",
+      accessTokenProvider: () => "token",
+      folder: "INBOX",
+      pollInterval: 1000,
+    });
+
+    await client.checkConnection();
+
+    expect(String(fetchMock.mock.calls[0]?.[0] || "")).toBe(
+      "https://loom.example.com/loom/v1/threads",
+    );
+  });
+
   it("fetches exactly the requested unread limit from LOOM folder", async () => {
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
     fetchMock.mockResolvedValueOnce(

@@ -85,6 +85,7 @@ import { formatTimelineActivityLabel } from "../../shared/timeline-v2";
 import { DEFAULT_QUIRKS } from "../../shared/types";
 import { botIconText } from "../../shared/bot-mascots";
 import { CHANNEL_ATTACHMENTS_SAVED_HEADER } from "../../shared/attachment-summary";
+import { CHANNEL_REPLY_CONTEXT_PREFIX } from "../../shared/channel-reply-context";
 import { formatChatTranscriptForPrompt, prefetchTranscriptUsers } from "./chat-transcript";
 import { evaluateWorkspaceRouterRules } from "./router-rules";
 import { applyResearchChatRouting } from "./router-research-routing";
@@ -879,7 +880,7 @@ export class MessageRouter {
 
   private stripWhatsAppReplyContextForRouting(text: string): string {
     const lines = text.split("\n");
-    if (!lines.length || !lines[0].startsWith("💬 In reply to ")) {
+    if (!lines.length || !lines[0].startsWith(CHANNEL_REPLY_CONTEXT_PREFIX)) {
       return text.trim();
     }
 
@@ -890,7 +891,7 @@ export class MessageRouter {
         idx++;
         continue;
       }
-      if (line.startsWith("💬 In reply to ") || line.startsWith(">")) {
+      if (line.startsWith(CHANNEL_REPLY_CONTEXT_PREFIX) || line.startsWith(">")) {
         idx++;
         continue;
       }

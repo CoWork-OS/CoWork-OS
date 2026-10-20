@@ -3496,8 +3496,8 @@ export function isMessageSurfaceOrigin(value: unknown): value is MessageSurfaceO
 export type FollowUpTextProvenance = "user_typed";
 
 /**
- * Who wrote a task's title and prompt (Task.promptProvenance). "user_typed": a person typed
- * them. There is no other value: unset means CoWork or someone else wrote them.
+ * Who wrote a task's prompt (Task.promptProvenance). "user_typed": a person typed it. There
+ * is no other value: unset means CoWork or someone else wrote it.
  */
 export type TaskPromptProvenance = "user_typed";
 

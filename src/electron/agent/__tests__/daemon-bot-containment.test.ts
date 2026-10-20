@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentDaemon } from "../daemon";
+import { BotDesktopManager } from "../../computer-use/bot-desktop-manager";
 import { botWorkspaceId } from "../../../shared/bot-containment";
 import type { Task } from "../../../shared/types";
 
@@ -15,6 +16,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (originalUserData === undefined) delete process.env.COWORK_USER_DATA_DIR;
   else process.env.COWORK_USER_DATA_DIR = originalUserData;
   fs.rmSync(userData, { recursive: true, force: true });
@@ -42,6 +44,7 @@ function fixture(tasks: Task[], role: Record<string, unknown> = {}) {
     }),
     getTaskAncestorChain: AgentDaemon.prototype["getTaskAncestorChain"],
     ensureBotWorkspace: AgentDaemon.prototype["ensureBotWorkspace"],
+    botDesktopWorkFolder: AgentDaemon.prototype["botDesktopWorkFolder"],
   } as Any;
   const contain = (task: Task): Task => AgentDaemon.prototype["containBotTask"].call(daemon, task);
   return { daemon, contain, byId, workspaces };
@@ -94,6 +97,39 @@ describe("moving a bot's unattended run into its own folder", () => {
       task({ id: "task-1", parentTaskId: "root", assignedAgentRoleId: "bot-1" }),
     ]);
     expect(f.contain(f.byId.get("task-1")!).workspaceId).toBe("user-project");
+  });
+
+  it("uses the folder an own-desktop bot's desktop sees as ~/work", () => {
+    const desktopFolder = path.join(userData, "bot-desktops", "abc123");
+    vi.spyOn(BotDesktopManager, "getInstance").mockReturnValue({
+      hostWorkFolder: (botId: string) => ({ desktopKey: botId, folder: desktopFolder }),
+    } as Any);
+    const f = fixture([task({ assignedAgentRoleId: "bot-1" })], { worksOn: "own_desktop" });
+    const result = f.contain(f.byId.get("task-1")!);
+    expect(f.workspaces.get(result.workspaceId).path).toBe(desktopFolder);
+    expect(f.workspaces.get(result.workspaceId).name).toBe("Scout (own desktop)");
+  });
+
+  it("shares one folder between bots on a shared desktop", () => {
+    const desktopFolder = path.join(userData, "bot-desktops", "shared");
+    vi.spyOn(BotDesktopManager, "getInstance").mockReturnValue({
+      hostWorkFolder: () => ({ desktopKey: "shared:research-team", folder: desktopFolder }),
+    } as Any);
+    const f = fixture([task({ assignedAgentRoleId: "bot-1" })], { worksOn: "own_desktop" });
+    const result = f.contain(f.byId.get("task-1")!);
+    expect(result.workspaceId).toBe(botWorkspaceId("shared:research-team"));
+    expect(f.workspaces.get(result.workspaceId).name).toBe("Shared desktop research-team");
+  });
+
+  it("falls back to a plain own folder when the desktop keeps its files elsewhere", () => {
+    vi.spyOn(BotDesktopManager, "getInstance").mockReturnValue({
+      hostWorkFolder: () => undefined,
+    } as Any);
+    const f = fixture([task({ assignedAgentRoleId: "bot-1" })], { worksOn: "own_desktop" });
+    const result = f.contain(f.byId.get("task-1")!);
+    expect(f.workspaces.get(result.workspaceId).path).toBe(
+      path.join(userData, "bots", "bot-1", "work"),
+    );
   });
 
   it("keeps any task in a bot's folder marked contained", () => {

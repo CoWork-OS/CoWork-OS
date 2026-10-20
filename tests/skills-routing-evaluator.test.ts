@@ -406,9 +406,9 @@ describe("production skill routing evaluator", () => {
     expect(contracts.corpus).toEqual({
       positiveExamples: 629,
       negativeExamples: 613,
-      datasetRows: 32,
-      datasetExpectedCases: 32,
-      datasetForbiddenCases: 32,
+      datasetRows: 34,
+      datasetExpectedCases: 34,
+      datasetForbiddenCases: 34,
       contractsByKind: { manual_only: 8, guideline: 6, explicit_only: 2, installed_pack: 1 },
     });
     expect(contracts.cases).toHaveLength(17);

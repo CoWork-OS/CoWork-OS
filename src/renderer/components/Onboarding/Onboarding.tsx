@@ -1630,48 +1630,6 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
     </div>
   );
 
-  // Render Ollama auto-detection card
-  const renderOllamaDetection = () => {
-    const modelName = onboarding.data.detectedOllamaModel || "Ollama";
-
-    return (
-      <div className="onboarding-ollama-detection">
-        <div className="onboarding-ollama-detection-icon">
-          <svg
-            width="32"
-            height="32"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <rect x="4" y="4" width="16" height="16" rx="2" />
-            <path d="M9 9h6v6H9z" />
-          </svg>
-        </div>
-        <p className="onboarding-ollama-detection-model">{modelName}</p>
-        <p className="onboarding-ollama-detection-note">
-          Local model — no API key needed. Inference runs on this machine for the detected local
-          endpoint.
-        </p>
-        <div className="onboarding-actions" style={{ marginTop: 20 }}>
-          <button
-            className="onboarding-btn onboarding-btn-primary"
-            onClick={() => onboarding.acceptOllamaDetection()}
-          >
-            Use {modelName}
-          </button>
-          <button
-            className="onboarding-btn onboarding-btn-secondary"
-            onClick={() => onboarding.declineOllamaDetection()}
-          >
-            Choose another provider
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   // Render provider selection: one no-key primary route, other sign-ins, then every key route.
   const renderProviders = () => {
     const signingIn = onboarding.accountSignInLoading;
@@ -2112,7 +2070,6 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
                 onboarding.state !== "ask_voice" &&
                 onboarding.state !== "ask_work_style" &&
                 onboarding.state !== "ask_memory_trust" &&
-                onboarding.state !== "ollama_detected" &&
                 onboarding.state !== "llm_setup" &&
                 onboarding.state !== "llm_api_key" &&
                 onboarding.state !== "final_try"
@@ -2159,9 +2116,6 @@ export function Onboarding({ onComplete, workspaceId, initialPrompt }: Onboardin
             onFinish={(imported) => void onboarding.finishImportOffer(imported)}
           />
         )}
-
-        {/* Ollama auto-detection */}
-        {onboarding.showOllamaDetection && renderOllamaDetection()}
 
         {/* Provider selection */}
         {onboarding.showProviders && renderProviders()}

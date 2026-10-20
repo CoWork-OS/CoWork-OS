@@ -7,6 +7,9 @@ export type BrowserToolbarMenuAction =
   | "fit"
   | "outlines"
   | "diagnostics"
+  | "appearance:app"
+  | "appearance:light"
+  | "appearance:dark"
   | `viewport:${number}`;
 
 export type BrowserToolbarMenuRequest = {
@@ -17,4 +20,6 @@ export type BrowserToolbarMenuRequest = {
   activeViewport: string | null;
   snapshotOverlay: boolean;
   diagnosticsOpen: boolean;
+  /** Optional appearance controls; omitted by clients without browser theme settings. */
+  colorScheme?: "light" | "dark" | null;
 };

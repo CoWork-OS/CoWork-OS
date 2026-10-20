@@ -28,6 +28,24 @@ export function popupBrowserToolbarMenu(
       item("Save screenshot", "screenshot", { enabled: request.hasPage === true }),
       item("Open in system browser", "external", { enabled: request.hasPage === true }),
       { type: "separator" },
+      ...(request.colorScheme !== undefined
+        ? [
+            { label: "Appearance", enabled: false },
+            item("Match app", "appearance:app", {
+              type: "checkbox",
+              checked: request.colorScheme === null,
+            }),
+            item("Light", "appearance:light", {
+              type: "checkbox",
+              checked: request.colorScheme === "light",
+            }),
+            item("Dark", "appearance:dark", {
+              type: "checkbox",
+              checked: request.colorScheme === "dark",
+            }),
+            { type: "separator" as const },
+          ]
+        : []),
       { label: "Page size", enabled: false },
       item("Fit to panel", "fit", { type: "checkbox", checked: request.activeViewport === null }),
     ];

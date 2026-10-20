@@ -100,8 +100,18 @@ export function ToolbarMenu({
         activeViewport,
         snapshotOverlay,
         diagnosticsOpen,
+        colorScheme: typeof onColorScheme === "function" ? (colorScheme ?? null) : undefined,
       });
       switch (action) {
+        case "appearance:app":
+          onColorScheme?.(null);
+          break;
+        case "appearance:light":
+          onColorScheme?.("light");
+          break;
+        case "appearance:dark":
+          onColorScheme?.("dark");
+          break;
         case "annotate":
           onAnnotateScreenshot();
           break;

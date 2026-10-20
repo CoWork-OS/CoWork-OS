@@ -120,4 +120,50 @@ describe("ToolRegistry tool restrictions", () => {
     });
     expect(registry.isToolAllowed("browser_navigate")).toBe(false);
   });
+
+  it("takes host-escape tools and workspace switching away from a run in a bot's own folder", async () => {
+    const workspace: Any = {
+      id: "__bot_workspace__:bot-1",
+      name: "Scout (own folder)",
+      path: "/mock/bot-folder",
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+      createdAt: Date.now(),
+    };
+    let task: Any = { id: "test-task", agentConfig: { botContained: true } };
+    const daemon: Any = {
+      logEvent: vi.fn(),
+      registerArtifact: vi.fn(),
+      getTask: vi.fn(() => task),
+      createWorkspace: vi.fn(),
+    };
+    const registry = new ToolRegistry(workspace, daemon, "test-task", "private", []);
+    const handler = vi.fn();
+    registry.setWorkspaceSwitchHandler(handler, () =>
+      task.agentConfig?.botContained ? "own folder" : undefined,
+    );
+
+    for (const name of [
+      "get_env",
+      "terminate_macos_app_processes",
+      "disable_macos_launch_agents",
+    ]) {
+      expect((registry as Any).isDeniedByTaskRestrictions(name)).toBe(true);
+    }
+    expect((registry as Any).isDeniedByTaskRestrictions("read_file")).toBe(false);
+    expect(await registry.switchWorkspace({ path: "/Users/someone" })).toEqual({
+      success: false,
+      error: "own folder",
+    });
+    expect(daemon.createWorkspace).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+
+    task = { id: "test-task", agentConfig: {} };
+    expect((registry as Any).isDeniedByTaskRestrictions("get_env")).toBe(false);
+
+    // A task that cannot be read is treated as contained.
+    daemon.getTask = vi.fn(() => {
+      throw new Error("task store unavailable");
+    });
+    expect((registry as Any).isDeniedByTaskRestrictions("get_env")).toBe(true);
+  });
 });

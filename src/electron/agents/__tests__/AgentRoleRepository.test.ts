@@ -161,6 +161,38 @@ describeWithSqlite("AgentRoleRepository heartbeat policy compatibility", () => {
     expect(agentRoleRepo.update({ id: created.id, worksOn: null })?.worksOn).toBeUndefined();
   });
 
+  it("stores which files a bot's unattended runs use, defaulting to its own folder", async () => {
+    const created = agentRoleRepo.create({
+      name: "files-bot",
+      displayName: "Files bot",
+      capabilities: ["code"],
+    });
+    expect(created.fileAccess).toBeUndefined();
+    expect(agentRoleRepo.update({ id: created.id, fileAccess: "workspace" })?.fileAccess).toBe(
+      "workspace",
+    );
+    expect(agentRoleRepo.findById(created.id)?.fileAccess).toBe("workspace");
+    expect(agentRoleRepo.update({ id: created.id, displayName: "Renamed" })?.fileAccess).toBe(
+      "workspace",
+    );
+    expect(agentRoleRepo.update({ id: created.id, fileAccess: null })?.fileAccess).toBeUndefined();
+
+    // Its own folder's workspace row stays out of every workspace list.
+    const { WorkspaceStore } = await import("../../database/repositories");
+    const workspaces = new WorkspaceStore(manager.getDatabase());
+    const botFolderId = `__bot_workspace__:${created.id}`;
+    workspaces.upsertWithId({
+      id: botFolderId,
+      name: "Files bot (own folder)",
+      path: "/tmp/cowork-bot-folder-test",
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      permissions: { read: true, write: true, delete: true, network: true, shell: true },
+    });
+    expect(workspaces.findById(botFolderId)?.path).toBe("/tmp/cowork-bot-folder-test");
+    expect(workspaces.findAll().some((workspace) => workspace.id === botFolderId)).toBe(false);
+  });
+
   it("stores the server a bot's own desktop runs on", () => {
     const created = agentRoleRepo.create({
       name: "server-bot",

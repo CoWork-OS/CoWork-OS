@@ -2,6 +2,7 @@ import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
 import type { BotWorksOn } from "./bot-computer";
+import type { BotFileAccess } from "./bot-containment";
 
 // Core types shared between main and renderer processes
 
@@ -2582,6 +2583,12 @@ export interface AgentConfig {
    * every one of them narrows the task's profile.
    */
   inheritedAccessCeilingProfileIds?: AccessProfileId[];
+  /**
+   * Set by the daemon when it moves a bot's run into the bot's own folder, and kept for as
+   * long as the task works there: adds the bot's-own-folder access limit (sandboxed shell) and
+   * blocks switching the task to another workspace. Child tasks inherit the limit.
+   */
+  botContained?: boolean;
   /**
    * Optional response quality loop for final text outputs:
    * - 1: draft only (default)
@@ -6131,6 +6138,11 @@ export interface AgentRole {
    * with its files, browser and sign-ins. Unset means a desktop of its own.
    */
   desktopGroup?: string;
+  /**
+   * Which files its runs work on when nobody started them by hand. Unset means its own folder:
+   * bots are contained by default.
+   */
+  fileAccess?: BotFileAccess;
   soul?: string; // Extended personality (JSON: communication style, focus areas, preferences)
   heartbeatPolicy?: HeartbeatPolicy;
   heartbeatEnabled?: boolean; // Whether agent participates in heartbeat system
@@ -6185,6 +6197,8 @@ export interface CreateAgentRoleRequest {
   desktopHost?: string;
   /** A shared desktop's name; unset means a desktop of its own. */
   desktopGroup?: string;
+  /** Which files unattended runs work on; unset means its own folder. */
+  fileAccess?: BotFileAccess;
   soul?: string;
   heartbeatPolicy?: HeartbeatPolicyInput;
   heartbeatEnabled?: boolean;
@@ -6236,6 +6250,8 @@ export interface UpdateAgentRoleRequest {
   desktopHost?: string | null;
   /** A shared desktop's name; null means a desktop of its own. */
   desktopGroup?: string | null;
+  /** Which files unattended runs work on; null resets it to its own folder. */
+  fileAccess?: BotFileAccess | null;
   soul?: string;
   monthlyBudgetCost?: number | null;
   autoPausedAt?: number | null;

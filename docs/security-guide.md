@@ -255,6 +255,23 @@ desktop container with `desktop_run`. A desktop on a server, or on a Linux host
 whose uid the container cannot write as, keeps its files in a volume, so the
 bot's own folder stays a separate folder on this computer.
 
+An own desktop's network is limited right after it starts, before anything runs
+in it. A short-lived helper container shares the desktop's network namespace,
+holds the only `NET_ADMIN` capability, applies `iptables` rules
+(`resources/bot-desktop/cowork-network.sh`) and exits; the desktop itself keeps
+`--cap-drop ALL`. The bot's **Network** setting picks the rules:
+
+- **Internet only** (default): public addresses only. This computer
+  (`host.docker.internal`), the local network, carrier-grade NAT, link-local and
+  cloud-metadata addresses and reserved ranges are rejected, DNS goes only to the
+  desktop's own IPv4 resolvers, and IPv6 is closed, so a page the bot opens
+  cannot reach apps listening on your Mac or devices on your network.
+- **No network**: only loopback and replies to the viewer connection.
+
+A shared desktop uses the narrowest setting of its bots, and a desktop restarts
+when its setting changes. If the rules cannot be applied, the desktop is
+removed rather than started without them.
+
 Runs a person starts in the app keep the workspace they were started in: a bot
 chat, a team peer, or a task typed and assigned in a project, including the
 tasks those start. A bot's **Files** setting can be changed to **Your

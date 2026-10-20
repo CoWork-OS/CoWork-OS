@@ -1,7 +1,7 @@
 import type { UiTimelineEvent } from "./timeline-events";
 import type { ChatInlineFrame } from "./mailbox";
 import type { AccessProfileDefinition, AccessProfileId } from "./access-profiles";
-import type { BotWorksOn } from "./bot-computer";
+import type { BotDesktopNetwork, BotWorksOn } from "./bot-computer";
 import type { BotFileAccess } from "./bot-containment";
 
 // Core types shared between main and renderer processes
@@ -6138,6 +6138,8 @@ export interface AgentRole {
    * with its files, browser and sign-ins. Unset means a desktop of its own.
    */
   desktopGroup?: string;
+  /** For "Its own desktop": what the desktop may reach on the network. Unset means internet only. */
+  desktopNetwork?: BotDesktopNetwork;
   /**
    * Which files its runs work on when nobody started them by hand. Unset means its own folder:
    * bots are contained by default.
@@ -6197,6 +6199,8 @@ export interface CreateAgentRoleRequest {
   desktopHost?: string;
   /** A shared desktop's name; unset means a desktop of its own. */
   desktopGroup?: string;
+  /** What its own desktop may reach on the network; unset means internet only. */
+  desktopNetwork?: BotDesktopNetwork;
   /** Which files unattended runs work on; unset means its own folder. */
   fileAccess?: BotFileAccess;
   soul?: string;
@@ -6250,6 +6254,8 @@ export interface UpdateAgentRoleRequest {
   desktopHost?: string | null;
   /** A shared desktop's name; null means a desktop of its own. */
   desktopGroup?: string | null;
+  /** What its own desktop may reach on the network; null resets it to internet only. */
+  desktopNetwork?: BotDesktopNetwork | null;
   /** Which files unattended runs work on; null resets it to its own folder. */
   fileAccess?: BotFileAccess | null;
   soul?: string;

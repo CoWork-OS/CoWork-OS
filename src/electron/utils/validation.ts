@@ -5,6 +5,7 @@
 
 import * as path from "path";
 import {
+  BOT_DESKTOP_NETWORK_VALUES,
   BOT_WORKS_ON_VALUES,
   DESKTOP_GROUP_PATTERN,
   DESKTOP_HOST_PATTERN,
@@ -109,6 +110,8 @@ export const AgentRoleDesktopHostSchema = z
   .nullable();
 /** Which files a bot's unattended runs work on; null resets it to its own folder. */
 export const AgentRoleFileAccessSchema = z.enum(BOT_FILE_ACCESS_VALUES).nullable();
+/** What a bot's own desktop may reach on the network; null resets it to internet only. */
+export const AgentRoleDesktopNetworkSchema = z.enum(BOT_DESKTOP_NETWORK_VALUES).nullable();
 /** A shared desktop's name; null or empty means a desktop of its own. */
 export const AgentRoleDesktopGroupSchema = z
   .string()

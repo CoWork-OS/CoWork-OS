@@ -1,5 +1,10 @@
 import Database from "better-sqlite3";
-import { isBotWorksOn, isValidDesktopGroup, isValidDesktopHost } from "../../shared/bot-computer";
+import {
+  isBotDesktopNetwork,
+  isBotWorksOn,
+  isValidDesktopGroup,
+  isValidDesktopHost,
+} from "../../shared/bot-computer";
 import { isBotFileAccess } from "../../shared/bot-containment";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -298,6 +303,9 @@ export class AgentRoleStore {
       desktopHost: isValidDesktopHost(request.desktopHost) ? request.desktopHost : undefined,
       desktopGroup: isValidDesktopGroup(request.desktopGroup) ? request.desktopGroup : undefined,
       fileAccess: isBotFileAccess(request.fileAccess) ? request.fileAccess : undefined,
+      desktopNetwork: isBotDesktopNetwork(request.desktopNetwork)
+        ? request.desktopNetwork
+        : undefined,
     };
 
     const stmt = this.db.prepare(`
@@ -312,8 +320,8 @@ export class AgentRoleStore {
         heartbeat_profile, heartbeat_active_hours, heartbeat_status, operator_mandate, allowed_loop_types,
         output_types, suppression_policy, max_autonomous_outputs_per_cycle,
         last_useful_output_at, operator_health_score, monthly_budget_cost, auto_paused_at, works_on,
-        desktop_host, desktop_group, file_access
-      ) VALUES (${Array.from({ length: 45 }, () => "?").join(", ")})
+        desktop_host, desktop_group, file_access, desktop_network
+      ) VALUES (${Array.from({ length: 46 }, () => "?").join(", ")})
     `);
 
     stmt.run(
@@ -362,6 +370,7 @@ export class AgentRoleStore {
       role.desktopHost ?? null,
       role.desktopGroup ?? null,
       role.fileAccess ?? null,
+      role.desktopNetwork ?? null,
     );
 
     const shouldPersistAutomationProfile =
@@ -631,6 +640,10 @@ export class AgentRoleStore {
     if (request.fileAccess !== undefined) {
       fields.push("file_access = ?");
       values.push(isBotFileAccess(request.fileAccess) ? request.fileAccess : null);
+    }
+    if (request.desktopNetwork !== undefined) {
+      fields.push("desktop_network = ?");
+      values.push(isBotDesktopNetwork(request.desktopNetwork) ? request.desktopNetwork : null);
     }
     if (request.soul !== undefined) {
       fields.push("soul = ?");
@@ -979,6 +992,7 @@ export class AgentRoleStore {
       desktopHost: isValidDesktopHost(row.desktop_host) ? row.desktop_host : undefined,
       desktopGroup: isValidDesktopGroup(row.desktop_group) ? row.desktop_group : undefined,
       fileAccess: isBotFileAccess(row.file_access) ? row.file_access : undefined,
+      desktopNetwork: isBotDesktopNetwork(row.desktop_network) ? row.desktop_network : undefined,
       soul: row.soul || undefined,
       heartbeatEnabled: row.heartbeat_enabled === 1,
       heartbeatIntervalMinutes: row.heartbeat_interval_minutes || 15,

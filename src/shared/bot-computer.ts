@@ -44,6 +44,43 @@ export const BOT_WORKS_ON_OPTIONS: ReadonlyArray<{
 
 const WORKS_ON_SET = new Set<string>(BOT_WORKS_ON_VALUES);
 
+/**
+ * What a bot's own desktop may reach on the network.
+ * - internet: public internet only, never this computer or the local network (default)
+ * - off: no network at all
+ */
+export const BOT_DESKTOP_NETWORK_VALUES = ["internet", "off"] as const;
+export type BotDesktopNetwork = (typeof BOT_DESKTOP_NETWORK_VALUES)[number];
+
+export const BOT_DESKTOP_NETWORK_OPTIONS: ReadonlyArray<{
+  value: BotDesktopNetwork;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "internet",
+    label: "Internet only",
+    description:
+      "Websites and online services, but not this Mac, apps running on it, or devices on your local network.",
+  },
+  {
+    value: "off",
+    label: "No network",
+    description: "Nothing online: for work on files only.",
+  },
+];
+
+const DESKTOP_NETWORK_SET = new Set<string>(BOT_DESKTOP_NETWORK_VALUES);
+
+export function isBotDesktopNetwork(value: unknown): value is BotDesktopNetwork {
+  return typeof value === "string" && DESKTOP_NETWORK_SET.has(value);
+}
+
+/** A missing or unknown value means internet only. */
+export function normalizeBotDesktopNetwork(value: unknown): BotDesktopNetwork {
+  return isBotDesktopNetwork(value) ? value : "internet";
+}
+
 /** An SSH host alias or user@host from your SSH config: no spaces, no leading dash, no options. */
 export const DESKTOP_HOST_PATTERN = /^(?!-)[A-Za-z0-9._@-]{1,100}$/;
 

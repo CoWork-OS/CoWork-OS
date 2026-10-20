@@ -257,6 +257,7 @@ import {
 } from "./utils/selected-task-restoration";
 import { resolveComposerDraftOwnerContext } from "./utils/composer-draft-owner";
 import { taskSurfaceStore } from "./state/task-surface-store";
+import { composerDraftStore } from "./state/composer-draft-store";
 import { prefetchWhenIdle } from "./utils/idle-prefetch";
 import { preloadableLazy } from "./utils/preloadable-lazy";
 import {
@@ -6262,6 +6263,18 @@ export function App() {
         }
       }
 
+      // An unsent new-session draft follows the folder. Left behind, it would
+      // reappear in the old (often scratch) workspace, e.g. on next launch.
+      const previousWorkspaceId = (currentWorkspaceRef.current ?? currentWorkspace)?.id;
+      if (!selectedTaskId && !remoteTaskView && previousWorkspaceId) {
+        await composerDraftStore
+          .carry(
+            { scope: "local", workspaceId: previousWorkspaceId, taskId: null, surface: "main" },
+            { scope: "local", workspaceId: workspace.id, taskId: null, surface: "main" },
+          )
+          .catch(() => false);
+      }
+
       // Restoring a folder's last task is for app startup. Choosing a folder
       // from the composer keeps the current view: a new session stays new and
       // a moved task stays selected, and that folder's pointer tracks it.
@@ -6269,7 +6282,7 @@ export function App() {
       selectionRestorationSettledWorkspaceRef.current = workspace.id;
       setCurrentWorkspace(workspace);
     },
-    [addToast, remoteTaskView, selectedTaskId],
+    [addToast, currentWorkspace, remoteTaskView, selectedTaskId],
   );
 
   // Opens the folder dialog and returns the matching (or newly created)

@@ -1,3 +1,4 @@
+import "../../agent/tools/__tests__/file-discovery-test-worker";
 /**
  * An applied directory-backed skill may read its own plugin pack (references, scripts,
  * assets next to its SKILL.md) under a named access profile: read-only, only inside the

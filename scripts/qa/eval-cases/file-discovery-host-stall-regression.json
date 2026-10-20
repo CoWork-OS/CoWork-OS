@@ -1,0 +1,68 @@
+{
+  "id": "file-discovery-host-stall-2026-10-20",
+  "title": "Repeated synchronous workspace discovery blocks the Electron host during concurrent sessions",
+  "source": {
+    "incident": "live filesystem discovery host stall"
+  },
+  "scenarios": [
+    {
+      "id": "multi-pattern-read-files",
+      "prompt": "Read several include patterns plus an exclusion while two sessions remain active.",
+      "assertions": {
+        "oneSharedTraversal": true,
+        "individualPatternLimitsAndWarningsPreserved": true,
+        "fixedDirectoryPrefixesPruneUnrelatedBranches": true
+      }
+    },
+    {
+      "id": "host-responsiveness",
+      "prompt": "Discover files in a large workspace while host timers and renderer IPC heartbeats run.",
+      "assertions": {
+        "globAndGrepTraversalOffHost": true,
+        "hostDirectoryReadSpiesRemainUnused": true,
+        "nativeSmokeMaxHostGapMs": 250,
+        "nativeSmokeMaxRendererIpcMs": 250
+      }
+    },
+    {
+      "id": "scoped-authority",
+      "prompt": "Search concurrently with different memory grants, profile deny rules and applied skill grants; revoke a grant during a scan.",
+      "assertions": {
+        "taskReadContextsRemainIsolated": true,
+        "symlinkAndProfileDenialsPreserved": true,
+        "revokedGrantResultsRejected": true
+      }
+    },
+    {
+      "id": "freshness-and-worker-lifecycle",
+      "prompt": "Repeat a search after files change and recover from a failed, exited, malformed or stuck discovery worker.",
+      "assertions": {
+        "completedResultsNotCached": true,
+        "identicalInFlightRequestsCoalesce": true,
+        "workersAndQueueSlotsReleased": true,
+        "concurrencyBounded": true
+      }
+    },
+    {
+      "id": "cross-platform-prefix-matching",
+      "prompt": "Use directory-qualified globs on Windows and case-sensitive filesystems with differently cased directory names.",
+      "assertions": {
+        "windowsSeparatorsNormalized": true,
+        "allCaseInsensitivePrefixMatchesRetained": true
+      }
+    }
+  ],
+  "executableTests": [
+    "src/electron/agent/tools/__tests__/file-discovery.test.ts",
+    "src/electron/agent/tools/__tests__/glob-tools-windows-paths.test.ts",
+    "src/electron/agent/tools/__tests__/read-files.test.ts",
+    "src/electron/agent/tools/__tests__/grep-tools.test.ts",
+    "src/electron/security/__tests__/memory-repo-access.test.ts",
+    "src/electron/security/__tests__/skill-pack-read-access.test.ts"
+  ],
+  "executableCommands": [
+    "npx vitest run src/electron/agent/tools/__tests__/file-discovery.test.ts src/electron/agent/tools/__tests__/glob-tools-windows-paths.test.ts src/electron/agent/tools/__tests__/read-files.test.ts src/electron/agent/tools/__tests__/grep-tools.test.ts src/electron/security/__tests__/memory-repo-access.test.ts src/electron/security/__tests__/skill-pack-read-access.test.ts",
+    "npm run qa:files:worker-smoke"
+  ],
+  "notes": "Traceability specification linked to executable regressions, not an automatically graded eval result. The smoke checks use synthetic temporary workspaces and disposable profiles. CI smoke budgets allow 1000 ms for slower runners. Existing live sessions and user data are not modified."
+}

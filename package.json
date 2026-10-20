@@ -172,6 +172,7 @@
     "qa:db:memory": "npm run build:cli && node scripts/qa/memory-workload.mjs",
     "qa:db:control-plane": "npm run build:cli && node scripts/qa/control-plane-workload.mjs",
     "qa:db:reads": "npm run build:cli && node scripts/qa/sqlite-reads.mjs",
+    "qa:files:worker-smoke": "npm run build:electron && npm run build:daemon && npm run build:cli && node scripts/qa/file-discovery-smoke.cjs",
     "qa:db:worker-smoke": "npm run build:electron && npm run build:daemon && npm run build:cli && node scripts/qa/database-worker-smoke.mjs",
     "qa:db:workload": "npm run build:cli && node scripts/qa/sqlite-workload.mjs",
     "qa:timeline:backfill": "node scripts/qa/backfill_timeline_completion_telemetry.cjs",

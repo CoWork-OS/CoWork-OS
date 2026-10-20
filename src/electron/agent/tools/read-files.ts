@@ -77,9 +77,15 @@ export async function readFilesByPatterns(
   const warnings: string[] = [];
   const matched = new Map<string, { size: number }>();
 
+  const results = await deps.globTools.globMany({
+    patterns: [...include, ...exclude],
+    path: basePath,
+    maxResults,
+  });
+  let resultIndex = 0;
   let anyPatternTruncated = false;
   for (const pattern of include) {
-    const res = await deps.globTools.glob({ pattern, path: basePath, maxResults });
+    const res = results[resultIndex++];
     if (!res.success) {
       warnings.push(`Glob failed for pattern "${pattern}": ${res.error || "unknown error"}`);
       continue;
@@ -96,7 +102,7 @@ export async function readFilesByPatterns(
   }
 
   for (const pattern of exclude) {
-    const res = await deps.globTools.glob({ pattern, path: basePath, maxResults });
+    const res = results[resultIndex++];
     if (!res.success) {
       warnings.push(
         `Exclude glob failed for pattern "!${pattern}": ${res.error || "unknown error"}`,

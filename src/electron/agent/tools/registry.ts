@@ -305,6 +305,67 @@ const SKILL_MUTATION_TOOLS = new Set([
   "skill_delete",
 ]);
 
+// Words that appear in many skill IDs or guesses and say nothing about which skill is meant.
+const SKILL_ID_FILLER_TOKENS = new Set([
+  "skill",
+  "skills",
+  "the",
+  "and",
+  "for",
+  "to",
+  "of",
+  "in",
+  "a",
+]);
+
+function skillIdTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 1 && !SKILL_ID_FILLER_TOKENS.has(token)),
+  );
+}
+
+function rankSkillIdGuess(
+  requestedId: string,
+  skills: CustomSkill[],
+): { id: string; overlap: number }[] {
+  const wanted = skillIdTokens(requestedId);
+  if (wanted.size === 0) return [];
+  return skills
+    .map((skill) => {
+      const offered = skillIdTokens(`${skill.id} ${skill.name || ""}`);
+      let shared = 0;
+      for (const token of wanted) if (offered.has(token)) shared++;
+      return { id: skill.id, overlap: shared / wanted.size };
+    })
+    .filter((entry) => entry.overlap >= 0.5)
+    .sort((a, b) => b.overlap - a.overlap || a.id.localeCompare(b.id));
+}
+
+/**
+ * Suggest real skill IDs for an unknown one: skills whose ID or name share at least half of
+ * the requested ID's meaningful words, best overlap first.
+ */
+function suggestSkillIds(requestedId: string, skills: CustomSkill[], limit = 5): string[] {
+  return rankSkillIdGuess(requestedId, skills)
+    .slice(0, limit)
+    .map((entry) => entry.id);
+}
+
+/**
+ * Resolve a guessed skill ID when it is unambiguous: at least two meaningful words, all of
+ * them found in exactly one skill's ID or name. Anything looser stays a suggestion.
+ */
+function resolveGuessedSkillId(requestedId: string, skills: CustomSkill[]): string | null {
+  if (skillIdTokens(requestedId).size < 2) return null;
+  const [best, next] = rankSkillIdGuess(requestedId, skills);
+  if (!best || best.overlap < 1) return null;
+  if (next && next.overlap >= 1) return null;
+  return best.id;
+}
+
 function getApprovalTypeForRuntimeKind(
   approvalKind: RuntimeToolApprovalKind | undefined,
 ): ApprovalType | null {
@@ -6713,7 +6774,7 @@ ${skillDescriptions}`;
     args?: string;
     trigger?: SkillApplicationTrigger;
   }): Promise<Any> {
-    const skill_id = String(input.skill || "").trim();
+    const requestedSkillId = String(input.skill || "").trim();
     const rawArgs = String(input.args || "").trim();
     const trigger: SkillApplicationTrigger =
       input.trigger === "slash" ||
@@ -6726,17 +6787,33 @@ ${skillDescriptions}`;
     const isAutomaticInvocation = !isManualInvocation;
 
     const skillLoader = getCustomSkillLoader();
+    // A model that knows a skill only from its description often guesses the ID
+    // ("unity-in-app-purchases" for "unity:implement-in-app-purchases"). When the guess
+    // matches exactly one skill on every meaningful word, load that skill instead of failing.
+    const resolvedSkillId =
+      isAutomaticInvocation && !skillLoader.getSkill(requestedSkillId)
+        ? resolveGuessedSkillId(requestedSkillId, skillLoader.listModelInvocableSkills())
+        : null;
+    const skill_id = resolvedSkillId ?? requestedSkillId;
+    const resolvedFrom = resolvedSkillId ? { resolved_from: requestedSkillId } : {};
     const skill = skillLoader.getSkill(skill_id);
     const descriptor = skill ? this.buildSkillRuntimeDescriptor(skill) : null;
 
     if (!skill) {
-      // List available skills to help the agent
+      // List available skills to help the agent. Models often guess an ID from a skill's
+      // description ("unity-in-app-purchases" for "unity:implement-in-app-purchases"), and
+      // the first 20 skills rarely include the intended one, so lead with close matches.
       const availableSkills = skillLoader.listRuntimeSkillDescriptors().map((entry) => entry.name);
+      const closestSkillIds = suggestSkillIds(skill_id, skillLoader.listModelInvocableSkills());
       return {
         success: false,
         error: `Skill '${skill_id}' not found`,
+        ...(closestSkillIds.length > 0 ? { did_you_mean: closestSkillIds } : {}),
         available_skills: availableSkills.slice(0, 20), // Show up to 20 skills
-        hint: "Use one of the listed skill IDs exposed through the Skill tool.",
+        hint:
+          closestSkillIds.length > 0
+            ? `Retry Skill with the exact ID, for example '${closestSkillIds[0]}'.`
+            : "Use one of the listed skill IDs exposed through the Skill tool.",
       };
     }
 
@@ -6968,6 +7045,7 @@ ${skillDescriptions}`;
       return {
         success: true,
         skill: skill_id,
+        ...resolvedFrom,
         skill_name: skill.name,
         message: `Loaded skill '${skill.name}' for this task.`,
         application_summary:
@@ -7020,8 +7098,11 @@ ${skillDescriptions}`;
     return {
       success: true,
       skill: skill_id,
+      ...resolvedFrom,
       skill_name: skill.name,
-      message: `Loaded skill '${skill.name}' for this task.`,
+      message: resolvedSkillId
+        ? `Loaded skill '${skill.name}' (ID '${skill_id}'; '${requestedSkillId}' does not exist) for this task.`
+        : `Loaded skill '${skill.name}' for this task.`,
       application_summary: `Loaded skill "${skill.name}" as hidden context for the current task.`,
       skill_invocation_id: invocationId,
     };

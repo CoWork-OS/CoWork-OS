@@ -164,29 +164,16 @@ function titleForType(type: ApprovalType): string {
   }
 }
 
-function iconForType(type: ApprovalType): string {
-  switch (type) {
-    case "delete_file":
-    case "delete_multiple":
-    case "memory_delete":
-      return "🗑️";
-    case "bulk_rename":
-    case "workspace_write":
-      return "📝";
-    case "network_access":
-      return "🌐";
-    case "external_file_access":
-      return "📁";
-    case "external_service":
-      return "🔗";
-    case "location_access":
-      return "📍";
-    case "run_command":
-      return "⌨️";
-    default:
-      return "⚠️";
-  }
-}
+/** Rows describing the request rather than what it changes; shown under Details. */
+const APPROVAL_META_ROW_LABELS = new Set([
+  "Category",
+  "Tool",
+  "Working directory",
+  "Timeout",
+  "Bundle",
+  "Scope",
+  "Reason",
+]);
 
 interface GenericApprovalDialogProps {
   approval: ApprovalRequest;
@@ -241,6 +228,7 @@ export function GenericApprovalDialog({
   }, [approval.id, approval.requestedAt, approval.revisionHash, approval.details, approval.status]);
   const [selectedScope, setSelectedScope] = useState<ScopeKey>("once");
   const [showAdvancedScopes, setShowAdvancedScopes] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const details =
     approval.details && typeof approval.details === "object" && !Array.isArray(approval.details)
       ? (approval.details as Record<string, unknown>)
@@ -605,26 +593,82 @@ export function GenericApprovalDialog({
   );
   const activePair = scopePairs?.find((p) => p.scope === selectedScope) ?? scopePairs?.[0];
 
+  // What is being approved stays in view; facts about the request (category, tool, working
+  // directory, limits, rule scope) sit one click away under Details.
+  const metaRows = rows.filter((row) => APPROVAL_META_ROW_LABELS.has(row.label));
+  const contentRows = rows.filter(
+    (row) =>
+      !APPROVAL_META_ROW_LABELS.has(row.label) && !(commandPreview && row.label === "Command"),
+  );
+  const title = titleForApproval(approval.type, toolName);
+  const summary =
+    responsibilityActionReview.state !== "absent"
+      ? "Applies only to the proposed write below"
+      : commandPreview
+        ? title
+        : title !== description
+          ? title
+          : "";
+  const advancedRules =
+    responsibilityActionReview.state === "absent" && hasAdvancedScopes ? (
+      <button
+        type="button"
+        className="session-approval-link"
+        aria-expanded={showAdvancedScopes}
+        onClick={() => {
+          setShowAdvancedScopes(!showAdvancedScopes);
+          setSelectedScope("once");
+        }}
+      >
+        {showAdvancedScopes ? "Hide advanced rules" : "Advanced permission rules"}
+      </button>
+    ) : null;
+  const approveAll =
+    responsibilityActionReview.state === "absent" &&
+    onApproveAllSession &&
+    showAdvancedScopes &&
+    !details.accessProfile ? (
+      <button type="button" className="session-approval-link" onClick={onApproveAllSession}>
+        Approve all for this session
+      </button>
+    ) : null;
+
   return (
-    <div className="session-approval-overlay" role="dialog" aria-modal="true">
+    <div className="session-approval-overlay" role="dialog" aria-modal="true" aria-label={title}>
       <div
         className={
           commandPreview
-            ? "session-approval-card session-approval-card--command"
-            : "session-approval-card"
+            ? "session-approval-card session-approval-card--minimal session-approval-card--command"
+            : "session-approval-card session-approval-card--minimal"
         }
       >
-        <div className="session-approval-heading">
-          <span className="session-approval-icon" aria-hidden="true">
-            {iconForType(approval.type)}
-          </span>
-          <h3 className="session-approval-title">{titleForApproval(approval.type, toolName)}</h3>
+        {commandPreview ? (
+          <div className="session-approval-command" role="region" aria-label="Command to approve">
+            <code>{commandPreview.text}</code>
+          </div>
+        ) : (
+          <h3 className="session-approval-title">{description}</h3>
+        )}
+        {commandPreview?.truncated ? (
+          <p className="session-approval-preview-note">
+            Preview condensed for readability. Approval still applies to the full command.
+          </p>
+        ) : null}
+        <div className="session-approval-meta">
+          {summary && <span className="session-approval-summary">{summary}</span>}
+          <button
+            type="button"
+            className="session-approval-link"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            {detailsOpen ? "Hide details" : "Details"}
+          </button>
         </div>
-        <p className="session-approval-prompt">{description}</p>
 
-        {rows.length > 0 && (
+        {contentRows.length > 0 && (
           <dl className="session-approval-details">
-            {rows.map((row) => (
+            {contentRows.map((row) => (
               <Fragment key={row.label}>
                 <dt>{row.label}</dt>
                 <dd>{row.value}</dd>
@@ -644,32 +688,47 @@ export function GenericApprovalDialog({
           }
         />
 
+        <div className="session-approval-details-panel" hidden={!detailsOpen}>
+          {commandPreview && <p className="session-approval-prompt">{description}</p>}
+          {metaRows.length > 0 && (
+            <dl className="session-approval-details">
+              {metaRows.map((row) => (
+                <Fragment key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+          {(advancedRules || approveAll) && (
+            <div className="session-approval-details-links">
+              {advancedRules}
+              {approveAll}
+            </div>
+          )}
+        </div>
+
         {responsibilityActionReview.state !== "absent" ? (
-          <>
-            <p className="session-approval-footer-hint">
-              This decision applies only to the proposed write shown above.
-            </p>
-            <div className="session-approval-actions">
+          <div className="session-approval-actions">
+            <button
+              type="button"
+              className="session-approval-btn-deny"
+              onClick={() => onRespond("deny_once", approval.revisionHash)}
+            >
+              Deny once
+            </button>
+            {responsibilityActionReview.state === "valid" && (
               <button
                 type="button"
-                className="session-approval-btn-deny"
-                onClick={() => onRespond("deny_once", approval.revisionHash)}
+                className="session-approval-btn-allow"
+                onClick={() => onRespond("allow_once", approval.revisionHash)}
               >
-                Deny once
+                Approve once
               </button>
-              {responsibilityActionReview.state === "valid" && (
-                <button
-                  type="button"
-                  className="session-approval-btn-allow"
-                  onClick={() => onRespond("allow_once", approval.revisionHash)}
-                >
-                  Approve once
-                </button>
-              )}
-            </div>
-          </>
+            )}
+          </div>
         ) : scopePairs ? (
-          <>
+          <div className="session-approval-actions session-approval-actions--scoped">
             <div className="session-approval-scope-row">
               <span className="session-approval-scope-label">Remember for</span>
               <div
@@ -694,77 +753,39 @@ export function GenericApprovalDialog({
                 ))}
               </div>
             </div>
-
-            <div className="session-approval-actions session-approval-actions--scoped">
-              {hasAdvancedScopes ? (
-                <button
-                  type="button"
-                  className="session-approval-approve-all-link"
-                  aria-expanded={showAdvancedScopes}
-                  onClick={() => {
-                    setShowAdvancedScopes(!showAdvancedScopes);
-                    setSelectedScope("once");
-                  }}
-                >
-                  {showAdvancedScopes ? "Hide advanced rules" : "Advanced permission rules"}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="session-approval-btn-deny"
-                onClick={() =>
-                  activePair && onRespond(activePair.denyAction, approval.revisionHash)
-                }
-              >
-                Deny
-              </button>
-              <button
-                type="button"
-                className="session-approval-btn-allow"
-                onClick={() =>
-                  activePair && onRespond(activePair.allowAction, approval.revisionHash)
-                }
-              >
-                Allow
-              </button>
-            </div>
-          </>
+            <button
+              type="button"
+              className="session-approval-btn-deny"
+              onClick={() => activePair && onRespond(activePair.denyAction, approval.revisionHash)}
+            >
+              Deny
+            </button>
+            <button
+              type="button"
+              className="session-approval-btn-allow"
+              onClick={() => activePair && onRespond(activePair.allowAction, approval.revisionHash)}
+            >
+              Allow
+            </button>
+          </div>
         ) : (
-          <>
-            <p className="session-approval-footer-hint">
-              This decision applies to the requested action and resource.
-            </p>
-            <div className="session-approval-actions">
-              {suggestedActions.map((action) => (
-                <button
-                  key={action.action}
-                  type="button"
-                  className={
-                    action.action.startsWith("allow_")
-                      ? "session-approval-btn-allow"
-                      : "session-approval-btn-deny"
-                  }
-                  onClick={() => onRespond(action.action, approval.revisionHash)}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="session-approval-actions">
+            {suggestedActions.map((action) => (
+              <button
+                key={action.action}
+                type="button"
+                className={
+                  action.action.startsWith("allow_")
+                    ? "session-approval-btn-allow"
+                    : "session-approval-btn-deny"
+                }
+                onClick={() => onRespond(action.action, approval.revisionHash)}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
         )}
-
-        {responsibilityActionReview.state === "absent" &&
-        onApproveAllSession &&
-        showAdvancedScopes &&
-        !details.accessProfile ? (
-          <button
-            type="button"
-            className="session-approval-approve-all-link"
-            onClick={onApproveAllSession}
-          >
-            Approve all for this session
-          </button>
-        ) : null}
       </div>
     </div>
   );

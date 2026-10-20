@@ -1,4 +1,12 @@
+import { useState } from "react";
 import type { ApprovalRequest } from "../../shared/types";
+
+function shortAccessLevel(level: unknown): string {
+  if (level === "full_control") return "Full control";
+  if (level === "click_only") return "Click only";
+  if (level === "view_only") return "View only";
+  return "";
+}
 
 function formatAccessLevel(level: unknown): string {
   if (level === "full_control") return "Full control (click, type, keys)";
@@ -27,6 +35,7 @@ export function ComputerUseApprovalDialog({
   onAllowSession,
   onDeny,
 }: ComputerUseApprovalDialogProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   if (!isComputerUseAppGrantApproval(approval)) {
     return null;
   }
@@ -40,26 +49,34 @@ export function ComputerUseApprovalDialog({
     sentinelWarning?: string;
   };
 
+  const title = d.appName ? `Let CoWork use ${d.appName}?` : "Let CoWork use this app?";
+  const summary = [shortAccessLevel(d.requestedLevel), "this session only"]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="session-approval-overlay" role="dialog" aria-modal="true">
-      <div className="session-approval-card session-approval-card--computer-use">
-        <div className="session-approval-heading">
-          <span className="session-approval-icon" aria-hidden="true">
-            🖥️
-          </span>
-          <h3 className="session-approval-title">Computer use — app access</h3>
+    <div className="session-approval-overlay" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="session-approval-card session-approval-card--minimal session-approval-card--computer-use">
+        <h3 className="session-approval-title">{title}</h3>
+        <div className="session-approval-meta">
+          <span className="session-approval-summary">{summary}</span>
+          <button
+            type="button"
+            className="session-approval-link"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            {detailsOpen ? "Hide details" : "Details"}
+          </button>
         </div>
 
-        <div className="session-approval-body">
-          <p className="session-approval-prompt">{approval.description}</p>
+        {d.sentinelWarning ? (
+          <p className="session-approval-sentinel-warning">{d.sentinelWarning}</p>
+        ) : null}
 
+        <div className="session-approval-details-panel" hidden={!detailsOpen}>
+          <p className="session-approval-prompt">{approval.description}</p>
           <dl className="session-approval-details">
-            {d.appName ? (
-              <>
-                <dt>App</dt>
-                <dd>{d.appName}</dd>
-              </>
-            ) : null}
             {d.bundleId ? (
               <>
                 <dt>Bundle ID</dt>
@@ -87,14 +104,8 @@ export function ComputerUseApprovalDialog({
               </>
             ) : null}
           </dl>
-
-          {d.sentinelWarning ? (
-            <p className="session-approval-sentinel-warning">{d.sentinelWarning}</p>
-          ) : null}
-
           <p className="session-approval-footer-hint">
-            Grants apply only for this computer-use session. Press{" "}
-            <kbd className="session-approval-kbd">Esc</kbd> during control to stop.
+            Press <kbd className="session-approval-kbd">Esc</kbd> during control to stop.
           </p>
         </div>
 

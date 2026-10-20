@@ -1012,6 +1012,89 @@ describe("Skill tool", () => {
       expect(result.success).toBe(false);
       expect(result.available_skills).toContain("skill-1");
       expect(result.available_skills).toContain("skill-2");
+      expect(result.did_you_mean).toBeUndefined();
+    });
+
+    it("loads the one skill a guessed ID fully matches and reports the real ID", async () => {
+      mockSkills.set(
+        "unity:implement-in-app-purchases",
+        createTestSkill({
+          id: "unity:implement-in-app-purchases",
+          name: "implement-in-app-purchases",
+        }),
+      );
+      mockSkills.set(
+        "unity:levelplay-unity-integration",
+        createTestSkill({
+          id: "unity:levelplay-unity-integration",
+          name: "levelplay-unity-integration",
+        }),
+      );
+      mockSkills.set("summarize", createTestSkill({ id: "summarize", name: "Summarize" }));
+
+      const guessed = await registry.executeTool("Skill", {
+        skill: "unity-in-app-purchases",
+        args: "coin pack",
+      });
+      expect(guessed.success).toBe(true);
+      expect(guessed.skill).toBe("unity:implement-in-app-purchases");
+      expect(guessed.resolved_from).toBe("unity-in-app-purchases");
+      expect(guessed.message).toContain("unity:implement-in-app-purchases");
+
+      const byName = await registry.executeTool("Skill", {
+        skill: "implement-in-app-purchases",
+        args: "coin pack",
+      });
+      expect(byName.success).toBe(true);
+      expect(byName.skill).toBe("unity:implement-in-app-purchases");
+    });
+
+    it("only suggests IDs when a guess matches several skills or only partly", async () => {
+      mockSkills.set(
+        "unity:optimize-audio",
+        createTestSkill({ id: "unity:optimize-audio", name: "optimize-audio" }),
+      );
+      mockSkills.set(
+        "unity:audio-setup-mixers",
+        createTestSkill({ id: "unity:audio-setup-mixers", name: "audio-setup-mixers" }),
+      );
+
+      const ambiguous = await registry.executeTool("Skill", { skill: "unity-audio" });
+      expect(ambiguous.success).toBe(false);
+      expect(ambiguous.did_you_mean).toEqual(["unity:audio-setup-mixers", "unity:optimize-audio"]);
+      expect(ambiguous.hint).toContain("unity:audio-setup-mixers");
+
+      const partial = await registry.executeTool("Skill", { skill: "unity-audio-compression" });
+      expect(partial.success).toBe(false);
+      expect(partial.did_you_mean).toContain("unity:optimize-audio");
+    });
+
+    it("never resolves a guessed ID for a manual slash invocation", async () => {
+      mockSkills.set(
+        "unity:implement-in-app-purchases",
+        createTestSkill({
+          id: "unity:implement-in-app-purchases",
+          name: "implement-in-app-purchases",
+        }),
+      );
+
+      const result = await registry.executeTool("Skill", {
+        skill: "unity-in-app-purchases",
+        trigger: "slash",
+      });
+      expect(result.success).toBe(false);
+      expect(result.did_you_mean).toEqual(["unity:implement-in-app-purchases"]);
+    });
+
+    it("does not suggest skills that only share filler words", async () => {
+      mockSkills.set(
+        "summarize-skill",
+        createTestSkill({ id: "summarize-skill", name: "Summarize" }),
+      );
+
+      const result = await registry.executeTool("Skill", { skill: "translate-skill" });
+      expect(result.success).toBe(false);
+      expect(result.did_you_mean).toBeUndefined();
     });
 
     it("should provide parameter info when required params missing", async () => {

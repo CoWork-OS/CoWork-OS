@@ -11,7 +11,10 @@ import {
   isComputerToolBlocked,
   type BotWorksOn,
 } from "../../../shared/bot-computer";
-import { BOT_CONTAINED_DENIED_TOOL_NAMES } from "../../../shared/bot-containment";
+import {
+  BOT_CONTAINED_DENIED_TOOL_NAMES,
+  BOT_DESKTOP_HOST_SHELL_TOOL_NAMES,
+} from "../../../shared/bot-containment";
 import { AgentRoleRepository } from "../../agents/agent-repository-facades";
 import { ChannelStore } from "../../database/repositories";
 import {
@@ -1498,6 +1501,13 @@ export class ToolRegistry {
     if (this.denyAllTools || this.deniedTools.has(toolName)) return true;
     if (this.isBlockedByBotWorksOn(toolName)) return true;
     if (BOT_CONTAINED_DENIED_TOOL_NAMES.has(toolName) && this.isBotContainedTask()) return true;
+    if (
+      BOT_DESKTOP_HOST_SHELL_TOOL_NAMES.has(toolName) &&
+      this.currentBotWorksOn() === "own_desktop" &&
+      this.isBotContainedTask()
+    ) {
+      return true;
+    }
     if (TERMINAL_TAB_TOOL_NAMES.has(toolName) && this.isTerminalTabReadDenied()) return true;
     for (const groupName of this.deniedGroups) {
       const tools = TOOL_GROUPS[groupName] as readonly string[] | undefined;

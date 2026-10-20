@@ -89,6 +89,35 @@ describe("BotDesktopManager", () => {
     fs.rmSync(resourcesDir, { recursive: true, force: true });
   });
 
+  it("names the folder on this computer that a desktop sees as ~/work", () => {
+    const manager = BotDesktopManager.getInstance();
+    expect(manager.hostWorkFolder("bot-1")).toEqual({
+      desktopKey: "bot-1",
+      folder: manager.homeFolder("bot-1"),
+    });
+
+    // A desktop on a server keeps its files in a volume there: no folder here.
+    const remote = BotDesktopManager.configure({
+      dataDir: () => dataDir,
+      resourcesDir: () => resourcesDir,
+      run: runner,
+      hostUid: 1000,
+      desktopHostFor: () => "my-server",
+    });
+    expect(remote.hostWorkFolder("bot-1")).toBeUndefined();
+
+    // Bots sharing a desktop share its folder.
+    const shared = BotDesktopManager.configure({
+      dataDir: () => dataDir,
+      resourcesDir: () => resourcesDir,
+      run: runner,
+      hostUid: 1000,
+      desktopGroupFor: () => "research-team",
+    });
+    expect(shared.hostWorkFolder("bot-1")).toEqual(shared.hostWorkFolder("bot-2"));
+    expect(shared.hostWorkFolder("bot-1")?.desktopKey).toBe("shared:research-team");
+  });
+
   it("uses the first runtime whose daemon answers", async () => {
     expect(await BotDesktopManager.getInstance().detectRuntime()).toEqual({
       name: "docker",

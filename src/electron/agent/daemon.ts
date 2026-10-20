@@ -285,6 +285,7 @@ import { BuiltinToolsSettingsManager } from "./tools/builtin-settings";
 import { loadPolicies } from "../admin/policies";
 import { ComputerUseSessionManager } from "../computer-use/session-manager";
 import { ComputerViewService } from "../computer-use/computer-view-service";
+import { BotDesktopManager } from "../computer-use/bot-desktop-manager";
 import { getNumbatService } from "../security/numbat";
 import {
   decideTaskOutcome,
@@ -2052,6 +2053,16 @@ export class AgentDaemon extends EventEmitter {
     return { ...task, workspaceId, agentConfig };
   }
 
+  /** The bot desktop's ~/work folder on this computer, when its files live in one. */
+  private botDesktopWorkFolder(roleId: string): { desktopKey: string; folder: string } | undefined {
+    try {
+      return BotDesktopManager.getInstance().hostWorkFolder(roleId);
+    } catch {
+      // The desktop service is not running (CLI, tests): the bot keeps its plain own folder.
+      return undefined;
+    }
+  }
+
   /** The task followed by its ancestors, nearest first (bounded, so a cycle cannot hang). */
   private getTaskAncestorChain(task: Task): Task[] {
     const chain = [task];
@@ -2063,17 +2074,25 @@ export class AgentDaemon extends EventEmitter {
     return chain;
   }
 
-  /** The bot's own folder and its hidden workspace row, created on first use. */
+  /**
+   * The bot's own folder and its hidden workspace row, created on first use. A bot set to "Its
+   * own desktop" uses the folder its desktop sees as ~/work, so its file tools and its desktop
+   * work on the same files; bots sharing a desktop share that folder and row.
+   */
   private ensureBotWorkspace(role: AgentRole): Workspace {
-    const id = botWorkspaceId(role.id);
-    const folder = path.join(getUserDataDir(), "bots", role.id, "work");
+    const desktop = role.worksOn === "own_desktop" ? this.botDesktopWorkFolder(role.id) : undefined;
+    const id = botWorkspaceId(desktop?.desktopKey ?? role.id);
+    const folder = desktop?.folder ?? path.join(getUserDataDir(), "bots", role.id, "work");
     fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
     const existing = this.workspaceRepo.findById(id);
     if (existing?.path === folder) return existing;
     const now = Date.now();
+    const label = desktop?.desktopKey.startsWith("shared:")
+      ? `Shared desktop ${desktop.desktopKey.slice("shared:".length)}`
+      : `${role.displayName || role.name} (${desktop ? "own desktop" : "own folder"})`;
     this.workspaceRepo.upsertWithId({
       id,
-      name: `${role.displayName || role.name} (own folder)`,
+      name: label,
       path: folder,
       createdAt: existing?.createdAt ?? now,
       lastUsedAt: now,

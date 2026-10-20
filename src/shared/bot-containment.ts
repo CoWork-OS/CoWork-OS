@@ -79,6 +79,21 @@ export const BOT_CONTAINED_DENIED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "native_application_inspect",
 ]);
 
+/**
+ * Host commands a contained run of a bot set to "Its own desktop" never gets: its commands run
+ * in its desktop instead (desktop_run), where ~/work is the same folder as its workspace.
+ */
+export const BOT_DESKTOP_HOST_SHELL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "run_command",
+  "process_output",
+  "stop_process",
+  "execute_code",
+  "git_status",
+  "git_diff",
+  "git_commit",
+  "git_merge_to_base",
+]);
+
 /** The task fields the containment decision reads, for the task and each of its ancestors. */
 export interface BotContainmentTaskFacts {
   assignedAgentRoleId?: string;

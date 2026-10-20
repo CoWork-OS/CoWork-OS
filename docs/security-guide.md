@@ -247,6 +247,14 @@ workspace lists. A run there:
 - loses `get_env` and the macOS process and login-item tools;
 - passes all of this to the tasks it starts.
 
+For a bot set to **Its own desktop**, its own folder is the folder its desktop
+sees as `~/work` (bots sharing a desktop share it), so file tools and the
+desktop work on the same files. Its contained runs lose the host's
+`run_command`, `execute_code`, process and git tools; commands run in the
+desktop container with `desktop_run`. A desktop on a server, or on a Linux host
+whose uid the container cannot write as, keeps its files in a volume, so the
+bot's own folder stays a separate folder on this computer.
+
 Runs a person starts in the app keep the workspace they were started in: a bot
 chat, a team peer, or a task typed and assigned in a project, including the
 tasks those start. A bot's **Files** setting can be changed to **Your

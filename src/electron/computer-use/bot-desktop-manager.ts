@@ -433,6 +433,17 @@ export class BotDesktopManager {
   }
 
   /**
+   * The folder on this computer that a bot's desktop sees as ~/work, with the desktop key it
+   * belongs to, or undefined when its files live in a volume (a desktop on a server, or a Linux
+   * host whose uid the container cannot write as). Bots sharing a desktop share the folder.
+   */
+  hostWorkFolder(botId: string): { desktopKey: string; folder: string } | undefined {
+    const key = this.desktopKey(botId);
+    if (!this.bindsHome(this.desktopHost(key))) return undefined;
+    return { desktopKey: key, folder: this.homeFolder(key) };
+  }
+
+  /**
    * Runs `work` with the bot's desktop, starting it first if needed. Tasks of the same bot take
    * turns, first come first served, and give up after the wait runs out.
    */

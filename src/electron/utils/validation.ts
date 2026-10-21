@@ -1237,6 +1237,17 @@ export const SearchSettingsSchema = z.object({
     .optional(),
 });
 
+// ============ Cua Space Settings Schema ============
+
+export const CuaSpaceSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    url: z.string().max(2000).optional(),
+    // null clears the stored token; omitted keeps it.
+    token: z.string().max(4000).nullable().optional(),
+  })
+  .strict();
+
 // ============ Notion Settings Schema ============
 
 export const NotionSettingsSchema = z.object({

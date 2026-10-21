@@ -18,6 +18,11 @@ import {
 import type { ApprovalRequest, SpaceSandboxConfig, SandboxType } from "../shared/types";
 import type { AndroidPhoneSettings, AndroidPhoneStatus } from "../shared/android-phone";
 import type {
+  CuaSpaceConnectionResult,
+  CuaSpaceDisplaySettings,
+  CuaSpaceSettingsUpdate,
+} from "../shared/cua-space";
+import type {
   ApprovalDraftPreview,
   InlineApprovalDraftReview,
 } from "../shared/approval-draft-presentation";
@@ -4553,6 +4558,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke(IPC_CHANNELS.CHRONICLE_CLEAR_OBSERVATIONS, input),
 
   getComputerUseStatus: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_STATUS),
+  getCuaSpaceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_GET_CUA_SPACE_SETTINGS),
+  saveCuaSpaceSettings: (update: CuaSpaceSettingsUpdate) =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS, update),
+  testCuaSpaceConnection: () => ipcRenderer.invoke(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE),
   getAndroidPhoneStatus: () => ipcRenderer.invoke("androidPhone:status"),
   saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) =>
     ipcRenderer.invoke("androidPhone:settings", settings),
@@ -8812,6 +8821,11 @@ export interface ElectronAPI {
     screenCaptureStatus: string;
     error: string | null;
   }>;
+  getCuaSpaceSettings: () => Promise<CuaSpaceDisplaySettings>;
+  /** Rejects with the validation reason when an enabled Space URL or token is unusable. */
+  saveCuaSpaceSettings: (update: CuaSpaceSettingsUpdate) => Promise<CuaSpaceDisplaySettings>;
+  /** Checks the saved Space: reachable, and the token is accepted by cua-spacesd. */
+  testCuaSpaceConnection: () => Promise<CuaSpaceConnectionResult>;
   getAndroidPhoneStatus: () => Promise<AndroidPhoneStatus>;
   saveAndroidPhoneSettings: (settings: AndroidPhoneSettings) => Promise<AndroidPhoneSettings>;
   installAndroidPhoneRuntime: () => Promise<void>;

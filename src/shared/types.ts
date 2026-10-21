@@ -9140,6 +9140,9 @@ export const IPC_CHANNELS = {
   COMPUTER_USE_OPEN_ACCESSIBILITY: "computerUse:openAccessibility",
   COMPUTER_USE_OPEN_SCREEN_RECORDING: "computerUse:openScreenRecording",
   COMPUTER_USE_EVENT: "computerUse:event",
+  COMPUTER_USE_GET_CUA_SPACE_SETTINGS: "computerUse:getCuaSpaceSettings",
+  COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS: "computerUse:saveCuaSpaceSettings",
+  COMPUTER_USE_TEST_CUA_SPACE: "computerUse:testCuaSpace",
   // Live view of a task's computer in the bot's panel, and take-over by the person
   COMPUTER_VIEW_WATCH: "computerView:watch",
   COMPUTER_VIEW_UNWATCH: "computerView:unwatch",

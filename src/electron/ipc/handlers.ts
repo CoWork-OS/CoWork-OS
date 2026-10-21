@@ -420,6 +420,7 @@ import {
   JevTestProviderRequestSchema,
   SearchSettingsSchema,
   NotionSettingsSchema,
+  CuaSpaceSettingsSchema,
   BoxSettingsSchema,
   OneDriveSettingsSchema,
   GoogleWorkspaceSettingsSchema,
@@ -544,6 +545,12 @@ import {
 } from "../computer-use/bot-task-recordings";
 import { registerAndroidPhoneHandlers } from "./android-phone-handlers";
 import { ComputerUseHelperRuntime } from "../computer-use/helper-runtime";
+import { CuaSpaceClient, testCuaSpaceConnection } from "../computer-use/cua-space/client";
+import {
+  CuaSpaceSettingsManager,
+  resolveCuaSpaceEndpoint,
+} from "../computer-use/cua-space/settings";
+import type { CuaSpaceConnectionResult, CuaSpaceSettingsUpdate } from "../../shared/cua-space";
 import {
   MCPServerConfigSchema,
   MCPServerUpdateSchema,
@@ -1213,6 +1220,12 @@ rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_EDIT, RATE_LIMIT_CONFIGS.limited)
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ACT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.SUGGESTIONS_ADD_COMMITMENT, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+// Cua Space settings carry a credential, and the test reaches a user-supplied host.
+rateLimiter.configure(
+  IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS,
+  RATE_LIMIT_CONFIGS.limited,
+);
+rateLimiter.configure(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_RESET_PROVIDER_CREDENTIALS, RATE_LIMIT_CONFIGS.limited);
 rateLimiter.configure(IPC_CHANNELS.LLM_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
 rateLimiter.configure(IPC_CHANNELS.JEV_TEST_PROVIDER, RATE_LIMIT_CONFIGS.expensive);
@@ -12681,6 +12694,51 @@ function setupMCPHandlers(): void {
       screenCaptureStatus: helperStatus.screenRecording ? "granted" : "denied",
       error: helperStatus.error ?? null,
     };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_GET_CUA_SPACE_SETTINGS, async () =>
+    CuaSpaceSettingsManager.getDisplaySettings(),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS, async (_, update) => {
+    checkRateLimit(IPC_CHANNELS.COMPUTER_USE_SAVE_CUA_SPACE_SETTINGS);
+    const validated = validateInput(
+      CuaSpaceSettingsSchema,
+      update,
+      "Cua Space settings",
+    ) as CuaSpaceSettingsUpdate;
+    const before = CuaSpaceSettingsManager.load();
+    CuaSpaceSettingsManager.save(validated);
+    const after = CuaSpaceSettingsManager.load();
+    // A session's remembered window ids belong to the computer it started on.
+    if (
+      before.enabled !== after.enabled ||
+      (after.enabled && (before.url !== after.url || before.token !== after.token))
+    ) {
+      await ComputerUseSessionManager.getInstance().endSessionManual();
+    }
+    return CuaSpaceSettingsManager.getDisplaySettings();
+  });
+
+  let cuaSpaceTest: Promise<CuaSpaceConnectionResult> | null = null;
+  ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE, async () => {
+    // One probe at a time; a repeat click joins the running one.
+    if (cuaSpaceTest) return await cuaSpaceTest;
+    checkRateLimit(IPC_CHANNELS.COMPUTER_USE_TEST_CUA_SPACE);
+    const settings = CuaSpaceSettingsManager.load();
+    let endpoint: ReturnType<typeof resolveCuaSpaceEndpoint>;
+    try {
+      endpoint = resolveCuaSpaceEndpoint(settings.url, settings.token);
+    } catch (error) {
+      return { reachable: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    cuaSpaceTest = testCuaSpaceConnection(
+      new CuaSpaceClient(endpoint, settings.token),
+      endpoint.origin,
+    ).finally(() => {
+      cuaSpaceTest = null;
+    });
+    return await cuaSpaceTest;
   });
 
   ipcMain.handle(IPC_CHANNELS.COMPUTER_USE_END_SESSION, async () => {

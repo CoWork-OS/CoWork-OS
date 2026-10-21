@@ -1,4 +1,10 @@
-import type { ApprovalType, InputRequest, RequestUserInputArgs } from "../../shared/types";
+import type {
+  ApprovalResponseAction,
+  ApprovalType,
+  InputRequest,
+  PermissionPromptDetails,
+  RequestUserInputArgs,
+} from "../../shared/types";
 import {
   ASSISTANT_APPROVAL_QUESTION_ID,
   RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID,
@@ -6,6 +12,8 @@ import {
 
 // Shared so the needs-you queue can tell approval decisions from ordinary questions.
 export { ASSISTANT_APPROVAL_QUESTION_ID };
+
+const ALWAYS_ALLOW_LABEL = "Always allow";
 
 const HIGH_IMPACT_APPROVAL_TYPES = new Set<ApprovalType>([
   "delete_file",
@@ -124,6 +132,25 @@ export function isHighImpactApprovalDecision(approvalType: string, details?: unk
   );
 }
 
+function getPermissionPrompt(details: unknown): Partial<PermissionPromptDetails> | null {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const prompt = (details as Record<string, unknown>).permissionPrompt;
+  return prompt && typeof prompt === "object" && !Array.isArray(prompt)
+    ? (prompt as Partial<PermissionPromptDetails>)
+    : null;
+}
+
+/**
+ * "Always allow" saves a workspace rule for the prompt's scope, so the card offers it only
+ * when the permission engine produced a scope and suggested `allow_workspace`. The engine
+ * withholds persistence for requests that must be decided one at a time.
+ */
+export function canOfferAssistantAlwaysAllow(details: unknown): boolean {
+  const prompt = getPermissionPrompt(details);
+  if (!prompt?.scope || !Array.isArray(prompt.suggestedActions)) return false;
+  return prompt.suggestedActions.some((option) => option?.action === "allow_workspace");
+}
+
 export function buildAssistantApprovalRequest(
   approvalType: string,
   description: string,
@@ -143,16 +170,7 @@ export function buildAssistantApprovalRequest(
       : ASSISTANT_APPROVAL_QUESTION_ID;
   const requiresExactWriteReview = questionId === RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID;
   const safeDescription = normalizeText(description) || "The next operation needs your decision.";
-  const scopePreview =
-    details && typeof details === "object" && !Array.isArray(details)
-      ? normalizeText(
-          (details as Record<string, unknown>).permissionPrompt &&
-            typeof (details as Record<string, unknown>).permissionPrompt === "object"
-            ? ((details as Record<string, unknown>).permissionPrompt as Record<string, unknown>)
-                .scopePreview
-            : undefined,
-        )
-      : "";
+  const scopePreview = normalizeText(getPermissionPrompt(details)?.scopePreview);
   const taskConsent =
     (approvalType === "external_service" ||
       approvalType === "network_access" ||
@@ -183,6 +201,32 @@ export function buildAssistantApprovalRequest(
   const permissionsText =
     reviewPermissions.length > 0 ? ` Permissions: ${reviewPermissions.join("; ")}.` : "";
   const preview = buildApprovalPreview(detailsRecord);
+  const operation = normalizeText(approvalType, 80) || "operation";
+  // Deny is first so an accidental Enter/keyboard submission fails closed. The user
+  // explicitly chooses an allow option; the one-time allow stays last as the primary action.
+  const options = [
+    {
+      label: requiresExactWriteReview ? "Deny once" : "Deny",
+      description: "Stop this operation and return control to the task.",
+    },
+  ];
+  // Task consent already covers the task, and an exact-write review approves one write only.
+  if (!taskConsent && !requiresExactWriteReview && canOfferAssistantAlwaysAllow(details)) {
+    options.push({
+      label: ALWAYS_ALLOW_LABEL,
+      description: scopePreview
+        ? `Continue and stop asking in this workspace for ${scopePreview}.`
+        : `Continue and stop asking for this ${operation} in this workspace.`,
+    });
+  }
+  options.push({
+    label: allowLabel,
+    description:
+      taskConsent ||
+      (approvalType === "memory_delete"
+        ? "Forget this memory."
+        : `Continue this ${operation} only once.`),
+  });
 
   return {
     questions: [
@@ -197,22 +241,7 @@ export function buildAssistantApprovalRequest(
             : ""
         } Do you want CoWork to continue?`,
         ...(preview ? { preview } : {}),
-        // Deny is first so an accidental Enter/keyboard submission fails
-        // closed. The user can explicitly choose Allow once.
-        options: [
-          {
-            label: requiresExactWriteReview ? "Deny once" : "Deny",
-            description: "Stop this operation and return control to the task.",
-          },
-          {
-            label: allowLabel,
-            description:
-              taskConsent ||
-              (approvalType === "memory_delete"
-                ? "Forget this memory."
-                : `Continue this ${normalizeText(approvalType, 80) || "operation"} only once.`),
-          },
-        ],
+        options,
       },
     ],
   };
@@ -229,8 +258,12 @@ export function buildAssistantApprovalMessage(
   details?: unknown,
 ): string {
   const request = buildAssistantApprovalRequest(approvalType, description, details);
-  const [deny, allow] = request.questions[0].options;
-  return `I need your decision before I can continue. Choose **${deny.label}** or **${allow.label}** below.`;
+  const labels = request.questions[0].options.map((option) => `**${option.label}**`);
+  const choices =
+    labels.length > 2
+      ? `${labels.slice(0, -1).join(", ")}, or ${labels[labels.length - 1]}`
+      : labels.join(" or ");
+  return `I need your decision before I can continue. Choose ${choices} below.`;
 }
 
 export function isAssistantApprovalInputRequest(request: InputRequest | undefined): boolean {
@@ -243,15 +276,46 @@ export function isAssistantApprovalInputRequest(request: InputRequest | undefine
   );
 }
 
-export function parseAssistantApprovalAnswer(
+/**
+ * Map the card answer to an approval action. Anything other than an explicit allow option
+ * (including a free-text "Other" answer) is a denial. A reviewed write only ever allows once.
+ */
+export function parseAssistantApprovalAction(
   answers: InputRequest["answers"] | undefined,
   responsibilityActionReview = false,
-): boolean {
+): ApprovalResponseAction {
   const label =
     answers?.[
       responsibilityActionReview
         ? RESPONSIBILITY_ACTION_REVIEW_DECISION_QUESTION_ID
         : ASSISTANT_APPROVAL_QUESTION_ID
     ]?.optionLabel;
-  return typeof label === "string" && label.trim().toLowerCase().startsWith("allow");
+  const normalized = typeof label === "string" ? label.trim().toLowerCase() : "";
+  if (!responsibilityActionReview && normalized === ALWAYS_ALLOW_LABEL.toLowerCase())
+    return "allow_workspace";
+  if (normalized.startsWith("allow")) return "allow_once";
+  return "deny_once";
+}
+
+export function parseAssistantApprovalAnswer(
+  answers: InputRequest["answers"] | undefined,
+  responsibilityActionReview = false,
+): boolean {
+  return parseAssistantApprovalAction(answers, responsibilityActionReview) !== "deny_once";
+}
+
+/** The card option that answers an approval action, or undefined when the card has none. */
+export function findAssistantApprovalOptionLabel(
+  options: readonly { label: string }[] | undefined,
+  action: ApprovalResponseAction,
+): string | undefined {
+  const labels = (options ?? []).map((option) => option.label);
+  const normalized = (label: string) => label.trim().toLowerCase();
+  if (action === "allow_workspace") {
+    const always = labels.find((label) => normalized(label) === ALWAYS_ALLOW_LABEL.toLowerCase());
+    if (always) return always;
+  }
+  // Without a matching broader scope on the card, an allow is answered with the one-time allow.
+  const prefix = action.startsWith("allow_") ? "allow" : "deny";
+  return labels.find((label) => normalized(label).startsWith(prefix));
 }

@@ -16,6 +16,13 @@
       "owner": "database platform"
     },
     {
+      "pattern": "^src/electron/database/composer-draft-sent-sql\\.ts$",
+      "domain": "shared SQL",
+      "access": "Composer draft load check: reads the tasks and follow-ups sent since a saved draft was started, so a draft whose words and files already went out is retired instead of restored. A storage-domain read unit behind the async ComposerDraftRepository facade in repository-facades.ts; nothing calls it on the host outside a unit.",
+      "plan": "worker by default (DB7); the host backend stays as the rollback path (COWORK_DB_WORKER=0 or a domain flag set to 0)",
+      "owner": "database platform"
+    },
+    {
       "pattern": "^src/electron/database/follow-up-recovery-sql\\.ts$",
       "domain": "shared SQL",
       "access": "Startup follow-up recovery scan: one read of every user follow-up receipt, as a storage-domain report unit on the reporting reader. AgentDaemon starts it during initialize and consumes it with the delayed task resume, so it never holds up the first window; on the host backend it runs when that resume consumes it.",

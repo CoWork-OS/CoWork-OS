@@ -712,6 +712,11 @@ export const STORAGE_UNITS = {
     "listLiveAttachmentRefs",
     { readonly: true },
   ),
+  composerDraft_listMessagesSentSince: storeUnit(
+    (db: Database.Database) => new ComposerDraftStore(db),
+    "listMessagesSentSince",
+    { readonly: true },
+  ),
   browserHistory_recordVisit: storeUnit(
     (db: Database.Database) => new BrowserHistoryStore(db),
     "recordVisit",

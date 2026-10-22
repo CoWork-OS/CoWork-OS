@@ -278,9 +278,18 @@ const SOURCE_LINKS_REQUEST_PATTERN = new RegExp(
 const RESEARCH_REQUEST_PATTERN =
   /\b(?:look(?:ing)?\s+up|research|compare|comparison|versus|vs\.?|documentation|docs|official|investigate|survey|latest|pricing|licen[cs]ing)\b/i;
 
+function requestsFilenameSources(prompt: string): boolean {
+  return (
+    /\b(?:cit(?:e|ing)|include|including|provide|list)\s+(?:(?:the|source|local|supporting|input|original)\s+)*file\s*names?\b/i.test(
+      prompt,
+    ) && !/\b(?:links?|urls?|hyperlinks?|numbered\s+(?:citations?|references?))\b/i.test(prompt)
+  );
+}
+
 /** True when the request asks for the answer's facts to come with links or citations. */
 export function requestsSourceLinks(prompt: string): boolean {
   const text = String(prompt || "");
+  if (requestsFilenameSources(text)) return false;
   if (requestsFileLinks(text) && !/\bsources?\b|\bcit(?:e|ing|ations?)\b/i.test(text)) {
     return false;
   }
@@ -583,6 +592,16 @@ export function buildVerificationSeverityGuidance(input: {
   const lines = [
     `- Severity: answer FAIL_BLOCKING when the deliverable misses, contradicts, or leaves out an explicit requirement of the request. Use WARN_NON_BLOCKING only for optional or cosmetic issues (wording, styling, layout polish) that leave every explicit requirement met.`,
   ];
+  if (
+    /\bpreserve\b[^.!?]{0,100}\b(?:sources?|inputs?|files?)\b[^.!?]{0,60}\bunchanged\b/i.test(
+      prompt,
+    ) &&
+    !/\b(?:checksums?|sha-?256|hash(?:es)?|byte[- ]for[- ]byte|exact equality)\b/i.test(prompt)
+  ) {
+    lines.push(
+      `- Source preservation: for file-tool-only tasks, an authoritative mutation audit recording all file writes and no input-file mutations is sufficient operation-level evidence that this task preserved its sources. State that evidence scope. Do not demand a historical byte-for-byte comparison solely because full originals are absent from this step's context. If shell/external writes or incomplete audit coverage are involved, do not assume preservation; obtain stronger evidence or report the limitation.`,
+    );
+  }
   if (requestsMatchingOutputs(prompt, input.createdFiles || [])) {
     lines.push(
       `- Matching outputs: the request asks for outputs that must carry the same content (for example a document and its PDF). Compare them section by section. Any difference between them in facts, figures, names, dates, or sections is FAIL_BLOCKING, not a warning; name the file and section of each difference.`,
@@ -598,7 +617,11 @@ export function buildVerificationSeverityGuidance(input: {
       `- Generated images: check an image file only with get_file_info and at most one analyze_image call. An aspect ratio within ±2% of the requested ratio passes (image generators snap to supported sizes). Imperfect text rendered by an image model is WARN_NON_BLOCKING unless the user demanded exact text. Never open desktop apps, take screenshots, or use computer-use tools to inspect a local image file.`,
     );
   }
-  if (requestsSourceLinks(prompt)) {
+  if (requestsFilenameSources(prompt)) {
+    lines.push(
+      `- Local source filenames: the user requested filename citations. Named source filenames satisfy that format; hyperlinks or numbered citations are not required. Verify that each cited file supports the claim and flag unsupported facts or missing source attribution.`,
+    );
+  } else if (requestsSourceLinks(prompt)) {
     lines.push(
       `- Sourced facts: the user asked for links or sources. Every table cell or bullet that states a source-specific fact needs a direct link, or a numbered citation that maps to the answer's source list. A factual cell or bullet with neither is FAIL_BLOCKING; name its row and column. A cell that only says a detail is not specified or not documented may rely on the row's link, but it must name the page that was checked.`,
     );

@@ -119,6 +119,8 @@ const fileData = {
   spreadsheetPreview: preview,
 };
 const updateSpreadsheetFile = vi.fn();
+const onClose = vi.fn();
+const confirmDiscard = vi.fn();
 let gridFocus: ReturnType<typeof vi.fn>;
 
 function render() {
@@ -128,7 +130,7 @@ function render() {
       filePath: fileData.path,
       workspacePath: "/workspace",
       mode: "sidebar",
-      onClose: () => {},
+      onClose,
       onFullscreen: () => {},
       onExitFullscreen: () => {},
     }),
@@ -159,8 +161,11 @@ const mouseDown = () => ({ preventDefault: vi.fn(), shiftKey: false });
 beforeEach(() => {
   hooks.reset();
   gridFocus = vi.fn();
+  onClose.mockReset();
+  confirmDiscard.mockReset().mockReturnValue(false);
   updateSpreadsheetFile.mockReset().mockResolvedValue({ success: true, data: fileData });
   vi.stubGlobal("window", {
+    confirm: confirmDiscard,
     electronAPI: {
       readFileForViewer: vi.fn().mockResolvedValue({ success: true, data: fileData }),
       updateSpreadsheetFile,
@@ -176,6 +181,39 @@ afterEach(() => {
 });
 
 describe("spreadsheet cell editing", () => {
+  it("closes a clean workbook without prompting", async () => {
+    const nodes = await loadViewer();
+    nodes.find((node) => node.props.title === "Close spreadsheet")!.props.onClick();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(confirmDiscard).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending cell draft when closing is cancelled, even before a render", async () => {
+    cell(await loadViewer()).props.onDoubleClick();
+    const nodes = render();
+    editor(nodes).props.onChange({ target: { value: "Keep this pending edit" } });
+    nodes.find((node) => node.props.title === "Close spreadsheet")!.props.onClick();
+    expect(confirmDiscard).toHaveBeenCalledWith(expect.stringContaining("costs.xlsx"));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(editor(render()).props.value).toBe("Keep this pending edit");
+  });
+
+  it("requires explicit discard for committed unsaved changes", async () => {
+    cell(await loadViewer()).props.onDoubleClick();
+    const input = editor(render());
+    input.props.onChange({ target: { value: "Unsaved edit" } });
+    input.props.onBlur();
+    const nodes = render();
+    const close = nodes.find((node) => node.props.title === "Close spreadsheet")!;
+    close.props.onClick();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(cell(render()).props.children).toBe("Unsaved edit");
+    confirmDiscard.mockReturnValue(true);
+    close.props.onClick();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(updateSpreadsheetFile).not.toHaveBeenCalled();
+  });
+
   it("commits the latest typed value before another cell's mouse-down removes the editor", async () => {
     cell(await loadViewer()).props.onDoubleClick();
     const nodes = render();

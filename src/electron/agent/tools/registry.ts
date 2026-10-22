@@ -9986,7 +9986,7 @@ ${skillDescriptions}`;
             background: {
               type: "boolean",
               description:
-                "Start a long-running command (dev server, file server, watcher) and return once it is ready or after a short startup window, leaving it running. The result has process_id, pid, status, startup_output and any localhost urls it printed. At most 5 per task; they stop when the task is cancelled, after 30 minutes without process_output unless completion delivery is armed, or when the app quits.",
+                "Start a long-running command (dev server, file server, watcher) and return once it is ready or after a short startup window, leaving it running. The result has process_id, pid, status, startup_output and any localhost urls it printed. At most 5 per task; they stop when the task is cancelled, after 30 minutes without process_output (4 hours once completion delivery is armed), or when the app quits.",
             },
             startup_wait_ms: {
               type: "number",

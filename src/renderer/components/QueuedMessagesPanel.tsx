@@ -16,14 +16,22 @@ export function QueuedMessagesPanel({
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
   const mounted = useRef(true);
+  const readFailed = useRef(false);
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
       const next = await window.electronAPI.getQueuedTaskInputs(taskId);
-      if (mounted.current && request === generation.current) setItems(next);
+      if (mounted.current && request === generation.current) {
+        setItems(next);
+        // A later read clears its own failure, never a save error the user still needs.
+        if (readFailed.current) setError(null);
+        readFailed.current = false;
+      }
     } catch (cause) {
-      if (mounted.current && request === generation.current)
+      if (mounted.current && request === generation.current) {
+        readFailed.current = true;
         setError(cause instanceof Error ? cause.message : "Unable to read queued messages.");
+      }
     }
   }, [taskId]);
   useEffect(() => {
@@ -38,6 +46,9 @@ export function QueuedMessagesPanel({
           "agent_follow_up_scheduled",
           "agent_follow_up_started",
           "task_created",
+          "task_queued",
+          "task_dequeued",
+          "task_status",
           "task_completed",
           "task_cancelled",
           "task_interrupted",
@@ -63,6 +74,7 @@ export function QueuedMessagesPanel({
     const submitted = edit;
     setSaving(true);
     setError(null);
+    readFailed.current = false;
     try {
       await window.electronAPI.editQueuedTaskInput({
         taskId,

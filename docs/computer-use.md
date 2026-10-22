@@ -34,6 +34,46 @@ The planner and tool policy treat the computer-use lane as a **controlled, last-
 - **macOS** uses a bundled Swift helper with Accessibility and Screen Recording permissions.
 - **Windows v1** uses a bundled PowerShell/Win32 helper for visible, non-minimized windows. Some protected or elevated apps may block capture or input unless CoWork is running with comparable privileges.
 
+## Run computer use in a Cua Space
+
+Instead of this computer, the computer-use tools (`screenshot`, `click`,
+`type_text`, `keypress`, `scroll`, `drag` and the rest) can drive a
+[Cua Space](https://cua.ai): a separate computer, on this machine or elsewhere,
+that you can watch from the Cua Spaces app. Your own windows, pointer and
+keyboard are not touched while it is on.
+
+1. Start a Space in Cua Spaces and note its address and token (the
+   `cua-spacesd` URL, for example `http://127.0.0.1:3211`).
+2. Open **Settings > Tools > Computer use**, enter the **Space URL** and
+   **Space token**, and choose **Save**. The token is stored encrypted and is
+   never shown again; the settings page only says that one is saved.
+3. Choose **Test connection**. It checks that the Space answers and that it
+   accepts the token.
+4. Turn on **Run Computer Use in this Cua Space**.
+
+Rules for the address:
+
+- A token is required unless the Space runs on this computer (`localhost`,
+  `127.0.0.1`, `::1`).
+- Plain `http://` is accepted only for this computer and private network
+  addresses (`10.x`, `172.16–31.x`, `192.168.x`, `fc00::/7`, `fe80::/10`).
+  Anything else, including any host name other than `localhost`, needs
+  `https://`.
+- Credentials inside the URL are refused; use the token field.
+
+While the Space is on:
+
+- If the Space cannot be reached, computer-use actions fail with a message
+  saying so. CoWork never falls back to this computer on its own; turn the
+  Space off to work locally again.
+- Foreground input happens inside the Space, so the Background-only mode and
+  visible-control approvals, which protect your own screen, do not apply.
+- Changing the Space, or turning it on or off, ends any active computer-use
+  session, because its window ids belong to the computer it started on.
+- Only the computer-use tools move to the Space. Other tools such as
+  `native_app`, `open_application`, `run_command` and the browser tools still
+  act on this computer.
+
 ## Optional Codex Computer Use MCP connection on macOS
 
 An installed Codex/ChatGPT desktop Computer Use plugin can also be connected as a
@@ -194,6 +234,7 @@ For how this fits the wider tool-risk model, see [Security guide → Computer us
 | Agent asks for a screenshot when the task is really “what is this on screen?” | This may be a Chronicle case rather than a computer-use case; enable Chronicle and test `screen_context_resolve` with a clear on-screen prompt first.                              |
 | Permission bootstrap repeats                                                  | macOS: re-check that both Accessibility and Screen Recording are granted to the helper binary, not just to CoWork OS or Terminal.                                                  |
 | Session feels “stuck”                                                         | Use **Esc** to abort the computer-use session, then cancel or adjust the task.                                                                                                     |
+| “Cua Space … is not reachable” or “refused the connection”                    | Start the Space in Cua Spaces, then use **Test connection** in Settings > Tools > Computer use. A refused connection usually means the token is wrong.                             |
 
 ## Implementation map (for contributors)
 
@@ -204,6 +245,7 @@ For how this fits the wider tool-risk model, see [Security guide → Computer us
 | Session lifecycle              | `src/electron/computer-use/session-manager.ts`, `shortcut-guard.ts`                                                                                                |
 | Policy / routing               | `src/electron/agent/tool-policy-engine.ts`, `src/electron/agent/executor.ts`                                                                                       |
 | Settings / IPC                 | `src/renderer/components/ComputerUseSettings.tsx`, IPC handlers                                                                                                    |
+| Cua Space backend              | `src/electron/computer-use/cua-space/` (settings, MCP client, provider), `src/renderer/components/CuaSpaceSettings.tsx`                                             |
 
 ---
 

@@ -6,6 +6,8 @@ import { LLMTool } from "../llm/types";
 import { ComputerUseSessionManager } from "../../computer-use/session-manager";
 import { ComputerViewService } from "../../computer-use/computer-view-service";
 import { getComputerUseProvider, type ComputerUseProvider } from "../../computer-use/provider";
+import { CuaSpaceProvider } from "../../computer-use/cua-space/provider";
+import { CuaSpaceSettingsManager } from "../../computer-use/cua-space/settings";
 import {
   type ComputerUseHelperApp,
   type ComputerUseHelperKeypressSpec,
@@ -15,6 +17,11 @@ import {
   isRecoverableScreenshotError,
 } from "../../computer-use/helper-runtime";
 import { BuiltinToolsSettingsManager } from "./builtin-settings";
+import {
+  MAC_KEY_ALIASES,
+  MAC_NAMED_KEY_CODES,
+  MAC_VIRTUAL_KEY_CODES,
+} from "../../computer-use/mac-key-codes";
 import {
   normalizeNativeComputerUseMode,
   type NativeComputerUseMode,
@@ -196,56 +203,6 @@ function frameDistanceScore(
   return dx + dy + dw + dh;
 }
 
-const MAC_VIRTUAL_KEY_CODES: Record<string, number> = {
-  a: 0,
-  s: 1,
-  d: 2,
-  f: 3,
-  h: 4,
-  g: 5,
-  z: 6,
-  x: 7,
-  c: 8,
-  v: 9,
-  b: 11,
-  q: 12,
-  w: 13,
-  e: 14,
-  r: 15,
-  y: 16,
-  t: 17,
-  "1": 18,
-  "2": 19,
-  "3": 20,
-  "4": 21,
-  "6": 22,
-  "5": 23,
-  "=": 24,
-  "9": 25,
-  "7": 26,
-  "-": 27,
-  "8": 28,
-  "0": 29,
-  "]": 30,
-  o: 31,
-  u: 32,
-  "[": 33,
-  i: 34,
-  p: 35,
-  l: 37,
-  j: 38,
-  "'": 39,
-  k: 40,
-  ";": 41,
-  "\\": 42,
-  ",": 43,
-  "/": 44,
-  n: 45,
-  m: 46,
-  ".": 47,
-  "`": 50,
-};
-
 function parseKeypressSpec(pid: number, keys: string[]): ComputerUseHelperKeypressSpec {
   if (process.platform === "win32") {
     return parseWindowsKeypressSpec(pid, keys);
@@ -275,48 +232,9 @@ function parseKeypressSpec(pid: number, keys: string[]): ComputerUseHelperKeypre
       continue;
     }
 
-    if (lower === "return" || lower === "enter") {
-      keyCode = 36;
-    } else if (lower === "escape" || lower === "esc") {
-      keyCode = 53;
-    } else if (lower === "tab") {
-      keyCode = 48;
-    } else if (lower === "space") {
-      keyCode = 49;
-    } else if (lower === "delete" || lower === "backspace") {
-      keyCode = 51;
-    } else if (lower === "up") {
-      keyCode = 126;
-    } else if (lower === "down") {
-      keyCode = 125;
-    } else if (lower === "left") {
-      keyCode = 123;
-    } else if (lower === "right") {
-      keyCode = 124;
-    } else if (lower === "home") {
-      keyCode = 115;
-    } else if (lower === "end") {
-      keyCode = 119;
-    } else if (lower === "pageup") {
-      keyCode = 116;
-    } else if (lower === "pagedown") {
-      keyCode = 121;
-    } else if (lower.startsWith("f") && /^f\d{1,2}$/.test(lower)) {
-      const fkeyMap: Record<string, number> = {
-        f1: 122,
-        f2: 120,
-        f3: 99,
-        f4: 118,
-        f5: 96,
-        f6: 97,
-        f7: 98,
-        f8: 100,
-        f9: 101,
-        f10: 109,
-        f11: 103,
-        f12: 111,
-      };
-      keyCode = fkeyMap[lower] ?? null;
+    const named = MAC_KEY_ALIASES[lower] ?? lower;
+    if (Object.hasOwn(MAC_NAMED_KEY_CODES, named)) {
+      keyCode = MAC_NAMED_KEY_CODES[named];
     } else if (lower in MAC_VIRTUAL_KEY_CODES) {
       keyCode = MAC_VIRTUAL_KEY_CODES[lower];
     } else if (trimmed.length === 1) {
@@ -397,6 +315,11 @@ export class ComputerUseTools {
 
   private currentTarget: ComputerUseTargetState | null = null;
   private currentCapture: ComputerUseCaptureState | null = null;
+  /**
+   * Provider for this tool instance, re-checked in ensureReady(). Pinning keeps one
+   * action's gates and input on the same computer when the Cua Space setting changes.
+   */
+  private provider: ComputerUseProvider | null = null;
 
   constructor(
     private workspace: Workspace,
@@ -418,7 +341,24 @@ export class ComputerUseTools {
   }
 
   private helper(): ComputerUseProvider {
-    return getComputerUseProvider();
+    this.provider ??= getComputerUseProvider();
+    return this.provider;
+  }
+
+  /** Fails the action when the backend switched since this task last used it. */
+  private checkProviderUnchanged(): void {
+    const current = getComputerUseProvider();
+    const previous = this.provider;
+    this.provider = current;
+    if (previous && previous !== current) {
+      // Window ids and captures belong to the computer they came from.
+      this.currentTarget = null;
+      this.currentCapture = null;
+      this.persistState();
+      throw new Error(
+        "Computer use switched between this computer and a Cua Space. Take a new screenshot to choose a window there.",
+      );
+    }
   }
 
   private session(): ComputerUseSessionManager {
@@ -437,6 +377,7 @@ export class ComputerUseTools {
     if (process.platform !== "darwin" && process.platform !== "win32") {
       throw new Error("Computer use is only supported on macOS and Windows desktop builds.");
     }
+    this.checkProviderUnchanged();
     // While the person has taken over, the bot's computer actions are refused, not queued.
     ComputerViewService.getInstance().assertNotHeld(this.taskId);
     await this.session().acquireOrWait(this.taskId, this.daemon, {
@@ -463,6 +404,13 @@ export class ComputerUseTools {
   }
 
   private resolveNativeControlMode(): NativeComputerUseMode {
+    // Background-only and approval gates keep input off the person's own screen. In a
+    // Cua Space, foreground input stays inside the Space, and the background-mode
+    // fallback (native_app) would act on this computer instead.
+    // Re-checked on every gate so a backend switch mid-action fails instead of
+    // applying the Space's relaxed gates to this computer.
+    this.checkProviderUnchanged();
+    if (this.provider instanceof CuaSpaceProvider) return "visible";
     return normalizeNativeComputerUseMode(
       BuiltinToolsSettingsManager.getComputerUseAutomationSettings().nativeComputerUseMode,
     );
@@ -1335,12 +1283,15 @@ export class ComputerUseTools {
     if (options?.headless || (process.platform !== "darwin" && process.platform !== "win32")) {
       return [];
     }
+    const inCuaSpace = CuaSpaceSettingsManager.load().enabled;
     return [
       {
         name: "screenshot",
-        description:
-          "Capture the current controlled window in a native desktop app. Call this first. " +
-          "Passing app and/or windowTitle retargets control to that window. Defaults to background window capture; visible control is a fallback only when approved.",
+        description: inCuaSpace
+          ? "Capture the current controlled window in the configured Cua Space, an isolated computer the person can watch. screenshot, click, type_text, keypress, scroll and drag act in the Space; other tools such as native_app still act on this computer. Call this first. " +
+            "Passing app and/or windowTitle retargets control to that window in the Space."
+          : "Capture the current controlled window in a native desktop app. Call this first. " +
+            "Passing app and/or windowTitle retargets control to that window. Defaults to background window capture; visible control is a fallback only when approved.",
         input_schema: {
           type: "object",
           properties: {

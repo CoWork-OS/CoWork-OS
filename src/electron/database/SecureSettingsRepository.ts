@@ -158,6 +158,8 @@ export type SettingsCategory =
   | "browser-vault"
   // Settings > Browser (search engine, downloads, agent permissions, developer mode).
   | "browser"
+  // Computer Use backend that drives a Cua Space; holds its bearer token.
+  | "cua-space"
   | "adaptive-style-engine"
   | "routine-workflow-secrets"
   | "acp-remote-agent-secrets"

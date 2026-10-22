@@ -503,6 +503,12 @@ export interface MCPRegistryEntry {
   defaultArgs?: string[];
   defaultEnv?: Record<string, string>;
   defaultUrl?: string;
+  /** Stdio only: start the server in its own folder under the app data dir (its default output lands there). */
+  useDataDirAsCwd?: boolean;
+  /** Approval mode a fresh install starts with (e.g. "writes": reads run, anything else asks). */
+  defaultToolsApprovalMode?: MCPToolApprovalMode;
+  /** Request timeout a fresh install starts with, for servers whose tools wait on long jobs. */
+  defaultRequestTimeout?: number;
 
   // Tool information
   tools: Array<{

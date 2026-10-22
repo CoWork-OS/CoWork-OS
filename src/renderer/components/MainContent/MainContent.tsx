@@ -243,6 +243,7 @@ import {
 import { preloadableLazy } from "../../utils/preloadable-lazy";
 import { getStepCompletionPreviewPath } from "../../utils/step-document-preview";
 import { SurfaceActionProvider } from "../AnswerSurface/SurfaceActions";
+import { ModelGalleryHost } from "../Model3D/ModelGalleryHost";
 import { AttachmentTile } from "../AttachmentTile";
 import { BotCollaborationHeader } from "../BotCollaborationHeader";
 import { BotConversationHistory } from "../BotConversationHistory";
@@ -9454,6 +9455,7 @@ function MainContentComponent({
             )}
           </div>
         </div>
+        <ModelGalleryHost />
       </SurfaceActionProvider>
 
       {headerActionError && (

@@ -90,6 +90,7 @@ const SHIPPED_CONNECTOR_IDS = new Set([
   "maps",
   "home-assistant",
   "miro",
+  "meshy",
   "supabase",
   "excalidraw",
   "stripe",
@@ -341,6 +342,21 @@ const CONNECTORS: ConnectorDefinition[] = [
     description: "Access and create new content on Miro boards.",
     supportsOAuth: false,
     envFields: [{ key: "MIRO_OAUTH_TOKEN", label: "OAuth Token", type: "password" }],
+  },
+  {
+    key: "meshy",
+    name: "Meshy",
+    registryId: "meshy",
+    description: "Make 3D models, rigged characters and printable parts with Meshy AI.",
+    supportsOAuth: false,
+    envFields: [
+      {
+        key: "MESHY_API_KEY",
+        label: "Meshy API key (meshy.ai → Settings → API)",
+        type: "password",
+        placeholder: "msy_...",
+      },
+    ],
   },
   {
     key: "supabase",
@@ -866,6 +882,7 @@ function getConnectorCategory(connector: ConnectorDefinition): Exclude<Connector
   if (
     [
       "miro",
+      "meshy",
       "huggingface",
       "mermaid-chart",
       "maps",

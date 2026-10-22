@@ -259,7 +259,19 @@ import {
   supportsWritePreview,
 } from "../../mcp/write-preview";
 import type { ApplicationPreparedChange } from "../../../shared/application-execution";
-import { buildMcpApprovalPresentation } from "./mcp-approval-preview";
+import { buildMcpApprovalPresentation, withMcpCostLines } from "./mcp-approval-preview";
+import {
+  bookCharge,
+  chargeExceedsLimit,
+  chargeLines,
+  chargeSpent,
+  pendingCharge,
+  refundCharge,
+  type PendingCharge,
+} from "../../mcp/tool-costs";
+import { costPolicyForServer, isMeshyServerConfig } from "../../meshy/meshy-server";
+import { applyMeshyToolResult } from "../../meshy/meshy-tool-results";
+import { getMeshyService } from "../../meshy/meshy-service";
 import { getNumbatService } from "../../security/numbat";
 import { approvalPromptsDisabled, canAnswerInlineApproval } from "../approval-policy";
 import {
@@ -2028,6 +2040,31 @@ export class ToolRegistry {
     }
   }
 
+  /** The declared cost of an MCP tool call for this task's tally, when its server declares one. */
+  private getMcpToolCharge(toolName: string, input: unknown): PendingCharge | null {
+    const settings = MCPSettingsManager.loadSettings();
+    const prefix = settings.toolNamePrefix || "mcp_";
+    if (!toolName.startsWith(prefix)) return null;
+    const rawToolName = toolName.slice(prefix.length);
+    try {
+      const manager = MCPClientManager.getInstance();
+      const serverId = manager.getServerIdForTool(rawToolName);
+      if (!serverId) return null;
+      const policy = costPolicyForServer(MCPSettingsManager.getServer(serverId));
+      if (!policy) return null;
+      const tool = manager.getAllTools().find((entry) => entry.name === rawToolName);
+      return pendingCharge(
+        policy,
+        this.taskId,
+        serverId,
+        tool?.serverToolName ?? rawToolName,
+        input,
+      );
+    } catch {
+      return null;
+    }
+  }
+
   private getMcpEndpointForTool(toolName: string): string | null {
     const settings = MCPSettingsManager.loadSettings();
     const prefix = settings.toolNamePrefix || "mcp_";
@@ -2686,8 +2723,32 @@ export class ToolRegistry {
       const pactApproval = context.request.name.startsWith("pact_")
         ? await this.pactTools.approvalDestination(context.request.name, context.request.input)
         : {};
+      // A tool that spends a vendor's credits names its estimate on the approval card, and a
+      // call that would take the task past the server's spend limit always asks.
+      const mcpCharge = serverName
+        ? this.getMcpToolCharge(context.request.name, context.request.input)
+        : null;
+      const mcpChargeSpent = mcpCharge ? chargeSpent(mcpCharge) : 0;
+      const mcpBudgetGate = mcpCharge ? chargeExceedsLimit(mcpCharge, mcpChargeSpent) : false;
+      const mcpCostLines = mcpCharge ? chargeLines(mcpCharge, mcpChargeSpent) : [];
+      // Booked in the same synchronous step as the check, so parallel calls in one step see
+      // each other's spend; a call refused before it runs gives its booking back.
+      let mcpChargeBooked = false;
+      if (mcpCharge && !mcpBudgetGate) {
+        bookCharge(mcpCharge);
+        mcpChargeBooked = true;
+      }
+      const releaseMcpCharge = () => {
+        if (mcpCharge && mcpChargeBooked) refundCharge(mcpCharge);
+        mcpChargeBooked = false;
+      };
       const mcpApproval = serverName
-        ? buildMcpApprovalPresentation(context.request.name, serverName, context.request.input)
+        ? buildMcpApprovalPresentation(
+            context.request.name,
+            serverName,
+            context.request.input,
+            mcpCostLines,
+          )
         : null;
       const skillWorkspaceTarget = this.getSkillManagementWorkspaceTarget(
         context.request.name,
@@ -2839,6 +2900,7 @@ export class ToolRegistry {
           await getNumbatService()?.recordBlockedDecision(pipeline.agentSecurity.decisionId);
         }
         const reason = pipeline.reason ? `: ${pipeline.reason}` : "";
+        releaseMcpCharge();
         throw Object.assign(
           new Error(`Tool "${context.request.name}" blocked by policy${reason}`),
           {
@@ -2847,13 +2909,14 @@ export class ToolRegistry {
         );
       }
 
-      if (pipeline.decision === "require_approval") {
+      if (pipeline.decision === "require_approval" || mcpBudgetGate) {
         if (
-          !(responsibilityActionReview && pipeline.approvalSource !== "semantic_review") &&
-          (pipeline.approvalSource === "semantic_review" ||
-            !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
-            pipeline.approvalSource === "workspace_policy" ||
-            pipeline.approvalSource === "runtime_metadata")
+          mcpBudgetGate ||
+          (!(responsibilityActionReview && pipeline.approvalSource !== "semantic_review") &&
+            (pipeline.approvalSource === "semantic_review" ||
+              !this.toolHandlesApprovalInternally(context.request.name, context.request.input) ||
+              pipeline.approvalSource === "workspace_policy" ||
+              pipeline.approvalSource === "runtime_metadata"))
         ) {
           const requester = (this.daemon as Any)?.requestApproval;
           if (typeof requester !== "function") {
@@ -2887,7 +2950,7 @@ export class ToolRegistry {
             ...approvalDetails,
             ...(connectorPreview
               ? {
-                  approvalPreview: connectorPreview.approvalPreview,
+                  approvalPreview: withMcpCostLines(connectorPreview.approvalPreview, mcpCostLines),
                   preparedChange: connectorPreview.prepared,
                 }
               : {}),
@@ -2895,7 +2958,7 @@ export class ToolRegistry {
           };
           const options = {
             allowAutoApprove:
-              pipeline.approvalSource === "semantic_review"
+              pipeline.approvalSource === "semantic_review" || mcpBudgetGate
                 ? false
                 : effectiveApprovalType !== "location_access",
             signal:
@@ -2903,6 +2966,7 @@ export class ToolRegistry {
                 ? context.request.runtime.signal
                 : undefined,
             requireExplicitApproval:
+              mcpBudgetGate ||
               pipeline.approvalSource === "semantic_review" ||
               pipeline.approvalSource === "workspace_policy" ||
               pipeline.approvalSource === "runtime_metadata",
@@ -2967,6 +3031,7 @@ export class ToolRegistry {
                       options,
                     );
           if (approved !== true) {
+            releaseMcpCharge();
             throw Object.assign(new Error(`Tool "${context.request.name}" approval denied`), {
               policyTrace: pipeline.trace,
             });
@@ -2981,6 +3046,11 @@ export class ToolRegistry {
           context.request.input,
           responsibilityActionReview,
         );
+        // A call over the limit is booked once the user has approved it.
+        if (mcpCharge && !mcpChargeBooked) {
+          bookCharge(mcpCharge);
+          mcpChargeBooked = true;
+        }
         const result = await next(context);
         let outputBytes: number | undefined;
         try {
@@ -6351,7 +6421,30 @@ ${skillDescriptions}`;
         });
       }
       // Format MCP result and process any generated files
-      return await this.formatMCPResult(result, mcpToolName, input);
+      const formatted = await this.formatMCPResult(result, mcpToolName, input);
+      if (routedServer && isMeshyServerConfig(routedServer) && result) {
+        const meshyTool = mcpManager
+          .getAllTools()
+          .find((candidate) => candidate.name === mcpToolName);
+        return await applyMeshyToolResult(formatted, {
+          tool: meshyTool?.serverToolName ?? mcpToolName,
+          input,
+          result,
+          workspacePath: this.workspace.path,
+          chatTaskId: this.taskId,
+          library: getMeshyService().getLibrary(),
+          onWorkspaceFile: async (relativePath, absolutePath, mimeType) => {
+            this.daemon.logEvent(this.taskId, "file_created", {
+              path: relativePath,
+              type: "model",
+              source: "mcp",
+              mimeType,
+            });
+            await this.daemon.registerArtifact(this.taskId, absolutePath, mimeType);
+          },
+        });
+      }
+      return formatted;
     } catch (error: Any) {
       const message = String(error?.message || "");
       if (isConnectorBlockedError(error)) {

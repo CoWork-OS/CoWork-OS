@@ -31,6 +31,11 @@ import { AnnotationUndoButton } from "./AnnotationUndoButton";
 import { InlineDocumentPreview } from "../InlineDocumentPreview";
 import { InlineImagePreview } from "../InlineImagePreview";
 import { InlineVideoPreview } from "../InlineVideoPreview";
+
+// three.js is large: load the 3D card only when a step saved a model.
+const LazyModelCard = React.lazy(() =>
+  import("../Model3D/ModelCard").then((module) => ({ default: module.ModelCard })),
+);
 import { JsonlPreview, parseJsonlPreview } from "../JsonlPreview";
 import { LatexArtifactWorkbench } from "../LatexArtifactWorkbench";
 import { MermaidDiagram, normalizeCodeBlockTextForDisplay } from "../markdown-components";
@@ -1709,6 +1714,18 @@ export function renderEventDetails(
               workspacePath={workspacePath}
               onOpenViewer={onOpenViewer}
             />
+          </div>
+        );
+      }
+
+      if (fcPreviewKind === "model" && fcPath && workspacePath) {
+        return (
+          <div className="event-details event-details-file-preview">
+            <React.Suspense
+              fallback={<div className="model-card model-card-line">Loading 3D viewer…</div>}
+            >
+              <LazyModelCard path={fcPath} workspacePath={workspacePath} />
+            </React.Suspense>
           </div>
         );
       }

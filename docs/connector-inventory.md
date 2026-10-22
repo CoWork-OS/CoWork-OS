@@ -10,8 +10,8 @@ Every row here is **available** in the build. Whether it is **configured**, **co
 | --- | ---: |
 | Native app integrations | 14 |
 | Gateway channels | 17 |
-| MCP connectors (Settings > Connectors) | 110 |
-| Bundled skills | 154 |
+| MCP connectors (Settings > Connectors) | 111 |
+| Bundled skills | 155 |
 
 Requirement keys: `macos-only`, `local-service` (a local app or server must be running), `public-webhook` (a reachable HTTPS URL is needed in production), `oauth-consent`, `api-key`, `cli-binary`, `personal-account-session`.
 
@@ -123,6 +123,7 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `maps` | Maps | read |  | first-party-api |
 | `mem` | Mem | read, write | api-key | third-party-package |
 | `mermaid-chart` | Mermaid Chart | read, write |  | third-party-package |
+| `meshy` | Meshy | read, write | api-key | third-party-package |
 | `metabase` | Metabase | read, write | api-key | third-party-package |
 | `microsoft-learn` | Microsoft Learn |  |  | first-party-api |
 | `miro` | Miro | read, write | oauth-consent | third-party-package |
@@ -261,6 +262,7 @@ Requirement keys: `macos-only`, `local-service` (a local app or server must be r
 | `marketing-strategist` | Marketing Strategist | Marketing |  |
 | `mcporter` | Mcporter | Tools |  |
 | `memory-kit` | Memory Kit | Tools |  |
+| `meshy-3d` | Meshy 3D | Creative |  |
 | `model-usage` | Model-usage | Tools |  |
 | `moltbook` | Moltbook | Tools |  |
 | `motion-editor` | Motion Editor | Creative |  |

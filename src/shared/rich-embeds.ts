@@ -1,6 +1,6 @@
 /**
  * Rich embeds in assistant messages (`::frame{…}` with an html fence, `::html{…}`,
- * `<rich-frame …>`, `::video{…}` and html fences that look like a page): the desktop chat
+ * `<rich-frame …>`, `::video{…}`, `::model{…}` and html fences that look like a page): the desktop chat
  * renders them, but everywhere else (channel gateways, the CLI, notifications, the tray,
  * search) they would show as markup. This turns each into one readable line. The rules for
  * what counts as an embed match AssistantMessageContent, which uses the same helpers.
@@ -12,6 +12,7 @@ const FENCE_END_REGEX = /^\s*```\s*$/;
 const VIDEO_DIRECTIVE_LINE_REGEX = /^\s*::video\{(.+)\}\s*$/;
 const HTML_DIRECTIVE_LINE_REGEX = /^\s*::html\{(.+)\}\s*$/;
 const FRAME_DIRECTIVE_LINE_REGEX = /^\s*::frame\{(.+)\}\s*$/;
+const MODEL_DIRECTIVE_LINE_REGEX = /^\s*::model\{(.+)\}\s*$/;
 const RICH_FRAME_TAG_LINE_REGEX = /^\s*<rich-frame\b([^>]{0,2000})>(?:\s*<\/rich-frame>)?\s*$/i;
 const RICH_FRAME_CLOSE_LINE_REGEX = /^\s*<\/rich-frame>\s*$/i;
 const DIRECTIVE_ATTR_REGEX = /(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|true|false)/g;
@@ -87,7 +88,7 @@ function fileEmbedLine(title: string | undefined, filePath: string): string {
  */
 export function richEmbedsToPlainText(message: string): string {
   const text = String(message || "");
-  if (!/::(?:frame|html|video)\{|<rich-frame\b|```html/i.test(text)) return text;
+  if (!/::(?:frame|html|video|model)\{|<rich-frame\b|```html/i.test(text)) return text;
   const lines = text.split("\n");
   const out: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -160,6 +161,21 @@ export function richEmbedsToPlainText(message: string): string {
       const attrs = directiveAttrs(video[1], DIRECTIVE_ATTR_REGEX);
       if (attrs.path) {
         out.push(`Video: ${attrs.title || baseName(attrs.path)} (${attrs.path})`);
+        continue;
+      }
+    }
+
+    const model = line.match(MODEL_DIRECTIVE_LINE_REGEX);
+    if (model) {
+      const attrs = directiveAttrs(model[1], DIRECTIVE_ATTR_REGEX);
+      if (attrs.path) {
+        out.push(`3D model: ${attrs.title || baseName(attrs.path)} (${attrs.path})`);
+        continue;
+      }
+      if (attrs.task) {
+        out.push(
+          `3D model: ${attrs.title || `Meshy task ${attrs.task}`} (open this answer in CoWork to view it)`,
+        );
         continue;
       }
     }

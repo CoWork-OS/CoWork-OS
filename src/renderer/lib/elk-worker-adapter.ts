@@ -8,6 +8,11 @@ import ElkApi, {
 } from "elkjs/lib/elk-api.js";
 import workerUrl from "elkjs/lib/elk-worker.min.js?url";
 
+/** What ELK.layout resolves to for a graph of type T (elkjs's own signature). */
+type ElkLayoutResult<T extends ElkNode> = Omit<T, "children"> & {
+  children?: (NonNullable<T["children"]>[number] & ElkNode)[];
+};
+
 const UI_ONLY = Symbol("ELK rendering metadata");
 
 /** Copy transport data without serializing away JSON values or UI identities. */
@@ -111,15 +116,15 @@ export default class ElkWorkerAdapter implements ELK {
 
   constructor(private readonly options: ELKConstructorArguments = {}) {}
 
-  layout(graph: ElkNode, args?: ElkLayoutArguments): Promise<ElkNode> {
+  layout<T extends ElkNode>(graph: T, args?: ElkLayoutArguments): Promise<ElkLayoutResult<T>> {
     return this.run(async (elk, isActive) => {
-      const result = await elk.layout(workerData(graph) as ElkNode, args);
+      const result = await elk.layout(workerData(graph) as T, args);
       // The RPC client defers replies through setTimeout. Terminating its worker
       // cannot retract an already queued reply, which must not mutate the input.
       if (!isActive()) throw new DOMException("ELK worker terminated.", "AbortError");
       // The former bundled fake worker mutated the graph in place. Restore
       // that behavior, retaining functions/DOM metadata which ELK never uses.
-      return restoreLayoutData(result, graph) as ElkNode;
+      return restoreLayoutData(result, graph) as ElkLayoutResult<T>;
     });
   }
 

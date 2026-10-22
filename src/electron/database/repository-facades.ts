@@ -467,6 +467,7 @@ const COMPOSERDRAFT_METHODS = [
   "pruneExpired",
   "listExpired",
   "listLiveAttachmentRefs",
+  "listMessagesSentSince",
 ] as const;
 export type ComposerDraftRepository = AsyncStore<
   ComposerDraftStore,

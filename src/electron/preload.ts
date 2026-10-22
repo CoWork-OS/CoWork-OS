@@ -4999,6 +4999,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
     taskId: string;
     sources: import("../shared/answer-surfaces/data").AnswerSurfaceData;
   }) => ipcRenderer.invoke(IPC_CHANNELS.ANSWER_SURFACE_LOAD_DATA, data),
+  // 3D model cards (::model{}) and the Meshy connector's cards and gallery
+  readModel3d: (data: { filePath: string; workspacePath?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MODEL3D_READ, data),
+  getMeshyStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MESHY_STATUS),
+  getMeshyTask: (data: { taskId: string }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_TASK, data),
+  getMeshyFormats: (data: { taskId: string; beside?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_FORMATS, data),
+  saveMeshyFormat: (data: {
+    taskId: string;
+    format: string;
+    beside?: string;
+    chatTaskId?: string;
+    reveal?: boolean;
+  }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_SAVE, data),
+  getMeshyActions: (data: { taskId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_ACTIONS, data),
+  getMeshyGallery: (data?: { limit?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_GALLERY, data),
+  getMeshyImage: (data: { url: string }) => ipcRenderer.invoke(IPC_CHANNELS.MESHY_IMAGE, data),
+  revealMeshyModel: (data: { filePath: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MESHY_REVEAL, data),
   // Memory folder: the folder is resolved in main, never sent from here
   getMemoryRepoStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_STATUS),
   openMemoryRepoFolder: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_REPO_OPEN_FOLDER),
@@ -9280,6 +9301,31 @@ export interface ElectronAPI {
     taskId: string;
     sources: import("../shared/answer-surfaces/data").AnswerSurfaceData;
   }) => Promise<Record<string, import("../shared/answer-surfaces/data").AnswerDataResult>>;
+  /** Desktop only: a .glb/.gltf from the workspace or one Meshy saved, for the 3D viewer. */
+  readModel3d?: (data: {
+    filePath: string;
+    workspacePath?: string;
+  }) => Promise<import("../shared/meshy").Model3dFile>;
+  getMeshyStatus?: () => Promise<import("../shared/meshy").MeshyStatus>;
+  getMeshyTask?: (data: { taskId: string }) => Promise<import("../shared/meshy").MeshyTaskInfo>;
+  getMeshyFormats?: (data: {
+    taskId: string;
+    beside?: string;
+  }) => Promise<import("../shared/meshy").MeshyFormatOption[]>;
+  saveMeshyFormat?: (data: {
+    taskId: string;
+    format: string;
+    beside?: string;
+    chatTaskId?: string;
+    reveal?: boolean;
+  }) => Promise<{ path: string }>;
+  getMeshyActions?: (data: { taskId: string }) => Promise<{
+    balance: number | null;
+    actions: import("../shared/meshy").MeshyNextAction[];
+  }>;
+  getMeshyGallery?: (data?: { limit?: number }) => Promise<import("../shared/meshy").MeshyGallery>;
+  getMeshyImage?: (data: { url: string }) => Promise<{ dataUrl: string }>;
+  revealMeshyModel?: (data: { filePath: string }) => Promise<{ success: boolean; error?: string }>;
   getMemoryRepoStatus: () => Promise<MemoryRepoStatusReport>;
   openMemoryRepoFolder: () => Promise<{ success: true }>;
   compactMemoryRepoHistory: () => Promise<MemoryRepoCompactResult>;

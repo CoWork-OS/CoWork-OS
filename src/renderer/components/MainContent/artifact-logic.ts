@@ -13,7 +13,12 @@ import {
   isPresentationMimeType,
 } from "../../../shared/presentation-formats";
 import { isWebPageArtifactFile, isWebPageMimeType } from "../../../shared/web-page-formats";
-import { IMAGE_FILE_EXT_RE, VIDEO_FILE_EXT_RE, HTML_FILE_EXT_RE } from "./main-content-constants";
+import {
+  IMAGE_FILE_EXT_RE,
+  VIDEO_FILE_EXT_RE,
+  HTML_FILE_EXT_RE,
+  MODEL_FILE_EXT_RE,
+} from "./main-content-constants";
 
 export type GeneratedInlinePreviewKind =
   | "image"
@@ -21,7 +26,8 @@ export type GeneratedInlinePreviewKind =
   | "html"
   | "spreadsheet"
   | "presentation"
-  | "document";
+  | "document"
+  | "model";
 
 export interface GeneratedImageCard {
   path: string;
@@ -79,6 +85,10 @@ export function getInlinePreviewKindForGeneratedFile(args: {
 
   if (fileType === "video" || mimeType.startsWith("video/") || VIDEO_FILE_EXT_RE.test(filePath)) {
     return "video";
+  }
+
+  if (mimeType.startsWith("model/gltf") || MODEL_FILE_EXT_RE.test(filePath)) {
+    return "model";
   }
 
   if (

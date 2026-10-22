@@ -2211,7 +2211,9 @@ if (isMacSafeStorageMigrationWorker) {
                 "default-src 'self'; " +
                   "script-src 'self'; " +
                   "style-src 'self' 'unsafe-inline'; " + // Allow inline styles for React
-                  "img-src 'self' data: media: https:; " + // Allow images from self, data URIs, HTTPS, and preview media URLs
+                  // blob: is for textures inside a .glb, which the 3D viewer decodes from
+                  // object URLs it creates itself (model-stage.ts).
+                  "img-src 'self' data: blob: media: https:; " + // Allow images from self, data URIs, HTTPS, and preview media URLs
                   "font-src 'self' data:; " + // Allow fonts from self and data URIs
                   "connect-src 'self' https:; " + // Allow API calls to HTTPS endpoints
                   "media-src 'self' data: blob: media: https:; " + // Allow inline video previews via blob/data URLs and the media:// protocol

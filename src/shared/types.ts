@@ -9411,6 +9411,17 @@ export const IPC_CHANNELS = {
   ANSWER_SURFACE_LOGIC_RUNNER: "answerSurfaces:logicRunner",
   ANSWER_SURFACE_LOAD_DATA: "answerSurfaces:loadData",
 
+  // 3D models in chat (::model{} cards) and the Meshy connector's cards and gallery
+  MODEL3D_READ: "model3d:read",
+  MESHY_STATUS: "meshy:status",
+  MESHY_TASK: "meshy:task",
+  MESHY_FORMATS: "meshy:formats",
+  MESHY_SAVE: "meshy:save",
+  MESHY_ACTIONS: "meshy:actions",
+  MESHY_GALLERY: "meshy:gallery",
+  MESHY_IMAGE: "meshy:image",
+  MESHY_REVEAL: "meshy:reveal",
+
   // Memory folder: the markdown + git memory repo (docs/memory-repo-phase1-design.md §9)
   MEMORY_REPO_STATUS: "memoryRepo:status",
   MEMORY_REPO_OPEN_FOLDER: "memoryRepo:openFolder",

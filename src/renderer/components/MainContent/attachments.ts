@@ -30,6 +30,26 @@ export type PendingAttachment = SelectedFileInfo & {
   status?: "available" | "unavailable";
 };
 
+/** Fence file-picker and FileReader replies to the composer that requested them. */
+export function createPendingAttachmentOwnerFence() {
+  let ownerKey: string | undefined;
+  let generation = 0;
+  return {
+    setOwner(nextOwnerKey: string) {
+      if (nextOwnerKey === ownerKey) return;
+      ownerKey = nextOwnerKey;
+      generation += 1;
+    },
+    capture() {
+      const startedGeneration = generation;
+      return () => generation === startedGeneration;
+    },
+    invalidate() {
+      generation += 1;
+    },
+  };
+}
+
 type ResolvedDraftAttachment = {
   attachment: PendingAttachment;
   resolved: { ref: DraftAttachmentRef; path: string } | null;

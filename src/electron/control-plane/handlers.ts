@@ -123,7 +123,7 @@ import { applyDefaultAccessProfile } from "../security/access-profile-resolver";
 import { PermissionSettingsManager } from "../security/permission-settings-manager";
 import { taskAgentConfigForCreation } from "../../shared/security/task-entrypoint";
 import { BUILTIN_ACCESS_PROFILE_IDS } from "../../shared/access-profiles";
-import { AgentConfigSchema, validateInput } from "../utils/validation";
+import { AgentConfigSchema, InputRequestResponseSchema, validateInput } from "../utils/validation";
 import { ManagedSessionRequirementCorrectionEventSchema } from "../../shared/managed-session-schemas";
 import { ManagedSessionSuccessCriteriaSchema } from "../../shared/managed-session-schemas";
 import {
@@ -1560,20 +1560,14 @@ async function routeLocalDeviceProxyRequest(method: string, params?: unknown): P
       return { status };
     }
     case Methods.INPUT_REQUEST_LIST: {
-      const p = (params ?? {}) as Any;
       return {
-        inputRequests: await inputRequestRepo.list({
-          limit:
-            typeof p.limit === "number" && Number.isFinite(p.limit) ? Math.max(1, p.limit) : 50,
-          offset:
-            typeof p.offset === "number" && Number.isFinite(p.offset) ? Math.max(0, p.offset) : 0,
-          ...(typeof p.taskId === "string" && p.taskId.trim() ? { taskId: p.taskId.trim() } : {}),
-          ...(typeof p.status === "string" && p.status.trim() ? { status: p.status.trim() } : {}),
-        }),
+        inputRequests: await inputRequestRepo.list(sanitizeInputRequestListParams(params)),
       };
     }
     case Methods.INPUT_REQUEST_RESPOND:
-      return controlPlaneDeps.agentDaemon.respondToInputRequest(params as Any);
+      return controlPlaneDeps.agentDaemon.respondToInputRequest(
+        sanitizeInputRequestResponseParams(params),
+      );
     case Methods.CHANNEL_LIST:
       return { channels: await channelRepo.findAll() };
     case Methods.CHANNEL_GET: {
@@ -1871,6 +1865,31 @@ function sanitizeApprovalListParams(params: unknown): {
   const offset = Math.max(rawOffset, 0);
   const taskId = typeof p.taskId === "string" ? p.taskId.trim() : "";
   return { limit, offset, ...(taskId ? { taskId } : {}) };
+}
+
+function sanitizeInputRequestListParams(params: unknown): {
+  limit: number;
+  offset: number;
+  taskId?: string;
+  status?: "pending" | "submitted" | "dismissed";
+} {
+  const p = parameterRecord(params);
+  const { limit, offset, taskId } = sanitizeApprovalListParams({ limit: 50, ...p });
+  const status = typeof p.status === "string" ? p.status.trim() : "";
+  return {
+    limit,
+    offset,
+    ...(taskId ? { taskId } : {}),
+    ...(status === "pending" || status === "submitted" || status === "dismissed" ? { status } : {}),
+  };
+}
+
+function sanitizeInputRequestResponseParams(params: unknown) {
+  const parsed = InputRequestResponseSchema.safeParse(params);
+  if (!parsed.success) {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: "Invalid input request response" };
+  }
+  return parsed.data;
 }
 
 function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: number } {
@@ -3677,6 +3696,20 @@ export function registerTaskAndWorkspaceMethods(
       expectedRevisionHash,
     );
     return { status };
+  });
+
+  server.registerMethod(Methods.INPUT_REQUEST_LIST, async (client, params) => {
+    requireScope(client, "admin");
+    return {
+      inputRequests: await agentDaemon.listInputRequests(sanitizeInputRequestListParams(params)),
+    };
+  });
+
+  server.registerMethod(Methods.INPUT_REQUEST_RESPOND, async (client, params) => {
+    requireScope(client, "admin");
+    // Delegate to the same daemon entrypoint as IPC: it owns idempotency and
+    // approval-bound revision checks, including restarted or stale cards.
+    return agentDaemon.respondToInputRequest(sanitizeInputRequestResponseParams(params));
   });
 
   // Channels (gateway)

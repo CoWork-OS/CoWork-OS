@@ -314,6 +314,7 @@ import { getAccessProfilePresentation } from "./access-profile-presentation";
 import { getInlinePreviewKindForTaskEvent } from "./artifact-logic";
 import {
   composeMessageWithAttachments,
+  createPendingAttachmentOwnerFence,
   guessVisualAttachmentMimeType,
   isVideoVisualAttachmentMimeType,
   joinWorkspaceRelativePath,
@@ -1052,6 +1053,18 @@ function MainContentComponent({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [isPreparingMessage, setIsPreparingMessage] = useState(false);
+  const attachmentOwnerFenceRef = useRef(createPendingAttachmentOwnerFence());
+  attachmentOwnerFenceRef.current.setOwner(
+    JSON.stringify([
+      workspace?.id ?? null,
+      selectedTaskId ?? task?.id ?? null,
+      remoteSession?.deviceId ?? null,
+    ]),
+  );
+  useEffect(() => {
+    const ownerFence = attachmentOwnerFenceRef.current;
+    return () => ownerFence.invalidate();
+  }, []);
   const pendingFollowUpSubmissionRef = useRef<{
     taskId: string;
     fingerprint: string;
@@ -4539,8 +4552,11 @@ function MainContentComponent({
   }, [task?.id]);
 
   const reportAttachmentError = (message: string) => {
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
     setAttachmentError(message);
-    window.setTimeout(() => setAttachmentError(null), 5000);
+    window.setTimeout(() => {
+      if (isCurrentOwner()) setAttachmentError(null);
+    }, 5000);
   };
 
   const readFileAsBase64 = (file: File): Promise<string> =>
@@ -4559,9 +4575,11 @@ function MainContentComponent({
       reader.readAsDataURL(file);
     });
 
-  const appendPendingAttachments = (files: PendingAttachment[]) => {
-    if (files.length === 0) return;
+  const appendPendingAttachments = (files: PendingAttachment[], isCurrentOwner: () => boolean) => {
+    if (files.length === 0 || !isCurrentOwner()) return;
     setPendingAttachments((prev) => {
+      // React may defer this updater until after another workspace is rendered.
+      if (!isCurrentOwner()) return prev;
       const existingKeys = new Set(
         prev.map((attachment) => attachment.path || `${attachment.name}-${attachment.size}`),
       );
@@ -4584,6 +4602,7 @@ function MainContentComponent({
   };
 
   const handleAttachFiles = async () => {
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
     try {
       const pickerDefaultPath =
         workspace && !workspace.isTemp && !isTempWorkspaceId(workspace.id)
@@ -4596,8 +4615,10 @@ function MainContentComponent({
           ...file,
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         })),
+        isCurrentOwner,
       );
     } catch (error) {
+      if (!isCurrentOwner()) return;
       console.error("Failed to select files:", error);
       reportAttachmentError("Failed to add attachments. Please try again.");
     }
@@ -4613,7 +4634,7 @@ function MainContentComponent({
 
   useEffect(() => {
     if (!onStageDraftAttachment) return;
-    const draftKeyAtStage = draftSnapshot?.draftKey;
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
     for (const attachment of pendingAttachments) {
       if (
         attachment.draftRefId ||
@@ -4625,11 +4646,7 @@ function MainContentComponent({
       stagingAttachmentIdsRef.current.add(attachment.id);
       void onStageDraftAttachment(attachment).then((ref) => {
         stagingAttachmentIdsRef.current.delete(attachment.id);
-        if (!pendingAttachmentIdsRef.current.has(attachment.id)) {
-          if (ref?.refId) void onReleaseDraftAttachment?.(ref.refId);
-          return;
-        }
-        if (draftKeyAtStage && draftSnapshot?.draftKey !== draftKeyAtStage) {
+        if (!isCurrentOwner() || !pendingAttachmentIdsRef.current.has(attachment.id)) {
           if (ref?.refId) void onReleaseDraftAttachment?.(ref.refId);
           return;
         }
@@ -4711,6 +4728,7 @@ function MainContentComponent({
     if (!isFileDrag(event)) return;
     event.preventDefault();
     setIsDraggingFiles(false);
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
 
     const droppedFiles = Array.from(event.dataTransfer.files || []);
     try {
@@ -4732,8 +4750,9 @@ function MainContentComponent({
         }),
       );
 
-      appendPendingAttachments(pending);
+      appendPendingAttachments(pending, isCurrentOwner);
     } catch (error) {
+      if (!isCurrentOwner()) return;
       console.error("Failed to handle dropped files:", error);
       reportAttachmentError("Failed to attach dropped files.");
     }
@@ -4752,6 +4771,7 @@ function MainContentComponent({
     }
     if (clipboardFiles.length === 0) return;
     event.preventDefault();
+    const isCurrentOwner = attachmentOwnerFenceRef.current.capture();
 
     try {
       const pending = await Promise.all(
@@ -4767,8 +4787,9 @@ function MainContentComponent({
         }),
       );
 
-      appendPendingAttachments(pending);
+      appendPendingAttachments(pending, isCurrentOwner);
     } catch (error) {
+      if (!isCurrentOwner()) return;
       console.error("Failed to handle pasted files:", error);
       reportAttachmentError("Failed to attach pasted files.");
     }

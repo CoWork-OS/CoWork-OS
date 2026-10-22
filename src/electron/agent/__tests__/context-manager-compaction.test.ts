@@ -473,6 +473,48 @@ describe("truncateToolResult re-trims its own output exactly", () => {
     expect(deliveredText(file.content)).toBe(big.slice(0, file.nextStartChar));
   });
 
+  it("preserves untrimmed source continuations and updates shortened source windows", () => {
+    const shortBody = "a".repeat(12_000);
+    const longBody = "b".repeat(80_000);
+    const payload = JSON.stringify({
+      success: true,
+      included: 2,
+      skipped: 37,
+      files: [
+        {
+          path: "a.txt",
+          size: 15_000,
+          truncated: true,
+          content: `${shortBody}\n\n[... File window 0-12000 of 15000 bytes ...]`,
+          window: { start: 0, end: 12_000, total: 15_000 },
+          nextStartChar: 12_000,
+        },
+        {
+          path: "b.txt",
+          size: 90_000,
+          truncated: true,
+          content: `${longBody}\n\n[... File window 0-80000 of 90000 bytes ...]`,
+          window: { start: 0, end: 80_000, total: 90_000 },
+          nextStartChar: 80_000,
+        },
+      ],
+      skippedFiles: [{ path: "(additional files)", reason: "37 more files omitted" }],
+      warnings: [],
+    });
+
+    const result = JSON.parse(truncateToolResult(payload));
+
+    expect(result.files[0].content).toContain(shortBody);
+    expect(result.files[0].nextStartChar).toBe(12_000);
+    expect(result.files[0].window.end).toBe(12_000);
+    expect(result.files[1].nextStartChar).toBeLessThan(80_000);
+    expect(result.files[1].window.end).toBe(result.files[1].nextStartChar);
+    expect(deliveredText(result.files[1].content)).toBe(
+      longBody.slice(0, result.files[1].nextStartChar),
+    );
+    expect(result.skipped).toBe(37);
+  });
+
   it("counts earlier omissions when shortening an already shortened field", () => {
     const stdout = Array.from({ length: 9_000 }, (_, i) => `line ${i}`).join("\n");
     const first = JSON.parse(truncateToolResult(JSON.stringify({ exitCode: 1, stdout })));

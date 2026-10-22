@@ -8311,7 +8311,8 @@ ${skillDescriptions}`;
         name: "read_files",
         description:
           "Read multiple files in one call using glob patterns. Useful for quickly attaching context without many read_file calls. " +
-          'Supports exclusion patterns by prefixing with "!". Example: ["src/**/*.ts", "!src/**/__tests__/**"].',
+          'Supports exclusion patterns by prefixing with "!". Example: ["src/**/*.ts", "!src/**/__tests__/**"]. ' +
+          "For truncated files, continue with read_file using path and nextStartChar when present; otherwise re-read the file in smaller windows.",
         input_schema: {
           type: "object",
           properties: {

@@ -329,6 +329,7 @@ export function SpreadsheetArtifactViewer({
   const [voiceNotice, setVoiceNotice] = useState("");
   const [turnContextExpanded, setTurnContextExpanded] = useState(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const editingDraftRef = useRef<{ position: CellPosition; value: string } | null>(null);
   const fileName = fileData?.fileName || getFileName(filePath);
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
@@ -358,6 +359,7 @@ export function SpreadsheetArtifactViewer({
     setSelectedRange({ start: { row: 1, column: 1 }, end: { row: 1, column: 1 } });
     setSelectionPointed(false);
     setEditingCell(null);
+    editingDraftRef.current = null;
     setDirty(false);
     setSaveMessage("");
 
@@ -493,6 +495,7 @@ export function SpreadsheetArtifactViewer({
   };
 
   const selectCell = (position: CellPosition, extend = false) => {
+    commitEditing(false);
     setSelectionPointed(true);
     setSelectedCell(position);
     setSelectedRange((current) => {
@@ -504,6 +507,7 @@ export function SpreadsheetArtifactViewer({
   };
 
   const selectRange = (range: CellRange, active: CellPosition = range.start) => {
+    commitEditing(false);
     setSelectedCell(active);
     setSelectedRange(range);
     setEditingCell(null);
@@ -620,19 +624,24 @@ export function SpreadsheetArtifactViewer({
     const cell = activeSheet?.rows[position.row - 1]?.[position.column - 1] || null;
     setSelectedCell(position);
     setSelectedRange({ start: position, end: position });
+    editingDraftRef.current = { position, value: initialValue ?? getCellText(cell) };
     setEditingCell(position);
     setEditingValue(initialValue ?? getCellText(cell));
   };
 
-  const commitEditing = () => {
-    if (!editingCell) return;
-    updateCellValue(editingCell.row, editingCell.column, editingValue);
+  const commitEditing = (focusGrid = true) => {
+    const draft = editingDraftRef.current;
+    if (!draft) return;
+    // Clear before moving focus: blur can run before React removes the input.
+    editingDraftRef.current = null;
+    updateCellValue(draft.position.row, draft.position.column, draft.value);
     setEditingCell(null);
     setEditingValue("");
-    gridRef.current?.focus();
+    if (focusGrid) gridRef.current?.focus();
   };
 
   const cancelEditing = () => {
+    editingDraftRef.current = null;
     setEditingCell(null);
     setEditingValue("");
     gridRef.current?.focus();
@@ -1253,8 +1262,14 @@ export function SpreadsheetArtifactViewer({
                               className="spreadsheet-viewer-cell-input"
                               value={editingValue}
                               autoFocus
-                              onChange={(event) => setEditingValue(event.target.value)}
-                              onBlur={commitEditing}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                if (editingDraftRef.current) editingDraftRef.current.value = value;
+                                setEditingValue(value);
+                              }}
+                              onBlur={() => commitEditing()}
                               onKeyDown={(event) => {
                                 if (event.key === "Enter" || event.key === "Tab") {
                                   event.preventDefault();
@@ -1289,6 +1304,7 @@ export function SpreadsheetArtifactViewer({
               type="button"
               className={index === activeSheetIndex ? "active" : undefined}
               onClick={() => {
+                commitEditing(false);
                 setActiveSheetIndex(index);
                 setSelectedCell({ row: 1, column: 1 });
               }}

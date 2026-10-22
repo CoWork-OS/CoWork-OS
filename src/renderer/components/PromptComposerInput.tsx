@@ -90,7 +90,15 @@ function formatComposerLinkLabel(url: URL): string {
   const pathParts = url.pathname
     .split("/")
     .filter(Boolean)
-    .map((part) => decodeURIComponent(part));
+    .map((part) => {
+      // URL accepts literal percent signs and incomplete percent escapes.
+      // Those URLs must still be pasteable even when their label cannot be decoded.
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    });
 
   if (host === "github.com" && pathParts.length >= 2) {
     return `${pathParts[0]}/${pathParts[1].replace(/\.git$/i, "")}`;
@@ -433,6 +441,28 @@ export function applyComposerTextReplacement(
   return replaceRange(value, validMentions, expandedStart, expandedEnd, replacement);
 }
 
+const composerGraphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+export function getComposerDeletionRange(
+  value: string,
+  start: number,
+  end: number,
+  direction: "backward" | "forward",
+): { start: number; end: number } {
+  if (start !== end) return { start, end };
+  // DOM offsets count UTF-16 code units. A visible character can span several
+  // of them (emoji, combining accents, joined emoji), so never delete one unit.
+  for (const segment of composerGraphemes.segment(value)) {
+    const segmentEnd = segment.index + segment.segment.length;
+    const touchesCaret =
+      direction === "backward"
+        ? segment.index < start && segmentEnd >= start
+        : segment.index <= end && segmentEnd > end;
+    if (touchesCaret) return { start: segment.index, end: segmentEnd };
+  }
+  return { start, end };
+}
+
 /**
  * The native input a handled keydown would have produced. The editor applies
  * the edit itself on keydown and cancels the key, which already suppresses the
@@ -719,19 +749,15 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
 
     const deleteSelectionRange = useCallback(
       (direction: "backward" | "forward") => {
-        const range = getSelectionRange();
-        let start = range.start;
-        let end = range.end;
-        if (start === end) {
-          if (direction === "backward") {
-            if (start === 0) return;
-            start -= 1;
-          } else {
-            if (end >= editStateRef.current.value.length) return;
-            end += 1;
-          }
-        }
-        applyTextReplacement(start, end, "");
+        const selection = getSelectionRange();
+        const range = getComposerDeletionRange(
+          editStateRef.current.value,
+          selection.start,
+          selection.end,
+          direction,
+        );
+        if (range.start === range.end) return;
+        applyTextReplacement(range.start, range.end, "");
       },
       [applyTextReplacement, getSelectionRange],
     );
@@ -826,6 +852,9 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       // A new key press ends the window in which the previous key's native
       // input could still arrive.
       pendingKeyboardEchoRef.current = null;
+      // The parent handles Enter as Send and Tab/Enter as mention acceptance.
+      // A composition commit belongs to the IME and must not reach those shortcuts.
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
       if (
         !value &&
         prediction &&
@@ -849,7 +878,6 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
       }
       onKeyDown(event);
       if (event.defaultPrevented) return;
-      if (event.nativeEvent.isComposing) return;
       if (event.key === "Enter" && event.shiftKey) {
         event.preventDefault();
         markKeyboardEditHandled(event.key);
@@ -858,14 +886,17 @@ export const PromptComposerInput = forwardRef<PromptComposerInputHandle, PromptC
         return;
       }
 
-      if (event.key === "Backspace") {
+      // Let Chromium choose the native word/line boundary for modified delete
+      // shortcuts, then read the resulting DOM through onInput.
+      const hasDeleteModifier = event.metaKey || event.ctrlKey || event.altKey;
+      if (event.key === "Backspace" && !hasDeleteModifier) {
         event.preventDefault();
         markKeyboardEditHandled(event.key);
         deleteSelectionRange("backward");
         return;
       }
 
-      if (event.key === "Delete") {
+      if (event.key === "Delete" && !hasDeleteModifier) {
         event.preventDefault();
         markKeyboardEditHandled(event.key);
         deleteSelectionRange("forward");

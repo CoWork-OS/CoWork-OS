@@ -38,6 +38,7 @@ Use cases:
 - Smart-home orchestration via integrations
 - "Figure it out" fallback orchestration for hard tasks
 - Location-aware local errands, nearby services, and walking route planning
+- 3D models and game assets with Meshy (text or photo to 3D, rigging and animation, 3D-print prep), shown as interactive 3D cards
 
 Cowork OS supports these via:
 
@@ -56,6 +57,7 @@ Cowork OS supports these via:
 
 For the unified artifact workflow, see [Everything Workbench](everything-workbench.md).
 For uploaded video analysis, see [Video Attachments](video-attachments.md).
+For 3D models, rigged characters and 3D printing, see [3D Models with Meshy](meshy-3d.md).
 For live website testing inside the app, see [Browser Workbench](browser-workbench.md).
 For turning existing tasks into recurring thread follow-ups or standalone scheduled checks, see [Task Automations](task-automations.md).
 For message-box app commands and skill-backed workflow shortcuts, see [Message Box Shortcuts](message-box-shortcuts.md).
@@ -736,3 +738,35 @@ Prompt (editor app):
 Use the motion-editor skill to build the motion editor in ./tools/motion-editor. I'm on macOS.
 Finish and verify Phase 1 before starting Phase 2, and keep PROGRESS.md up to date.
 ```
+
+### 24) 3D Models, Game Assets and 3D Prints (Meshy)
+
+Needs the Meshy connector (Settings → Connectors → Meshy) and a Meshy API key. Every call that spends credits shows its cost on the approval card first.
+
+Prompt (game prop):
+
+```
+Make a low-poly treasure chest for my Godot game, under 2,000 triangles.
+Tell me the credit cost before you start, and save the GLB in models/.
+```
+
+Prompt (photo to print):
+
+```
+Turn ~/photos/mug.jpg into a 3D model I can print at 10 cm tall.
+Check it for printing, repair it if needed, and give me an STL.
+```
+
+Prompt (animated character):
+
+```
+Make a stylised knight character in a T-pose, rig it, and add a wave and a walk animation.
+Ask me before each paid step.
+```
+
+Expected behavior:
+
+- The agent picks the route and detail level for the asset's use, names the tool and its cost, and waits for your yes. The approval card repeats the estimate and the task's Meshy spend.
+- Right after a job starts, the reply shows a 3D card with Meshy's progress. When the job finishes, the card becomes an interactive 3D view: orbit, play animation clips, and toggle wireframe or grid.
+- The card's **Download** menu saves other formats (FBX, OBJ, STL, USDZ) at no cost. **Next** offers texture, rig, remesh and the other follow-ups with their credit costs.
+- Saved models land in the project and appear in the 3D gallery (**Open** on any card).

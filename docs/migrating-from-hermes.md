@@ -40,6 +40,17 @@ Quit the desktop app before importing scheduled jobs from the terminal, or impor
 
 Other credentials in `.env` (search, voice, tool keys) and other chat platforms are listed as skipped so nothing disappears silently.
 
+## Hermes plugins
+
+Hermes plugins are not imported. CoWork has its own versions of the most popular ones built in:
+
+- **Meshy (3D models)**: install the Meshy connector in **Settings → Connectors** and paste your key. The importer doesn't copy `MESHY_API_KEY` from Hermes' `.env`. You get the same Meshy MCP server and workflow rules, with these CoWork-native parts:
+  - 3D cards in chat;
+  - a 3D gallery;
+  - credit costs on every approval card.
+
+  See [3D Models with Meshy](meshy-3d.md).
+
 ## Where CoWork looks
 
 CoWork reads `HERMES_HOME` when it is set, then `%LOCALAPPDATA%\hermes` on Windows, then `~/.hermes`. If you use Hermes profiles, the profile named in `active_profile` is imported.

@@ -404,8 +404,8 @@ describe("production skill routing evaluator", () => {
       readFileSync(resolve("resources/skills/_evals/routing-contracts.json"), "utf8"),
     );
     expect(contracts.corpus).toEqual({
-      positiveExamples: 629,
-      negativeExamples: 613,
+      positiveExamples: 633,
+      negativeExamples: 617,
       datasetRows: 34,
       datasetExpectedCases: 34,
       datasetForbiddenCases: 34,

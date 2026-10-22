@@ -23,6 +23,7 @@ import {
 import { MCPSettingsManager } from "../settings";
 import { assertMcpServerNotBlocked } from "../connector-policy";
 import { HOSTED_MCP_SERVERS } from "./hosted-mcp-servers";
+import { getUserDataDir } from "../../utils/user-data-dir";
 
 // Cache duration in milliseconds (15 minutes)
 const REGISTRY_CACHE_DURATION = 15 * 60 * 1000;
@@ -31,6 +32,12 @@ const MAX_NPM_PACKAGE_NAME_LENGTH = 214;
 // not imported, because that module pulls in the client manager.
 const REGISTRY_OAUTH_REDIRECT_URI = "http://127.0.0.1:18768/oauth/callback";
 const NPM_PACKAGE_PART_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const MAX_REGISTRY_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** A registry id as one folder name under the app's mcp-data dir. */
+function sanitizeDataDirName(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "") || "server";
+}
 
 // Built-in registry of common MCP servers
 // This is used as a fallback when the remote registry is unavailable.
@@ -201,6 +208,7 @@ const SHIPPED_LOCAL_CONNECTOR_IDS = new Set([
   "blender",
   "comfyui",
   "miro",
+  "meshy",
   "supabase",
   "excalidraw",
   "stripe",
@@ -1295,6 +1303,73 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       verified: true,
     },
     // --- npm-based connectors ---
+    {
+      // Meshy's own MCP server. Pinned: a version bump is a reviewed change here, never @latest.
+      id: "meshy",
+      name: "Meshy",
+      description:
+        "Make 3D models with Meshy AI: text or image to 3D, texturing, remeshing, rigging, animation, format conversion and 3D-print prep. Requires MESHY_API_KEY.",
+      version: "0.6.5",
+      author: "Meshy AI",
+      homepage: "https://www.meshy.ai",
+      repository: "https://github.com/meshy-dev/meshy-mcp-server",
+      license: "MIT",
+      installMethod: "npm",
+      installCommand: "npx",
+      packageName: "@meshy-ai/meshy-mcp-server",
+      transport: "stdio",
+      defaultCommand: "npx",
+      defaultArgs: ["-y", "@meshy-ai/meshy-mcp-server@0.6.5"],
+      defaultEnv: {
+        MESHY_API_KEY: "",
+      },
+      useDataDirAsCwd: true,
+      // Most Meshy tools spend credits: reads (balance, status, lists) run, everything else asks.
+      defaultToolsApprovalMode: "writes",
+      // meshy_get_task_status waits up to 300 s for a job by default.
+      defaultRequestTimeout: 360_000,
+      tools: [
+        { name: "meshy_text_to_3d", description: "Untextured 3D preview from a text prompt" },
+        { name: "meshy_text_to_3d_refine", description: "Texture a finished text-to-3D preview" },
+        { name: "meshy_image_to_3d", description: "Textured 3D model from one image" },
+        { name: "meshy_multi_image_to_3d", description: "3D model from up to four views" },
+        { name: "meshy_text_to_image", description: "Concept image from text" },
+        { name: "meshy_image_to_image", description: "Edit or restyle an image" },
+        { name: "meshy_remesh", description: "Change a model's polygon count or topology" },
+        { name: "meshy_retexture", description: "New AI textures for a model" },
+        { name: "meshy_convert", description: "Convert a model to other file formats" },
+        { name: "meshy_resize", description: "Rescale a model to real-world size" },
+        { name: "meshy_uv_unwrap", description: "Clean UV layout" },
+        { name: "meshy_rig", description: "Auto-rig a humanoid character" },
+        { name: "meshy_animate", description: "Animate a rigged character" },
+        { name: "meshy_text_to_motion", description: "Motion clip from text" },
+        { name: "meshy_list_animations", description: "Look up preset animation ids" },
+        { name: "meshy_analyze_printability", description: "Check a model for 3D printing" },
+        { name: "meshy_repair_printability", description: "Repair a model for 3D printing" },
+        { name: "meshy_process_multicolor", description: "Multicolor 3MF for a slicer" },
+        { name: "meshy_auto_split", description: "Split a model into printable parts" },
+        { name: "meshy_send_to_slicer", description: "Detect installed slicers" },
+        { name: "meshy_creative_lab", description: "Photo to a Creative Lab product model" },
+        { name: "meshy_get_task_status", description: "Wait for or check a task" },
+        { name: "meshy_list_tasks", description: "List tasks" },
+        { name: "meshy_list_models", description: "List finished models" },
+        { name: "meshy_download_model", description: "Save a finished task's file" },
+        { name: "meshy_cancel_task", description: "Cancel or delete a task" },
+        { name: "meshy_check_balance", description: "Credit balance" },
+        { name: "meshy_list_usage", description: "Credits spent per task" },
+      ],
+      tags: ["meshy", "3d", "text-to-3d", "image-to-3d", "rigging", "animation", "3d-printing"],
+      category: "creative",
+      verified: true,
+      tagline: "Generate 3D models, characters and printable parts",
+      longDescription:
+        "Meshy's first-party MCP server, run locally with npx. Ask for a model from a prompt or a photo, then texture, rig, animate, convert or prepare it for printing. Finished models show as interactive 3D cards in chat. Every call that spends credits asks first and names its estimated cost.",
+      examples: [
+        { prompt: "Make a low-poly treasure chest for Godot" },
+        { prompt: "Turn ~/photos/mug.jpg into a 3D model I can print at 10 cm" },
+        { prompt: "Make a rigged knight character that can walk and wave" },
+      ],
+    },
     {
       id: "miro",
       name: "Miro",
@@ -3239,6 +3314,27 @@ export class MCPRegistryManager {
       }
     }
 
+    // Install defaults only a bundled entry may carry, and even then only approval modes at
+    // least as strict as the default, and a capped timeout.
+    const bundledEntry = !isRemoteRegistryEntry(entry);
+    const approvalModeDefault =
+      bundledEntry &&
+      (entry.defaultToolsApprovalMode === "writes" || entry.defaultToolsApprovalMode === "prompt")
+        ? entry.defaultToolsApprovalMode
+        : undefined;
+    const requestTimeoutDefault =
+      bundledEntry &&
+      typeof entry.defaultRequestTimeout === "number" &&
+      Number.isFinite(entry.defaultRequestTimeout) &&
+      entry.defaultRequestTimeout > 0
+        ? Math.min(entry.defaultRequestTimeout, MAX_REGISTRY_REQUEST_TIMEOUT_MS)
+        : undefined;
+    let dataDirCwd: string | undefined;
+    if (bundledEntry && entry.transport === "stdio" && entry.useDataDirAsCwd) {
+      dataDirCwd = path.join(getUserDataDir(), "mcp-data", sanitizeDataDirName(entry.id));
+      fs.mkdirSync(dataDirCwd, { recursive: true });
+    }
+
     // Create server config from registry entry
     const enabledByDefault = entry.installMethod !== "manual";
     const config: MCPServerConfig = {
@@ -3253,8 +3349,11 @@ export class MCPRegistryManager {
             command: entry.defaultCommand || entry.installCommand,
             args: [...(entry.defaultArgs || []), ...(extraArgs || [])],
             env: entry.defaultEnv,
+            ...(dataDirCwd ? { cwd: dataDirCwd } : {}),
           }
         : { url: entry.defaultUrl }),
+      ...(approvalModeDefault ? { defaultToolsApprovalMode: approvalModeDefault } : {}),
+      ...(requestTimeoutDefault ? { requestTimeout: requestTimeoutDefault } : {}),
       // Hosted servers that sign in with MCP OAuth register their own client on
       // the first sign-in (see prepareDynamicClient).
       ...(entry.transport !== "stdio" && entry.remoteAuth === "oauth"

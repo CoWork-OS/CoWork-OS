@@ -23,8 +23,14 @@ vi.mock("electron", () => ({
 vi.mock("fs", () => ({
   default: {
     existsSync: vi.fn().mockReturnValue(true),
+    mkdirSync: vi.fn(),
   },
   existsSync: vi.fn().mockReturnValue(true),
+  mkdirSync: vi.fn(),
+}));
+
+vi.mock("../../utils/user-data-dir", () => ({
+  getUserDataDir: () => "/tmp/cowork-user-data",
 }));
 
 vi.mock("child_process", () => ({
@@ -95,6 +101,28 @@ describe("MCPRegistryManager install defaults", () => {
     expect(mockState.addServerMock).toHaveBeenCalledTimes(1);
     expect(mockState.addServerMock.mock.calls[0][0].enabled).toBe(true);
 
+    verifySpy.mockRestore();
+  });
+
+  it("installs Meshy pinned, in its own folder, asking before anything that is not a read", async () => {
+    const verifySpy = vi
+      .spyOn(MCPRegistryManager, "verifyNpmPackage")
+      .mockResolvedValue({ exists: true, version: "0.7.0" });
+
+    const config = await MCPRegistryManager.installServer("meshy");
+
+    expect(config).toMatchObject({
+      name: "Meshy",
+      enabled: true,
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@meshy-ai/meshy-mcp-server@0.6.5"],
+      env: { MESHY_API_KEY: "" },
+      cwd: "/tmp/cowork-user-data/mcp-data/meshy",
+      defaultToolsApprovalMode: "writes",
+      requestTimeout: 360_000,
+      registryId: "meshy",
+    });
     verifySpy.mockRestore();
   });
 

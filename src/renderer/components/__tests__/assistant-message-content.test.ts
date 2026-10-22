@@ -257,3 +257,42 @@ describe("AssistantMessageContent", () => {
     ]);
   });
 });
+
+describe("::model directives", () => {
+  const TASK = "0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b";
+
+  it("parses a model path, a Meshy task, or both", () => {
+    const segments = parseAssistantMessageSegments(
+      [
+        "Here it is.",
+        '::model{path="/work/models/chest.glb" task="' + TASK + '" title="Chest"}',
+        '::model{task="' + TASK + '"}',
+      ].join("\n"),
+    );
+    expect(segments.filter((segment) => segment.type === "model")).toEqual([
+      {
+        type: "model",
+        raw: '::model{path="/work/models/chest.glb" task="' + TASK + '" title="Chest"}',
+        directive: { path: "/work/models/chest.glb", task: TASK, title: "Chest" },
+      },
+      {
+        type: "model",
+        raw: '::model{task="' + TASK + '"}',
+        directive: { path: undefined, task: TASK, title: undefined },
+      },
+    ]);
+  });
+
+  it("reports directives it cannot show", () => {
+    const errors = parseAssistantMessageSegments(
+      ['::model{title="Nothing"}', '::model{path="photo.png"}', '::model{task="../balance"}'].join(
+        "\n",
+      ),
+    ).filter((segment) => segment.type === "model_error");
+    expect(errors.map((segment) => (segment as { error: string }).error)).toEqual([
+      "3D model embed requires a path or a task",
+      "3D model embeds show .glb or .gltf files",
+      "Unknown 3D model task id",
+    ]);
+  });
+});

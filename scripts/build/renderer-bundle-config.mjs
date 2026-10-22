@@ -15,6 +15,18 @@ export const rendererCodeSplitting = {
       test: /[/\\]node_modules[/\\](?:react|react-dom|scheduler)[/\\]/,
       priority: 20,
     },
+    // three.js (the in-chat 3D viewer, loaded on demand) is one 660 kB chunk otherwise;
+    // its core and its WebGL renderer are separate files upstream, so they split cleanly.
+    {
+      name: "three-core",
+      test: /[/\\]node_modules[/\\]three[/\\]build[/\\]three\.core\.js$/,
+      priority: 15,
+    },
+    {
+      name: "three-webgl",
+      test: /[/\\]node_modules[/\\]three[/\\]build[/\\]three\.module\.js$/,
+      priority: 15,
+    },
   ],
 };
 

@@ -260,6 +260,18 @@
       "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/cli-anything.json"
     },
     {
+      "id": "meshy-3d",
+      "name": "Meshy 3D",
+      "description": "Create 3D models with Meshy AI from text or images, then texture, remesh, rig, animate, convert or prepare them for 3D printing, and show them as interactive 3D cards in chat.",
+      "version": "1.0.0",
+      "author": "CoWork OS Contributors",
+      "tags": ["meshy", "3d", "text-to-3d", "image-to-3d", "rigging", "animation", "3d-printing", "game-assets"],
+      "icon": "🧊",
+      "category": "Creative",
+      "updatedAt": "2026-10-22",
+      "homepage": "https://github.com/CoWork-OS/CoWork-OS/blob/main/resources/skills/meshy-3d.json"
+    },
+    {
       "id": "clean-imports",
       "name": "Clean Imports",
       "description": "Remove unused imports from files",

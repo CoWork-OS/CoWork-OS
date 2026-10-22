@@ -620,6 +620,7 @@ import {
 } from "../attention/attention-sources";
 import { setupMemoryHealthHandlers } from "./memory-health-handlers";
 import { setupAnswerSurfaceHandlers } from "./answer-surface-handlers";
+import { setupMeshyHandlers } from "./meshy-handlers";
 import { AnswerDataError, readAnswerDataTable } from "../answer-surfaces/answer-data";
 import { AnswerToolDataStore } from "../answer-surfaces/AnswerToolDataStore";
 import { hasHiddenSegment } from "../../shared/answer-surfaces/data";
@@ -11980,6 +11981,14 @@ export async function setupIpcHandlers(
   setupMemoryHealthHandlers({
     service: createMemoryHealthService(db),
     workspaceExists: async (workspaceId) => Boolean(await workspaceRepo.findById(workspaceId)),
+  });
+
+  // 3D model cards in chat and the Meshy connector's cards and gallery.
+  setupMeshyHandlers({
+    isKnownWorkspace: async (workspacePath) => {
+      const resolved = path.resolve(workspacePath);
+      return Boolean(await workspaceRepo.findByPath(resolved));
+    },
   });
 
   // Interactive answer surfaces: saved control values and photos found by description.
